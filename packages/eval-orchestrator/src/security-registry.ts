@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { lstat, readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 
 import {
   BearerAuthConfigSchema, SigningKeyRegistrySchema, type BearerAuthConfig, type Principal,
@@ -7,6 +8,7 @@ import {
 } from '@agent-kernel/eval-protocol'
 
 import { BearerTokenAuthenticator, type Authenticator } from './auth.js'
+import { SecurityReloadAuditLog } from './security-audit.js'
 
 export type SecurityRegistryMetadata = {
   schemaVersion: 1
@@ -24,31 +26,37 @@ type Snapshot = { authenticator: BearerTokenAuthenticator; auth: BearerAuthConfi
 export class FileBackedSecurityRegistry implements Authenticator, SigningKeyRegistry {
   private snapshot?: Snapshot
   private readonly audit: SecurityRegistryMetadata['reloadAudit'] = []
+  private readonly auditLog: SecurityReloadAuditLog
+  private reloadTail: Promise<void> = Promise.resolve()
 
-  constructor(readonly authPath: string, readonly trustPath?: string) {}
+  constructor(readonly authPath: string, readonly trustPath?: string, auditPath = join(dirname(authPath), 'security-reload-audit.jsonl')) { this.auditLog = new SecurityReloadAuditLog(auditPath) }
 
-  async initialize(): Promise<void> { await this.reload('startup') }
+  async initialize(): Promise<void> { this.audit.push(...(await this.auditLog.readAll()).slice(-100).map(({ at, actorId, outcome, generation, configDigest }) => ({ at, actorId, outcome, generation, ...(configDigest ? { configDigest } : {}) }))); await this.reload('startup') }
 
   authenticate(authorization: string | undefined): Principal | undefined { return this.snapshot?.authenticator.authenticate(authorization) }
   resolve(keyReference: string): TrustedSigningKey | undefined { return this.snapshot?.trust.keys.find((key) => key.keyReference === keyReference) }
 
-  async reload(actorId: string): Promise<SecurityRegistryMetadata> {
-    try {
-      const [authBody, trustBody] = await Promise.all([readSecureFile(this.authPath), this.trustPath ? readSecureFile(this.trustPath) : Promise.resolve('{"schemaVersion":1,"keys":[]}')])
-      const auth = BearerAuthConfigSchema.parse(JSON.parse(authBody))
-      const trust = SigningKeyRegistrySchema.parse(JSON.parse(trustBody))
-      const next: Snapshot = {
-        authenticator: new BearerTokenAuthenticator(auth), auth, trust,
-        loadedAt: new Date().toISOString(), generation: (this.snapshot?.generation ?? 0) + 1,
-        configDigest: createHash('sha256').update(authBody).update('\0').update(trustBody).digest('hex'),
+  reload(actorId: string): Promise<SecurityRegistryMetadata> {
+    const operation = this.reloadTail.then(async () => {
+      try {
+        const [authBody, trustBody] = await Promise.all([readSecureFile(this.authPath), this.trustPath ? readSecureFile(this.trustPath) : Promise.resolve('{"schemaVersion":1,"keys":[]}')])
+        const auth = BearerAuthConfigSchema.parse(JSON.parse(authBody))
+        const trust = SigningKeyRegistrySchema.parse(JSON.parse(trustBody))
+        const next: Snapshot = {
+          authenticator: new BearerTokenAuthenticator(auth), auth, trust,
+          loadedAt: new Date().toISOString(), generation: (this.snapshot?.generation ?? 0) + 1,
+          configDigest: createHash('sha256').update(authBody).update('\0').update(trustBody).digest('hex'),
+        }
+        await this.persist({ at: next.loadedAt, actorId, outcome: 'succeeded', generation: next.generation, configDigest: next.configDigest })
+        this.snapshot = next
+        return this.metadata()
+      } catch (error) {
+        await this.persist({ at: new Date().toISOString(), actorId, outcome: 'failed', generation: this.snapshot?.generation ?? 0 })
+        throw error
       }
-      this.snapshot = next
-      this.record({ at: next.loadedAt, actorId, outcome: 'succeeded', generation: next.generation, configDigest: next.configDigest })
-      return this.metadata()
-    } catch (error) {
-      this.record({ at: new Date().toISOString(), actorId, outcome: 'failed', generation: this.snapshot?.generation ?? 0 })
-      throw error
-    }
+    })
+    this.reloadTail = operation.then(() => undefined, () => undefined)
+    return operation
   }
 
   metadata(): SecurityRegistryMetadata {
@@ -68,7 +76,7 @@ export class FileBackedSecurityRegistry implements Authenticator, SigningKeyRegi
     }
   }
 
-  private record(entry: SecurityRegistryMetadata['reloadAudit'][number]): void { this.audit.push(entry); if (this.audit.length > 100) this.audit.shift() }
+  private async persist(entry: SecurityRegistryMetadata['reloadAudit'][number]): Promise<void> { await this.auditLog.append(entry); this.audit.push(entry); if (this.audit.length > 100) this.audit.shift() }
 }
 
 async function readSecureFile(path: string): Promise<string> {

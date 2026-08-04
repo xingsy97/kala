@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { ControlPlaneCapabilities } from "@agent-kernel/eval-protocol";
 import { errorMessage, type DashboardControlPlane, type Page } from "../client.js";
 import { translate, type Locale } from "../i18n/index.js";
@@ -17,14 +17,21 @@ export function Administration({ data, capabilities, controlPlane, locale, reten
   const maintenance = object(administration.maintenance);
   const [reloadConfirmation, setReloadConfirmation] = useState("");
   const [reloadMessage, setReloadMessage] = useState("");
+  const [reloading, setReloading] = useState(false);
+  const reloadLock = useRef(false);
   const reload = async () => {
-    if (reloadConfirmation !== "reload-security-registry") return;
+    if (reloadConfirmation !== "reload-security-registry" || reloadLock.current) return;
+    reloadLock.current = true;
+    setReloading(true);
     try {
       await controlPlane.reloadSecurity(reloadConfirmation);
       setReloadMessage(translate(locale, "admin.reloadSuccess"));
       setReloadConfirmation("");
     } catch (error) {
       setReloadMessage(errorMessage(error));
+    } finally {
+      reloadLock.current = false;
+      setReloading(false);
     }
   };
   return <div className="stack">
@@ -46,7 +53,7 @@ export function Administration({ data, capabilities, controlPlane, locale, reten
         <label>{translate(locale, "admin.reloadPrompt")} <code>reload-security-registry</code>
           <input aria-label={translate(locale, "admin.reloadLabel")} value={reloadConfirmation} onChange={(event) => setReloadConfirmation(event.target.value)} />
         </label>
-        <button disabled={reloadConfirmation !== "reload-security-registry"} onClick={() => void reload()}>{translate(locale, "admin.reloadAction")}</button>
+        <button disabled={reloading || reloadConfirmation !== "reload-security-registry"} aria-busy={reloading} onClick={() => void reload()}>{translate(locale, "admin.reloadAction")}</button>
         {reloadMessage && <p role="status">{reloadMessage}</p>}
       </div>
     </section>

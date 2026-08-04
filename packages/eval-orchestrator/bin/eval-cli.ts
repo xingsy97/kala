@@ -10,8 +10,8 @@ import { ArtifactEntrySchema, ControlPlaneDeadlineError, ControlPlaneHttpError, 
 import { createBackup, restoreBackup, sweepRetention, verifyBackup } from '../src/maintenance.js'
 
 class UsageError extends Error { readonly code = 'USAGE_ERROR' }
-const command = process.argv[2]
-const action = process.argv[3]
+const parsedArguments = parseArguments(process.argv.slice(2))
+const [command, action] = parsedArguments.positionals
 
 try {
   const token = option('--token') ?? process.env.AGENT_EVAL_TOKEN
@@ -40,7 +40,12 @@ async function dispatch(client: ControlPlaneClient): Promise<void> {
     if (action === 'create') return print(await client.command({ type: 'run.create', spec: await jsonFile('--file') } as never, idempotencyOptions()))
     if (['start', 'grade', 'align', 'cluster'].includes(String(action))) return print(await client.command({ type: `run.${action}`, runId: required('--run-id') } as never, idempotencyOptions()))
     if (action === 'cancel') return print(await client.command({ type: 'run.cancel', runId: required('--run-id'), reason: required('--reason') }, idempotencyOptions()))
-    if (action === 'watch') { for await (const event of client.watchEvents(required('--run-id'), { ...(option('--last-event-id') ? { lastEventId: option('--last-event-id')! } : {}) })) print(event); return }
+    if (action === 'watch') {
+      const abort = new AbortController(); const stop = () => abort.abort(new DOMException('interrupted', 'AbortError'))
+      process.once('SIGINT', stop); process.once('SIGTERM', stop)
+      try { for await (const event of client.watchEvents(required('--run-id'), { signal: abort.signal, ...(option('--last-event-id') ? { lastEventId: option('--last-event-id')! } : {}), ...(option('--watch-deadline-ms') ? { deadlineMs: positiveInteger(option('--watch-deadline-ms')!, '--watch-deadline-ms') } : {}), ...(option('--reconnect-attempts') ? { reconnectAttempts: nonnegativeInteger(option('--reconnect-attempts')!, '--reconnect-attempts') } : {}), ...(option('--reconnect-delay-ms') ? { reconnectDelayMs: nonnegativeInteger(option('--reconnect-delay-ms')!, '--reconnect-delay-ms') } : {}) })) print(event) } finally { process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop) }
+      return
+    }
   }
   if (command === 'trial') {
     if (action === 'list') return print(await client.query({ resource: 'trials', runId: required('--run-id'), page }))
@@ -68,8 +73,10 @@ async function dispatch(client: ControlPlaneClient): Promise<void> {
   if (command === 'admin') {
     if (action === 'capabilities') return print(await client.capabilities())
     if (action === 'metrics') return print(await client.query({ resource: 'platform-metrics' }))
-    if (action === 'audit') return print(await client.query({ resource: 'audit', page }))
+    if (action === 'audit') return print(await client.query({ resource: 'audit', page, ...(option('--actor-id') ? { actorId: option('--actor-id')! } : {}), ...(option('--operation') ? { operation: option('--operation')! } : {}), ...(option('--resource-type') ? { resourceType: option('--resource-type')! } : {}), ...(flag('--trusted-only') ? { trustedOnly: true } : {}) }))
     if (action === 'retention') return print(await client.query({ resource: 'retention', page }))
+    if (action === 'status') return print(await client.administrationStatus())
+    if (action === 'security-reload') return print(await client.reloadSecurity(required('--confirm') as 'reload-security-registry'))
     if (action === 'command') return print(await client.command(await jsonFile('--file'), idempotencyOptions()))
     if (action === 'query') return print(await client.query(await jsonFile('--file')))
   }
@@ -79,6 +86,7 @@ async function dispatch(client: ControlPlaneClient): Promise<void> {
 async function jsonFile(name: string): Promise<any> { return JSON.parse(await readFile(resolve(required(name)), 'utf8')) }
 function idempotencyOptions(): { idempotencyKey?: string } { return option('--idempotency-key') ? { idempotencyKey: option('--idempotency-key')! } : {} }
 function positiveInteger(value: string, name: string): number { const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new UsageError(name + ' must be a positive integer'); return parsed }
+function nonnegativeInteger(value: string, name: string): number { const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 0) throw new UsageError(name + ' must be a nonnegative integer'); return parsed }
 function normalizedError(error: unknown): { code: string; message: string; status?: number; exitCode: number } {
   if (error instanceof UsageError) return { code: error.code, message: error.message, exitCode: 2 }
   if (error instanceof ControlPlaneDeadlineError) return { code: error.code, message: error.message, exitCode: 6 }
@@ -165,12 +173,25 @@ async function readContained(root: string, path: string): Promise<Buffer> {
 
 function print(value: unknown): void { process.stdout.write(JSON.stringify(value, null, 2) + '\n') }
 function required(name: string): string { const value = option(name); if (!value) throw new Error(name + ' is required'); return value }
-function flag(name: string): boolean { return process.argv.slice(3).includes(name) }
+function flag(name: string): boolean { return parsedArguments.flags.has(name) }
 function integerOption(name: string): number { const value = Number(required(name)); if (!Number.isSafeInteger(value) || value < 0) throw new Error(name + ' must be a non-negative integer'); return value }
 function option(name: string): string | undefined {
-  for (let index = 3; index < process.argv.length; index += 1) {
-    if (process.argv[index] === name) return process.argv[index + 1]
-    if (process.argv[index]?.startsWith(name + '=')) return process.argv[index]!.slice(name.length + 1)
+  const value = parsedArguments.options.get(name)
+  if (value === null) throw new UsageError(name + ' requires a value')
+  return value
+}
+
+function parseArguments(args: string[]): { positionals: string[]; options: Map<string, string | null>; flags: Set<string> } {
+  const positionals: string[] = []; const options = new Map<string, string | null>(); const flags = new Set<string>()
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index]!
+    if (!value.startsWith('--')) { positionals.push(value); continue }
+    const equals = value.indexOf('=')
+    if (equals >= 0) { options.set(value.slice(0, equals), value.slice(equals + 1) || null); continue }
+    if (value === '--dry-run' || value === '--trusted-only') { flags.add(value); continue }
+    const next = args[index + 1]
+    if (!next || next.startsWith('--')) options.set(value, null)
+    else { options.set(value, next); index += 1 }
   }
-  return undefined
+  return { positionals, options, flags }
 }

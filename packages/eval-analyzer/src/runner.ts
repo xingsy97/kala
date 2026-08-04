@@ -67,25 +67,27 @@ export class EvaluationAnalyzer {
     try { await this.options.controlPlane.command(start, signal) } catch { return }
     const controller = new AbortController(); const abort = () => controller.abort(signal?.reason ?? new Error('analyzer stopped'))
     signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort()
-    const heartbeat = this.heartbeat(queued.jobId, controller.signal)
+    let current: AnalysisJob | undefined
+    let heartbeat = Promise.resolve()
     try {
-      const current = AnalysisJobSchema.parse(await this.options.controlPlane.query({ resource: 'analysis-job', jobId: queued.jobId }, controller.signal))
+      current = AnalysisJobSchema.parse(await this.options.controlPlane.query({ resource: 'analysis-job', jobId: queued.jobId }, controller.signal))
+      heartbeat = this.heartbeat(current, controller.signal)
       const manifest = await this.process(current, controller.signal)
-      await this.options.controlPlane.command(command('analysis.job.complete', { jobId: current.jobId, executorId: this.options.executorId, outputManifest: manifest }), controller.signal)
+      await this.options.controlPlane.command(command('analysis.job.complete', { ...leaseAuthority(current), jobId: current.jobId, executorId: this.options.executorId, outputManifest: manifest }), controller.signal)
     } catch (error) {
-      if (!controller.signal.aborted) {
-        await this.options.controlPlane.command(command('analysis.job.fail', { jobId: queued.jobId, executorId: this.options.executorId, failure: { code: 'ANALYSIS_EXECUTION_FAILED', summary: safeMessage(error) } })).catch(() => undefined)
+      if (!controller.signal.aborted && current) {
+        await this.options.controlPlane.command(command('analysis.job.fail', { ...leaseAuthority(current), jobId: queued.jobId, executorId: this.options.executorId, failure: { code: 'ANALYSIS_EXECUTION_FAILED', summary: safeMessage(error) } })).catch(() => undefined)
       }
     } finally {
       controller.abort(new Error('analysis job finished')); signal?.removeEventListener('abort', abort); await heartbeat
     }
   }
 
-  private async heartbeat(jobId: string, signal: AbortSignal): Promise<void> {
+  private async heartbeat(job: AnalysisJob, signal: AbortSignal): Promise<void> {
     const interval = Math.max(100, Math.floor(this.options.leaseMs / 3))
     while (!signal.aborted) {
       await delay(interval, undefined, { signal }).catch(() => undefined)
-      if (!signal.aborted) await this.options.controlPlane.command(command('analysis.job.heartbeat', { jobId, executorId: this.options.executorId, leaseMs: this.options.leaseMs }), signal)
+      if (!signal.aborted) await this.options.controlPlane.command(command('analysis.job.heartbeat', { ...leaseAuthority(job), jobId: job.jobId, executorId: this.options.executorId, leaseMs: this.options.leaseMs }), signal)
     }
   }
 
@@ -183,12 +185,13 @@ export class EvaluationAnalyzer {
   private async uploadRaw(job: AnalysisJob, kind: AnalysisOutputManifest['outputs'][number]['kind'], outputId: string, content: Buffer, mediaType: string, signal: AbortSignal) {
     const sha256 = createHash('sha256').update(content).digest('hex')
     const artifactRef = 'analysis/' + job.jobId + '/' + outputId + (mediaType === 'application/x-ndjson' ? '.jsonl' : '.json')
-    await this.options.controlPlane.stageAnalysisArtifact({ jobId: job.jobId, executorId: this.options.executorId, path: artifactRef, mediaType, bytes: content.byteLength, sha256, content }, signal)
+    await this.options.controlPlane.stageAnalysisArtifact({ ...leaseAuthority(job), jobId: job.jobId, executorId: this.options.executorId, path: artifactRef, mediaType, bytes: content.byteLength, sha256, content }, signal)
     return { outputId, kind, artifactRef, mediaType, bytes: content.byteLength, sha256 }
   }
 }
 
 function command<T extends string>(type: T, fields: Record<string, unknown>): any { const id = type.replaceAll('.', '-') + '-' + randomUUID(); return { schemaVersion: 1, type, commandId: id, idempotencyKey: id, submittedAt: new Date().toISOString(), ...fields } }
+function leaseAuthority(job: AnalysisJob): { leaseToken: string; generation: number } { if (!job.leaseToken || !job.generation) throw new Error('analysis job lacks fenced lease authority'); return { leaseToken: job.leaseToken, generation: job.generation } }
 function requiredDetectorId(value: string): RequiredDetectorId { if (!(value in DETECTOR_VERSIONS)) throw new Error('unknown detector implementation: ' + value); return value as RequiredDetectorId }
 function errorSequence(input: AnalyzerInput): string[] { return input.events.filter((event) => event.kind === 'error' || event.kind === 'tool_call').map((event) => canonicalJson({ kind: event.kind, data: event.data })) }
 function safeMessage(error: unknown): string { return (error instanceof Error ? error.message : String(error)).replace(/[\r\n]+/gu, ' ').slice(0, 500) || 'analysis failed' }

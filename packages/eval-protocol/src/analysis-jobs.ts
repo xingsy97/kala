@@ -42,7 +42,8 @@ export const AnalysisJobSchema = z.object({
   }
   if (['running', 'completed', 'failed'].includes(job.state) && !job.executorId) ctx.addIssue({ code: 'custom', path: ['executorId'], message: 'started analysis jobs require executor identity' })
   if (['running', 'completed', 'failed'].includes(job.state) && !job.startedAt) ctx.addIssue({ code: 'custom', path: ['startedAt'], message: 'started analysis jobs require startedAt' })
-  if (job.state === 'running' && (!job.heartbeatAt || !job.leaseExpiresAt || !job.leaseToken)) ctx.addIssue({ code: 'custom', message: 'running analysis jobs require a renewable fenced lease' })
+  if (['running', 'completed', 'failed'].includes(job.state) && (!job.generation || !job.leaseToken)) ctx.addIssue({ code: 'custom', message: 'started analysis jobs require fenced lease authority' })
+  if (job.state === 'running' && (!job.heartbeatAt || !job.leaseExpiresAt)) ctx.addIssue({ code: 'custom', message: 'running analysis jobs require a renewable fenced lease' })
   if (job.state === 'completed' && (!job.finishedAt || !job.outputManifestRef || !job.outputManifestHash || job.failure)) {
     ctx.addIssue({ code: 'custom', message: 'completed analysis jobs require an output manifest and cannot carry a failure' })
   }

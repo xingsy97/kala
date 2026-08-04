@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function Rows({
   items,
@@ -12,6 +12,11 @@ export function Rows({
   const overscan = 5;
   const virtualized = items.length > 40;
   const [scrollTop, setScrollTop] = useState(0);
+  const frame = useRef<number>();
+  const latestScrollTop = useRef(0);
+  useEffect(() => () => {
+    if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+  }, []);
   if (!items.length)
     return (
       <EmptyScene
@@ -32,12 +37,19 @@ export function Rows({
       tabIndex={0}
       role="region"
       aria-label="Scrollable data table"
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onScroll={(event) => {
+        latestScrollTop.current = event.currentTarget.scrollTop;
+        if (frame.current !== undefined) return;
+        frame.current = requestAnimationFrame(() => {
+          frame.current = undefined;
+          setScrollTop(latestScrollTop.current);
+        });
+      }}
       data-virtualized={virtualized}
       data-total-rows={items.length}
       data-rendered-rows={visible.length}
     >
-      <table>
+      <table aria-rowcount={items.length + 1} aria-colcount={fields.length}>
         <thead>
           <tr>
             {fields.map((name) => (
@@ -55,6 +67,7 @@ export function Rows({
             const index = start + visibleIndex;
             return (
               <tr
+                aria-rowindex={index + 2}
                 key={
                   field(item, "id") ||
                   field(item, "runId") ||

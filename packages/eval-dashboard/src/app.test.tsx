@@ -160,6 +160,9 @@ function client(
         "http://localhost/artifacts/" + artifactId + "?trialId=" + trialId,
     ),
     artifactText: vi.fn(async () => ""),
+    artifactBlob: vi.fn(async () => new Blob()),
+    archiveDocumentBlob: vi.fn(async () => new Blob()),
+    reportBlob: vi.fn(async () => new Blob()),
     reportUrl: vi.fn(
       (reportId: string, format: string) =>
         "http://localhost/reports/" + reportId + "/" + format,
@@ -210,7 +213,10 @@ describe("standalone evaluation dashboard", () => {
     fireEvent.change(screen.getByLabelText("Security reload confirmation"), { target: { value: "reload-security-registry" } });
     expect(action.disabled).toBe(false);
     fireEvent.click(action);
-    await waitFor(() => expect(controlPlane.reloadSecurity).toHaveBeenCalledWith("reload-security-registry"));
+    fireEvent.click(action);
+    expect(action.disabled).toBe(true);
+    await waitFor(() => expect(controlPlane.reloadSecurity).toHaveBeenCalledTimes(1));
+    expect(controlPlane.reloadSecurity).toHaveBeenCalledWith("reload-security-registry");
   });
 
   it("contains render failures without exposing error detail or mutating durable state", () => {
@@ -324,6 +330,17 @@ describe("standalone evaluation dashboard", () => {
       (await screen.findAllByText("Capability unavailable")).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText("Error")).toBeNull();
+  });
+
+  it("does not show a previous route's projection when the new route fails", async () => {
+    const controlPlane = client();
+    render(<App controlPlane={controlPlane as never} />);
+    expect(await screen.findByText("run-one")).toBeTruthy();
+    controlPlane.query.mockRejectedValue(new Error("route unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: /Analysis/ }));
+    expect(await screen.findByText("Error")).toBeTruthy();
+    expect(screen.queryByText("run-one")).toBeNull();
+    expect(screen.queryByText("Stale data")).toBeNull();
   });
 
   it("retains the last authoritative projection as explicitly stale when refresh fails", async () => {
@@ -486,17 +503,25 @@ describe("standalone evaluation dashboard", () => {
     render(<App controlPlane={controlPlane as never} />);
     await screen.findByRole("button", { name: "Cancel run" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }));
+    const opener = screen.getByRole("button", { name: "Cancel run" });
+    opener.focus();
+    fireEvent.click(opener);
     const cancel = (await screen.findByRole("button", {
       name: "Confirm cancel",
     })) as HTMLButtonElement;
     expect(cancel.disabled).toBe(true);
+    const dialog = screen.getByRole("dialog");
+    const input = screen.getByLabelText(/Type cancel:run-one/);
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Back" }));
     fireEvent.change(screen.getByLabelText(/Type cancel:run-one/), {
       target: { value: "cancel:wrong-run" },
     });
     expect(cancel.disabled).toBe(true);
     expect(controlPlane.command).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(document.activeElement).toBe(opener);
 
     fireEvent.click(screen.getByRole("button", { name: "Publish run" }));
     const publish = (await screen.findByRole("button", {

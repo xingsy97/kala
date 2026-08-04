@@ -32,14 +32,25 @@ test('published ports default to loopback and services have operational limits',
 })
 
 test('auth, scoped tokens, signing key, and model settings are file secrets', () => {
-  for (const name of ['auth_config', 'worker_token', 'analyzer_token', 'dashboard_token', 'worker_signing_key', 'analyzer_signing_key', 'docker_model_settings', 'lxd_model_settings']) assert.match(compose, new RegExp(`\\n  ${name}:`))
+  for (const name of ['auth_config', 'trust_config', 'worker_token', 'analyzer_token', 'dashboard_read_token', 'worker_signing_key', 'analyzer_signing_key', 'docker_model_settings', 'lxd_model_settings']) assert.match(compose, new RegExp(`\\n  ${name}:`))
   assert.doesNotMatch(compose, /AGENT_EVAL_(?:TOKEN|AUTH_CONFIG|SIGNING_KEY):\s*[^/\n]/)
+  assert.match(compose, /AGENT_EVAL_DASHBOARD_READ_TOKEN_FILE/)
+  assert.doesNotMatch(compose, /AGENT_EVAL_DASHBOARD_TOKEN_FILE/)
   assert.match(serviceBlock('orchestrator', 'analyzer'), /\/run\/secrets\/auth_config/)
+  assert.match(serviceBlock('orchestrator', 'analyzer'), /\/run\/secrets\/trust_config/)
   assert.match(serviceBlock('analyzer', 'docker-worker'), /\/run\/secrets\/analyzer_signing_key/)
   assert.match(serviceBlock('docker-worker', 'lxd-worker'), /worker_signing_key/)
   assert.match(serviceBlock('lxd-worker', 'dashboard'), /worker_signing_key/)
   assert.doesNotMatch(serviceBlock('docker-worker', 'lxd-worker'), /analyzer_signing_key/)
   assert.doesNotMatch(serviceBlock('lxd-worker', 'dashboard'), /analyzer_signing_key/)
+})
+
+test('dashboard BFF secret is explicitly read-only and mutations do not receive it', async () => {
+  const nginx = await readFile(new URL('nginx.conf', root), 'utf8')
+  assert.match(nginx, /__AGENT_EVAL_DASHBOARD_READ_TOKEN__/)
+  const mutationFallback = nginx.slice(nginx.indexOf('location /api/'), nginx.indexOf('location = /healthz'))
+  assert.doesNotMatch(mutationFallback, /proxy_set_header Authorization/)
+  assert.match(serviceBlock('dashboard'), /dashboard_read_token/)
 })
 
 test('worker profiles are socket-exclusive and model credentials are profile-scoped', () => {

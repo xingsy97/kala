@@ -66,7 +66,7 @@ describe('ControlPlaneClient', () => {
       return new Response(JSON.stringify({ schemaVersion: 1, idempotencyKey: body.idempotencyKey, commandId: body.commandId, committedSequence: 0, committedAt: '2026-08-03T00:00:00.000Z', projectionVersion: 1 }))
     } })
     await client.command({ type: 'run.start', runId: 'run' })
-    await client.command({ type: 'run.start', runId: 'run' }, { idempotencyKey: 'reusable-key' })
+    await client.command({ type: 'run.start', runId: 'run', idempotencyKey: 'payload-key' }, { idempotencyKey: 'reusable-key' })
     expect(bodies[0]?.idempotencyKey).toBe(bodies[0]?.commandId)
     expect(bodies[1]?.idempotencyKey).toBe('reusable-key')
   })
@@ -81,14 +81,41 @@ describe('ControlPlaneClient', () => {
   it('parses SSE with Last-Event-ID and verifies artifact downloads', async () => {
     const event = { schemaVersion: 1, sequence: 3, at: '2026-08-03T00:00:00.000Z', runId: 'run', type: 'run.state', producer: 'control-plane', data: { state: 'draft' } }
     let headers = new Headers()
-    const stream = new ControlPlaneClient({ baseUrl: 'http://control-plane', fetchImpl: async (_input, init) => { headers = new Headers(init?.headers); return new Response(`id: 3\nevent: durable-event\ndata: ${JSON.stringify(event)}\n\n`) } })
-    const received = []; for await (const item of stream.watchEvents('run', { lastEventId: 2 })) received.push(item)
+    const stream = new ControlPlaneClient({ baseUrl: 'http://control-plane', fetchImpl: async (_input, init) => { headers = new Headers(init?.headers); return new Response(`id: 3\nevent: durable-event\ndata: ${JSON.stringify(event)}\n\n`, { headers: { 'content-type': 'text/event-stream; charset=utf-8' } }) } })
+    const received = []; for await (const item of stream.watchEvents('run', { lastEventId: 2, reconnectAttempts: 0 })) received.push(item)
     expect(headers.get('last-event-id')).toBe('2'); expect(received).toEqual([event])
     const content = new TextEncoder().encode('artifact')
     const entry = { artifactId: 'artifact', path: 'out.txt', mediaType: 'text/plain', bytes: content.byteLength, sha256: 'c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c', redaction: 'passed' as const, classification: 'public' as const }
     const download = new ControlPlaneClient({ baseUrl: 'http://control-plane', fetchImpl: async () => new Response(content) })
     await expect(download.downloadArtifact(entry, 'trial')).resolves.toEqual(content)
     await expect(download.downloadArtifact({ ...entry, bytes: 1 }, 'trial')).rejects.toBeInstanceOf(ArtifactIntegrityError)
+  })
+
+  it('reconnects SSE from the durable cursor and honors immediate abort', async () => {
+    const events = [3, 4].map((sequence) => ({ schemaVersion: 1, sequence, at: '2026-08-03T00:00:00.000Z', runId: 'run', type: 'run.state', producer: 'control-plane', data: { state: 'draft' } }))
+    const cursors: Array<string | null> = []; let request = 0
+    const client = new ControlPlaneClient({ baseUrl: 'http://control-plane', fetchImpl: async (_input, init) => {
+      cursors.push(new Headers(init?.headers).get('last-event-id'))
+      const event = events[request++]!
+      return new Response(`id: ${event.sequence}\ndata: ${JSON.stringify(event)}\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    const received = []; for await (const event of client.watchEvents('run', { lastEventId: 2, reconnectAttempts: 1, reconnectDelayMs: 0 })) received.push(event.sequence)
+    expect(received).toEqual([3, 4]); expect(cursors).toEqual(['2', '3'])
+    const aborted = new AbortController(); aborted.abort(new DOMException('stop', 'AbortError'))
+    await expect(async () => { for await (const _event of client.watchEvents('run', { signal: aborted.signal })) void _event }).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('validates SSE media types and exposes typed administration methods', async () => {
+    const invalid = new ControlPlaneClient({ baseUrl: 'http://control-plane', fetchImpl: async () => new Response('{}', { headers: { 'content-type': 'application/json' } }) })
+    await expect(async () => { for await (const _event of invalid.watchEvents('run')) void _event }).rejects.toMatchObject({ code: 'INVALID_SSE_CONTENT_TYPE' })
+    const requests: Array<{ url: string; body?: unknown }> = []
+    const admin = new ControlPlaneClient({ baseUrl: 'http://control-plane', fetchImpl: async (input, init) => {
+      requests.push({ url: String(input), ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) })
+      return new Response(JSON.stringify(String(input).endsWith('/status') ? { schemaVersion: 1, security: null, maintenance: null } : { generation: 2 }))
+    } })
+    await expect(admin.administrationStatus()).resolves.toEqual({ schemaVersion: 1, security: null, maintenance: null })
+    await admin.reloadSecurity('reload-security-registry')
+    expect(requests).toEqual([{ url: 'http://control-plane/api/v1/administration/status' }, { url: 'http://control-plane/api/v1/administration/security/reload', body: { confirmation: 'reload-security-registry' } }])
   })
 
   it('registers public external plugin definitions without orchestrator imports', () => {

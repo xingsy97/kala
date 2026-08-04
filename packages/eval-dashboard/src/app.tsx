@@ -208,6 +208,7 @@ export function App({
     "idle" | "connected" | "reconnecting"
   >("idle");
   const hasAuthoritativeData = useRef(false);
+  const authoritativeRoute = useRef<RouteId>();
   const liveSequences = useRef(new Map<string, number>());
   const liveRefreshPending = useRef(false);
   const liveRefreshAgain = useRef(false);
@@ -229,6 +230,11 @@ export function App({
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
+      const requestedRoute = route.id;
+      if (authoritativeRoute.current !== requestedRoute) {
+        setData(undefined);
+        hasAuthoritativeData.current = false;
+      }
       setState(navigator.onLine ? "loading" : "offline");
       try {
         const currentCapabilities = await controlPlane.connect(signal);
@@ -243,6 +249,7 @@ export function App({
         signal?.throwIfAborted();
         setData(loaded);
         hasAuthoritativeData.current = true;
+        authoritativeRoute.current = requestedRoute;
         const loadedState = classifyLoadedState(loaded);
         setState(loadedState);
         setMessage(
@@ -256,7 +263,10 @@ export function App({
         const text = errorMessage(error);
         const unsupported =
           /unsupported(?:\s+control\s+plane)?\s+protocol/iu.test(text);
-        const stale = !unsupported && hasAuthoritativeData.current;
+        const stale =
+          !unsupported &&
+          hasAuthoritativeData.current &&
+          authoritativeRoute.current === requestedRoute;
         setMessage(
           stale
             ? "The last authoritative projection is retained, but refresh failed: " +
@@ -1146,15 +1156,15 @@ function ArchiveConclusions({
                 </dd>
               </dl>
               {field(item, "sourceDocumentId") && (
-                <a
-                  href={controlPlane.archiveDocumentUrl(
-                    field(item, "sourceDocumentId"),
+                <button
+                  type="button"
+                  onClick={() => void downloadBlob(
+                    () => controlPlane.archiveDocumentBlob(field(item, "sourceDocumentId")),
+                    field(item, "sourceDocumentId") + ".json",
                   )}
-                  target="_blank"
-                  rel="noreferrer"
                 >
-                  Open authoritative source JSON →
-                </a>
+                  Download authoritative source JSON
+                </button>
               )}
             </article>
           ))}
@@ -1252,20 +1262,20 @@ function ArchivedRunDetailView({
       <h3>Source documents</h3>
       <div className="artifact-links">
         {documents.map((document) => (
-          <a
+          <button
+            type="button"
             key={field(document, "documentId")}
-            href={controlPlane.archiveDocumentUrl(
-              field(document, "documentId"),
+            onClick={() => void downloadBlob(
+              () => controlPlane.archiveDocumentBlob(field(document, "documentId")),
+              field(document, "documentId") + ".json",
             )}
-            target="_blank"
-            rel="noreferrer"
           >
             {field(document, "title")}
             <small>
               {field(document, "kind")} · SHA-256 {field(document, "sha256")} ·{" "}
               {field(document, "bytes")} bytes
             </small>
-          </a>
+          </button>
         ))}
       </div>
       <ArchiveConclusions
@@ -2121,6 +2131,8 @@ function Runs({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const confirmationInput = useRef<HTMLInputElement>(null);
+  const confirmationDialog = useRef<HTMLElement>(null);
+  const dialogOpener = useRef<HTMLElement>();
   useEffect(() => {
     if (!selectedRunId && firstRunId) setSelectedRunId(firstRunId);
   }, [firstRunId, selectedRunId]);
@@ -2130,12 +2142,17 @@ function Runs({
   }, [firstArchivedRunId, selectedArchivedRunId]);
   useEffect(() => {
     if (intent) confirmationInput.current?.focus();
+    else dialogOpener.current?.focus();
   }, [intent]);
 
   const supports = (command: string) =>
     capabilities?.commands.includes(command) ?? false;
-  const begin = async (action: OperatorIntent["action"]) => {
-    if (!selectedRunId) return;
+  const begin = async (
+    action: OperatorIntent["action"],
+    opener: HTMLElement,
+  ) => {
+    if (!selectedRunId || busy) return;
+    dialogOpener.current = opener;
     setBusy(true);
     setError(undefined);
     setConfirmation("");
@@ -2264,7 +2281,7 @@ function Runs({
         <div className="operator-actions">
           <button
             disabled={!selectedRunId || !supports("run.cancel") || busy}
-            onClick={() => void begin("cancel")}
+            onClick={(event) => void begin("cancel", event.currentTarget)}
           >
             Cancel run
           </button>
@@ -2272,14 +2289,14 @@ function Runs({
             disabled={
               !selectedRunId || !supports("leaderboard.publish") || busy
             }
-            onClick={() => void begin("publish")}
+            onClick={(event) => void begin("publish", event.currentTarget)}
           >
             Publish run
           </button>
           <button
             className="danger"
             disabled={!selectedRunId || !supports("run.delete") || busy}
-            onClick={() => void begin("delete")}
+            onClick={(event) => void begin("delete", event.currentTarget)}
           >
             Delete run
           </button>
@@ -2423,12 +2440,30 @@ function Runs({
           }}
         >
           <section
+            ref={confirmationDialog}
             className="confirmation-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirmation-title"
             onKeyDown={(event) => {
               if (event.key === "Escape" && !busy) setIntent(undefined);
+              if (event.key === "Tab") {
+                const focusable = Array.from(
+                  confirmationDialog.current?.querySelectorAll<HTMLElement>(
+                    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+                  ) ?? [],
+                );
+                const first = focusable[0];
+                const last = focusable.at(-1);
+                if (!first || !last) return;
+                if (event.shiftKey && document.activeElement === first) {
+                  event.preventDefault();
+                  last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                  event.preventDefault();
+                  first.focus();
+                }
+              }
             }}
           >
             <p>Safety confirmation</p>
@@ -3546,21 +3581,20 @@ function RunDetail({
       {artifacts.items.length ? (
         <div className="artifact-links">
           {artifacts.items.map((artifact) => (
-            <a
+            <button
+              type="button"
               key={field(artifact, "artifactId")}
-              href={controlPlane.artifactUrl(
+              onClick={() => void downloadBlob(
+                () => controlPlane.artifactBlob(field(artifact, "artifactId"), selectedTrialId),
                 field(artifact, "artifactId"),
-                selectedTrialId,
               )}
-              target="_blank"
-              rel="noreferrer"
             >
               {field(artifact, "artifactId")}
               <small>
                 {field(artifact, "mediaType")} · {field(artifact, "bytes")}{" "}
                 bytes · {field(artifact, "redaction")}
               </small>
-            </a>
+            </button>
           ))}
         </div>
       ) : (
@@ -4234,17 +4268,16 @@ function ReportDownloads({
       <div className="download-grid">
         {["html", "pdf", "json", "csv", "junit", "sarif", "markdown"].map(
           (format) => (
-            <a
+            <button
+              type="button"
               key={format}
-              href={controlPlane.reportUrl(reportId, format)}
-              target={
-                format === "html" || format === "pdf" ? "_blank" : undefined
-              }
-              rel="noreferrer"
-              download={format === "html" || format === "pdf" ? undefined : ""}
+              onClick={() => void downloadBlob(
+                () => controlPlane.reportBlob(reportId, format),
+                reportId + "." + format,
+              )}
             >
               {format.toUpperCase()}
-            </a>
+            </button>
           ),
         )}
       </div>
@@ -4254,6 +4287,15 @@ function ReportDownloads({
       </p>
     </section>
   );
+}
+
+async function downloadBlob(load: () => Promise<Blob>, filename: string): Promise<void> {
+  const url = URL.createObjectURL(await load());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function Skeleton(): JSX.Element {

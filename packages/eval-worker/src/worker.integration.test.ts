@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, createPublicKey, generateKeyPairSync, sign } from 'node:crypto'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  AgentBackendDescriptorSchema, EnvironmentLockSchema, ResolvedTaskSchema, SandboxDescriptorSchema, TraceSpanSchema,
+  AgentBackendDescriptorSchema, EnvironmentLockSchema, ResolvedTaskSchema, SandboxDescriptorSchema, StaticSigningKeyRegistry, TraceSpanSchema,
   type EvaluationRunSpec, type NormalizedAgentEvent, type TrialLease,
 } from '@agent-kernel/eval-protocol'
 import { AgentProviderError, ControlPlaneClient, type AgentRunArtifacts, type AgentRunHandle, type EvaluationAgentBackend, type EvaluationBenchmarkAdapter, type EvaluationSandboxProvider, type SandboxExecutionTarget } from '@agent-kernel/eval-sdk'
@@ -26,7 +26,10 @@ const OPERATOR_TOKEN = 'operator-test-token'
 const WORKER_TOKEN = 'worker-test-token'
 const WORKER_ID = 'worker'
 const FIXTURE_POLICY = { license: { status: 'granted', basis: 'MIT' }, permissions: { evaluation: { status: 'granted', basis: 'test' }, training: { status: 'unreviewed' } }, sourceProvenance: { status: 'granted', sourceRefs: ['fixture:worker-integration'] }, publication: { artifact: { status: 'granted', basis: 'test' }, report: { status: 'granted', basis: 'test' }, leaderboard: { status: 'granted', basis: 'test' }, redistribution: { status: 'granted', basis: 'MIT' } } } as const
-const signingProvider = { keyReference: 'fixture-key', validate: async () => undefined, signSha256: async () => ({ algorithm: 'ed25519' as const, keyReference: 'fixture-key', valueBase64: 'fixture-signature' }) }
+const signingKey = generateKeyPairSync('ed25519')
+const signingKeyReference = 'fixture-key'
+const signingProvider = { keyReference: signingKeyReference, validate: async () => undefined, signSha256: async (digest: string) => ({ algorithm: 'ed25519' as const, keyReference: signingKeyReference, valueBase64: sign(null, Buffer.from(digest, 'hex'), signingKey.privateKey).toString('base64') }) }
+const signingKeyRegistry = new StaticSigningKeyRegistry({ schemaVersion: 1, keys: [{ keyReference: signingKeyReference, algorithm: 'ed25519', publicKeySpkiBase64: createPublicKey(signingKey.privateKey).export({ format: 'der', type: 'spki' }).toString('base64'), scopes: ['artifact_manifest', 'trial_result'], status: 'active', validFrom: '2020-01-01T00:00:00.000Z' }] })
 const servers: Server[] = []
 afterEach(async () => Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))))
 
@@ -42,7 +45,7 @@ async function harness(options: { backend?: Partial<EvaluationAgentBackend>; des
   })
   const catalog = new RegisteredTaskCatalog()
   catalog.register(spec.taskPack.evaluatedSlice.sliceManifestHash, [task, { ...task, taskId: 'task-two' }])
-  const controlPlane = new EvaluationControlPlane({ journalPath: join(directory, 'journal.jsonl'), taskCatalog: catalog })
+  const controlPlane = new EvaluationControlPlane({ journalPath: join(directory, 'journal.jsonl'), taskCatalog: catalog, signingKeyRegistry })
   await controlPlane.initialize()
   const authenticator = new BearerTokenAuthenticator({ schemaVersion: 1, keys: [
     { key: OPERATOR_TOKEN, principal: { schemaVersion: 1, principalId: 'operator-one', kind: 'user', role: 'operator', scopes: ['platform:read', 'evaluation:read', 'evaluation:write', 'evidence:read'] } },
@@ -94,7 +97,7 @@ async function harness(options: { backend?: Partial<EvaluationAgentBackend>; des
     normalizeFailure: () => null,
   }
   registry.registerSandbox(provider); registry.registerAgent(backend); registry.registerBenchmark(benchmark)
-  await client.registerWorker({ schemaVersion: 1, workerId: WORKER_ID, workerVersion: '1', protocolVersions: [1], sandboxProviders: ['docker'], agentBackends: ['agent-runlab'], benchmarkAdapters: ['swe-bench'], capacity: { cpu: 2, memoryMb: 4096, diskMb: 32768, gpu: 0, maxTrials: 1 } })
+  await client.registerWorker({ schemaVersion: 1, workerId: WORKER_ID, signingKeyReference: 'fixture-key', workerVersion: '1', protocolVersions: [1], sandboxProviders: ['docker'], agentBackends: ['agent-runlab'], benchmarkAdapters: ['swe-bench'], capacity: { cpu: 2, memoryMb: 4096, diskMb: 32768, gpu: 0, maxTrials: 1 } })
   const lease = (await client.acquireLease(WORKER_ID, 10_000))!
   const credentials = new EnvironmentCredentialResolver({ AGENT_EVAL_CREDENTIAL_FIXTURE_KEY: 'fixture-secret-value' })
   const runner = new TrialRunner({ controlPlane: client, registry, credentials, artifactRoot: join(directory, 'artifacts'), workerDataDir: join(directory, 'worker'), signingProvider, cancellationGraceMs: 10 })
@@ -295,7 +298,7 @@ function evaluationWorker(
 ): EvaluationWorker {
   return new EvaluationWorker({
     controlPlane: fixture.client, registry: fixture.registry, credentials: fixture.credentials,
-    workerId: WORKER_ID, workerVersion: '1', cpu: 2, memoryMb: 4096, diskMb: 32768, gpu: 0, maxTrials: 1, leaseMs,
+    workerId: WORKER_ID, signingKeyReference: 'fixture-key', workerVersion: '1', cpu: 2, memoryMb: 4096, diskMb: 32768, gpu: 0, maxTrials: 1, leaseMs,
     artifactRoot: join(fixture.directory, 'worker-artifacts'), workerDataDir: join(fixture.directory, 'worker-process'),
     signingProvider,
     cancellationGraceMs: 10, onTrialError,

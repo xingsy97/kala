@@ -1,15 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { BackupManifestSchema, RetentionSweepResultSchema, canonicalJson, sha256Hex, type BackupManifest, type RetentionSweepResult } from '@agent-kernel/eval-protocol'
 
 import { EvaluationControlPlane } from './control-plane.js'
+import { withDataDirectoryLock } from './data-directory-lock.js'
 import { DurableJournal } from './journal.js'
 import { RegisteredTaskCatalog } from './task-catalog.js'
 
 export type RecoveryTargets = { rpoTargetSeconds: number; rtoTargetSeconds: number }
-export type MaintenanceStatus = { schemaVersion: 1; retentionSweeps: unknown[]; backups: unknown[]; restoreDrills: unknown[]; audit: Array<{ at: string; operation: string; outcome: 'succeeded' | 'failed'; subjectId?: string }> }
+export type MaintenanceStatus = { schemaVersion: 1; retentionSweeps: unknown[]; backups: unknown[]; restoreDrills: unknown[]; audit: Array<{ at: string; operation: string; outcome: 'succeeded' | 'failed'; actor: string; subjectId?: string; error?: string }> }
 const STATUS_FILE = 'maintenance-status.json'
 
 export async function readMaintenanceStatus(dataDirectory: string): Promise<MaintenanceStatus> {
@@ -17,7 +18,7 @@ export async function readMaintenanceStatus(dataDirectory: string): Promise<Main
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyStatus(); throw error }
 }
 
-export async function createBackup(dataDirectory: string, destination: string, targets: RecoveryTargets): Promise<BackupManifest> {
+export async function createBackup(dataDirectory: string, destination: string, targets: RecoveryTargets, actor = 'system'): Promise<BackupManifest> {
   const source = resolve(dataDirectory); const output = resolve(destination)
   if (contained(source, output) || contained(output, source)) throw new Error('backup source and destination must not contain one another')
   await assertNewDirectory(output); await mkdir(output, { recursive: true, mode: 0o700 })
@@ -36,10 +37,14 @@ export async function createBackup(dataDirectory: string, destination: string, t
       }
       const manifest = BackupManifestSchema.parse({ ...unsigned, manifestHash: await sha256Hex(canonicalJson(unsigned)) })
       await writeDurable(join(output, 'backup-manifest.json'), canonicalJson(manifest) + '\n')
-      await recordStatus(source, 'backups', { backupId: manifest.backupId, createdAt: manifest.createdAt, transactionCount: manifest.journal.transactionCount, artifactCount: manifest.artifacts.length, manifestHash: manifest.manifestHash, recovery: manifest.recovery }, 'backup.created', 'succeeded', manifest.backupId)
+      await recordStatus(source, 'backups', { backupId: manifest.backupId, createdAt: manifest.createdAt, transactionCount: manifest.journal.transactionCount, artifactCount: manifest.artifacts.length, manifestHash: manifest.manifestHash, recovery: manifest.recovery }, 'backup.created', 'succeeded', actor, manifest.backupId)
       return manifest
     })
-  } catch (error) { await rm(output, { recursive: true, force: true }); throw error }
+  } catch (error) {
+    await rm(output, { recursive: true, force: true })
+    await recordStatus(source, 'backups', undefined, 'backup.created', 'failed', actor, undefined, errorText(error))
+    throw error
+  }
 }
 
 export async function verifyBackup(directory: string): Promise<BackupManifest> {
@@ -58,7 +63,7 @@ export async function verifyBackup(directory: string): Promise<BackupManifest> {
   return manifest
 }
 
-export async function restoreBackup(backupDirectory: string, destination: string, confirmation?: string): Promise<{ manifest: BackupManifest; rtoObservedSeconds: number; rtoTargetSeconds: number; rtoMet: boolean }> {
+export async function restoreBackup(backupDirectory: string, destination: string, confirmation?: string, actor = 'system'): Promise<{ manifest: BackupManifest; rtoObservedSeconds: number; rtoTargetSeconds: number; rtoMet: boolean }> {
   if (confirmation !== 'restore:' + resolve(destination)) throw new Error('restore drill requires exact destructive confirmation: restore:' + resolve(destination))
   const started = performance.now(); const manifest = await verifyBackup(backupDirectory); const source = await realpath(resolve(backupDirectory)); const output = resolve(destination)
   await assertNewDirectory(output); await mkdir(output, { recursive: true, mode: 0o700 })
@@ -70,33 +75,44 @@ export async function restoreBackup(backupDirectory: string, destination: string
     const observed = Math.max(0, (performance.now() - started) / 1000)
     const drill = { schemaVersion: 1, backupId: manifest.backupId, verifiedAt: new Date().toISOString(), transactionCount: restored.projection.transactionCount, tipHash: restored.projection.lastTransactionHash, rtoTargetSeconds: manifest.recovery.rtoTargetSeconds, rtoObservedSeconds: observed, rtoMet: observed <= manifest.recovery.rtoTargetSeconds }
     await writeDurable(join(output, 'restore-verification.json'), canonicalJson(drill) + '\n')
-    await recordStatus(source, 'restoreDrills', drill, 'restore.drill', 'succeeded', manifest.backupId)
+    await recordStatus(source, 'restoreDrills', drill, 'restore.drill', 'succeeded', actor, manifest.backupId)
     return { manifest, rtoObservedSeconds: observed, rtoTargetSeconds: manifest.recovery.rtoTargetSeconds, rtoMet: observed <= manifest.recovery.rtoTargetSeconds }
-  } catch (error) { await rm(output, { recursive: true, force: true }); throw error }
+  } catch (error) {
+    await rm(output, { recursive: true, force: true })
+    await recordStatus(resolve(backupDirectory), 'restoreDrills', undefined, 'restore.drill', 'failed', actor, undefined, errorText(error))
+    throw error
+  }
 }
 
-export async function sweepRetention(dataDirectory: string, policyId: string, dryRun: boolean, now = new Date(), confirmation?: string): Promise<RetentionSweepResult> {
-  if (!dryRun && confirmation !== 'execute-retention:' + policyId) throw new Error('retention execution requires exact destructive confirmation: execute-retention:' + policyId)
-  const root = resolve(dataDirectory)
-  const controlPlane = new EvaluationControlPlane({ journalPath: join(root, 'control-plane.jsonl'), reportRoot: join(root, 'artifacts'), taskCatalog: new RegisteredTaskCatalog(), now: () => now })
-  await controlPlane.initialize()
-  const policy = controlPlane.projection.retentionPolicies.get(policyId)
-  if (!policy) throw new Error('retention policy not found: ' + policyId)
-  const candidates: RetentionSweepResult['candidates'] = []
-  for (const run of [...controlPlane.projection.runs.values()].sort((a, b) => a.accepted.spec.runId.localeCompare(b.accepted.spec.runId))) {
-    if (!['completed', 'cancelled', 'failed', 'blocked'].includes(run.state)) continue
-    const ageDays = Math.max(0, (now.getTime() - Date.parse(run.updatedAt)) / 86_400_000)
-    if (ageDays < policy.retainDays) continue
-    const runId = run.accepted.spec.runId
-    const impact = await controlPlane.query({ resource: 'deletion-impact', runId }) as RetentionSweepResult['candidates'][number]['impact']
-    if (impact.blockedByRefs.length) { candidates.push({ runId, ageDays, impact, disposition: 'protected', reason: impact.blockedByRefs.join(',') }); continue }
-    if (dryRun) { candidates.push({ runId, ageDays, impact, disposition: 'eligible' }); continue }
-    await controlPlane.executeCommand({ schemaVersion: 1, type: 'run.delete', commandId: 'retention-delete-' + randomUUID(), idempotencyKey: 'retention-delete-' + runId + '-' + impact.impactHash, submittedAt: now.toISOString(), runId, expectedImpactHash: impact.impactHash, confirmation: 'delete:' + runId })
-    candidates.push({ runId, ageDays, impact, disposition: 'deleted' })
+export async function sweepRetention(dataDirectory: string, policyId: string, dryRun: boolean, now = new Date(), confirmation?: string, actor = 'system'): Promise<RetentionSweepResult> {
+  const root = resolve(dataDirectory); const operation = dryRun ? 'retention.sweep.dry-run' : 'retention.sweep.executed'
+  try {
+    if (!dryRun && confirmation !== 'execute-retention:' + policyId) throw new Error('retention execution requires exact destructive confirmation: execute-retention:' + policyId)
+    return await withDataDirectoryLock(root, async () => {
+      const controlPlane = new EvaluationControlPlane({ journalPath: join(root, 'control-plane.jsonl'), reportRoot: join(root, 'artifacts'), taskCatalog: new RegisteredTaskCatalog(), now: () => now })
+      await controlPlane.initialize()
+      const policy = controlPlane.projection.retentionPolicies.get(policyId)
+      if (!policy) throw new Error('retention policy not found: ' + policyId)
+      const candidates: RetentionSweepResult['candidates'] = []
+      for (const run of [...controlPlane.projection.runs.values()].sort((a, b) => a.accepted.spec.runId.localeCompare(b.accepted.spec.runId))) {
+        if (!['completed', 'cancelled', 'failed', 'blocked'].includes(run.state)) continue
+        const ageDays = Math.max(0, (now.getTime() - Date.parse(run.updatedAt)) / 86_400_000)
+        if (ageDays < policy.retainDays) continue
+        const runId = run.accepted.spec.runId
+        const impact = await controlPlane.query({ resource: 'deletion-impact', runId }) as RetentionSweepResult['candidates'][number]['impact']
+        if (impact.blockedByRefs.length) { candidates.push({ runId, ageDays, impact, disposition: 'protected', reason: impact.blockedByRefs.join(',') }); continue }
+        if (dryRun) { candidates.push({ runId, ageDays, impact, disposition: 'eligible' }); continue }
+        await controlPlane.executeCommand({ schemaVersion: 1, type: 'run.delete', commandId: 'retention-delete-' + randomUUID(), idempotencyKey: 'retention-delete-' + runId + '-' + impact.impactHash, submittedAt: now.toISOString(), runId, expectedImpactHash: impact.impactHash, confirmation: 'delete:' + runId })
+        candidates.push({ runId, ageDays, impact, disposition: 'deleted' })
+      }
+      const result = RetentionSweepResultSchema.parse({ schemaVersion: 1, policyId, dryRun, evaluatedAt: now.toISOString(), candidates })
+      await recordStatus(root, 'retentionSweeps', result, operation, 'succeeded', actor, policyId)
+      return result
+    })
+  } catch (error) {
+    await recordStatus(root, 'retentionSweeps', undefined, operation, 'failed', actor, policyId, errorText(error))
+    throw error
   }
-  const result = RetentionSweepResultSchema.parse({ schemaVersion: 1, policyId, dryRun, evaluatedAt: now.toISOString(), candidates })
-  await recordStatus(root, 'retentionSweeps', result, dryRun ? 'retention.sweep.dry-run' : 'retention.sweep.executed', 'succeeded', policyId)
-  return result
 }
 
 async function copyArtifactTree(source: string, destination: string): Promise<Array<{ path: string; bytes: number; sha256: string }>> {
@@ -121,7 +137,15 @@ async function readContained(root: string, path: string): Promise<Buffer> { cons
 function contained(root: string, target: string): boolean { const rel = relative(resolve(root), resolve(target)); return rel !== '' && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel) }
 function digest(value: Uint8Array): string { return createHash('sha256').update(value).digest('hex') }
 function emptyStatus(): MaintenanceStatus { return { schemaVersion: 1, retentionSweeps: [], backups: [], restoreDrills: [], audit: [] } }
-async function recordStatus(root: string, collection: 'retentionSweeps' | 'backups' | 'restoreDrills', record: unknown, operation: string, outcome: 'succeeded' | 'failed', subjectId?: string): Promise<void> {
-  const status = await readMaintenanceStatus(root); status[collection] = [record, ...status[collection]].slice(0, 50); status.audit = [{ at: new Date().toISOString(), operation, outcome, ...(subjectId ? { subjectId } : {}) }, ...status.audit].slice(0, 100)
-  const target = join(resolve(root), STATUS_FILE); const temporary = target + '.tmp-' + randomUUID(); await writeFile(temporary, canonicalJson(status) + '\n', { mode: 0o600 }); await rename(temporary, target)
+async function recordStatus(root: string, collection: 'retentionSweeps' | 'backups' | 'restoreDrills', record: unknown | undefined, operation: string, outcome: 'succeeded' | 'failed', actor: string, subjectId?: string, error?: string): Promise<void> {
+  await withDataDirectoryLock(root, async () => {
+    const status = await readMaintenanceStatus(root)
+    if (record !== undefined) status[collection] = [record, ...status[collection]].slice(0, 50)
+    status.audit = [{ at: new Date().toISOString(), operation, outcome, actor, ...(subjectId ? { subjectId } : {}), ...(error ? { error } : {}) }, ...status.audit].slice(0, 100)
+    const target = join(resolve(root), STATUS_FILE); const temporary = target + '.tmp-' + randomUUID()
+    const handle = await open(temporary, 'wx', 0o600)
+    try { await handle.writeFile(canonicalJson(status) + '\n'); await handle.sync() } finally { await handle.close() }
+    await rename(temporary, target)
+  })
 }
+function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error) }

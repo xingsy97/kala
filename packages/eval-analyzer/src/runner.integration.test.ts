@@ -150,7 +150,7 @@ async function setup(options: { agents?: number } = {}) {
   const workerClient = new ControlPlaneClient({ baseUrl, credentialProvider: () => WORKER_TOKEN })
   const analyzerClient = new ControlPlaneClient({ baseUrl, credentialProvider: () => ANALYZER_TOKEN })
   analyzerClient.query = client.query.bind(client); analyzerClient.expireAnalysisJobs = client.expireAnalysisJobs.bind(client)
-  await client.command(command('run.create', { spec })); await client.command(command('run.start', { runId: spec.runId })); await workerClient.registerWorker({ schemaVersion: 1, workerId: 'worker', workerVersion: '1', protocolVersions: [1], sandboxProviders: ['docker'], agentBackends: ['custom-command'], benchmarkAdapters: ['custom-task-pack'], capacity: { cpu: 1, memoryMb: 256, diskMb: 256, gpu: 0, maxTrials: 1 } })
+  await client.command(command('run.create', { spec })); await client.command(command('run.start', { runId: spec.runId })); await workerClient.registerWorker({ schemaVersion: 1, workerId: 'worker', signingKeyReference: 'runner-integration-key', workerVersion: '1', protocolVersions: [1], sandboxProviders: ['docker'], agentBackends: ['custom-command'], benchmarkAdapters: ['custom-task-pack'], capacity: { cpu: 1, memoryMb: 256, diskMb: 256, gpu: 0, maxTrials: 1 } })
   const trialIds: string[] = []; const analyzerInputs: AnalyzerInput[] = []
   for (let index = 0; index < agentCount; index += 1) {
   const lease = (await workerClient.acquireLease('worker', 10_000))!; const trial = controlPlane.projection.trials.get(lease.trialId)!; trialIds.push(trial.trialId); const prefix = spec.runId + '/' + trial.trialId + '/'

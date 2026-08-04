@@ -12,7 +12,8 @@ import { RegisteredTaskCatalog } from './task-catalog.js'
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const reproductionSigningKey = generateKeyPairSync('ed25519')
-const reproductionKeyRegistry = { resolve: (keyReference: string) => keyReference === 'local-signing-key' ? { keyReference, algorithm: 'ed25519' as const, publicKeySpkiBase64: createPublicKey(reproductionSigningKey.privateKey).export({ format: 'der', type: 'spki' }).toString('base64'), scopes: ['reproduction_bundle' as const], status: 'active' as const, validFrom: '2026-01-01T00:00:00.000Z' } : undefined }
+const reproductionKeyRegistry = { resolve: (keyReference: string) => keyReference === 'local-signing-key' ? { keyReference, algorithm: 'ed25519' as const, publicKeySpkiBase64: createPublicKey(reproductionSigningKey.privateKey).export({ format: 'der', type: 'spki' }).toString('base64'), scopes: ['artifact_manifest' as const, 'trial_result' as const, 'reproduction_bundle' as const], status: 'active' as const, validFrom: '2026-01-01T00:00:00.000Z' } : undefined }
+function evidenceSignature(digest: string) { return { algorithm: 'ed25519' as const, keyReference: 'local-signing-key', valueBase64: sign(null, Buffer.from(digest, 'hex'), reproductionSigningKey.privateKey).toString('base64') } }
 async function canonicalSpec(): Promise<EvaluationRunSpec> {
   return JSON.parse(await readFile(join(packageRoot, '..', 'eval-protocol', 'fixtures', 'canonical-run-spec-v1.json'), 'utf8')) as EvaluationRunSpec
 }
@@ -56,7 +57,7 @@ function startCommand(runId: string, suffix = '') {
 }
 
 function worker() {
-  return { schemaVersion: 1 as const, workerId: 'worker-one', workerVersion: '1.0.0', protocolVersions: [1], sandboxProviders: ['docker'], agentBackends: ['agent-runlab'], benchmarkAdapters: ['swe-bench'], capacity: { cpu: 8, memoryMb: 16384, diskMb: 65536, gpu: 0, maxTrials: 2 } }
+  return { schemaVersion: 1 as const, workerId: 'worker-one', signingKeyReference: 'local-signing-key', workerVersion: '1.0.0', protocolVersions: [1], sandboxProviders: ['docker'], agentBackends: ['agent-runlab'], benchmarkAdapters: ['swe-bench'], capacity: { cpu: 8, memoryMb: 16384, diskMb: 65536, gpu: 0, maxTrials: 2 } }
 }
 
 async function evidenceFor(controlPlane: EvaluationControlPlane, spec: EvaluationRunSpec, lease: TrialLease, overrides: Partial<TrialEvidence> = {}): Promise<TrialEvidence> {
@@ -79,7 +80,8 @@ async function evidenceFor(controlPlane: EvaluationControlPlane, spec: Evaluatio
       entry('final.diff', 'text/x-diff'), entry('stdout.log', 'text/plain'), entry('stderr.log', 'text/plain'),
     ],
   }
-  const artifactManifest = { ...unsignedManifest, manifestHash: await sha256Hex(canonicalJson(unsignedManifest)) }
+  const manifestHash = await sha256Hex(canonicalJson(unsignedManifest))
+  const artifactManifest = { ...unsignedManifest, manifestHash, signature: evidenceSignature(manifestHash) }
   const unsignedEvidence = {
     schemaVersion: 1 as const,
     runId: spec.runId,
@@ -123,7 +125,8 @@ async function evidenceFor(controlPlane: EvaluationControlPlane, spec: Evaluatio
   }
   const { resultHash: _ignored, ...hashable } = unsignedEvidence as typeof unsignedEvidence & { resultHash?: string }
   if (controlPlane.projection.leases.get(lease.leaseId)?.state === 'active') for (const artifact of unsignedManifest.entries) await controlPlane.stageTrialArtifact({ leaseId: lease.leaseId, commitToken: lease.commitToken, path: artifact.path, mediaType: artifact.mediaType, bytes: artifact.bytes, sha256: artifact.sha256 }, bodies.get(artifact.artifactId)!)
-  return { ...hashable, resultHash: await sha256Hex(canonicalJson(hashable)) }
+  const resultHash = await sha256Hex(canonicalJson(hashable))
+  return { ...hashable, resultHash, signature: evidenceSignature(resultHash) }
 }
 
 async function completedCommit(controlPlane: EvaluationControlPlane, spec: EvaluationRunSpec, lease: TrialLease, overrides: Partial<TrialEvidence> = {}): Promise<TrialResultCommit> {
@@ -164,8 +167,10 @@ async function rehashEvidence(evidence: TrialEvidence, mutate: (draft: TrialEvid
   mutate(draft)
   const { manifestHash: _manifestHash, signature: _signature, ...unsignedManifest } = draft.artifactManifest
   draft.artifactManifest.manifestHash = await sha256Hex(canonicalJson(unsignedManifest))
-  const { resultHash: _ignored, ...unsigned } = draft
-  return { ...unsigned, resultHash: await sha256Hex(canonicalJson(unsigned)) }
+  draft.artifactManifest.signature = evidenceSignature(draft.artifactManifest.manifestHash)
+  const { resultHash: _ignored, signature: _oldEvidenceSignature, ...unsigned } = draft
+  const resultHash = await sha256Hex(canonicalJson(unsigned))
+  return { ...unsigned, resultHash, signature: evidenceSignature(resultHash) }
 }
 
 function oneTrialSpec(spec: EvaluationRunSpec, runId = spec.runId, sliceManifestHash = '6'.repeat(64)): EvaluationRunSpec {
@@ -202,7 +207,7 @@ describe('EvaluationControlPlane durable authority', () => {
   it('atomically commits idempotent commands and rebuilds the same projection after restart', async () => {
     const { controlPlane, options, spec } = await harness()
     const first = await controlPlane.executeCommand(createCommand(spec))
-    const duplicate = await controlPlane.executeCommand(createCommand(spec))
+    const duplicate = await controlPlane.executeCommand({ ...createCommand(spec), commandId: 'retry-command', submittedAt: '2026-08-03T00:00:01.000Z' })
     expect(duplicate).toEqual(first)
     expect(controlPlane.projection.runs).toHaveLength(1)
     expect(controlPlane.projection.transactionCount).toBe(2)
@@ -222,7 +227,7 @@ describe('EvaluationControlPlane durable authority', () => {
   it('rejects one idempotency key reused for a different payload', async () => {
     const { controlPlane, spec } = await harness()
     await controlPlane.executeCommand(createCommand(spec))
-    await expect(controlPlane.executeCommand({ ...createCommand(spec), commandId: 'different-command' })).rejects.toThrow('idempotency key collision')
+    await expect(controlPlane.executeCommand({ ...createCommand(spec), spec: { ...spec, runId: 'different-run' } })).rejects.toThrow('idempotency key collision')
   })
 
   it('leases only compatible trials and makes result completion idempotent by hash', async () => {
@@ -287,6 +292,17 @@ describe('EvaluationControlPlane durable authority', () => {
         artifactManifestHash: tampered.artifactManifest.manifestHash, evidence: tampered,
       })), testCase.name).rejects.toThrow(testCase.expected)
     }
+  })
+
+  it('requires trusted evidence signatures bound to the leased Worker key', async () => {
+    const { controlPlane, spec, options } = await harness()
+    const run = oneTrialSpec(spec, 'worker-key-binding', 'e'.repeat(64))
+    ;(options.taskCatalog as RegisteredTaskCatalog).register(run.taskPack.evaluatedSlice.sliceManifestHash, ['task-one'])
+    await controlPlane.executeCommand(createCommand(run, '-worker-key'))
+    await controlPlane.executeCommand(startCommand(run.runId, '-worker-key'))
+    await controlPlane.registerWorker({ ...worker(), signingKeyReference: 'different-worker-key' })
+    const lease = (await controlPlane.issueLease('worker-one', 60_000))!
+    await expect(controlPlane.commitTrialResult(await completedCommit(controlPlane, run, lease))).rejects.toThrow('does not match leased Worker registration')
   })
 
   it('requeues expired work only before any execution receipt and classifies ambiguous work indeterminate', async () => {
@@ -475,10 +491,10 @@ describe('EvaluationControlPlane durable authority', () => {
     await expect(controlPlane.executeCommand({ schemaVersion: 1, type: 'analysis.job.heartbeat', commandId: 'stale-analysis-heartbeat', idempotencyKey: 'stale-analysis-heartbeat', submittedAt: '2026-08-03T00:00:12.000Z', jobId, executorId: 'analyzer-one', leaseMs: 10_000, generation: 2, leaseToken: running.leaseToken })).rejects.toThrow('generation mismatch')
     const outputBody = Buffer.from(canonicalJson({ schemaVersion: 1, findingId: 'finding-one', detectorId: 'instruction-drift', detectorVersion: '1.0.0', runId: run.runId, trialId: lease.trialId, category: 'instruction_drift', severity: 'high', confidence: 1, evidenceRefs: ['normalized-events.jsonl#0'], status: 'detected' }))
     const outputHash = createHash('sha256').update(outputBody).digest('hex')
-    await controlPlane.stageAnalysisArtifact({ jobId, executorId: 'analyzer-one', path: 'analysis/' + jobId + '/finding-one.json', mediaType: 'application/json', bytes: outputBody.byteLength, sha256: outputHash }, outputBody)
+    await controlPlane.stageAnalysisArtifact({ jobId, executorId: 'analyzer-one', generation: running.generation, leaseToken: running.leaseToken, path: 'analysis/' + jobId + '/finding-one.json', mediaType: 'application/json', bytes: outputBody.byteLength, sha256: outputHash }, outputBody)
     const unsignedOutput = { schemaVersion: 1 as const, jobId, runId: run.runId, inputManifestHash: queued.inputManifestHash, generatedAt: '2026-08-03T00:00:13.000Z', outputs: [{ outputId: 'finding-one', kind: 'finding' as const, artifactRef: 'analysis/' + jobId + '/finding-one.json', mediaType: 'application/json', bytes: outputBody.byteLength, sha256: outputHash }] }
     const outputManifest = { ...unsignedOutput, manifestHash: await sha256Hex(canonicalJson(unsignedOutput)) }
-    const complete = { schemaVersion: 1 as const, type: 'analysis.job.complete' as const, commandId: 'complete-analysis-job', idempotencyKey: 'complete-analysis-job', submittedAt: '2026-08-03T00:00:14.000Z', jobId, executorId: 'analyzer-one', outputManifest }
+    const complete = { schemaVersion: 1 as const, type: 'analysis.job.complete' as const, commandId: 'complete-analysis-job', idempotencyKey: 'complete-analysis-job', submittedAt: '2026-08-03T00:00:14.000Z', jobId, executorId: 'analyzer-one', generation: running.generation, leaseToken: running.leaseToken, outputManifest }
     await expect(controlPlane.executeCommand({ ...complete, commandId: 'wrong-executor', idempotencyKey: 'wrong-executor', executorId: 'analyzer-two' })).rejects.toThrow('executor mismatch')
     await expect(controlPlane.executeCommand({ ...complete, commandId: 'wrong-output-hash', idempotencyKey: 'wrong-output-hash', outputManifest: { ...outputManifest, manifestHash: 'c'.repeat(64) } })).rejects.toThrow('manifest hash mismatch')
     await controlPlane.executeCommand(complete)

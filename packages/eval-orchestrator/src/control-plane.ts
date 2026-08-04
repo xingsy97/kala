@@ -36,7 +36,9 @@ import {
   TrialLeaseSchema,
   TrialProgressUpdateSchema,
   TrialResultCommitSchema,
+  verifyArtifactManifestSignature,
   verifyTrialEvidence,
+  verifyTrialEvidenceSignature,
   verifyReproductionBundleSignature,
   WorkerRegistrationSchema,
   type CommittedAcknowledgement,
@@ -58,6 +60,7 @@ import {
   type PolicyOperation,
 } from '@agent-kernel/eval-protocol'
 
+import { ConflictError } from './http-errors.js'
 import { DurableJournal } from './journal.js'
 import { currentPrincipal } from './principal-context.js'
 import { ContainedArtifactStore } from './artifact-store.js'
@@ -162,7 +165,7 @@ export class EvaluationControlPlane {
     })
   }
 
-  stageAnalysisArtifact(input: { jobId: string; executorId: string; leaseToken?: string; generation?: number; path: string; mediaType: string; bytes: number; sha256: string }, content: Uint8Array): Promise<void> {
+  stageAnalysisArtifact(input: { jobId: string; executorId: string; leaseToken: string; generation: number; path: string; mediaType: string; bytes: number; sha256: string }, content: Uint8Array): Promise<void> {
     return this.mutate(async () => {
       try {
       const job = this.requiredAnalysisJob(input.jobId)
@@ -297,9 +300,13 @@ export class EvaluationControlPlane {
         const artifactRun = this.projection.runs.get(lease.lease.runId)!
         const artifactDecision = await this.requireCatalogPolicy(artifactRun.accepted.spec, 'artifact_publication', commit.trialId, commit.committedAt)
         await this.commit([artifactDecision], 'policy-artifact-' + commit.trialId + '-' + String(commit.attempt), commit.committedAt)
-        const evidence = await verifyTrialEvidence(commit.evidence)
+        const evidence = await verifyTrialEvidenceSignature(commit.evidence, this.signingKeyRegistry, commit.committedAt)
+        await verifyArtifactManifestSignature(evidence.artifactManifest, this.signingKeyRegistry, commit.committedAt)
         const trial = this.projection.trials.get(commit.trialId)!
         const run = this.projection.runs.get(lease.lease.runId)!
+        const worker = this.projection.workers.get(lease.lease.workerId)
+        if (!worker) throw new Error('leased worker registration is missing')
+        if (evidence.signature!.keyReference !== worker.registration.signingKeyReference || evidence.artifactManifest.signature!.keyReference !== worker.registration.signingKeyReference) throw new Error('trial evidence signing key does not match leased Worker registration')
         if (evidence.runId !== lease.lease.runId || evidence.taskId !== trial.taskId || evidence.agentVariantId !== trial.agentVariantId || evidence.repeatIndex !== trial.repeatIndex) throw new Error('canonical evidence does not match leased trial identity')
         if (evidence.artifactManifest.runId !== lease.lease.runId || evidence.artifactManifest.trialId !== commit.trialId || evidence.artifactManifest.leaseId !== commit.leaseId) throw new Error('canonical artifact manifest does not match leased trial authority')
         if (evidence.environmentLock.provider !== run.accepted.spec.sandbox.provider) throw new Error('canonical evidence sandbox provider does not match accepted spec')
@@ -426,7 +433,10 @@ export class EvaluationControlPlane {
       case 'reports': return page([...this.projection.reports.values()].filter((report) => !query.runId || report.runRefs.includes(query.runId)), query.page)
       case 'audit': {
         const records = this.projection.auditRecords.filter((record) => (!query.actorId || record.actor.id === query.actorId) && (!query.operation || record.operation === query.operation) && (!query.resourceType || record.resourceType === query.resourceType))
-        return { ...page(records, query.page), trusted: true, authority: { transactionCount: this.projection.transactionCount, tipHash: this.projection.lastTransactionHash } }
+        const transactions = await this.journal.readAll()
+        const tipHash = transactions.at(-1)?.transactionHash ?? null
+        const trusted = transactions.length === this.projection.transactionCount && tipHash === this.projection.lastTransactionHash
+        return { ...page(query.trustedOnly && !trusted ? [] : records, query.page), trusted, authority: { transactionCount: transactions.length, tipHash } }
       }
       case 'retention': return page([...this.projection.retentionPolicies.values()], query.page)
       case 'deletion-impact': return await this.deletionImpact(query.runId)
@@ -462,10 +472,11 @@ export class EvaluationControlPlane {
   }
 
   private async executeCommandExclusive(command: EvaluationCommand): Promise<CommittedAcknowledgement> {
-    const commandHash = await sha256Hex(canonicalJson(command))
+    const { commandId: _commandId, idempotencyKey: _idempotencyKey, submittedAt: _submittedAt, ...semanticCommand } = command
+    const commandHash = await sha256Hex(canonicalJson(semanticCommand))
     const prior = this.projection.commandAcks.get(command.idempotencyKey)
     if (prior) {
-      if (prior.hash !== commandHash) throw new Error('idempotency key collision with different command payload')
+      if (prior.hash !== commandHash) throw new ConflictError('idempotency key collision with different command payload')
       return prior.acknowledgement
     }
     const at = this.now().toISOString()
@@ -1136,9 +1147,9 @@ export class EvaluationControlPlane {
     if (Date.parse(lease.expiresAt) <= this.now().getTime()) throw new Error('lease has expired: ' + lease.lease.leaseId)
   }
 
-  private assertAnalysisLease(job: ReturnType<EvaluationControlPlane['requiredAnalysisJob']>, authority: { leaseToken?: string; generation?: number }): void {
-    if (authority.leaseToken !== undefined && authority.leaseToken !== job.leaseToken) throw new Error('analysis job lease token mismatch')
-    if (authority.generation !== undefined && authority.generation !== job.generation) throw new Error('analysis job generation mismatch')
+  private assertAnalysisLease(job: ReturnType<EvaluationControlPlane['requiredAnalysisJob']>, authority: { leaseToken: string; generation: number }): void {
+    if (authority.leaseToken !== job.leaseToken) throw new Error('analysis job lease token mismatch')
+    if (authority.generation !== job.generation) throw new Error('analysis job generation mismatch')
   }
 
   private async requireCatalogPolicy(spec: import('@agent-kernel/eval-protocol').EvaluationRunSpec, operation: PolicyOperation, resourceId: string, at: string): Promise<JournalDomainRecord> {

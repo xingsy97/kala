@@ -33,7 +33,7 @@ export class EvaluationWorker {
     readinessPolicies?: { sandboxes: readonly SandboxPolicy[]; agents: readonly AgentVariantSpec[] }
   }) {
     const capabilities = options.registry.capabilities()
-    this.registration = WorkerRegistrationSchema.parse({ schemaVersion: 1, workerId: options.workerId, workerVersion: options.workerVersion, protocolVersions: [1], sandboxProviders: capabilities.sandboxes, agentBackends: capabilities.agents, benchmarkAdapters: capabilities.benchmarks, capacity: { cpu: options.cpu, memoryMb: options.memoryMb, diskMb: options.diskMb, gpu: options.gpu, maxTrials: options.maxTrials } })
+    this.registration = WorkerRegistrationSchema.parse({ schemaVersion: 1, workerId: options.workerId, signingKeyReference: options.signingProvider.keyReference, workerVersion: options.workerVersion, protocolVersions: [1], sandboxProviders: capabilities.sandboxes, agentBackends: capabilities.agents, benchmarkAdapters: capabilities.benchmarks, capacity: { cpu: options.cpu, memoryMb: options.memoryMb, diskMb: options.diskMb, gpu: options.gpu, maxTrials: options.maxTrials } })
     this.leases = new WorkerLeaseClient(options.controlPlane, this.registration, options.leaseMs)
     this.runner = new TrialRunner(options)
   }

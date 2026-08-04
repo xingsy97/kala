@@ -52,7 +52,7 @@ describe('versioned Control Plane HTTP API', () => {
     expect(anonymous.headers.get('www-authenticate')).toContain('Bearer')
     const worker = new ControlPlaneClient({ baseUrl: 'http://127.0.0.1:' + String(port), credentialProvider: () => 'worker-test-token' })
     await expect(worker.query({ resource: 'runs', page: { limit: 10 } })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' })
-    await expect(worker.registerWorker({ schemaVersion: 1, workerId: 'different-worker', workerVersion: '1', protocolVersions: [1], sandboxProviders: [], agentBackends: [], benchmarkAdapters: [], capacity: { cpu: 1, memoryMb: 1, diskMb: 1, gpu: 0, maxTrials: 1 } })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' })
+    await expect(worker.registerWorker({ schemaVersion: 1, workerId: 'different-worker', signingKeyReference: 'fixture-key', workerVersion: '1', protocolVersions: [1], sandboxProviders: [], agentBackends: [], benchmarkAdapters: [], capacity: { cpu: 1, memoryMb: 1, diskMb: 1, gpu: 0, maxTrials: 1 } })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' })
   })
 
   it('returns 401 before parsing or resource lookup on every protected endpoint', async () => {
@@ -102,10 +102,20 @@ describe('versioned Control Plane HTTP API', () => {
     expect(viewer.status).toBe(403)
     const status = await fetch(base + '/api/v1/administration/status', { headers: { authorization: 'Bearer ' + operatorToken } })
     expect(await status.json()).toMatchObject({ security: { generation: 1 }, maintenance: { backups: [] } })
+    const sdk = new ControlPlaneClient({ baseUrl: base, credentialProvider: () => operatorToken })
+    await expect(sdk.administrationStatus()).resolves.toMatchObject({ security: { generation: 1 }, maintenance: { backups: [] } })
     const wrong = await fetch(base + '/api/v1/administration/security/reload', { method: 'POST', headers: { authorization: 'Bearer ' + operatorToken, 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'reload' }) })
     expect(wrong.status).toBe(400); expect(reloads).toEqual([])
-    const reloaded = await fetch(base + '/api/v1/administration/security/reload', { method: 'POST', headers: { authorization: 'Bearer ' + operatorToken, 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'reload-security-registry' }) })
-    expect(reloaded.status).toBe(200); expect(reloads).toEqual(['operator-one'])
+    await expect(sdk.reloadSecurity('reload-security-registry')).resolves.toMatchObject({ generation: 2 })
+    expect(reloads).toEqual(['operator-one'])
+  })
+
+  it('accepts global CLI options before resources and rejects missing option values', async () => {
+    const { port } = await start(undefined, { maintenanceStatus: async () => ({ backups: [] }) })
+    const cli = join(packageRoot, 'bin/eval-cli.ts'); const baseUrl = 'http://127.0.0.1:' + String(port)
+    const status = JSON.parse((await runFile(process.execPath, ['--import', 'tsx', cli, '--url', baseUrl, '--token', operatorToken, 'admin', 'status'], { cwd: packageRoot })).stdout)
+    expect(status).toMatchObject({ schemaVersion: 1, maintenance: { backups: [] } })
+    await expect(runFile(process.execPath, ['--import', 'tsx', cli, 'admin', 'status', '--url'], { cwd: packageRoot })).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('requires a value') })
   })
 
   it('provides CLI/Web client parity with durable projection and committed acknowledgements', async () => {
@@ -151,9 +161,16 @@ describe('versioned Control Plane HTTP API', () => {
     const restarted = await start(first.journalPath)
     expect(await restarted.client.command(command)).toEqual(acknowledgement)
     expect(restarted.controlPlane.projection.transactionCount).toBe(transactionsBeforeRestart)
-    await expect(restarted.client.command({ ...command, commandId: 'different-command' }))
+    await expect(restarted.client.command({ ...command, type: 'run.start', runId: command.spec.runId } as never))
       .rejects.toMatchObject({ status: 409, code: 'CONFLICT' })
     expect(restarted.controlPlane.projection.transactionCount).toBe(transactionsBeforeRestart)
+  })
+
+  it('does not expose unexpected internal error messages', async () => {
+    const { port } = await start(undefined, { maintenanceStatus: async () => { throw new Error('secret filesystem location') } })
+    const response = await fetch('http://127.0.0.1:' + String(port) + '/api/v1/administration/status', { headers: { authorization: 'Bearer ' + operatorToken } })
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ code: 'INTERNAL_ERROR', message: 'Control Plane request failed' })
   })
 
   it('serves durable SSE catch-up starting after the requested sequence', async () => {
@@ -194,7 +211,7 @@ describe('versioned Control Plane HTTP API', () => {
     await client.command({ schemaVersion: 1, type: 'run.create', commandId: 'create-upload-interruption', idempotencyKey: 'idem-upload-interruption', submittedAt: '2026-08-03T00:00:00.000Z', spec })
     await client.command({ schemaVersion: 1, type: 'run.start', commandId: 'start-upload-interruption', idempotencyKey: 'idem-start-upload-interruption', submittedAt: '2026-08-03T00:00:01.000Z', runId: spec.runId })
     const workerClient = new ControlPlaneClient({ baseUrl: 'http://127.0.0.1:' + String(port), credentialProvider: () => 'worker-test-token' })
-    await workerClient.registerWorker({ schemaVersion: 1, workerId: 'upload-worker', workerVersion: '1', protocolVersions: [1], sandboxProviders: ['docker'], agentBackends: ['agent-runlab'], benchmarkAdapters: ['swe-bench'], capacity: { cpu: 8, memoryMb: 16384, diskMb: 65536, gpu: 0, maxTrials: 1 } })
+    await workerClient.registerWorker({ schemaVersion: 1, workerId: 'upload-worker', signingKeyReference: 'fixture-key', workerVersion: '1', protocolVersions: [1], sandboxProviders: ['docker'], agentBackends: ['agent-runlab'], benchmarkAdapters: ['swe-bench'], capacity: { cpu: 8, memoryMb: 16384, diskMb: 65536, gpu: 0, maxTrials: 1 } })
     const lease = (await workerClient.acquireLease('upload-worker', 10_000))!
     const content = Buffer.from('canonical artifact bytes')
     const metadata = {

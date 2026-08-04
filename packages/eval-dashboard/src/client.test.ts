@@ -58,6 +58,11 @@ describe('DashboardControlPlane browser security', () => {
     vi.useRealTimers()
   })
 
+  it('explicitly disables cross-origin EventSource because it cannot attach credentials', () => {
+    const control = new DashboardControlPlane('https://eval.example.test', undefined, () => 'user-session', ['https://eval.example.test'])
+    expect(() => control.subscribeRunEvents({ runId: 'run-one', afterSequence: 0, onEvent: () => undefined })).toThrow('Cross-origin live events are disabled')
+  })
+
   it('allows only same-origin or explicitly allowlisted Control Plane URLs', () => {
     expect(allowedControlPlaneUrl('/control')).toBe(fixtureOrigin + '/control')
     expect(allowedControlPlaneUrl('https://eval.example.test/root', ['https://eval.example.test'])).toBe('https://eval.example.test/root')
@@ -89,6 +94,14 @@ describe('DashboardControlPlane browser security', () => {
     await control.artifactText('artifact', 'trial')
     const headers = new Headers(request.mock.calls[0]![1]?.headers)
     expect(headers.get('authorization')).toBe('Bearer artifact-session')
+  })
+
+  it('downloads cross-origin reports with the current user credential through fetch', async () => {
+    const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('report', { status: 200 }))
+    const control = new DashboardControlPlane('https://eval.example.test', undefined, () => 'user-session', ['https://eval.example.test'])
+    await control.reportBlob('report-one', 'pdf')
+    expect(request.mock.calls[0]![0]).toBe('https://eval.example.test/api/v1/reports/report-one/pdf')
+    expect(new Headers(request.mock.calls[0]![1]?.headers).get('authorization')).toBe('Bearer user-session')
   })
 
   it('maps authorization failures and redacts internal HTTP details', () => {

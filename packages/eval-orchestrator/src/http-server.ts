@@ -5,6 +5,7 @@ import { IdentifierSchema, ReportFormatSchema, principalHasScope, type Authoriza
 import type { EvaluationControlPlane } from './control-plane.js'
 import { AuthorizationError, bindServicePrincipal, requireAuthenticatedPrincipal, requirePrincipal, type Authenticator } from './auth.js'
 import { runAsPrincipal } from './principal-context.js'
+import { InvalidRequestError, SafeHttpError } from './http-errors.js'
 import type { SecurityRegistryMetadata } from './security-registry.js'
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
@@ -29,10 +30,9 @@ export function createEvaluationHttpServer(controlPlane: EvaluationControlPlane,
         response.destroy(error instanceof Error ? error : new Error(String(error)))
         return
       }
-      const message = error instanceof Error ? error.message : String(error)
-      const status = error instanceof AuthorizationError ? error.status : classifyStatus(message)
-      if (status === 401) response.setHeader('www-authenticate', 'Bearer realm="agent-evaluation"')
-      sendJson(response, status, { code: error instanceof AuthorizationError ? error.code : status === 400 ? 'INVALID_REQUEST' : status === 404 ? 'NOT_FOUND' : status === 409 ? 'CONFLICT' : 'INTERNAL_ERROR', message })
+      const safe = safeHttpError(error)
+      if (safe.status === 401) response.setHeader('www-authenticate', 'Bearer realm="agent-evaluation"')
+      sendJson(response, safe.status, { code: safe.code, message: safe.message })
     })
   })
 }
@@ -110,7 +110,7 @@ async function route(controlPlane: EvaluationControlPlane, authenticator: Authen
     const executorId = requiredHeader(request, 'executor-id')
     bindServicePrincipal(authorize(authenticator, request, 'analyzer:execute'), 'analyzer', executorId)
     const content = await readBytes(request, MAX_ARTIFACT_BYTES)
-    await controlPlane.stageAnalysisArtifact({ ...artifactHeaders(request), jobId: requiredHeader(request, 'job-id'), executorId }, content)
+    await controlPlane.stageAnalysisArtifact({ ...artifactHeaders(request), jobId: requiredHeader(request, 'job-id'), executorId, leaseToken: requiredHeader(request, 'lease-token'), generation: requiredPositiveIntegerHeader(request, 'generation') }, content)
     sendJson(response, 200, { staged: true })
     return
   }
@@ -132,7 +132,7 @@ async function route(controlPlane: EvaluationControlPlane, authenticator: Authen
   switch (url.pathname) {
     case '/api/v1/administration/security/reload': {
       const principal = authorize(authenticator, request, 'admin')
-      if (object(body).confirmation !== 'reload-security-registry') throw new Error('security reload requires exact confirmation: reload-security-registry')
+      if (object(body).confirmation !== 'reload-security-registry') throw new InvalidRequestError('security reload requires exact confirmation: reload-security-registry')
       if (!administration?.reloadSecurity) throw new Error('security registry reload is unavailable')
       sendJson(response, 200, await administration.reloadSecurity(principal.principalId))
       return
@@ -305,6 +305,7 @@ function artifactHeaders(request: IncomingMessage): { path: string; mediaType: s
 }
 function requiredHeader(request: IncomingMessage, name: string): string { const value = request.headers['x-agent-eval-' + name]; if (typeof value !== 'string' || !value) throw new Error(name + ' header is required'); return value }
 function requiredHeaderInteger(request: IncomingMessage, name: string): number { const value = Number(requiredHeader(request, name)); if (!Number.isSafeInteger(value) || value < 0) throw new Error(name + ' header must be a nonnegative integer'); return value }
+function requiredPositiveIntegerHeader(request: IncomingMessage, name: string): number { const value = requiredHeaderInteger(request, name); if (value === 0) throw new Error(name + ' header must be a positive integer'); return value }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   const body = JSON.stringify(value)
@@ -335,9 +336,9 @@ function requiredPositiveInteger(value: unknown, key: string): number {
   return field
 }
 
-function classifyStatus(message: string): number {
-  if (/already exists|collision|conflicting|cannot start|already terminal|not active|mismatch/iu.test(message)) return 409
-  if (/unknown |ENOENT/iu.test(message)) return 404
-  if (/required|requires|invalid|must |forbidden|exceeds|expected /iu.test(message)) return 400
-  return 500
+function safeHttpError(error: unknown): { status: number; code: string; message: string } {
+  if (error instanceof AuthorizationError) return { status: error.status, code: error.code, message: error.message }
+  if (error instanceof SafeHttpError) return { status: error.status, code: error.code, message: error.safeMessage }
+  if (error instanceof Error && error.name === 'ZodError') return { status: 400, code: 'INVALID_REQUEST', message: 'request does not match the protocol schema' }
+  return { status: 500, code: 'INTERNAL_ERROR', message: 'Control Plane request failed' }
 }

@@ -4,6 +4,8 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 import type { ArtifactEntry, ReportFormat, ReportManifest } from '@agent-kernel/eval-protocol'
 
+import { dataDirectoryForArtifacts, withDataDirectoryLock } from './data-directory-lock.js'
+
 export type StoredArtifact = { path: string; mediaType: string; bytes: number; sha256: string; content: Buffer }
 
 export class ContainedArtifactStore {
@@ -25,20 +27,22 @@ export class ContainedArtifactStore {
   async readRegisteredFile(file: { path: string; mediaType: string; bytes: number; sha256: string }): Promise<StoredArtifact> { return this.readVerified(file.path, file.mediaType, file.bytes, file.sha256) }
 
   async writeExclusive(path: string, content: Uint8Array, expectedSha256: string): Promise<void> {
-    const destination = this.containedPath(path)
-    const actual = createHash('sha256').update(content).digest('hex')
-    if (actual !== expectedSha256) throw new Error('generated artifact hash mismatch: ' + path)
-    await mkdir(dirname(destination), { recursive: true, mode: 0o700 })
-    const temporary = destination + '.upload-' + randomUUID()
-    let handle: Awaited<ReturnType<typeof open>> | undefined
-    try {
-      handle = await open(temporary, 'wx', 0o600)
-      await handle.writeFile(content); await handle.sync(); await handle.close(); handle = undefined
-      await link(temporary, destination)
-    } finally {
-      await handle?.close().catch(() => undefined)
-      await rm(temporary, { force: true }).catch(() => undefined)
-    }
+    await withDataDirectoryLock(dataDirectoryForArtifacts(this.root), async () => {
+      const destination = this.containedPath(path)
+      const actual = createHash('sha256').update(content).digest('hex')
+      if (actual !== expectedSha256) throw new Error('generated artifact hash mismatch: ' + path)
+      await mkdir(dirname(destination), { recursive: true, mode: 0o700 })
+      const temporary = destination + '.upload-' + randomUUID()
+      let handle: Awaited<ReturnType<typeof open>> | undefined
+      try {
+        handle = await open(temporary, 'wx', 0o600)
+        await handle.writeFile(content); await handle.sync(); await handle.close(); handle = undefined
+        await link(temporary, destination)
+      } finally {
+        await handle?.close().catch(() => undefined)
+        await rm(temporary, { force: true }).catch(() => undefined)
+      }
+    })
   }
 
   async writeIdempotent(path: string, content: Uint8Array, expectedSha256: string): Promise<void> {
@@ -52,19 +56,21 @@ export class ContainedArtifactStore {
   }
 
   async deleteFiles(paths: readonly string[]): Promise<void> {
-    for (const path of [...new Set(paths)].sort()) {
-      const target = this.containedPath(path)
-      try {
-        const metadata = await lstat(target)
-        if (metadata.isSymbolicLink() || !metadata.isFile()) throw new Error('deletion target must be a regular non-symlink file')
-        const canonical = await realpath(target)
-        const canonicalRoot = await realpath(this.root)
-        if (!contained(canonicalRoot, canonical)) throw new Error('deletion target resolved outside configured root')
-        await rm(canonical)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    await withDataDirectoryLock(dataDirectoryForArtifacts(this.root), async () => {
+      for (const path of [...new Set(paths)].sort()) {
+        const target = this.containedPath(path)
+        try {
+          const metadata = await lstat(target)
+          if (metadata.isSymbolicLink() || !metadata.isFile()) throw new Error('deletion target must be a regular non-symlink file')
+          const canonical = await realpath(target)
+          const canonicalRoot = await realpath(this.root)
+          if (!contained(canonicalRoot, canonical)) throw new Error('deletion target resolved outside configured root')
+          await rm(canonical)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
       }
-    }
+    })
   }
 
   private async readVerified(path: string, mediaType: string, expectedBytes: number | undefined, expectedSha256: string): Promise<StoredArtifact> {

@@ -3,6 +3,7 @@ import { dirname } from 'node:path'
 
 import { canonicalJson, sha256Hex } from '@agent-kernel/eval-protocol'
 
+import { dataDirectoryForJournal, withDataDirectoryLock } from './data-directory-lock.js'
 import { JournalTransactionSchema, type JournalTransaction } from './model.js'
 
 export class DurableJournal {
@@ -47,7 +48,7 @@ export class DurableJournal {
 
   append(transaction: JournalTransaction): Promise<void> {
     const parsed = JournalTransactionSchema.parse(transaction)
-    const action = this.tail.then(async () => {
+    const action = this.tail.then(async () => await withDataDirectoryLock(dataDirectoryForJournal(this.path), async () => {
       const release = await this.acquireWriterFence()
       try {
         const existing = await this.readAll()
@@ -59,7 +60,7 @@ export class DurableJournal {
           await handle.sync()
         } finally { await handle.close() }
       } finally { await release() }
-    })
+    }))
     this.tail = action.catch(() => undefined)
     return action
   }
@@ -77,8 +78,10 @@ export class DurableJournal {
   async bytes(): Promise<number> { return (await stat(this.path)).size }
 
   async withWriterFence<T>(action: () => Promise<T>): Promise<T> {
-    const release = await this.acquireWriterFence()
-    try { return await action() } finally { await release() }
+    return await withDataDirectoryLock(dataDirectoryForJournal(this.path), async () => {
+      const release = await this.acquireWriterFence()
+      try { return await action() } finally { await release() }
+    })
   }
 
   private async acquireWriterFence(): Promise<() => Promise<void>> {

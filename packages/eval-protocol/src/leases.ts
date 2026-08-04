@@ -35,6 +35,7 @@ export const WorkerReadinessSchema = z.object({
 export const WorkerRegistrationSchema = z.object({
   schemaVersion: z.literal(1),
   workerId: IdentifierSchema,
+  signingKeyReference: IdentifierSchema,
   workerVersion: z.string().min(1),
   protocolVersions: z.array(z.number().int().positive()).min(1),
   sandboxProviders: z.array(IdentifierSchema),

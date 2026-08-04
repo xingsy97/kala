@@ -31,7 +31,7 @@ if (catalogPath) {
 }
 
 const runTemplates = EvaluationRunTemplatesSchema.parse(runTemplatesPath ? JSON.parse(await readFile(resolve(runTemplatesPath), 'utf8')) : [])
-const security = new FileBackedSecurityRegistry(resolve(authConfigPath), trustConfigPath ? resolve(trustConfigPath) : undefined)
+const security = new FileBackedSecurityRegistry(resolve(authConfigPath), trustConfigPath ? resolve(trustConfigPath) : undefined, resolve(dataDir, 'security-reload-audit.jsonl'))
 await security.initialize()
 const controlPlane = new EvaluationControlPlane({ journalPath: resolve(dataDir, 'control-plane.jsonl'), reportRoot: resolve(dataDir, 'artifacts'), taskCatalog: catalog, evidenceArchive: new EvidenceArchive(evidencePath ? resolve(evidencePath) : undefined), runTemplates, signingKeyRegistry: security })
 await controlPlane.initialize()

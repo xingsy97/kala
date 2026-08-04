@@ -11,7 +11,8 @@ import { resolveCredentialProvider, type CredentialProviderLike } from './creden
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 export type RequestOptions = AbortSignal | { signal?: AbortSignal; deadlineMs?: number }
-export type WatchOptions = { signal?: AbortSignal; lastEventId?: string | number }
+export type WatchOptions = { signal?: AbortSignal; lastEventId?: string | number; deadlineMs?: number; reconnectAttempts?: number; reconnectDelayMs?: number }
+export type AdministrationStatus = { schemaVersion: 1; security: unknown | null; maintenance: unknown | null }
 export type Page<T> = { items: T[]; page: { nextCursor?: string; hasMore: boolean; total?: number } }
 export type CommandInput = EvaluationCommand | (Omit<EvaluationCommand, 'schemaVersion' | 'commandId' | 'idempotencyKey' | 'submittedAt'> & Partial<Pick<EvaluationCommand, 'schemaVersion' | 'commandId' | 'idempotencyKey' | 'submittedAt'>>)
 
@@ -69,7 +70,7 @@ export class ControlPlaneClient {
     const supplied = input as Record<string, unknown>
     const commandId = typeof supplied.commandId === 'string' ? supplied.commandId : crypto.randomUUID()
     const optionKey = !(options instanceof AbortSignal) ? options?.idempotencyKey : undefined
-    const body = EvaluationCommandSchema.parse({ schemaVersion: 1, commandId, idempotencyKey: optionKey ?? supplied.idempotencyKey ?? commandId, submittedAt: supplied.submittedAt ?? new Date().toISOString(), ...supplied })
+    const body = EvaluationCommandSchema.parse({ ...supplied, schemaVersion: 1, commandId, idempotencyKey: optionKey ?? supplied.idempotencyKey ?? commandId, submittedAt: supplied.submittedAt ?? new Date().toISOString() })
     return CommittedAcknowledgementSchema.parse(await this.request('/api/v1/commands', { method: 'POST', body: JSON.stringify(body) }, options))
   }
 
@@ -79,32 +80,60 @@ export class ControlPlaneClient {
   }
 
   async *watchEvents(runId: string, options: WatchOptions = {}): AsyncGenerator<EvaluationEvent> {
-    const headers = new Headers({ accept: 'text/event-stream' })
-    if (options.lastEventId !== undefined) headers.set('last-event-id', String(options.lastEventId))
-    await this.authorize(headers)
-    const response = await this.fetchImpl(`${this.baseUrl}/api/v1/events?runId=${encodeURIComponent(runId)}`, { method: 'GET', headers, signal: options.signal })
-    if (!response.ok) throw await responseError(response)
-    if (!response.body) throw new ControlPlaneHttpError(response.status, 'INVALID_SSE_RESPONSE', 'Control Plane returned an empty event stream')
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
-    let buffer = ''
-    try {
-      while (true) {
-        const { value, done } = await reader.read(); if (done) break
-        buffer += value
-        const frames = buffer.split(/\r?\n\r?\n/u); buffer = frames.pop() ?? ''
-        for (const frame of frames) {
-          let event = 'message'; const data: string[] = []
-          for (const line of frame.split(/\r?\n/u)) {
-            if (line.startsWith('event:')) event = line.slice(6).trim()
-            else if (line.startsWith('data:')) data.push(line.slice(5).trimStart())
+    if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('aborted', 'AbortError')
+    const attempts = nonnegativeInteger(options.reconnectAttempts ?? 3, 'reconnectAttempts')
+    const delayMs = nonnegativeInteger(options.reconnectDelayMs ?? 250, 'reconnectDelayMs')
+    let cursor = options.lastEventId === undefined ? undefined : String(options.lastEventId)
+    for (let attempt = 0; ; attempt += 1) {
+      const headers = new Headers({ accept: 'text/event-stream' })
+      if (cursor !== undefined) headers.set('last-event-id', cursor)
+      await this.authorize(headers)
+      const deadline = deadlineSignal({ signal: options.signal, deadlineMs: options.deadlineMs ?? this.deadlineMs }, this.deadlineMs)
+      try {
+        const response = await this.fetchImpl(`${this.baseUrl}/api/v1/events?runId=${encodeURIComponent(runId)}`, { method: 'GET', headers, signal: deadline.signal })
+        if (!response.ok) throw await responseError(response)
+        if (!isEventStream(response.headers.get('content-type'))) throw new ControlPlaneHttpError(response.status, 'INVALID_SSE_CONTENT_TYPE', 'Control Plane returned a non-event-stream response')
+        if (!response.body) throw new ControlPlaneHttpError(response.status, 'INVALID_SSE_RESPONSE', 'Control Plane returned an empty event stream')
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+        let buffer = ''
+        try {
+          while (true) {
+            const { value, done } = await reader.read(); if (done) break
+            buffer += value
+            const frames = buffer.split(/\r?\n\r?\n/u); buffer = frames.pop() ?? ''
+            for (const frame of frames) {
+              let event = 'message'; let id: string | undefined; const data: string[] = []
+              for (const line of frame.split(/\r?\n/u)) {
+                if (line.startsWith('event:')) event = line.slice(6).trim()
+                else if (line.startsWith('id:')) id = line.slice(3).trim()
+                else if (line.startsWith('data:')) data.push(line.slice(5).trimStart())
+              }
+              if (!data.length) continue
+              const parsed = parseJson(data.join('\n'), response.status)
+              if (event === 'error') { const error = asRecord(parsed); throw new ControlPlaneHttpError(404, stringValue(error.code, 'SSE_ERROR'), stringValue(error.message, 'Control Plane event stream failed')) }
+              const value = EvaluationEventSchema.parse(parsed)
+              cursor = id ?? String(value.sequence)
+              yield value
+            }
           }
-          if (!data.length) continue
-          const parsed = parseJson(data.join('\n'), response.status)
-          if (event === 'error') { const error = asRecord(parsed); throw new ControlPlaneHttpError(404, stringValue(error.code, 'SSE_ERROR'), stringValue(error.message, 'Control Plane event stream failed')) }
-          yield EvaluationEventSchema.parse(parsed)
-        }
-      }
-    } finally { reader.releaseLock() }
+        } finally { reader.releaseLock() }
+      } catch (error) {
+        const mapped = deadline.map(error)
+        if (mapped instanceof ControlPlaneHttpError || mapped instanceof ControlPlaneDeadlineError || options.signal?.aborted || attempt >= attempts) throw mapped
+      } finally { deadline.dispose() }
+      if (attempt >= attempts) return
+      await abortableDelay(delayMs, options.signal)
+    }
+  }
+
+  async administrationStatus(options?: RequestOptions): Promise<AdministrationStatus> {
+    const value = asRecord(await this.request('/api/v1/administration/status', { method: 'GET' }, options))
+    if (value.schemaVersion !== 1 || !('security' in value) || !('maintenance' in value)) throw new Error('invalid administration status response')
+    return value as AdministrationStatus
+  }
+
+  async reloadSecurity(confirmation: 'reload-security-registry', options?: RequestOptions): Promise<unknown> {
+    return await this.request('/api/v1/administration/security/reload', { method: 'POST', body: JSON.stringify({ confirmation }) }, options)
   }
 
   archiveDocumentUrl(documentId: string): string { return this.baseUrl + '/api/v1/archive-documents/' + encodeURIComponent(documentId) }
@@ -126,7 +155,7 @@ export class ControlPlaneClient {
   async commitTrialResult(commit: TrialResultCommit, options?: RequestOptions): Promise<TrialResultCommit> { const body = TrialResultCommitSchema.parse(commit); return TrialResultCommitSchema.parse(await this.request('/api/v1/results/commit', { method: 'POST', body: JSON.stringify(body) }, options)) }
   async expireLeases(options?: RequestOptions): Promise<number> { const result = asRecord(await this.request('/api/v1/leases/expire', { method: 'POST', body: '{}' }, options)); if (typeof result.expired !== 'number') throw new Error('invalid lease expiry response'); return result.expired }
   async stageTrialArtifact(input: { leaseId: string; commitToken: string; path: string; mediaType: string; bytes: number; sha256: string; content: Uint8Array }, options?: RequestOptions): Promise<void> { await this.upload('/api/v1/artifacts/stage/trial', input, { leaseId: input.leaseId, commitToken: input.commitToken }, options) }
-  async stageAnalysisArtifact(input: { jobId: string; executorId: string; path: string; mediaType: string; bytes: number; sha256: string; content: Uint8Array }, options?: RequestOptions): Promise<void> { await this.upload('/api/v1/artifacts/stage/analysis', input, { jobId: input.jobId, executorId: input.executorId }, options) }
+  async stageAnalysisArtifact(input: { jobId: string; executorId: string; leaseToken: string; generation: number; path: string; mediaType: string; bytes: number; sha256: string; content: Uint8Array }, options?: RequestOptions): Promise<void> { await this.upload('/api/v1/artifacts/stage/analysis', input, { jobId: input.jobId, executorId: input.executorId, leaseToken: input.leaseToken, generation: String(input.generation) }, options) }
   async expireAnalysisJobs(options?: RequestOptions): Promise<number> { const result = asRecord(await this.request('/api/v1/analysis/expire', { method: 'POST', body: '{}' }, options)); if (typeof result.expired !== 'number') throw new Error('invalid analysis expiry response'); return result.expired }
 
   private async upload(path: string, artifact: { path: string; mediaType: string; bytes: number; sha256: string; content: Uint8Array }, authority: Record<string, string>, options?: RequestOptions): Promise<void> {
@@ -174,7 +203,10 @@ function parseQueryResponse(query: EvaluationQuery, body: unknown): unknown {
 function parsePage<T>(body: unknown, schema: { parse(value: unknown): T }): Page<T> { const value = asRecord(body); const page = asRecord(value.page); if (!Array.isArray(value.items) || typeof page.hasMore !== 'boolean') throw new Error('invalid paginated query response'); return { items: value.items.map((item) => schema.parse(item)), page: { hasMore: page.hasMore, ...(typeof page.nextCursor === 'string' ? { nextCursor: page.nextCursor } : {}), ...(typeof page.total === 'number' ? { total: page.total } : {}) } } }
 function validateGenericResponse(resource: string, body: unknown): unknown { if (['run', 'trial', 'task', 'analysis-job', 'analysis-output', 'deletion-impact', 'archived-run', 'archive-document'].includes(resource)) { if (body !== null) asRecord(body); return body } if (['runs', 'trials', 'catalog', 'defects', 'failure-cluster-promotions', 'reproductions', 'regressions', 'regression-decisions', 'insights', 'audit', 'retention', 'workers', 'run-templates'].includes(resource)) return parsePage(body, { parse: asRecord }); return body }
 function validDeadline(value: number): number { if (!Number.isFinite(value) || value <= 0) throw new TypeError('deadlineMs must be a positive finite number'); return value }
-function deadlineSignal(options: RequestOptions | undefined, fallback: number): { signal: AbortSignal; dispose(): void; map(error: unknown): unknown } { const external = options instanceof AbortSignal ? options : options?.signal; const ms = validDeadline(options instanceof AbortSignal ? fallback : options?.deadlineMs ?? fallback); const controller = new AbortController(); let expired = false; const timer = setTimeout(() => { expired = true; controller.abort() }, ms); const abort = () => controller.abort(external?.reason); external?.addEventListener('abort', abort, { once: true }); return { signal: controller.signal, dispose: () => { clearTimeout(timer); external?.removeEventListener('abort', abort) }, map: (error) => expired ? new ControlPlaneDeadlineError(ms) : error } }
+function nonnegativeInteger(value: number, name: string): number { if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(name + ' must be a nonnegative integer'); return value }
+function deadlineSignal(options: RequestOptions | undefined, fallback: number): { signal: AbortSignal; dispose(): void; map(error: unknown): unknown } { const external = options instanceof AbortSignal ? options : options?.signal; const ms = validDeadline(options instanceof AbortSignal ? fallback : options?.deadlineMs ?? fallback); const controller = new AbortController(); let expired = false; const timer = setTimeout(() => { expired = true; controller.abort() }, ms); const abort = () => controller.abort(external?.reason); if (external?.aborted) abort(); else external?.addEventListener('abort', abort, { once: true }); return { signal: controller.signal, dispose: () => { clearTimeout(timer); external?.removeEventListener('abort', abort) }, map: (error) => expired ? new ControlPlaneDeadlineError(ms) : error } }
+function isEventStream(value: string | null): boolean { return value?.split(';', 1)[0]?.trim().toLowerCase() === 'text/event-stream' }
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> { if (signal?.aborted) throw signal.reason ?? new DOMException('aborted', 'AbortError'); if (ms === 0) return; await new Promise<void>((resolve, reject) => { const timer = setTimeout(done, ms); const abort = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); reject(signal?.reason ?? new DOMException('aborted', 'AbortError')) }; function done() { signal?.removeEventListener('abort', abort); resolve() } signal?.addEventListener('abort', abort, { once: true }) }) }
 async function responseError(response: Response): Promise<ControlPlaneHttpError> { const text = await response.text(); return httpError(response.status, text ? parseJson(text, response.status) : null) }
 function httpError(status: number, body: unknown): ControlPlaneHttpError { const error = body && typeof body === 'object' ? body as Record<string, unknown> : {}; return new ControlPlaneHttpError(status, stringValue(error.code, 'HTTP_ERROR'), stringValue(error.message, 'Control Plane request failed')) }
 function parseJson(text: string, status: number): unknown { try { return JSON.parse(text) } catch { throw new ControlPlaneHttpError(status, 'INVALID_JSON_RESPONSE', 'Control Plane returned invalid JSON') } }

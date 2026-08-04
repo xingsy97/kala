@@ -29,6 +29,7 @@ export class DashboardControlPlane {
   readonly client: ControlPlaneClient
   private readonly eventSourceFactory: EventSourceFactory
   private readonly getToken?: () => Promise<string | undefined>
+  private readonly sameOrigin: boolean
 
   constructor(baseUrl = dashboardControlPlaneUrl(), eventSourceFactory: EventSourceFactory = (url) => {
     const source = new EventSource(url)
@@ -38,6 +39,7 @@ export class DashboardControlPlane {
     this.client = new ControlPlaneClient({ baseUrl: safeBaseUrl, credentialProvider })
     this.eventSourceFactory = eventSourceFactory
     this.getToken = credentialProvider ? resolveCredentialProvider(credentialProvider) : undefined
+    this.sameOrigin = new URL(safeBaseUrl).origin === globalThis.location?.origin
   }
 
   async connect(signal?: AbortSignal): Promise<ControlPlaneCapabilities> {
@@ -64,12 +66,31 @@ export class DashboardControlPlane {
     return this.client.archiveDocumentUrl(documentId)
   }
   async artifactText(artifactId: string, trialId: string, signal?: AbortSignal): Promise<string> {
-    const headers = new Headers({ accept: 'application/x-ndjson, application/json, text/plain' })
-    const token = await this.getToken?.()
-    if (token) headers.set('authorization', 'Bearer ' + token)
-    const response = await fetch(this.artifactUrl(artifactId, trialId), { signal, headers })
+    const response = await this.authenticatedFetch(this.artifactUrl(artifactId, trialId), { signal, headers: { accept: 'application/x-ndjson, application/json, text/plain' } })
     if (!response.ok) throw new ControlPlaneHttpError(response.status, 'HTTP_ERROR', 'Artifact request failed')
     return await response.text()
+  }
+  async artifactBlob(artifactId: string, trialId: string, signal?: AbortSignal): Promise<Blob> {
+    const response = await this.authenticatedFetch(this.artifactUrl(artifactId, trialId), { signal })
+    if (!response.ok) throw new ControlPlaneHttpError(response.status, 'HTTP_ERROR', 'Artifact request failed')
+    return await response.blob()
+  }
+  async reportBlob(reportId: string, format: string, signal?: AbortSignal): Promise<Blob> {
+    const response = await this.authenticatedFetch(this.reportUrl(reportId, format), { signal })
+    if (!response.ok) throw new ControlPlaneHttpError(response.status, 'HTTP_ERROR', 'Report request failed')
+    return await response.blob()
+  }
+  async archiveDocumentBlob(documentId: string, signal?: AbortSignal): Promise<Blob> {
+    const response = await this.authenticatedFetch(this.archiveDocumentUrl(documentId), { signal })
+    if (!response.ok) throw new ControlPlaneHttpError(response.status, 'HTTP_ERROR', 'Archive document request failed')
+    return await response.blob()
+  }
+
+  private async authenticatedFetch(url: string, init: RequestInit): Promise<Response> {
+    const headers = new Headers(init.headers)
+    const token = await this.getToken?.()
+    if (token) headers.set('authorization', 'Bearer ' + token)
+    return await fetch(url, { ...init, headers, credentials: 'same-origin' })
   }
 
   private async administrationRequest<T>(path: string, init: RequestInit): Promise<T> {
@@ -82,6 +103,9 @@ export class DashboardControlPlane {
   }
 
   subscribeRunEvents(subscription: RunEventSubscription): () => void {
+    if (!this.sameOrigin) {
+      throw new Error('Cross-origin live events are disabled because EventSource cannot attach dashboard credentials.')
+    }
     let stopped = false
     let source: EventSourceLike | undefined
     let retry: ReturnType<typeof setTimeout> | undefined

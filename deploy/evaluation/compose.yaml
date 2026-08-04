@@ -117,11 +117,11 @@ services:
     build:
       context: ../..
       dockerfile: deploy/evaluation/images/Dockerfile.orchestrator
-    command: ["--host", "0.0.0.0", "--data-dir", "/var/lib/agent-evaluation", "--catalog", "/opt/agent-evaluation/catalog.json", "--run-templates", "/opt/agent-evaluation/config/run-templates.json", "--evidence-dir", "/opt/agent-evaluation/evidence", "--auth-config", "/run/secrets/auth_config"]
+    command: ["--host", "0.0.0.0", "--data-dir", "/var/lib/agent-evaluation", "--catalog", "/opt/agent-evaluation/catalog.json", "--run-templates", "/opt/agent-evaluation/config/run-templates.json", "--evidence-dir", "/opt/agent-evaluation/evidence", "--auth-config", "/run/secrets/auth_config", "--trust-config", "/run/secrets/trust_config"]
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
     volumes: ["evaluation-control-plane-data:/var/lib/agent-evaluation", "evaluation-rendered-config:/opt/agent-evaluation/config:ro"]
-    secrets: [auth_config]
+    secrets: [auth_config, trust_config]
     ports: ["${AGENT_EVAL_BIND_ADDRESS:-127.0.0.1}:${AGENT_EVAL_PORT:-13100}:13100"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:13100/healthz').then(r=>{if(!r.ok)process.exit(1)})"]
@@ -220,9 +220,9 @@ services:
       dockerfile: deploy/evaluation/images/Dockerfile.dashboard
     entrypoint: ["/bin/sh", "-eu", "-c"]
     command:
-      - '{ printf "events {}\nhttp { include /etc/nginx/mime.types;\n"; sed "s|__AGENT_EVAL_DASHBOARD_TOKEN__|$$(cat /run/secrets/dashboard_token)|g" /opt/agent-evaluation/nginx.conf; printf "\n}\n"; } > /run/nginx.conf; chown nginx:nginx /run/nginx.conf; chmod 0400 /run/nginx.conf; exec su nginx -s /bin/sh -c "exec nginx -e /tmp/nginx-error.log -c /run/nginx.conf -g ''daemon off;''"'
-    secrets: [dashboard_token]
-    volumes: ["./nginx.conf:/opt/agent-evaluation/nginx.conf:ro"]
+      - '{ printf "events {}\nhttp { include /etc/nginx/mime.types;\n"; sed "s|__AGENT_EVAL_DASHBOARD_READ_TOKEN__|$$(cat /run/secrets/dashboard_read_token)|g" /opt/agent-evaluation/nginx.conf; printf "\n}\n"; } > /run/nginx.conf; chown nginx:nginx /run/nginx.conf; chmod 0400 /run/nginx.conf; exec su nginx -s /bin/sh -c "exec nginx -e /tmp/nginx-error.log -c /run/nginx.conf -g ''daemon off;''"'
+    secrets: [dashboard_read_token]
+    volumes: ["./nginx.conf:/opt/agent-evaluation/nginx.conf:ro", "./security-headers.conf:/opt/agent-evaluation/security-headers.conf:ro"]
     read_only: true
     user: "0:0"
     cap_add: ["DAC_OVERRIDE", "CHOWN", "FOWNER", "SETUID", "SETGID"]
@@ -245,6 +245,8 @@ services:
 secrets:
   auth_config:
     file: "${AGENT_EVAL_AUTH_CONFIG_FILE:?set auth config secret file in deployment.env}"
+  trust_config:
+    file: "${AGENT_EVAL_TRUST_CONFIG_FILE:?set trust registry secret file in deployment.env}"
   worker_token:
     file: "${AGENT_EVAL_WORKER_TOKEN_FILE:?set worker token secret file in deployment.env}"
   analyzer_token:
@@ -253,8 +255,8 @@ secrets:
     file: "${AGENT_EVAL_WORKER_SIGNING_KEY_FILE:?set Worker signing key secret file in deployment.env}"
   analyzer_signing_key:
     file: "${AGENT_EVAL_ANALYZER_SIGNING_KEY_FILE:?set Analyzer signing key secret file in deployment.env}"
-  dashboard_token:
-    file: "${AGENT_EVAL_DASHBOARD_TOKEN_FILE:?set dashboard token secret file in deployment.env}"
+  dashboard_read_token:
+    file: "${AGENT_EVAL_DASHBOARD_READ_TOKEN_FILE:?set read-only dashboard token secret file in deployment.env}"
   docker_model_settings:
     file: "${AGENT_EVAL_DOCKER_MODEL_SETTINGS_FILE:?set Docker-profile model settings secret file in deployment.env}"
   lxd_model_settings:
