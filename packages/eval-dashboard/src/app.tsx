@@ -1139,50 +1139,13 @@ function ArchiveConclusions({
         </summary>
         {conclusions.length ? (
           <div className="conclusion-grid">
-          {conclusions.map((item, index) => (
-            <article
-              key={field(item, "conclusionId") || String(index)}
-              className={"conclusion-card " + field(item, "status")}
-            >
-              <header>
-                <span>{field(item, "kind")}</span>
-                <strong>{field(item, "status")}</strong>
-              </header>
-              <h3>{field(item, "title")}</h3>
-              <p>{field(item, "summary")}</p>
-              {field(item, "recommendation") && (
-                <blockquote>{field(item, "recommendation")}</blockquote>
-              )}
-              <dl>
-                <dt>Confidence</dt>
-                <dd>
-                  {field(item, "confidence")
-                    ? percent(Number(path(item, "confidence")))
-                    : "—"}
-                </dd>
-                <dt>Runs</dt>
-                <dd>{display(path(item, "runIds"))}</dd>
-                <dt>Evidence</dt>
-                <dd>
-                  {Array.isArray(path(item, "evidenceRefs"))
-                    ? String((path(item, "evidenceRefs") as unknown[]).length)
-                    : "—"}{" "}
-                  refs
-                </dd>
-              </dl>
-              {field(item, "sourceDocumentId") && (
-                <button
-                  type="button"
-                  onClick={() => void downloadBlob(
-                    () => controlPlane.archiveDocumentBlob(field(item, "sourceDocumentId")),
-                    field(item, "sourceDocumentId") + ".json",
-                  )}
-                >
-                  Download authoritative source JSON
-                </button>
-              )}
-            </article>
-          ))}
+            {conclusions.map((item, index) => (
+              <HumanConclusionCard
+                key={field(item, "conclusionId") || String(index)}
+                item={item}
+                controlPlane={controlPlane}
+              />
+            ))}
           </div>
         ) : (
           <EmptyScene
@@ -1193,6 +1156,164 @@ function ArchiveConclusions({
       </details>
     </section>
   );
+}
+
+function HumanConclusionCard({
+  item,
+  controlPlane,
+}: {
+  item: unknown;
+  controlPlane: DashboardControlPlane;
+}): JSX.Element {
+  const kind = field(item, "kind");
+  const status = field(item, "status");
+  const runIds = array(path(item, "runIds")).map(String).filter(Boolean);
+  const evidenceRefs = array(path(item, "evidenceRefs"));
+  const sourceDocumentId = field(item, "sourceDocumentId");
+  const confidence = path(item, "confidence");
+  const observedAt = runIds.map(dateFromRunId).find(Boolean);
+  return (
+    <article className={"conclusion-card " + status}>
+      <header>
+        <span>{conclusionKindLabel(kind)}</span>
+        <strong>{conclusionStatusLabel(status)}</strong>
+      </header>
+      <h3>{humanConclusionTitle(item)}</h3>
+      <p>{humanConclusionSummary(item)}</p>
+      {observedAt && <time dateTime={observedAt.iso}>{observedAt.label}</time>}
+      {field(item, "recommendation") && (
+        <blockquote>
+          <strong>Recommended action</strong>
+          {field(item, "recommendation")}
+        </blockquote>
+      )}
+      <div className="conclusion-actions">
+        {runIds.slice(0, 3).map((runId, index) => (
+          <a key={runId} href={"/runs?archiveRunId=" + encodeURIComponent(runId)}>
+            {runIds.length === 1 ? "View run details" : `View run ${index + 1}`}
+          </a>
+        ))}
+      </div>
+      <details className="conclusion-technical">
+        <summary>Technical details</summary>
+        <dl>
+          <dt>Type</dt>
+          <dd>{kind}</dd>
+          {typeof confidence === "number" && (
+            <>
+              <dt>Confidence</dt>
+              <dd>{percent(confidence)}</dd>
+            </>
+          )}
+          <dt>Evidence records</dt>
+          <dd>{evidenceRefs.length}</dd>
+          {runIds.length > 0 && (
+            <>
+              <dt>Run ID</dt>
+              <dd><code>{runIds.join(", ")}</code></dd>
+            </>
+          )}
+        </dl>
+        {sourceDocumentId && (
+          <button
+            type="button"
+            onClick={() => void downloadBlob(
+              () => controlPlane.archiveDocumentBlob(sourceDocumentId),
+              sourceDocumentId + ".json",
+            )}
+          >
+            Download source JSON
+          </button>
+        )}
+      </details>
+    </article>
+  );
+}
+
+function conclusionKindLabel(kind: string): string {
+  return ({
+    "run-result": "Test run",
+    finding: "Issue found",
+    reproduction: "Reproduction",
+    regression: "Release check",
+    insight: "Product insight",
+    report: "Report",
+    "closed-loop": "End-to-end check",
+  } as Record<string, string>)[kind] ?? humanizeIdentifier(kind);
+}
+
+function conclusionStatusLabel(status: string): string {
+  return ({
+    passed: "Passed",
+    failed: "Failed",
+    verified: "Verified",
+    validated: "Validated",
+    human_validated: "Validated by reviewer",
+    reproduced: "Reproduced",
+    block: "Blocked",
+    detected: "Detected",
+    unknown: "Needs review",
+  } as Record<string, string>)[status] ?? humanizeIdentifier(status);
+}
+
+function humanConclusionTitle(item: unknown): string {
+  const kind = field(item, "kind");
+  const title = field(item, "title");
+  const [leading, detail] = title.split(" · ");
+  const hasGenericPrefix = /^(Defect finding|Verified reproduction|Regression gate|Product insight|Evidence report)$/i.test(
+    leading ?? "",
+  );
+  const readable = humanizeIdentifier(
+    hasGenericPrefix ? (detail ?? leading ?? title) : (leading ?? title),
+  );
+  if (kind === "run-result") return `${readable || "Evaluation"} test run`;
+  return readable || conclusionKindLabel(kind);
+}
+
+function humanConclusionSummary(item: unknown): string {
+  const kind = field(item, "kind");
+  const data = object(path(item, "data"));
+  if (kind === "run-result") {
+    const total = Number(data.trialCount);
+    const passed = Number(data.passedTrials);
+    const failed = Number(data.failedTrials);
+    const unknown = Number(data.unknownTrials);
+    if ([total, passed, failed, unknown].every(Number.isFinite)) {
+      if (total > 0 && passed === total)
+        return `All ${total} ${total === 1 ? "test" : "tests"} passed.`;
+      const parts = [`${passed} passed`];
+      if (failed > 0) parts.push(`${failed} failed`);
+      if (unknown > 0) parts.push(`${unknown} need review`);
+      return `${parts.join(" · ")} out of ${total} tests.`;
+    }
+  }
+  return field(item, "summary")
+    .replace(/\btrials?\b/gi, "tests")
+    .replace(/; 0 failed; 0 unknown\.?$/i, ".");
+}
+
+function humanizeIdentifier(value: string): string {
+  if (!value) return "";
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b(sdlc|swe|api|ci|ui)\b/gi, (word) => word.toUpperCase())
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function dateFromRunId(runId: string): { iso: string; label: string } | undefined {
+  const match = runId.match(/(?:^|-)20(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:-|$)/);
+  if (!match) return undefined;
+  const iso = `20${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
+  const date = new Date(iso);
+  if (Number.isNaN(date.valueOf())) return undefined;
+  return {
+    iso,
+    label: new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "UTC",
+    }).format(date) + " UTC",
+  };
 }
 
 function ArchivedRunDetailView({

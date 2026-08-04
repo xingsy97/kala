@@ -441,7 +441,7 @@ describe("standalone evaluation dashboard", () => {
       return { items: [], page: { hasMore: false, total: 0 } };
     }) as never);
     render(<App controlPlane={controlPlane as never} />);
-    expect(await screen.findByText("Archived defect conclusion")).toBeTruthy();
+    expect(await screen.findByText("Archived Defect Conclusion")).toBeTruthy();
     const archiveDisclosure = document.querySelector<HTMLDetailsElement>(
       ".archive-conclusions details",
     );
@@ -453,6 +453,53 @@ describe("standalone evaluation dashboard", () => {
       "ready",
     );
     expect(screen.queryByText("Empty")).toBeNull();
+  });
+
+  it("presents archived run conclusions as human-readable summaries", async () => {
+    const controlPlane = client();
+    controlPlane.connect.mockResolvedValue({
+      ...capabilities,
+      queryResources: [...capabilities.queryResources, "archive-summary"],
+    });
+    controlPlane.query.mockImplementation((async (query: { resource: string }) => {
+      if (query.resource === "archive-summary")
+        return {
+          documentCount: 1,
+          runCount: 1,
+          trialCount: 1,
+          conclusions: [
+            {
+              conclusionId: "run-result-readable",
+              kind: "run-result",
+              status: "passed",
+              title: "sdlc-journey · fresh-sdlc-journey-20260803082358-22094",
+              summary: "1/1 trials passed; 0 failed; 0 unknown.",
+              runIds: ["fresh-sdlc-journey-20260803082358-22094"],
+              evidenceRefs: ["result.json"],
+              sourceDocumentId: "source-one",
+              data: {
+                trialCount: 1,
+                passedTrials: 1,
+                failedTrials: 0,
+                unknownTrials: 0,
+              },
+            },
+          ],
+          latestRuns: [],
+        };
+      return { items: [], page: { hasMore: false, total: 0 } };
+    }) as never);
+    render(<App controlPlane={controlPlane as never} />);
+    expect(await screen.findByText("SDLC Journey test run")).toBeTruthy();
+    expect(screen.getByText("All 1 test passed.")).toBeTruthy();
+    expect(screen.getByText("Passed")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "View run details" }).getAttribute("href"),
+    ).toBe("/runs?archiveRunId=fresh-sdlc-journey-20260803082358-22094");
+    const card = screen.getByText("SDLC Journey test run").closest("article");
+    expect(card?.textContent).not.toContain("Confidence");
+    expect(card?.textContent).not.toContain('["fresh-sdlc');
+    expect(card?.querySelector<HTMLDetailsElement>(".conclusion-technical")?.open).toBe(false);
   });
 
   it("keeps one local operator session across a Runs page remount", async () => {

@@ -47,6 +47,19 @@ main { min-width: 0; padding: 0 2.4rem 4rem; }.topbar { min-height: 7rem; displa
 .archive-summary strong { font-size:.95rem; letter-spacing:-.02em }
 .archive-summary-meta { color:var(--muted); font:.68rem DM Mono,monospace; white-space:nowrap }
 .archive-conclusions details[open] > .conclusion-grid,.archive-conclusions details[open] > .empty-scene { margin-top:.8rem; padding-top:.8rem; border-top:1px solid var(--line) }
+.conclusion-card time { color:var(--muted); font-size:.72rem }
+.conclusion-card blockquote { display:grid; gap:.3rem }
+.conclusion-card blockquote strong { color:var(--amber); font:.64rem DM Mono,monospace; text-transform:uppercase; letter-spacing:.08em }
+.conclusion-actions { display:flex; flex-wrap:wrap; gap:.5rem }
+.conclusion-actions a { border:1px solid rgba(138,240,197,.32); border-radius:.4rem; padding:.48rem .65rem; color:var(--green); background:rgba(138,240,197,.06); font-size:.72rem; text-decoration:none }
+.conclusion-actions a:hover { background:rgba(138,240,197,.13) }
+.conclusion-technical { border-top:1px solid var(--line); padding-top:.65rem }
+.conclusion-technical > summary { width:max-content; color:var(--muted); cursor:pointer; font-size:.68rem }
+.conclusion-technical[open] > summary { margin-bottom:.55rem; color:var(--ink) }
+.conclusion-technical dl { grid-template-columns:8rem minmax(0,1fr) }
+.conclusion-technical dd { min-width:0; overflow-wrap:anywhere }
+.conclusion-technical code { white-space:normal }
+.conclusion-technical button { border:0; padding:.35rem 0; color:var(--muted); background:transparent; cursor:pointer; font-size:.68rem; text-decoration:underline }
 .hero-card { min-height:14rem; padding:1.7rem 2rem }
 .hero-card h2 { max-width:22ch; margin:.2rem 0 1.2rem; font-size:clamp(2rem,4vw,3.5rem); line-height:1 }
 .hero-card::after { top:1.4rem; right:1.5rem }
