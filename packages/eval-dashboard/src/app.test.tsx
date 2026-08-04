@@ -442,6 +442,13 @@ describe("standalone evaluation dashboard", () => {
     }) as never);
     render(<App controlPlane={controlPlane as never} />);
     expect(await screen.findByText("Archived defect conclusion")).toBeTruthy();
+    const archiveDisclosure = document.querySelector<HTMLDetailsElement>(
+      ".archive-conclusions details",
+    );
+    expect(archiveDisclosure?.open).toBe(false);
+    expect(archiveDisclosure?.querySelector("summary")?.textContent).toContain(
+      "1 shown · 1 total",
+    );
     expect(document.querySelector("main")?.getAttribute("data-load-state")).toBe(
       "ready",
     );

@@ -34,3 +34,47 @@ main { min-width: 0; padding: 0 2.4rem 4rem; }.topbar { min-height: 7rem; displa
 .creation-mode { display:flex; width:max-content; padding:.2rem; border:1px solid var(--line); border-radius:.5rem; background:#071311 }.creation-mode button { border:0; border-radius:.35rem; padding:.5rem .75rem; color:var(--muted); background:transparent; cursor:pointer }.creation-mode button.active { color:var(--green); background:rgba(138,240,197,.12) }.template-builder { display:grid; gap:.8rem; border:1px solid var(--line); border-radius:.6rem; padding:1rem; background:rgba(7,19,17,.58) }.template-builder select,.template-builder input { width:100%; min-width:0; border:1px solid var(--line); border-radius:.4rem; padding:.58rem .7rem; background:#071311; color:var(--ink); font: .7rem DM Mono,monospace }.template-description { margin:0 }.template-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.8rem }.live-result-panel,.live-timeline,.live-analysis-jobs { margin-top:1rem; border-top:1px solid var(--line); padding-top:1rem }.live-result-panel .definition-list code { white-space:normal; overflow-wrap:anywhere }.live-timeline .table-wrap,.live-analysis-jobs .table-wrap { max-height:24rem }
 @media (max-width: 900px) { .template-fields { grid-template-columns:repeat(2,minmax(0,1fr)) } }
 @media (max-width: 580px) { .creation-mode { width:100% }.creation-mode button { flex:1 }.template-fields { grid-template-columns:1fr } }
+
+/* Product-density pass: current work stays prominent; historical evidence is available on demand. */
+.archive-conclusions { padding:.8rem 1rem }
+.archive-conclusions details { min-width:0 }
+.archive-summary { display:flex; align-items:center; justify-content:space-between; gap:1rem; min-height:2.8rem; cursor:pointer; list-style:none }
+.archive-summary::-webkit-details-marker { display:none }
+.archive-summary::before { content:'▸'; color:var(--green); font-size:.8rem }
+.archive-conclusions details[open] > .archive-summary::before { content:'▾' }
+.archive-summary > span:first-of-type { display:grid; gap:.18rem; flex:1 }
+.archive-summary small { color:var(--green); font:.66rem DM Mono,monospace; text-transform:uppercase; letter-spacing:.1em }
+.archive-summary strong { font-size:.95rem; letter-spacing:-.02em }
+.archive-summary-meta { color:var(--muted); font:.68rem DM Mono,monospace; white-space:nowrap }
+.archive-conclusions details[open] > .conclusion-grid,.archive-conclusions details[open] > .empty-scene { margin-top:.8rem; padding-top:.8rem; border-top:1px solid var(--line) }
+.hero-card { min-height:14rem; padding:1.7rem 2rem }
+.hero-card h2 { max-width:22ch; margin:.2rem 0 1.2rem; font-size:clamp(2rem,4vw,3.5rem); line-height:1 }
+.hero-card::after { top:1.4rem; right:1.5rem }
+.panel { box-shadow:0 10px 30px rgba(0,0,0,.1) }
+.table-wrap { width:100%; max-width:100%; overscroll-behavior-inline:contain }
+.operator-strip label,.operator-strip select { min-width:0; max-width:100% }
+.panel-heading p,.topbar p,.filter-bar label,.inline-filter label,.operator-strip span,.operator-strip label { font-size:.67rem }
+th { font-size:.65rem }
+.nav-item b { font-size:.82rem }.nav-item small { font-size:.66rem }
+
+@media (max-width:580px) {
+  main { overflow-x:hidden }
+  .rail { scrollbar-width:thin }
+  .nav-item { min-width:6.6rem; grid-template-columns:1fr; text-align:left; padding:.55rem .65rem }
+  .nav-item > span { display:none }
+  .nav-item div { display:block }
+  .nav-item b { font-size:.75rem; white-space:nowrap }
+  .nav-item small { display:none }
+  .topbar { min-height:4.8rem; margin-bottom:1rem }
+  .hero-card { min-height:12rem; padding:1.25rem }
+  .hero-card h2 { font-size:2rem; margin-bottom:1rem }
+  .archive-summary { align-items:flex-start; flex-wrap:wrap; gap:.4rem }
+  .archive-summary-meta { width:100%; padding-left:1.05rem }
+  .archive-conclusions details[open] .conclusion-grid { grid-template-columns:1fr }
+  .archive-conclusions details[open] .conclusion-card blockquote,
+  .archive-conclusions details[open] .conclusion-card dl { display:none }
+  .conclusion-card { gap:.5rem; padding:.75rem }
+  .conclusion-card > p { font-size:.76rem }
+  .operator-strip select { width:100%; max-width:100% }
+  .panel { padding:1rem }
+}

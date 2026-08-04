@@ -520,9 +520,15 @@ function RouteView(props: {
         title={
           props.state === "unsupported"
             ? "Capability unavailable"
-            : "State could not be loaded"
+            : props.route === "administration" && props.state === "error"
+              ? "Administrator access required"
+              : "State could not be loaded"
         }
-        detail="The page never infers durable state from cached deltas. Reconnect to query the Control Plane again."
+        detail={
+          props.route === "administration" && props.state === "error"
+            ? "The read-only dashboard identity cannot inspect or change security policy. Sign in with an Administrator credential to use this page."
+            : "The page never infers durable state from cached deltas. Reconnect to query the Control Plane again."
+        }
       />
     );
   if (props.route === "overview")
@@ -953,7 +959,8 @@ function Overview({
       <ArchiveConclusions
         archive={archive}
         controlPlane={controlPlane}
-        limit={6}
+        limit={3}
+        defaultOpen
       />
       <section className="panel">
         <PanelHeading
@@ -1106,11 +1113,13 @@ function ArchiveConclusions({
   controlPlane,
   kinds,
   limit,
+  defaultOpen = false,
 }: {
   archive: Record<string, unknown>;
   controlPlane: DashboardControlPlane;
   kinds?: string[];
   limit?: number;
+  defaultOpen?: boolean;
 }): JSX.Element {
   const all = Array.isArray(archive.conclusions) ? archive.conclusions : [];
   const conclusions = all
@@ -1118,12 +1127,18 @@ function ArchiveConclusions({
     .slice(0, limit ?? all.length);
   return (
     <section className="panel archive-conclusions">
-      <PanelHeading
-        title="Experiment conclusions"
-        eyebrow="Existing canonical evidence · directly readable"
-      />
-      {conclusions.length ? (
-        <div className="conclusion-grid">
+      <details open={defaultOpen}>
+        <summary className="archive-summary">
+          <span>
+            <small>Historical evidence</small>
+            <strong>Experiment conclusions</strong>
+          </span>
+          <span className="archive-summary-meta">
+            {conclusions.length} shown · {all.length} total
+          </span>
+        </summary>
+        {conclusions.length ? (
+          <div className="conclusion-grid">
           {conclusions.map((item, index) => (
             <article
               key={field(item, "conclusionId") || String(index)}
@@ -1168,13 +1183,14 @@ function ArchiveConclusions({
               )}
             </article>
           ))}
-        </div>
-      ) : (
-        <EmptyScene
-          title="No matching conclusions"
-          detail="The archive contains no conclusion of this type."
-        />
-      )}
+          </div>
+        ) : (
+          <EmptyScene
+            title="No matching conclusions"
+            detail="The archive contains no conclusion of this type."
+          />
+        )}
+      </details>
     </section>
   );
 }
