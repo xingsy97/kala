@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -22,6 +22,7 @@ import { createProgramBenchAdapter } from '../../adapters/benchmarks/program-ben
 import { createCodeUnderstandingAdapter } from '../../adapters/benchmarks/code-understanding/dist/index.js'
 import { createMemoryPlanningAdapter } from '../../adapters/benchmarks/memory-planning/dist/index.js'
 import { createEphemeralAuth } from './fixtures/ephemeral-auth.mjs'
+import { buildIdentity, cleanupReceipt, loadCanonicalPackInventory } from './benchmark-contracts.mjs'
 import { lockedEndpointDestinations, providerRootUrl } from './locked-endpoint.mjs'
 
 const runFile = promisify(execFile)
@@ -30,6 +31,8 @@ const taskPackId = option('--task-pack') ?? 'sdlc-journey'
 const taskCount = positiveInteger(option('--tasks') ?? '1', '--tasks')
 if (taskCount > 5) throw new Error('--tasks cannot exceed the five-task flagship slice')
 const startedAt = new Date()
+const identity = await buildIdentity()
+const canonicalInventory = await loadCanonicalPackInventory()
 const definitions = {
   'sdlc-journey': { source: 'task-packs/sdlc-journey-v1/service-release', taskId: 'service-release-v2', version: '1.0.0', adapter: createSdlcJourneyAdapter, verifierId: 'sdlc-journey-native', verifierVersion: '1.0.0', title: 'Build, package, deploy, verify, and roll back service release v2', promptFile: 'ISSUE.md', faultScenarioIds: [], verification: sdlcVerification() },
   'fault-scenarios': { source: 'task-packs/fault-scenarios-v1/config-schema-recovery', taskId: 'config-schema-recovery', version: '1.0.0', adapter: createFaultScenarioAdapter, verifierId: 'fault-scenario-native', verifierVersion: '1.0.0', title: 'Diagnose and recover a strict configuration schema failure', promptFile: 'INCIDENT.md', faultScenarioIds: ['invalid-port-type-v1'], verification: faultVerification() },
@@ -40,6 +43,7 @@ const definitions = {
 }
 const definition = definitions[taskPackId]
 if (!definition) throw new Error('unsupported task pack: ' + taskPackId)
+if (!canonicalInventory.packs.some((pack) => pack.id === taskPackId && pack.realRunner === 'task-pack')) throw new Error('task pack is not enabled by the canonical inventory: ' + taskPackId)
 
 const endpoint = await resolveEndpointCredential()
 const credential = endpoint.credential
@@ -97,7 +101,7 @@ registry.registerBenchmark(definition.adapter())
 const workerErrors = []
 const worker = new EvaluationWorker({
   controlPlane: workerClient, registry, credentials: { resolve: async (references) => Object.fromEntries(references.map((reference) => [reference.referenceId, credential])), available: async () => true },
-  workerId, workerVersion: '0.0.0', cpu: 6, memoryMb: 12288, diskMb: 131072, gpu: 0, maxTrials: agents.length, leaseMs: 30_000, artifactRoot, workerDataDir, cancellationGraceMs: 5_000, onTrialError: (error, trialId) => workerErrors.push({ trialId, message: safeMessage(error) }),
+  workerId, workerVersion: identity.version, cpu: 6, memoryMb: 12288, diskMb: 131072, gpu: 0, maxTrials: agents.length, leaseMs: 30_000, artifactRoot, workerDataDir, cancellationGraceMs: 5_000, onTrialError: (error, trialId) => workerErrors.push({ trialId, message: safeMessage(error) }),
 })
 
 let evidence
@@ -121,7 +125,7 @@ try {
   await new Promise((resolvePromise) => server.close(() => resolvePromise()))
 }
 if (output) { const path = resolve(output); await mkdir(dirname(path), { recursive: true, mode: 0o700 }); await writeFile(path, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 }) }
-process.stdout.write(JSON.stringify({ ok: true, runId, taskPackId, tasks: tasks.length, trials: evidence.trials.length, freshSandboxes: evidence.freshSandboxes, durationMs: evidence.durationMs, output: output ? resolve(output) : undefined }) + '\n')
+process.stdout.write(JSON.stringify({ ok: true, runId, taskPackId, tasks: tasks.length, trials: evidence.trials.length, cleanupReceipts: evidence.trials.map((trial) => trial.cleanupReceipt), freshSandboxes: evidence.freshSandboxes, durationMs: evidence.durationMs, output: output ? resolve(output) : undefined }) + '\n')
 
 async function prepareTask(item, workerRoot) {
   const source = resolve(workspaceRoot, item.source)
@@ -169,7 +173,7 @@ async function agentVariants(url) {
     { variantId: 'claude-code', backendId: 'claude-code', model: { provider: 'anthropic', modelId: option('--claude-model') ?? 'claude-opus-4.8' }, config: { baseUrl: url }, referenceId: 'claude-api-key', provider: 'anthropic' },
     { variantId: 'codex', backendId: 'codex', model: { provider: 'openai', modelId: option('--codex-model') ?? 'gpt-5.6-sol' }, config: { baseUrl: url + '/v1', transport: option('--codex-transport') ?? 'app-server', reasoningEffort: option('--codex-effort') ?? 'medium' }, referenceId: 'codex-api-key', provider: 'openai' },
   ]
-  return await Promise.all(values.map(async (value) => ({ variantId: value.variantId, backendId: value.backendId, agentVersion: '0.0.0', model: value.model, configHash: await sha256Hex(canonicalJson(value.config)), config: value.config, credentialRefs: [{ referenceId: value.referenceId, provider: value.provider, scope: ['model-inference'] }] })))
+  return await Promise.all(values.map(async (value) => ({ variantId: value.variantId, backendId: value.backendId, agentVersion: identity.version, model: value.model, configHash: await sha256Hex(canonicalJson(value.config)), config: value.config, credentialRefs: [{ referenceId: value.referenceId, provider: value.provider, scope: ['model-inference'] }] })))
 }
 function selectAgents(agents) {
   const requested = values('--agent')
@@ -181,13 +185,13 @@ function selectAgents(agents) {
 
 function createTrackedProvider(inner) {
   const created = []
-  const destroyed = new Set()
+  const destroyed = new Map()
   return {
     descriptor: inner.descriptor, created, destroyed,
     preflight: (policy) => inner.preflight(policy),
     create: async (input) => { const target = await inner.create(input); created.push({ trialId: input.trialId, sandboxId: target.sandboxId }); return target },
     collect: (target) => inner.collect(target),
-    destroy: async (target) => { await inner.destroy(target); destroyed.add(target.sandboxId) },
+    destroy: async (target) => { await inner.destroy(target); await inner.verifyDestroyed(target); destroyed.set(target.sandboxId, new Date().toISOString()) },
     verifyDestroyed: (target) => inner.verifyDestroyed(target),
     reapOrphans: (workerId) => inner.reapOrphans(workerId),
   }
@@ -222,7 +226,9 @@ async function auditAcceptance(input) {
       const native = await readFile(join(input.artifactRoot, evidence.nativeEventsRef), 'utf8')
       for (const required of ['adapter.started', 'hostVersion', 'executorVersion', 'runlab.driver.ready', 'runlab.completed']) if (!native.includes(required)) throw new Error('RunLab co-located process evidence is missing ' + required)
     }
-    trialEvidence.push({ trialId: trial.trialId, taskId: trial.taskId, agentVariantId: trial.agentVariantId, resultHash: evidence.resultHash, artifactManifestHash: evidence.artifactManifest.manifestHash, evidenceLevel: evidence.evidenceLevel, nativeMetrics: evidence.benchmarkResult.nativeMetrics, normalizedEventCount: evidence.normalizedEventCount })
+    const created = input.provider.created.find((item) => item.trialId === trial.trialId)
+    const cleanup = cleanupReceipt({ runId: input.runId, trial, providerRecord: created && { ...created, destroyedAt: input.provider.destroyed.get(created.sandboxId) } })
+    trialEvidence.push({ trialId: trial.trialId, taskId: trial.taskId, agentVariantId: trial.agentVariantId, resultHash: evidence.resultHash, artifactManifestHash: evidence.artifactManifest.manifestHash, evidenceLevel: evidence.evidenceLevel, nativeMetrics: evidence.benchmarkResult.nativeMetrics, normalizedEventCount: evidence.normalizedEventCount, cleanupReceipt: cleanup })
   }
   if (environmentLocks.size !== 1) throw new Error('Agent run did not use an equal locked environment')
   const jobs = [...input.controlPlane.projection.analysisJobs.values()].filter((job) => job.runId === input.runId)
@@ -232,7 +238,7 @@ async function auditAcceptance(input) {
   const gradingOutput = gradingJob && input.controlPlane.projection.analysisOutputs.get(gradingJob.jobId)
   if (!gradingJob || gradingJob.state !== 'completed' || !gradingOutput || gradingOutput.outputs.length !== trials.length || gradingOutput.outputs.some((output) => output.kind !== 'grading-result')) throw new Error('fresh task-pack grading job did not complete with one result per canonical trial')
   const completedAt = new Date()
-  return { schemaVersion: 1, generatedAt: completedAt.toISOString(), scope: 'fresh standalone Control Plane + Worker + grader + analyzer + real Agent backends + LXD sandbox + native verifier', runId: input.runId, taskPackId: input.taskPackId, taskIds: input.expectedTaskIds, agentIds: input.expectedAgents.map((agent) => agent.variantId), agentConfigs: input.expectedAgents.map((agent) => ({ variantId: agent.variantId, backendId: agent.backendId, model: agent.model, configHash: agent.configHash, config: agent.config })), runState: runProjection.state, startedAt: input.startedAt.toISOString(), completedAt: completedAt.toISOString(), durationMs: completedAt.getTime() - input.startedAt.getTime(), freshSandboxes: input.provider.created.length, cleanupVerified: true, environmentLockEqualAcrossAgents: true, gradingJobId: gradingJob.jobId, gradingOutputHash: gradingJob.outputManifestHash, analysisJobId: analysisJob.jobId, analysisOutputHash: analysisJob.outputManifestHash, defects: [...input.controlPlane.projection.defects.values()].filter((finding) => finding.runId === input.runId).length, workerErrors: input.workerErrors, trials: trialEvidence }
+  return { schemaVersion: 1, generatedAt: completedAt.toISOString(), build: identity, scope: 'fresh standalone Control Plane + Worker + grader + analyzer + real Agent backends + LXD sandbox + native verifier', runId: input.runId, taskPackId: input.taskPackId, taskIds: input.expectedTaskIds, agentIds: input.expectedAgents.map((agent) => agent.variantId), agentConfigs: input.expectedAgents.map((agent) => ({ variantId: agent.variantId, backendId: agent.backendId, model: agent.model, configHash: agent.configHash, config: agent.config })), runState: runProjection.state, startedAt: input.startedAt.toISOString(), completedAt: completedAt.toISOString(), durationMs: completedAt.getTime() - input.startedAt.getTime(), freshSandboxes: input.provider.created.length, cleanupVerified: true, environmentLockEqualAcrossAgents: true, gradingJobId: gradingJob.jobId, gradingOutputHash: gradingJob.outputManifestHash, analysisJobId: analysisJob.jobId, analysisOutputHash: analysisJob.outputManifestHash, defects: [...input.controlPlane.projection.defects.values()].filter((finding) => finding.runId === input.runId).length, workerErrors: input.workerErrors, trials: trialEvidence }
 }
 
 function expandDefinitions(item, count) {
@@ -306,11 +312,7 @@ async function resolveEndpointCredential() {
     if (!result.stdout.trim()) throw new Error('credential helper returned an empty value')
     return { credential: result.stdout.trim(), baseUrl: process.env.AGENT_EVAL_BASE_URL ?? 'http://192.0.2.5:3000' }
   }
-  const settings = JSON.parse(await readFile(join(homedir(), '.claude', 'settings.json'), 'utf8'))
-  if (typeof settings.apiKeyHelper !== 'string' || !settings.apiKeyHelper.trim()) throw new Error('set AGENT_EVAL_CREDENTIAL_LOCAL_API_KEY or configure a fresh evaluation credential source')
-  const result = await runFile('/bin/bash', ['-lc', settings.apiKeyHelper], { encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024 })
-  if (!result.stdout.trim()) throw new Error('credential helper returned an empty value')
-  return { credential: result.stdout.trim(), baseUrl: settings.env?.ANTHROPIC_BASE_URL ?? 'http://192.0.2.5:3000' }
+  throw new Error('formal experiments require explicit AGENT_EVAL_CREDENTIAL_LOCAL_API_KEY or --credential-helper; implicit Claude apiKeyHelper fallback is disabled')
 }
 async function run(binary, args, cwd, env = {}) { return await runFile(binary, args, { cwd, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 }) }
 function safeId(value) { return value.toLowerCase().replace(/[^a-z0-9._:-]/gu, '-').replace(/-+/gu, '-').slice(0, 120) }

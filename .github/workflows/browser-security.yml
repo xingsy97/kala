@@ -25,4 +25,20 @@ jobs:
       - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run ci:${{ matrix.layer }}
+      - name: Install pinned security scanners
+        if: matrix.layer == 'security'
+        env:
+          SYFT_VERSION: v1.30.0
+          GRYPE_VERSION: v0.99.1
+          TRIVY_VERSION: v0.66.0
+          COSIGN_VERSION: v2.6.0
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin "${SYFT_VERSION}"
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin "${GRYPE_VERSION}"
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+          curl -sSfL https://raw.githubusercontent.com/sigstore/cosign/${COSIGN_VERSION}/install.sh | sh -s -- -b /usr/local/bin "${COSIGN_VERSION}"
+      - if: matrix.layer == 'browser'
+        run: pnpm run ci:browser
+      - if: matrix.layer == 'security'
+        run: pnpm run ci:security

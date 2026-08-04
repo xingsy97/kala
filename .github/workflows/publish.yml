@@ -63,23 +63,40 @@ jobs:
           fi
 
       # If publishing host/executor, publish shared first (transitive dep).
-      # pnpm publish is idempotent — a version that already exists on the
-      # registry short-circuits with a non-zero exit that we swallow.
+      # Only an exact version already present in the registry is skipped.
       - name: Publish shared (transitive)
         if: steps.tag.outputs.package != 'kernel'
         run: |
+          set -euo pipefail
           pnpm --filter @agent-kernel/shared run build
-          pnpm --filter @agent-kernel/shared publish --access public --no-git-checks || echo "shared already at this version, skipping"
+          VERSION=$(node -p "require('./packages/shared/package.json').version")
+          if LOOKUP=$(npm view "@agent-kernel/shared@$VERSION" version 2>&1); then
+            echo "@agent-kernel/shared@$VERSION already exists; skipping"
+          elif grep -q 'E404' <<<"$LOOKUP"; then
+            pnpm --filter @agent-kernel/shared publish --access public --no-git-checks
+          else
+            printf '%s\n' "$LOOKUP" >&2
+            exit 1
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Kernel is a dep of shared/host/executor, so always publish first when
-      # not the target itself. Same idempotent skip.
+      # not the target itself. Registry presence is the only skip condition.
       - name: Publish kernel (transitive)
         if: steps.tag.outputs.package != 'kernel'
         run: |
+          set -euo pipefail
           pnpm --filter @agent-kernel/kernel run build
-          pnpm --filter @agent-kernel/kernel publish --access public --no-git-checks || echo "kernel already at this version, skipping"
+          VERSION=$(node -p "require('./packages/kernel/package.json').version")
+          if LOOKUP=$(npm view "@agent-kernel/kernel@$VERSION" version 2>&1); then
+            echo "@agent-kernel/kernel@$VERSION already exists; skipping"
+          elif grep -q 'E404' <<<"$LOOKUP"; then
+            pnpm --filter @agent-kernel/kernel publish --access public --no-git-checks
+          else
+            printf '%s\n' "$LOOKUP" >&2
+            exit 1
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

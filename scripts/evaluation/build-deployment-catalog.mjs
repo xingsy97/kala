@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
+import { buildIdentity, loadCanonicalPackInventory } from './benchmark-contracts.mjs'
+
 const runFile = promisify(execFile)
 const root = resolve(dirname(new URL(import.meta.url).pathname), '../..')
 const outputRoot = resolve(root, 'deploy/evaluation')
@@ -15,6 +17,8 @@ const officialSweBenchImage = 'docker.io/swebench/sweb.eval.x86_64.astropy_1776_
 const harnessRevision = 'f7bbbb2ccdf479001d6467c9e34af59e44a840f9'
 const allowedDestinations = ['model-gateway.invalid:3000']
 const credentialRefs = [{ referenceId: 'local-model-api-key', provider: 'openai', scope: ['model-inference'] }]
+const identity = await buildIdentity()
+const canonicalInventory = await loadCanonicalPackInventory()
 const definitions = [
   { id: 'terminal-bench', source: 'task-packs/terminal-bench-v1/release-ledger', taskId: 'release-ledger-reconciliation', title: 'Reconcile a release ledger with shell tools', promptFile: 'TASK.md', verifierId: 'terminal-bench-native', primary: 'reward', verification: terminalBenchVerification() },
   { id: 'program-bench', source: 'task-packs/program-bench-v1/greeting-cli', taskId: 'greeting-cli', title: 'Implement and compile a deterministic greeting CLI', promptFile: 'TASK.md', verifierId: 'program-bench-native', primary: 'compile_passed', verification: programBenchVerification() },
@@ -23,6 +27,9 @@ const definitions = [
   { id: 'fault-scenarios', source: 'task-packs/fault-scenarios-v1/config-schema-recovery', taskId: 'config-schema-recovery', title: 'Diagnose and recover a strict configuration schema failure', promptFile: 'INCIDENT.md', verifierId: 'fault-scenario-native', primary: 'recovered', faultScenarioIds: ['invalid-port-type-v1'], verification: faultVerification() },
   { id: 'sdlc-journey', source: 'task-packs/sdlc-journey-v1/service-release', taskId: 'service-release-v2', title: 'Build, package, deploy, verify, and roll back service release v2', promptFile: 'ISSUE.md', verifierId: 'sdlc-journey-native', primary: 'journey_completed', verification: sdlcVerification() },
 ]
+const generatedPackIds = [...definitions.map((definition) => definition.id), 'swe-marathon', 'swe-bench'].sort()
+const canonicalPackIds = canonicalInventory.packs.map((pack) => pack.id).sort()
+if (JSON.stringify(generatedPackIds) !== JSON.stringify(canonicalPackIds)) throw new Error('catalog definitions differ from canonical pack inventory')
 
 await mkdir(fixtureRoot, { recursive: true, mode: 0o700 })
 const prepared = []
@@ -130,7 +137,7 @@ function agentVariants() {
     { variantId: 'claude-code', backendId: 'claude-code', model: { provider: 'anthropic', modelId: 'claude-opus-4.8' }, config: { baseUrl: 'http://model-gateway.invalid:3000' }, credentialRefs: credentialRefs.map((reference) => ({ ...reference, provider: 'anthropic' })) },
     { variantId: 'codex', backendId: 'codex', model: { provider: 'openai', modelId: 'gpt-5.6-sol' }, config: { baseUrl: 'http://model-gateway.invalid:3000/v1', transport: 'app-server', reasoningEffort: 'medium' }, credentialRefs },
   ]
-  return values.map((value) => ({ ...value, agentVersion: '0.0.0', configHash: sha(canonical(value.config)) }))
+  return values.map((value) => ({ ...value, agentVersion: identity.version, configHash: sha(canonical(value.config)) }))
 }
 
 async function sweBenchCatalog() {

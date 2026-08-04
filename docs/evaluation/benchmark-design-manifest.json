@@ -38,59 +38,87 @@
   },
   "packs": [
     {
-      "id": "swe-bench",
-      "authority": "pinned_official_harness_local_result",
-      "completionClaim": "SWE-Bench local result produced by the pinned official harness",
-      "officialBenchmark": true,
-      "containerSubset": {
-        "provider": "lxd-container",
-        "imageDigest": "local:eadfb7f63cf63e47312d33b332c01a05110ed8f73de62bd8a09749e9e615b6cc",
-        "taskIds": [
-          "astropy__astropy-12907"
-        ],
-        "selectionKind": "explicit_ids",
-        "sliceManifestRef": "deploy/evaluation/catalog.json#swe-bench"
-      },
-      "dataset": {
-        "id": "swe-bench-verified",
-        "version": "verified-1",
-        "revision": "8a94a16c1704afcb9379d36934399813696d4c9c82fac928e01a4cd83134244a",
-        "taskRevision": "d16bfe05a744909de4b27f5875fe0d4ed41ce607"
-      },
-      "expectedVerifier": {
-        "id": "swe-bench-official",
-        "version": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
-        "officialRequired": true,
-        "resultEvidenceLevel": "official",
-        "primaryMetric": "resolved"
-      }
-    },
-    {
-      "id": "terminal-bench",
+      "id": "code-understanding",
       "authority": "compatible_local_pack",
-      "completionClaim": "Terminal-Bench-compatible local pack result",
+      "completionClaim": "code-understanding local task pack result",
       "officialBenchmark": false,
       "containerSubset": {
         "provider": "lxd-container",
-        "imageDigest": "local:b4351c51e6235cd452d175e28d1b1630b92a8288585c2688b8e7b3ae1d439ba9",
+        "imageDigest": "local:runtime-injected",
         "taskIds": [
-          "release-ledger-reconciliation"
+          "configuration-runtime-trace"
         ],
         "selectionKind": "full",
-        "sliceManifestRef": "deploy/evaluation/catalog.json#terminal-bench"
+        "sliceManifestRef": "deploy/evaluation/catalog.json#code-understanding"
       },
       "dataset": {
-        "id": "terminal-bench-v1",
+        "id": "code-understanding-v1",
         "version": "1.0.0",
-        "revision": "c1ccae715d618df01927f64daf8a171fb91e4c966ac944e437575d9fa577c4df",
-        "taskRevision": "d9e363ef01a7c00145eec6f4e9fecc17da4c3c74"
+        "revision": "85cb65e90782059286dd7f17eb36395ed4098a44feb6ea1dfde2530aadbda81c",
+        "taskRevision": "73852c472cf09da6afdf197d6fc76de37222d1b5"
       },
       "expectedVerifier": {
-        "id": "terminal-bench-native",
+        "id": "code-understanding-native",
         "version": "1.0.0",
         "officialRequired": false,
         "resultEvidenceLevel": "native",
-        "primaryMetric": "reward"
+        "primaryMetric": "code_understanding_observation"
+      }
+    },
+    {
+      "id": "fault-scenarios",
+      "authority": "compatible_local_pack",
+      "completionClaim": "fault-scenarios local task pack result",
+      "officialBenchmark": false,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:runtime-injected",
+        "taskIds": [
+          "config-schema-recovery"
+        ],
+        "selectionKind": "full",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#fault-scenarios"
+      },
+      "dataset": {
+        "id": "fault-scenarios-v1",
+        "version": "1.0.0",
+        "revision": "269bd7f5533813a25b2c75cc9b00bf2e7fcfac29002e4a926cd9e6b2936b850e",
+        "taskRevision": "923b626605e8aff1a5281927d2c7a32ab173a5e7"
+      },
+      "expectedVerifier": {
+        "id": "fault-scenario-native",
+        "version": "1.0.0",
+        "officialRequired": false,
+        "resultEvidenceLevel": "native",
+        "primaryMetric": "success_control_passed"
+      }
+    },
+    {
+      "id": "memory-planning",
+      "authority": "compatible_local_pack",
+      "completionClaim": "memory-planning local task pack result",
+      "officialBenchmark": false,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:runtime-injected",
+        "taskIds": [
+          "release-handoff"
+        ],
+        "selectionKind": "full",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#memory-planning"
+      },
+      "dataset": {
+        "id": "memory-planning-v1",
+        "version": "1.0.0",
+        "revision": "aa709eb98d8f95a52bf6760fbe29dcc4a7bcc624891b6c729584ef5bb7c48450",
+        "taskRevision": "7eb924864b397979ed5ade4ef16b69de079aefa9"
+      },
+      "expectedVerifier": {
+        "id": "memory-planning-native",
+        "version": "1.0.0",
+        "officialRequired": false,
+        "resultEvidenceLevel": "native",
+        "primaryMetric": "memory_planning_observation"
       }
     },
     {
@@ -122,6 +150,62 @@
       }
     },
     {
+      "id": "sdlc-journey",
+      "authority": "compatible_local_pack",
+      "completionClaim": "sdlc-journey local task pack result",
+      "officialBenchmark": false,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:runtime-injected",
+        "taskIds": [
+          "service-release-v2"
+        ],
+        "selectionKind": "full",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#sdlc-journey"
+      },
+      "dataset": {
+        "id": "sdlc-journey-v1",
+        "version": "1.0.0",
+        "revision": "c14d5eaaede825985c5541def5b187ee3484adb025e070f42fbe339e5fe3678b",
+        "taskRevision": "88afdcb4edaacb1af1c0dba512d5533f66539efb"
+      },
+      "expectedVerifier": {
+        "id": "sdlc-journey-native",
+        "version": "1.0.0",
+        "officialRequired": false,
+        "resultEvidenceLevel": "native",
+        "primaryMetric": "rollback_verified"
+      }
+    },
+    {
+      "id": "swe-bench",
+      "authority": "pinned_official_harness_local_result",
+      "completionClaim": "SWE-Bench local result produced by the pinned official harness",
+      "officialBenchmark": true,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:eadfb7f63cf63e47312d33b332c01a05110ed8f73de62bd8a09749e9e615b6cc",
+        "taskIds": [
+          "astropy__astropy-12907"
+        ],
+        "selectionKind": "explicit_ids",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#swe-bench"
+      },
+      "dataset": {
+        "id": "swe-bench-verified",
+        "version": "verified-1",
+        "revision": "8a94a16c1704afcb9379d36934399813696d4c9c82fac928e01a4cd83134244a",
+        "taskRevision": "d16bfe05a744909de4b27f5875fe0d4ed41ce607"
+      },
+      "expectedVerifier": {
+        "id": "swe-bench-official",
+        "version": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+        "officialRequired": true,
+        "resultEvidenceLevel": "official",
+        "primaryMetric": "resolved"
+      }
+    },
+    {
       "id": "swe-marathon",
       "authority": "compatible_local_pack",
       "completionClaim": "SWE-Marathon-compatible local pack result",
@@ -148,6 +232,66 @@
         "resultEvidenceLevel": "native",
         "primaryMetric": "resolved_tasks"
       }
+    },
+    {
+      "id": "terminal-bench",
+      "authority": "compatible_local_pack",
+      "completionClaim": "Terminal-Bench-compatible local pack result",
+      "officialBenchmark": false,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:b4351c51e6235cd452d175e28d1b1630b92a8288585c2688b8e7b3ae1d439ba9",
+        "taskIds": [
+          "release-ledger-reconciliation"
+        ],
+        "selectionKind": "full",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#terminal-bench"
+      },
+      "dataset": {
+        "id": "terminal-bench-v1",
+        "version": "1.0.0",
+        "revision": "c1ccae715d618df01927f64daf8a171fb91e4c966ac944e437575d9fa577c4df",
+        "taskRevision": "d9e363ef01a7c00145eec6f4e9fecc17da4c3c74"
+      },
+      "expectedVerifier": {
+        "id": "terminal-bench-native",
+        "version": "1.0.0",
+        "officialRequired": false,
+        "resultEvidenceLevel": "native",
+        "primaryMetric": "reward"
+      }
     }
-  ]
+  ],
+  "integrationMatrix": {
+    "inventoryRef": "docs/evaluation/canonical-pack-inventory.json",
+    "dimensions": [
+      "pack",
+      "agentBackend",
+      "sandboxProvider",
+      "verifier",
+      "credentialMode"
+    ],
+    "purpose": "Adapter and lifecycle compatibility only; integration cells are not rankings."
+  },
+  "controlledComparison": {
+    "rankingAllowedOnlyWhenCoordinatesEqual": true,
+    "requiredCoordinates": [
+      "taskIdsHash",
+      "datasetRevision",
+      "sliceManifestHash",
+      "verifierId",
+      "verifierVersion",
+      "sandboxProvider",
+      "imageDigest",
+      "modelId",
+      "modelRevision",
+      "inferenceParametersHash",
+      "toolPolicyHash",
+      "tokenBudget",
+      "timeBudgetMs",
+      "networkPolicyHash",
+      "repeats"
+    ],
+    "missingCoordinatePolicy": "unranked_integration_only"
+  }
 }

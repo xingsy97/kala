@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "packs": [
+    { "id": "code-understanding", "realRunner": "task-pack", "officialBenchmark": false },
+    { "id": "fault-scenarios", "realRunner": "task-pack", "officialBenchmark": false },
+    { "id": "memory-planning", "realRunner": "task-pack", "officialBenchmark": false },
+    { "id": "program-bench", "realRunner": "task-pack", "officialBenchmark": false },
+    { "id": "sdlc-journey", "realRunner": "task-pack", "officialBenchmark": false },
+    { "id": "swe-bench", "realRunner": "swe-bench", "officialBenchmark": true },
+    { "id": "swe-marathon", "realRunner": "catalog-only", "officialBenchmark": false },
+    { "id": "terminal-bench", "realRunner": "task-pack", "officialBenchmark": false }
+  ]
+}

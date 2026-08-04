@@ -8,6 +8,11 @@ const files = walk(join(root, 'scripts')).filter((path) => path.endsWith('.test.
 const vitestFiles = files.filter((path) => readFileSync(path, 'utf8').includes("from 'vitest'"))
 const nodeFiles = files.filter((path) => !vitestFiles.includes(path))
 
+if (files.length === 0) {
+  console.error('No script tests discovered under scripts/**')
+  process.exit(1)
+}
+
 if (nodeFiles.length > 0) run(process.execPath, ['--test', ...nodeFiles])
 if (vitestFiles.length > 0) run('pnpm', ['exec', 'vitest', 'run', ...vitestFiles])
 

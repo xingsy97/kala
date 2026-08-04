@@ -7,14 +7,17 @@ const design = await json('docs/evaluation/benchmark-design-manifest.json')
 const templates = await json('deploy/evaluation/run-templates.json')
 const catalog = await json('deploy/evaluation/catalog.json')
 const catalogBuilder = await readFile(resolve(root, 'scripts/evaluation/build-deployment-catalog.mjs'), 'utf8')
+const inventory = await json('docs/evaluation/canonical-pack-inventory.json')
 const expectedAgents = ['agent-runlab', 'claude-code', 'codex']
-const expectedPacks = ['program-bench', 'swe-bench', 'swe-marathon', 'terminal-bench']
+const expectedPacks = inventory.packs.map((pack) => pack.id).sort()
 
 assert(design.schemaVersion === 1, 'unsupported benchmark design manifest schema')
 assert(equal(design.agents, expectedAgents), 'design must declare exactly the three ranked Agents')
 assert(Object.values(design.pairing ?? {}).every((value) => value === true), 'all same-task pairing controls must be required')
-assert(equal([...design.packs.map((pack) => pack.id)].sort(), expectedPacks), 'design pack inventory changed')
+assert(equal([...design.packs.map((pack) => pack.id)].sort(), expectedPacks), 'design pack inventory must equal the canonical inventory')
+assert(equal([...templates.filter((template) => template.kind === 'benchmark').map((template) => template.spec.taskPack.id)].sort(), expectedPacks), 'deployment templates must equal the canonical inventory')
 validateCleanup(design.cleanupSchema)
+validateComparisonPolicy(design)
 
 for (const pack of design.packs) {
   const template = templates.find((candidate) => candidate.spec?.taskPack?.id === pack.id)
@@ -41,7 +44,7 @@ for (const pack of design.packs) {
     assert(pack.expectedVerifier.resultEvidenceLevel === 'official', 'SWE-Bench expected evidence must be official')
   } else {
     assert(pack.authority === 'compatible_local_pack', pack.id + ' must be a compatible local pack')
-    assert(/compatible local task pack/iu.test(template.label) && /non-official/iu.test(template.label), pack.id + ' label must state compatible local and non-official')
+    assert(/(?:compatible )?local task pack/iu.test(template.label) && /non-official/iu.test(template.label), pack.id + ' label must state local-pack and non-official provenance')
     assert(pack.expectedVerifier.resultEvidenceLevel === 'native', pack.id + ' expected evidence must be native')
     assert(!/official/iu.test(pack.completionClaim), pack.id + ' completion claim must not imply official authority')
   }
@@ -71,6 +74,13 @@ for (const path of completionClaimFiles) {
 
 process.stdout.write(JSON.stringify({ ok: true, packs: design.packs.length, agents: design.agents.length, modelExperimentsRun: 0 }) + '\n')
 
+function validateComparisonPolicy(manifest) {
+  const requiredCoordinates = ['taskIdsHash', 'datasetRevision', 'sliceManifestHash', 'verifierId', 'verifierVersion', 'sandboxProvider', 'imageDigest', 'modelId', 'modelRevision', 'inferenceParametersHash', 'toolPolicyHash', 'tokenBudget', 'timeBudgetMs', 'networkPolicyHash', 'repeats']
+  assert(manifest.integrationMatrix?.inventoryRef === 'docs/evaluation/canonical-pack-inventory.json', 'integration matrix must reference canonical inventory')
+  assert(manifest.controlledComparison?.rankingAllowedOnlyWhenCoordinatesEqual === true, 'ranking must require equal controlled coordinates')
+  assert(equal(manifest.controlledComparison.requiredCoordinates, requiredCoordinates), 'controlled comparison coordinates are incomplete')
+  assert(manifest.controlledComparison.missingCoordinatePolicy === 'unranked_integration_only', 'missing fair coordinates must prohibit ranking')
+}
 function validateCleanup(cleanup) {
   const required = ['schemaVersion', 'runId', 'trialId', 'agentVariantId', 'taskId', 'provider', 'sandboxId', 'destroyedAt', 'residue']
   assert(cleanup?.schemaVersion === 1 && cleanup.receiptRequired === true, 'cleanup receipt schema must be required')

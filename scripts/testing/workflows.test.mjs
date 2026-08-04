@@ -47,3 +47,41 @@ test('verification fixtures use ephemeral scoped auth without anonymous fallback
     assert.doesNotMatch(source, /createEvaluationHttpServer\(controlPlane\)\s*$/mu)
   }
 })
+
+test('security, publish, and release workflows fail closed', async () => {
+  const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
+  assert.match(rootPackage.scripts['ci:security'], /verify:supply-chain -- --strict/u)
+
+  const security = await workflow('browser-security.yml')
+  for (const scanner of ['SYFT_VERSION', 'GRYPE_VERSION', 'TRIVY_VERSION', 'COSIGN_VERSION']) assert.match(security, new RegExp(`${scanner}: v\\d`, 'u'))
+  assert.match(security, /pnpm run ci:security/u)
+
+  const publish = await workflow('publish.yml')
+  assert.doesNotMatch(publish, /publish[^\n]*\|\|\s*echo/u)
+  assert.match(publish, /npm view/u)
+  assert.match(publish, /elif grep -q 'E404'/u)
+
+  const release = await workflow('release.yml')
+  assert.match(release, /gh release create[\s\S]*?--draft/u)
+  assert.match(release, /gh release edit "\$TAG" --draft=false/u)
+  assert.ok(release.indexOf('gh release upload "$TAG" release/* --clobber') < release.lastIndexOf('gh release edit "$TAG" --draft=false'))
+})
+
+test('test discovery and release gates cannot silently omit task packs', async () => {
+  const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
+  assert.match(rootPackage.scripts['test:extended'], /test:task-packs/u)
+  const scripts = await readFile(resolve(root, 'scripts/testing/run-script-tests.mjs'), 'utf8')
+  const taskPacks = await readFile(resolve(root, 'scripts/testing/run-task-pack-tests.mjs'), 'utf8')
+  assert.match(scripts, /files\.length === 0/u)
+  assert.match(taskPacks, /discovered === 0/u)
+  assert.match(taskPacks, /No task-pack tests discovered/u)
+})
+
+test('evidence policy binds current records to clean revisions and explicit supersession', async () => {
+  const policy = await readFile(resolve(root, 'docs/evidence/README.md'), 'utf8')
+  for (const field of ['status', 'sourceRevision', 'generatedAt', 'supersedes', 'generator']) assert.match(policy, new RegExp('`' + field + '`', 'u'))
+  const recorder = await readFile(resolve(root, 'scripts/evaluation/record-evidence-revision.mjs'), 'utf8')
+  assert.match(recorder, /git', \['status', '--porcelain', '--untracked-files=all'\]/u)
+  assert.match(recorder, /refusing to record current evidence from a dirty tree/u)
+  assert.match(recorder, /flag: 'wx'/u)
+})

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -16,9 +16,13 @@ import { createClaudeCodeAgentBackend } from '../../adapters/agents/claude-code/
 import { createCodexAgentBackend } from '../../adapters/agents/codex/dist/src/index.js'
 import { createSweBenchBenchmarkAdapter } from '../../adapters/benchmarks/swe-bench/dist/src/index.js'
 import { createEphemeralAuth } from './fixtures/ephemeral-auth.mjs'
+import { buildIdentity, cleanupReceipt, loadCanonicalPackInventory } from './benchmark-contracts.mjs'
 import { lockedEndpointDestinations, providerRootUrl } from './locked-endpoint.mjs'
 
 const runFile = promisify(execFile)
+const identity = await buildIdentity()
+const canonicalInventory = await loadCanonicalPackInventory()
+if (!canonicalInventory.packs.some((pack) => pack.id === 'swe-bench' && pack.realRunner === 'swe-bench')) throw new Error('SWE-Bench is not enabled by the canonical inventory')
 const INSTANCE_ID = option('--instance-id') ?? 'astropy__astropy-12907'
 const DATASET_ID = 'swe-bench-verified'
 const DATASET_VERSION = option('--dataset-version') ?? 'verified-1'
@@ -89,7 +93,7 @@ registry.registerBenchmark(adapter)
 const workerErrors = []
 const worker = new EvaluationWorker({
   controlPlane: workerClient, registry, credentials: { resolve: async (references) => Object.fromEntries(references.map((reference) => [reference.referenceId, credential])), available: async () => true },
-  workerId, workerVersion: '0.0.0', cpu: 6, memoryMb: 12288, diskMb: 131072, gpu: 0, maxTrials: agents.length, leaseMs: 30_000,
+  workerId, workerVersion: identity.version, cpu: 6, memoryMb: 12288, diskMb: 131072, gpu: 0, maxTrials: agents.length, leaseMs: 30_000,
   artifactRoot, workerDataDir, cancellationGraceMs: 5_000, onTrialError: (error, trialId) => workerErrors.push({ trialId, message: safeMessage(error) }),
 })
 
@@ -156,7 +160,7 @@ async function agentVariants(url) {
     { variantId: 'claude-code', backendId: 'claude-code', model: { provider: 'anthropic', modelId: option('--claude-model') ?? 'claude-opus-4.8' }, config: { baseUrl: url }, referenceId: 'claude-api-key', provider: 'anthropic' },
     { variantId: 'codex', backendId: 'codex', model: { provider: 'openai', modelId: option('--codex-model') ?? 'gpt-5.6-sol' }, config: { baseUrl: url + '/v1', transport: option('--codex-transport') ?? 'app-server', reasoningEffort: option('--codex-effort') ?? 'medium' }, referenceId: 'codex-api-key', provider: 'openai' },
   ]
-  return await Promise.all(values.map(async (value) => ({ variantId: value.variantId, backendId: value.backendId, agentVersion: '0.0.0', model: value.model, configHash: await sha256Hex(canonicalJson(value.config)), config: value.config, credentialRefs: [{ referenceId: value.referenceId, provider: value.provider, scope: ['model-inference'] }] })))
+  return await Promise.all(values.map(async (value) => ({ variantId: value.variantId, backendId: value.backendId, agentVersion: identity.version, model: value.model, configHash: await sha256Hex(canonicalJson(value.config)), config: value.config, credentialRefs: [{ referenceId: value.referenceId, provider: value.provider, scope: ['model-inference'] }] })))
 }
 
 function selectAgents(agents) {
@@ -169,12 +173,12 @@ function selectAgents(agents) {
 
 function createTrackedProvider(inner) {
   const created = []
-  const destroyed = new Set()
+  const destroyed = new Map()
   return {
     descriptor: inner.descriptor, created, destroyed,
     preflight: (policy) => inner.preflight(policy),
     create: async (input) => { const target = await inner.create(input); created.push({ trialId: input.trialId, sandboxId: target.sandboxId }); return target },
-    collect: (target) => inner.collect(target), destroy: async (target) => { await inner.destroy(target); destroyed.add(target.sandboxId) },
+    collect: (target) => inner.collect(target), destroy: async (target) => { await inner.destroy(target); await inner.verifyDestroyed(target); destroyed.set(target.sandboxId, new Date().toISOString()) },
     verifyDestroyed: (target) => inner.verifyDestroyed(target), reapOrphans: (workerId) => inner.reapOrphans(workerId),
   }
 }
@@ -205,7 +209,9 @@ async function auditAcceptance(input) {
       const native = await readFile(join(input.artifactRoot, evidence.nativeEventsRef), 'utf8')
       for (const required of ['adapter.started', 'hostVersion', 'executorVersion', 'runlab.driver.ready', 'runlab.completed']) if (!native.includes(required)) throw new Error('RunLab co-located process evidence is missing ' + required)
     }
-    trialEvidence.push({ trialId: trial.trialId, agentVariantId: trial.agentVariantId, resultHash: evidence.resultHash, artifactManifestHash: evidence.artifactManifest.manifestHash, evidenceLevel: evidence.evidenceLevel, nativeMetrics: evidence.benchmarkResult.nativeMetrics, normalizedEventCount: evidence.normalizedEventCount })
+    const created = input.provider.created.find((item) => item.trialId === trial.trialId)
+    const cleanup = cleanupReceipt({ runId: input.runId, trial, providerRecord: created && { ...created, destroyedAt: input.provider.destroyed.get(created.sandboxId) } })
+    trialEvidence.push({ trialId: trial.trialId, agentVariantId: trial.agentVariantId, resultHash: evidence.resultHash, artifactManifestHash: evidence.artifactManifest.manifestHash, evidenceLevel: evidence.evidenceLevel, nativeMetrics: evidence.benchmarkResult.nativeMetrics, normalizedEventCount: evidence.normalizedEventCount, cleanupReceipt: cleanup })
   }
   if (environmentLocks.size !== 1) throw new Error('SWE-Bench Agents did not use an equal locked environment')
   const jobs = [...input.controlPlane.projection.analysisJobs.values()].filter((job) => job.runId === input.runId)
@@ -214,7 +220,7 @@ async function auditAcceptance(input) {
   if (jobs.length !== 2 || !analysisJob || analysisJob.state !== 'completed' || !input.controlPlane.projection.analysisOutputs.has(analysisJob.jobId)) throw new Error('fresh SWE-Bench analyzer job did not complete')
   const gradingOutput = gradingJob && input.controlPlane.projection.analysisOutputs.get(gradingJob.jobId)
   if (!gradingJob || gradingJob.state !== 'completed' || !gradingOutput || gradingOutput.outputs.length !== trials.length || gradingOutput.outputs.some((output) => output.kind !== 'grading-result')) throw new Error('fresh SWE-Bench grading job did not complete with one result per canonical trial')
-  return { schemaVersion: 1, generatedAt: new Date().toISOString(), scope: 'fresh standalone Control Plane + Worker + grader + analyzer + three real Agent backends + fresh LXD sandbox + official SWE-Bench verifier', runId: input.runId, instanceId: INSTANCE_ID, sourceRecordHash: input.source.recordHash, sourceFetchedFresh: true, runState: runProjection.state, freshSandboxes: input.provider.created.length, cleanupVerified: true, environmentLockEqualAcrossAgents: true, gradingJobId: gradingJob.jobId, gradingOutputHash: gradingJob.outputManifestHash, analysisJobId: analysisJob.jobId, analysisOutputHash: analysisJob.outputManifestHash, defects: [...input.controlPlane.projection.defects.values()].filter((finding) => finding.runId === input.runId).length, workerErrors: input.workerErrors, trials: trialEvidence }
+  return { schemaVersion: 1, generatedAt: new Date().toISOString(), build: identity, scope: 'fresh standalone Control Plane + Worker + grader + analyzer + three real Agent backends + fresh LXD sandbox + official SWE-Bench verifier', runId: input.runId, instanceId: INSTANCE_ID, sourceRecordHash: input.source.recordHash, sourceFetchedFresh: true, runState: runProjection.state, freshSandboxes: input.provider.created.length, cleanupVerified: true, environmentLockEqualAcrossAgents: true, gradingJobId: gradingJob.jobId, gradingOutputHash: gradingJob.outputManifestHash, analysisJobId: analysisJob.jobId, analysisOutputHash: analysisJob.outputManifestHash, defects: [...input.controlPlane.projection.defects.values()].filter((finding) => finding.runId === input.runId).length, workerErrors: input.workerErrors, trials: trialEvidence }
 }
 
 function command(type, fields) { const suffix = type.replaceAll('.', '-'); return { schemaVersion: 1, type, commandId: suffix + '-' + process.pid, idempotencyKey: suffix + '-' + process.pid, submittedAt: new Date().toISOString(), ...fields } }
@@ -223,11 +229,7 @@ async function resolveCredential() {
   const helper = option('--credential-helper')
   let result
   if (helper) result = await runFile(resolve(helper), [], { encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024 })
-  else {
-    const settings = JSON.parse(await readFile(join(homedir(), '.claude', 'settings.json'), 'utf8'))
-    if (typeof settings.apiKeyHelper !== 'string' || !settings.apiKeyHelper.trim()) throw new Error('set AGENT_EVAL_CREDENTIAL_LOCAL_API_KEY or configure the local Claude apiKeyHelper')
-    result = await runFile('/bin/bash', ['-lc', settings.apiKeyHelper], { encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024 })
-  }
+  else throw new Error('formal experiments require explicit AGENT_EVAL_CREDENTIAL_LOCAL_API_KEY or --credential-helper; implicit Claude apiKeyHelper fallback is disabled')
   const value = result.stdout.trim()
   if (!value) throw new Error('credential helper returned an empty value')
   return value

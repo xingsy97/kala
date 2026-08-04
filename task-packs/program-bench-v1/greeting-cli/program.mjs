@@ -1,4 +1,8 @@
 #!/usr/bin/env node
-// TODO: implement the command described in TASK.md.
-process.stderr.write('usage: program <name>\n')
-process.exitCode = 2
+const names = process.argv.slice(2)
+if (names.length !== 1) {
+  process.stderr.write('usage: program <name>\n')
+  process.exitCode = 2
+} else {
+  process.stdout.write(`hello ${names[0]}\n`)
+}

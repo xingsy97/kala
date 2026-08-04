@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-04T10:05:21.934Z",
+  "generatedAt": "2026-08-04T12:14:49.554Z",
   "scope": "clean temporary workspaces using packed public eval-protocol/eval-sdk plus public npm dependencies; no workspace links or orchestrator source imports",
   "publicPackages": {
     "protocol": {
       "name": "agent-kernel-eval-protocol-0.0.0.tgz",
-      "bytes": 133829,
-      "sha256": "873d6b833436e95ba3b0610c9fd54c60ada2ef95b3990bdee9e12a3c9109fa58"
+      "bytes": 133880,
+      "sha256": "5058c4c9710f06ab86034e3453cc402f271976aa52a9d73282cc26a6cfe71d89"
     },
     "sdk": {
       "name": "agent-kernel-eval-sdk-0.0.0.tgz",
-      "bytes": 47715,
-      "sha256": "61fdc595f21879ccc960e1c6ec9fc2882ce19def6153164429c5bdfb3742d630"
+      "bytes": 50193,
+      "sha256": "ad087e56ddf4b0eb7aa6857464a4bb06249420bd997aca9ab973d377d53c31a9"
     }
   },
   "cleanWorkspaces": [
@@ -231,11 +231,11 @@
     },
     {
       "path": "packages/eval-orchestrator/bin/eval-cli.ts",
-      "sha256": "e1a78c8fa147851747bbaf328e83804e37cd8f03b1fa12d7a8372c50294b7fb4"
+      "sha256": "6e17b1ab96400c29f0652b45414ffc04b2f1d2464fcaa49d8197b11fe3ae2537"
     },
     {
       "path": "packages/eval-orchestrator/bin/eval-orchestrator.ts",
-      "sha256": "47ee00b821c43bfa557409c334dccad67ad3ea800f3420d1097fd6b3bc20b01f"
+      "sha256": "41dbc6174eeb66d4b7eee61b80d8e171704ee955a2ec43c7345749fac04c3144"
     },
     {
       "path": "packages/eval-orchestrator/package.json",
@@ -251,7 +251,7 @@
     },
     {
       "path": "packages/eval-orchestrator/src/artifact-store.ts",
-      "sha256": "b440a1796518f3a2b5df912f13c17d05592e59ad46c62491e066e491616015e9"
+      "sha256": "74a8b9e8eb9c955e6a5182bff7bf93f6f8d30d46e7e76177b4ff829f6a7360e4"
     },
     {
       "path": "packages/eval-orchestrator/src/auth.test.ts",
@@ -271,11 +271,15 @@
     },
     {
       "path": "packages/eval-orchestrator/src/control-plane.test.ts",
-      "sha256": "7b8c8c1dad2bf635b033d81c2c67f4a3687d8836733300bde2de7d14c75828ce"
+      "sha256": "d587c5addc37fb922683867c9d9c5225bb824fa2372aa8f83f9351fbebbd9679"
     },
     {
       "path": "packages/eval-orchestrator/src/control-plane.ts",
-      "sha256": "291368f2671678d444904b5e8b434cac21872f613cfd253bb003176087246d63"
+      "sha256": "ff41b20b5c4918f8fcf453cfe09f9dae6b3160bd5cd7ef13fdf0132deb233a86"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/data-directory-lock.ts",
+      "sha256": "b45b265d1c1d6d28212f098a2908d8f26746297679c3fa427a615a2f66d16b2a"
     },
     {
       "path": "packages/eval-orchestrator/src/evidence-archive.test.ts",
@@ -286,28 +290,32 @@
       "sha256": "0a7abbfff4cecb8f14a4739d9ece68337fcf734cabdcf3757e3458965ed74134"
     },
     {
+      "path": "packages/eval-orchestrator/src/http-errors.ts",
+      "sha256": "01d832a0de3303d0c61d2c9b281828b5ceb9f538a3be506c6c501ff4f3fddc45"
+    },
+    {
       "path": "packages/eval-orchestrator/src/http-server.test.ts",
-      "sha256": "f79acbb04ea41ff027db488bb2ed67c8902d1dedcfe30726368bf4066f6f5b9b"
+      "sha256": "2704de02a82f7f817789d1ce764a9d5542c6173e58f7678c20d2d666e230ec43"
     },
     {
       "path": "packages/eval-orchestrator/src/http-server.ts",
-      "sha256": "0f6091a690754a602014e5ea7dcf928d40a24a615899144d10e9dcfe334f3ca4"
+      "sha256": "54485d8c42e6bf381c7c235b596e14a8d8d52dc7665f54772b119b93b48620b5"
     },
     {
       "path": "packages/eval-orchestrator/src/index.ts",
-      "sha256": "9e0c366528096b2469d288688a7e71616437fa8cac0787239e60ce6568e38ac7"
+      "sha256": "4e8d4b0085a3b87ee866be42c5b334e1fb939c5536575d29182b3dcd379723fa"
     },
     {
       "path": "packages/eval-orchestrator/src/journal.ts",
-      "sha256": "a6d0aff7bd2c550af5c38ec54cfa1e08e9d14509b0afde6d81606356b878bc04"
+      "sha256": "d03470d79ca96a7b9bb1419e6ca8996a0f51fa5d2ec040f1af86760940933385"
     },
     {
       "path": "packages/eval-orchestrator/src/maintenance.test.ts",
-      "sha256": "06d803447be7345a6fee8b52e6c3d9cc9744686dca6b0e8ba17a4bc5a32aa585"
+      "sha256": "827115f4315c9c7787fa0cd0953732d0cee3038baeedc65c09d12545f84cd0d4"
     },
     {
       "path": "packages/eval-orchestrator/src/maintenance.ts",
-      "sha256": "fe200eb0c2b9e170f7103f586d7bd272d097283e1adf484a42880618bf8bd269"
+      "sha256": "84c1e0e0cd89097ee7240732eb7740a536672f4005d36980b725585c20ee4583"
     },
     {
       "path": "packages/eval-orchestrator/src/model.ts",
@@ -338,6 +346,18 @@
       "sha256": "f4ec0c6a1c20a7348ba5e70bc13d62245ebdcb4767c3b2ed4b68a2250008b0e5"
     },
     {
+      "path": "packages/eval-orchestrator/src/security-audit.ts",
+      "sha256": "7c5c1ee46726fd8d1f9c506b9c6285e10a0098b05da55b338df8cad28caf20fd"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/security-registry.test.ts",
+      "sha256": "f3125a8cf42a4a8268fefb1f4e066ee4984a1745519b1c8e50fdd01788d7f26c"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/security-registry.ts",
+      "sha256": "13cf2c86fa51c8cb27452f95c0b167b1bc797e71164e495d33bbbff2ab468cb9"
+    },
+    {
       "path": "packages/eval-orchestrator/src/task-catalog.ts",
       "sha256": "e441b25c7db66729f50dd6bb99117566b37b1baf0ee448fd5c68513f4a93377a"
     },
@@ -347,7 +367,7 @@
     },
     {
       "path": "packages/eval-worker/src/plugin-loader.ts",
-      "sha256": "c968dd51eeeec07271f0cc54f64f8dc3a20d0bbd4865628d33a534dfbb56712b"
+      "sha256": "15aef6e4bb21321e91da2554382d5ea5037c42243c4c7091561f12a04aa44173"
     }
   ]
 }

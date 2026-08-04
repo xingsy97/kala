@@ -17,8 +17,10 @@ import { createCustomTaskPackAdapter } from '../../adapters/benchmarks/custom-ta
 import { createProgramBenchAdapter } from '../../adapters/benchmarks/program-bench/dist/index.js'
 import { createSweMarathonAdapter } from '../../adapters/benchmarks/swe-marathon/dist/index.js'
 import { createEphemeralAuth } from './fixtures/ephemeral-auth.mjs'
+import { buildIdentity } from './benchmark-contracts.mjs'
 
 const runFile = promisify(execFile)
+const identity = await buildIdentity()
 const root = resolve(new URL('../..', import.meta.url).pathname)
 const mode = option('--mode')
 if (mode !== 'swe-marathon' && mode !== 'metamorphic') throw new Error('--mode must be swe-marathon or metamorphic')
@@ -72,7 +74,7 @@ registry.registerBenchmark(createSweMarathonAdapter())
 registry.registerBenchmark(createCustomTaskPackAdapter())
 registry.registerBenchmark(createProgramBenchAdapter())
 const workerErrors = []
-const worker = new EvaluationWorker({ controlPlane: workerClient, registry, credentials: { resolve: async () => ({}), available: async () => true }, workerId, workerVersion: '0.0.0', cpu: 2, memoryMb: 2048, diskMb: 8192, gpu: 0, maxTrials: 2, leaseMs: 30_000, artifactRoot, workerDataDir, cancellationGraceMs: 5_000, onTrialError: (error, trialId) => workerErrors.push({ trialId, message: message(error) }) })
+const worker = new EvaluationWorker({ controlPlane: workerClient, registry, credentials: { resolve: async () => ({}), available: async () => true }, workerId, workerVersion: identity.version, cpu: 2, memoryMb: 2048, diskMb: 8192, gpu: 0, maxTrials: 2, leaseMs: 30_000, artifactRoot, workerDataDir, cancellationGraceMs: 5_000, onTrialError: (error, trialId) => workerErrors.push({ trialId, message: message(error) }) })
 
 try {
   await client.command(command('run.create', { spec }))

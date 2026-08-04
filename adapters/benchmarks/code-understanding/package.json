@@ -1,5 +1,5 @@
 {
-  "name": "@agent-kernel/eval-benchmark-code-understanding", "version": "0.0.0", "type": "module",
+  "name": "@agent-kernel/eval-benchmark-code-understanding", "version": "0.1.10", "type": "module",
   "main": "./dist/index.js", "types": "./dist/index.d.ts", "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": { "@agent-kernel/eval-benchmark-common": "workspace:*", "@agent-kernel/eval-protocol": "workspace:*", "@agent-kernel/eval-sdk": "workspace:*" },

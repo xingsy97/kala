@@ -162,14 +162,14 @@ jobs:
           path: release/*
           if-no-files-found: error
 
-      - name: Create or update GitHub Release
+      - name: Stage draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
           COMPONENT: ${{ needs.resolve.outputs.component }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file release/RELEASE_NOTES.md
+            gh release edit "$TAG" --draft --notes-file release/RELEASE_NOTES.md
             gh release delete-asset "$TAG" run-host.sh --yes || true
             gh release delete-asset "$TAG" run-executor.sh --yes || true
             gh release delete-asset "$TAG" agent-kernel-host.cjs --yes || true
@@ -181,8 +181,12 @@ jobs:
             gh release upload "$TAG" release/* --clobber
           else
             gh release create "$TAG" release/* \
+              --draft \
               --title "$TAG" \
               --notes-file release/RELEASE_NOTES.md
+          fi
+          if [ "$COMPONENT" = "dashboard" ]; then
+            gh release edit "$TAG" --draft=false
           fi
 
   native-release:
@@ -225,5 +229,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          gh release edit "$TAG" --notes-file release/RELEASE_NOTES.md
+          gh release edit "$TAG" --draft --notes-file release/RELEASE_NOTES.md
           gh release upload "$TAG" release/* --clobber
+          gh release edit "$TAG" --draft=false

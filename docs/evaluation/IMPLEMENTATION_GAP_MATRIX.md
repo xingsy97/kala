@@ -2,7 +2,7 @@
 
 Status: source-level review baseline, not completion evidence
 Reviewed baseline: `58dccafb37fba85afa6f921fd1f8dc9403368b8c` plus the frozen shared working tree captured in `/tmp/agent-evaluation-review-baseline-20260804T091423Z`
-Rule: implementation presence, fixture tests, source scans, and historical evidence do not by themselves establish release verification.
+Rule: implementation presence, fixture tests, source scans, and historical evidence do not by themselves establish release verification. Current disposition is governed by [`SECOND_REVIEW.md`](SECOND_REVIEW.md) and the terminology in [`README.md`](README.md).
 
 ## 1. Completion-criterion recalibration
 
@@ -103,4 +103,4 @@ The reviewed P0 implementation defects have been remediated in the current worki
 - truthful benchmark labels and a clear Product Artifacts boundary;
 - executable retention, backup/verify/restore, telemetry, Administration, CLI/SDK, reports, CI integrations, plugin SDK, and catalog governance.
 
-Working-tree container evidence is recorded in `docs/evidence/evaluation/container-acceptance-current.json`. It proves an authenticated Docker subset lifecycle, role rejection, ten-route browser acceptance before and after Control Plane recreation, backup/restore verification, and zero residual resources. It is not final release evidence because the source tree is not yet clean and the detector validation corpus remains explicitly synthetic-derived.
+Working-tree container evidence is recorded in `docs/evidence/evaluation/container-acceptance-current.json`. It is diagnostic working-tree evidence for an authenticated Docker subset lifecycle, role rejection, browser recovery, backup/restore verification, and cleanup; the filename does not make it current release evidence. Detector v1 and pre-second-review Compose records are superseded, and detector v2 remains fixture evidence over an explicitly synthetic-derived corpus. Final acceptance must use clean release HEAD and exercise [`RUNBOOK.md`](RUNBOOK.md).
