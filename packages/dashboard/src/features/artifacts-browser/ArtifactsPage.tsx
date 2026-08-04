@@ -7,7 +7,7 @@ import { MemoryView } from '../artifacts/MemoryView.js'
 
 type ArtifactSection = 'artifacts' | 'memory'
 
-export function ArtifactsPage(_: {
+export function ArtifactsPage({ onOpenSession }: {
   onOpenSession?(sessionId: string): void
 } = {}): JSX.Element {
   const { t } = useTranslation()
@@ -26,11 +26,11 @@ export function ArtifactsPage(_: {
       <div className="min-h-0 flex-1 overflow-auto md:grid md:grid-rows-2">
         <section className={cn('min-h-0', section !== 'artifacts' && 'hidden md:block')} data-testid="artifacts-main-panel">
           <div className="border-b border-border/60 px-4 py-2"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('artifactsPage.artifactsTitle')}</h2></div>
-          <ArtifactInventoryView />
+          <ArtifactInventoryView onOpenSession={onOpenSession} />
         </section>
         <section className={cn('min-h-0 border-t border-border/60', section !== 'memory' && 'hidden md:block')} data-testid="artifacts-memory-panel">
           <div className="border-b border-border/60 px-4 py-2"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('artifactsPage.memoryTitle')}</h2><p className="text-[11px] text-muted-foreground">{t('artifactsPage.memorySubtitle')}</p></div>
-          <MemoryView />
+          <MemoryView onOpenSession={onOpenSession} />
         </section>
       </div>
     </div>

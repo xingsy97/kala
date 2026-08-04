@@ -7,7 +7,7 @@ import { ProfilesView } from '../artifacts/ProfilesView.js'
 
 type OperationsSection = 'ops' | 'profiles'
 
-export function OperationsPage(_: {
+export function OperationsPage({ onOpenSession }: {
   onOpenSession?(sessionId: string): void
 } = {}): JSX.Element {
   const { t } = useTranslation()
@@ -26,11 +26,11 @@ export function OperationsPage(_: {
       <div className="min-h-0 flex-1 overflow-auto md:grid md:grid-rows-2">
         <section className={cn('min-h-0', section !== 'ops' && 'hidden md:block')} data-testid="operations-ops-panel">
           <SectionHeader title={t('operations.opsTitle')} subtitle={t('operations.opsSubtitle')} />
-          <OpsView />
+          <OpsView onOpenSession={onOpenSession} />
         </section>
         <section className={cn('min-h-0 border-t border-border/60', section !== 'profiles' && 'hidden md:block')} data-testid="operations-profiles-panel">
           <SectionHeader title={t('operations.profilesTitle')} subtitle={t('operations.profilesSubtitle')} />
-          <ProfilesView />
+          <ProfilesView onOpenSession={onOpenSession} />
         </section>
       </div>
     </div>

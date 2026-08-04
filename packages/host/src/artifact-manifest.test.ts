@@ -60,7 +60,7 @@ describe('pruneArtifacts', () => {
     expect(existsSync(join(dir, 'traces/session-a.openinference.json'))).toBe(true)
   })
 
-  it('never removes protected paths: prune report, run registry, and worker plans', async () => {
+  it('protects only the prune report and treats legacy evaluation artifacts normally', async () => {
     const now = new Date('2026-07-09T12:00:00.000Z')
     const oldMtime = new Date('2020-01-01T00:00:00.000Z')
     writeArtifact('artifact-prune.json', '{}', oldMtime)
@@ -78,12 +78,9 @@ describe('pruneArtifacts', () => {
     expect(removedPaths).toContain('traces/session-a.openinference.json')
     expect(removedPaths).not.toContain('artifact-manifest.json')
     expect(removedPaths).not.toContain('artifact-prune.json')
-    expect(removedPaths).not.toContain('registry/run-index.json')
-    expect(removedPaths).not.toContain('runs/run-abc/worker-plan.json')
-    const protectedReasons = report.protected.map((p) => p.reason)
-    expect(protectedReasons).toEqual(
-      expect.arrayContaining(['prune_report', 'run_registry', 'worker_plan']),
-    )
+    expect(removedPaths).toContain('registry/run-index.json')
+    expect(removedPaths).toContain('runs/run-abc/worker-plan.json')
+    expect(report.protected.map((p) => p.reason)).toEqual(['prune_report'])
   })
 
   it('enforces a byte budget by removing the oldest eligible entries first', async () => {

@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
 import type { ArtifactManifest } from './product-artifact-views.js'
+import { artifactRequest } from './artifact-client.js'
 
 export type ManifestState = {
   manifest: ArtifactManifest | null
@@ -14,7 +15,7 @@ export type ManifestState = {
 export const ARTIFACT_MANIFEST_QUERY_KEY = ['artifact-manifest'] as const
 
 async function fetchArtifactManifest(): Promise<ArtifactManifest | null> {
-  const res = await fetch('/artifacts/manifest', { cache: 'no-store' })
+  const res = await artifactRequest('/artifacts/manifest', { cache: 'no-store' })
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null
     if (isMissingArtifactDirectory(res.status, body?.error)) return emptyManifest()

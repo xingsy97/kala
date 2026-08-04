@@ -1607,6 +1607,11 @@ describe('wire protocol', () => {
     }>)
     expect(content).toMatchObject({ path: 'llm/s1/1.request.json', body: { ok: true } })
 
+    const download = await fetch(`${url}/artifacts/download?path=${encodeURIComponent('llm/s1/1.request.json')}`)
+    expect(download.status).toBe(200)
+    expect(download.headers.get('content-disposition')).toContain("filename*=UTF-8''1.request.json")
+    expect(await download.text()).toBe(JSON.stringify({ ok: true }))
+
     const traversal = await fetch(`${url}/artifacts/content?path=${encodeURIComponent('../secret.json')}`)
     expect(traversal.status).toBe(403)
   })

@@ -56,9 +56,15 @@ export function useAppSection(): [AppSection, (next: AppSection) => void] {
 export function parseSessionDeepLink(hash: string): string | null {
   const cleaned = hash.replace(/^#\/?/, '')
   const parts = cleaned.split('/')
-  if (parts[0]?.toLowerCase() !== 'sessions') return null
-  const id = parts[1]
-  return id && id.length > 0 ? decodeURIComponent(id) : null
+  if (parts[0]?.toLowerCase() !== 'sessions' || parts.length !== 2) return null
+  const encoded = parts[1]
+  if (!encoded || encoded.length > 512) return null
+  try {
+    const id = decodeURIComponent(encoded)
+    return id && !/[\u0000-\u001f\u007f/\\]/u.test(id) ? id : null
+  } catch {
+    return null
+  }
 }
 
 /**

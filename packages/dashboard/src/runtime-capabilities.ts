@@ -2,7 +2,7 @@ import type { RuntimeCapabilities, RuntimeCapabilitiesPayload } from '@agent-ker
 import { useEffect, useState } from 'react'
 import { resolveHostEndpoint } from './host-endpoint.js'
 
-const SAFE_CAPABILITIES: RuntimeCapabilities = { agent: true, workspace: true }
+const SAFE_CAPABILITIES: RuntimeCapabilities = { agent: true, workspace: true, operations: false, artifacts: false, pipeline: false }
 export type RuntimeDeploymentState = { capabilities: RuntimeCapabilities; mode: RuntimeCapabilitiesPayload['mode'] | null; loaded: boolean; unauthorized?: boolean; error?: string }
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -10,7 +10,7 @@ type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respons
 function isCapabilities(value: unknown): value is RuntimeCapabilities {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
-  return ['agent', 'workspace'].every((key) => typeof candidate[key] === 'boolean')
+  return ['agent', 'workspace', 'operations', 'artifacts', 'pipeline'].every((key) => typeof candidate[key] === 'boolean')
 }
 
 function isPayload(value: unknown): value is RuntimeCapabilitiesPayload {

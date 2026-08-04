@@ -131,13 +131,6 @@ function inferKind(path: string): string {
   if (inPath(path, 'rl-tasks')) return 'rl_task_pool'
   if (inPath(path, 'rl-adapters')) return 'rl_adapter'
   if (inPath(path, 'rollouts')) return 'rl_rollout_sidecar'
-  if (inPath(path, 'trials')) return 'eval_trial'
-  if (path.endsWith('/summary.json')) return 'eval_summary'
-  if (path === 'worker-plan.json' || path.endsWith('/worker-plan.json')) return 'eval_worker_plan'
-  if (path === 'registry/run-index.json' || path.endsWith('/registry/run-index.json')) return 'eval_run_registry'
-  if (path === 'progress.json' || path.endsWith('/progress.json')) return 'eval_progress'
-  if (path.endsWith('/scores.json')) return 'eval_score'
-  if (inPath(path, 'judge') || path.endsWith('/judge-trace.json')) return 'eval_judge'
   if (path.endsWith('/profile.json')) return 'profile'
   if (path.endsWith('/reliability-audit.json')) return 'reliability_audit'
   if (path.endsWith('/reliability-chaos.json')) return 'reliability_chaos'
@@ -145,12 +138,10 @@ function inferKind(path: string): string {
   if (path.endsWith('/crash-kill-report.json')) return 'reliability_crash_kill'
   if (path.endsWith('/tool-catalog-diff.json')) return 'tool_catalog_diff'
   if (path.endsWith('/executor-capabilities.json')) return 'executor_capabilities'
-  if (path.endsWith('/regression-gate.json')) return 'eval_regression_gate'
   if (path.endsWith('/memory-index.json')) return 'memory_index'
   if (path.endsWith('/memory-retrieval.json') || (inPath(path, 'memory-retrieval'))) return 'memory_retrieval'
   if (path.endsWith('/subagent-graph.json')) return 'subagent_graph'
   if (inPath(path, 'subagent-policies')) return 'subagent_policy'
-  if (path.endsWith('/eval-comparison.json')) return 'eval_comparison'
   if (path.endsWith('.diff') || path.endsWith('.patch')) return 'diff'
   if (path.endsWith('.jsonl')) return 'jsonl_log'
   if (path.endsWith('.log')) return 'log'
@@ -240,8 +231,6 @@ export type PruneArtifactsReport = {
 
 const PROTECTED_PATH_MATCHERS: Array<{ match: (path: string) => boolean; reason: string }> = [
   { match: (p) => p === 'artifact-prune.json' || p.endsWith('/artifact-prune.json'), reason: 'prune_report' },
-  { match: (p) => p === 'registry/run-index.json' || p.endsWith('/registry/run-index.json'), reason: 'run_registry' },
-  { match: (p) => p === 'worker-plan.json' || p.endsWith('/worker-plan.json'), reason: 'worker_plan' },
 ]
 
 export async function pruneArtifacts(

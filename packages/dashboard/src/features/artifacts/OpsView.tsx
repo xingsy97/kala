@@ -11,7 +11,7 @@ import {
 import { asRecord, isOpsArtifactKind, opsKindOrder } from './artifact-model.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
 
-export function OpsView(): JSX.Element {
+export function OpsView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
   const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()
   const [rows, setRows] = useState<readonly OpsArtifactRow[]>([])
   const [rowsError, setRowsError] = useState<string | null>(null)
@@ -50,7 +50,7 @@ export function OpsView(): JSX.Element {
           onArtifactActionComplete={reload}
         />
       </div>
-      <ArtifactContentDialog request={artifactDetail} onOpenChange={(nextOpen) => !nextOpen && setArtifactDetail(null)} />
+      <ArtifactContentDialog request={artifactDetail} onOpenChange={(nextOpen) => !nextOpen && setArtifactDetail(null)} onOpenSession={onOpenSession} />
     </>
   )
 }

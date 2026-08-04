@@ -1381,16 +1381,25 @@ export type DeploymentMode = 'standalone' | 'saas'
 export type RuntimeCapabilities = {
   agent: boolean
   workspace: boolean
+  operations: boolean
+  artifacts: boolean
+  pipeline: boolean
 }
 
 export const FULL_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   agent: true,
   workspace: true,
+  operations: true,
+  artifacts: true,
+  pipeline: true,
 }
 
 export const SAAS_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   agent: true,
   workspace: true,
+  operations: true,
+  artifacts: true,
+  pipeline: true,
 }
 
 export type RuntimeCapabilitiesPayload = {

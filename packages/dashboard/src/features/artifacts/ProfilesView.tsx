@@ -8,7 +8,7 @@ import {
 } from './product-artifact-views.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
 
-export function ProfilesView(): JSX.Element {
+export function ProfilesView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
   const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()
   const [rows, setRows] = useState<readonly ProfileRow[]>([])
   const [rowsError, setRowsError] = useState<string | null>(null)
@@ -42,6 +42,7 @@ export function ProfilesView(): JSX.Element {
         error={error ?? rowsError}
         loading={loading}
         onArtifactActionComplete={reload}
+        onOpenSession={onOpenSession}
       />
     </div>
   )

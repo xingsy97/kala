@@ -6,11 +6,11 @@ describe('loadRuntimeDeployment', () => {
   it('accepts a valid authoritative payload', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       mode: 'saas',
-      capabilities: { agent: true, workspace: true },
+      capabilities: { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true },
     }), { status: 200 }))
     await expect(loadRuntimeDeployment('http://host', undefined, fetcher)).resolves.toEqual({
       mode: 'saas', loaded: true,
-      capabilities: { agent: true, workspace: true },
+      capabilities: { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true },
     })
   })
 
@@ -23,7 +23,7 @@ describe('loadRuntimeDeployment', () => {
     expect(result).toEqual({
       mode: null,
       loaded: true,
-      capabilities: { agent: true, workspace: true },
+      capabilities: { agent: true, workspace: true, operations: false, artifacts: false, pipeline: false },
       ...(error ? { error } : {}),
     })
   })
@@ -32,7 +32,7 @@ describe('loadRuntimeDeployment', () => {
     const fetcher = vi.fn().mockResolvedValue(new Response('{}', { status: 401 }))
     await expect(loadRuntimeDeployment('http://host', undefined, fetcher)).resolves.toEqual({
       mode: 'saas', loaded: true, unauthorized: true,
-      capabilities: { agent: true, workspace: true },
+      capabilities: { agent: true, workspace: true, operations: false, artifacts: false, pipeline: false },
     })
   })
 })

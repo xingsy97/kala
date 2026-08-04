@@ -14,6 +14,7 @@ import {
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { JsonBlock } from '../../components/ui/json-block.js'
 import { arrayField, arrayLength, asRecord, booleanField, formatBytes, formatBytesMetric, formatConfidence, formatDurationMetric, formatInteger, numberField, stringField } from './artifact-model.js'
+import { artifactRequest, downloadArtifact } from './artifact-client.js'
 
 export type ArtifactManifestEntry = {
   path: string
@@ -190,11 +191,13 @@ export function ArtifactInventory({
   kindRows,
   error,
   loading,
+  onOpenArtifact,
 }: {
   manifest: ArtifactManifest | null
   kindRows: readonly [string, number][]
   error: string | null
   loading: boolean
+  onOpenArtifact(request: ArtifactDetailRequest): void
 }): JSX.Element {
   const { t } = useTranslation()
   return (
@@ -234,12 +237,12 @@ export function ArtifactInventory({
               <>
               <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="artifact-inventory-mobile-list">
                 {manifest.entries.map((entry) => (
-                  <div key={entry.path} className="min-w-0 px-3 py-2">
+                  <button key={entry.path} type="button" onClick={() => onOpenArtifact({ path: entry.path, label: entry.path })} className="block w-full min-w-0 px-3 py-2 text-left hover:bg-muted/40">
                     <div className="truncate font-mono text-xs" title={entry.path}>{entry.path}</div>
                     <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
                       <span className="truncate">{entry.kind}</span><span className="flex-none">{formatBytes(entry.bytes)}</span><span className="ml-auto flex-none">{entry.sha256 ? entry.sha256.slice(0, 8) : t('artifacts.inventory.hashSkipped')}</span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
               <ScrollArea className="hidden h-full rounded-md border border-border/50 md:block">
@@ -251,7 +254,7 @@ export function ArtifactInventory({
                     <div>{t('artifacts.inventory.integrity')}</div>
                   </div>
                   {manifest.entries.map((entry) => (
-                    <div key={entry.path} className="grid grid-cols-[1.4fr_150px_100px_170px] gap-3 px-3 py-2">
+                    <button key={entry.path} type="button" onClick={() => onOpenArtifact({ path: entry.path, label: entry.path })} className="grid w-full grid-cols-[1.4fr_150px_100px_170px] gap-3 px-3 py-2 text-left hover:bg-muted/40">
                       <div className="min-w-0">
                         <div className="truncate font-mono text-[11px]" title={entry.path}>{entry.path}</div>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">{entry.mediaType}</div>
@@ -265,7 +268,7 @@ export function ArtifactInventory({
                           <span title={entry.hashSkippedReason}>{t('artifacts.inventory.hashSkipped')}</span>
                         )}
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </ScrollArea>
@@ -363,7 +366,7 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
       else payload[field.key] = raw
     }
     try {
-      const res = await fetch('/enhancement/action', {
+      const res = await artifactRequest('/enhancement/action', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
@@ -598,9 +601,11 @@ const opsActionConfigs: readonly EnhancementActionConfig[] = [
 export function ArtifactContentDialog({
   request,
   onOpenChange,
+  onOpenSession,
 }: {
   request: ArtifactDetailRequest | null
   onOpenChange(open: boolean): void
+  onOpenSession?(sessionId: string): void
 }): JSX.Element {
   const { t } = useTranslation()
   const [content, setContent] = useState<ArtifactContentResponse | null>(null)
@@ -635,10 +640,11 @@ export function ArtifactContentDialog({
           <DialogTitle>{t('artifacts.detail.title')}</DialogTitle>
           <DialogDescription className="truncate font-mono text-xs">{request?.label ?? ''}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 p-3">
+        <div className="flex min-h-0 flex-1 flex-col p-3">
           {loading ? <div className="text-xs text-muted-foreground">{t('artifacts.detail.loading')}</div> : null}
           {error ? <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
           {content ? <ArtifactBody content={content} /> : null}
+          {request ? <div className="mt-3 flex flex-wrap gap-2"><Button variant="outline" onClick={() => void downloadArtifact(request.path)}>{t('artifacts.detail.download')}</Button>{onOpenSession && sessionIdFromArtifact(content?.body, request.path) ? <Button variant="outline" onClick={() => onOpenSession(sessionIdFromArtifact(content?.body, request.path)!)}>{t('artifacts.detail.openSession')}</Button> : null}</div> : null}
         </div>
       </DialogContent>
     </Dialog>
@@ -662,12 +668,14 @@ export function ProfilesView({
   error,
   loading,
   onArtifactActionComplete,
+  onOpenSession,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly ProfileRow[]
   error: string | null
   loading: boolean
   onArtifactActionComplete(): void
+  onOpenSession?(sessionId: string): void
 }): JSX.Element {
   const { t } = useTranslation()
   const totals = rows.reduce((acc, row) => {
@@ -704,7 +712,7 @@ export function ProfilesView({
           <>
           <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="profiles-mobile-list">
             {rows.map((row) => (
-              <div key={row.path} className="min-w-0 px-3 py-2">
+              <div key={row.path} className="min-w-0 px-3 py-2" role={row.profile.sessionId && onOpenSession ? 'button' : undefined} tabIndex={row.profile.sessionId && onOpenSession ? 0 : undefined} onClick={() => row.profile.sessionId && onOpenSession?.(row.profile.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && row.profile.sessionId) onOpenSession?.(row.profile.sessionId) }}>
                 <div className="truncate font-mono text-xs">{row.profile.sessionId ?? row.path}</div>
                 <div className="mt-1 truncate text-[11px] text-muted-foreground">{(row.profile.models ?? []).join(', ') || t('artifacts.fallback.unknown')}</div>
                 <div className="mt-1 grid grid-cols-3 gap-2 font-mono text-[11px]"><span>LLM {row.profile.llmCalls ?? 0}</span><span>Tools {row.profile.toolCalls ?? 0}</span><span className="text-right">{formatInteger((row.profile.totalInputTokens ?? 0) + (row.profile.totalOutputTokens ?? 0))} tok</span></div>
@@ -725,7 +733,7 @@ export function ProfilesView({
                 <div>{t('artifacts.profiles.columns.p95Ttft')}</div>
               </div>
               {rows.map((row) => (
-                <div key={row.path} className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px] gap-3 px-3 py-2">
+                <div key={row.path} className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px] gap-3 px-3 py-2" role={row.profile.sessionId && onOpenSession ? 'button' : undefined} tabIndex={row.profile.sessionId && onOpenSession ? 0 : undefined} onClick={() => row.profile.sessionId && onOpenSession?.(row.profile.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && row.profile.sessionId) onOpenSession?.(row.profile.sessionId) }}>
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px]">{row.profile.sessionId ?? row.path}</div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path} · {(row.profile.models ?? []).join(', ') || t('artifacts.fallback.unknown')} · {t('artifacts.fallback.missing')} {row.profile.llmTraceMissingCalls ?? 0}</div>
@@ -755,12 +763,14 @@ export function MemoryView({
   error,
   loading,
   onArtifactActionComplete,
+  onOpenSession,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly MemoryIndexRow[]
   error: string | null
   loading: boolean
   onArtifactActionComplete(): void
+  onOpenSession?(sessionId: string): void
 }): JSX.Element {
   const { t } = useTranslation()
   const entries = rows.flatMap((row) => (row.index.entries ?? []).map((entry) => ({ row, entry })))
@@ -802,7 +812,7 @@ export function MemoryView({
           <>
           <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="memory-mobile-list">
             {entries.map(({ row, entry }, index) => (
-              <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="min-w-0 px-3 py-2">
+              <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="min-w-0 px-3 py-2" role={entry.sessionId && onOpenSession ? 'button' : undefined} tabIndex={entry.sessionId && onOpenSession ? 0 : undefined} onClick={() => entry.sessionId && onOpenSession?.(entry.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && entry.sessionId) onOpenSession?.(entry.sessionId) }}>
                 <div className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.key ?? t('artifacts.fallback.unknown')}</span><MemoryStatus status={entry.status} /></div>
                 <div className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{entry.description ?? entry.name ?? '-'}</div>
                 <div className="mt-1 flex min-w-0 gap-2 font-mono text-[11px] text-muted-foreground"><span>{entry.scope ?? t('artifacts.fallback.unknown')}</span><span>{formatConfidence(entry.confidence)}</span><span className="ml-auto max-w-[50%] truncate" title={entry.source ?? entry.path}>{entry.source ?? entry.path ?? '-'}</span></div>
@@ -821,7 +831,7 @@ export function MemoryView({
                 <div>{t('artifacts.memory.columns.provenance')}</div>
               </div>
               {entries.map(({ row, entry }, index) => (
-                <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 px-3 py-2">
+                <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 px-3 py-2" role={entry.sessionId && onOpenSession ? 'button' : undefined} tabIndex={entry.sessionId && onOpenSession ? 0 : undefined} onClick={() => entry.sessionId && onOpenSession?.(entry.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && entry.sessionId) onOpenSession?.(entry.sessionId) }}>
                   <div className="font-mono text-[11px]">{entry.scope ?? t('artifacts.fallback.unknown')}</div>
                   <MemoryStatus status={entry.status} />
                   <div className="min-w-0">
@@ -1057,8 +1067,18 @@ function Stat({ label, value }: { label: string; value: string }): JSX.Element {
 
 
 export async function fetchArtifactContent(path: string): Promise<ArtifactContentResponse> {
-  const res = await fetch(`/artifacts/content?path=${encodeURIComponent(path)}`, { cache: 'no-store' })
+  const res = await artifactRequest(`/artifacts/content?path=${encodeURIComponent(path)}`, { cache: 'no-store' })
   if (res.ok) return (await res.json()) as ArtifactContentResponse
   const body = await res.json().catch(() => null) as { error?: string } | null
   throw new Error(body?.error ?? `artifact content request failed: ${res.status}`)
+}
+
+export function sessionIdFromArtifact(body: unknown, path: string): string | undefined {
+  const record = asRecord(body)
+  for (const key of ['sessionId', 'session_id']) {
+    const value = stringField(record, key)
+    if (value) return value
+  }
+  const match = path.match(/(?:^|\/)sessions\/([^/]+)(?:\/|$)/u)
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined
 }

@@ -8,7 +8,7 @@ import {
 } from './product-artifact-views.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
 
-export function MemoryView(): JSX.Element {
+export function MemoryView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
   const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()
   const [rows, setRows] = useState<readonly MemoryIndexRow[]>([])
   const [rowsError, setRowsError] = useState<string | null>(null)
@@ -42,6 +42,7 @@ export function MemoryView(): JSX.Element {
         error={error ?? rowsError}
         loading={loading}
         onArtifactActionComplete={reload}
+        onOpenSession={onOpenSession}
       />
     </div>
   )

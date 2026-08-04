@@ -1168,6 +1168,8 @@ export const resources = {
         detail: {
           title: 'Artifact Detail',
           loading: 'Loading artifact...',
+          download: 'Download',
+          openSession: 'Open Session',
         },
         actionPanel: {
           hide: 'hide',
@@ -2514,6 +2516,8 @@ export const resources = {
         detail: {
           title: '产物详情',
           loading: '正在加载产物...',
+          download: '下载',
+          openSession: '打开 Session',
         },
         actionPanel: {
           hide: '隐藏',

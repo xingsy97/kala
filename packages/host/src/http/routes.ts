@@ -300,7 +300,7 @@ export function attachJsonRoutes(
       claimRoute(req)
       sendJson(req, res, {
         mode: payloads.deploymentMode ?? 'standalone',
-        capabilities: payloads.capabilities ?? { agent: true, workspace: true },
+        capabilities: payloads.capabilities ?? { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true },
       })
       return
     }
@@ -757,6 +757,26 @@ export function attachJsonRoutes(
       }
       void readArtifactContent(url, payloads.artifactRootDir)
         .then((content) => sendJson(req, res, content))
+        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/artifacts/download') {
+      claimRoute(req)
+      if (!payloads.artifactRootDir) {
+        sendError(res, 404, 'artifact capture is not configured')
+        return
+      }
+      void resolveArtifactFile(url, payloads.artifactRootDir)
+        .then(({ abs, name, size, mediaType }) => {
+          res.writeHead(200, {
+            'content-type': mediaType,
+            'content-length': String(size),
+            'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+            'x-content-type-options': 'nosniff',
+          })
+          if (req.method === 'HEAD') res.end()
+          else createReadStream(abs).pipe(res)
+        })
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
       return
     }
@@ -1228,7 +1248,7 @@ class HttpRouteError extends Error {
   }
 }
 
-async function readArtifactContent(url: string, rootDir: string): Promise<{ path: string; mediaType: string; body: unknown }> {
+async function resolveArtifactFile(url: string, rootDir: string): Promise<{ abs: string; rel: string; name: string; size: number; mediaType: string }> {
   const parsed = new URL(url, 'http://x')
   const requested = parsed.searchParams.get('path') ?? ''
   if (!requested || requested.includes('\0')) throw new HttpRouteError(400, 'missing artifact path')
@@ -1241,8 +1261,13 @@ async function readArtifactContent(url: string, rootDir: string): Promise<{ path
     throw err
   })
   if (!st.isFile()) throw new HttpRouteError(400, 'artifact path is not a file')
-  if (st.size > MAX_ARTIFACT_CONTENT_BYTES) throw new HttpRouteError(413, 'artifact is too large to read inline')
-  const mediaType = MIME[extname(abs).toLowerCase()] ?? 'text/plain; charset=utf-8'
+  return { abs, rel, name: rel.split(sep).at(-1) ?? 'artifact', size: st.size, mediaType: MIME[extname(abs).toLowerCase()] ?? 'application/octet-stream' }
+}
+
+async function readArtifactContent(url: string, rootDir: string): Promise<{ path: string; mediaType: string; body: unknown }> {
+  const { abs, rel, size, mediaType } = await resolveArtifactFile(url, rootDir)
+  if (size > MAX_ARTIFACT_CONTENT_BYTES) throw new HttpRouteError(413, 'artifact is too large to read inline')
+  if (!(mediaType.startsWith('application/json') || mediaType.startsWith('text/'))) throw new HttpRouteError(415, 'artifact media type cannot be previewed')
   const raw = await readFile(abs, 'utf8')
   if (mediaType.startsWith('application/json')) {
     return { path: rel.split(sep).join('/'), mediaType, body: JSON.parse(raw) as unknown }

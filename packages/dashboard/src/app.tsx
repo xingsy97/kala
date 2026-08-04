@@ -24,6 +24,7 @@ import type {
 import { isSessionResting } from '@agent-kernel/shared'
 
 import { Button, buttonVariants } from './components/ui/button.js'
+import { ProductState } from './components/ui/product-state.js'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -75,6 +76,7 @@ import { useSessionTabs } from './session-tabs.js'
 import { AppShellNav } from './app-shell/AppShellNav.js'
 import { useAppSection, useSessionDeepLink, type AppSection } from './app-shell/section.js'
 import { useRuntimeDeployment } from './runtime-capabilities.js'
+import { configureArtifactClient } from './features/artifacts/artifact-client.js'
 import { useAuthSession } from './auth-session.js'
 // Page-level lazy loading: the app boots into the "agent" section by default,
 // so the five other top-level pages plus SettingsDialog are pulled in only
@@ -378,6 +380,10 @@ export function App(): JSX.Element {
       window.history.replaceState(null, '', next)
     }
   }, [config])
+
+  useEffect(() => {
+    configureArtifactClient({ host: hostEndpoint.url, ...(config.token ? { token: config.token } : {}) })
+  }, [config.token, hostEndpoint.url])
 
   useEffect(() => {
     const refresh = () => setHostEndpoint(resolveHostEndpoint())
@@ -1599,21 +1605,21 @@ export function App(): JSX.Element {
       <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
       {section === 'operations' ? (
-        <Suspense fallback={<PageLoadingFallback />}>
-          <OperationsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
-        </Suspense>
+        runtimeCapabilities.operations ? <Suspense fallback={<PageLoadingFallback />}>
+          <OperationsPage onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }} />
+        </Suspense> : <CapabilityUnavailable title="Operations unavailable" />
       ) : section === 'artifacts' ? (
-        <Suspense fallback={<PageLoadingFallback />}>
-          <ArtifactsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
-        </Suspense>
+        runtimeCapabilities.artifacts ? <Suspense fallback={<PageLoadingFallback />}>
+          <ArtifactsPage onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }} />
+        </Suspense> : <CapabilityUnavailable title="Product outputs unavailable" />
       ) : section === 'docs' ? (
         <Suspense fallback={<PageLoadingFallback />}>
           <DocsPage />
         </Suspense>
       ) : section === 'pipeline' ? (
-        <Suspense fallback={<PageLoadingFallback />}>
+        runtimeCapabilities.pipeline ? <Suspense fallback={<PageLoadingFallback />}>
           <PipelinePage />
-        </Suspense>
+        </Suspense> : <CapabilityUnavailable title="Pipeline unavailable" />
       ) : section === 'memo' ? (
         <Suspense fallback={<PageLoadingFallback />}>
           <MemoPage />
@@ -2458,6 +2464,10 @@ type Config = {
   sessionId: string | null
   explicit: boolean
   token?: string
+}
+
+function CapabilityUnavailable({ title }: { title: string }): JSX.Element {
+  return <div className="grid h-full place-items-center p-6"><ProductState kind="degraded" title={title} description="The configured Host does not advertise this product capability." /></div>
 }
 
 function readInitialConfig(): Config {
