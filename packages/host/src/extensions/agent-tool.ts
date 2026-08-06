@@ -45,6 +45,43 @@ type ActiveSubAgent = {
   cancelReason?: string
 }
 
+type TimeoutReason = 'ordinary-idle' | 'tool-idle' | 'absolute-deadline' | 'turn-limit'
+type TimeoutObservation = { cursor: number; status: AgentState['status']; requestedToolTimeoutMs?: number }
+type TimeoutMonitor = { last: TimeoutObservation; lastActivityAt: number; graceStartedAt?: number; reason?: TimeoutReason }
+
+export function evaluateSubAgentTimeout(input: {
+  now: number
+  startedAt: number
+  observation: TimeoutObservation
+  monitor: TimeoutMonitor
+  idleTimeoutMs: number
+  toolIdleTimeoutMs: number
+  absoluteTimeoutMs: number
+  gracePeriodMs: number
+  turnCount?: number
+  maxTurns?: number
+}): { monitor: TimeoutMonitor; action: 'continue' | 'cancel'; reason?: TimeoutReason } {
+  const progressed = input.observation.cursor !== input.monitor.last.cursor || input.observation.status !== input.monitor.last.status
+  let monitor: TimeoutMonitor = progressed
+    ? { last: input.observation, lastActivityAt: input.now, ...(['absolute-deadline', 'turn-limit'].includes(input.monitor.reason ?? '') ? { graceStartedAt: input.monitor.graceStartedAt, reason: input.monitor.reason } : {}) }
+    : input.monitor
+  if (monitor.graceStartedAt !== undefined) {
+    return input.now - monitor.graceStartedAt >= input.gracePeriodMs
+      ? { monitor, action: 'cancel', reason: monitor.reason }
+      : { monitor, action: 'continue', reason: monitor.reason }
+  }
+  const absoluteExpired = input.now - input.startedAt >= input.absoluteTimeoutMs
+  const turnLimitReached = input.maxTurns !== undefined && (input.turnCount ?? 0) >= input.maxTurns
+  const toolRunning = input.observation.status === 'executing_tools'
+  const toolDeadlineWithGrace = (input.observation.requestedToolTimeoutMs ?? 0) + 2 * 60_000
+  const idleLimit = toolRunning ? Math.max(input.toolIdleTimeoutMs, toolDeadlineWithGrace) : input.idleTimeoutMs
+  const idleExpired = input.now - monitor.lastActivityAt >= idleLimit
+  if (!absoluteExpired && !turnLimitReached && !idleExpired) return { monitor, action: 'continue' }
+  const reason: TimeoutReason = absoluteExpired ? 'absolute-deadline' : turnLimitReached ? 'turn-limit' : toolRunning ? 'tool-idle' : 'ordinary-idle'
+  monitor = { ...monitor, graceStartedAt: input.now, reason }
+  return { monitor, action: input.gracePeriodMs === 0 ? 'cancel' : 'continue', reason }
+}
+
 const activeSubAgents = new Map<string, ActiveSubAgent>()
 
 function activeKey(parentSessionId: string, parentCallId: string): string {
@@ -224,19 +261,46 @@ export async function runAgentTool(
     deps.models.set(child.sessionId, model)
   }
   let timedOut = false
-  const timeoutHandle = policy.timeoutMs !== undefined
-    ? setTimeout(() => {
-        timedOut = true
-        void interruptSubAgent(
-          deps,
-          aborts,
-          parentSessionId,
-          effect.callId,
-          child.sessionId,
-          `sub-agent exceeded timeoutMs=${policy.timeoutMs}`,
-        )
-      }, policy.timeoutMs)
-    : undefined
+  let timeoutReason: TimeoutReason | undefined
+  const startedAtMs = startedAt.getTime()
+  const initialState = deps.store.get(child.sessionId)?.state ?? child.state
+  let timeoutMonitor: TimeoutMonitor = {
+    last: { cursor: initialState.cursor, status: initialState.status },
+    lastActivityAt: startedAtMs,
+  }
+  const timeoutHandle = setInterval(() => {
+    const state = deps.store.get(child.sessionId)?.state
+    if (!state || active.cancelled || state.status === 'done' || state.status === 'error') return
+    const evaluated = evaluateSubAgentTimeout({
+      now: Date.now(),
+      startedAt: startedAtMs,
+      observation: {
+        cursor: state.cursor,
+        status: state.status,
+        ...(state.status === 'executing_tools' ? { requestedToolTimeoutMs: requestedToolTimeoutMs(state) } : {}),
+      },
+      monitor: timeoutMonitor,
+      idleTimeoutMs: policy.idleTimeoutMs!,
+      toolIdleTimeoutMs: policy.toolIdleTimeoutMs!,
+      absoluteTimeoutMs: policy.timeoutMs!,
+      gracePeriodMs: policy.gracePeriodMs!,
+      turnCount: assistantTurnCount(state),
+      maxTurns: policy.maxTurns,
+    })
+    timeoutMonitor = evaluated.monitor
+    if (evaluated.action !== 'cancel' || timedOut) return
+    timedOut = true
+    timeoutReason = evaluated.reason
+    void interruptSubAgent(
+      deps,
+      aborts,
+      parentSessionId,
+      effect.callId,
+      child.sessionId,
+      `sub-agent ${timeoutReason ?? 'timeout'} exceeded; absoluteTimeoutMs=${policy.timeoutMs}; idleTimeoutMs=${policy.idleTimeoutMs}; toolIdleTimeoutMs=${policy.toolIdleTimeoutMs}; gracePeriodMs=${policy.gracePeriodMs}`,
+    )
+  }, 1_000)
+  timeoutHandle.unref?.()
   let dispatchError: string | undefined
   try {
     try {
@@ -251,7 +315,7 @@ export async function runAgentTool(
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err)
     } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle)
+      clearInterval(timeoutHandle)
       if (model && isSettableModelResolver(deps.models)) {
         if (priorModel) deps.models.set(child.sessionId, priorModel)
         else deps.models.delete(child.sessionId)
@@ -267,20 +331,22 @@ export async function runAgentTool(
 
   if (active.cancelled) {
     const error = active.cancelReason ?? 'sub-agent interrupted'
+    const partial = final ? finalAssistantText(final) : ''
     deps.broadcast.onSubAgentFinished?.({
       parentSessionId,
       parentCallId: effect.callId,
       childSessionId: child.sessionId,
-      status: 'cancelled',
+      status: timedOut && partial ? 'timed_out_with_partial_result' : 'cancelled',
       turns,
       durationMs,
       finishedAt: finishedAt.toISOString(),
       error,
     })
-    const partial = final ? finalAssistantText(final) : ''
-    return timedOut
-      ? failEnvelope(child.sessionId, agentType, `timeout: ${error}${partial ? `; partial=${partial.slice(0, 500)}` : ''}`, turns, durationMs)
-      : cancelEnvelope(child.sessionId, agentType, error, turns, durationMs)
+    return timedOut && partial
+      ? partialTimeoutEnvelope(child.sessionId, agentType, partial, timeoutReason ?? 'absolute-deadline', turns, durationMs)
+      : timedOut
+        ? failEnvelope(child.sessionId, agentType, `timeout: ${error}`, turns, durationMs)
+        : cancelEnvelope(child.sessionId, agentType, error, turns, durationMs)
   }
 
   if (dispatchError || !final || final.status !== 'done') {
@@ -313,6 +379,22 @@ export async function runAgentTool(
   return okEnvelope(child.sessionId, agentType, finalAssistantText(final), turns, durationMs)
 }
 
+function assistantTurnCount(state: AgentState): number {
+  return state.messages.filter((message) => message.role === 'assistant').length
+}
+
+function requestedToolTimeoutMs(state: AgentState): number | undefined {
+  if (state.status !== 'executing_tools') return undefined
+  let longest = 0
+  for (const call of state.pendingCalls) {
+    const seconds = typeof call.input.timeout_seconds === 'number' ? call.input.timeout_seconds * 1_000 : 0
+    const millis = typeof call.input.timeout_ms === 'number' ? call.input.timeout_ms : 0
+    const camelMillis = typeof call.input.timeoutMs === 'number' ? call.input.timeoutMs : 0
+    longest = Math.max(longest, seconds, millis, camelMillis)
+  }
+  return Number.isFinite(longest) && longest > 0 ? longest : undefined
+}
+
 function agentTypeOf(effect: CallToolEffect): string | undefined {
   const raw = (effect.input as Record<string, unknown>)['agent_type']
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined
@@ -330,6 +412,18 @@ function okEnvelope(
     ok: true,
     content: `${header}\n<result>\n${escapeEnvelopeBody(resultText)}\n</result>\n</sub_agent>`,
   }
+}
+
+function partialTimeoutEnvelope(
+  childSessionId: string,
+  agentType: string | undefined,
+  partial: string,
+  reason: TimeoutReason,
+  turns: number,
+  durationMs: number,
+): { ok: true; content: string } {
+  const header = envelopeHeader(childSessionId, agentType, 'timed_out_with_partial_result', turns, durationMs)
+  return { ok: true, content: `${header}\n<warning>Sub-agent reached ${reason}; returning verified partial work.</warning>\n<result>\n${escapeEnvelopeBody(partial)}\n</result>\n</sub_agent>` }
 }
 
 function failEnvelope(
@@ -363,7 +457,7 @@ function cancelEnvelope(
 function envelopeHeader(
   childSessionId: string,
   agentType: string | undefined,
-  status: 'completed' | 'failed' | 'cancelled',
+  status: 'completed' | 'failed' | 'cancelled' | 'timed_out_with_partial_result',
   turns: number,
   durationMs: number,
 ): string {

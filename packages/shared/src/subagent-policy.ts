@@ -4,7 +4,9 @@ export type SubAgentPolicyReasonCode =
   | 'role_template_applied'
   | 'role_unknown'
   | 'policy_max_turns_capped'
+  | 'policy_max_turns_raised'
   | 'policy_timeout_capped'
+  | 'policy_timeout_raised'
   | 'policy_allowed_tools_intersected'
   | 'policy_max_depth_exceeded'
   | 'policy_max_fanout_exceeded'
@@ -23,7 +25,10 @@ export type SubAgentPolicy = {
   objective?: string
   allowedTools?: readonly string[]
   maxTurns?: number
+  idleTimeoutMs?: number
+  toolIdleTimeoutMs?: number
   timeoutMs?: number
+  gracePeriodMs?: number
   expectedOutput?: string
   /**
    * Depth cap the host is enforcing for this sub-agent call. `resolvedDepth`
@@ -48,36 +53,53 @@ export type SubAgentRoleTemplate = {
   purpose: string
   defaultAllowedTools: readonly string[]
   defaultMaxTurns: number
+  minimumMaxTurns: number
+  maximumMaxTurns: number
+  defaultIdleTimeoutMs: number
+  defaultToolIdleTimeoutMs: number
   defaultTimeoutMs: number
+  minimumTimeoutMs: number
+  maximumTimeoutMs: number
+  defaultGracePeriodMs: number
   defaultExpectedOutput: string
 }
 
 export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRoleTemplate>> = {
   research: {
-    role: 'research',
-    purpose: 'Read files and return a concise report with references.',
+    role: 'research', purpose: 'Read files and return a concise report with references.',
     defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'websearch', 'webfetch', 'todowrite'],
-    defaultMaxTurns: 20,
-    defaultTimeoutMs: 5 * 60_000,
+    defaultMaxTurns: 60, minimumMaxTurns: 25, maximumMaxTurns: 120,
+    defaultIdleTimeoutMs: 20 * 60_000, defaultToolIdleTimeoutMs: 40 * 60_000,
+    defaultTimeoutMs: 90 * 60_000, minimumTimeoutMs: 30 * 60_000, maximumTimeoutMs: 240 * 60_000,
+    defaultGracePeriodMs: 5 * 60_000,
     defaultExpectedOutput: 'Structured summary with file:line references.',
   },
   test: {
-    role: 'test',
-    purpose: 'Run focused tests and report failure causes.',
+    role: 'test', purpose: 'Run focused tests and report failure causes.',
     defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'bash', 'todowrite'],
-    defaultMaxTurns: 25,
-    defaultTimeoutMs: 10 * 60_000,
+    defaultMaxTurns: 80, minimumMaxTurns: 30, maximumMaxTurns: 160,
+    defaultIdleTimeoutMs: 20 * 60_000, defaultToolIdleTimeoutMs: 60 * 60_000,
+    defaultTimeoutMs: 120 * 60_000, minimumTimeoutMs: 45 * 60_000, maximumTimeoutMs: 360 * 60_000,
+    defaultGracePeriodMs: 5 * 60_000,
     defaultExpectedOutput: 'Failing test names, first-failure reasons, and next actions.',
   },
   review: {
-    role: 'review',
-    purpose: 'Inspect the final diff and report risks before answer.',
+    role: 'review', purpose: 'Inspect the final diff and report risks before answer.',
     defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'todowrite'],
-    defaultMaxTurns: 15,
-    defaultTimeoutMs: 3 * 60_000,
+    defaultMaxTurns: 50, minimumMaxTurns: 20, maximumMaxTurns: 100,
+    defaultIdleTimeoutMs: 15 * 60_000, defaultToolIdleTimeoutMs: 30 * 60_000,
+    defaultTimeoutMs: 60 * 60_000, minimumTimeoutMs: 20 * 60_000, maximumTimeoutMs: 180 * 60_000,
+    defaultGracePeriodMs: 3 * 60_000,
     defaultExpectedOutput: 'Ranked list of risks/regressions with file references.',
   },
 }
+
+export const DEFAULT_SUB_AGENT_POLICY = {
+  defaultMaxTurns: 60, minimumMaxTurns: 20, maximumMaxTurns: 120,
+  defaultIdleTimeoutMs: 20 * 60_000, defaultToolIdleTimeoutMs: 45 * 60_000,
+  defaultTimeoutMs: 90 * 60_000, minimumTimeoutMs: 30 * 60_000, maximumTimeoutMs: 240 * 60_000,
+  defaultGracePeriodMs: 5 * 60_000,
+} as const
 
 export function getSubAgentRoleTemplate(role: SubAgentRole | undefined): SubAgentRoleTemplate | undefined {
   return role ? SUB_AGENT_ROLE_TEMPLATES[role] : undefined
@@ -143,20 +165,28 @@ export function resolveSubAgentPolicy({
     }
   }
 
-  const templateMaxTurns = template?.defaultMaxTurns
-  let maxTurns = input?.maxTurns ?? templateMaxTurns
-  if (input?.maxTurns !== undefined && templateMaxTurns !== undefined && input.maxTurns > templateMaxTurns) {
-    maxTurns = templateMaxTurns
+  const bounds = template ?? DEFAULT_SUB_AGENT_POLICY
+  let maxTurns = input?.maxTurns ?? bounds.defaultMaxTurns
+  if (input?.maxTurns !== undefined && input.maxTurns > bounds.maximumMaxTurns) {
+    maxTurns = bounds.maximumMaxTurns
     reasons.push('policy_max_turns_capped')
+  } else if (input?.maxTurns !== undefined && input.maxTurns < bounds.minimumMaxTurns) {
+    maxTurns = bounds.minimumMaxTurns
+    reasons.push('policy_max_turns_raised')
   }
 
-  const templateTimeout = template?.defaultTimeoutMs
-  let timeoutMs = input?.timeoutMs ?? templateTimeout
-  if (input?.timeoutMs !== undefined && templateTimeout !== undefined && input.timeoutMs > templateTimeout) {
-    timeoutMs = templateTimeout
+  let timeoutMs = input?.timeoutMs ?? bounds.defaultTimeoutMs
+  if (input?.timeoutMs !== undefined && input.timeoutMs > bounds.maximumTimeoutMs) {
+    timeoutMs = bounds.maximumTimeoutMs
     reasons.push('policy_timeout_capped')
+  } else if (input?.timeoutMs !== undefined && input.timeoutMs < bounds.minimumTimeoutMs) {
+    timeoutMs = bounds.minimumTimeoutMs
+    reasons.push('policy_timeout_raised')
   }
 
+  const idleTimeoutMs = bounds.defaultIdleTimeoutMs
+  const toolIdleTimeoutMs = bounds.defaultToolIdleTimeoutMs
+  const gracePeriodMs = bounds.defaultGracePeriodMs
   const expectedOutput = input?.expectedOutput ?? template?.defaultExpectedOutput
 
   if (
@@ -182,8 +212,11 @@ export function resolveSubAgentPolicy({
     ...(input?.role ? { role: input.role } : {}),
     ...(input?.objective ? { objective: input.objective } : {}),
     ...(allowedTools ? { allowedTools } : {}),
-    ...(maxTurns !== undefined ? { maxTurns } : {}),
-    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    maxTurns,
+    idleTimeoutMs,
+    toolIdleTimeoutMs,
+    timeoutMs,
+    gracePeriodMs,
     ...(expectedOutput ? { expectedOutput } : {}),
     ...(typeof maxDepth === 'number' && Number.isFinite(maxDepth) ? { maxDepth } : {}),
     ...(typeof parentDepth === 'number' && Number.isFinite(parentDepth) ? { resolvedDepth: parentDepth } : {}),

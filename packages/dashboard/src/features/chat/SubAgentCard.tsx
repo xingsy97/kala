@@ -124,7 +124,7 @@ const SubAgentRow = memo(function SubAgentRow({
   const modelInput = readModel(call)
 
   const seededLifecycle: SubAgentLifecycle | undefined = envelope
-    ? envelope.status === 'completed'
+    ? envelope.status === 'completed' || envelope.status === 'timed_out_with_partial_result'
       ? {
           status: 'completed',
           childSessionId: envelope.sessionId,
@@ -496,8 +496,17 @@ function SubAgentPolicyPanel({
         {policy.maxTurns !== undefined ? (
           <PolicyChip label={t('chat.subAgent.maxTurns')} value={String(policy.maxTurns)} />
         ) : null}
+        {policy.idleTimeoutMs !== undefined ? (
+          <PolicyChip label="idle" value={formatPolicyDuration(policy.idleTimeoutMs)} />
+        ) : null}
+        {policy.toolIdleTimeoutMs !== undefined ? (
+          <PolicyChip label="tool idle" value={formatPolicyDuration(policy.toolIdleTimeoutMs)} />
+        ) : null}
         {policy.timeoutMs !== undefined ? (
-          <PolicyChip label={t('chat.subAgent.timeout')} value={`${Math.round(policy.timeoutMs / 1000)}s`} />
+          <PolicyChip label="absolute" value={formatPolicyDuration(policy.timeoutMs)} />
+        ) : null}
+        {policy.gracePeriodMs !== undefined ? (
+          <PolicyChip label="grace" value={formatPolicyDuration(policy.gracePeriodMs)} />
         ) : null}
         {policy.maxDepth !== undefined ? (
           <PolicyChip
@@ -549,6 +558,11 @@ function SubAgentPolicyPanel({
       ) : null}
     </div>
   )
+}
+
+function formatPolicyDuration(ms: number): string {
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`
+  return `${Math.round(ms / 1000)}s`
 }
 
 function PolicyChip({ label, value }: { label: string; value: string }): JSX.Element {

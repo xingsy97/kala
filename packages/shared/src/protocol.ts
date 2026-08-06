@@ -1005,7 +1005,7 @@ export type ServerSubAgentFinishedEvent = {
   parentSessionId: string
   parentCallId: string
   childSessionId: string
-  status: 'completed' | 'failed' | 'cancelled'
+  status: 'completed' | 'failed' | 'cancelled' | 'timed_out_with_partial_result'
   /** Turn count taken from the child's `state.cursor` on finish (approximate). */
   turns: number
   durationMs: number

@@ -82,6 +82,16 @@ describe('parseSubAgentEnvelope', () => {
     expect(parsed?.body).toBe('<p>hi</p>')
   })
 
+  it('parses a timed-out partial result as usable result text', () => {
+    const raw = '<sub_agent session_id="child-partial" status="timed_out_with_partial_result" turns="12" duration_ms="3000">\n' +
+      '<warning>deadline reached</warning>\n<result>Verified findings so far.</result>\n</sub_agent>'
+    expect(parseSubAgentEnvelope(raw)).toMatchObject({
+      sessionId: 'child-partial',
+      status: 'timed_out_with_partial_result',
+      body: 'Verified findings so far.',
+    })
+  })
+
   it('returns null for legacy pre-envelope content', () => {
     expect(parseSubAgentEnvelope('just a plain string')).toBeNull()
     expect(parseSubAgentEnvelope('')).toBeNull()

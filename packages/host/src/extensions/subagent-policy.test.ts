@@ -8,11 +8,16 @@ import {
 } from '@agent-kernel/shared/enhancement'
 
 describe('resolveSubAgentPolicy', () => {
-  it('returns an empty policy with no reasons when input is undefined', () => {
+  it('applies aggressive no-role defaults when input is undefined', () => {
     const policy = resolveSubAgentPolicy({})
     expect(policy.reasons).toEqual([])
     expect(policy.role).toBeUndefined()
     expect(policy.allowedTools).toBeUndefined()
+    expect(policy.maxTurns).toBe(60)
+    expect(policy.idleTimeoutMs).toBe(20 * 60_000)
+    expect(policy.toolIdleTimeoutMs).toBe(45 * 60_000)
+    expect(policy.timeoutMs).toBe(90 * 60_000)
+    expect(policy.gracePeriodMs).toBe(5 * 60_000)
   })
 
   it('applies the research role template as defaults', () => {
@@ -25,16 +30,16 @@ describe('resolveSubAgentPolicy', () => {
     expect(policy.expectedOutput).toBe(SUB_AGENT_ROLE_TEMPLATES.research.defaultExpectedOutput)
   })
 
-  it('caps caller-supplied maxTurns and timeoutMs at the template ceiling', () => {
+  it('caps caller-supplied maxTurns and timeoutMs at the template maximum', () => {
     const policy = resolveSubAgentPolicy({
       input: {
         role: 'review',
         maxTurns: 999,
-        timeoutMs: 60 * 60_000,
+        timeoutMs: 24 * 60 * 60_000,
       },
     })
-    expect(policy.maxTurns).toBe(SUB_AGENT_ROLE_TEMPLATES.review.defaultMaxTurns)
-    expect(policy.timeoutMs).toBe(SUB_AGENT_ROLE_TEMPLATES.review.defaultTimeoutMs)
+    expect(policy.maxTurns).toBe(SUB_AGENT_ROLE_TEMPLATES.review.maximumMaxTurns)
+    expect(policy.timeoutMs).toBe(SUB_AGENT_ROLE_TEMPLATES.review.maximumTimeoutMs)
     expect(policy.reasons).toContain('policy_max_turns_capped')
     expect(policy.reasons).toContain('policy_timeout_capped')
   })
@@ -67,14 +72,14 @@ describe('resolveSubAgentPolicy', () => {
     expect(policy.reasons).not.toContain('role_template_applied')
   })
 
-  it('preserves explicit values below the template ceilings', () => {
+  it('raises dangerously small explicit values to the role minimum', () => {
     const policy = resolveSubAgentPolicy({
       input: { role: 'test', maxTurns: 5, timeoutMs: 30_000 },
     })
-    expect(policy.maxTurns).toBe(5)
-    expect(policy.timeoutMs).toBe(30_000)
-    expect(policy.reasons).not.toContain('policy_max_turns_capped')
-    expect(policy.reasons).not.toContain('policy_timeout_capped')
+    expect(policy.maxTurns).toBe(SUB_AGENT_ROLE_TEMPLATES.test.minimumMaxTurns)
+    expect(policy.timeoutMs).toBe(SUB_AGENT_ROLE_TEMPLATES.test.minimumTimeoutMs)
+    expect(policy.reasons).toContain('policy_max_turns_raised')
+    expect(policy.reasons).toContain('policy_timeout_raised')
   })
 
   it('records depth cap when parent depth reaches max depth', () => {

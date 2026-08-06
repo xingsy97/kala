@@ -360,7 +360,7 @@ export const ServerSubAgentFinishedEventSchema = z.object({
   parentSessionId: z.string(),
   parentCallId: z.string(),
   childSessionId: z.string(),
-  status: z.enum(['completed', 'failed', 'cancelled']),
+  status: z.enum(['completed', 'failed', 'cancelled', 'timed_out_with_partial_result']),
   turns: z.number().int().nonnegative(),
   durationMs: z.number().nonnegative(),
   finishedAt: z.string(),

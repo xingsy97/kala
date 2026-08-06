@@ -7,7 +7,7 @@
  *   <sub_agent
  *     session_id="…"
  *     agent_type="…"    (optional)
- *     status="completed|failed|cancelled"
+ *     status="completed|failed|cancelled|timed_out_with_partial_result"
  *     turns="N"
  *     duration_ms="N"
  *   >
@@ -25,7 +25,7 @@
 export type SubAgentEnvelope = {
   sessionId: string
   agentType?: string
-  status: 'completed' | 'failed' | 'cancelled'
+  status: 'completed' | 'failed' | 'cancelled' | 'timed_out_with_partial_result'
   turns: number
   durationMs: number
   /** The un-escaped body from `<result>` (completed) or `<error>` (failed). */
@@ -46,10 +46,10 @@ export function parseSubAgentEnvelope(content: string): SubAgentEnvelope | null 
   const sessionId = attrs.session_id
   const status = attrs.status
   if (!sessionId) return null
-  if (status !== 'completed' && status !== 'failed' && status !== 'cancelled') return null
+  if (status !== 'completed' && status !== 'failed' && status !== 'cancelled' && status !== 'timed_out_with_partial_result') return null
   const turns = numeric(attrs.turns)
   const durationMs = numeric(attrs.duration_ms)
-  const bodyMatch = status === 'completed' ? RESULT_RE.exec(trimmed) : ERROR_RE.exec(trimmed)
+  const bodyMatch = status === 'completed' || status === 'timed_out_with_partial_result' ? RESULT_RE.exec(trimmed) : ERROR_RE.exec(trimmed)
   const body = bodyMatch ? unescapeEnvelopeBody(bodyMatch[1] ?? '') : ''
   return {
     sessionId,

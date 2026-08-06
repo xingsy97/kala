@@ -256,7 +256,7 @@ const agentToolset: ToolsetPlugin = {
       purpose: 'Spawn a sub-agent to handle a focused sub-task.',
       whenToUse: ['Delegate bounded investigation, testing, or review.', 'Use when parallel or isolated work would reduce context pressure.'],
       constraints: ['Give a specific objective and expected output.', 'Do not use for trivial single-step tasks.'],
-    }, { type: 'object', properties: { prompt: { type: 'string' }, model: { type: 'string' }, tools: { type: 'array', items: { type: 'string' } }, role: { type: 'string', enum: ['research', 'test', 'review'], description: 'Optional role template. Selects default allowed tools, max turns, timeout, and expected output.' }, objective: { type: 'string' }, max_turns: { type: 'integer', minimum: 1 }, timeout_ms: { type: 'integer', minimum: 1 }, expected_output: { type: 'string' } }, required: ['prompt'] })]
+    }, { type: 'object', properties: { prompt: { type: 'string' }, model: { type: 'string' }, tools: { type: 'array', items: { type: 'string' } }, role: { type: 'string', enum: ['research', 'test', 'review'], description: 'Optional role template. Selects long-running defaults for allowed tools, turns, idle/tool-idle deadlines, absolute deadline, grace, and expected output. Omit timeout_ms for normal work.' }, objective: { type: 'string' }, max_turns: { type: 'integer', minimum: 1 }, timeout_ms: { type: 'integer', minimum: 1 }, expected_output: { type: 'string' } }, required: ['prompt'] })]
   },
 }
 

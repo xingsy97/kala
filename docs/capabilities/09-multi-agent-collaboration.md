@@ -111,13 +111,15 @@ The current implementation has the right primitive:
   action coverage verifies graph export from real session logs.
 - `SubAgentRoleTemplate` / `resolveSubAgentPolicy` in
   `@agent-kernel/shared/enhancement` provide fixed role templates (`research`,
-  `test`, `review`, `benchmark-triage`) with default allowed tools, max turns,
-  timeouts, and expected output. `resolveSubAgentPolicy` intersects caller
-  input with the role template and with parent-available tools, and reports
-  low-cardinality reason codes (`role_template_applied`, `role_unknown`,
-  `policy_max_turns_capped`, `policy_timeout_capped`,
-  `policy_allowed_tools_intersected`, `policy_max_depth_exceeded`,
-  `policy_max_fanout_exceeded`).
+  `test`, `review`) with default allowed tools, enforced max turns, ordinary
+  idle, active-tool idle, absolute deadline, grace period, and expected output.
+  Aggressive defaults are documented in
+  [`subagent-timeout-policy.md`](../architecture/subagent-timeout-policy.md).
+  `resolveSubAgentPolicy` intersects caller input with the role template and
+  parent-available tools. Undersized turn/deadline requests are raised, oversized
+  requests are capped, and low-cardinality reason codes include
+  `policy_max_turns_raised`, `policy_max_turns_capped`,
+  `policy_timeout_raised`, and `policy_timeout_capped`.
 - Host-level depth and fan-out caps are enforced in `runAgentTool`:
   `AgentConfig.maxAgentDepth` (default 3) walks the `parentSessionId` chain at
   spawn time; `AgentConfig.maxAgentFanOut` (default 4) counts live sibling
@@ -128,12 +130,14 @@ The current implementation has the right primitive:
   returns a failure envelope (`agent depth exceeded` / `agent fan-out exceeded`)
   without creating a child session.
 - The host `agent` tool schema accepts optional `role`, `objective`,
-  `max_turns`, `timeout_ms`, and `expected_output`. When set, `runAgentTool`
-  resolves the policy, filters the child config to the effective allowed tools,
-  applies a `timeoutMs` guard that interrupts the child sub-agent on expiry,
-  and persists a `subagent-policies/<parentSessionId>/<callId>.json` artifact
-  under the artifact root, with `subagent_policy` inferred as the artifact
-  manifest kind.
+  `max_turns`, `timeout_ms`, and `expected_output`. Callers normally omit
+  `timeout_ms`; for compatibility it means the absolute deadline. `runAgentTool`
+  enforces role/no-role defaults, tracks durable cursor/status progress, uses a
+  longer idle threshold while tools execute (including an explicit tool deadline
+  plus a two-minute margin), applies grace before durable cancellation, and
+  preserves emitted assistant text as `timed_out_with_partial_result`. The
+  resolved policy is persisted under
+  `subagent-policies/<parentSessionId>/<callId>.json`.
 - Dashboard `SubAgentCard` loads `subagent-policies/<parentSessionId>/<callId>.json`
   on expand and renders an inline policy panel with role, objective, allowed
   tools, max turns, timeout, depth (`resolvedDepth/maxDepth`), fan-out

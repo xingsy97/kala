@@ -1965,8 +1965,11 @@ describe('host loop', () => {
     expect(artifact.policy.objective).toBe('summarize repo layout')
     expect(artifact.policy.reasons).toContain('role_template_applied')
     expect(artifact.policy.allowedTools).toContain('read')
-    expect(artifact.policy.maxTurns).toBeGreaterThan(0)
-    expect(artifact.policy.timeoutMs).toBeGreaterThan(0)
+    expect(artifact.policy.maxTurns).toBe(60)
+    expect(artifact.policy.idleTimeoutMs).toBe(20 * 60_000)
+    expect(artifact.policy.toolIdleTimeoutMs).toBe(40 * 60_000)
+    expect(artifact.policy.timeoutMs).toBe(90 * 60_000)
+    expect(artifact.policy.gracePeriodMs).toBe(5 * 60_000)
     expect(artifact.policy.expectedOutput).toMatch(/summary/i)
   })
 

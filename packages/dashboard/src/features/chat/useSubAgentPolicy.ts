@@ -12,7 +12,10 @@ export type SubAgentPolicyView = {
   objective?: string
   allowedTools?: readonly string[]
   maxTurns?: number
+  idleTimeoutMs?: number
+  toolIdleTimeoutMs?: number
   timeoutMs?: number
+  gracePeriodMs?: number
   expectedOutput?: string
   maxDepth?: number
   resolvedDepth?: number
@@ -28,7 +31,10 @@ type PolicyArtifact = {
     objective?: string
     allowedTools?: unknown
     maxTurns?: unknown
+    idleTimeoutMs?: unknown
+    toolIdleTimeoutMs?: unknown
     timeoutMs?: unknown
+    gracePeriodMs?: unknown
     expectedOutput?: unknown
     maxDepth?: unknown
     resolvedDepth?: unknown
@@ -78,7 +84,10 @@ function normalize(raw: Required<PolicyArtifact>['policy']): SubAgentPolicyView 
   if (typeof raw.objective === 'string' && raw.objective.length > 0) view.objective = raw.objective
   if (allowedTools && allowedTools.length > 0) view.allowedTools = allowedTools
   if (typeof raw.maxTurns === 'number' && Number.isFinite(raw.maxTurns)) view.maxTurns = raw.maxTurns
+  if (typeof raw.idleTimeoutMs === 'number' && Number.isFinite(raw.idleTimeoutMs)) view.idleTimeoutMs = raw.idleTimeoutMs
+  if (typeof raw.toolIdleTimeoutMs === 'number' && Number.isFinite(raw.toolIdleTimeoutMs)) view.toolIdleTimeoutMs = raw.toolIdleTimeoutMs
   if (typeof raw.timeoutMs === 'number' && Number.isFinite(raw.timeoutMs)) view.timeoutMs = raw.timeoutMs
+  if (typeof raw.gracePeriodMs === 'number' && Number.isFinite(raw.gracePeriodMs)) view.gracePeriodMs = raw.gracePeriodMs
   if (typeof raw.expectedOutput === 'string' && raw.expectedOutput.length > 0) view.expectedOutput = raw.expectedOutput
   if (typeof raw.maxDepth === 'number' && Number.isFinite(raw.maxDepth)) view.maxDepth = raw.maxDepth
   if (typeof raw.resolvedDepth === 'number' && Number.isFinite(raw.resolvedDepth)) view.resolvedDepth = raw.resolvedDepth
