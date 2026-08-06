@@ -392,7 +392,7 @@ async function verifyOperatorCommands(activeBrowser, telemetry) {
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 })
   await waitForRouteState(page, 'runs', 'ready')
   const failedStateRestored = await page.$eval('.command-status', (element) => element.getAttribute('data-command-state'))
-  await clickButton(page, 'Retry same command')
+  await clickButton(page, 'Try again')
   await page.waitForSelector('.command-status.committed')
   const afterRetry = await fixtureState()
   const retriedCommand = afterRetry.receivedCommands.at(-1)?.command

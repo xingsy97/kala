@@ -13,6 +13,7 @@ export function Administration({ data, capabilities, controlPlane, locale, reten
 }): JSX.Element {
   const value = object(data);
   const administration = object(value.administration);
+  const unavailable = administration.unavailable === true;
   const security = object(administration.security);
   const maintenance = object(administration.maintenance);
   const [reloadConfirmed, setReloadConfirmed] = useState(false);
@@ -35,6 +36,7 @@ export function Administration({ data, capabilities, controlPlane, locale, reten
     }
   };
   return <div className="stack">
+    {unavailable && <div className="human-error" role="status"><strong>Advanced security administration is not enabled</strong><p>Worker, dataset, retention and audit information below remains available. Configure the authenticated administration endpoint to manage access keys.</p></div>}
     <section className="stat-band">
       <Metric label={translate(locale, "admin.workers")} value={String(pageItems(value.workers).length)} />
       <Metric label={translate(locale, "admin.agents")} value={String(pageItems(value.agents).length)} />

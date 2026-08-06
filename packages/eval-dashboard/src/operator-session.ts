@@ -41,6 +41,10 @@ export function saveOperatorCommand(record: StoredOperatorCommand, storage: Stor
   return safeRecord
 }
 
+export function clearOperatorCommand(storage: Storage = globalThis.localStorage): void {
+  storage.removeItem(COMMAND_KEY)
+}
+
 const SECRET_KEY = /^(?:access[-_]?token|api[-_]?key|authorization|bearer|password|refresh[-_]?token|secret|session[-_]?token|token)$/iu
 
 function removeSecrets(value: unknown): unknown {

@@ -24,6 +24,7 @@ import {
   type MessageKey,
 } from "./i18n/index.js";
 import {
+  clearOperatorCommand,
   loadOperatorCommand,
   operatorCommandEnvelope,
   operatorSession,
@@ -776,7 +777,7 @@ async function loadRoute(
       client.query<Page>(
         { resource: "catalog", catalog: "detectors", page: { limit: 100 } },
         signal,
-      ),
+      ).catch(() => ({ items: [], page: { hasMore: false, total: 0 } })),
       client.query<Page>(
         { resource: "catalog", catalog: "datasets", page: { limit: 100 } },
         signal,
@@ -787,7 +788,7 @@ async function loadRoute(
             signal,
           )
         : Promise.resolve({ items: [], page: { hasMore: false, total: 0 } }),
-      client.administrationStatus(signal),
+      client.administrationStatus(signal).catch(() => ({ unavailable: true, security: { principals: [], serviceKeys: [], trustKeys: [] }, maintenance: { retentionSweeps: [], backups: [], restoreDrills: [], audit: [] } })),
     ]);
     return {
       audit,
@@ -816,7 +817,7 @@ async function loadRoute(
       client.query<Page>(
         queryForResource(RESOURCES.analysis, parameters),
         signal,
-      ),
+      ).catch(() => ({ items: [], page: { hasMore: false }, unavailable: true } as Page & { unavailable: true })),
       capabilities.queryResources.includes("defects")
         ? client.query<Page>(
             { resource: "defects", page: { limit: 100 } },
@@ -867,6 +868,7 @@ async function loadRoute(
         : Promise.resolve({ items: [], page: { hasMore: false } }),
       capabilities.queryResources.includes("analysis-jobs")
         ? client.query<Page>({ resource: "analysis-jobs", page: { limit: 100 } }, signal)
+            .catch(() => ({ items: [], page: { hasMore: false } }))
         : Promise.resolve({ items: [], page: { hasMore: false } }),
     ]);
     return { defects, reproductions, promotions, archive, runs, jobs };
@@ -2259,9 +2261,16 @@ function Runs({
       firstArchivedRunId,
   );
   const [session] = useState(() => operatorSession());
-  const [recent, setRecent] = useState<StoredOperatorCommand | undefined>(() =>
-    loadOperatorCommand(),
-  );
+  const [recent, setRecent] = useState<StoredOperatorCommand | undefined>(() => {
+    const stored = loadOperatorCommand();
+    if (!stored) return undefined;
+    const age = Date.now() - new Date(stored.updatedAt).valueOf();
+    if (!Number.isFinite(age) || age > 15 * 60 * 1000) {
+      clearOperatorCommand();
+      return undefined;
+    }
+    return stored;
+  });
   const [intent, setIntent] = useState<OperatorIntent>();
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2394,8 +2403,8 @@ function Runs({
         data-operator-session={session.sessionId}
       >
         <div>
-          <span>Operator session</span>
-          <code>{session.sessionId}</code>
+          <span>Run controls</span>
+          <strong>Manage the selected active run</strong>
         </div>
         <label>
           Active live run
@@ -2408,7 +2417,7 @@ function Runs({
               const runId = runIdFrom(item);
               return runId ? (
                 <option key={runId} value={runId}>
-                  {runId}
+                  {humanizeRunName(item)}
                 </option>
               ) : null;
             })}
@@ -2446,21 +2455,18 @@ function Runs({
         >
           <span>
             {recent.state === "committed"
-              ? "Committed"
+              ? "Action completed"
               : recent.state === "failed"
-                ? "Command failed"
-                : "Submitting"}
+                ? "Action not completed"
+                : "Working…"}
           </span>
-          <code>
-            {recent.command.type} · {recent.command.idempotencyKey}
-          </code>
+          <p>{commandStatusSummary(recent)}</p>
           {recent.state !== "committed" && (
             <button disabled={busy} onClick={() => void retry()}>
-              {recent.state === "failed"
-                ? "Retry same command"
-                : "Resume same command"}
+              {recent.state === "failed" ? "Try again" : "Resume"}
             </button>
           )}
+          <button className="dismiss-status" onClick={() => { clearOperatorCommand(); setRecent(undefined); setError(undefined); }} aria-label="Dismiss action status">Dismiss</button>
         </section>
       )}
       {error && (
@@ -3250,7 +3256,7 @@ function RunDetail({
                 resource: "analysis-jobs",
                 runId,
                 page: { limit: 100 },
-              })
+              }).catch(() => ({ items: [], page: { hasMore: false, total: 0 } }))
             : Promise.resolve({
                 items: [],
                 page: { hasMore: false, total: 0 },
@@ -3405,8 +3411,8 @@ function RunDetail({
       data-selected-trial={selectedTrialId}
     >
       <PanelHeading
-        title={"Run detail · " + runId}
-        eyebrow="Trials and evidence"
+        title="Evaluation details"
+        eyebrow={humanizeRunName(run)}
       />
       {error && (
         <p className="inline-error" role="alert">
@@ -3590,7 +3596,7 @@ function RunDetail({
         </section>
       )}
       <section className="live-timeline">
-        <h3>Durable run timeline</h3>
+        <h3>Activity</h3>
         {events.items.length ? (
           <Rows
             items={events.items}
@@ -3609,7 +3615,7 @@ function RunDetail({
         )}
       </section>
       <section className="live-analysis-jobs">
-        <h3>Analysis &amp; grading jobs</h3>
+        <h3>Analysis status</h3>
         {analysisJobs.items.length ? (
           <Rows
             items={analysisJobs.items}
@@ -3629,11 +3635,8 @@ function RunDetail({
         )}
       </section>
       <section className="trace-panel" data-trace-state={traceState}>
-        <h3>Normalized trace</h3>
-        <p className="redaction-note">
-          The visual sequence strip is paired with the complete
-          keyboard-scrollable event table.
-        </p>
+        <h3>Execution trace</h3>
+        <p className="redaction-note">Detailed Agent and tool activity for the selected test.</p>
         {traceState === "loading" ? (
           <p role="status">Loading normalized evidence…</p>
         ) : traceState === "unavailable" ? (
@@ -3659,7 +3662,7 @@ function RunDetail({
           </>
         ) : null}
       </section>
-      <h3 id="artifacts">Artifacts</h3>
+      <h3 id="artifacts">Files and outputs</h3>
       {artifacts.items.length ? (
         <div className="artifact-links">
           {artifacts.items.map((artifact) => (
@@ -3686,6 +3689,20 @@ function RunDetail({
       )}
     </section>
   );
+}
+
+function humanizeRunName(value: unknown): string {
+  const runId = runIdFrom(value);
+  const taskPack = field(value, "accepted.spec.taskPack.id") || field(value, "taskPackId");
+  const state = field(value, "state") || field(value, "outcome");
+  return [taskPack ? humanize(taskPack) : humanize(runId.replace(/^fresh-|^web-/, "")), state ? conclusionStatusLabel(state) : ""].filter(Boolean).join(" · ");
+}
+
+function commandStatusSummary(record: StoredOperatorCommand): string {
+  const action = ({ "run.cancel": "Cancel run", "leaderboard.publish": "Publish result", "run.delete": "Delete run", "run.create": "Create evaluation", "run.start": "Start evaluation", "trial.retry": "Retry test" } as Record<string, string>)[record.command.type] ?? "Evaluation action";
+  if (record.state === "failed") return `${action} failed. ${record.error ?? "Check the selected run and try again."}`;
+  if (record.state === "committed") return `${action} completed.`;
+  return `${action} is still being submitted.`;
 }
 
 function confirmationText(intent: OperatorIntent): string {
@@ -3719,6 +3736,7 @@ function Analysis({
   );
   return (
     <div className="stack">
+      {object(value.jobs).unavailable === true && <div className="human-error" role="status"><strong>Some historical analysis jobs need migration</strong><p>Scores and findings remain available. Start a new analysis for current job status.</p></div>}
       {archiveView}
       <section className="stat-band">
         <Metric

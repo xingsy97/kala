@@ -505,12 +505,13 @@ describe("standalone evaluation dashboard", () => {
   it("keeps one local operator session across a Runs page remount", async () => {
     history.replaceState({}, "", "/runs");
     const first = render(<App controlPlane={client() as never} />);
-    const initialSession = (await screen.findByText(/operator-/)).textContent;
+    await screen.findByText("Run controls");
+    const initialSession = document.querySelector(".operator-strip")?.getAttribute("data-operator-session");
+    expect(document.body.textContent).not.toContain(initialSession);
     first.unmount();
     render(<App controlPlane={client() as never} />);
-    expect((await screen.findByText(/operator-/)).textContent).toBe(
-      initialSession,
-    );
+    await screen.findByText("Run controls");
+    expect(document.querySelector(".operator-strip")?.getAttribute("data-operator-session")).toBe(initialSession);
   });
 
   it("restores and safely resumes an interrupted pending command with the same envelope", async () => {
@@ -526,7 +527,7 @@ describe("standalone evaluation dashboard", () => {
       sessionId: session.sessionId,
       command,
       state: "pending",
-      updatedAt: "2026-08-03T00:00:00.000Z",
+      updatedAt: new Date().toISOString(),
     });
     const controlPlane = client();
     controlPlane.connect.mockResolvedValue(operatorCapabilities);
@@ -540,14 +541,15 @@ describe("standalone evaluation dashboard", () => {
     });
 
     render(<App controlPlane={controlPlane as never} />);
-    expect(await screen.findByText("Submitting")).toBeTruthy();
+    expect(await screen.findByText("Working…")).toBeTruthy();
+    expect(document.body.textContent).not.toContain(command.idempotencyKey);
     fireEvent.click(
-      screen.getByRole("button", { name: "Resume same command" }),
+      screen.getByRole("button", { name: "Resume" }),
     );
     await waitFor(() =>
       expect(controlPlane.command).toHaveBeenCalledWith(command),
     );
-    expect(await screen.findByText("Committed")).toBeTruthy();
+    expect(await screen.findByText("Action completed")).toBeTruthy();
   });
 
   it("never submits cancel or publish until the exact confirmation is entered", async () => {
@@ -631,7 +633,7 @@ describe("standalone evaluation dashboard", () => {
         }),
       ),
     );
-    expect(await screen.findByText("Committed")).toBeTruthy();
+    expect(await screen.findByText("Action completed")).toBeTruthy();
   });
 
   it("blocks deletion when the authoritative impact contains protected references", async () => {
@@ -687,13 +689,13 @@ describe("standalone evaluation dashboard", () => {
       target: { value: "cancel:run-one" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" }));
-    expect(await screen.findByText("Command failed")).toBeTruthy();
+    expect(await screen.findByText("Action not completed")).toBeTruthy();
     const original = controlPlane.command.mock.calls[0]![0];
-    fireEvent.click(screen.getByRole("button", { name: "Retry same command" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => expect(controlPlane.command).toHaveBeenCalledTimes(2));
     expect(controlPlane.command.mock.calls[1]![0]).toEqual(original);
-    expect(await screen.findByText("Committed")).toBeTruthy();
+    expect(await screen.findByText("Action completed")).toBeTruthy();
     await waitFor(() =>
       expect(controlPlane.query.mock.calls.length).toBeGreaterThan(
         queriesBefore,
@@ -893,7 +895,7 @@ describe("standalone evaluation dashboard", () => {
       return { items: [], page: { hasMore: false, total: 0 } };
     }) as never);
     render(<App controlPlane={controlPlane as never} />);
-    const detail = await screen.findByText("Run detail · run-two");
+    const detail = await screen.findByText("Evaluation details");
     expect(
       detail.closest(".run-detail")?.getAttribute("data-selected-trial"),
     ).toBe("trial-two");
