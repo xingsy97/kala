@@ -45,7 +45,22 @@ export function renderToolSchema(
   tool: ToolDefinition & { toolsetId: string; toolsetVersion: string },
 ): ToolSchema {
   const properties = typeof tool.inputSchema.properties === 'object' && tool.inputSchema.properties !== null ? tool.inputSchema.properties as Record<string, unknown> : {}
-  const inputSchema = { ...tool.inputSchema, properties: { ...properties, _intent: { type: 'string', maxLength: 160, description: 'Briefly explain in the user’s current language what this tool call is about to do and why it is needed. Use one natural-language sentence, do not merely restate the arguments, and do not include secrets, tokens, or sensitive file contents.' } } }
+  const required = Array.isArray(tool.inputSchema.required)
+    ? tool.inputSchema.required.filter((value): value is string => typeof value === 'string')
+    : []
+  const inputSchema = {
+    ...tool.inputSchema,
+    required: [...new Set([...required, '_intent'])],
+    properties: {
+      ...properties,
+      _intent: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 160,
+        description: 'Briefly explain in the user’s current language what this tool call is about to do and why it is needed. Use one natural-language sentence, do not merely restate the arguments, and do not include secrets, tokens, or sensitive file contents.',
+      },
+    },
+  }
   return {
     name: tool.name,
     description: renderToolDescription(tool),

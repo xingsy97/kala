@@ -47,6 +47,7 @@ export const HandshakeAuthSchema = z.object({
   sessionId: SessionIdSchema.optional(),
   token: z.string().optional(),
   invite: z.string().optional(),
+  installId: NonEmptyStringSchema.optional(),
   clientVersion: z.string(),
 }) satisfies z.ZodType<HandshakeAuth>
 
@@ -90,6 +91,7 @@ export const ExecutorCapabilitiesSchema = z.object({
 
 export const ExecutorAnnounceSchema = z.object({
   executorId: WireIdSchema,
+  installId: WireIdSchema.optional(),
   executorVersion: z.string().optional(),
   build: BuildMetadataSchema.optional(),
   capabilities: ExecutorCapabilitiesSchema.optional(),
@@ -159,7 +161,7 @@ export const ServerTerminalOutputSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   sessionId: SessionIdSchema,
   terminalId: WireIdSchema,
-  data: z.string(),
+  data: z.string().max(1_048_576),
 }) satisfies z.ZodType<ServerTerminalOutput>
 
 export const ServerTerminalExitSchema = z.object({

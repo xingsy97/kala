@@ -81,6 +81,36 @@ describe('configured tool execution', () => {
     expect(dispatched).toBe('bash')
   })
 
+  it('forces historical executor websearch schemas through the Host handler', async () => {
+    const record = await store.create({
+      sessionId: 'sess-legacy-websearch',
+      config: createConfig({
+        tools: [{
+          name: 'websearch',
+          description: 'websearch',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'executor',
+          executionHandler: 'websearch',
+        }],
+      }),
+    })
+    let executorCalls = 0
+    const result = await dispatchConfiguredTool({
+      ...deps(store, {
+        async callTool() {
+          executorCalls += 1
+          return { ok: false, content: 'wrong route' }
+        },
+        cancelPending() {},
+      }),
+      webSearchCredentials: { get: () => undefined },
+    }, record.sessionId, effect('websearch', { query: 'query' }), new Map())
+
+    expect(executorCalls).toBe(0)
+    expect(result).toMatchObject({ ok: false, failure: { code: 'ESEARCH_CREDENTIAL' } })
+  })
+
   it('runs the skill host handler without calling the executor', async () => {
     const skillsRoot = join(dir, 'skills-root')
     const skillDir = join(skillsRoot, 'demo-skill')

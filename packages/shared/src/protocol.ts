@@ -34,8 +34,11 @@ export type ClientRole = 'dashboard' | 'executor'
 export type HandshakeAuth = {
   role: ClientRole
   sessionId?: string
+  clientId?: string
+  resumeToken?: string
   token?: string
   invite?: string
+  installId?: string
   clientVersion: string
 }
 
@@ -191,6 +194,7 @@ export type HostRestartSessionCheckpointStatus =
   | 'already_safe'
   | 'waiting_llm'
   | 'waiting_tool'
+  | 'waiting_turn'
   | 'waiting_idle'
   | 'safe'
   | 'failed'
@@ -206,6 +210,7 @@ export type HostRestartSessionPlan = {
   cursor: number
   initialStatus: AgentState['status']
   checkpointStatus: HostRestartSessionCheckpointStatus
+  checkpointKind?: 'resting' | 'before_llm' | 'before_tool_dispatch' | 'waiting_for_approval'
   resumeAction: HostRestartResumeAction
   label?: string
   workspaceId?: string
@@ -224,6 +229,8 @@ export type HostRestartAttempt = {
   newPid?: number
   timeoutMs?: number
   sessions: readonly HostRestartSessionPlan[]
+  /** Durable per-Session continuation receipts; completed entries are never replayed. */
+  recoveryReceipts?: Readonly<Record<string, 'pending' | 'running' | 'completed' | 'failed'>>
   command?: readonly string[]
   error?: string
 }
@@ -465,6 +472,15 @@ export type ClientSubscribe = {
   sessionId: string
 }
 
+export type ClientUnsubscribe = {
+  sessionId: string
+}
+
+export type DashboardChannel = 'global' | `workspace:${string}` | `session:${string}`
+export type ClientSubscribeChannels = { requestId: string; generation: number; channels: DashboardChannel[]; cursors?: Record<string, number> }
+export type ClientUnsubscribeChannels = { requestId: string; generation: number; channels: DashboardChannel[] }
+export type ChannelSubscriptionResult = { requestId: string; generation: number; accepted: DashboardChannel[]; rejected: Array<{ channel: DashboardChannel; code: string }>; cursors: Record<string, number> }
+
 export type ClientSetCwd = {
   operationId?: string
   sessionId: string
@@ -557,6 +573,7 @@ export type ExecutorCapabilities = {
 
 export type ExecutorAnnounce = {
   executorId: string
+  installId?: string
   /** agent-kernel executor package version. */
   executorVersion?: string
   build?: BuildMetadata
@@ -884,6 +901,10 @@ export type TerminalCreateResult = {
   sessionId: string
   terminalId?: string
   cwd?: string
+  /** True when create returned the Session's already-running terminal. */
+  reused?: boolean
+  /** Buffered terminal output captured before a reused create request. */
+  replay?: string
   error?: string
 }
 
@@ -907,6 +928,11 @@ export type ClientTerminalKill = {
   workspaceId: string
   sessionId: string
   terminalId: string
+}
+
+export type ClientTerminalCloseSession = {
+  workspaceId: string
+  sessionId: string
 }
 
 export type TerminalKillResult = {
@@ -1397,9 +1423,9 @@ export const FULL_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
 export const SAAS_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   agent: true,
   workspace: true,
-  operations: true,
+  operations: false,
   artifacts: true,
-  pipeline: true,
+  pipeline: false,
 }
 
 export type RuntimeCapabilitiesPayload = {
@@ -1517,6 +1543,7 @@ export type RpcAck<T = undefined> =
 
 export type DashboardClientToServerEvents = {
   'client:connection_ping': (sentAt: number, ack: (serverAt: number) => void) => void
+  'client:executor_ping': (workspaceId: string, ack: (result: { rttMs?: number; error?: string }) => void) => void
   'client:user_message': (payload: ClientUserMessage, ack?: (result: RpcAck) => void) => void
   'client:user_approve': (payload: ClientUserApprove, ack?: (result: RpcAck) => void) => void
   'client:user_reject': (payload: ClientUserReject, ack?: (result: RpcAck) => void) => void
@@ -1566,6 +1593,7 @@ export type DashboardClientToServerEvents = {
     payload: ClientTerminalKill,
     ack: (result: TerminalKillResult) => void,
   ) => void
+  'terminal:close_session': (payload: ClientTerminalCloseSession) => void
   'workspace:exec': (
     payload: import('./workspace-exec.js').WorkspaceExecRequest,
     ack: (result: import('./workspace-exec.js').WorkspaceExecResponse) => void,
@@ -1583,6 +1611,10 @@ export type DashboardClientToServerEvents = {
     ack: (result: AgentTypesResult) => void,
   ) => void
   subscribe: (payload: ClientSubscribe) => void
+  unsubscribe: (payload: ClientUnsubscribe) => void
+  'client:subscribe_channels': (payload: ClientSubscribeChannels, ack: (result: ChannelSubscriptionResult) => void) => void
+  'client:unsubscribe_channels': (payload: ClientUnsubscribeChannels, ack: (result: ChannelSubscriptionResult) => void) => void
+  'client:restore_subscriptions': (payload: ClientSubscribeChannels, ack: (result: ChannelSubscriptionResult) => void) => void
 }
 
 export type DashboardServerToClientEvents = {
@@ -1653,6 +1685,7 @@ export type ExecutorClientToServerEvents = {
  * subscribed by any executor; they were pure type noise. Gone.
  */
 export type ExecutorServerToClientEvents = {
+  'executor:health_ping': (sentAt: number, ack: (executorAt: number) => void) => void
   'tool:call': (
     payload: ToolCallMessage,
     ack: (result: ToolResultAck) => void,
@@ -1668,6 +1701,7 @@ export type ExecutorServerToClientEvents = {
     payload: ClientTerminalKill,
     ack: (result: TerminalKillResult) => void,
   ) => void
+  'terminal:close_session': (payload: ClientTerminalCloseSession) => void
   /**
    * Permanent-failure signal. Sent immediately before a server-initiated
    * `socket.disconnect(true)` when the executor must not retry (workspaceId

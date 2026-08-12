@@ -206,7 +206,8 @@ export const HostRestartSessionPlanSchema = z.object({
   sessionId: z.string(),
   cursor: z.number().int().nonnegative(),
   initialStatus: AgentStatusSchema,
-  checkpointStatus: z.enum(['already_safe', 'waiting_llm', 'waiting_tool', 'waiting_idle', 'safe', 'failed']),
+  checkpointStatus: z.enum(['already_safe', 'waiting_llm', 'waiting_tool', 'waiting_turn', 'waiting_idle', 'safe', 'failed']),
+  checkpointKind: z.enum(['resting', 'before_llm', 'before_tool_dispatch', 'waiting_for_approval']).optional(),
   resumeAction: z.enum(['none', 'wait_for_approval', 'continue_turn', 'drain_queue']),
   label: z.string().optional(),
   workspaceId: z.string().optional(),
@@ -225,6 +226,7 @@ export const HostRestartAttemptSchema = z.object({
   newPid: z.number().int().nonnegative().optional(),
   timeoutMs: z.number().int().positive().optional(),
   sessions: z.array(HostRestartSessionPlanSchema),
+  recoveryReceipts: z.record(z.string(), z.enum(['pending', 'running', 'completed', 'failed'])).optional(),
   command: z.array(z.string()).optional(),
   error: z.string().optional(),
 }) satisfies z.ZodType<HostRestartAttempt>

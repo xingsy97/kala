@@ -266,7 +266,7 @@ const webToolset: ToolsetPlugin = {
   label: 'Web',
   provideTools() {
     return [
-      tool('websearch', 'executor', 'network', false, 'websearch', {
+      tool('websearch', 'host', 'network', false, 'websearch', {
         purpose: 'Search the web and return top results as text.',
         whenToUse: ['Look up current information, documentation, error messages, or facts not in the conversation.'],
         constraints: ['Prefer official or primary sources when possible.', 'Do not use web search for facts already available in the workspace.'],

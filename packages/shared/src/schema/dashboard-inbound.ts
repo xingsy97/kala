@@ -43,7 +43,9 @@ import type {
   ClientSetCwd,
   ClientSetDefaultModel,
   ClientSubscribe,
+  ClientUnsubscribe,
   ClientTerminalCreate,
+  ClientTerminalCloseSession,
   ClientTerminalInput,
   ClientTerminalKill,
   ClientTerminalResize,
@@ -57,6 +59,8 @@ import type {
   ClientUpdateAgentPromptSettings,
   ClientDeleteManualModel,
   ClientDeleteManualProvider,
+  ClientSubscribeChannels,
+  ClientUnsubscribeChannels,
   CopyOverflowSession,
   DeleteOverflowSession,
   ManualModelInput,
@@ -164,6 +168,26 @@ export const ClientCreateSessionSchema = z.object({
 export const ClientSubscribeSchema = z.object({
   sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientSubscribe>
+
+export const ClientUnsubscribeSchema = z.object({
+  sessionId: SessionIdSchema,
+}) satisfies z.ZodType<ClientUnsubscribe>
+
+export const DashboardChannelSchema = z.string().refine(
+  (value): value is import('../protocol.js').DashboardChannel => value === 'global' || /^(?:workspace|session):[^:]+$/u.test(value),
+  'invalid dashboard channel',
+)
+export const ClientSubscribeChannelsSchema = z.object({
+  requestId: RequestIdSchema,
+  generation: z.number().int().nonnegative(),
+  channels: z.array(DashboardChannelSchema).max(128),
+  cursors: z.record(z.string(), z.number().int().nonnegative()).optional(),
+}).strict() satisfies z.ZodType<ClientSubscribeChannels>
+export const ClientUnsubscribeChannelsSchema = z.object({
+  requestId: RequestIdSchema,
+  generation: z.number().int().nonnegative(),
+  channels: z.array(DashboardChannelSchema).max(128),
+}).strict() satisfies z.ZodType<ClientUnsubscribeChannels>
 
 export const ClientLoadHistorySchema = z.object({
   sessionId: SessionIdSchema,
@@ -304,24 +328,24 @@ export const ClientTerminalCreateSchema = z.object({
   requestId: RequestIdSchema,
   workspaceId: WorkspaceIdSchema,
   sessionId: SessionIdSchema,
-  cwd: z.string().optional(),
-  cols: z.number().int().positive().optional(),
-  rows: z.number().int().positive().optional(),
+  cwd: z.string().min(1).max(4096).optional(),
+  cols: z.number().int().positive().max(500).optional(),
+  rows: z.number().int().positive().max(500).optional(),
 }) satisfies z.ZodType<ClientTerminalCreate>
 
 export const ClientTerminalInputSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   sessionId: SessionIdSchema,
   terminalId: WireIdSchema,
-  data: z.string(),
+  data: z.string().max(65_536),
 }) satisfies z.ZodType<ClientTerminalInput>
 
 export const ClientTerminalResizeSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   sessionId: SessionIdSchema,
   terminalId: WireIdSchema,
-  cols: z.number().int().positive(),
-  rows: z.number().int().positive(),
+  cols: z.number().int().positive().max(500),
+  rows: z.number().int().positive().max(500),
 }) satisfies z.ZodType<ClientTerminalResize>
 
 export const ClientTerminalKillSchema = z.object({
@@ -330,6 +354,11 @@ export const ClientTerminalKillSchema = z.object({
   sessionId: SessionIdSchema,
   terminalId: WireIdSchema,
 }) satisfies z.ZodType<ClientTerminalKill>
+
+export const ClientTerminalCloseSessionSchema = z.object({
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+}) satisfies z.ZodType<ClientTerminalCloseSession>
 
 export const DeleteOverflowSessionSchema = z.object({
   requestId: RequestIdSchema,

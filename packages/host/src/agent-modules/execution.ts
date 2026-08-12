@@ -4,6 +4,7 @@ import { runAgentTool } from '../extensions/agent-tool.js'
 import { isSkillManager, runSkillTool } from '../extensions/skills.js'
 import { runTodoGraphTool } from '../extensions/todo-graph.js'
 import type { HostLoopDeps } from '../loop-types.js'
+import { runWebSearch } from '../web-search/index.js'
 
 export type ToolExecutionResult = {
   ok: boolean
@@ -19,14 +20,21 @@ export async function dispatchConfiguredTool(
 ): Promise<ToolExecutionResult> {
   const record = deps.store.get(sessionId)
   const schema = record?.config.tools.find((tool) => tool.name === effect.name)
-  const executionKind = schema?.executionKind ?? 'executor'
+  // Historical sessions may persist websearch as an executor tool. Its
+  // model-facing name is the compatibility boundary after the Host migration.
+  const executionKind = effect.name === 'websearch' ? 'host' : (schema?.executionKind ?? 'executor')
   if (executionKind === 'executor') {
     const handler = schema?.executionHandler ?? effect.name
     return await deps.tools.callTool(sessionId, handler === effect.name ? effect : { ...effect, name: handler })
   }
 
-  const handler = schema?.executionHandler ?? effect.name
+  const handler = effect.name === 'websearch' ? 'websearch' : (schema?.executionHandler ?? effect.name)
   switch (handler) {
+    case 'websearch':
+      if (!deps.webSearchCredentials) {
+        return { ok: false, content: 'web search credential store is not configured' }
+      }
+      return await runWebSearch(effect.input, { credentials: deps.webSearchCredentials })
     case 'agent':
       return await runAgentTool(deps, sessionId, effect, aborts)
     case 'todo_graph':
