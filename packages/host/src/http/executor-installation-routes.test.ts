@@ -1,0 +1,66 @@
+import { createServer } from 'node:http'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { attachExecutorInstallationRoutes } from './executor-installation-routes.js'
+import { ExecutorInstallationStore } from '../store/executor-installation.js'
+import { ExecutorIdentityStore } from '../store/executor-identity.js'
+
+describe('executor installation routes', () => {
+  const servers: ReturnType<typeof createServer>[] = []
+  afterEach(async () => { await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))) })
+
+  async function start(mode: 'standalone' | 'saas' = 'standalone') {
+    const dir = mkdtempSync(join(tmpdir(), 'executor-install-api-'))
+    const store = new ExecutorInstallationStore(join(dir, 'installs.json'))
+    const identities = new ExecutorIdentityStore(join(dir, 'identities.json'))
+    const server = createServer(); servers.push(server)
+    attachExecutorInstallationRoutes(server, { store, identities, deploymentMode: mode })
+    await new Promise<void>((resolve) => server.listen(0, resolve))
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('missing address')
+    return { url: `http://localhost:${address.port}`, dir }
+  }
+
+  it('creates, patches, reports progress, approves, redeems, and short-polls', async () => {
+    const { url, dir } = await start()
+    const createdResponse = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'temporary', workspaceRoot: '/work' }) })
+    expect(createdResponse.status).toBe(201)
+    const created = await createdResponse.json() as { id: string; command: string; setupCode: string }
+    expect(created.command).toBe(`curl -fsSL '${url}/install' | RUNLAB_SETUP_CODE='${created.setupCode}' RUNLAB_INSTALL_MODE='temporary' sh`)
+    expect(created.command).not.toMatch(/sudo|ak_install_|[?&](?:invite|token|session)=/u)
+    expect(created.setupCode).toMatch(/^[A-F0-9]{10}$/u)
+    expect(readFileSync(join(dir, 'installs.json'), 'utf8')).not.toContain(created.setupCode)
+
+    expect((await fetch(`${url}/api/executor-installs/${created.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: 'runner' }) })).status).toBe(200)
+    const installer = await fetch(`${url}/install`)
+    expect(installer.status).toBe(200)
+    const installerScript = await installer.text()
+    expect(installerScript).toContain('RUNLAB_SETUP_CODE')
+    expect(installerScript).toContain('/install/session')
+    const claimed = await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })
+    expect(claimed.status).toBe(200)
+    const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string } }
+    const bootstrap = claim.env.EXECUTOR_INSTALL_BOOTSTRAP
+    expect(bootstrap).toMatch(/^ak_install_/u)
+    expect((await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })).status).toBe(401)
+    for (const status of ['asset_verified', 'pairing_pending']) {
+      expect((await fetch(`${url}/api/executor-installs/${created.id}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap, status }) })).status).toBe(200)
+    }
+    const redeemed = await fetch(`${url}/api/executor-installs/${created.id}/redeem`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap, workspaceId: 'ws-api' }) })
+    expect((await redeemed.json() as { token: string }).token).toMatch(/^ak_exec_/)
+    expect((await fetch(`${url}/api/executor-installs/${created.id}/redeem`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap, workspaceId: 'ws-api' }) })).status).toBe(409)
+    const events = await fetch(`${url}/api/executor-installs/${created.id}/events?after=1`).then((response) => response.json()) as { events: Array<{ seq: number }> }
+    expect(events.events.every((event) => event.seq > 1)).toBe(true)
+  })
+
+  it('requires ingress admin in SaaS while standalone no-auth remains explicitly usable', async () => {
+    const standalone = await start('standalone')
+    expect((await fetch(`${standalone.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' }) })).status).toBe(201)
+    const saas = await start('saas')
+    const body = JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' })
+    expect((await fetch(`${saas.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })).status).toBe(403)
+    expect((await fetch(`${saas.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'admin' }, body })).status).toBe(201)
+  })
+})

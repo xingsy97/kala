@@ -28,8 +28,8 @@
  * `workspaceId` matches this executor's stored workspace id.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { resolve, join } from 'node:path'
 import process from 'node:process'
 
 import lockfile from 'proper-lockfile'
@@ -40,8 +40,14 @@ import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
 import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
 import { readPairingJson } from '../src/pairing-response.js'
+import { readExecutorCredential, readExecutorRuntimeConfig } from '../src/executor-config.js'
 import { parseSandboxRootsEnv } from '../src/sandbox-roots-env.js'
 import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile } from '../src/workspace-id.js'
+import { bootstrapEnvironment, defaultManagedRoot, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
+import { createLinuxServicePlan, executeLinuxServicePlan, type Command } from '../src/linux-service.js'
+import type { InstallerSession } from '../src/installer-session.js'
+import { spawn } from 'node:child_process'
+import { homedir } from 'node:os'
 
 const logger = createRuntimeLogger('agent-kernel-executor')
 const VERSION = packageJson.version
@@ -59,6 +65,7 @@ type Args = {
   autoUpdate?: boolean
   noUpdateCheck?: boolean
   updateRepo?: string
+  config?: string
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -91,7 +98,8 @@ function parseArgs(argv: readonly string[]): Args {
       case '--invite':
       case '--id':
       case '--profile':
-      case '--update-repo': {
+      case '--update-repo':
+      case '--config': {
         const value = inline ?? argv[++i]
         if (value === undefined) break
         if (key === '--host') out.host = value
@@ -101,6 +109,7 @@ function parseArgs(argv: readonly string[]): Args {
         else if (key === '--invite') out.invite = value
         else if (key === '--id') out.id = value
         else if (key === '--profile') out.profile = value
+        else if (key === '--config') out.config = value
         else out.updateRepo = value
         break
       }
@@ -130,6 +139,7 @@ Options:
   --auto-update              Update release asset before connecting.
   --no-update-check          Disable release update check.
   --update-repo <owner/repo> GitHub release repo. Defaults to AGENT_KERNEL_UPDATE_REPO.
+  --config <path>             Managed service JSON config; credentials are loaded from its protected file.
 
 Common environment:
   HOST_URL                   Host URL used when --host is omitted.
@@ -205,8 +215,69 @@ async function acquireLocalLock(
   }
 }
 
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2))
+async function runInternalInstaller(): Promise<void> {
+  const env = bootstrapEnvironment(process.env)
+  await reportInstallation(env, 'asset_verified')
+  await reportInstallation(env, 'pairing_pending')
+  await waitForApproval(env)
+  const workspaceId = loadOrCreateWorkspaceId()
+  const redeemed = await redeemInstallation(env, workspaceId)
+  const workspaceRoot = env.EXECUTOR_INSTALL_ROOT === '__RUNLAB_CURRENT_DIRECTORY__' ? resolve(process.cwd()) : resolve(env.EXECUTOR_INSTALL_ROOT)
+  process.stdout.write(`Agent RunLab workspace root: ${workspaceRoot}\n`)
+  const service = env.EXECUTOR_INSTALL_MODE === 'service'
+  const managedRoot = defaultManagedRoot(homedir(), service && process.getuid?.() === 0)
+  const executable = service ? join(managedRoot, 'current', 'runlab-executor') : process.execPath
+  const installerSession: InstallerSession = {
+    version: 1, mode: service && process.getuid?.() === 0 ? 'system' : 'user', executable,
+    host: env.HOST_URL, ...(env.EXECUTOR_INSTALL_LABEL ? { name: env.EXECUTOR_INSTALL_LABEL } : {}),
+    sandboxRoots: [workspaceRoot], credential: { token: redeemed.token }, installationId: env.EXECUTOR_INSTALL_ID,
+  }
+  if (!service) {
+    await reportInstallation(env, 'starting')
+    process.env.EXECUTOR_TOKEN = redeemed.token
+    process.env.HOST_URL = env.HOST_URL
+    process.env.SANDBOX_ROOTS = workspaceRoot
+    return await main(['--host', env.HOST_URL, '--sandbox-root', workspaceRoot, '--config', writeTemporaryConfig(installerSession)])
+  }
+  mkdirSync(join(managedRoot, 'current'), { recursive: true, mode: 0o700 })
+  copyFileSync(process.execPath, executable)
+  chmodSync(executable, 0o755)
+  const sessionFile = join(managedRoot, 'installer-session.json')
+  writeInstallerSession(sessionFile, installerSession)
+  const plan = createLinuxServicePlan('install', installerSession.mode, homedir(), installerSession)
+  await reportInstallation(env, 'service_installing')
+  await executeLinuxServicePlan(plan, { run: runServiceCommand })
+  rmSync(sessionFile, { force: true })
+  await reportInstallation(env, 'starting')
+}
+
+function writeTemporaryConfig(session: InstallerSession): string {
+  const root = defaultManagedRoot(homedir(), false)
+  const credential = join(root, 'temporary-credential')
+  mkdirSync(root, { recursive: true, mode: 0o700 })
+  writeFileSync(credential, `${session.credential.token}\n`, { mode: 0o600 })
+  const config = join(root, 'temporary-config.json')
+  writeFileSync(config, `${JSON.stringify({ version: 1, host: session.host, sandboxRoots: session.sandboxRoots, credentialFile: credential, installationId: session.installationId })}\n`, { mode: 0o600 })
+  return config
+}
+
+async function runServiceCommand(command: Command): Promise<{ code: number; stdout: string; stderr: string }> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command.file, [...command.args], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const stdout: Buffer[] = [], stderr: Buffer[] = []
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk)); child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+    child.once('error', reject); child.once('close', (code) => resolve({ code: code ?? -1, stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() }))
+    child.stdin.end(command.stdin)
+  })
+}
+
+async function main(argv = process.argv.slice(2)): Promise<void> {
+  const internalIndex = argv.findIndex((arg) => arg === '--internal-installer')
+  if (internalIndex >= 0) {
+    await runInternalInstaller()
+    return
+  }
+  const args = parseArgs(argv)
   if (args.help) {
     printHelp()
     return
@@ -216,13 +287,15 @@ async function main(): Promise<void> {
     return
   }
 
-  const host = args.host ?? process.env.HOST_URL
-  const name = args.name ?? process.env.WORKSPACE_NAME
+  const managed = args.config ? readExecutorRuntimeConfig(args.config) : undefined
+  const host = args.host ?? managed?.host ?? process.env.HOST_URL
+  const name = args.name ?? managed?.name ?? process.env.WORKSPACE_NAME
   const envRoots = parseSandboxRootsEnv(process.env.SANDBOX_ROOTS)
-  const sandboxRoots = args.sandboxRoots.length > 0 ? args.sandboxRoots : envRoots
-  const invite = args.invite ?? process.env.EXECUTOR_INVITE
-  const profile = normalizeExecutorProfile(args.profile ?? process.env.AGENT_KERNEL_EXECUTOR_PROFILE)
-  const token = args.token ?? process.env.EXECUTOR_TOKEN ?? (invite ? undefined : loadExecutorToken(undefined, profile))
+  const sandboxRoots = args.sandboxRoots.length > 0 ? args.sandboxRoots : managed?.sandboxRoots ?? envRoots
+  const managedCredential = managed ? readExecutorCredential(managed.credentialFile) : undefined
+  const invite = args.invite ?? (managedCredential?.startsWith('ak_invite_') ? managedCredential : undefined) ?? process.env.EXECUTOR_INVITE
+  const profile = normalizeExecutorProfile(args.profile ?? managed?.profile ?? process.env.AGENT_KERNEL_EXECUTOR_PROFILE)
+  const token = args.token ?? (managedCredential?.startsWith('ak_exec_') ? managedCredential : undefined) ?? process.env.EXECUTOR_TOKEN ?? (invite ? undefined : loadExecutorToken(undefined, profile))
   const executorId = args.id ?? process.env.EXECUTOR_ID
   const autoUpdate = args.autoUpdate === true || process.env.AGENT_KERNEL_AUTO_UPDATE === '1'
   const noUpdateCheck = args.noUpdateCheck === true || process.env.AGENT_KERNEL_NO_UPDATE_CHECK === '1'
@@ -298,6 +371,7 @@ async function main(): Promise<void> {
     ...(pairingToken !== undefined ? { token: pairingToken } : {}),
     ...(invite !== undefined ? { invite } : {}),
     ...(executorId !== undefined ? { executorId } : {}),
+    ...(managed?.installationId ? { installId: managed.installationId } : {}),
     logger,
     onToken(nextToken) {
       saveExecutorToken(nextToken, undefined, profile)

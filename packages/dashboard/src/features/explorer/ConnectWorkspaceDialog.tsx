@@ -1,10 +1,15 @@
-import { useMemo, useState } from 'react'
-import { Check, Clipboard, Monitor, Terminal } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
+import { Apple, Check, Clipboard, Monitor, Terminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type {
+  CreateExecutorInstall,
+  ExecutorInstallEvent,
+  ExecutorInstallMode,
+  ExecutorInstallPlatform,
+  ExecutorInstallStatusSnapshot,
+} from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
-import type { ServerSettingsPayload } from '@agent-kernel/shared'
 import {
   Dialog,
   DialogContent,
@@ -18,102 +23,215 @@ type Props = {
   onOpenChange(open: boolean): void
 }
 
-type OsTab = 'unix' | 'windows'
+type InstallResponse = ExecutorInstallStatusSnapshot & { command?: string; setupCode?: string }
+type FormState = Pick<CreateExecutorInstall, 'platform' | 'mode'>
 
-const OS_TABS: ReadonlyArray<{ value: OsTab; label: string; icon: typeof Terminal }> = [
-  { value: 'unix', label: 'Mac/Linux', icon: Terminal },
-  { value: 'windows', label: 'Windows', icon: Monitor },
-]
+const POLL_INTERVAL_MS = 2_000
+const PATCH_DEBOUNCE_MS = 350
+const PLATFORMS: ExecutorInstallPlatform[] = ['linux', 'macos', 'windows']
+const MODES: ExecutorInstallMode[] = ['service', 'temporary']
 
 export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Element {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<OsTab>(() => detectCurrentOs())
-  const [copied, setCopied] = useState(false)
-  const [mode, setMode] = useState<'pair'|'invite'>('pair')
+  const [form, setForm] = useState<FormState>(() => ({
+    platform: detectCurrentPlatform(),
+    mode: 'service',
+  }))
+  const [installation, setInstallation] = useState<InstallResponse | null>(null)
+  const [command, setCommand] = useState('')
+  const [pairingCode, setPairingCode] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [copyError, setCopyError] = useState<string | null>(null)
-  const hostUrl = useMemo(() => hostUrlFromLocation(), [])
-  const fallbackBootstrapBaseUrl = useMemo(() => `${hostUrl}/release-assets`, [hostUrl])
+  const [copied, setCopied] = useState(false)
+  const [deciding, setDeciding] = useState(false)
+  const generationRef = useRef(0)
+  const createdFormRef = useRef<FormState | null>(null)
+  const installationIdRef = useRef<string | null>(null)
 
-  // Executor invites are long-lived credentials managed by the host. This
-  // dialog creates a fresh one so the command can show plaintext once.
-  const inviteQuery = useQuery({
-    queryKey: ['executor-invite'],
-    queryFn: async (): Promise<{ inviteToken: string }> => {
-      const res = await fetch('/auth/executor-invites', {
-        method: 'POST',
+  useEffect(() => {
+    if (!open) {
+      generationRef.current += 1
+      const staleId = installationIdRef.current
+      installationIdRef.current = null
+      if (staleId) void fetch(`/api/executor-installs/${encodeURIComponent(staleId)}`, { method: 'DELETE' }).catch(() => undefined)
+      setInstallation(null)
+      setCommand('')
+      setPairingCode(null)
+      setError(null)
+      setCopyError(null)
+      createdFormRef.current = null
+      return
+    }
+
+    const generation = ++generationRef.current
+    const controller = new AbortController()
+    const input = toApiInput(form)
+    createdFormRef.current = form
+    setError(null)
+    void request<InstallResponse>('/api/executor-installs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+      signal: controller.signal,
+    }).then((created) => {
+      if (generationRef.current !== generation) return
+      installationIdRef.current = created.id
+      setInstallation(created)
+      setCommand(created.command ?? '')
+      updatePairingCode(created, setPairingCode)
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted && generationRef.current === generation) setError(errorMessage(cause))
+    })
+
+    return () => controller.abort()
+    // A session is created once per opening. Form edits are handled by the debounced PATCH effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  useEffect(() => {
+    if (!open || !installation || !createdFormRef.current || sameForm(form, createdFormRef.current)) return
+    const installationId = installation.id
+    const generation = generationRef.current
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => {
+      void request<InstallResponse>(`/api/executor-installs/${encodeURIComponent(installationId)}`, {
+        method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(toApiInput(form)),
+        signal: controller.signal,
+      }).then((updated) => {
+        if (generationRef.current !== generation) return
+        createdFormRef.current = form
+        setInstallation(updated)
+        if (updated.command !== undefined) setCommand(updated.command)
+        updatePairingCode(updated, setPairingCode)
+        setError(null)
+      }).catch((cause: unknown) => {
+        if (!controller.signal.aborted && generationRef.current === generation) setError(errorMessage(cause))
       })
-      if (!res.ok) throw new Error(await res.text())
-      return (await res.json()) as { inviteToken: string }
-    },
-    enabled: open,
-    staleTime: 0,
-    gcTime: 0,
-  })
-  const invite = inviteQuery.data ?? null
-  const settingsQuery = useQuery({
-    queryKey: ['settings', 'release-bootstrap'],
-    queryFn: async (): Promise<ServerSettingsPayload> => {
-      const res = await fetch('/settings')
-      if (!res.ok) throw new Error(await res.text())
-      return (await res.json()) as ServerSettingsPayload
-    },
-    enabled: open,
-    staleTime: 30_000,
-  })
-  const bootstrapBaseUrl = resolveBootstrapBaseUrl(settingsQuery.data?.release, hostUrl, fallbackBootstrapBaseUrl)
-  const error = inviteQuery.error ? (inviteQuery.error as Error).message : null
-  const command = commandFor(tab, hostUrl, bootstrapBaseUrl, mode === 'invite' ? invite?.inviteToken : undefined)
+    }, PATCH_DEBOUNCE_MS)
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [form, installation, open])
+
+  useEffect(() => {
+    if (!open || !installation) return
+    const installationId = installation.id
+    const generation = generationRef.current
+    let lastSeq = installation.seq
+    let stopped = false
+    let timeout: number | undefined
+    let controller: AbortController | undefined
+
+    const poll = async (): Promise<void> => {
+      controller = new AbortController()
+      try {
+        const encodedId = encodeURIComponent(installationId)
+        const [snapshot, eventResult] = await Promise.all([
+          request<InstallResponse>(`/api/executor-installs/${encodedId}`, { signal: controller.signal }),
+          request<{ events: ExecutorInstallEvent[] }>(`/api/executor-installs/${encodedId}/events?after=${lastSeq}`, { signal: controller.signal }),
+        ])
+        if (stopped || generationRef.current !== generation) return
+        const events = eventResult.events ?? []
+        const latestEvent = events.at(-1)
+        lastSeq = Math.max(lastSeq, snapshot.seq, latestEvent?.seq ?? -1)
+        const next = latestEvent && latestEvent.seq > snapshot.seq
+          ? { ...snapshot, status: latestEvent.status, seq: latestEvent.seq, errorCode: latestEvent.errorCode }
+          : snapshot
+        setInstallation(next)
+        if (snapshot.command !== undefined) setCommand(snapshot.command)
+        updatePairingCode(latestEvent ?? snapshot, setPairingCode)
+        setError(next.errorCode ?? null)
+      } catch (cause) {
+        if (!controller.signal.aborted && !stopped) setError(errorMessage(cause))
+      } finally {
+        if (!stopped && generationRef.current === generation) timeout = window.setTimeout(() => void poll(), POLL_INTERVAL_MS)
+      }
+    }
+
+    timeout = window.setTimeout(() => void poll(), POLL_INTERVAL_MS)
+    return () => {
+      stopped = true
+      if (timeout !== undefined) window.clearTimeout(timeout)
+      controller?.abort()
+    }
+  }, [installation?.id, open])
+
+  const updateForm = (patch: Partial<FormState>): void => {
+    setForm((current) => {
+      const next = { ...current, ...patch }
+      return next
+    })
+    setCopied(false)
+    setCopyError(null)
+  }
 
   const copy = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(command)
       setCopyError(null)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
-    } catch (error) {
+      window.setTimeout(() => setCopied(false), 1_600)
+    } catch (cause) {
       setCopied(false)
-      setCopyError(error instanceof Error ? error.message : String(error))
+      setCopyError(errorMessage(cause))
+    }
+  }
+
+  const decide = async (action: 'approve' | 'reject'): Promise<void> => {
+    if (!installation) return
+    setDeciding(true)
+    try {
+      const updated = await request<InstallResponse>(`/api/executor-installs/${encodeURIComponent(installation.id)}/${action}`, { method: 'POST' })
+      setInstallation(updated)
+      updatePairingCode(updated, setPairingCode)
+      setError(null)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setDeciding(false)
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] max-w-2xl overflow-hidden p-0 gap-0" data-testid="connect-workspace-dialog">
+      <DialogContent className="grid max-h-[min(var(--ak-viewport-h,90dvh),52rem)] w-[calc(100vw-1rem)] min-w-0 max-w-4xl grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 pb-[env(safe-area-inset-bottom)] sm:w-[calc(100vw-2rem)]" data-testid="connect-workspace-dialog">
         <DialogHeader className="border-b border-border/50 px-4 py-3">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Terminal className="h-4 w-4" aria-hidden="true" />
             {t('explorer.connectDialog.title')}
           </DialogTitle>
-          <DialogDescription>
-            {t('explorer.connectDialog.description')}
-          </DialogDescription>
+          <DialogDescription>{t('explorer.connectDialog.description')}</DialogDescription>
         </DialogHeader>
-        <div className="px-4 py-4">
-          <TerminalCommand
-            tab={tab}
-            command={command}
-            copied={copied}
-            disabled={mode === 'invite' && !invite}
-            onCopy={() => void copy()}
-            onTabChange={(next) => {
-              setTab(next)
-              setCopied(false)
-              setCopyError(null)
-            }}
-          />
-          <div className="mb-3 flex gap-2"><Button size="sm" variant={mode==='pair'?'outline':'ghost'} onClick={()=>setMode('pair')}>Approve in Dashboard</Button><Button size="sm" variant={mode==='invite'?'outline':'ghost'} onClick={()=>setMode('invite')}>Use invite</Button></div>
-          <Pairings mode={mode} />
-          <div className="mt-3 text-xs text-muted-foreground" role={error || copyError ? 'alert' : 'status'}>
-            {error ? (
-              <span className="text-destructive">
-                {error}{' '}
-                <button type="button" className="underline" onClick={() => { void inviteQuery.refetch() }}>{t('common.reload')}</button>
-              </span>
-            ) : copyError ? (
-              <span className="text-destructive">{copyError}</span>
-            ) : invite ? t('explorer.connectDialog.inviteReady') : t('explorer.connectDialog.preparingInvite')}
+        <div className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto p-4 sm:p-5">
+          <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <section className="min-w-0 space-y-5 rounded-2xl bg-muted/25 p-4">
+              <PlatformGroup label={t('explorer.connectDialog.platform')} selected={form.platform} labelFor={(value) => t(`explorer.connectDialog.platforms.${value}`)} onChange={(platform) => updateForm({ platform })} />
+              <ChoiceGroup label={t('explorer.connectDialog.runMode')} values={MODES} selected={form.mode} labelFor={(value) => t(`explorer.connectDialog.modes.${value}`)} onChange={(mode) => updateForm({ mode })} />
+              <p className="rounded-xl bg-background/50 px-3 py-2 text-xs leading-5 text-muted-foreground">{t(`explorer.connectDialog.modeDescriptions.${form.mode}`)}</p>
+            </section>
+            <section className="min-w-0 space-y-4">
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold">{t('explorer.connectDialog.runCommand')}</h3>
+                <TerminalCommand command={command} copied={copied} onCopy={() => void copy()} />
+              </div>
+              <section className="space-y-2 rounded-xl bg-muted/25 p-4" aria-live="polite">
+                <h3 className="text-sm font-medium">{t('explorer.connectDialog.installationStatus')}</h3>
+                <p data-testid="installation-status" className="text-sm">{t(`explorer.connectDialog.statuses.${installation?.status ?? 'preparing'}`)}</p>
+            {pairingCode ? (
+              <div className="flex min-w-0 flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="font-mono text-lg font-semibold tracking-widest">{pairingCode}</span>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" disabled={deciding} onClick={() => void decide('approve')}>{t('explorer.connectDialog.approve')}</Button>
+                  <Button size="sm" variant="outline" disabled={deciding} onClick={() => void decide('reject')}>{t('explorer.connectDialog.reject')}</Button>
+                </div>
+              </div>
+            ) : null}
+            {error || copyError ? <p className="text-sm text-destructive" role="alert">{error ?? copyError}</p> : null}
+              </section>
+            </section>
           </div>
         </div>
       </DialogContent>
@@ -121,145 +239,48 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
   )
 }
 
-function Pairings({mode}:{mode:'pair'|'invite'}):JSX.Element|null{
-  const query=useQuery({queryKey:['executor-pairings'],queryFn:async()=>{const r=await fetch('/auth/executor-pairings');if(!r.ok)throw new Error(await r.text());return await r.json() as {pairings:Array<{id:string;code:string;label?:string;workspaceId:string;status:string;expiresAt:string}>}},enabled:mode==='pair',refetchInterval:2000})
-  if(mode!=='pair')return null
-  const pending=(query.data?.pairings??[]).filter(p=>p.status==='pending')
-  return <div className="mb-3 space-y-2">{pending.map(p=><div key={p.id} className="flex items-center justify-between rounded-md border p-3"><div><div className="font-mono text-lg font-semibold tracking-widest">{p.code}</div><div className="text-xs text-muted-foreground">{p.label||p.workspaceId}</div></div><div className="flex gap-2"><Button size="sm" onClick={()=>void decide(p.id,'approve',query.refetch)}>Approve</Button><Button size="sm" variant="outline" onClick={()=>void decide(p.id,'reject',query.refetch)}>Reject</Button></div></div>)}</div>
+function PlatformGroup({ label, selected, labelFor, onChange }: { label: string; selected: ExecutorInstallPlatform; labelFor(value: ExecutorInstallPlatform): string; onChange(value: ExecutorInstallPlatform): void }): JSX.Element {
+  const icons = { linux: <Terminal className="h-5 w-5" />, macos: <Apple className="h-5 w-5" />, windows: <Monitor className="h-5 w-5" /> }
+  return <fieldset className="min-w-0 space-y-2"><legend className="text-sm font-medium">{label}</legend><div className="grid grid-cols-3 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-w-0 flex-col items-center gap-2 rounded-xl px-2 py-3 text-xs transition-colors ${selected === value ? 'bg-primary/10 text-primary ring-1 ring-primary/25' : 'bg-background/50 text-muted-foreground hover:bg-accent hover:text-foreground'}`}>{icons[value]}<span className="truncate">{labelFor(value)}</span></button>)}</div></fieldset>
 }
-async function decide(id:string,action:'approve'|'reject',refresh:()=>unknown){const r=await fetch(`/auth/executor-pairings/${encodeURIComponent(id)}/${action}`,{method:'POST'});if(!r.ok)throw new Error(await r.text());await refresh()}
 
-function TerminalCommand({
-  tab,
-  command,
-  copied,
-  disabled,
-  onCopy,
-  onTabChange,
-}: {
-  tab: OsTab
-  command: string
-  copied: boolean
-  disabled: boolean
-  onCopy(): void
-  onTabChange(tab: OsTab): void
-}): JSX.Element {
+function ChoiceGroup<T extends string>({ label, values, selected, labelFor, onChange }: { label: string; values: readonly T[]; selected: T; labelFor(value: T): string; onChange(value: T): void }): JSX.Element {
+  return <fieldset className="min-w-0 space-y-2"><legend className="text-sm font-medium">{label}</legend><div className="grid min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap">{values.map((value) => <Button key={value} type="button" size="sm" variant={selected === value ? 'outline' : 'ghost'} aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)}>{labelFor(value)}</Button>)}</div></fieldset>
+}
+
+function TerminalCommand({ command, copied, onCopy }: { command: string; copied: boolean; onCopy(): void }): JSX.Element {
   const { t } = useTranslation()
-  return (
-    <section className="overflow-hidden rounded-md bg-[#101216] shadow-xl ring-1 ring-black/30 dark:ring-white/10" data-testid="executor-terminal-command">
-      <div className="flex h-9 items-center gap-3 border-b border-white/10 bg-[#23252b] px-3">
-        <div className="flex flex-none items-center gap-1.5" aria-hidden="true">
-          <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
-          <span className="h-2.5 w-2.5 rounded-full bg-[#ffbd2e]" />
-          <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
-        </div>
-        <div className="min-w-0 flex-1" />
-        <div className="inline-flex flex-none rounded bg-black/20 p-0.5" data-testid="connect-workspace-os-tabs">
-          {OS_TABS.map((item) => {
-            const Icon = item.icon
-            return (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => onTabChange(item.value)}
-                className={
-                  item.value === tab
-                    ? 'inline-flex items-center gap-1.5 rounded bg-white/14 px-2.5 py-0.5 text-[11px] font-medium text-white shadow-sm'
-                    : 'inline-flex items-center gap-1.5 rounded px-2.5 py-0.5 text-[11px] font-medium text-zinc-400 hover:bg-white/8 hover:text-zinc-100'
-                }
-                data-testid={`connect-workspace-tab-${item.value}`}
-                aria-pressed={item.value === tab}
-              >
-                <Icon className="h-3 w-3" aria-hidden="true" />
-                <span>{item.label}</span>
-              </button>
-            )
-          })}
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-6 flex-none gap-1 px-2 text-[11px] text-zinc-300 hover:bg-white/10 hover:text-white"
-          onClick={onCopy}
-          disabled={disabled}
-          data-testid="copy-executor-command"
-        >
-          {copied ? <Check className="h-3 w-3" /> : <Clipboard className="h-3 w-3" />}
-          {copied ? t('common.copied') : t('common.copy')}
-        </Button>
-      </div>
-      <div className="bg-[#101216] px-4 py-4 font-mono text-[12px] leading-6 text-zinc-100">
-        <pre className="min-w-0 select-all whitespace-pre-wrap break-words">{command || t('explorer.connectDialog.preparingInvite')}</pre>
-      </div>
-    </section>
-  )
+  if (command.includes('\n') || command.includes('\r')) throw new Error('Executor install command must be one physical line')
+  return <section className="min-w-0 max-w-full overflow-hidden rounded-md bg-[#101216] shadow-xl ring-1 ring-black/30" data-testid="executor-terminal-command"><div className="flex h-9 min-w-0 items-center justify-end border-b border-white/10 bg-[#23252b] px-3"><Button type="button" variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px] text-zinc-300 hover:bg-white/10 hover:text-white" onClick={onCopy} disabled={!command} data-testid="copy-executor-command">{copied ? <Check className="h-3 w-3" /> : <Clipboard className="h-3 w-3" />}{copied ? t('common.copied') : t('common.copy')}</Button></div><div className="min-w-0 max-w-full overflow-hidden px-4 py-4 font-mono text-[12px] leading-5 text-zinc-100"><pre className="max-w-full whitespace-pre-wrap break-all">{command || t('explorer.connectDialog.preparing')}</pre></div></section>
 }
 
-function hostUrlFromLocation(): string {
-  const { protocol, hostname, port } = window.location
-  const hostProtocol = protocol === 'https:' ? 'https:' : 'http:'
-  return `${hostProtocol}//${hostname}${port ? `:${port}` : ''}`
+function toApiInput(form: FormState): CreateExecutorInstall {
+  return { platform: form.platform, mode: form.mode, workspaceRoot: '__RUNLAB_CURRENT_DIRECTORY__' }
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`
+function sameForm(left: FormState, right: FormState): boolean {
+  return JSON.stringify(toApiInput(left)) === JSON.stringify(toApiInput(right))
 }
 
-function powershellQuote(value: string): string {
-  // PowerShell double-quoted strings interpolate `$`, treat `` ` `` as escape,
-  // and end at `"`. Escape all three so an untrusted hostUrl can't break out.
-  const escaped = value.replaceAll('`', '``').replaceAll('$', '`$').replaceAll('"', '`"')
-  return `"${escaped}"`
+function updatePairingCode(value: ExecutorInstallEvent | ExecutorInstallStatusSnapshot, set: (code: string | null) => void): void {
+  if (value.status !== 'pairing_pending') { set(null); return }
+  const metadata = 'metadata' in value ? value.metadata : undefined
+  const code = metadata?.pairingCode ?? metadata?.code
+  set(typeof code === 'string' || typeof code === 'number' ? String(code) : null)
 }
 
-function commandFor(tab: OsTab, hostUrl: string, bootstrapBaseUrl: string, invite?: string): string {
-  const invitePart = invite ?? ''
-  const base = bootstrapBaseUrl.replace(/\/+$/, '')
-  if (tab === 'windows') {
-    const quotedHost = powershellQuote(hostUrl)
-    const quotedInvite = powershellQuote(invitePart)
-    const query=invitePart?`?invite=${encodeURIComponent(invitePart)}`:''
-    return `iex (irm ${powershellQuote(`${hostUrl}/install.ps1${query}`)})`
-    return [
-      `$dir = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP "agent-kernel-$([guid]::NewGuid())");`,
-      `iwr ${powershellQuote(`${base}/agent-kernel-executor.cjs`)} -OutFile "$dir/agent-kernel-executor.cjs";`,
-      `iwr ${powershellQuote(`${base}/SHA256SUMS`)} -OutFile "$dir/SHA256SUMS";`,
-      `$exp = (Get-Content "$dir/SHA256SUMS" | Where-Object { $_ -match 'agent-kernel-executor.cjs$' }).Split()[0];`,
-      `if ((Get-FileHash "$dir/agent-kernel-executor.cjs" -Algorithm SHA256).Hash -ne $exp.ToUpper()) { throw 'checksum mismatch' };`,
-      `$env:HOST_URL=${quotedHost};`,
-      `$env:EXECUTOR_INVITE=${quotedInvite};`,
-      `$env:SANDBOX_ROOTS=$env:USERPROFILE;`,
-      `node "$dir/agent-kernel-executor.cjs"`,
-    ].join('\n')
-  }
-  return `curl -fsSL ${shellQuote(`${hostUrl}/install${invitePart?`?invite=${encodeURIComponent(invitePart)}`:''}`)} | sh`
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init)
+  if (!response.ok) throw new Error(await response.text())
+  return await response.json() as T
 }
 
-function resolveBootstrapBaseUrl(
-  release: ServerSettingsPayload['release'] | undefined,
-  hostUrl: string,
-  fallback: string,
-): string {
-  if (!release) return fallback
-  if (release.source !== 'local') return release.bootstrapBaseUrl
-  const path = localReleaseAssetPath(release.bootstrapBaseUrl)
-  return `${hostUrl}${path}`
-}
+function errorMessage(value: unknown): string { return value instanceof Error ? value.message : String(value) }
 
-function localReleaseAssetPath(value: string): string {
-  try {
-    const parsed = new URL(value)
-    return parsed.pathname || '/release-assets'
-  } catch {
-    return value.startsWith('/') ? value : '/release-assets'
-  }
-}
-
-function detectCurrentOs(): OsTab {
-  const userAgentData = navigator as Navigator & { userAgentData?: { platform?: string } }
-  const platform = userAgentData.userAgentData?.platform ?? navigator.platform ?? ''
-  const normalized = platform.toLowerCase()
-  if (normalized.includes('win')) return 'windows'
-  return 'unix'
+function detectCurrentPlatform(): ExecutorInstallPlatform {
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } }
+  const platform = (nav.userAgentData?.platform ?? navigator.platform ?? '').toLowerCase()
+  if (platform.includes('win')) return 'windows'
+  if (platform.includes('mac')) return 'macos'
+  return 'linux'
 }

@@ -8,6 +8,12 @@ import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { build } from 'esbuild'
+import {
+  executorNativeAssetName,
+  generateExecutorInstallerPs1,
+  generateExecutorInstallerSh,
+  legacyExecutorNativeAssetName,
+} from './executor-installer.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
@@ -40,6 +46,16 @@ const allEntries = [
     component: 'executor',
     entry: join(root, 'packages/executor/bin/agent-kernel-executor.ts'),
   },
+  {
+    name: 'agent-runlab-standalone-ingress',
+    component: 'host',
+    entry: join(root, 'packages/host/bin/agent-runlab-standalone-ingress.ts'),
+  },
+  {
+    name: 'agent-runlab-deploy-supervisor',
+    component: 'host',
+    entry: join(root, 'packages/host/bin/agent-runlab-deploy-supervisor.ts'),
+  },
 ]
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
@@ -47,9 +63,12 @@ const nativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64',
 const expectedAssets = [
   ...allEntries.map((entry) => cjsAssetName(entry)),
   ...allEntries.flatMap((entry) => nativeTargets.map((target) => nativeAssetName(entry.name, target))),
+  ...nativeTargets.map(executorNativeAssetName),
   'agent-kernel-dashboard-dist.tar.gz',
   'agent-runlab-model-catalog-seed.json',
   'run.sh',
+  'install-executor.sh',
+  'install-executor.ps1',
   'RELEASE_NOTES.md',
   'manifest.json',
   'SHA256SUMS',
@@ -97,16 +116,17 @@ const buildEntries = [...entries].sort((a, b) => {
 })
 
 for (const item of buildEntries) {
-  const embeddedReleaseAssets = item.component === 'host'
+  const embedsHostRuntime = item.name === 'agent-kernel-host'
+  const embeddedReleaseAssets = embedsHostRuntime
     ? prepareEmbeddedReleaseAssetsForHost()
     : ''
-  const embeddedDashboard = item.component === 'host' && includeDashboard
+  const embeddedDashboard = embedsHostRuntime && includeDashboard
     ? embeddedDashboardBanner(dashboardDist)
     : ''
-  const embeddedSocketAdmin = item.component === 'host'
+  const embeddedSocketAdmin = embedsHostRuntime
     ? embeddedSocketAdminBanner(socketAdminDist)
     : ''
-  const buildInfo = buildInfoBanner({ artifactKind: nativeOnly ? 'native' : 'cjs', dashboardMode: item.component === 'host' && includeDashboard ? 'embedded' : 'none', socketAdminMode: item.component === 'host' ? 'embedded' : 'missing' })
+  const buildInfo = buildInfoBanner({ artifactKind: nativeOnly ? 'native' : 'cjs', dashboardMode: embedsHostRuntime && includeDashboard ? 'embedded' : 'none', socketAdminMode: embedsHostRuntime ? 'embedded' : 'missing' })
   const outfile = nativeOnly
     ? join(outDir, '.sea', `${item.name}-${nativeTarget}`, `${item.name}.cjs`)
     : join(outDir, cjsAssetName(item))
@@ -129,6 +149,10 @@ for (const item of buildEntries) {
   if (!nativeOnly) chmodSync(outfile, 0o755)
   if (nativeOnly || !noNative) {
     await buildNativeSea(item.name, outfile, nativeTarget)
+    if (item.name === 'agent-kernel-executor') {
+      copyFileSync(join(outDir, legacyExecutorNativeAssetName(nativeTarget)), join(outDir, executorNativeAssetName(nativeTarget)))
+      chmodSync(join(outDir, executorNativeAssetName(nativeTarget)), 0o755)
+    }
   }
 }
 
@@ -160,6 +184,26 @@ function finalizeRelease() {
     writeFileSync(path, unifiedBootstrap({ repo, tag, component }))
     chmodSync(path, 0o755)
     bootstrapAssets.push('run.sh')
+    if (component === 'all' || component === 'executor') {
+      const shPath = join(outDir, 'install-executor.sh')
+      writeFileSync(shPath, generateExecutorInstallerSh({ repo, tag }))
+      chmodSync(shPath, 0o755)
+      writeFileSync(join(outDir, 'install-executor.ps1'), generateExecutorInstallerPs1({ repo, tag }))
+      bootstrapAssets.push('install-executor.sh', 'install-executor.ps1')
+    }
+    if (component === 'all' || component === 'host') {
+      for (const asset of [
+        'deploy/standalone-systemd/agent-runlab-ingress.service',
+        'deploy/standalone-systemd/agent-runlab-unit@.service',
+        'deploy/standalone-systemd/agent-runlab-deploy-supervisor.service',
+        'scripts/deploy/install-standalone-systemd.mjs',
+        'scripts/deploy/cutover-standalone-systemd.mjs',
+      ]) {
+        const target = join(outDir, basename(asset))
+        copyFileSync(join(root, asset), target)
+        bootstrapAssets.push(basename(asset))
+      }
+    }
   }
 
   const builtEntries = entries.map((entry) => {
@@ -169,7 +213,9 @@ function finalizeRelease() {
       .filter((asset) => exists(asset))
     return { ...entry, cjs: exists(cjs) ? cjs : undefined, natives }
   })
+  const executorProductNatives = nativeTargets.map(executorNativeAssetName).filter((asset) => exists(asset))
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
+    .concat(executorProductNatives)
     .concat(includeDashboard && exists('agent-kernel-dashboard-dist.tar.gz') ? ['agent-kernel-dashboard-dist.tar.gz'] : [])
     .concat(includeDashboard && exists('agent-runlab-docs.tar.gz') ? ['agent-runlab-docs.tar.gz'] : [])
     .concat(includeDashboard && exists('agent-runlab-model-catalog-seed.json') ? ['agent-runlab-model-catalog-seed.json'] : [])
@@ -184,13 +230,17 @@ function finalizeRelease() {
     node: '>=22',
     nativeTargets: nativeTargets.filter((target) => builtEntries.some((entry) => entry.natives.includes(nativeAssetName(entry.name, target)))),
     assets,
-    nativeAssets: Object.fromEntries(builtEntries.map((entry) => [entry.component, entry.natives])),
-    fallbackAssets: Object.fromEntries(builtEntries.map((entry) => [entry.component, entry.cjs]).filter(([, cjs]) => cjs)),
+    nativeAssets: {
+      ...Object.fromEntries(builtEntries.map((entry) => [entry.name, entry.natives])),
+      ...(entries.some((entry) => entry.name === 'agent-kernel-executor') ? { 'runlab-executor': executorProductNatives } : {}),
+    },
+    fallbackAssets: Object.fromEntries(builtEntries.map((entry) => [entry.name, entry.cjs]).filter(([, cjs]) => cjs)),
     notes: [
       hasNativeAssets
-        ? 'host and executor releases include native binaries plus Node.js .cjs fallback assets'
-        : 'host and executor releases include Node.js .cjs fallback assets; native binaries are added by the native release job',
+        ? 'runtime releases include native binaries plus Node.js .cjs fallback assets'
+        : 'runtime releases include Node.js .cjs fallback assets; native binaries are added by the native release job',
       'run.sh is a wget-only bash bootstrap that uses compact .cjs assets when Node.js 22+ is available and falls back to native binaries otherwise',
+      'install-executor.sh and install-executor.ps1 install only checksum-verified runlab-executor native assets; unsigned mode is development-only',
       'bundle-dashboard-with-runtime.cjs embeds the host runtime and dashboard dist; DASHBOARD_DIR remains an explicit override',
     ],
   }
@@ -729,6 +779,16 @@ function releaseNotes(manifest) {
         '',
         '```bash',
         run('executor', 'HOST_URL=http://host-machine:3000'),
+        '```',
+        '',
+        'Native installer preview (unsigned development mode; production remains fail-closed until release signing is implemented):',
+        '',
+        '```bash',
+        `wget -nv -O - "${base}/install-executor.sh" | RUNLAB_INSTALLER_ALLOW_UNSIGNED=1 bash`,
+        '```',
+        '',
+        '```powershell',
+        `$env:RUNLAB_INSTALLER_ALLOW_UNSIGNED='1'; irm "${base}/install-executor.ps1" | iex`,
         '```',
         '',
         'Use `HOST_URL=https://agent.example.com` when the host is exposed through a public domain.',

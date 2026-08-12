@@ -1,0 +1,49 @@
+{
+  "layout": {
+    "installDir": "C:\\Program Files\\星云 Corp\\执行器 Pro",
+    "dataDir": "D:\\共享 数据\\星云 Corp\\执行器 Pro",
+    "executablePath": "C:\\Program Files\\星云 Corp\\执行器 Pro\\agent executor.exe",
+    "configPath": "D:\\共享 数据\\星云 Corp\\执行器 Pro\\config.json"
+  },
+  "commands": [
+    {
+      "action": "create",
+      "command": "sc.exe",
+      "args": [
+        "create",
+        "Agent RunLab 执行器",
+        "binPath=",
+        "\"C:\\Program Files\\星云 Corp\\执行器 Pro\\agent executor.exe\" \"--config\" \"D:\\共享 数据\\星云 Corp\\执行器 Pro\\config.json\"",
+        "start=",
+        "auto",
+        "DisplayName=",
+        "Agent RunLab 执行器（生产）"
+      ]
+    },
+    {
+      "action": "recovery",
+      "command": "sc.exe",
+      "args": ["failure", "Agent RunLab 执行器", "reset=", "86400", "actions=", "restart/5000/restart/30000/none/0"]
+    },
+    {
+      "action": "start",
+      "command": "sc.exe",
+      "args": ["start", "Agent RunLab 执行器"]
+    },
+    {
+      "action": "query",
+      "command": "sc.exe",
+      "args": ["query", "Agent RunLab 执行器"]
+    },
+    {
+      "action": "stop",
+      "command": "sc.exe",
+      "args": ["stop", "Agent RunLab 执行器"]
+    },
+    {
+      "action": "delete",
+      "command": "sc.exe",
+      "args": ["delete", "Agent RunLab 执行器"]
+    }
+  ]
+}

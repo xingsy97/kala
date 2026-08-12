@@ -39,13 +39,12 @@ for (const asset of manifest.assets) {
   if (isNativeAsset(asset)) {
     accessSync(path, constants.X_OK)
   }
-  if (asset.endsWith('.sh')) {
+  if (asset === 'run.sh') {
     const text = readFileSync(path, 'utf8')
     if (!text.startsWith('#!/usr/bin/env bash\n')) {
       fail(`${asset} is missing bash shebang`)
     }
     accessSync(path, constants.X_OK)
-    if (asset !== 'run.sh') fail(`unexpected shell bootstrap ${asset}; use run.sh only`)
     if (text.includes('curl')) fail(`${asset} must be wget-only and must not mention curl`)
     if (/wget\s+-qO-.*\|.*bash/.test(text)) {
       fail(`${asset} must not suggest quiet wget pipe-to-bash bootstrap commands`)
@@ -101,8 +100,16 @@ for (const asset of manifest.assets) {
   }
 }
 
-const shellAssets = manifest.assets.filter((asset) => asset.endsWith('.sh'))
-if (shellAssets.length > 1) fail(`expected at most one shell bootstrap, got ${shellAssets.join(', ')}`)
+for (const installer of ['install-executor.sh', 'install-executor.ps1']) {
+  if (!manifest.assets.includes(installer)) fail(`manifest missing ${installer}`)
+  const text = readFileSync(join(releaseDir, installer), 'utf8')
+  for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'manifest.json', 'SHA256SUMS', 'runlab-executor-', 'CJS fallback is intentionally disabled', '--internal-installer']) {
+    if (!text.includes(marker)) fail(`${installer} missing required installer marker: ${marker}`)
+  }
+  if (text.includes('agent-kernel-executor.cjs')) fail(`${installer} must not fall back to CJS`)
+}
+const installerSyntax = spawnSync('bash', ['-n', join(releaseDir, 'install-executor.sh')], { stdio: 'inherit' })
+if (installerSyntax.status !== 0) fail('install-executor.sh failed bash syntax check')
 
 const notesPath = join(releaseDir, 'RELEASE_NOTES.md')
 if (!existsSync(notesPath)) fail('missing release/RELEASE_NOTES.md')
@@ -220,7 +227,7 @@ if (nativeExecutor) {
 console.log('release assets verified')
 
 function isNativeAsset(asset) {
-  return /^agent-kernel-(host|executor)-(linux|darwin|win32)-(x64|arm64)(\.exe)?$/.test(asset)
+  return /^(?:agent-kernel-(?:host|executor)|runlab-executor)-(linux|darwin|win32)-(x64|arm64)(\.exe)?$/.test(asset)
 }
 
 function nativeAssetName(base) {

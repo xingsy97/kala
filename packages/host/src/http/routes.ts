@@ -73,6 +73,8 @@ import { writeExecutorCapabilitySnapshot } from '../executor-capabilities.js'
 import type { SessionStore } from '../store/session.js'
 import { compareToolVersions } from '../tool-version.js'
 import { exportSubAgentGraph } from '../subagent-graph.js'
+import { runWebSearch, type WebSearchCredentialStore } from '../web-search/index.js'
+import type { WebSearchCredentialStatus } from '../web-search/credential-store.js'
 import { ContentInputError, resolveContentToPath } from './content-inputs.js'
 import {
   HttpThemeError,
@@ -212,9 +214,14 @@ export function attachJsonRoutes(
     routerHealth?: () => unknown
     executorsSnapshot?: () => readonly AttachedExecutor[]
     toolRegistry?: () => readonly import('@agent-kernel/kernel').ToolSchema[]
+    toolResultPersisted?: (sessionId: string, callId: string) => Promise<boolean>
     restartStatus?: () => HostRestartStatus
     requestRestart?: (input: { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number }) => Promise<HostRestartAttempt>
+    commitRestartActivation?: (attemptId: string) => HostRestartAttempt | null
     abortRestart?: () => HostRestartAttempt | null
+    unitQuiescence?: () => unknown
+    reserveCutover?: () => Promise<unknown>
+    releaseCutover?: () => void
     auth?: AuthConfig
     audit?: AuditLogger
     /**
@@ -227,6 +234,11 @@ export function attachJsonRoutes(
     deploymentMode?: import('@agent-kernel/shared').DeploymentMode
     metrics?: OperationalMetrics
     memoStore?: MemoStore
+    webSearchCredentials?: WebSearchCredentialStore & {
+      status(): Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
+      set(provider: 'serper', key: string): Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
+      delete(provider: 'serper'): Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
+    }
   },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -267,7 +279,7 @@ export function attachJsonRoutes(
     }
     if (req.method === 'OPTIONS') {
       const headers: Record<string, string> = {
-        'access-control-allow-methods': 'GET, HEAD, POST, DELETE, OPTIONS',
+        'access-control-allow-methods': 'GET, HEAD, POST, PUT, DELETE, OPTIONS',
         'access-control-allow-headers': req.headers['access-control-request-headers'] ?? 'content-type, authorization',
         'access-control-max-age': '600',
       }
@@ -370,10 +382,10 @@ export function attachJsonRoutes(
     }
     if (path === '/auth/executor-invites' && req.method === 'GET') {
       claimRoute(req)
-      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_invite.list', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
-        sendError(res, 401, auth.reason)
+        sendError(res, auth.status, auth.error)
         return
       }
       const body: ServerExecutorInvitesPayload = { invites: payloads.auth?.executorIdentityStore?.inviteSnapshot() ?? [] }
@@ -391,19 +403,20 @@ export function attachJsonRoutes(
         sendJson(req,res,pairing)
       }).catch((e)=>sendError(res,400,e instanceof Error?e.message:String(e)));return
     }
-    if (path === '/auth/executor-pairings' && req.method === 'GET') { claimRoute(req);sendJson(req,res,{pairings:payloads.auth?.executorIdentityStore?.pairingSnapshot()??[]});return }
+    if (path === '/auth/executor-pairings' && req.method === 'GET') { claimRoute(req);const auth=authorizeSensitiveManagement(req,payloads.deploymentMode??'standalone',payloads.auth);if(!auth.ok){sendError(res,auth.status,auth.error);return}sendJson(req,res,{pairings:payloads.auth?.executorIdentityStore?.pairingSnapshot()??[]});return }
     const pairingMatch=path.match(/^\/auth\/executor-pairings\/([^/]+)\/(approve|reject|claim)$/u)
     if(pairingMatch&&req.method==='POST'){
       claimRoute(req);const id=decodeURIComponent(pairingMatch[1]??''),action=pairingMatch[2]
       if(action==='claim'){void readJson(req).then((body)=>{const secret=cleanString((body as {claimSecret?:unknown}).claimSecret);const result=secret?payloads.auth?.executorIdentityStore?.claimPairing(id,secret):undefined;if(!result){sendError(res,404,'pairing not found');return}sendJson(req,res,result)});return}
-      const result=payloads.auth?.executorIdentityStore?.decidePairing(id,action==='approve');if(!result){sendError(res,404,'pending pairing not found');return}payloads.audit?.log({action:`executor_pairing.${action}`,actor:httpActor(req,payloads.auth),target:{workspaceId:result.workspaceId},outcome:'ok',metadata:{id}});sendJson(req,res,result);return
+      const auth=authorizeSensitiveManagement(req,payloads.deploymentMode??'standalone',payloads.auth);if(!auth.ok){sendError(res,auth.status,auth.error);return}
+      const result=payloads.auth?.executorIdentityStore?.decidePairing(id,action==='approve');if(!result){sendError(res,404,'pending pairing not found');return}payloads.audit?.log({action:`executor_pairing.${action}`,actor:auth.actor,target:{workspaceId:result.workspaceId},outcome:'ok',metadata:{id}});sendJson(req,res,result);return
     }
     if (path === '/auth/executor-invites' && req.method === 'POST') {
       claimRoute(req)
-      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_invite.create', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
-        sendError(res, 401, auth.reason)
+        sendError(res, auth.status, auth.error)
         return
       }
       void readJson(req)
@@ -424,10 +437,10 @@ export function attachJsonRoutes(
     const invitePathMatch = path.match(/^\/auth\/executor-invites\/([^/]+)(?:\/(regenerate))?$/u)
     if (invitePathMatch && (req.method === 'PATCH' || req.method === 'DELETE' || req.method === 'POST')) {
       claimRoute(req)
-      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_invite.manage', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
-        sendError(res, 401, auth.reason)
+        sendError(res, auth.status, auth.error)
         return
       }
       const id = decodeURIComponent(invitePathMatch[1] ?? '').trim()
@@ -477,10 +490,10 @@ export function attachJsonRoutes(
     }
     if (path === '/auth/executor-identities' && req.method === 'GET') {
       claimRoute(req)
-      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_identity.list', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
-        sendError(res, 401, auth.reason)
+        sendError(res, auth.status, auth.error)
         return
       }
       const identities = payloads.auth?.executorIdentityStore?.snapshot() ?? []
@@ -497,10 +510,10 @@ export function attachJsonRoutes(
     }
     if (path === '/auth/executor-identities' && req.method === 'DELETE') {
       claimRoute(req)
-      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_identity.revoke', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
-        sendError(res, 401, auth.reason)
+        sendError(res, auth.status, auth.error)
         return
       }
       const parsed = new URL(url, 'http://x')
@@ -524,6 +537,73 @@ export function attachJsonRoutes(
         return
       }
     }
+    if (path === '/settings/web-search' && payloads.webSearchCredentials) {
+      claimRoute(req)
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        void Promise.resolve(payloads.webSearchCredentials.status())
+          .then((body) => sendJson(req, res, body))
+          .catch((error: unknown) => sendError(res, 500, error instanceof Error ? error.message : String(error)))
+        return
+      }
+      if (req.method === 'PUT') {
+        void readJson(req).then((raw) => {
+          const body = typeof raw === 'object' && raw !== null ? raw as { provider?: unknown; apiKey?: unknown; key?: unknown } : {}
+          if (body.provider !== 'serper') throw new HttpRouteError(400, 'provider must be serper')
+          const key = body.apiKey ?? body.key
+          if (typeof key !== 'string' || key !== key.trim() || key.length < 8 || key.length > 512) {
+            throw new HttpRouteError(400, 'key must be a trimmed string between 8 and 512 characters')
+          }
+          return payloads.webSearchCredentials!.set('serper', key)
+        }).then((body) => sendJson(req, res, body))
+          .catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 500, error instanceof Error ? error.message : String(error)))
+        return
+      }
+      if (req.method === 'DELETE') {
+        void Promise.resolve(payloads.webSearchCredentials.delete('serper'))
+          .then((body) => sendJson(req, res, body))
+          .catch((error: unknown) => sendError(res, 500, error instanceof Error ? error.message : String(error)))
+        return
+      }
+      sendError(res, 405, 'method not allowed')
+      return
+    }
+    if (path === '/settings/web-search/test' && req.method === 'POST' && payloads.webSearchCredentials) {
+      claimRoute(req)
+      void runWebSearch({ query: 'Agent RunLab', limit: 1 }, { credentials: payloads.webSearchCredentials })
+        .then((result) => {
+          if (!result.ok) {
+            sendError(res, result.failure?.code === 'ESEARCH_CREDENTIAL' ? 400 : 502, result.content)
+            return
+          }
+          sendJson(req, res, { ok: true })
+        })
+        .catch((error: unknown) => sendError(res, 502, error instanceof Error ? error.message : String(error)))
+      return
+    }
+    const toolBarrier = /^\/runtime\/sessions\/([^/]+)\/tool-result\/([^/]+)$/u.exec(path)
+    if (toolBarrier && payloads.toolResultPersisted && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      void payloads.toolResultPersisted(decodeURIComponent(toolBarrier[1]!), decodeURIComponent(toolBarrier[2]!))
+        .then((persisted) => sendJson(req, res, { persisted }))
+        .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/internal/runtime/quiescence' && payloads.unitQuiescence && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      sendJson(req, res, payloads.unitQuiescence())
+      return
+    }
+    if (path === '/internal/runtime/cutover/reserve' && payloads.reserveCutover && req.method === 'POST') {
+      claimRoute(req)
+      void payloads.reserveCutover().then((snapshot) => sendJson(req, res, snapshot)).catch((error) => sendError(res, 409, error instanceof Error ? error.message : String(error)))
+      return
+    }
+    if (path === '/internal/runtime/cutover/release' && payloads.releaseCutover && req.method === 'POST') {
+      claimRoute(req)
+      payloads.releaseCutover()
+      sendJson(req, res, { ok: true })
+      return
+    }
     if (path === '/runtime/restart/status' && payloads.restartStatus && (req.method === 'GET' || req.method === 'HEAD')) {
       claimRoute(req)
       sendJson(req, res, payloads.restartStatus())
@@ -539,6 +619,16 @@ export function attachJsonRoutes(
           sendJson(req, res, result)
         })
         .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/runtime/restart/commit' && payloads.commitRestartActivation && req.method === 'POST') {
+      claimRoute(req)
+      void readJson(req).then((body) => {
+        const attemptId = typeof (body as { attemptId?: unknown })?.attemptId === 'string' ? (body as { attemptId: string }).attemptId : ''
+        const result = attemptId ? payloads.commitRestartActivation!(attemptId) : null
+        if (!result) { sendError(res, 409, 'restart activation commit rejected'); return }
+        sendJson(req, res, result)
+      }).catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
       return
     }
     if (path === '/runtime/restart/abort' && payloads.abortRestart && req.method === 'POST') {
@@ -822,10 +912,15 @@ function isProtectedJsonRoute(path: string): boolean {
     path === '/runtime/capabilities' ||
     path === '/runtime/tool-registry' ||
     /^\/runtime\/sessions\/[^/]+\/tool-lock$/u.test(path) ||
+    /^\/runtime\/sessions\/[^/]+\/tool-result\/[^/]+$/u.test(path) ||
+    path.startsWith('/internal/runtime/') ||
     path === '/runtime/restart/status' ||
     path === '/runtime/restart' ||
+    path === '/runtime/restart/commit' ||
     path === '/runtime/restart/abort' ||
     path === '/settings/models' ||
+    path === '/settings/web-search' ||
+    path === '/settings/web-search/test' ||
     path === '/settings/agent-prompt' ||
     path === '/settings/socket-admin/init' ||
     path === '/settings/socket-admin/mode' ||
@@ -836,6 +931,15 @@ function isProtectedJsonRoute(path: string): boolean {
     path.startsWith('/artifacts/') ||
     path.startsWith('/docs/') ||
     path.startsWith('/router/')
+}
+
+function authorizeSensitiveManagement(req: IncomingMessage, deploymentMode: import('@agent-kernel/shared').DeploymentMode, auth: AuthConfig | undefined): { ok: true; actor: AuditActor } | { ok: false; status: number; error: string; reason: string } {
+  const authorization = req.headers.authorization
+  const token = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined
+  const result = authenticateDashboardHandshake({ role: 'dashboard', clientVersion: 'http', ...(token ? { token } : {}) }, req, auth)
+  if (!result.ok) return { ok: false, status: 401, error: result.reason, reason: result.reason }
+  if (deploymentMode === 'saas' && (result.actor.kind !== 'ingress' || !['owner', 'admin'].includes(result.actor.role))) return { ok: false, status: 403, error: 'admin_required', reason: 'admin_required' }
+  return { ok: true, actor: result.actor }
 }
 
 function httpActor(req: IncomingMessage, auth: AuthConfig | undefined): AuditActor {
@@ -1533,10 +1637,11 @@ export function attachReleaseAssetsHandler(
   const embedded = embeddedAssetMap(embeddedAssets)
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/'
-    if (!url.startsWith('/release-assets/')) return
+    if (!url.startsWith('/release-assets/') && !url.startsWith('/install/assets/')) return
     if (req.method !== 'GET' && req.method !== 'HEAD') return
     if (routeClaimed(req) || res.headersSent || res.writableEnded) return
     claimRoute(req)
+    if (url.startsWith('/install/assets/')) req.url = url.replace('/install/assets/', '/release-assets/')
     void serveReleaseAsset(root, embedded, req, res)
   })
 }
@@ -1667,9 +1772,19 @@ function pickEmbeddedAsset(
   if (requested === '__forbidden__') return null
   const direct = assets.get(requested)
   if (direct) return direct
+  // A stale page or service worker may request a hashed chunk from the
+  // previous release. Returning index.html for that .js URL causes strict
+  // browsers such as Safari to reject it as an invalid text/html module.
+  // Only extensionless client-side routes are eligible for SPA fallback.
+  if (hasStaticAssetExtension(requested)) return null
   const index = assets.get(`${requested.replace(/\/+$/u, '')}/index.html`)
   if (index) return index
   return assets.get('index.html') ?? null
+}
+
+function hasStaticAssetExtension(requested: string): boolean {
+  const leaf = requested.split('/').at(-1) ?? ''
+  return extname(leaf).length > 0
 }
 
 function normalizeStaticAssetPath(path: string): string {
@@ -1772,7 +1887,10 @@ async function pickFile(abs: string, root: string): Promise<string | null> {
       } catch {}
     }
   } catch {}
-  // SPA fallback: unknown routes serve index.html (client-side routing).
+  // Missing static assets must stay 404. Serving index.html for a stale hashed
+  // JavaScript chunk makes Safari reject it as an invalid text/html module.
+  if (extname(abs).length > 0) return null
+  // SPA fallback: extensionless unknown routes serve index.html.
   const fallback = join(root, 'index.html')
   try {
     const s = await stat(fallback)
