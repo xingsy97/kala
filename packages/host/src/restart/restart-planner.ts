@@ -41,6 +41,7 @@ export function planRestartSession(input: {
     cursor: snapshot.cursor ?? record.state.cursor,
     initialStatus: record.state.status,
     checkpointStatus: checkpointStatusFor(snapshot),
+    ...(snapshot.checkpointKind ? { checkpointKind: snapshot.checkpointKind } : {}),
     resumeAction: resumeActionFor(snapshot, mode),
     ...(record.label ? { label: record.label } : {}),
     ...(record.workspaceId ? { workspaceId: record.workspaceId } : {}),
@@ -52,6 +53,7 @@ export function checkpointStatusFor(snapshot: Pick<LoopDrainSessionSnapshot, 'sa
   if (snapshot.safe) return snapshot.waiting === 'none' ? 'safe' : 'already_safe'
   if (snapshot.waiting === 'llm') return 'waiting_llm'
   if (snapshot.waiting === 'tool') return 'waiting_tool'
+  if (snapshot.waiting === 'turn' || snapshot.waiting === 'compaction') return 'waiting_turn'
   if (snapshot.waiting === 'idle') return 'waiting_idle'
   return 'safe'
 }

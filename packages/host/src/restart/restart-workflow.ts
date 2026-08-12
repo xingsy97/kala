@@ -16,6 +16,7 @@ export type RestartWorkflowEvent =
   | ({ readonly kind: 'drain_started' } & AttemptEventFields)
   | ({ readonly kind: 'checkpoints_reached' } & AttemptEventFields)
   | ({ readonly kind: 'restart_started' } & AttemptEventFields)
+  | ({ readonly kind: 'activation_committed' } & AttemptEventFields)
   | ({ readonly kind: 'abort'; readonly error: string } & AttemptEventFields)
   | ({ readonly kind: 'fail'; readonly error: string } & AttemptEventFields)
 
@@ -80,9 +81,14 @@ export function transitionRestartWorkflow(
       commands: [
         { kind: 'clear_timeout', attemptId: current.attemptId },
         { kind: 'publish', attempt },
-        { kind: 'start_restart', attemptId: current.attemptId },
+        ...(current.reason === 'deploy' ? [] : [{ kind: 'start_restart' as const, attemptId: current.attemptId }]),
       ],
     }
+  }
+
+  if (event.kind === 'activation_committed') {
+    if (current.phase !== 'checkpoint_reached' || current.reason !== 'deploy') return unchanged(state)
+    return { state, commands: [{ kind: 'start_restart', attemptId: current.attemptId }] }
   }
 
   if (event.kind === 'restart_started') {

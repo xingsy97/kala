@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -13,7 +15,7 @@ import {
 } from './deploy-plan.mjs'
 
 const ROOT = '/repo'
-const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'bundle-dashboard-with-runtime.cjs']
+const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'agent-runlab-deploy-supervisor.cjs', 'agent-runlab-standalone-ingress.cjs', 'bundle-dashboard-with-runtime.cjs']
 
 function fakeFs(names) {
   return {
@@ -32,18 +34,35 @@ describe('deploy plan', () => {
   it('keeps the LXD deployment contract available from deploy:remote', async () => {
     const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('./deploy-remote.mjs', import.meta.url), 'utf8'))
     expect(source).toContain("optionValueLocal(effectiveArgs, '--lxd')")
-    expect(source).toContain('sha256sum -c SHA256SUMS --ignore-missing')
-    expect(source).toContain('deploy failed; rolling back LXD')
-    expect(source).toContain('systemctl is-active --quiet')
+    expect(source).toContain('createGenerationPlan')
+    expect(source).toContain('deploy-finalize.mjs')
+    expect(source).toContain('launchFinalizeScript')
+    expect(source).not.toContain('systemctl restart')
+    expect(source).toContain("['exec', container, '--', 'bash', '-lc', command]")
+    expect(source).toContain('const files = releaseFiles(releaseDir)')
+    expect(source).toContain('transactionJson')
     expect(source).toContain("rawArgs.includes('--dry-run')")
-    expect(source).toContain('no build, SSH command, upload, install, restart, or rollback was executed')
+    expect(source).toContain("rawArgs.includes('--help')")
+    expect(source).toContain('pnpm run deploy:remote -- --lxd <container>')
+    expect(source.indexOf("rawArgs.includes('--help')")).toBeLessThan(source.indexOf("optionValueLocal(effectiveArgs, '--lxd')"))
+    expect(source).toContain('no build, SSH command, upload, activation, restart, or rollback was executed')
   })
+  it('shows help without requiring a deployment target or touching release assets', () => {
+    const script = fileURLToPath(new URL('./deploy-remote.mjs', import.meta.url))
+    const output = execFileSync(process.execPath, [script, '--help'], { encoding: 'utf8' })
+    expect(output).toContain('Agent RunLab transactional deployment')
+    expect(output).toContain('pnpm run deploy:remote -- --lxd <container>')
+    expect(output).toContain('self-deployment checkpoint')
+  })
+
   it('discovers only deployable release assets in stable order', () => {
     const fs = fakeFs(['z.tmp', 'run.sh', ...REQUIRED, 'manifest.json', 'agent-runlab-model-catalog-seed.json'])
     expect(releaseFiles(`${ROOT}/release`, fs)).toEqual([
       'SHA256SUMS',
       'agent-kernel-executor.cjs',
+      'agent-runlab-deploy-supervisor.cjs',
       'agent-runlab-model-catalog-seed.json',
+      'agent-runlab-standalone-ingress.cjs',
       'bundle-dashboard-with-runtime.cjs',
       'manifest.json',
       'run.sh',
@@ -88,7 +107,7 @@ describe('deploy plan', () => {
   })
 
   it('requires core release assets before deployment can run', () => {
-    const fs = fakeFs(['SHA256SUMS', 'bundle-dashboard-with-runtime.cjs'])
+    const fs = fakeFs(REQUIRED.filter((name) => name !== 'agent-kernel-executor.cjs'))
     expect(() => buildDeployPlan({
       args: ['--ssh', 'target', '--host-url', 'http://127.0.0.1:3000', '--remote-bin', '~/bin'],
       env: {},

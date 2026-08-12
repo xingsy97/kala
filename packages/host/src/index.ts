@@ -33,3 +33,4 @@ export type {
 } from './agent-modules/types.js'
 export { discoverSkills, skillToolSchema, SKILL_TOOL_NAME } from './extensions/skills.js'
 export type { SkillInfo, SkillRegistry } from './extensions/skills.js'
+export type { WebSearchCredentialStore } from './web-search/index.js'

@@ -60,6 +60,12 @@ const cases = [
     fullSettings: false,
   },
   {
+    name: 'iPad portrait',
+    viewport: { width: 768, height: 1024, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+    standalone: false,
+    fullSettings: false,
+  },
+  {
     name: 'standalone PWA',
     viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
     standalone: true,
@@ -146,6 +152,7 @@ async function verifyScenario(scenario) {
   await verifyImagePreviewDialog(page, scenario.name)
   await verifySessionMetadataDialog(page, scenario.name)
   await verifySettingsDialog(page, scenario.name, scenario.fullSettings !== false)
+  await verifyConnectWorkspaceDialog(page, scenario.name)
   if (scenario.name === 'desktop browser') {
     await verifyInspectorDefaults(page, scenario.name)
   }
@@ -511,6 +518,55 @@ async function selectSettingsSection(page, section) {
     return
   }
   await page.click(`[data-testid="settings-tab-${section}"]`)
+}
+
+async function verifyConnectWorkspaceDialog(page, name) {
+  let trigger = await page.$('[data-testid="connect-workspace-button"]')
+  if (!trigger) {
+    await page.keyboard.down('Control')
+    await page.keyboard.press('KeyK')
+    await page.keyboard.up('Control')
+    await page.waitForSelector('[data-testid="command-palette-search"]')
+    await page.$eval('[data-testid="command-palette-search"]', (element) => element.focus())
+    await page.keyboard.type('connect workspace')
+    const command = await page.$('[data-testid="command-palette-item-workspace.connect"]')
+    if (command) await command.click()
+    await sleep(100)
+    trigger = await page.$('[data-testid="connect-workspace-button"]')
+  }
+  const alreadyOpen = Boolean(await page.$('[data-testid="connect-workspace-dialog"]'))
+  if (!trigger && !alreadyOpen) {
+    check(`${name}: Connect Workspace entry exists`, false)
+    return
+  }
+  if (!alreadyOpen) await trigger.click()
+  await page.waitForSelector('[data-testid="connect-workspace-dialog"]')
+  await page.waitForSelector('[data-testid="executor-terminal-command"]')
+  await sleep(150)
+  const metrics = await page.evaluate(() => {
+    const dialog = document.querySelector('[data-testid="connect-workspace-dialog"]')
+    const command = document.querySelector('[data-testid="executor-terminal-command"]')
+    const rectFor = (element) => {
+      const rect = element?.getBoundingClientRect()
+      return rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height } : null
+    }
+    return {
+      dialog: rectFor(dialog), command: rectFor(command),
+      text: command?.textContent ?? '', viewportWidth: window.innerWidth,
+      viewportHeight: window.visualViewport?.height ?? window.innerHeight,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      dialogScrollWidth: dialog?.scrollWidth ?? 0, dialogClientWidth: dialog?.clientWidth ?? 0,
+    }
+  })
+  const fits = Boolean(metrics.dialog)
+    && metrics.dialog.top >= -1 && metrics.dialog.left >= -1
+    && metrics.dialog.right <= metrics.viewportWidth + 1 && metrics.dialog.bottom <= metrics.viewportHeight + 1
+  const childrenFit = [metrics.command].every((rect) => !rect || (rect.left >= metrics.dialog.left - 1 && rect.right <= metrics.dialog.right + 1))
+  check(`${name}: Connect Workspace fits without horizontal overflow`, fits && childrenFit && metrics.documentScrollWidth <= metrics.viewportWidth + 1 && metrics.dialogScrollWidth <= metrics.dialogClientWidth + 1, JSON.stringify(metrics))
+  check(`${name}: installer command has stable URL, injected setup environment, and no sudo`, /\/install(?:\.ps1)?/.test(metrics.text) && !/sudo|ak_install_|[?&](?:invite|token|session)=/i.test(metrics.text) && /RUNLAB_SETUP_CODE/.test(metrics.text), metrics.text)
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="connect-workspace-dialog"]'))
+  await sleep(150)
 }
 
 async function verifyInspectorDefaults(page, name) {

@@ -107,7 +107,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
 
   const notifyCheckpoint = (sessionId: string): void => {
     const waiters = checkpointWaiters.get(sessionId)
-    const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+    const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, compactionInFlight, sessionTails, drainMode)
     // A steer stop self-clears once the session has settled to a safe boundary
     // (no in-flight LLM/tools), so the next turn — the front-queued steer
     // message — runs normally.
@@ -203,10 +203,12 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       await next
     },
     async compact(sessionId, trigger = 'manual', resume = false) {
+      if (drainMode !== 'none') return false
       // Commit replacement first without inline continuation. runCompact owns
       // metadata and its in-flight lock; resuming from inside it meant the next
       // LLM/tools ran before the lock cleared and before loop guards were armed.
       const replaced = await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts, false)
+      notifyCheckpoint(sessionId)
       if (replaced && trigger !== 'tool_result') {
         loopGuard.set(sessionId, {
           remainingCalls: POST_COMPACTION_GUARD_CALLS,
@@ -242,7 +244,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       if (ctrl) ctrl.abort()
     },
     requestStopAtBoundary(sessionId) {
-      const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, 'checkpoint')
+      const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, compactionInFlight, sessionTails, 'checkpoint')
       if (snapshot.safe) return
       steerStopSessions.add(sessionId)
     },
@@ -254,6 +256,9 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
     },
     async waitForActiveTurn(sessionId) {
       await (sessionTails.get(sessionId) ?? Promise.resolve()).catch(() => {})
+    },
+    async waitForQuiescence() {
+      while (sessionTails.size > 0) await Promise.allSettled([...sessionTails.values()])
     },
     async recoverInterruptedLlm(sessionId) {
       return await handle.ensureSessionResumed(sessionId)
@@ -304,19 +309,22 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       drainMode = mode
       for (const record of deps.store.recordsSnapshot()) notifyCheckpoint(record.sessionId)
     },
+    isDraining() {
+      return drainMode !== 'none'
+    },
     endDrain() {
       drainMode = 'none'
       for (const [sessionId, waiters] of checkpointWaiters) {
-        const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+        const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, compactionInFlight, sessionTails, drainMode)
         for (const resolve of waiters) resolve(snapshot)
       }
       checkpointWaiters.clear()
     },
     drainSnapshot(sessionId) {
-      return drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+      return drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, compactionInFlight, sessionTails, drainMode)
     },
     async waitForCheckpoint(sessionId) {
-      const current = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+      const current = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, compactionInFlight, sessionTails, drainMode)
       if (current.safe) return current
       return await new Promise<LoopDrainSessionSnapshot>((resolve) => {
         const waiters = checkpointWaiters.get(sessionId) ?? new Set()
@@ -325,7 +333,47 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       })
     },
     async resumeSession(sessionId) {
-      return await handle.ensureSessionResumed(sessionId)
+      const existing = recoveries.get(sessionId)
+      if (existing) return await existing
+      const recovery = (async (): Promise<boolean> => {
+        if (drainMode !== 'none' || sessionTails.has(sessionId) || inFlightAborts.has(sessionId)) return false
+        const record = deps.store.get(sessionId) ?? await deps.store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
+        if (!record) return false
+        const runtime: LoopRuntime = {
+          handle,
+          loopGuard,
+          drain: () => drainMode,
+          steerStop: () => steerStopSessions.has(sessionId),
+          toolStarted: markToolStarted,
+          toolSettled: markToolSettled,
+        }
+        if (record.state.status === 'thinking' && record.state.pendingCalls.length === 0) {
+          await performCallLlm(deps, sessionId, record.config, {
+            kind: 'call_llm',
+            messages: record.state.messages,
+            tools: record.config.tools,
+          }, inFlightAborts, runtime)
+          return true
+        }
+        if (record.state.status !== 'executing_tools' || record.state.pendingCalls.length === 0) return false
+        const effects = record.state.pendingCalls
+          .filter((call) => call.status === 'approved' || call.status === 'dispatched')
+          .map((call) => ({
+            kind: 'call_tool' as const,
+            callId: call.callId,
+            name: call.name,
+            input: call.input,
+            ...(record.state.cwd !== undefined ? { cwd: record.state.cwd } : {}),
+          }))
+        if (effects.length === 0) return false
+        const resultQueue = createSerialQueue()
+        await Promise.all(effects.map((effect) => performCallTool(deps, sessionId, effect, inFlightAborts, runtime, resultQueue)))
+        return true
+      })().finally(() => {
+        if (recoveries.get(sessionId) === recovery) recoveries.delete(sessionId)
+      })
+      recoveries.set(sessionId, recovery)
+      return await recovery
     },
   }
 
@@ -350,6 +398,8 @@ function drainSnapshotFor(
   sessionId: string,
   aborts: Map<string, AbortController>,
   tools: Map<string, Set<string>>,
+  compactions: Set<string>,
+  tails: Map<string, Promise<void>>,
   mode: LoopDrainMode,
 ): LoopDrainSessionSnapshot {
   const record = deps.store.get(sessionId)
@@ -363,7 +413,16 @@ function drainSnapshotFor(
   if ((tools.get(sessionId)?.size ?? 0) > 0) {
     return { sessionId, status: state.status, safe: false, waiting: 'tool', pendingCalls: state.pendingCalls, cursor: state.cursor }
   }
-  return { sessionId, status: state.status, safe: true, waiting: 'none', pendingCalls: state.pendingCalls, cursor: state.cursor }
+  if (compactions.has(sessionId)) return { sessionId, status: state.status, safe: false, waiting: 'compaction', pendingCalls: state.pendingCalls, cursor: state.cursor }
+  if (tails.has(sessionId)) return { sessionId, status: state.status, safe: false, waiting: 'turn', pendingCalls: state.pendingCalls, cursor: state.cursor }
+  const checkpointKind = state.status === 'thinking'
+    ? 'before_llm'
+    : state.status === 'executing_tools'
+      ? 'before_tool_dispatch'
+      : state.status === 'awaiting_approval'
+        ? 'waiting_for_approval'
+        : 'resting'
+  return { sessionId, status: state.status, safe: true, waiting: 'none', checkpointKind, pendingCalls: state.pendingCalls, cursor: state.cursor }
 }
 
 function interruptedLlmRecoveryEvent(): AgentEvent {
@@ -511,8 +570,8 @@ function shouldStopForDrain(event: AgentEvent, effects: readonly Effect[], runti
   const mode = runtime?.drain?.() ?? 'none'
   if (mode === 'none') return false
   if (mode === 'idle') return false
+  if (effects.some((effect) => effect.kind === 'call_llm' || effect.kind === 'call_tool' || effect.kind === 'request_approval')) return true
   if (event.kind === 'llm_response' || event.kind === 'llm_error') return true
-  if (effects.some((effect) => effect.kind === 'request_approval')) return true
   return false
 }
 

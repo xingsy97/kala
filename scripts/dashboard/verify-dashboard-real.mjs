@@ -36,6 +36,7 @@ const MODEL = process.env.VERIFY_MODEL
 const ANTHROPIC_MODEL = process.env.VERIFY_ANTHROPIC_MODEL ?? 'claude-opus-4.7-1m-internal'
 const REMOVED_ANTHROPIC_MODEL = process.env.VERIFY_REMOVED_ANTHROPIC_MODEL ?? 'claude-haiku-4-5'
 const TURN_TIMEOUT_MS = Number(process.env.VERIFY_TURN_TIMEOUT_MS ?? 10_000)
+const E2E_EXECUTOR_TOKEN = `dashboard-real-token-${process.pid}`
 
 const checks = []
 const hostLog = []
@@ -66,12 +67,13 @@ try {
         HOST_PORT: String(PORT),
         SESSIONS_DIR,
         DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
+        EXECUTOR_TOKENS: JSON.stringify([{ token: E2E_EXECUTOR_TOKEN }]),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   )
   pipeLog(host, hostLog)
-  await waitForLog(hostLog, `"port":${PORT}`, 10_000)
+  await waitForLog(hostLog, `host listening on http://127.0.0.1:${PORT}`, 10_000)
 
   executor = spawn(
     'pnpm',
@@ -84,6 +86,8 @@ try {
         WORKSPACE_NAME: 'dashboard-real-e2e',
         SANDBOX_ROOTS: WORKSPACE,
         AGENT_KERNEL_WORKSPACE_ID_FILE: WORKSPACE_ID_FILE,
+        AGENT_KERNEL_EXECUTOR_PROFILE: `dashboard-real-${process.pid}`,
+        EXECUTOR_TOKEN: E2E_EXECUTOR_TOKEN,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },

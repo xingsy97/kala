@@ -77,6 +77,7 @@ import { resolveModelContextWindow } from '../src/model-capabilities.js'
 import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
+import { LocalWebSearchCredentialStore } from '../src/web-search/credential-store.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 const VERSION = packageJson.version
@@ -170,6 +171,7 @@ async function main(): Promise<void> {
   const port = Number(argValue(process.argv.slice(2), '--port') ?? process.env.HOST_PORT ?? 3000)
   const sessionsDir =
     process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
+  const webSearchCredentialStore = new LocalWebSearchCredentialStore(join(dirname(sessionsDir), 'credentials'))
   const artifactRootDir = process.env.AGENT_KERNEL_ARTIFACTS_DIR === '0'
     ? false
     : process.env.AGENT_KERNEL_ARTIFACTS_DIR ?? join(dirname(sessionsDir), 'artifacts')
@@ -280,11 +282,16 @@ async function main(): Promise<void> {
 
   const server = await startHostServer({
     port,
+    ...(process.env.HOST_LISTEN_HOST?.trim() ? { listenHost: process.env.HOST_LISTEN_HOST.trim() } : {}),
     deploymentMode,
     capabilities,
     sessionsDir,
     llm,
     logger,
+    webSearchCredentials: webSearchCredentialStore,
+    webSearchCredentialStatus: () => webSearchCredentialStore.status(),
+    setWebSearchCredential: (provider, key) => webSearchCredentialStore.set(provider, key),
+    deleteWebSearchCredential: (provider) => webSearchCredentialStore.delete(provider),
     defaultConfig: () => resolvedAgentModule.config,
     models: () => registry.models,
     defaultModel: () => registry.defaultModel,
@@ -413,6 +420,9 @@ async function main(): Promise<void> {
   const shutdown = async (): Promise<void> => {
     logger.info('shutting down')
     modelMetadata.stop()
+    server.loop.beginDrain('checkpoint')
+    const sessionIds = server.store.list().map((record) => record.sessionId)
+    await Promise.all(sessionIds.map((sessionId) => server.loop.waitForCheckpoint(sessionId)))
     await server.close()
     process.exit(0)
   }

@@ -3,9 +3,16 @@ import { join } from 'node:path'
 
 export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
   'bundle-dashboard-with-runtime.cjs',
+  'agent-runlab-standalone-ingress.cjs',
+  'agent-runlab-deploy-supervisor.cjs',
   'agent-kernel-executor.cjs',
   'agent-kernel-dashboard-dist.tar.gz',
   'agent-runlab-model-catalog-seed.json',
+  'agent-runlab-ingress.service',
+  'agent-runlab-unit@.service',
+  'agent-runlab-deploy-supervisor.service',
+  'install-standalone-systemd.mjs',
+  'cutover-standalone-systemd.mjs',
   'run.sh',
   'manifest.json',
   'RELEASE_NOTES.md',
@@ -14,6 +21,8 @@ export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
 
 export const REQUIRED_RELEASE_ASSETS = Object.freeze([
   'bundle-dashboard-with-runtime.cjs',
+  'agent-runlab-standalone-ingress.cjs',
+  'agent-runlab-deploy-supervisor.cjs',
   'agent-kernel-executor.cjs',
   'SHA256SUMS',
 ])

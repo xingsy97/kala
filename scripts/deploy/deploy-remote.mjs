@@ -1,16 +1,55 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { buildDeployPlan, RETIRED_RELEASE_ASSETS, rsyncUploadArgs, sh } from './deploy-plan.mjs'
+import { buildDeployPlan, releaseFiles, RETIRED_RELEASE_ASSETS, rsyncUploadArgs, sh } from './deploy-plan.mjs'
+import { createGenerationPlan, launchFinalizeScript, prepareGenerationScript, systemdDropInScript, transactionJson, verifyGenerationScript } from './generation-plan.mjs'
+import { assertSafeDeploymentInvocation } from './self-host-guard.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const rawArgs = process.argv.slice(2)
+if (rawArgs.includes('--help') || rawArgs.includes('-h')) {
+  process.stdout.write(`Agent RunLab transactional deployment
+
+Usage:
+  pnpm run deploy:remote -- --lxd <container> [options]
+  pnpm run deploy:remote -- --ssh <target> --host-url <url> --remote-bin <dir> --service <unit> [options]
+
+LXD example:
+  pnpm run deploy:remote -- --lxd agent-runlab-host
+
+Options:
+  --lxd <container>          Deploy through the local LXD transport
+  --ssh <target>             Deploy through SSH/rsync
+  --host-url <url>           Host URL reachable from the deployment target
+                             (LXD default: http://127.0.0.1:13000)
+  --remote-bin <dir>         Target installation root
+                             (LXD default: /home/ubuntu/.bin)
+  --service <unit>           systemd Host service
+                             (LXD default: agent-runlab-host)
+  --skip-build               Reuse release assets, but still verify them
+  --dry-run                  Print the selected target without side effects
+  -h, --help                 Show this help without requiring a target
+
+Safety:
+  Both transports stage and verify an immutable generation, then hand
+  activation to an external systemd finalizer. Do not replace this command
+  with direct live-file overwrites or direct service restart.
+
+  A Session hosted by the target may invoke this command through an external
+  Executor that has the repository and target access. After "accepted" is
+  returned, let the Tool call finish: polling from that same Tool call blocks
+  its durable result and therefore blocks the self-deployment checkpoint.
+`)
+  process.exit(0)
+}
 const dryRun = rawArgs.includes('--dry-run')
 const effectiveArgs = rawArgs.filter((arg) => arg !== '--dry-run')
 const lxdContainer = optionValueLocal(effectiveArgs, '--lxd') ?? process.env.AK_DEPLOY_LXD
+const supervisorInstalled = /^(?:1|true|yes|on)$/iu.test(process.env.AGENT_RUNLAB_DEPLOY_SUPERVISOR_INSTALLED ?? '')
+assertSafeDeploymentInvocation({ env: process.env, supervisorInstalled })
 if (lxdContainer) {
   const lxdPlan = {
     mode: 'lxd',
@@ -28,17 +67,9 @@ if (lxdContainer) {
   deployLxd(lxdPlan)
   process.exit(0)
 }
-// --async / --no-wait / AK_DEPLOY_ASYNC=1 all mean "fire the restart and exit,
-// don't sit waiting for /runtime/restart/status to reach completed". This is
-// required whenever the deploy tool call itself runs inside a host session:
-// waiting synchronously deadlocks the graceful restart, because the checkpoint
-// drain will never see this session's tool bucket empty until the deploy
-// script returns, and the deploy script is the one blocking on the restart.
-const asyncFlagIndex = effectiveArgs.findIndex((arg) => arg === '--async' || arg === '--no-wait')
-const asyncMode = asyncFlagIndex !== -1 || /^(?:1|true|yes|on)$/i.test(process.env.AK_DEPLOY_ASYNC ?? '')
-const cleanedArgs = asyncFlagIndex !== -1
-  ? [...effectiveArgs.slice(0, asyncFlagIndex), ...effectiveArgs.slice(asyncFlagIndex + 1)]
-  : effectiveArgs
+// Transactional deployment is always asynchronously finalized outside the Host
+// cgroup. Keep legacy flags accepted, but they no longer alter safety semantics.
+const cleanedArgs = effectiveArgs.filter((arg) => arg !== '--async' && arg !== '--no-wait')
 const plan = buildDeployPlan({ args: cleanedArgs, env: process.env, root })
 
 const {
@@ -46,15 +77,9 @@ const {
   sshTarget,
   hostUrl,
   remoteBin,
-  restartMode,
   restartTimeoutMs,
   statusTimeoutMs,
-  pollMs,
   files,
-  uploadDir,
-  seedCommand,
-  installCommand,
-  rollbackCommand,
   service,
   sudo,
 } = plan
@@ -62,134 +87,43 @@ const {
 console.log(`deploy target: ${sshTarget}`)
 console.log(`remote bin: ${remoteBin}`)
 console.log(`host url: ${hostUrl}`)
-console.log(`upload dir: ${uploadDir}`)
-if (service) console.log(`remote service: ${service}${sudo ? ' (sudo -n)' : ''}`)
-if (asyncMode) console.log('async mode: restart is fire-and-forget (no wait for completed)')
+if (!service) throw new Error('--service is required for transactional remote deployment')
 if (dryRun) {
-  console.log(`restart mode: ${restartMode}`)
   console.log(`release files: ${files.join(', ')}`)
-  console.log(`retired remote files: ${RETIRED_RELEASE_ASSETS.join(', ')}`)
-  console.log('dry run complete: no build, SSH command, upload, install, restart, or rollback was executed')
+  console.log('dry run complete: no build, SSH command, upload, activation, restart, or rollback was executed')
   process.exit(0)
 }
-
-if (service && sudo) stage('verify remote service privilege', () => remote(`sudo -n systemctl is-active ${sh(service)} >/dev/null`))
 if (!effectiveArgs.includes('--skip-build')) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--no-native', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
 stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
-stage('prepare incremental upload', () => remote(seedCommand))
-stage('transfer release assets', transferReleaseAssets)
+const sums = readFileSync(join(releaseDir, 'SHA256SUMS'), 'utf8')
+const bundleHash = sums.match(/^([a-f0-9]{64})\s+bundle-dashboard-with-runtime\.cjs$/m)?.[1]
+if (!bundleHash) throw new Error('bundle hash is missing from SHA256SUMS')
+const generation = createGenerationPlan({
+  remoteBin, service, hostUrl, files, bundleHash, restartTimeoutMs, statusTimeoutMs,
+  sessionId: process.env.AGENT_RUNLAB_SESSION_ID, callId: process.env.AGENT_RUNLAB_CALL_ID,
+})
+const txLocal = join('/tmp', `agent-runlab-deploy-${generation.deployId}.json`)
+writeFileSync(txLocal, `${transactionJson(generation)}\n`, { mode: 0o600 })
+const remote = (command) => run('ssh', [sshTarget, command])
+let remoteHandedOff = false
 try {
-  stage('install release assets', () => remote(installCommand))
-} catch (error) {
-  rollbackRemote('remote install failed', error)
-}
-
-let before
-let restart
-try {
-  before = restartStatus()
-  restart = requestRestart({ mode: restartMode, reason: 'deploy', timeoutMs: restartTimeoutMs })
-} catch (error) {
-  rollbackRemote('graceful restart request failed', error)
-}
-const beforePid = Number(before?.pid ?? 0)
-console.log(`current host pid: ${beforePid || 'unknown'}`)
-console.log(`restart attempt: ${restart?.attemptId ?? 'unknown'} phase=${restart?.phase ?? 'unknown'} mode=${restart?.mode ?? restartMode}`)
-
-if (asyncMode) {
-  console.log('deploy dispatched: restart running in background, exiting now to unblock any originating tool call.')
-  console.log(`poll ${hostUrl}/runtime/restart/status to observe progress.`)
-  process.exit(0)
-}
-
-const deadline = Date.now() + statusTimeoutMs
-let lastPhase = restart?.phase ?? 'unknown'
-while (Date.now() < deadline) {
-  sleep(pollMs)
-  const status = tryRestartStatus()
-  if (!status) continue
-  const phase = status?.current?.phase ?? status?.last?.phase ?? 'unknown'
-  if (phase !== lastPhase) {
-    console.log(`restart phase: ${phase}`)
-    lastPhase = phase
+  stage('prepare immutable remote generation', () => remote(prepareGenerationScript(generation)))
+  stage('transfer remote generation', () => {
+    const args = rsyncUploadArgs({ releaseDir, files, sshTarget, uploadDir: generation.generationDir })
+    run('rsync', args)
+    run('scp', [join(root, 'scripts/deploy/deploy-finalize.mjs'), `${sshTarget}:${generation.workerPath}`])
+    run('scp', [txLocal, `${sshTarget}:${generation.transactionPath}`])
+  })
+  stage('verify immutable remote generation', () => remote(verifyGenerationScript(generation)))
+  stage('install generation supervisor contract', () => remote(`${sudo ? 'sudo -n ' : ''}bash -lc ${sh(systemdDropInScript(generation))}`))
+  stage('handoff remote deployment finalization', () => remote(`${sudo ? 'sudo -n ' : ''}bash -lc ${sh(launchFinalizeScript(generation))}`))
+  remoteHandedOff = true
+  console.log(JSON.stringify({ accepted: true, deployId: generation.deployId, transaction: generation.transactionPath, bundleHash }, null, 2))
+} finally {
+  if (!remoteHandedOff) {
+    try { remote(`rm -rf ${sh(`${generation.root}/deploy.active`)} ${sh(generation.generationDir)}`) } catch {}
   }
-  const pid = Number(status?.pid ?? 0)
-  const last = status?.last
-  if (pid > 0 && beforePid > 0 && pid !== beforePid && last?.phase === 'completed') {
-    try {
-      if (service) remote(`${sudo ? 'sudo -n ' : ''}systemctl is-active --quiet ${sh(service)}`)
-      remote(`cd ${sh(remoteBin)} && sha256sum -c SHA256SUMS --ignore-missing`)
-    } catch (error) {
-      rollbackRemote('post-restart verification failed', error)
-    }
-    console.log(`deploy complete: host restarted pid ${beforePid} -> ${pid}`)
-    process.exit(0)
-  }
-  if (last?.phase === 'failed' || last?.phase === 'aborted') {
-    rollbackRemote(`restart ${last.phase}`, new Error(`restart ${last.phase}: ${last.error ?? 'no error detail'}`))
-  }
-}
-
-rollbackRemote('graceful restart timed out', new Error(`timed out waiting for graceful restart after ${statusTimeoutMs}ms`))
-
-function restartStatus() {
-  return remoteJson(`curl -fsS ${sh(`${hostUrl}/runtime/restart/status`)}`)
-}
-
-function tryRestartStatus() {
-  try {
-    return restartStatus()
-  } catch {
-    return null
-  }
-}
-
-function requestRestart(payload) {
-  return remoteJson([
-    'curl -fsS',
-    '-H Content-Type:application/json',
-    '-X POST',
-    `--data ${sh(JSON.stringify(payload))}`,
-    sh(`${hostUrl}/runtime/restart`),
-  ].join(' '))
-}
-
-function remoteJson(command) {
-  const result = run('ssh', [sshTarget, command], { capture: true })
-  try {
-    return JSON.parse(result.stdout)
-  } catch (err) {
-    throw new Error(`remote command did not return JSON: ${err instanceof Error ? err.message : String(err)}\n${result.stdout}`)
-  }
-}
-
-function remote(command) {
-  run('ssh', [sshTarget, command])
-}
-
-function rollbackRemote(reason, error) {
-  console.error(`${reason}; rolling back remote release`)
-  try {
-    remote(rollbackCommand)
-  } catch (rollbackError) {
-    console.error(`rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
-  }
-  throw error
-}
-
-function transferReleaseAssets() {
-  const args = rsyncUploadArgs({ releaseDir, files, sshTarget, uploadDir })
-  const maxAttempts = 3
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      run('rsync', args)
-      return
-    } catch (error) {
-      if (attempt === maxAttempts) throw error
-      console.warn(`transfer attempt ${attempt}/${maxAttempts} failed; retrying the partial upload in 2s`)
-      sleep(2000)
-    }
-  }
+  rmSync(txLocal, { force: true })
 }
 
 function stage(label, action) {
@@ -217,39 +151,44 @@ function run(command, args, options = {}) {
   return result
 }
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-}
-
 function deployLxd({ container, remoteBin, service, skipBuild }) {
   const releaseDir = join(root, 'release')
   if (!skipBuild) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--no-native', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
   stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
   const sums = readFileSync(join(releaseDir, 'SHA256SUMS'), 'utf8')
-  const files = ['bundle-dashboard-with-runtime.cjs', 'agent-kernel-executor.cjs', 'SHA256SUMS']
+  const files = releaseFiles(releaseDir)
+  const bundleHash = sums.match(/^([a-f0-9]{64})\s+bundle-dashboard-with-runtime\.cjs$/m)?.[1]
+  if (!bundleHash) throw new Error('bundle hash is missing from SHA256SUMS')
   for (const file of files) if (!existsSync(join(releaseDir, file))) throw new Error(`missing release asset: ${file}`)
-  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
-  const upload = `${remoteBin}/.agent-kernel-upload-${stamp}`
-  const backup = `${remoteBin}/.agent-kernel-backup-${stamp}`
-  const managed = [...files, ...RETIRED_RELEASE_ASSETS]
-  stage('prepare LXD upload', () => lxcExec(container, `mkdir -p ${sh(upload)} ${sh(backup)}`))
-  stage('transfer LXD release assets', () => { for (const file of files) run('lxc', ['file', 'push', join(releaseDir, file), `${container}${upload}/${file}`]) })
-  stage('verify staged checksums', () => lxcExec(container, `cd ${sh(upload)} && sha256sum -c SHA256SUMS --ignore-missing`))
-  const install = ['set -euo pipefail', `BIN=${sh(remoteBin)}`, `UPLOAD=${sh(upload)}`, `BACKUP=${sh(backup)}`, `for f in ${managed.map(sh).join(' ')}; do [ ! -e "$BIN/$f" ] || cp -p "$BIN/$f" "$BACKUP/$f"; done`, `rm -f ${RETIRED_RELEASE_ASSETS.map((file) => `"$BIN/${file}"`).join(' ')}`, `for f in ${files.map(sh).join(' ')}; do mv "$UPLOAD/$f" "$BIN/$f"; done`, 'chmod 755 "$BIN/bundle-dashboard-with-runtime.cjs" "$BIN/agent-kernel-executor.cjs"', `systemctl restart ${sh(service)}`].join('\n')
+  const hostUrl = optionValueLocal(effectiveArgs, '--host-url') ?? process.env.AK_DEPLOY_HOST_URL ?? 'http://127.0.0.1:13000'
+  const plan = createGenerationPlan({
+    remoteBin, service, hostUrl, files, bundleHash,
+    sessionId: process.env.AGENT_RUNLAB_SESSION_ID,
+    callId: process.env.AGENT_RUNLAB_CALL_ID,
+  })
+  const txLocal = join('/tmp', `agent-runlab-deploy-${plan.deployId}.json`)
+  writeFileSync(txLocal, `${transactionJson(plan)}\n`, { mode: 0o600 })
+  let handedOff = false
   try {
-    stage('install and restart LXD service', () => lxcExec(container, install))
-    stage('verify LXD service health', () => { lxcExec(container, `systemctl is-active --quiet ${sh(service)}`); lxcExec(container, `pid=$(systemctl show -p MainPID --value ${sh(service)}); [ "$pid" -gt 1 ] && kill -0 "$pid"`) })
-    const localHash = sums.match(/^([a-f0-9]{64})\s+bundle-dashboard-with-runtime\.cjs$/m)?.[1]
-    const remoteHash = run('lxc', ['exec', container, '--', 'sha256sum', `${remoteBin}/bundle-dashboard-with-runtime.cjs`], { capture: true }).stdout.trim().split(/\s+/u)[0]
-    if (!localHash || localHash !== remoteHash) throw new Error(`deployed bundle hash mismatch: local=${localHash ?? 'missing'} remote=${remoteHash}`)
-    lxcExec(container, `rm -rf ${sh(upload)} ${sh(backup)}`)
-    console.log(`deploy complete: LXD ${container} service=${service} sha256=${remoteHash}`)
-  } catch (error) {
-    console.error(`deploy failed; rolling back LXD ${container}`)
-    lxcExec(container, `set -eu; BIN=${sh(remoteBin)}; BACKUP=${sh(backup)}; for f in ${managed.map(sh).join(' ')}; do rm -f "$BIN/$f"; [ ! -e "$BACKUP/$f" ] || cp -p "$BACKUP/$f" "$BIN/$f"; done; systemctl restart ${sh(service)}`)
-    throw error
+    stage('prepare immutable LXD generation', () => lxcExec(container, prepareGenerationScript(plan)))
+    stage('transfer LXD generation', () => {
+      for (const file of files) run('lxc', ['file', 'push', join(releaseDir, file), `${container}${plan.generationDir}/${file}`])
+      run('lxc', ['file', 'push', join(root, 'scripts/deploy/deploy-finalize.mjs'), `${container}${plan.workerPath}`])
+      run('lxc', ['file', 'push', txLocal, `${container}${plan.transactionPath}`])
+    })
+    stage('verify immutable LXD generation', () => lxcExec(container, verifyGenerationScript(plan)))
+    stage('install generation supervisor contract', () => lxcExec(container, systemdDropInScript(plan)))
+    stage('handoff LXD deployment finalization', () => lxcExec(container, launchFinalizeScript(plan)))
+    handedOff = true
+    console.log(JSON.stringify({ accepted: true, deployId: plan.deployId, transaction: plan.transactionPath, bundleHash }, null, 2))
+    console.log('deployment finalizer accepted the transaction; it will wait for this Tool result before checkpoint restart')
+  } finally {
+    if (!handedOff) {
+      try { lxcExec(container, `rm -rf ${sh(`${plan.root}/deploy.active`)} ${sh(plan.generationDir)}`) } catch {}
+    }
+    rmSync(txLocal, { force: true })
   }
 }
 
-function lxcExec(container, command) { run('lxc', ['exec', container, '--', 'sh', '-lc', command]) }
+function lxcExec(container, command) { run('lxc', ['exec', container, '--', 'bash', '-lc', command]) }
 function optionValueLocal(args, name) { for (let i = 0; i < args.length; i++) { if (args[i] === name) return args[i + 1]; if (args[i]?.startsWith(`${name}=`)) return args[i].slice(name.length + 1) } return undefined }

@@ -28,6 +28,7 @@ import type { LLMAdapter } from './llm/adapter.js'
 import type { HookConfig, HookRunner } from './extensions/hooks.js'
 import type { SkillManager, SkillRegistry } from './extensions/skills.js'
 import type { SessionStore } from './store/session.js'
+import type { WebSearchCredentialStore } from './web-search/index.js'
 
 export type LoopBroadcast = {
   onEvent(
@@ -132,6 +133,7 @@ export type HostLoopDeps = {
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
   skills?: SkillRegistry | SkillManager
+  webSearchCredentials?: WebSearchCredentialStore
   artifactRootDir?: string
 }
 
@@ -142,10 +144,13 @@ export type LoopHandle = {
   /** True while any serialized turn work is still running, including the gaps between LLM and tool effects. */
   hasActiveTurn(sessionId: string): boolean
   waitForActiveTurn(sessionId: string): Promise<void>
+  /** Wait until every serialized Session turn has left the Loop. */
+  waitForQuiescence(): Promise<void>
   recoverInterruptedLlm(sessionId: string): Promise<boolean>
   /** Resume a dangling Session once; coalesces reconnect/restart callers. */
   ensureSessionResumed(sessionId: string): Promise<boolean>
   beginDrain(mode: LoopDrainMode): void
+  isDraining(): boolean
   endDrain(): void
   drainSnapshot(sessionId: string): LoopDrainSessionSnapshot
   waitForCheckpoint(sessionId: string): Promise<LoopDrainSessionSnapshot>
@@ -175,7 +180,8 @@ export type LoopDrainSessionSnapshot = {
   sessionId: string
   status: AgentState['status'] | 'missing'
   safe: boolean
-  waiting: 'none' | 'llm' | 'tool' | 'idle'
+  waiting: 'none' | 'llm' | 'tool' | 'compaction' | 'turn' | 'idle'
+  checkpointKind?: 'resting' | 'before_llm' | 'before_tool_dispatch' | 'waiting_for_approval'
   pendingCalls: readonly PendingToolCall[]
   cursor?: number
 }

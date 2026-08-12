@@ -13,6 +13,7 @@ import { readRequiredSecretEnv } from '../src/config/secret-env.js'
 import { createRuntimeProviderRuntime, FileSecretResolver, loadRuntimeProviderCatalog } from '../src/llm/runtime-provider-catalog.js'
 import { RuntimeUnitMaterializationStore } from '../src/tenant-runtime/materialization-store.js'
 import { attachTenantRuntimeControlApi } from '../src/tenant-runtime/control-api.js'
+import { LocalWebSearchCredentialStore } from '../src/web-search/credential-store.js'
 
 function required(name: string): string {
   const value = process.env[name]?.trim()
@@ -56,6 +57,7 @@ async function main(): Promise<void> {
     factory: async (id) => {
       const unitRoot = join(dataRoot, 'tenant-runtime-units', id)
       const workspaceDir = join(unitRoot, 'workspace')
+      const webSearchCredentialStore = new LocalWebSearchCredentialStore(join(unitRoot, 'credentials'))
       await mkdir(workspaceDir, { recursive: true, mode: 0o700 })
       return startLoopbackHostRuntimeUnit(id, {
         sessionsDir: join(unitRoot, 'sessions'),
@@ -68,6 +70,10 @@ async function main(): Promise<void> {
         defaultModel: runtimeProvider.defaultModel,
         deploymentMode: 'saas',
         capabilities: SAAS_RUNTIME_CAPABILITIES,
+        webSearchCredentials: webSearchCredentialStore,
+        webSearchCredentialStatus: () => webSearchCredentialStore.status(),
+        setWebSearchCredential: (provider, key) => webSearchCredentialStore.set(provider, key),
+        deleteWebSearchCredential: (provider) => webSearchCredentialStore.delete(provider),
         ...(dashboardDir ? { staticDir: resolve(dashboardDir) } : {}),
         ...(docsDir ? { docsRootDir: resolve(docsDir) } : {}),
         ...(releaseAssetsDir ? { releaseAssetsDir: resolve(releaseAssetsDir) } : {}),

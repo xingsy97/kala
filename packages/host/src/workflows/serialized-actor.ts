@@ -34,6 +34,12 @@ export class SerializedActor<State, Event, Command> {
     return this.state
   }
 
+  /** Replace a durably restored workflow snapshot before normal admission. */
+  replaceState(state: State): void {
+    if (this.processing) throw new Error('cannot replace actor state while processing')
+    this.state = state
+  }
+
   send(event: Event): void {
     if (this.closed) return
     this.mailbox.push(event)

@@ -2554,6 +2554,69 @@ describe('host loop', () => {
     expect(toolCalls).toBe(0)
     expect(loop.drainSnapshot(sessionId).safe).toBe(true)
   })
+
+  it('checkpoint drain pauses after a durable tool result before the next LLM', async () => {
+    let llmCalls = 0
+    const loop = runHostLoop({
+      store,
+      llm: {
+        name: 'checkpoint-tool-boundary',
+        async call() {
+          llmCalls += 1
+          if (llmCalls === 1) return { message: { role: 'assistant', content: [{ type: 'tool_call' as const, callId: 'c-tool-boundary', name: 'read', input: {} }] } }
+          return { message: { role: 'assistant', content: [{ type: 'text' as const, text: 'continued' }] } }
+        },
+      },
+      tools: nullTools({
+        callTool: async () => {
+          loop.beginDrain('checkpoint')
+          return { ok: true, content: 'tool finished' }
+        },
+      }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'read x' })
+
+    expect(llmCalls).toBe(1)
+    expect(store.get(sessionId)?.state.status).toBe('thinking')
+    expect(loop.drainSnapshot(sessionId)).toMatchObject({ safe: true, checkpointKind: 'before_llm' })
+  })
+
+  it('planned resume continues a checkpointed LLM turn without an interrupted marker', async () => {
+    let llmCalls = 0
+    const loop = runHostLoop({
+      store,
+      llm: {
+        name: 'planned-resume',
+        async call() {
+          llmCalls += 1
+          if (llmCalls === 1) return { message: { role: 'assistant', content: [{ type: 'tool_call' as const, callId: 'c-resume', name: 'read', input: {} }] } }
+          return { message: { role: 'assistant', content: [{ type: 'text' as const, text: 'resumed normally' }] } }
+        },
+      },
+      tools: nullTools({
+        callTool: async () => {
+          loop.beginDrain('checkpoint')
+          return { ok: true, content: 'checkpoint me' }
+        },
+      }),
+      broadcast: silentBroadcast(),
+    })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'continue me' })
+    expect(store.get(sessionId)?.state.status).toBe('thinking')
+    loop.endDrain()
+
+    await expect(loop.resumeSession(sessionId)).resolves.toBe(true)
+
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    const assistantText = parsed.events
+      .flatMap((entry) => entry.event.kind === 'llm_response' ? entry.event.message.content : [])
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+    expect(assistantText).toContain('resumed normally')
+    expect(assistantText).not.toContain('[interrupted]')
+  })
 })
 
 describe('SessionStore', () => {

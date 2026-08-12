@@ -35,6 +35,7 @@ function harness(overrides: Partial<RestartCoordinatorOptions> = {}) {
       sessionId, status: 'thinking' as const, safe: false, waiting: 'llm' as const, pendingCalls: [], cursor: 3,
     })),
     waitForCheckpoint: vi.fn(() => checkpoint.promise),
+    waitForQuiescence: vi.fn(async () => undefined),
     resumeSession: vi.fn(async () => true),
   } as unknown as LoopHandle
   const store = {
@@ -89,6 +90,23 @@ describe('RestartCoordinator', () => {
     expect(loop.beginDrain).toHaveBeenCalledTimes(1)
   })
 
+  it('upgrades an active parent/child agent Tool group to when_idle', async () => {
+    const store = {
+      recordsSnapshot: () => [{
+        sessionId: 'parent',
+        state: {
+          status: 'executing_tools' as const,
+          cursor: 4,
+          pendingCalls: [{ callId: 'agent-call', name: 'agent', input: {}, status: 'dispatched' as const }],
+        },
+      }],
+    } as unknown as SessionStore
+    const { coordinator, loop } = harness({ store })
+    const result = await coordinator.request({ mode: 'checkpoint' })
+    expect(result.mode).toBe('when_idle')
+    expect(loop.beginDrain).toHaveBeenCalledWith('idle')
+  })
+
   it('turns checkpoint rejection into a failed terminal attempt', async () => {
     const { coordinator, checkpoint, loop } = harness()
     await coordinator.request()
@@ -132,5 +150,33 @@ describe('RestartCoordinator', () => {
 
     expect(options.closeServer).toHaveBeenCalledOnce()
     expect(coordinator.status().last?.phase).not.toBe('failed')
+  })
+
+  it('persists continuation receipts and does not resume a completed participant twice', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'restart-receipts-'))
+    roots.push(root)
+    const statePath = join(root, 'restart.json')
+    const persisted: HostRestartAttempt = {
+      attemptId: 'receipt-attempt',
+      phase: 'restarting',
+      mode: 'checkpoint',
+      reason: 'deploy',
+      requestedAt: '2026-07-24T00:00:00.000Z',
+      updatedAt: '2026-07-24T00:00:01.000Z',
+      oldPid: 10,
+      sessions: [{
+        sessionId: 'session-1', cursor: 3, initialStatus: 'thinking',
+        checkpointStatus: 'safe', checkpointKind: 'before_llm', resumeAction: 'continue_turn',
+      }],
+    }
+    writeFileSync(statePath, JSON.stringify(persisted))
+    const first = harness({ statePath })
+    await first.coordinator.resumeMarkedSessions()
+    expect(first.loop.resumeSession).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).recoveryReceipts).toEqual({ 'session-1': 'completed' })
+
+    const second = harness({ statePath })
+    await second.coordinator.resumeMarkedSessions()
+    expect(second.loop.resumeSession).not.toHaveBeenCalled()
   })
 })

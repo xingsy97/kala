@@ -45,6 +45,16 @@ describe('restart workflow', () => {
     expect(restarting.commands.map((command) => command.kind)).toEqual(['clear_timeout', 'publish', 'close_and_spawn'])
   })
 
+  it('holds deploy restart at checkpoint until activation is committed', () => {
+    const requested = transitionRestartWorkflow(empty, { kind: 'request', attempt: { ...attempt('deploy-a'), reason: 'deploy' } })
+    const draining = transitionRestartWorkflow(requested.state, { kind: 'drain_started', attemptId: 'deploy-a', ...update })
+    const checkpoint = transitionRestartWorkflow(draining.state, { kind: 'checkpoints_reached', attemptId: 'deploy-a', ...update })
+    expect(checkpoint.state.current?.phase).toBe('checkpoint_reached')
+    expect(checkpoint.commands.map((command) => command.kind)).toEqual(['clear_timeout', 'publish'])
+    const committed = transitionRestartWorkflow(checkpoint.state, { kind: 'activation_committed', attemptId: 'deploy-a', ...update })
+    expect(committed.commands).toEqual([{ kind: 'start_restart', attemptId: 'deploy-a' }])
+  })
+
   it('starts force requests without entering drain', () => {
     const requested = transitionRestartWorkflow(empty, { kind: 'request', attempt: attempt('force', 'force') })
     expect(requested.commands.map((command) => command.kind)).toEqual(['publish', 'start_restart'])
