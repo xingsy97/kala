@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Circle, CircleDashed, GitBranch, LockKeyhole, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
 
 import { cn } from '../../lib/utils.js'
 import type { TaskGraphNode, TaskGraphSnapshot, TaskGraphStatus } from './task-graph-from-timeline.js'
@@ -10,9 +11,13 @@ export function TaskGraphButton({ graph }: Props): JSX.Element | null {
   const [open, setOpen] = useState(false)
   const [graphView, setGraphView] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
+  const popover = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!open) return
-    const close = (event: MouseEvent): void => { if (root.current && !root.current.contains(event.target as Node)) setOpen(false) }
+    const close = (event: MouseEvent): void => {
+      const target = event.target as Node
+      if (!root.current?.contains(target) && !popover.current?.contains(target)) setOpen(false)
+    }
     const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', close); document.addEventListener('keydown', key)
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key) }
@@ -30,7 +35,7 @@ export function TaskGraphButton({ graph }: Props): JSX.Element | null {
       <span className="hidden sm:inline">· {summary.ready} ready</span>
       {summary.active > 0 ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" /> : null}
     </button>
-    {open ? <div role="dialog" aria-label="Task graph" data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-30 flex max-h-[76dvh] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-xl sm:inset-x-4 sm:bottom-20 lg:left-1/2 lg:right-auto lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
+    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label="Task graph" data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-30 flex max-h-[76dvh] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-xl md:inset-x-4 md:bottom-4 md:top-16 md:max-h-none lg:left-1/2 lg:right-auto lg:top-auto lg:bottom-20 lg:max-h-[76dvh] lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
       <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
         <GitBranch className="h-4 w-4" /><span className="text-sm font-medium">Task Graph</span><span className="text-xs text-muted-foreground">rev {graph.revision}</span>
         <button className="ml-auto rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => setGraphView((value) => !value)}>{graphView ? 'List view' : 'Graph view'}</button>
@@ -38,7 +43,7 @@ export function TaskGraphButton({ graph }: Props): JSX.Element | null {
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {graphView ? <GraphView graph={graph} /> : <GroupedList graph={graph} />}
       </div>
-    </div> : null}
+    </div>, document.body) : null}
   </div>
 }
 
@@ -70,14 +75,16 @@ const GRAPH_NODE_HEIGHT = 76
 const GRAPH_COLUMN_GAP = 104
 const GRAPH_ROW_GAP = 28
 const GRAPH_PADDING = 28
+const GRAPH_LEVEL_GAP_VERTICAL = 68
 
 type PositionedNode = { node: TaskGraphNode; x: number; y: number }
 
 function GraphView({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
   const [selected, setSelected] = useState<string | null>(null)
-  const layout = useMemo(() => graphLayout(graph), [graph])
+  const portrait = usePortraitGraphLayout()
+  const layout = useMemo(() => graphLayout(graph, portrait ? 'vertical' : 'horizontal'), [graph, portrait])
   const related = useMemo(() => selected ? connectedNodeIds(graph, selected) : null, [graph, selected])
-  return <div className="relative min-w-max overflow-hidden rounded-lg border border-border/50 bg-muted/10" style={{ width: layout.width, height: layout.height }} data-testid="task-graph-view">
+  return <div className="flex min-h-full min-w-full w-max justify-center"><div className="relative overflow-hidden rounded-lg border border-border/50 bg-muted/10" style={{ width: layout.width, height: layout.height }} data-testid="task-graph-view" data-layout={layout.direction}>
     <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden="true">
       <defs>
         <marker id="todo-graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -87,11 +94,17 @@ function GraphView({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
       {graph.edges.map((edge) => {
         const from = layout.byId.get(edge.from); const to = layout.byId.get(edge.to)
         if (!from || !to) return null
-        const x1 = from.x + GRAPH_NODE_WIDTH; const y1 = from.y + GRAPH_NODE_HEIGHT / 2
-        const x2 = to.x; const y2 = to.y + GRAPH_NODE_HEIGHT / 2
-        const bend = Math.max(36, (x2 - x1) * 0.46)
+        const vertical = layout.direction === 'vertical'
+        const x1 = vertical ? from.x + GRAPH_NODE_WIDTH / 2 : from.x + GRAPH_NODE_WIDTH
+        const y1 = vertical ? from.y + GRAPH_NODE_HEIGHT : from.y + GRAPH_NODE_HEIGHT / 2
+        const x2 = vertical ? to.x + GRAPH_NODE_WIDTH / 2 : to.x
+        const y2 = vertical ? to.y : to.y + GRAPH_NODE_HEIGHT / 2
+        const bend = vertical ? Math.max(28, (y2 - y1) * 0.46) : Math.max(36, (x2 - x1) * 0.46)
+        const path = vertical
+          ? `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`
+          : `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`
         const highlighted = selected === null || (related?.has(edge.from) && related.has(edge.to))
-        return <path key={`${edge.from}-${edge.to}`} d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`}
+        return <path key={`${edge.from}-${edge.to}`} d={path}
           fill="none" stroke="currentColor" strokeWidth={highlighted ? 2 : 1.25} markerEnd="url(#todo-graph-arrow)"
           className={cn('text-border transition-opacity', highlighted ? 'opacity-90' : 'opacity-15', selected && highlighted && 'text-sky-500')} />
       })}
@@ -108,11 +121,23 @@ function GraphView({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
         <span className="mt-auto flex items-center gap-1.5 text-[10px] text-muted-foreground"><StatusIcon status={node.status} blocked={blocked} /><code className="truncate">{node.id}</code></span>
       </button>
     })}
-  </div>
+  </div></div>
 }
 
-function graphLayout(graph: TaskGraphSnapshot): { nodes: PositionedNode[]; byId: Map<string, PositionedNode>; width: number; height: number } {
+function graphLayout(graph: TaskGraphSnapshot, direction: 'horizontal' | 'vertical'): { nodes: PositionedNode[]; byId: Map<string, PositionedNode>; width: number; height: number; direction: 'horizontal' | 'vertical' } {
   const levels = graphLevels(graph)
+  if (direction === 'vertical') {
+    const maxColumns = Math.max(1, ...levels.map((level) => level.length))
+    const width = GRAPH_PADDING * 2 + maxColumns * GRAPH_NODE_WIDTH + (maxColumns - 1) * GRAPH_ROW_GAP
+    const height = GRAPH_PADDING * 2 + levels.length * GRAPH_NODE_HEIGHT + Math.max(0, levels.length - 1) * GRAPH_LEVEL_GAP_VERTICAL
+    const nodes: PositionedNode[] = []
+    levels.forEach((level, row) => {
+      const rowWidth = level.length * GRAPH_NODE_WIDTH + Math.max(0, level.length - 1) * GRAPH_ROW_GAP
+      const startX = (width - rowWidth) / 2
+      level.forEach((node, column) => nodes.push({ node, x: startX + column * (GRAPH_NODE_WIDTH + GRAPH_ROW_GAP), y: GRAPH_PADDING + row * (GRAPH_NODE_HEIGHT + GRAPH_LEVEL_GAP_VERTICAL) }))
+    })
+    return { nodes, byId: new Map(nodes.map((item) => [item.node.id, item])), width, height, direction }
+  }
   const maxRows = Math.max(1, ...levels.map((level) => level.length))
   const height = GRAPH_PADDING * 2 + maxRows * GRAPH_NODE_HEIGHT + (maxRows - 1) * GRAPH_ROW_GAP
   const nodes: PositionedNode[] = []
@@ -122,7 +147,20 @@ function graphLayout(graph: TaskGraphSnapshot): { nodes: PositionedNode[]; byId:
     level.forEach((node, row) => nodes.push({ node, x: GRAPH_PADDING + column * (GRAPH_NODE_WIDTH + GRAPH_COLUMN_GAP), y: startY + row * (GRAPH_NODE_HEIGHT + GRAPH_ROW_GAP) }))
   })
   const width = GRAPH_PADDING * 2 + levels.length * GRAPH_NODE_WIDTH + Math.max(0, levels.length - 1) * GRAPH_COLUMN_GAP
-  return { nodes, byId: new Map(nodes.map((item) => [item.node.id, item])), width, height }
+  return { nodes, byId: new Map(nodes.map((item) => [item.node.id, item])), width, height, direction }
+}
+
+function usePortraitGraphLayout(): boolean {
+  const query = '(max-width: 1023px) and (orientation: portrait)'
+  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches)
+  useEffect(() => {
+    const media = window.matchMedia(query)
+    const update = (): void => setMatches(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  return matches
 }
 
 function connectedNodeIds(graph: TaskGraphSnapshot, selected: string): Set<string> {

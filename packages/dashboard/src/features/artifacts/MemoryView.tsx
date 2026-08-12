@@ -7,6 +7,9 @@ import {
   type MemoryIndexRow,
 } from './product-artifact-views.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
+import { mapWithConcurrency } from './concurrency.js'
+
+const ARTIFACT_FETCH_CONCURRENCY = 6
 
 export function MemoryView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
   const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()
@@ -19,10 +22,10 @@ export function MemoryView({ onOpenSession }: { onOpenSession?(sessionId: string
     let cancelled = false
     setRowsError(null)
     setRows([])
-    void Promise.all(indexes.map(async (entry): Promise<MemoryIndexRow> => {
+    void mapWithConcurrency(indexes, ARTIFACT_FETCH_CONCURRENCY, async (entry): Promise<MemoryIndexRow> => {
       const content = await fetchArtifactContent(entry.path)
       return { path: entry.path, index: content.body as MemoryIndex }
-    }))
+    })
       .then((next) => {
         if (!cancelled) setRows(next.sort((a, b) => a.path.localeCompare(b.path)))
       })

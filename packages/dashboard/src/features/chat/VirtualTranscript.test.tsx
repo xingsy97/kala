@@ -47,7 +47,7 @@ describe('VirtualTranscript', () => {
     expect(screen.getByTestId('footer')).toBeTruthy()
   })
 
-  it('lets Virtuoso own footer height compensation without duplicate imperative scrolling', () => {
+  it('scrolls a newly appearing Thinking footer into view while pinned', () => {
     const scrollTo = (globalThis as typeof globalThis & {
       __virtuosoScrollToMock?: ReturnType<typeof vi.fn>
     }).__virtuosoScrollToMock
@@ -75,6 +75,36 @@ describe('VirtualTranscript', () => {
       />,
     )
 
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: Number.MAX_SAFE_INTEGER,
+      behavior: 'auto',
+    })
+  })
+
+  it('does not reveal a newly appearing footer when already unpinned', () => {
+    const scrollTo = (globalThis as typeof globalThis & {
+      __virtuosoScrollToMock?: ReturnType<typeof vi.fn>
+    }).__virtuosoScrollToMock
+    scrollTo?.mockClear()
+    const { rerender } = render(
+      <VirtualTranscript<Item>
+        items={makeItems(2)}
+        renderItem={(it) => <span>{it.label}</span>}
+        keyFor={(it) => it.id}
+        pinnedToBottom={false}
+        onPinnedChange={() => {}}
+      />,
+    )
+    rerender(
+      <VirtualTranscript<Item>
+        items={makeItems(2)}
+        renderItem={(it) => <span>{it.label}</span>}
+        keyFor={(it) => it.id}
+        pinnedToBottom={false}
+        onPinnedChange={() => {}}
+        footerSlot={<div>thinking</div>}
+      />,
+    )
     expect(scrollTo).not.toHaveBeenCalled()
   })
 

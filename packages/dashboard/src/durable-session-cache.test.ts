@@ -9,27 +9,29 @@ import { createDurableSessionViewCache, sessionCacheNamespace } from './durable-
 describe('durable session cache', () => {
   it('hydrates a snapshot across cache instances and partitions hosts', async () => {
     const namespace = sessionCacheNamespace(`https://host-a-${crypto.randomUUID()}.test/`, '1')
-    const first = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true })
+    const database = immediateDatabase()
+    const first = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
     first.set('s1', snapshot('s1', 3))
     await first.flush()
 
-    const second = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true })
+    const second = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
     expect((await second.hydrate('s1'))?.timeline.at(-1)?.seq).toBe(3)
 
-    const otherHost = createDurableSessionViewCache({ namespace: sessionCacheNamespace('https://host-b.test', '1'), maxBytes: 1024 * 1024, enabled: true })
+    const otherHost = createDurableSessionViewCache({ namespace: sessionCacheNamespace('https://host-b.test', '1'), maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
     expect(await otherHost.hydrate('s1')).toBeNull()
     first.close(); second.close(); otherHost.close()
   })
 
   it('does not let an older tab overwrite a newer cursor', async () => {
     const namespace = sessionCacheNamespace(`https://host-${crypto.randomUUID()}.test`, '1')
-    const first = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true })
-    const stale = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true })
+    const database = immediateDatabase()
+    const first = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
+    const stale = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
     first.set('s1', snapshot('s1', 8))
     await first.flush()
     stale.set('s1', snapshot('s1', 3))
     await stale.flush()
-    const reader = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true })
+    const reader = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
     expect((await reader.hydrate('s1'))?.timeline.at(-1)?.seq).toBe(8)
     first.close(); stale.close(); reader.close()
   })
@@ -96,6 +98,17 @@ describe('durable session cache', () => {
     cache.close(); reader.close()
   })
 })
+
+function immediateDatabase() {
+  const database = openDB(`session-cache-test-${crypto.randomUUID()}`, 1, {
+    upgrade(db) {
+      const store = db.createObjectStore('sessions', { keyPath: 'key' })
+      store.createIndex('namespace', 'namespace')
+      store.createIndex('cachedAt', 'cachedAt')
+    },
+  })
+  return { open: async () => database as never }
+}
 
 function delayedDatabase() {
   let release!: () => void

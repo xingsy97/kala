@@ -95,6 +95,9 @@ function VirtualTranscriptInner<Item>(
   const lastScrollTop = useRef(0)
   const pointerScrollActive = useRef(false)
   const userScrollingTowardBottom = useRef(false)
+  const footerObserver = useRef<ResizeObserver | null>(null)
+  const footerSettleRafs = useRef<number[]>([])
+  const footerSettleTimers = useRef<number[]>([])
   pinnedRef.current = pinnedToBottom
   if (!previousPinnedProp.current && pinnedToBottom) userUnpinnedRef.current = false
   previousPinnedProp.current = pinnedToBottom
@@ -191,6 +194,59 @@ function VirtualTranscriptInner<Item>(
     [],
   )
 
+  // The footer is outside Virtuoso's totalCount. Its content can change from
+  // Thinking to a taller "Preparing next step" after the send token's retries
+  // have finished, and Virtuoso then corrects its measurements asynchronously.
+  // Observe the actual footer box and settle across those measurement turns.
+  const cancelFooterSettle = useCallback(() => {
+    for (const raf of footerSettleRafs.current) cancelAnimationFrame(raf)
+    for (const timer of footerSettleTimers.current) window.clearTimeout(timer)
+    footerSettleRafs.current = []
+    footerSettleTimers.current = []
+  }, [])
+  const settlePinnedFooter = useCallback(() => {
+    cancelFooterSettle()
+    // `atBottom=false` can be a transient Virtuoso measurement while the footer
+    // grows. Only explicit wheel/touch/scrollbar intent may disable following.
+    if (userUnpinnedRef.current) return
+    const scroll = (): void => {
+      if (!userUnpinnedRef.current) scrollVirtuosoToBottom(virtuoso.current)
+    }
+    scroll()
+    footerSettleRafs.current.push(requestAnimationFrame(() => {
+      scroll()
+      footerSettleRafs.current.push(requestAnimationFrame(scroll))
+    }))
+    footerSettleTimers.current = [60, 180, 360].map((ms) => window.setTimeout(scroll, ms))
+  }, [cancelFooterSettle])
+  const bindFooterElement = useCallback((element: HTMLDivElement | null) => {
+    footerObserver.current?.disconnect()
+    footerObserver.current = null
+    if (!element || typeof ResizeObserver === 'undefined') return
+    let previousHeight = element.getBoundingClientRect().height
+    const observer = new ResizeObserver(() => {
+      const nextHeight = element.getBoundingClientRect().height
+      if (Math.abs(nextHeight - previousHeight) < 0.5) return
+      previousHeight = nextHeight
+      settlePinnedFooter()
+    })
+    observer.observe(element)
+    footerObserver.current = observer
+  }, [settlePinnedFooter])
+  const hasFooter = Boolean(footerSlot)
+  const hadFooter = useRef(hasFooter)
+  const previousFooterSlot = useRef(footerSlot)
+  useEffect(() => {
+    const contentChanged = footerSlot !== previousFooterSlot.current
+    if (hasFooter && (!hadFooter.current || contentChanged)) settlePinnedFooter()
+    hadFooter.current = hasFooter
+    previousFooterSlot.current = footerSlot
+  }, [footerSlot, hasFooter, settlePinnedFooter])
+  useEffect(() => () => {
+    footerObserver.current?.disconnect()
+    cancelFooterSettle()
+  }, [cancelFooterSettle])
+
   // Scroll to highlightIndex when it changes. Guard against out-of-range.
   const lastHighlight = useRef<number | null | undefined>(undefined)
   useEffect(() => {
@@ -259,18 +315,18 @@ function VirtualTranscriptInner<Item>(
           />
         )
       }),
-      Footer: function TranscriptFooter({ context }: { context?: { slot: JSX.Element | null | undefined; itemClassName: string | undefined } }) {
+      Footer: function TranscriptFooter({ context }: { context?: { slot: JSX.Element | null | undefined; itemClassName: string | undefined; bindFooterElement: (element: HTMLDivElement | null) => void } }) {
         const slot = context?.slot
         const footerClassName = context?.itemClassName
-        return slot ? <div className={footerClassName}>{slot}</div> : null
+        return slot ? <div ref={context?.bindFooterElement} className={footerClassName}>{slot}</div> : null
       },
     }),
     [handleScroll, handleTouchMove, handleTouchStart, handleWheel],
   )
 
   const footerContext = useMemo(
-    () => ({ slot: footerSlot, itemClassName }),
-    [footerSlot, itemClassName],
+    () => ({ slot: footerSlot, itemClassName, bindFooterElement }),
+    [bindFooterElement, footerSlot, itemClassName],
   )
 
   return (

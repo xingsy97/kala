@@ -10,6 +10,9 @@ import {
 } from './product-artifact-views.js'
 import { asRecord, isOpsArtifactKind, opsKindOrder } from './artifact-model.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
+import { mapWithConcurrency } from './concurrency.js'
+
+const ARTIFACT_FETCH_CONCURRENCY = 6
 
 export function OpsView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
   const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()
@@ -23,10 +26,10 @@ export function OpsView({ onOpenSession }: { onOpenSession?(sessionId: string): 
     let cancelled = false
     setRowsError(null)
     setRows([])
-    void Promise.all(entries.map(async (entry): Promise<OpsArtifactRow> => {
+    void mapWithConcurrency(entries, ARTIFACT_FETCH_CONCURRENCY, async (entry): Promise<OpsArtifactRow> => {
       const content = await fetchArtifactContent(entry.path)
       return { path: entry.path, kind: entry.kind as OpsArtifactKind, body: asRecord(content.body) }
-    }))
+    })
       .then((next) => {
         if (!cancelled) setRows(next.sort((a, b) => opsKindOrder(a.kind) - opsKindOrder(b.kind) || a.path.localeCompare(b.path)))
       })

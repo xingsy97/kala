@@ -16,11 +16,7 @@
  * virtualisation each parent turn re-mounts every nested row on every diff.
  */
 
-import { Children, isValidElement, useCallback, useMemo, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type {
@@ -39,7 +35,6 @@ import {
   type ToolCallGroup,
 } from './grouping.js'
 import { firstLine, pickRenderer, previewValue, truncate, type SummaryRow } from './toolSummaries/index.js'
-import { CodeBlock } from './CodeBlock.js'
 import { VirtualTranscript } from './VirtualTranscript.js'
 
 type Props = {
@@ -55,13 +50,15 @@ type NestedRenderItem =
 type NestedSummaryRow = SummaryRow & { toolName: string }
 
 export function NestedTranscript({ messages, compact = false, virtualized = true }: Props): JSX.Element {
-  const visible = messages.filter((m) => m.role !== 'system')
-  const resultsByCallId = collectAllToolResults(visible)
-  const groupedCallIds = collectNestedGroupedResultCallIds(visible, resultsByCallId)
-  const renderItems = useMemo(
-    () => collectNestedRenderItems(visible, resultsByCallId),
-    [visible, resultsByCallId],
-  )
+  const { resultsByCallId, groupedCallIds, renderItems } = useMemo(() => {
+    const visible = messages.filter((message) => message.role !== 'system')
+    const results = collectAllToolResults(visible)
+    return {
+      resultsByCallId: results,
+      groupedCallIds: collectNestedGroupedResultCallIds(visible, results),
+      renderItems: collectNestedRenderItems(visible, results),
+    }
+  }, [messages])
   const [pinned, setPinned] = useState(true)
 
   const renderItem = useCallback(
@@ -313,7 +310,7 @@ function NestedContent({
   compact: boolean
 }): JSX.Element | null {
   if (content.type === 'text') {
-    if (role === 'assistant') return <NestedMarkdown text={content.text} compact={compact} />
+    if (role === 'assistant') return <NestedPreviewText text={content.text} compact={compact} />
     return (
       <div className="min-w-0 whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere]">
         {content.text}
@@ -424,7 +421,7 @@ function NestedToolRows({
               {row.toolName}
             </span>
             <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">
-              {row.primary}
+              {group.calls.find((call) => call.callId === row.callId)?.intent ?? row.primary}
             </span>
             {!ok ? (
               <span className="flex-none text-[9px] uppercase tracking-wider">{t('chat.transcript.failed')}</span>
@@ -471,8 +468,8 @@ function NestedToolCall({ call }: { call: ToolCallContent }): JSX.Element {
       <span className="flex-none rounded bg-background/70 px-1 text-[9px] uppercase tracking-wider">
         {call.name}
       </span>
-      <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">
-        {preview || call.callId}
+      <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]" title={call.intent ?? undefined}>
+        {call.intent ?? (preview || call.callId)}
       </span>
     </div>
   )
@@ -502,69 +499,52 @@ function NestedToolResult({ result }: { result: ToolResultContent }): JSX.Elemen
   )
 }
 
-function NestedMarkdown({ text, compact }: { text: string; compact: boolean }): JSX.Element {
+const NESTED_PREVIEW_TEXT_LIMIT = 1_200
+
+function NestedPreviewText({ text, compact }: { text: string; compact: boolean }): JSX.Element {
+  const parts = useMemo(() => lightweightPreviewParts(text), [text])
   return (
-    <div
-      className={cn(
-        'min-w-0 max-w-full break-words leading-snug text-foreground [overflow-wrap:anywhere]',
-        compact ? 'text-[11px]' : 'text-[12px]',
-        '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
-        '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
-        '[&_p]:my-1',
-        '[&_h1]:my-1.5 [&_h1]:text-[12px] [&_h1]:font-semibold',
-        '[&_h2]:my-1.5 [&_h2]:text-[12px] [&_h2]:font-semibold',
-        '[&_h3]:my-1.5 [&_h3]:text-[11px] [&_h3]:font-semibold',
-        '[&_h4]:my-1.5 [&_h4]:text-[11px] [&_h4]:font-semibold',
-        '[&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-2 [&_blockquote]:text-muted-foreground',
-        '[&_code]:rounded [&_code]:bg-muted/70 [&_code]:px-1 [&_code]:py-0 [&_code]:text-foreground [&_code]:[overflow-wrap:anywhere] [&_code]:[word-break:break-word]',
-        '[&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4',
-        '[&_li]:my-0.5 [&_li>p]:my-0.5',
-        '[&_pre]:my-1 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/60 [&_pre]:p-2 [&_pre]:text-[10px]',
-        '[&_hr]:my-2 [&_hr]:border-border/50',
-        '[&_table]:my-1 [&_table]:text-[10px] [&_table]:ring-1 [&_table]:ring-border/50 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:px-1.5 [&_th]:py-0.5',
-      )}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={{
-          pre({ children }) {
-            return <MarkdownPre>{children}</MarkdownPre>
-          },
-          code({ inline, className, children, ...rest }: {
-            inline?: boolean
-            className?: string
-            children?: React.ReactNode
-          }) {
-            return (
-              <code className={className} {...rest}>
-                {children}
-              </code>
-            )
-          },
-        }}
-      >
-        {text}
-      </ReactMarkdown>
+    <div className={cn('min-w-0 max-w-full space-y-1 break-words leading-snug text-foreground [overflow-wrap:anywhere]', compact ? 'text-[11px]' : 'text-[12px]')}>
+      {parts.map((part, index) => part.kind === 'text' ? (
+        <div key={index} className="whitespace-pre-wrap">{part.text}</div>
+      ) : (
+        <div key={index} className="flex items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/40 px-2 py-1.5 text-[10px] text-muted-foreground" data-testid="nested-complex-content-omitted">
+          <span className="rounded bg-background/80 px-1.5 py-0.5 font-medium uppercase tracking-wider">{part.label}</span>
+          <span>Complex content omitted from session preview</span>
+        </div>
+      ))}
     </div>
   )
 }
 
-function MarkdownPre({ children }: { children?: React.ReactNode }): JSX.Element {
-  const code = Children.toArray(children).find((child) => isValidElement(child))
-  if (code && isValidElement<{ className?: string; children?: React.ReactNode }>(code)) {
-    const className = code.props.className
-    const match = /language-(\w+)/.exec(className ?? '')
-    const raw = reactNodeText(code.props.children).replace(/\n$/, '')
-    return <CodeBlock code={raw} lang={match?.[1]} />
+type NestedPreviewPart = { kind: 'text'; text: string } | { kind: 'omitted'; label: string }
+
+function lightweightPreviewParts(source: string): NestedPreviewPart[] {
+  const parts: NestedPreviewPart[] = []
+  const fence = /```([^\n`]*)\n?[\s\S]*?```/g
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = fence.exec(source)) !== null) {
+    appendPreviewText(parts, source.slice(cursor, match.index))
+    const language = match[1]?.trim().toLowerCase()
+    parts.push({ kind: 'omitted', label: language === 'mermaid' ? 'Diagram' : language ? `${language} code` : 'Code block' })
+    cursor = match.index + match[0].length
   }
-  return <CodeBlock code={reactNodeText(children).replace(/\n$/, '')} />
+  appendPreviewText(parts, source.slice(cursor))
+  if (parts.length === 0) parts.push({ kind: 'text', text: '' })
+  return parts
 }
 
-function reactNodeText(node: React.ReactNode): string {
-  if (node === null || node === undefined || typeof node === 'boolean') return ''
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(reactNodeText).join('')
-  if (isValidElement<{ children?: React.ReactNode }>(node)) return reactNodeText(node.props.children)
-  return ''
+function appendPreviewText(parts: NestedPreviewPart[], raw: string): void {
+  const normalized = raw
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .trim()
+  if (!normalized) return
+  const consumed = parts.reduce((total, part) => total + (part.kind === 'text' ? part.text.length : 0), 0)
+  const remaining = NESTED_PREVIEW_TEXT_LIMIT - consumed
+  if (remaining <= 0) return
+  const clipped = normalized.length > remaining ? `${normalized.slice(0, Math.max(0, remaining - 1))}…` : normalized
+  parts.push({ kind: 'text', text: clipped })
 }

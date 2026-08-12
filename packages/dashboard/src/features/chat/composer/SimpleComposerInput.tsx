@@ -18,6 +18,7 @@ type Props = {
   onEnterSubmit?(): void
   onSelectionChange?(caret: number): void
   ariaLabel?: string
+  className?: string
 }
 
 const IMAGE_ATTR = 'data-ak-img-id'
@@ -137,6 +138,7 @@ export function SimpleComposerInput({
   onEnterSubmit,
   onSelectionChange,
   ariaLabel,
+  className,
 }: Props): JSX.Element {
   const ref = useRef<HTMLDivElement | null>(null)
   const lastSerialized = useRef<{ text: string; imageIds: string[] }>({ text: '', imageIds: [] })
@@ -239,6 +241,7 @@ export function SimpleComposerInput({
         'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
         'min-h-10 max-h-[calc(1.25rem*5+1rem)] overflow-y-auto',
         disabled ? 'cursor-not-allowed opacity-60' : '',
+        className,
       )}
       onPointerDown={focusWithoutViewportScroll}
       onInput={handleInput}

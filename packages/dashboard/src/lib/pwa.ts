@@ -40,6 +40,43 @@ const NOOP_CONTROLLER: PwaController = {
 
 const UPDATE_POLL_INTERVAL_MS = 30 * 60 * 1000
 const UPDATE_DEDUPE_MS = 5_000
+export const UPDATE_RELOAD_TIMEOUT_MS = 5_000
+
+/**
+ * Activate the waiting worker, then reload as soon as it controls this page.
+ * The timeout is a recovery path for browsers that lose Workbox's controlling
+ * event (seen after long-lived iOS/PWA tabs); the update button must never stay
+ * in an unbounded "Reloading…" state.
+ */
+export async function activatePwaUpdate(options: {
+  sendSkipWaiting(): Promise<void>
+  serviceWorker: Pick<ServiceWorkerContainer, 'addEventListener' | 'removeEventListener'>
+  reload(): void
+  timeoutMs?: number
+}): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? UPDATE_RELOAD_TIMEOUT_MS
+  let settled = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let resolveControl: (() => void) | undefined
+  const controlled = new Promise<void>((resolve) => { resolveControl = resolve })
+  const finish = (): void => {
+    if (settled) return
+    settled = true
+    if (timer) clearTimeout(timer)
+    options.serviceWorker.removeEventListener('controllerchange', onControllerChange)
+    resolveControl?.()
+  }
+  const onControllerChange = (): void => finish()
+  options.serviceWorker.addEventListener('controllerchange', onControllerChange)
+  timer = setTimeout(finish, timeoutMs)
+  try {
+    await options.sendSkipWaiting()
+    await controlled
+  } finally {
+    finish()
+  }
+  options.reload()
+}
 
 export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
   if (typeof window === 'undefined') return NOOP_CONTROLLER
@@ -131,7 +168,14 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
 
   return {
     applyUpdate: async () => {
-      if (updateSW) await updateSW(true)
+      if (!updateSW) return
+      await activatePwaUpdate({
+        // Manage reload ourselves instead of waiting indefinitely for the
+        // virtual module's Workbox `controlling` callback.
+        sendSkipWaiting: () => updateSW!(false),
+        serviceWorker: navigator.serviceWorker,
+        reload: () => window.location.reload(),
+      })
     },
     checkForUpdate: async () => {
       const registration = await navigator.serviceWorker.getRegistration()
@@ -145,7 +189,13 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
  * the app is already installed, and to gate iOS-only push flows (iOS 16.4+
  * only allows PushManager.subscribe when display-mode === 'standalone').
  */
-export function isStandalone(): boolean {
+export function isStandalone(input: {
+  matches?: boolean
+  navigatorStandalone?: boolean
+} = {}): boolean {
+  if (input.matches !== undefined || input.navigatorStandalone !== undefined) {
+    return input.matches === true || input.navigatorStandalone === true
+  }
   if (typeof window === 'undefined') return false
   if (window.matchMedia?.('(display-mode: standalone)').matches) return true
   // Legacy iOS Safari — property is non-standard but still present in iOS 17.

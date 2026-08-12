@@ -170,11 +170,13 @@ export function InspectorPanel({
   }, [showToolCallTab, inspectorView])
 
   const hydratedTimeline = useMemo(() => mergeTimelineArtifacts(timeline, artifactTimeline), [timeline, artifactTimeline])
-  const flow = useMemo(() => stateFlow(hydratedTimeline), [hydratedTimeline])
-  const llmCalls = useMemo(() => buildLlmCalls(hydratedTimeline), [hydratedTimeline])
-  const toolCalls = useMemo(() => buildToolCalls(hydratedTimeline), [hydratedTimeline])
+  const needsLlmCalls = inspectorView === 'status' || inspectorView === 'llm' || selected?.kind === 'llm'
+  const needsToolCalls = inspectorView === 'status' || inspectorView === 'tools'
+  const flow = useMemo(() => inspectorView === 'trace' ? stateFlow(hydratedTimeline) : [], [hydratedTimeline, inspectorView])
+  const llmCalls = useMemo(() => needsLlmCalls ? buildLlmCalls(hydratedTimeline) : [], [hydratedTimeline, needsLlmCalls])
+  const toolCalls = useMemo(() => needsToolCalls ? buildToolCalls(hydratedTimeline) : [], [hydratedTimeline, needsToolCalls])
   const parentHistory = useHistoryTimeline(socket ?? null, parentSessionId ?? null)
-  const replaySnapshots = useMemo(() => buildReplaySnapshots(hydratedTimeline, state, config), [hydratedTimeline, state, config])
+  const replaySnapshots = useMemo(() => inspectorView === 'trace' ? buildReplaySnapshots(hydratedTimeline, state, config) : [], [hydratedTimeline, state, config, inspectorView])
   const replaySnapshot = useMemo(() => {
     if (replaySnapshots.length === 0) return null
     if (replaySeq === null) return replaySnapshots.at(-1) ?? null

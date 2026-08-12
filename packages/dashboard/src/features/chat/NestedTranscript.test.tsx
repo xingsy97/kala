@@ -13,7 +13,7 @@ describe('NestedTranscript', () => {
           { role: 'user', content: [{ type: 'text', text: 'do many edits' }] },
           {
             role: 'assistant',
-            content: [{ type: 'tool_call', callId: 'c1', name: 'bash', input: { command: 'pwd' } }],
+            content: [{ type: 'tool_call', callId: 'c1', name: 'bash', input: { command: 'pwd' }, intent: 'Inspect the working directory.' }],
           },
           { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 'ok' }] },
           {
@@ -39,9 +39,27 @@ describe('NestedTranscript', () => {
 
     fireEvent.click(screen.getByText('Tool activity'))
 
-    expect(screen.getByText(/pwd/)).toBeTruthy()
+    expect(screen.getByText('Inspect the working directory.')).toBeTruthy()
     expect(screen.getByText(/\/repo\/a\.md/)).toBeTruthy()
     expect(screen.getByText(/\/repo\/b\.md/)).toBeTruthy()
+  })
+
+  it('uses lightweight placeholders for complex preview content', () => {
+    render(
+      <NestedTranscript
+        messages={[{
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Architecture:\n\n```mermaid\ngraph TD\nA-->B\n```\n\nImplementation:\n```typescript\nconst x = 1\n```' }],
+        }] satisfies Message[]}
+      />,
+    )
+
+    expect(screen.getByText('Architecture:')).toBeTruthy()
+    expect(screen.getByText('Diagram')).toBeTruthy()
+    expect(screen.getByText('typescript code')).toBeTruthy()
+    expect(screen.getAllByText('Complex content omitted from session preview')).toHaveLength(2)
+    expect(screen.queryByText('graph TD')).toBeNull()
+    expect(screen.queryByTestId('code-block-highlighted')).toBeNull()
   })
 
   it('does not collapse nested tool activity across assistant text', () => {

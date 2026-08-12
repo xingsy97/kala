@@ -128,7 +128,7 @@ export function NewSessionDialog({
                 </div>
               </button>
             </div>
-            <div className="px-3 py-2 text-xs font-medium text-muted-foreground">{t('dialogs.workspaces')}</div>
+            <div className="px-3 py-2 text-xs font-medium text-muted-foreground">{t('dialogs.workspaceSessions')}</div>
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-1 px-2 pb-2">
                 {workspaces.length === 0 ? (
@@ -203,7 +203,7 @@ export function NewSessionDialog({
             disabled={submitting || !selectedWorkspace || cwd.trim().length === 0}
             data-testid="new-session-create"
           >
-            {submitting ? t('dialogs.newSessionCreating') : t('dialogs.newSessionCreate')}
+            {submitting ? t('dialogs.newSessionCreating') : t('dialogs.newWorkspaceSessionCreate')}
           </Button>
         </DialogFooter>
       </DialogContent>

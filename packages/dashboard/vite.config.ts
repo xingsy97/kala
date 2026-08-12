@@ -48,8 +48,19 @@ export default defineConfig({
       injectRegister: null,
       manifest: false,
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2,webmanifest}'],
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Precache only the navigation shell. Hashed feature chunks (Monaco,
+        // Mermaid, Shiki languages/themes, Settings, etc.) stay truly on-demand
+        // instead of turning every PWA update into a ~16 MiB install.
+        globPatterns: ['index.html', '**/index-*.css', '**/*.{svg,png,webmanifest}'],
+        // The entry filename is hash-generated and added below; broad index-*.js
+        // matching accidentally precached lazy Shiki/shared chunks as well.
+        globIgnores: ['**/mermaid*.js', '**/cytoscape*.js', '**/SessionFilesPanel-*.js', '**/SettingsDialog-*.js'],
+        manifestTransforms: [async (entries) => {
+          const html = await import('node:fs/promises').then((fs) => fs.readFile(resolve(__dirname, 'dist/index.html'), 'utf8'))
+          const entry = html.match(/src="\/(assets\/index-[^"]+\.js)"/u)?.[1]
+          return { manifest: entry && !entries.some((item) => item.url === entry) ? [...entries, { url: entry, revision: null }] : entries, warnings: [] }
+        }],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
       devOptions: {
         // Never run the SW in `vite dev` — it caches the HMR shell and hides

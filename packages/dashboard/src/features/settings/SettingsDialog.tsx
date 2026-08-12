@@ -7,6 +7,7 @@ import {
   Cpu,
   ChevronDown,
   KeyRound,
+  Search,
   Palette,
   PlugZap,
   Rocket,
@@ -48,6 +49,7 @@ import { NotificationsSection } from './sections/NotificationsSection.js'
 import { RuntimeSection } from './sections/RuntimeSection.js'
 import { SecuritySection } from './sections/SecuritySection.js'
 import { SocketAdminSection } from './sections/SocketAdminSection.js'
+import { WebSearchSection } from './sections/WebSearchSection.js'
 
 
 type Props = {
@@ -58,7 +60,7 @@ type Props = {
   sessionCache?: DurableSessionViewCache
 }
 
-type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
+type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
 
 type SectionGroup = 'personal' | 'workspace' | 'agent' | 'administration'
 const SECTION_GROUPS: readonly SectionGroup[] = ['personal', 'workspace', 'agent', 'administration']
@@ -68,6 +70,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint', icon: TerminalSquare, group: 'workspace' },
   { key: 'agent', label: 'settings.sections.agent.label', hint: 'settings.sections.agent.hint', icon: Bot, group: 'agent' },
   { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint', icon: Cpu, group: 'agent' },
+  { key: 'webSearch', label: 'settings.sections.webSearch.label', hint: 'settings.sections.webSearch.hint', icon: Search, group: 'agent' },
   { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint', icon: KeyRound, group: 'agent' },
   { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint', icon: Cable, group: 'administration' },
   { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint', icon: Shield, group: 'administration' },
@@ -182,6 +185,8 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
                 <AgentSection payload={payload} onPayloadChange={applyPayload} />
               ) : section === 'models' ? (
                 <ModelsSection payload={payload} onPayloadChange={applyPayload} onModelsChanged={onModelsChanged} />
+              ) : section === 'webSearch' ? (
+                <WebSearchSection />
               ) : section === 'security' ? (
                 <SecuritySection payload={payload} />
               ) : section === 'socketAdmin' ? (

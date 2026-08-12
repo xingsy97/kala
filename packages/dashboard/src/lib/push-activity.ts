@@ -1,3 +1,4 @@
+import { randomId } from './random-id.js'
 import { useEffect } from 'react'
 
 const HEARTBEAT_MS = 15_000
@@ -7,7 +8,7 @@ const DEVICE_ID_KEY = 'agent-kernel.push-device-id'
 export function pushDeviceId(): string {
   const existing = localStorage.getItem(DEVICE_ID_KEY)
   if (existing) return existing
-  const created = crypto.randomUUID()
+  const created = randomId()
   localStorage.setItem(DEVICE_ID_KEY, created)
   return created
 }

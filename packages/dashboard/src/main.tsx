@@ -10,6 +10,22 @@ import './index.css'
 import 'katex/dist/katex.min.css'
 import { initializeTheme } from './lib/theme.js'
 
+const STALE_CHUNK_RELOAD_KEY = 'ak-stale-chunk-reload'
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault()
+  try {
+    if (sessionStorage.getItem(STALE_CHUNK_RELOAD_KEY) === '1') return
+    sessionStorage.setItem(STALE_CHUNK_RELOAD_KEY, '1')
+  } catch {
+    // Storage can be unavailable in hardened/private browser modes; reloading
+    // is still preferable to leaving the dashboard on a permanent crash page.
+  }
+  window.location.reload()
+})
+window.setTimeout(() => {
+  try { sessionStorage.removeItem(STALE_CHUNK_RELOAD_KEY) } catch { /* noop */ }
+}, 10_000)
+
 const root = document.getElementById('root')
 if (!root) throw new Error('missing #root')
 // Remove the pure-CSS splash (index.html) before mounting so React's

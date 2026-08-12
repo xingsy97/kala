@@ -327,7 +327,7 @@ describe('SubAgentCard', () => {
 
     fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
     await waitFor(() => expect(screen.getByText(/child answer visible/)).toBeTruthy())
-    expect(document.querySelector('.katex')).toBeTruthy()
+    expect(screen.getByText(/\$a\^2\$/)).toBeTruthy()
     expect(screen.getByTestId('sub-agent-transcript-frame-c1').getAttribute('data-layout')).toBe('content')
     expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('false')
   })

@@ -5,10 +5,11 @@
  * "Workspace" here is the machine a session's tool calls run on
  * (see ADR 0013): a stable ULID that the executor announces on connect.
  * Sessions whose parent workspace has no attached executor are shown offline;
- * sessions without a workspaceId (older logs) group under "Unassigned".
+ * sessions without a workspaceId are ordinary chats and group under "Chats".
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
+import { createPortal } from 'react-dom'
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
 import type { RowRendererProps } from 'react-arborist'
@@ -26,12 +27,14 @@ import {
   GitFork,
   Info,
   LoaderCircle,
+  MoreHorizontal,
   Pencil,
   Plus,
   RotateCcw,
   Search,
   TriangleAlert,
   Trash2,
+  Wrench,
   X,
 } from 'lucide-react'
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
@@ -73,6 +76,7 @@ import {
 import { useHiddenWorkspaces } from './useHiddenWorkspaces.js'
 import { useHiddenSessions } from './useHiddenSessions.js'
 import { SessionHoverPreview, type SessionPreviewAnchor } from './SessionHoverPreview.js'
+import type { SessionPreviewStore } from './session-preview-store.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 import type {
   SessionNode,
@@ -101,7 +105,9 @@ type Props = {
   onCollapse?(): void
   embeddedHeader?: boolean
   fontSizePx?: number
+  previewStore?: SessionPreviewStore
   getCachedSessionView?: (sessionId: string) => CachedSessionView | null
+  subscribeCachedSessionView?: (sessionId: string, listener: () => void) => () => void
 }
 
 const SESSION_ROW_HEIGHT = 44
@@ -130,7 +136,9 @@ function ExplorerImpl({
   onCollapse,
   embeddedHeader = false,
   fontSizePx = 13,
+  previewStore,
   getCachedSessionView,
+  subscribeCachedSessionView,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
@@ -142,6 +150,7 @@ function ExplorerImpl({
   const [manualWorkspaceOrder, setManualWorkspaceOrder] = useState<readonly string[]>(() => readStoredWorkspaceOrder())
   const [previewAnchor, setPreviewAnchor] = useState<SessionPreviewAnchor | null>(null)
   const previewHoveringRef = useRef(false)
+  const pointerActivatedSessionRef = useRef<string | null>(null)
   const hiddenWorkspaces = useHiddenWorkspaces()
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
@@ -214,7 +223,8 @@ function ExplorerImpl({
     () => data.filter((workspace) => workspace.workspaceId === null || !hiddenWorkspaces.isHidden(workspace.workspaceId)),
     [data, hiddenWorkspaces],
   )
-  const visibleData = useMemo(() => filterTree(visibleWorkspaceData, query), [visibleWorkspaceData, query])
+  const deferredQuery = useDeferredValue(query)
+  const visibleData = useMemo(() => filterTree(visibleWorkspaceData, deferredQuery), [visibleWorkspaceData, deferredQuery])
   const initialOpenState = useMemo(
     () => buildInitialOpenState(visibleData, workspaceOpenState, sessionChildrenOpenState),
     [visibleData, workspaceOpenState, sessionChildrenOpenState],
@@ -249,8 +259,21 @@ function ExplorerImpl({
   }, [selectedSessionId])
 
   const activate = (node: NodeApi<TreeNode>): void => {
-    if (node.data.kind === 'session') onSelect(node.data.sessionId)
+    if (node.data.kind !== 'session') return
+    if (pointerActivatedSessionRef.current === node.data.sessionId) {
+      pointerActivatedSessionRef.current = null
+      return
+    }
+    onSelect(node.data.sessionId)
   }
+  const activateSessionOnPointerDown = useCallback((sessionId: string): void => {
+    // A running Session can commit between pointerdown and click. If that
+    // commit replaces a virtualized row, the browser drops the click that
+    // react-arborist normally turns into onActivate. Honor the discrete
+    // pointerdown immediately and suppress the matching normal activation.
+    pointerActivatedSessionRef.current = sessionId
+    onSelect(sessionId)
+  }, [onSelect])
 
   const handleMove = useCallback((args: {
     dragIds: string[]
@@ -401,13 +424,16 @@ function ExplorerImpl({
                 fontSizePx={fontSizePx}
                 onPreviewAnchorChange={setPreviewAnchor}
                 onPreviewLeave={clearPreviewSoon}
+                onPointerActivateSession={activateSessionOnPointerDown}
               />
             )}
           </Tree>
         ) : null}
         <SessionHoverPreview
           anchor={previewAnchor}
+          previewStore={previewStore}
           getCachedSessionView={getCachedSessionView}
+          subscribeCachedSessionView={subscribeCachedSessionView}
           onHoverChange={(hovering) => {
             previewHoveringRef.current = hovering
             if (!hovering) clearPreviewSoon()
@@ -833,6 +859,7 @@ function Row({
   fontSizePx,
   onPreviewAnchorChange,
   onPreviewLeave,
+  onPointerActivateSession,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
@@ -857,6 +884,7 @@ function Row({
   fontSizePx: number
   onPreviewAnchorChange(anchor: SessionPreviewAnchor | null): void
   onPreviewLeave(sessionId: string): void
+  onPointerActivateSession(sessionId: string): void
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
@@ -894,6 +922,7 @@ function Row({
       fontSizePx={fontSizePx}
       onPreviewAnchorChange={onPreviewAnchorChange}
       onPreviewLeave={onPreviewLeave}
+      onPointerActivateSession={onPointerActivateSession}
     />
   )
 }
@@ -928,6 +957,7 @@ function WorkspaceRow({
 }): JSX.Element {
   const { t } = useTranslation()
   const w = node.data
+  const workspaceLabel = w.workspaceId === null ? t('explorer.chats') : w.name
   const meta =
     w.workspaceId === null
       ? t('explorer.sessionsNoWorkspace')
@@ -1004,7 +1034,7 @@ function WorkspaceRow({
               onStartEdit(w)
             }}
           >
-            <HighlightText text={w.name} query={query} />
+            <HighlightText text={workspaceLabel} query={query} />
           </span>
         </div>
       )}
@@ -1093,6 +1123,7 @@ function SessionRow({
   fontSizePx,
   onPreviewAnchorChange,
   onPreviewLeave,
+  onPointerActivateSession,
 }: {
   node: NodeApi<SessionNode>
   style: React.CSSProperties
@@ -1110,6 +1141,7 @@ function SessionRow({
   fontSizePx: number
   onPreviewAnchorChange(anchor: SessionPreviewAnchor | null): void
   onPreviewLeave(sessionId: string): void
+  onPointerActivateSession(sessionId: string): void
 }): JSX.Element {
   const { t } = useTranslation()
   const s = node.data
@@ -1119,6 +1151,17 @@ function SessionRow({
   const currentCwd = runtime?.currentCwd ?? s.currentCwd
   const lastActivityIso = runtime?.lastActivityIso ?? s.lastActivityIso
   const minuteNow = useMinuteClock()
+  const [touchMenuPosition, setTouchMenuPosition] = useState<{ right: number; top: number } | null>(null)
+  useEffect(() => {
+    if (!touchMenuPosition) return
+    const close = (): void => setTouchMenuPosition(null)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [touchMenuPosition])
   return (
     <div
       style={style}
@@ -1141,6 +1184,10 @@ function SessionRow({
         // loads on the *second* click. Preview teardown is handled by an effect
         // that watches the selected session id instead (see ExplorerImpl).
         if (e.detail >= 2) e.preventDefault()
+      }}
+      onPointerDown={(e) => {
+        if (e.button > 0 || selected || editing) return
+        onPointerActivateSession(s.sessionId)
       }}
       onDoubleClick={(e) => {
         e.preventDefault()
@@ -1229,7 +1276,44 @@ function SessionRow({
         </div>
       )}
       {editing ? null : (
-        <div data-row-action className="ak-touch-reveal pointer-events-none col-start-4 row-start-1 flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none col-start-4 row-start-1 flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            data-testid="session-more-button"
+            title={t('common.more')}
+            aria-label={t('common.more')}
+            aria-expanded={touchMenuPosition !== null}
+            className="ak-session-more-button hidden h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              const rect = e.currentTarget.getBoundingClientRect()
+              setTouchMenuPosition((current) => current ? null : {
+                right: Math.max(8, window.innerWidth - rect.right),
+                top: Math.min(window.innerHeight - 192, rect.bottom + 4),
+              })
+            }}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+          {touchMenuPosition && typeof document !== 'undefined' ? createPortal(
+            <>
+              <button type="button" className="fixed inset-0 z-40 cursor-default" aria-label={t('common.close')} onClick={(e) => { e.stopPropagation(); setTouchMenuPosition(null) }} />
+              <div
+                className="fixed z-50 min-w-40 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+                style={{ right: touchMenuPosition.right, top: touchMenuPosition.top }}
+                data-testid="session-action-menu"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-sm hover:bg-accent" onClick={() => { setTouchMenuPosition(null); if (!renameDisabled) onStartEdit(s) }}><Pencil className="h-4 w-4" />{t('explorer.renameSession')}</button>
+                {onOpenSessionInfo ? <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-sm hover:bg-accent" onClick={() => { setTouchMenuPosition(null); onOpenSessionInfo(s.sessionId) }}><Info className="h-4 w-4" />{t('explorer.sessionInfoTitle')}</button> : null}
+                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-sm hover:bg-accent" onClick={() => { setTouchMenuPosition(null); onHideSession(s.sessionId) }}><EyeOff className="h-4 w-4" />{t('explorer.hideSession')}</button>
+                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-sm text-destructive hover:bg-destructive/10" onClick={() => { setTouchMenuPosition(null); onDeleteRequest(s) }}><Trash2 className="h-4 w-4" />{t('explorer.deleteSessionTitle')}</button>
+              </div>
+            </>,
+            document.body,
+          ) : null}
           <Button
             variant="ghost"
             size="icon"
@@ -1316,12 +1400,14 @@ function SessionRow({
 
 export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   status,
+  selected = false,
 }: {
   status: SessionActivityStatus | undefined
   selected?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const label = statusIndicatorLabel(status, t)
+  if (selected) return <ToolbarSessionStatus status={status} label={label} />
   const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
   if (status === 'loading' || status === 'thinking' || status === 'executing_tools') {
     return (
@@ -1411,6 +1497,38 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     </span>
   )
 })
+
+function ToolbarSessionStatus({ status, label }: { status: SessionActivityStatus | undefined; label: string }): JSX.Element {
+  const running = status === 'thinking' || status === 'executing_tools' || status === 'loading'
+  const tone = status === 'error'
+    ? 'border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+    : status === 'awaiting_approval'
+      ? 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+      : status === 'executing_tools'
+        ? 'border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-300'
+        : running
+          ? 'border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+          : status === 'done'
+            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            : 'border-border/70 bg-muted/45 text-muted-foreground'
+  const Icon = status === 'executing_tools'
+    ? Wrench
+    : status === 'awaiting_approval'
+      ? TriangleAlert
+      : status === 'error'
+        ? AlertCircle
+        : running
+          ? LoaderCircle
+          : Circle
+  return (
+    <span className={cn('inline-flex h-6 flex-none items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium', tone)} data-testid="session-status-indicator" data-status={status ?? 'unknown'} aria-label={label}>
+      <span className={cn('inline-flex', running && 'ak-session-status-spinner')} data-testid={running ? 'session-status-spinner' : undefined} aria-hidden="true">
+        <Icon className="h-3 w-3" strokeWidth={2.3} />
+      </span>
+      <span>{label}</span>
+    </span>
+  )
+}
 
 function statusIndicatorLabel(status: SessionActivityStatus | undefined, t: ReturnType<typeof useTranslation>['t']): string {
   switch (status) {
@@ -1521,7 +1639,9 @@ function areExplorerPropsEqual(prev: Props, next: Props): boolean {
     prev.onOpenSessionInfo === next.onOpenSessionInfo &&
     prev.onWorkspaceInfo === next.onWorkspaceInfo &&
     prev.onCollapse === next.onCollapse &&
+    prev.previewStore === next.previewStore &&
     prev.getCachedSessionView === next.getCachedSessionView &&
+    prev.subscribeCachedSessionView === next.subscribeCachedSessionView &&
     sameExecutorListForExplorer(prev.executors, next.executors) &&
     sameSessionListForExplorer(prev.sessions, next.sessions) &&
     sameSessionStatusMap(prev.sessionStatuses, next.sessionStatuses)

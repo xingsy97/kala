@@ -56,7 +56,7 @@ describe('WorkbenchToolbar', () => {
   })
 
   it('uses the dedicated transform owner for the title activity spinner', () => {
-    renderToolbar({ sessionSelected: true, sessionActivityStatus: 'loading', onChangeCwd: vi.fn() })
+    renderToolbar({ sessionSelected: true, sessionActivityStatus: 'thinking', onChangeCwd: vi.fn() })
 
     const indicator = screen.getByTestId('session-status-indicator')
     const spinner = screen.getByTestId('session-status-spinner')
@@ -64,6 +64,16 @@ describe('WorkbenchToolbar', () => {
     expect(spinner.className).toContain('ak-session-status-spinner')
     expect(icon?.className.baseVal).not.toContain('animate-spin')
     expect(icon?.className.baseVal).not.toContain('translateZ')
+    expect(indicator.textContent).toContain('Thinking')
+  })
+
+  it('shows tool execution as a distinct single-layer status pill', () => {
+    renderToolbar({ sessionSelected: true, sessionActivityStatus: 'executing_tools', onChangeCwd: vi.fn() })
+
+    const indicator = screen.getByTestId('session-status-indicator')
+    expect(indicator.textContent).toContain('Running tools')
+    expect(indicator.className).toContain('border-violet-500/25')
+    expect(indicator.querySelector('.lucide-wrench')).toBeTruthy()
   })
 })
 

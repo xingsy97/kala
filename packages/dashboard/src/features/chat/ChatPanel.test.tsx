@@ -272,15 +272,15 @@ describe('ChatPanel', () => {
     expect(screen.getAllByText('wrote 3 bytes').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('previews dots on hover or click and reserves full expansion for the arrow', () => {
+  it('previews intent and tool summary on hover or click without expanding the group', () => {
     render(
       <DashboardChatPanel
         messages={[
           {
             role: 'assistant',
             content: [
-              { type: 'tool_call', callId: 'dot-1', name: 'read', input: { path: '/repo/a.ts' } },
-              { type: 'tool_call', callId: 'dot-2', name: 'bash', input: { command: 'pnpm test' } },
+              { type: 'tool_call', callId: 'dot-1', name: 'read', input: { path: '/repo/a.ts' }, intent: 'Inspect the implementation before changing it.' },
+              { type: 'tool_call', callId: 'dot-2', name: 'bash', input: { command: 'pnpm test' }, intent: 'Run the focused tests to verify current behavior.' },
             ],
           },
           {
@@ -311,25 +311,39 @@ describe('ChatPanel', () => {
     const firstDot = screen.getByTestId('tool-card-dot-dot-1')
     const secondDot = screen.getByTestId('tool-card-dot-dot-2')
     fireEvent.mouseEnter(firstDot)
-    expect(screen.getByTestId('tool-card-preview-dot-1')).toBeTruthy()
+    const hoverCard = screen.getByTestId('tool-card-preview-layer-dot-1')
+    expect(screen.getByTestId('tool-call-detail-intent-dot-1').textContent).toBe('Inspect the implementation before changing it.')
+    expect(hoverCard.className).toContain('fixed')
+    expect(hoverCard.className).toContain('w-[min(34rem,calc(100vw-1rem))]')
+    expect(hoverCard.getAttribute('data-placement')).toBe('right-below')
+    expect(hoverCard.textContent).toContain('/repo/a.ts')
+    expect(hoverCard.textContent).toContain('a')
     expect(screen.queryByTestId('tool-call-group-details-dot-1')).toBeNull()
     fireEvent.mouseLeave(firstDot)
-    expect(screen.queryByTestId('tool-card-preview-dot-1')).toBeNull()
+    expect(screen.queryByTestId('tool-card-preview-layer-dot-1')).toBeNull()
 
     fireEvent.click(secondDot)
     expect(secondDot.getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByTestId('tool-card-preview-dot-2')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-detail-intent-dot-2').textContent).toBe('Run the focused tests to verify current behavior.')
+    const pinnedCard = screen.getByTestId('tool-card-preview-layer-dot-2')
+    expect(pinnedCard.textContent).toContain('failed')
+    expect(pinnedCard.textContent).toContain('pnpm test')
+    expect(pinnedCard.className).toContain('pointer-events-auto')
+    const previewScroll = screen.getByTestId('tool-card-preview-scroll-dot-2')
+    expect(previewScroll.className).toContain('overflow-y-auto')
+    fireEvent.wheel(previewScroll, { deltaY: 120 })
+    expect(screen.getByTestId('tool-card-preview-layer-dot-2')).toBeTruthy()
     expect(screen.queryByTestId('tool-call-group-details-dot-1')).toBeNull()
 
     fireEvent.mouseEnter(firstDot)
-    expect(screen.getByTestId('tool-card-preview-dot-1')).toBeTruthy()
-    expect(screen.queryByTestId('tool-card-preview-dot-2')).toBeNull()
+    expect(screen.getByTestId('tool-card-preview-layer-dot-1')).toBeTruthy()
+    expect(screen.queryByTestId('tool-card-preview-layer-dot-2')).toBeNull()
     fireEvent.mouseLeave(firstDot)
-    expect(screen.getByTestId('tool-card-preview-dot-2')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-preview-layer-dot-2')).toBeTruthy()
 
     fireEvent.click(secondDot)
     expect(secondDot.getAttribute('aria-pressed')).toBe('false')
-    expect(screen.queryByTestId('tool-card-preview-dot-2')).toBeNull()
+    expect(screen.queryByTestId('tool-card-preview-layer-dot-2')).toBeNull()
 
     fireEvent.click(screen.getByTestId('tool-activity-direction'))
     expect(screen.getByTestId('tool-call-group-details-dot-1')).toBeTruthy()
@@ -360,7 +374,7 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-call-group-details-many-0')).toBeTruthy()
   })
 
-  it('shows the latest visible running dot with the same compact preview by default', () => {
+  it('keeps a running dot animated without auto-opening its hover preview', () => {
     render(
       <DashboardChatPanel
         messages={[
@@ -381,15 +395,22 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(screen.getByTestId('tool-card-preview-running')).toBeTruthy()
+    const runningDot = screen.getByTestId('tool-card-dot-running')
+    expect(runningDot.querySelector('.animate-ping')).toBeTruthy()
+    expect(screen.queryByTestId('tool-card-preview-layer-running')).toBeNull()
     expect(screen.queryByTestId('tool-call-group-details-done')).toBeNull()
+
+    fireEvent.mouseEnter(runningDot)
+    expect(screen.getByTestId('tool-card-preview-layer-running')).toBeTruthy()
+    fireEvent.mouseLeave(runningDot)
+    expect(screen.queryByTestId('tool-card-preview-layer-running')).toBeNull()
 
     const doneDot = screen.getByTestId('tool-card-dot-done')
     fireEvent.click(doneDot)
-    expect(screen.getByTestId('tool-card-preview-done')).toBeTruthy()
-    expect(screen.queryByTestId('tool-card-preview-running')).toBeNull()
+    expect(screen.getByTestId('tool-card-preview-layer-done')).toBeTruthy()
     fireEvent.click(doneDot)
-    expect(screen.getByTestId('tool-card-preview-running')).toBeTruthy()
+    expect(screen.queryByTestId('tool-card-preview-layer-done')).toBeNull()
+    expect(screen.queryByTestId('tool-card-preview-layer-running')).toBeNull()
   })
 
   it('retains the textual collapsed card in Standard Tool Card Mode', () => {
@@ -1056,6 +1077,14 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('assistant-message-cancelled').textContent ?? '').toContain('Response cancelled')
   })
 
+  it('renders interrupted assistant responses as a dedicated state', () => {
+    render(<ChatPanel messages={[{ role: 'assistant', content: [{ type: 'text', text: 'Partial response\n\n[interrupted]' }] }]} />)
+
+    expect(screen.getByText('Partial response')).toBeTruthy()
+    expect(screen.queryByText('[interrupted]')).toBeNull()
+    expect(screen.getByTestId('assistant-message-interrupted').textContent).toContain('Response interrupted before completion')
+  })
+
   it('marks only the streaming assistant draft with a cursor class', () => {
     const { container } = render(
       <ChatPanel
@@ -1289,9 +1318,11 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('try-again-message-1')).toBeNull()
   })
 
-  it('shows persisted natural-language intent on a tool card', () => {
+  it('keeps persisted natural-language intent visible beside a collapsed tool dot', () => {
     render(<DashboardChatPanel messages={[{ role: 'assistant', content: [{ type: 'tool_call', callId: 'intent-card', name: 'read', input: { path: '/repo/a.ts' }, intent: 'Inspect the current implementation before editing it.' }] }]} />)
-    expect(screen.getByTestId('tool-call-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
+    expect(screen.getByTestId('tool-card-dots-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
+    fireEvent.mouseEnter(screen.getByTestId('tool-card-dot-intent-card'))
+    expect(screen.getByTestId('tool-call-detail-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
   })
 
   it('flags a pending tool_call but shows no inline approve/reject buttons (they live in the composer flip)', () => {
@@ -1393,10 +1424,10 @@ describe('ChatPanel', () => {
           {
             role: 'assistant',
             content: [
-              { type: 'tool_call', callId: 'c1', name: 'read', input: { path: '/repo/a.ts' } },
-              { type: 'tool_call', callId: 'c2', name: 'grep', input: { pattern: 'needle', path: '/repo' } },
-              { type: 'tool_call', callId: 'c3', name: 'edit', input: { path: '/repo/a.ts' } },
-              { type: 'tool_call', callId: 'c4', name: 'bash', input: { command: 'pnpm test' } },
+              { type: 'tool_call', callId: 'c1', name: 'read', input: { path: '/repo/a.ts' }, intent: 'Inspect the target implementation.' },
+              { type: 'tool_call', callId: 'c2', name: 'grep', input: { pattern: 'needle', path: '/repo' }, intent: 'Locate all relevant references.' },
+              { type: 'tool_call', callId: 'c3', name: 'edit', input: { path: '/repo/a.ts' }, intent: 'Apply the focused source change.' },
+              { type: 'tool_call', callId: 'c4', name: 'bash', input: { command: 'pnpm test' }, intent: 'Verify the change with focused tests.' },
             ],
           },
           {
@@ -1415,7 +1446,10 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
     expect(screen.getByText('Tool activity')).toBeTruthy()
     expect(screen.getByText('4 ops')).toBeTruthy()
-    expect(screen.getByText(/read 1, grep 1, edit 1, bash 1/)).toBeTruthy()
+    const intentSummary = screen.getByTestId('tool-call-intent-summary-c1')
+    expect(intentSummary.textContent).toContain('Inspect the target implementation.')
+    expect(intentSummary.textContent).toContain('Locate all relevant references.')
+    expect(intentSummary.textContent).toContain('+1 more')
     expect(screen.getByText('1 Failed')).toBeTruthy()
     expect(screen.getAllByText(/Failed/i)).toHaveLength(1)
     expect(screen.getByText('3 Succeeded')).toBeTruthy()
@@ -1427,6 +1461,11 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/grep · \/needle\//)).toBeTruthy()
     expect(screen.getByText(/edit · \/repo\/a\.ts/)).toBeTruthy()
     expect(screen.getByText(/bash · pnpm test/)).toBeTruthy()
+    expect(screen.getByTestId('grouped-tool-intent-c1').textContent).toBe('Inspect the target implementation.')
+    expect(screen.getByTestId('grouped-tool-intent-c4').textContent).toBe('Verify the change with focused tests.')
+
+    fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
+    expect(screen.getByTestId('tool-call-detail-intent-c1').textContent).toBe('Inspect the target implementation.')
   })
 
   it('collapses mixed tool activity split across timeline items', () => {

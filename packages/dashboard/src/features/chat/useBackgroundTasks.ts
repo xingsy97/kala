@@ -12,6 +12,7 @@
  * map — the panel's fallback (timeline-derived tasks) takes over from there.
  */
 
+import { randomId } from '../../lib/random-id.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
@@ -261,5 +262,5 @@ export function statusLabel(status: BackgroundTaskStatus): string {
 }
 
 function requestId(): string {
-  return crypto.randomUUID()
+  return randomId()
 }

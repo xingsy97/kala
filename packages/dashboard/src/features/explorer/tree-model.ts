@@ -50,6 +50,8 @@ export type SessionRuntimeMeta = {
   lastActivityIso: string
 }
 
+// Sessions without a workspace are a supported product mode (ordinary chat),
+// not incomplete workspace metadata. Keep the internal sentinel for stable ids.
 const UNASSIGNED_KEY = '__unassigned__'
 
 export type BuildTreeOptions = {
@@ -98,7 +100,7 @@ export function buildTree(
         workspaceId: key === UNASSIGNED_KEY ? null : key,
         name:
           key === UNASSIGNED_KEY
-            ? 'Unassigned'
+            ? 'Chats'
             : s.workspaceName ?? '(unnamed workspace)',
         online: false,
         children: [],
@@ -388,9 +390,9 @@ function labelFor(s: SessionSummary): string {
 }
 
 function compareWorkspaces(a: WorkspaceNode, b: WorkspaceNode): number {
-  const aUnassigned = a.workspaceId === null
-  const bUnassigned = b.workspaceId === null
-  if (aUnassigned !== bUnassigned) return aUnassigned ? 1 : -1
+  const aChats = a.workspaceId === null
+  const bChats = b.workspaceId === null
+  if (aChats !== bChats) return aChats ? -1 : 1
   if (a.online !== b.online) return a.online ? -1 : 1
   return a.name.localeCompare(b.name)
 }

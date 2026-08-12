@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
@@ -10,6 +10,7 @@ vi.mock('react-use-measure', () => ({
 
 import { Explorer } from './Explorer.js'
 import { canDropWorkspacesAtRoot, reorderWorkspaceIds } from './tree-model.js'
+import { createSessionViewCache } from '../../session-view-cache.js'
 import { HIDDEN_WORKSPACES_STORAGE_KEY } from './hidden-workspaces.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 
@@ -463,7 +464,7 @@ describe('Explorer', () => {
     expect(secondRow?.querySelector('[data-testid="session-status-indicator"]')?.getAttribute('data-status')).toBe('executing_tools')
   })
 
-  it('places sessions with no workspaceId under an Unassigned bucket', () => {
+  it('presents sessions with no workspaceId as ordinary Chats', () => {
     const orphan: SessionSummary = {
       ...sessionSummary,
       sessionId: 'orphan-1',
@@ -485,7 +486,9 @@ describe('Explorer', () => {
     )
     const wsRow = screen.getByTestId('workspace-row')
     expect(wsRow.getAttribute('data-workspace-id')).toBe('unassigned')
-    expect(wsRow.textContent).toContain('Unassigned')
+    expect(wsRow.textContent).toContain('Chats')
+    expect(wsRow.textContent).toContain('personal conversations')
+    expect(wsRow.textContent).not.toContain('no workspace')
     expect(screen.getByTestId('session-row').textContent).toContain(
       'orphan chat',
     )
@@ -507,6 +510,30 @@ describe('Explorer', () => {
     )
     fireEvent.click(screen.getByTestId('session-row'))
     expect(onSelect).toHaveBeenCalledWith(sessionSummary.sessionId)
+  })
+
+  it('commits a running-session switch on pointerdown before a click can be lost', () => {
+    const onSelect = vi.fn()
+    const running = { ...sessionSummary, status: 'executing_tools' as const }
+    const target = { ...sessionSummary, sessionId: 'target-session', status: 'idle' as const }
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[running, target]}
+        selectedSessionId={running.sessionId}
+        onSelect={onSelect}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const targetRow = screen.getAllByTestId('session-row').find((row) => row.getAttribute('data-session-id') === target.sessionId)!
+    fireEvent.pointerDown(targetRow, { button: 0, pointerType: 'mouse' })
+
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith(target.sessionId)
   })
 
   it('clears the focused session when clicking empty explorer space', () => {
@@ -724,6 +751,37 @@ describe('Explorer', () => {
     )
   })
 
+  it('offers all secondary session actions from the compact touch menu', () => {
+    const onRename = vi.fn()
+    const onOpenSessionInfo = vi.fn()
+    const onHideSession = vi.fn()
+    const onDelete = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={sessionSummary.sessionId}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={onDelete}
+        onRename={onRename}
+        onOpenSessionInfo={onOpenSessionInfo}
+        onHideSession={onHideSession}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('session-more-button'))
+    const menu = screen.getByTestId('session-action-menu')
+    expect(menu.textContent).toContain('Rename')
+    expect(menu.textContent).toContain('Session info')
+    expect(menu.textContent).toContain('Hide')
+    expect(menu.textContent).toContain('Delete')
+    fireEvent.click(within(menu).getByText('Session info'))
+    expect(onOpenSessionInfo).toHaveBeenCalledWith(sessionSummary.sessionId)
+    expect(screen.queryByTestId('session-action-menu')).toBeNull()
+  })
+
   it('never selects the session when clicking any row action button', () => {
     const onSelect = vi.fn()
     const onDelete = vi.fn()
@@ -889,7 +947,7 @@ describe('Explorer', () => {
     expect(screen.getByTestId('explorer-filter-empty').textContent).toContain('does-not-exist')
   })
 
-  it('shows a cached full chat preview when hovering a loaded session on desktop', async () => {
+  it('shows a cached lightweight preview when hovering a loaded session on desktop', async () => {
     vi.useFakeTimers()
     try {
       render(
@@ -908,12 +966,81 @@ describe('Explorer', () => {
 
       fireEvent.pointerEnter(screen.getByTestId('session-row'), { pointerType: 'mouse' })
       await act(async () => {
-        vi.advanceTimersByTime(350)
+        vi.advanceTimersByTime(50)
       })
 
-      expect(screen.getByTestId('session-hover-preview')).toBeTruthy()
-      expect(screen.getByTestId('session-hover-preview-chat').textContent).toContain('please write hello.txt')
-      expect(screen.getByTestId('session-hover-preview-chat').textContent).toContain('Done.')
+      const preview = screen.getByTestId('session-hover-preview')
+      expect(preview).toBeTruthy()
+      expect(Number.parseFloat(preview.style.height)).toBeLessThan(672)
+      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('please write hello.txt')
+      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('Done.')
+      expect(screen.queryByTestId('virtual-transcript')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('refreshes an open hover preview when its cache entry changes', async () => {
+    vi.useFakeTimers()
+    try {
+      const cache = createSessionViewCache({ maxBytes: 1024 * 1024 })
+      cache.set(sessionSummary.sessionId, cachedSessionView(sessionSummary.sessionId))
+      render(
+        <Explorer
+          executors={[executor]}
+          sessions={[sessionSummary]}
+          selectedSessionId={null}
+          onSelect={() => {}}
+          onNewSession={() => {}}
+          onConnectWorkspace={() => {}}
+          onDelete={() => {}}
+          onRename={() => {}}
+          getCachedSessionView={cache.peek}
+          subscribeCachedSessionView={cache.subscribe}
+        />,
+      )
+      fireEvent.pointerEnter(screen.getByTestId('session-row'), { pointerType: 'mouse' })
+      await act(async () => vi.advanceTimersByTime(50))
+      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('Done.')
+      const updated = cachedSessionView(sessionSummary.sessionId)
+      act(() => {
+        cache.set(sessionSummary.sessionId, {
+          ...updated,
+          timeline: [...updated.timeline, {
+            seq: 3, ts: '2026-07-05T10:00:01.000Z',
+            event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'Latest realtime checkpoint.' }] } }, effects: [],
+          }],
+        })
+      })
+      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('Latest realtime checkpoint.')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows only the recent preview window and keeps it compact for long sessions', async () => {
+    vi.useFakeTimers()
+    try {
+      const cached = cachedSessionView(sessionSummary.sessionId)
+      const timeline = Array.from({ length: 16 }, (_, index) => ({
+        seq: index + 1,
+        ts: `2026-07-05T10:00:${String(index).padStart(2, '0')}.000Z`,
+        event: { kind: 'user_message' as const, text: `history-message-${index + 1}` },
+        effects: [],
+      }))
+      render(
+        <Explorer
+          executors={[executor]} sessions={[sessionSummary]} selectedSessionId={null}
+          onSelect={() => {}} onNewSession={() => {}} onConnectWorkspace={() => {}}
+          onDelete={() => {}} onRename={() => {}}
+          getCachedSessionView={() => ({ ...cached, timeline })}
+        />,
+      )
+      fireEvent.pointerEnter(screen.getByTestId('session-row'), { pointerType: 'mouse' })
+      await act(async () => vi.advanceTimersByTime(50))
+      expect(screen.getByTestId('session-hover-preview').style.height).toBe('520px')
+      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('history-message-5')
+      expect(screen.getByTestId('session-hover-preview-summary').textContent).not.toContain('history-message-4')
     } finally {
       vi.useRealTimers()
     }
@@ -940,7 +1067,7 @@ describe('Explorer', () => {
 
       fireEvent.pointerEnter(screen.getByTestId('session-row'), { pointerType: 'mouse' })
       await act(async () => {
-        vi.advanceTimersByTime(350)
+        vi.advanceTimersByTime(50)
       })
 
       expect(getCachedSessionView).toHaveBeenCalledWith(sessionSummary.sessionId)
@@ -971,7 +1098,7 @@ describe('Explorer', () => {
 
       fireEvent.pointerEnter(screen.getByTestId('session-row'), { pointerType: 'mouse' })
       await act(async () => {
-        vi.advanceTimersByTime(350)
+        vi.advanceTimersByTime(50)
       })
 
       expect(getCachedSessionView).not.toHaveBeenCalled()
@@ -1011,7 +1138,7 @@ describe('Explorer', () => {
 
       fireEvent.pointerEnter(screen.getByTestId('session-row'), { pointerType: 'mouse' })
       await act(async () => {
-        vi.advanceTimersByTime(350)
+        vi.advanceTimersByTime(50)
       })
 
       expect(getCachedSessionView).not.toHaveBeenCalled()

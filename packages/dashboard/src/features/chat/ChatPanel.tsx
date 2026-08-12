@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Archive,
   ArrowRight,
@@ -217,41 +218,35 @@ export function ChatPanel({
   onOpenWorkspaceFile,
 }: Props): JSX.Element {
   const { t } = useTranslation()
-  const fallbackItems: TranscriptItem[] = (messages ?? [])
+  const fallbackItems = useMemo<TranscriptItem[]>(() => (messages ?? [])
     .filter((message) => message.role !== 'system')
-    .map((message) => ({
-      kind: 'message',
-      message,
-    }))
+    .map((message) => ({ kind: 'message', message })), [messages])
   const rawItems = items ?? fallbackItems
-  const toolNameByCallId = new Map<string, string>()
-  for (const item of rawItems) {
-    if (item.kind !== 'message') continue
-    const message = item.message
-    for (const content of message.content) {
-      if (content.type === 'tool_call') toolNameByCallId.set(content.callId, content.name)
-    }
-  }
-  const allMessages = rawItems
-    .filter((it): it is Extract<TranscriptItem, { kind: 'message' }> => it.kind === 'message')
-    .map((it) => it.message)
-  const resultsByCallId = collectAllToolResults(allMessages)
-  const intraMessageGroupedCallIds = new Set<string>()
-  for (const m of allMessages) {
-    if (m.role !== 'assistant') continue
-    const grouped = groupConsecutiveToolCalls(m.content, resultsByCallId)
-    for (const g of grouped) {
-      if (g.kind === 'tool_call_group') {
-        for (const c of g.calls) intraMessageGroupedCallIds.add(c.callId)
+  const { toolNameByCallId, allMessages, resultsByCallId, intraMessageGroupedCallIds } = useMemo(() => {
+    const names = new Map<string, string>()
+    const messageItems = rawItems
+      .filter((item): item is Extract<TranscriptItem, { kind: 'message' }> => item.kind === 'message')
+      .map((item) => item.message)
+    for (const message of messageItems) {
+      for (const content of message.content) {
+        if (content.type === 'tool_call') names.set(content.callId, content.name)
       }
     }
-  }
-  const approvalByCallId = new Map<string, ApprovalRequiredEvent>()
-  for (const a of pendingApprovals ?? []) approvalByCallId.set(a.callId, a)
+    const results = collectAllToolResults(messageItems)
+    const groupedIds = new Set<string>()
+    for (const message of messageItems) {
+      if (message.role !== 'assistant') continue
+      for (const group of groupConsecutiveToolCalls(message.content, results)) {
+        if (group.kind === 'tool_call_group') for (const call of group.calls) groupedIds.add(call.callId)
+      }
+    }
+    return { toolNameByCallId: names, allMessages: messageItems, resultsByCallId: results, intraMessageGroupedCallIds: groupedIds }
+  }, [rawItems])
+  const approvalByCallId = useMemo(() => new Map((pendingApprovals ?? []).map((approval) => [approval.callId, approval])), [pendingApprovals])
   // Null preserves the legacy standalone/demo fallback. The product App always
   // supplies the authoritative set so an unpaired historical call cannot be
   // mistaken for live work after compaction, interruption, or recovery.
-  const activeToolCallIdSet = activeToolCallIds === undefined ? null : new Set(activeToolCallIds)
+  const activeToolCallIdSet = useMemo(() => activeToolCallIds === undefined ? null : new Set(activeToolCallIds), [activeToolCallIds])
 
   // Drop tool messages whose every tool_result is already rendered inline in a
   // grouped assistant tool-call card. Otherwise MessageRow returns null but
@@ -1486,8 +1481,8 @@ function ContentBlock({
 }): JSX.Element {
   if (content.type === 'text') {
     if (role === 'assistant') {
-      const cancelled = splitCancelledSuffix(content.text)
-      if (cancelled) return <CancelledAssistantMessage text={cancelled.text} />
+      const terminalMarker = splitAssistantTerminalMarker(content.text)
+      if (terminalMarker) return <TerminalAssistantMessage text={terminalMarker.text} kind={terminalMarker.kind} />
       return <AssistantMarkdown text={content.text} streaming={streaming === true} />
     }
     if (role === 'user') {
@@ -1636,23 +1631,32 @@ function formatMessageActionValue(value: unknown): string {
   }
 }
 
-function splitCancelledSuffix(text: string): { text: string } | null {
-  const match = text.match(/(?:\n\n)?\[cancelled\]\s*$/i)
+function splitAssistantTerminalMarker(text: string): { text: string; kind: 'cancelled' | 'interrupted' } | null {
+  const match = text.match(/(?:\n\n)?\[(cancelled|interrupted)\]\s*$/i)
   if (!match) return null
-  return { text: text.slice(0, match.index).trimEnd() }
+  return {
+    text: text.slice(0, match.index).trimEnd(),
+    kind: match[1]?.toLowerCase() === 'interrupted' ? 'interrupted' : 'cancelled',
+  }
 }
 
-function CancelledAssistantMessage({ text }: { text: string }): JSX.Element {
+function TerminalAssistantMessage({ text, kind }: { text: string; kind: 'cancelled' | 'interrupted' }): JSX.Element {
   const { t } = useTranslation()
+  const interrupted = kind === 'interrupted'
   return (
     <div className="min-w-0 space-y-3">
       {text.length > 0 ? <AssistantMarkdown text={text} /> : null}
       <div
-        className="inline-flex max-w-full items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-500/25 dark:text-amber-300"
-        data-testid="assistant-message-cancelled"
+        className={cn(
+          'inline-flex max-w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ring-1',
+          interrupted
+            ? 'bg-orange-500/10 text-orange-700 ring-orange-500/25 dark:text-orange-300'
+            : 'bg-amber-500/10 text-amber-700 ring-amber-500/25 dark:text-amber-300',
+        )}
+        data-testid={interrupted ? 'assistant-message-interrupted' : 'assistant-message-cancelled'}
       >
         <Ban className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-        <span className="truncate">{t('chat.transcript.cancelledMessage')}</span>
+        <span>{interrupted ? 'Response interrupted before completion' : t('chat.transcript.cancelledMessage')}</span>
       </div>
     </div>
   )
@@ -2629,6 +2633,11 @@ function ToolCallInlineDetail({
           <ToolTextBadge tone="warning">Approval needed</ToolTextBadge>
         ) : null}
       </div>
+      {call.intent ? (
+        <p className="border-b border-border/30 px-2.5 py-2 text-[11px] leading-relaxed text-foreground" data-testid={`tool-call-detail-intent-${call.callId}`}>
+          {call.intent}
+        </p>
+      ) : null}
       {isPendingApproval && hasDiffPreview ? (
         <div className="p-2">
           <DiffPreview toolName={call.name} input={approval.input} />
@@ -2935,6 +2944,7 @@ function ToolCallGroupBlock({
         : null
   const groupLifecycle = summarizeToolGroupLifecycle(group, approvalByCallId, activeToolCallIds)
   const toolMix = summarizeToolMix(group.calls)
+  const groupIntent = summarizeToolIntents(group.calls, 3)
   const primaryTargets = summarizePrimaryTargets(rows, group.mixed ? 2 : 1)
   const groupTitle = group.mixed ? 'Tool activity' : group.toolName
   const liveTailCount = Math.max(0, Math.round(liveToolActivityTailCount))
@@ -2973,20 +2983,53 @@ function ToolCallGroupBlock({
   const omittedDotCount = Math.max(0, dots.length - visibleDots.length)
   const collapsedDots = toolCardMode === 'dots' && !open
   const showRows = open || anyPending || (!collapsedDots && autoRevealTail)
-  const runningCallId = [...visibleDots].reverse().find((dot) => dot.status === 'running')?.callId ?? null
   // Live running state for this group: any dispatched call without a result and
   // not waiting on approval. When running, this card itself carries the dynamic
   // affordances that used to live in a second, redundant inline status card
   // (spinning wrench, elapsed timer, pulsing badge, breathing beam).
   const isRunning = dots.some((dot) => dot.status === 'running')
   const runningElapsed = useElapsedSeconds(isRunning, toolExecutionStartedAt)
-  const previewCallId = hoveredCallId ?? pinnedCallId ?? (anyPending ? null : runningCallId)
+  // A running call keeps its animated dot, but must not open the hover preview
+  // until the user explicitly hovers, focuses, or pins that dot. Auto-opening
+  // the fixed layer obscures transcript content while long-running tools execute.
+  const previewCallId = hoveredCallId ?? pinnedCallId
+  const previewCall = previewCallId
+    ? group.calls.find((call) => call.callId === previewCallId) ?? null
+    : null
   const previewRow = previewCallId
     ? rows.find((row) => row.callId === previewCallId) ?? null
     : null
   const previewStatus = previewCallId
     ? dots.find((dot) => dot.callId === previewCallId)?.status ?? null
     : null
+  const previewResult = previewCallId ? group.results.get(previewCallId) ?? null : null
+  const [previewPosition, setPreviewPosition] = useState<{
+    left: number
+    top: number
+    horizontal: 'right' | 'left'
+    vertical: 'above' | 'below'
+  } | null>(null)
+  useEffect(() => {
+    if (!collapsedDots || !previewCallId || !previewRow || !previewStatus || typeof document === 'undefined') {
+      setPreviewPosition(null)
+      return
+    }
+    const anchor = document.getElementById(`tool-card-dot-anchor-${previewCallId}`)
+    if (!anchor) {
+      setPreviewPosition(null)
+      return
+    }
+    const rect = anchor.getBoundingClientRect()
+    const cardWidth = Math.min(544, window.innerWidth - 16)
+    const horizontal = rect.right + 12 + cardWidth <= window.innerWidth - 8 ? 'right' : 'left'
+    const vertical = rect.top >= Math.min(360, window.innerHeight * 0.45) ? 'above' : 'below'
+    setPreviewPosition({
+      left: horizontal === 'right' ? rect.right + 12 : Math.max(8, rect.left - 12),
+      top: vertical === 'above' ? rect.top - 8 : rect.bottom + 8,
+      horizontal,
+      vertical,
+    })
+  }, [collapsedDots, previewCallId, previewStatus])
 
   const toggleOpen = (): void => {
     setHoveredCallId(null)
@@ -3018,7 +3061,7 @@ function ToolCallGroupBlock({
     >
       {collapsedDots ? (
         <div
-          className="flex min-h-7 w-fit min-w-0 items-center overflow-hidden"
+          className="flex min-h-7 w-fit min-w-0 items-center overflow-visible"
           style={{ maxWidth: '90%' }}
           data-testid={`tool-card-dots-${group.firstCallId}`}
           aria-label={`${group.calls.length} tool calls`}
@@ -3029,6 +3072,7 @@ function ToolCallGroupBlock({
               <div key={dot.callId} className="relative z-10 flex flex-none items-center">
                 <button
                   type="button"
+                  id={`tool-card-dot-anchor-${dot.callId}`}
                   title={dot.title}
                   aria-label={dot.title}
                   aria-pressed={pinnedCallId === dot.callId}
@@ -3061,6 +3105,51 @@ function ToolCallGroupBlock({
           >
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
+          {groupIntent ? (
+            <p
+              className="ml-2 min-w-0 max-w-[min(36rem,calc(100vw-8rem))] truncate text-[11px] leading-5 text-muted-foreground"
+              title={groupIntent}
+              data-testid={`tool-card-dots-intent-${group.firstCallId}`}
+            >
+              {groupIntent}
+            </p>
+          ) : null}
+          {previewCallId && previewCall && previewRow && previewStatus && previewPosition && typeof document !== 'undefined'
+            ? createPortal(
+                <div
+                  className={cn(
+                    'fixed z-[100] w-[min(34rem,calc(100vw-1rem))] rounded-xl border border-border/80 bg-popover p-2 text-popover-foreground shadow-2xl',
+                    pinnedCallId === previewCallId ? 'pointer-events-auto' : 'pointer-events-none',
+                    previewPosition.horizontal === 'left' && '-translate-x-full',
+                    previewPosition.vertical === 'above' && '-translate-y-full',
+                  )}
+                  style={{ left: previewPosition.left, top: previewPosition.top }}
+                  data-placement={`${previewPosition.horizontal}-${previewPosition.vertical}`}
+                  data-testid={`tool-card-preview-layer-${previewCallId}`}
+                  role="tooltip"
+                  onWheel={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div className="mb-2 flex min-w-0 items-center justify-between gap-3 px-1 py-0.5">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <ToolNameChip name={previewCall.name} />
+                      <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={previewRow.primary}>{previewRow.primary}</span>
+                    </div>
+                    <ToolTextBadge tone={previewStatus === 'failed' ? 'danger' : previewStatus === 'succeeded' ? 'success' : previewStatus === 'approval' ? 'warning' : 'neutral'}>
+                      {previewStatus}
+                    </ToolTextBadge>
+                  </div>
+                  <div className="grid max-h-[min(28rem,calc(100vh-1rem))] min-w-0 touch-pan-y gap-2 overflow-y-auto overscroll-contain pr-1" data-testid={`tool-card-preview-scroll-${previewCallId}`}>
+                    <ToolCallInlineDetail
+                      call={previewCall}
+                      approval={approvalByCallId.get(previewCallId) ?? null}
+                    />
+                    {previewResult ? <ToolResultInlineDetail result={previewResult} /> : <GroupSummaryPreview row={previewRow} status={previewStatus} />}
+                  </div>
+                </div>,
+                document.body,
+              )
+            : null}
         </div>
       ) : (
       <button
@@ -3093,6 +3182,10 @@ function ToolCallGroupBlock({
           {singleCall?.intent ? (
             <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={singleCall.intent} data-testid={`tool-call-intent-${singleCall.callId}`}>
               {singleCall.intent}
+            </span>
+          ) : groupIntent ? (
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={groupIntent} data-testid={`tool-call-intent-summary-${group.firstCallId}`}>
+              {groupIntent}
             </span>
           ) : singleRow?.primary ? (
             <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={singleRow.primary}>
@@ -3157,12 +3250,6 @@ function ToolCallGroupBlock({
         </span>
       </button>
       )}
-      {collapsedDots && previewRow && previewStatus ? (
-        <div className="mt-0.5 max-w-xl min-w-0 pr-1">
-          {singleCall?.intent ? <div className="mb-0.5 truncate text-[11px] text-muted-foreground" data-testid={`tool-call-intent-${singleCall.callId}`} title={singleCall.intent}>{singleCall.intent}</div> : null}
-          <GroupSummaryPreview row={previewRow} status={previewStatus} />
-        </div>
-      ) : null}
       {showRows ? (
         <div
           className="ak-expand-in flex min-w-0 max-w-full flex-col gap-0.5 overflow-hidden border-t border-border/40 px-3 pb-2 pt-1"
@@ -3204,6 +3291,7 @@ function ToolCallGroupBlock({
               >
                 <GroupSummaryRow
                   row={row}
+                  intent={call.intent}
                   status={approvalByCallId.has(row.callId)
                     ? 'approval'
                     : group.results.has(row.callId)
@@ -3325,6 +3413,19 @@ function summarizeToolMix(calls: readonly ToolCallContent[]): string {
   const counts = new Map<string, number>()
   for (const call of calls) counts.set(call.name, (counts.get(call.name) ?? 0) + 1)
   return [...counts.entries()].map(([name, count]) => `${name} ${count}`).join(', ')
+}
+
+function summarizeToolIntents(calls: readonly ToolCallContent[], limit: number): string {
+  const intents: string[] = []
+  for (const call of calls) {
+    const intent = call.intent?.trim()
+    if (!intent || intents.includes(intent)) continue
+    intents.push(intent)
+  }
+  if (intents.length === 0) return ''
+  const visible = intents.slice(0, limit)
+  const remainder = intents.length - visible.length
+  return `${visible.join(' · ')}${remainder > 0 ? ` · +${remainder} more` : ''}`
 }
 
 function summarizePrimaryTargets(rows: readonly SummaryRow[], limit: number): string {

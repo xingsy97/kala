@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { TimelineEntry } from './session.js'
 import { appendTranscriptBaseItems, transcriptBaseItems } from './transcript.js'
+import { mergeBySeq } from './session.js'
 
 function timeline(count: number): TimelineEntry[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -20,6 +21,19 @@ describe('transcript projection performance budget', () => {
     const duration = performance.now() - started
     expect(items).toHaveLength(5_000)
     expect(duration).toBeLessThan(100)
+  })
+
+  it('appends a 1000-entry timeline tail to 10000 entries within the merge fast-path budget', () => {
+    const entries = timeline(11_000)
+    const previous = entries.slice(0, 10_000)
+    const added = entries.slice(10_000)
+    const started = performance.now()
+    const merged = mergeBySeq(previous, added)
+    const duration = performance.now() - started
+    expect(merged).toHaveLength(11_000)
+    expect(merged[0]).toBe(previous[0])
+    expect(merged[10_000]).toBe(added[0])
+    expect(duration).toBeLessThan(10)
   })
 
   it('appends 100 entries to a 5000-item projection within the fast-path budget', () => {

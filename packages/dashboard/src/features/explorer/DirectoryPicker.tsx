@@ -1,3 +1,4 @@
+import { randomId } from '../../lib/random-id.js'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowUp, ChevronRight, File, Folder, Home, Loader2, RefreshCw, Slash } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -355,7 +356,7 @@ function DirectoryColumn({
 }
 
 function requestDirs(socket: DashboardSocket, workspaceId: string, path: string | undefined): string {
-  const requestId = crypto.randomUUID()
+  const requestId = randomId()
   socket.emit('client:list_dirs', {
     requestId,
     workspaceId,

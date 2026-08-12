@@ -66,14 +66,14 @@ describe('buildTree', () => {
     expect(tree[0]!.children.map((c) => c.sessionId)).toEqual(['s-a', 's-b'])
   })
 
-  it('puts sessions with no workspaceId under an Unassigned bucket', () => {
+  it('puts sessions with no workspaceId under the supported Chats bucket', () => {
     const tree = buildTree(
       [],
       [session({ sessionId: 'orphan' })],
     )
     expect(tree).toHaveLength(1)
     expect(tree[0]!.workspaceId).toBe(null)
-    expect(tree[0]!.name).toBe('Unassigned')
+    expect(tree[0]!.name).toBe('Chats')
     expect(tree[0]!.online).toBe(false)
     expect(tree[0]!.children.map((c) => c.sessionId)).toEqual(['orphan'])
   })
@@ -95,7 +95,7 @@ describe('buildTree', () => {
     expect(tree[0]!.name).toBe('ghost')
   })
 
-  it('sorts online workspaces before offline ones, and Unassigned last', () => {
+  it('sorts Chats before online and offline workspaces', () => {
     const tree = buildTree(
       [executor({ workspaceId: 'ws-online', workspaceName: 'zulu' })],
       [
@@ -108,7 +108,7 @@ describe('buildTree', () => {
         session({ sessionId: 's-c' }),
       ],
     )
-    expect(tree.map((n) => n.name)).toEqual(['zulu', 'alpha', 'Unassigned'])
+    expect(tree.map((n) => n.name)).toEqual(['Chats', 'zulu', 'alpha'])
   })
 
   it('keeps sessions in incoming order so activity does not move cards to the top', () => {

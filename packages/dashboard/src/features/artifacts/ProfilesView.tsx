@@ -7,6 +7,9 @@ import {
   type SessionProfile,
 } from './product-artifact-views.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
+import { mapWithConcurrency } from './concurrency.js'
+
+const ARTIFACT_FETCH_CONCURRENCY = 6
 
 export function ProfilesView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
   const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()
@@ -19,10 +22,10 @@ export function ProfilesView({ onOpenSession }: { onOpenSession?(sessionId: stri
     let cancelled = false
     setRowsError(null)
     setRows([])
-    void Promise.all(profiles.map(async (entry): Promise<ProfileRow> => {
+    void mapWithConcurrency(profiles, ARTIFACT_FETCH_CONCURRENCY, async (entry): Promise<ProfileRow> => {
       const content = await fetchArtifactContent(entry.path)
       return { path: entry.path, profile: content.body as SessionProfile }
-    }))
+    })
       .then((next) => {
         if (!cancelled) setRows(next.sort((a, b) => a.path.localeCompare(b.path)))
       })

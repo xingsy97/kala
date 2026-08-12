@@ -55,7 +55,18 @@ const HOST_RPC_DENYLIST: RegExp[] = [
 ]
 
 registerRoute(
-  new NavigationRoute(createHandlerBoundToURL(APP_SHELL_URL), {
+  new NavigationRoute(async (options) => {
+    // A cached HTML shell can reference lazy chunks removed by an immutable
+    // deployment. Prefer the current network shell whenever online; use the
+    // precache only as an actual offline fallback.
+    try {
+      const response = await fetch(options.request, { cache: 'no-store' })
+      if (response.ok) return response
+    } catch {
+      // Offline: fall through to the precached shell.
+    }
+    return await createHandlerBoundToURL(APP_SHELL_URL)(options)
+  }, {
     denylist: HOST_RPC_DENYLIST,
   }),
 )

@@ -451,11 +451,15 @@ describe('Composer', () => {
     expect(send.className).toContain('h-9')
     expect(sendMode.className).toContain('h-9')
 
-    // The mode switch is a visible compact control immediately left of the input.
+    // The mode switch is attached to the input as its left layout segment.
     const modeToggle = screen.getByTestId('composer-mode-toggle')
     expect(modeToggle).toBeTruthy()
     expect(modeToggle.className).not.toContain('absolute')
-    expect(modeToggle.className).toContain('w-8')
+    expect(modeToggle.className).toContain('h-10')
+    expect(modeToggle.className).toContain('w-10')
+    expect(modeToggle.className).toContain('self-start')
+    expect(modeToggle.className).toContain('border-r-0')
+    expect(modeToggle.querySelector('svg')).toBeTruthy()
     expect(shell.contains(modeToggle)).toBe(true)
     expect(modeToggle.compareDocumentPosition(shell.querySelector('textarea, [contenteditable="true"]') ?? indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(sendMode)

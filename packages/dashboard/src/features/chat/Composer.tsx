@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
+import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Pencil, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
@@ -228,10 +228,25 @@ export function Composer({
     loadedDraftSession.current = sessionId
     setText(readStoredDraft(sessionId))
   }, [sessionId])
+  const draftWriteTimer = useRef<number | null>(null)
+  const latestDraft = useRef({ sessionId, text })
   useEffect(() => {
     if (loadedDraftSession.current !== sessionId) return
-    writeStoredDraft(sessionId, text)
+    latestDraft.current = { sessionId, text }
+    if (draftWriteTimer.current !== null) window.clearTimeout(draftWriteTimer.current)
+    draftWriteTimer.current = window.setTimeout(() => {
+      writeStoredDraft(sessionId, text)
+      draftWriteTimer.current = null
+    }, 300)
+    return () => {
+      if (draftWriteTimer.current !== null) window.clearTimeout(draftWriteTimer.current)
+      draftWriteTimer.current = null
+    }
   }, [text, sessionId])
+  useEffect(() => () => {
+    const pending = latestDraft.current
+    if (pending.sessionId === sessionId) writeStoredDraft(pending.sessionId, pending.text)
+  }, [sessionId])
   const [sendMode, setSendMode] = useState<SendMode>(() => readStoredSendMode(sessionId))
   useEffect(() => {
     setSendMode(readStoredSendMode(sessionId))
@@ -538,7 +553,7 @@ export function Composer({
           onDelete={onQueuedDelete}
         />
         {mode === 'simple' ? (
-          <div className="relative flex items-center gap-2" data-testid="composer-simple-shell">
+          <div className="relative flex items-center gap-0" data-testid="composer-simple-shell">
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
             <SlashCommandMenu
               commands={matchingCommands}
@@ -560,6 +575,7 @@ export function Composer({
                 onRemoveImage={(id) => removeImage(id)}
                 onPaste={(e) => { void handleSimplePaste(e) }}
                 onEnterSubmit={() => { void submit() }}
+                className="rounded-l-none"
               />
             </div>
             <RuntimeMetrics
@@ -585,11 +601,11 @@ export function Composer({
             />
           </div>
         ) : (
-        <div className="flex items-stretch gap-2" data-testid="composer-full-shell">
+        <div className="flex items-stretch gap-0" data-testid="composer-full-shell">
           <ComposerModeToggle mode={mode} onToggle={toggleMode} />
         <div
           className={cn(
-            'min-w-0 flex-1 relative rounded-2xl border border-border/60 bg-background/60 transition-shadow',
+            'min-w-0 flex-1 relative rounded-2xl rounded-l-none border border-border/60 bg-background/60 transition-shadow',
             'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
           )}
         >
@@ -853,9 +869,14 @@ function ComposerModeToggle({ mode, onToggle }: { mode: 'simple' | 'full'; onTog
       title={label}
       data-testid="composer-mode-toggle"
       data-composer-mode={mode}
-      className="flex w-8 flex-none items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40"
+      className={cn(
+        'relative z-[1] flex h-10 w-10 flex-none self-start items-center justify-center rounded-l-2xl border border-r-0 border-border/60 bg-background/60 text-muted-foreground transition-colors',
+        'hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50',
+      )}
     >
-      {mode === 'simple' ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+      {mode === 'simple'
+        ? <PanelTopClose className="h-4 w-4" aria-hidden="true" />
+        : <PanelTopOpen className="h-4 w-4" aria-hidden="true" />}
     </button>
   )
 }

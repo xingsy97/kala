@@ -40,6 +40,8 @@ export type CachedSessionViewEstimateParts = {
 
 export type SessionViewCache = {
   get(sessionId: string): CachedSessionView | null
+  peek(sessionId: string): CachedSessionView | null
+  subscribe(sessionId: string, listener: () => void): () => void
   set(sessionId: string, view: CachedSessionViewInput): CachedSessionView | null
   patch(sessionId: string, patch: Partial<CachedSessionViewInput>): CachedSessionView | null
   delete(sessionId: string): void
@@ -57,7 +59,11 @@ export function createSessionViewCache(options: { maxBytes?: number; now?: () =>
   let maxBytes = Math.max(0, Math.round(options.maxBytes ?? sessionViewCacheMaxBytesFromMb(DEFAULT_SESSION_VIEW_CACHE_MAX_MB)))
   const now = options.now ?? (() => Date.now())
   const entries = new Map<string, CachedSessionView>()
+  const listeners = new Map<string, Set<() => void>>()
   let estimatedBytes = 0
+  const notify = (sessionId: string): void => {
+    for (const listener of listeners.get(sessionId) ?? []) listener()
+  }
 
   const enforceLimit = (): void => {
     if (maxBytes <= 0) {
@@ -91,6 +97,7 @@ export function createSessionViewCache(options: { maxBytes?: number; now?: () =>
     entries.set(sessionId, entry)
     estimatedBytes += entry.estimatedBytes
     enforceLimit()
+    notify(sessionId)
     return entries.get(sessionId) ?? null
   }
 
@@ -101,6 +108,18 @@ export function createSessionViewCache(options: { maxBytes?: number; now?: () =>
       const refreshed = { ...entry, cachedAt: now() }
       entries.set(sessionId, refreshed)
       return refreshed
+    },
+    peek(sessionId) {
+      return entries.get(sessionId) ?? null
+    },
+    subscribe(sessionId, listener) {
+      const current = listeners.get(sessionId) ?? new Set<() => void>()
+      current.add(listener)
+      listeners.set(sessionId, current)
+      return () => {
+        current.delete(listener)
+        if (current.size === 0) listeners.delete(sessionId)
+      }
     },
     set: put,
     patch(sessionId, patch) {
@@ -113,6 +132,7 @@ export function createSessionViewCache(options: { maxBytes?: number; now?: () =>
       if (!previous) return
       entries.delete(sessionId)
       estimatedBytes -= previous.estimatedBytes
+      notify(sessionId)
     },
     clear() {
       entries.clear()

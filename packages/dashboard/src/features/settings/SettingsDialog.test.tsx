@@ -124,6 +124,35 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Override host endpoint')).toBeTruthy()
   })
 
+  it('configures, tests, and removes web search', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ configured: false, provider: 'serper' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-webSearch'))
+    expect(await screen.findByText('Not configured')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith('/settings/web-search', { cache: 'no-store' })
+
+    fireEvent.change(screen.getByTestId('settings-web-search-api-key'), { target: { value: 'serper-secret' } })
+    fireEvent.click(screen.getByTestId('settings-web-search-save'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/settings/web-search', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ provider: 'serper', apiKey: 'serper-secret' }),
+    })))
+
+    fireEvent.click(await screen.findByTestId('settings-web-search-test'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/settings/web-search/test', { method: 'POST' }))
+
+    fireEvent.click(screen.getByTestId('settings-web-search-delete'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/settings/web-search', { method: 'DELETE' }))
+    expect(await screen.findByText('Web search configuration removed.')).toBeTruthy()
+  })
+
   it('executes connection test, save, failure, and reset states', async () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))

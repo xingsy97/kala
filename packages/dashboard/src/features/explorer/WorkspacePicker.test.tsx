@@ -71,6 +71,26 @@ describe('NewSessionDialog', () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it('presents chat and workspace sessions as explicit creation paths', () => {
+    const onCreateSimpleChat = vi.fn()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        socket={makeSocket().socket as never}
+        onCreate={() => {}}
+        onCreateSimpleChat={onCreateSimpleChat}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('Start a conversation')).toBeTruthy()
+    expect(screen.getByText('Workspace sessions')).toBeTruthy()
+    expect(screen.getByTestId('new-session-create').textContent).toContain('Create workspace session')
+    fireEvent.click(screen.getByTestId('new-session-simple-chat'))
+    expect(onCreateSimpleChat).toHaveBeenCalledTimes(1)
+  })
+
   it('requests directories, expands finder columns, and creates with selected cwd', async () => {
     const onCreate = vi.fn()
     const harness = makeSocket()

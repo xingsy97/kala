@@ -88,10 +88,12 @@ export function toolStatusIcon(ok: boolean): ToolIconRenderer {
 export function GroupSummaryRow({
   row,
   status,
+  intent,
   onClick,
 }: {
   row: SummaryRow
   status?: 'succeeded' | 'failed' | 'approval' | 'running'
+  intent?: string
   onClick: () => void
 }): JSX.Element {
   const fallback = toolStatusIcon(row.ok)
@@ -107,7 +109,7 @@ export function GroupSummaryRow({
     <button
       type="button"
       onClick={onClick}
-      className="group/summary grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
+      className="group/summary grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
       data-testid={`grouped-tool-row-${row.callId}`}
     >
       <Icon className={cn('h-3 w-3 flex-none', toneClass)} aria-hidden="true" />
@@ -128,6 +130,11 @@ export function GroupSummaryRow({
       ) : text ? (
         <span className="inline-flex h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[11px] leading-none text-muted-foreground" title={text}>
           {text}
+        </span>
+      ) : null}
+      {intent ? (
+        <span className="col-start-2 col-end-4 min-w-0 truncate text-[11px] text-muted-foreground" title={intent} data-testid={`grouped-tool-intent-${row.callId}`}>
+          {intent}
         </span>
       ) : null}
     </button>

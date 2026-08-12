@@ -136,6 +136,8 @@ export function createDurableSessionViewCache(options: {
 
   return {
     get: memory.get,
+    peek: memory.peek,
+    subscribe: memory.subscribe,
     set(sessionId, input) {
       invalidateSession(sessionId)
       const entry = memory.set(sessionId, input)
