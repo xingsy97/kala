@@ -37,6 +37,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [dashboard/browser-feature-todo.md](dashboard/browser-feature-todo.md) | Browser (web) feature backlog |
 | [dashboard/browser-core-local-runtime.md](dashboard/browser-core-local-runtime.md) | Browser-core local runtime option — planned |
 | [dashboard/frontend-modernization-plan.md](dashboard/frontend-modernization-plan.md) | Phased modernization: auto-animate, TanStack Query, Motion, typewriter |
+| [dashboard/session-runtime-interaction-sot.md](dashboard/session-runtime-interaction-sot.md) | **Normative.** Running-Session shell responsiveness, hover preview, status UI, overlays, stress testing, and deployment gates |
 
 ### Executor — tool sandbox (`packages/executor`)
 
@@ -91,16 +92,19 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [architecture/runtime-naming-migration.md](architecture/runtime-naming-migration.md) | RuntimeIngressGateway/RuntimeHost/RuntimeUnitIngress naming contract and compatibility policy |
 | [architecture/llm-dependency-contract.md](architecture/llm-dependency-contract.md) | Explicit LLM Port/Adapter/Factory/SecretResolver boundaries and lifecycle scopes |
 | [architecture/session-artifact-registry.md](architecture/session-artifact-registry.md) | Durable session-bound `artifact://` image registration and rendering |
+| [architecture/visual-approval-loop.md](architecture/visual-approval-loop.md) | **Normative target.** Read-only Visual Preview, A2UI-compatible Visual IR, Agent-only patching, design confirmation, functional-coverage gates, and Browser Lab verification |
 | [testing/core-hardening-baseline-2026-07-31.md](testing/core-hardening-baseline-2026-07-31.md) | Frozen source/runtime/data baseline and evidence rules for the highest-strength core Agent regression program |
 | [testing/core-change-risk-and-coverage-matrix.md](testing/core-change-risk-and-coverage-matrix.md) | Changed-surface to invariant/test mapping, confirmed gaps, severity, and downstream audit ownership |
 | [testing/session-log-integrity-audit.md](testing/session-log-integrity-audit.md) | Session cursor/append/replay atomicity findings, legacy compatibility policy, fixes, and regression evidence |
 | [architecture/tenant-runtime-unit-saas.md](architecture/tenant-runtime-unit-saas.md) | **Accepted architecture and implementation record.** `TenantRuntimeUnit` logical isolation and SaaS composition |
+| [architecture/standalone-runtime-unit-refactor.md](architecture/standalone-runtime-unit-refactor.md) | **Normative.** Stable Ingress, Standalone `local` Unit, external deployment Supervisor, migration, rollback, and final cutover contract |
 
 ### Operations
 
 | File | Purpose |
 |---|---|
 | [operations/saas-local-runbook.md](operations/saas-local-runbook.md) | Single Docker SaaS stack with mandatory NFS Session storage, bootstrap, verification, backup, upgrade, and rollback |
+| [operations/standalone-runtime-unit-cutover.md](operations/standalone-runtime-unit-cutover.md) | External staging, preflight, bounded cutover, verification, observation, and rollback for Standalone Runtime Unit migration |
 
 ### Design
 

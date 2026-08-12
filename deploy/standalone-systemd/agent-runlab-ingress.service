@@ -1,0 +1,24 @@
+[Unit]
+Description=Agent RunLab Stable Ingress
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=agent-runlab
+Group=agent-runlab
+EnvironmentFile=-/etc/agent-runlab/ingress.env
+ExecStart=/usr/bin/node /opt/agent-runlab/control/agent-runlab-standalone-ingress.cjs
+Restart=always
+RestartSec=2s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/agent-runlab
+RuntimeDirectory=agent-runlab
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,24 @@
+[Unit]
+Description=Agent RunLab Deploy Supervisor
+After=network-online.target user4@example.com
+Wants=network-online.target
+
+[Service]
+Type=exec
+EnvironmentFile=-/etc/agent-runlab/supervisor.env
+ExecStart=/usr/bin/flock --exclusive --nonblock /var/lib/agent-runlab/deploy/supervisor.lock /usr/bin/node /opt/agent-runlab/control/agent-runlab-deploy-supervisor.cjs
+Restart=always
+RestartSec=2s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agent-runlab/deploy
+InaccessiblePaths=/var/lib/agent-runlab/units
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

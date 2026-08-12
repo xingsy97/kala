@@ -3,7 +3,7 @@
 > 审计范围：`packages/dashboard`。
 > 审计方式：源码扫描、生产构建、现有组件与性能测试。
 > 已执行：`pnpm --dir packages/dashboard build`；ChatPanel、VirtualTranscript、Transcript performance 测试共 89/89 通过。
-> 限制：尚未执行真实移动设备、CPU 限速、弱网和浏览器 React Profiler 采样。文中的性能影响是基于代码路径与构建产物确认的问题，修复前后数值必须按每项“验证方式”补测。
+> 浏览器验证：已重新执行 Headless Chrome production-preview harness。当前冷导航约 919ms，Chrome TaskDuration 约 111ms，JS heap 约 7.05MB，DOM nodes 134，Service Worker cache entries 13。真实 Host+Executor harness 已能启动并创建 Session，但其旧版 ScrollArea/模型/布局断言与当前 UI 不一致，Preview 专项浏览器动作仍需独立 harness；移动设备 CPU 限速和弱网仍未覆盖。
 
 ## 结论与优先顺序
 
@@ -25,10 +25,17 @@
 | FE-PERF-014 | P2 | Session 切换只恢复 pinned 状态，不恢复阅读位置 | 长对话交叉阅读 |
 | FE-PERF-015 | P2 | Models Query 未按 Host/身份隔离且错误被缓存为空结果 | Host/账号切换、瞬时错误 |
 | FE-PERF-016 | P3 | 滚动与模型查找存在低优先级同步开销 | 高频滚动、频繁 Composer render |
+| FE-PERF-017 | P1（代码已修复） | 更新提示点击 Reload 后可能无限等待 | Dashboard 版本更新、长驻 PWA |
+| FE-PERF-018 | P1 | Running Session 期间切换 Session 时 Hover/点击/加载卡顿 | 多 Session、长会话、工具密集运行 |
+| FE-PERF-019 | P1 | Session Hover Preview 是一次性缓存快照，不显示真实最新状态 | 观察后台 Running Session |
 
 ---
 
 ## FE-PERF-001：PWA 首装和更新预缓存 15.8 MiB 非必要资源
+
+### 最新复核状态
+
+**已完成第一阶段修复并通过生产构建预算测试。** Precache 从基线 410 entries / 15,671.72 KiB 先降至 15 entries / 2,568.70 KiB；进一步根因分析发现 broad `index-*.js` 仍误纳入两个 lazy/shared chunk，现已收敛至 13 entries / 396.04 KiB（Workbox 报告值）；Mermaid、Cytoscape、SessionFilesPanel 和 SettingsDialog 保持按需加载。新增构建后预算测试，限制条目数并禁止重功能 chunk 回流。真实离线启动与二次按需缓存仍需 Gate 3 浏览器验收。
 
 ### 问题描述
 
@@ -92,6 +99,10 @@
 
 ## FE-PERF-002：Timeline 顺序追加仍重复复制和排序完整历史
 
+### 最新复核状态
+
+**第一阶段已修复并通过回归测试。** `mergeBySeq` 现在对严格递增 tail 使用 O(add.length) append fast path，乱序、重复 seq 和 metadata enrichment 仍走 authoritative Map+sort；projection rAF queue 现在一次 dispatch 整个 batch，并按原顺序在 reducer 内折叠。新增 identity、乱序 fallback、batch 等价和 10k+1k 性能测试。后续仍需在 production profile 验证 React commit 收益。
+
 ### 问题描述
 
 `session-projection.ts` 在每个 `appended` event 中调用 `mergeBySeq(current.timeline, [entry])`。`mergeBySeq` 每次都会：
@@ -152,6 +163,10 @@ $$
 
 ## FE-PERF-003：Session cache 在高频 Projection 更新时序列化并重写完整快照
 
+### 最新复核状态
+
+**第一阶段 checkpoint 修复已完成并通过测试。** Projection 更新现在只更新 pending checkpoint，连续变化在 1 秒安静窗口后合并为一次 cache.set；Session 切换或卸载会强制 flush 最新 checkpoint。新增“多次 commit 只写一次”和“切换时强制写旧 Session”测试。完整快照格式和 IndexedDB 容量扫描仍待后续增量 schema 优化，因此该问题从“每次 commit 写入”降级为“checkpoint 仍写完整 entry”。
+
 ### 问题描述
 
 `session.ts` 的 cache effect 依赖整个 `projection`。只要 Streaming、状态或 Timeline 更新，就调用 `cache.set` 并传入完整 state 和 timeline。
@@ -204,6 +219,10 @@ $$
 
 ## FE-PERF-004：Streaming 文本更新导致大型 App 和静态区域重复 Render
 
+### 最新复核状态
+
+**结构性问题仍存在，但前置减负已完成。** `streamingText` 仍由顶层 `App` 消费；Explorer 已隔离，Timeline frame batch、ChatPanel index memo、Inspector 按视图派生和 Draft debounce 已降低每帧成本，但 App/Composer/Inspector 尚未形成完整独立 Streaming subscription boundary。
+
 ### 问题描述
 
 `useSession` 在 `App` 顶层提供 `streamingText`。文本 reveal 提交时，约 2,900 行的 `App` 函数组件会重新执行，位于同一 owner 下的 Toolbar、Composer、Inspector、dialogs 和其他派生逻辑也会参与 reconciliation。
@@ -243,6 +262,10 @@ Explorer 已有 memo/runtime store 隔离，但 Composer、Inspector 和部分�
 ---
 
 ## FE-PERF-005：ChatPanel 每个 Streaming Frame 重建完整消息和工具索引
+
+### 最新复核状态
+
+**第一阶段引用稳定化已完成，完整增量索引仍待实施。** ChatPanel 的 fallback items、tool/message/result/group indexes、approval map 和 active call set 已按输入引用 memoize，避免父级无关 render 重建；既有 ChatPanel 基线仍保持相同的 2 个用户分支测试失败、其余 76 项通过，未新增失败。Streaming tail 当前仍改变 items 引用，因此下一阶段仍需拆分稳定 base 与 live-tail view model。
 
 ### 问题描述
 
@@ -291,6 +314,10 @@ Streaming 时通常只变化最后一个 assistant tail，但 `chatItems` identi
 
 ## FE-PERF-006：Inspector 未按当前视图延迟计算，长列表未虚拟化
 
+### 最新复核状态
+
+**第一阶段按视图延迟派生已完成，虚拟化仍待实施。** Inspector 现在仅在 Status/LLM/Tools/Trace 对应视图需要时构建 LLM calls、tool calls、flow 和 replay snapshots；27 个 Inspector 测试通过。Trace/LLM/Tool 等长列表仍使用普通 `.map()` 和 `scrollIntoView`，后续需继续虚拟化。
+
 ### 问题描述
 
 Inspector 会同时构建 artifacts、state flow、LLM calls、tool calls 和 replay snapshots，即使用户只查看其中一个 tab。Trace、Flow、LLM、Tool 列表主要使用普通 `.map()` 放入 ScrollArea；ScrollArea 提供滚动但不限制 DOM 数量。
@@ -331,6 +358,10 @@ Inspector 会同时构建 artifacts、state flow、LLM calls、tool calls 和 re
 ---
 
 ## FE-PERF-007：Control plane 对全局实时事件逐条扫描 Session 列表
+
+### 最新复核状态
+
+**客户端缓冲与规范化 store 基础已完成，协议级问题仍存在。** 高频 event/state/queue 摘要更新按 animation frame 合并；新增 `SessionSummaryStore`，支持按 ID 更新并保持未变化 summary identity/顺序，4 个 summary/preview store 测试通过。服务端仍发送全局原始事件，store 尚未全面接入 control hook，revisioned summary delta 仍待后续阶段。
 
 ### 问题描述
 
@@ -373,6 +404,10 @@ Inspector 会同时构建 artifacts、state flow、LLM calls、tool calls 和 re
 
 ## FE-PERF-008：Artifacts 页面存在无界并发读取和无界 DOM
 
+### 最新复核状态
+
+**第一阶段请求限流已完成，分页/取消/虚拟化仍待实施。** `MemoryView`、`OpsView`、`ProfilesView` 已统一使用并发上限 6 的有序 worker pool，不再对完整匹配集无界 Promise.all；新增并发上限和输出顺序测试。服务端分页、AbortController、按需挂载和长列表虚拟化仍是后续工作。
+
 ### 问题描述
 
 多个 Artifact view 会先获取完整 manifest，再通过嵌套 `Promise.all` 对匹配文件发起读取。Trial、Inventory、Memory、Profile、Ops 等列表缺少统一分页、并发池、取消和虚拟化。部分移动端隐藏面板仍保持挂载，可能继续加载用户看不到的数据。
@@ -414,6 +449,10 @@ Inspector 会同时构建 artifacts、state flow、LLM calls、tool calls 和 re
 
 ## FE-PERF-009：IndexedDB Hydration 会在 Cache miss 时延迟 Socket 建连
 
+### 最新复核状态
+
+**已修复并通过竞态测试。** Durable hydrate 与 Socket 现在并行启动，Socket constructor 不再等待 250ms；cache 先到可用于快速绘制，live `session:ready` 先到后会拒绝迟到 cache，避免内容闪回。新增“不等待 hydrate 建连”和“live baseline 后忽略迟到 hydrate”测试。
+
 ### 问题描述
 
 切换 Session 后，如果内存 cache miss，`session.ts` 会先等待 `cache.hydrate(sessionId)`，最多 250ms，随后才创建 Socket。IndexedDB 慢、数据库被其他 tab 阻塞或浏览器恢复时，实时连接被人为推迟。超时只结束等待，原 hydration 没有取消，仍可能继续占用 I/O 并触发后续工作。
@@ -450,6 +489,10 @@ Inspector 会同时构建 artifacts、state flow、LLM calls、tool calls 和 re
 ---
 
 ## FE-PERF-010：首屏、Files 和 Settings 的代码拆分粒度不足
+
+### 最新复核状态
+
+**仍存在。** Settings 内全部 section 仍静态 import，Files 仍在同一模块绑定 tree/editor/terminal/Markdown。
 
 ### 问题描述
 
@@ -500,6 +543,10 @@ Chat workspace、Inspector、Account/Admin 等仍进入主依赖图。Files chun
 
 ## FE-PERF-011：Mermaid 图表在离屏状态也立即解析和布局
 
+### 最新复核状态
+
+**已完成 viewport、单例、队列和 SVG cache 第一阶段修复。** MermaidBlock 仅在距离 viewport 400px 内开始加载；模块 import 单例化，render 串行排队，结果按 theme+code 缓存，3 个 Mermaid 测试通过。后续仍需补真实 Virtuoso root、主题即时失效和复杂图取消压力测试。
+
 ### 问题描述
 
 Mermaid 已动态 import，这是正确基础；但 `MermaidBlock` 挂载后会立即 import、initialize 和 render，没有 viewport 判断，也没有全局并发控制。打开包含多个 Mermaid block 的历史时，离屏图表也会并发执行解析、布局和 SVG 生成。每个组件重复 initialize 还会产生额外工作。
@@ -537,6 +584,10 @@ Mermaid 已动态 import，这是正确基础；但 `MermaidBlock` 挂载后会�
 ---
 
 ## FE-PERF-012：大目录与多 Session 搜索缺少分页和增量数据结构
+
+### 最新复核状态
+
+**Explorer 搜索已完成 deferred 第一阶段，Files 分页/标准化仍待实施。** Session 搜索使用 `useDeferredValue`，输入反馈不再同步等待完整 `filterTree`，Explorer 39/39 测试通过；Files 的 `client:list_dirs` 仍无 cursor/limit，树更新仍递归复制。
 
 ### 问题描述
 
@@ -579,6 +630,10 @@ Session Explorer 在 sessions 变化时还会构建结构签名、排序、过�
 
 ## FE-PERF-013：Streaming Markdown 重扫完整文本，Composer 每键同步写 localStorage
 
+### 最新复核状态
+
+**Draft 同步写入已修复，Markdown 增量解析仍待实施。** Composer draft 现在 300ms debounce，Session 切换/卸载时通过最新 ref 强制 flush，39 个 Composer 测试通过；`splitMarkdownBlocks(text)` 仍针对完整 Streaming 文本运行，后续需维护稳定 block 边界和 suffix parser state。
+
 ### 问题描述
 
 稳定 Markdown block 已 memo，但 Streaming 时仍会对不断增长的完整文本执行 block split、fence 和 cursor 判定。单条回复很长时，每帧成本随文本长度增长。
@@ -620,6 +675,10 @@ Session Explorer 在 sessions 变化时还会构建结构签名、排序、过�
 
 ## FE-PERF-014：Session 切换不能恢复用户的精确阅读位置
 
+### 最新复核状态
+
+**仍存在。** 最新 Session scroll state 仍只保存 `pinned: boolean`，没有可见 item key、offset 或 Virtuoso snapshot。
+
 ### 问题描述
 
 当前滚动状态只保存 `pinned: boolean`。用户在长对话中向上阅读时，切换到其他 Session 再返回，只能知道“不跟随底部”，无法知道之前阅读的是哪条消息和偏移。
@@ -658,6 +717,10 @@ Session Explorer 在 sessions 变化时还会构建结构签名、排序、过�
 ---
 
 ## FE-PERF-015：Models Query 未按 Host/身份隔离，HTTP 错误被当作空成功结果
+
+### 最新复核状态
+
+**已修复并通过针对性测试。** Models query key 现在包含规范化 Host 和 identity cache namespace；非 2xx 抛出带 status 的错误，401/403 不重试，网络/5xx 最多有限重试；手动 reload 只失效当前 scope。新增 Host 规范化和错误状态测试。
 
 ### 问题描述
 
@@ -699,6 +762,10 @@ Session Explorer 在 sessions 变化时还会构建结构签名、排序、过�
 
 ## FE-PERF-016：滚动处理和 Composer 模型查询存在低优先级同步开销
 
+### 最新复核状态
+
+**仍存在且维持 P3。** VirtualTranscript 的布局读取和 Composer 重复 model lookup 尚未结构性调整。
+
 ### 问题描述
 
 `VirtualTranscript` 的 scroll handler 每次读取 `scrollTop`、`scrollHeight` 和 `clientHeight`。当前没有明显读写交错，因此不是最高风险，但在 Streaming 自动跟随和用户滚动同时发生时仍会增加高频主线程工作。
@@ -733,49 +800,289 @@ Composer 同一 render 中多次通过线性 `find` 查询 model。模型数量�
 
 ---
 
+## FE-PERF-017：Dashboard 新版本点击 Reload 后长时间停留在 Reloading
+
+### 最新复核状态
+
+**代码修复及真实 Headless Chrome production PWA 验收已完成。** 根因被拆成两段：旧版 broad precache 使 update→waiting 下载/缓存约 15.7MiB；同时 `updateSW(true)` 对丢失的 controlling event 无 timeout。缩小 precache 后，Headless Chrome 实测 update check 到 waiting 约 1,033ms，`SKIP_WAITING` 到 `controllerchange` 约 2.1ms；应用侧仍保留 5 秒 recovery reload 防事件丢失。
+
+### 问题描述
+
+旧逻辑调用 `updateSW(true)`。vite-plugin-pwa 生成的实现发送 `SKIP_WAITING` 后无限等待 Workbox `controlling` event，收到后才执行 `window.location.reload()`，且 Promise 没有 timeout。长驻 tab、iOS standalone 或浏览器丢失 controlling event 时，按钮会永久停留在 `Reloading…`。
+
+FE-PERF-001 的大 precache 会延长新 worker 安装到 waiting 的过程，但 banner 出现时 worker 已 waiting，因此“点击后无限等待”是独立问题。
+
+### 复现方式
+
+1. 使用 production build 安装旧版 PWA并保持页面长驻。
+2. 发布新版，等待 `New dashboard version available`。
+3. 点击 Reload；测试环境可让 `SKIP_WAITING` 成功但不派发 `controllerchange`。
+4. 旧实现的 `updateSW(true)` 不 resolve，按钮持续显示 Reloading。
+5. 正常路径通过派发 `controllerchange` 验证 worker 接管后应立即 reload。
+
+### 修复方案
+
+1. 改用 `updateSW(false)`，只让插件发送 `SKIP_WAITING`。
+2. 应用在发送消息前监听标准 `navigator.serviceWorker.controllerchange`。
+3. 接管后立即 reload；5 秒未收到事件时执行 recovery reload。
+4. `SKIP_WAITING` 发送失败时不 reload，UI 恢复按钮并允许重试。
+
+### 回归风险与预防
+
+- **过早 reload 仍由旧 worker 控制**：正常路径等待 controllerchange，5 秒 reload 只作为事件丢失恢复。
+- **重复 reload loop**：listener 在成功、超时、失败路径均清理；每次点击只调用一次 reload。
+- **发送失败却强制刷新**：send reject 时 helper reject 且不 reload。
+- **草稿丢失**：现有按 Session draft 持久化必须保留；未来实施 FE-PERF-013 debounce 时，更新 reload 前必须 flush。
+- **回滚信号**：循环刷新、仍出现超过 5 秒的 Reloading、reload 后仍为旧 build 或 registration error 上升。
+
+### 验证方式
+
+1. 单元测试已覆盖 controllerchange 立即 reload、事件缺失 timeout reload、发送失败不 reload。
+2. Chromium 与 Safari/iOS standalone 使用真实旧版→新版流程验收。
+3. 记录 click→navigation，正常路径目标小于 1 秒，P95 必须小于 5 秒。
+4. 刷新后验证 build hash 更新、banner 消失、草稿恢复且无 reload loop。
+
+---
+
+## FE-PERF-018：Running Session 期间切换其他 Session 时卡片 Hover、点击反馈和加载明显卡顿
+
+### 最新复核状态
+
+**前置热路径减负、urgent selection 和状态隔离已完成，真实 P75/P95 仍待专项采样。** Timeline batch/fast path、cache/socket 并行、Chat indexes memo、control frame batch 已落地；点击 Session 时独立 optimistic selected ID 先更新 Explorer，projection generation 拒绝旧 Session 事件。后台 Preview 已改为复用 control socket 的按需 room 订阅，不再依赖切换 Session 才更新；当前仍缺 running A → running B 的专项 production-browser P75/P95。
+
+### 问题描述
+
+当 Session A 正在 Streaming 或密集执行工具时，用户 Hover 或点击 Session B，会观察到：
+
+- Session card 的 `hover:bg-accent`、action overlay 或 cursor 反馈延迟；
+- 点击后 selected marker/loading shell 不能稳定在下一帧出现；
+- Chat pane 切换和 Session B 历史加载明显停顿。
+
+最新代码显示该问题不是单一组件造成，而是三段工作叠加：
+
+1. **点击前主线程持续被 Running Session 占用**：`useSession` 每约 66ms 提交 Streaming text；projection 虽按 rAF 排队，但一帧内仍逐条 dispatch。顶层 `App` 随之执行 transcript、task、status、ChatPanel 等派生。浏览器只有在 JavaScript task/React commit 结束后才能绘制纯 CSS hover，因此即使 SessionRow 本身已隔离，hover 仍会“冻住”。
+2. **Hover preview 增加竞争**：SessionRow `pointerenter` 同步读取 `getBoundingClientRect()`；停留 350ms 后 `SessionHoverPreview` 从完整 cached state/timeline 调用 `visibleTranscript`，之后截取最后 12 项并挂载第二个完整 `ChatPanel`。裁剪发生在完整 transcript projection 之后，长缓存 Session 的 hover 会额外占用主线程。
+3. **点击切换同步替换大型工作区**：`selectSession` 直接 `setConfig`，没有即时的轻量 selection layer 或 transition 分层。React 同一次更新需要改变 Explorer selection、顶层 App 派生和 Chat workspace。随后 `useSession` effect 清理旧 rAF/socket，再在 cache miss 时最多等待 250ms hydrate，之后才创建新 socket。`selectedHistorySessionLoading` 虽提供 skeleton，但 skeleton 也要等本次 React commit 才能绘制。
+
+现有清理逻辑会在 effect cleanup 中取消旧 stream/projection rAF，这是正确的；但 cleanup 只有在 selection commit 后运行，无法解决点击前已经占用主线程的 Running render，也无法保证 pressed/selected visual 在重工作开始前先绘制。
+
+### 复现方式
+
+#### 手工可重复场景
+
+1. Session A 准备至少 2,000–5,000 条 transcript items，并启动持续 30 秒以上的 Streaming 或工具密集任务。
+2. Session B 准备至少 1,000 条历史；分别测试内存 cache hit、仅 IndexedDB hit 和 cache miss。
+3. Chrome DevTools Performance 开启 Screenshots、Web Vitals 和 React Profiler。
+4. A running 时快速在 B card 上来回移动鼠标，再点击 B。
+5. 在 trace 中标记：
+   - `pointerenter`；
+   - hover background 首次 paint；
+   - `pointerdown/click`；
+   - selected marker 首次 paint；
+   - loading skeleton/cached content 首次 paint；
+   - socket constructor、ready、history complete。
+6. 将 Smooth streaming 关闭后重复一次；再临时禁用 hover preview 重复一次，用于区分 Streaming commit 与 preview projection 的贡献。
+
+#### 代码级证据
+
+- `app.tsx` 明确记录此前 Running render 会“dropping button clicks / freezing hover cursor”，当前只优化了 transcript base，并未下沉 `streamingText` owner。
+- `session.ts` 的 rAF queue flush 仍逐条 `dispatchProjection`；Streaming commit 仍调用顶层 state setter。
+- `SessionHoverPreview.tsx` 先调用完整 `visibleTranscript(...)`，再 `slice(-12)`，并渲染第二个 `ChatPanel`。
+- `selectSession` 直接更新顶层 config；代码中没有 `startTransition/useTransition`，也没有独立 urgent selected-row state。
+- cache miss 仍在 socket 创建前最多等待 250ms。
+
+#### 当前自动化覆盖缺口
+
+现有 Explorer 38 个测试验证了 running indicator DOM 稳定、runtime-only refresh 不破坏编辑、hover preview 行为等，但没有测量 Running Session 下 `pointerdown → selected paint`，也没有覆盖主线程长任务。因此测试通过不能否定该交互卡顿。
+
+### 修复方案
+
+按以下顺序实施，不能只给 SessionRow 增加 `memo`：
+
+1. **先减少 Running 热路径 CPU**：完成 FE-PERF-002 和 FE-PERF-005，使每个 Streaming frame 不再全量合并 Timeline/重建 ChatPanel 历史索引。
+2. **拆分 urgent 与 deferred selection**：在 Explorer/轻量 selection store 中立即提交目标 Session ID，让 selected marker 和轻量 loading shell 先绘制；Chat workspace 的重历史替换使用 transition 或下一帧开始。不要把 selected marker 本身放进 transition。
+3. **下沉 Streaming owner**：完成 FE-PERF-004，让 Session A 的 live tail 更新不再执行整个 App 和 B card 所在树。
+4. **优化 hover preview**：缓存预先生成的 tail view model，或从 timeline 尾部增量投影；不要先构建完整 visibleTranscript 再裁剪。Preview 的 ChatPanel lazy mount，并可在 pointerdown 时同步取消尚未开始的 preview task。
+5. **并行 hydrate/connect**：完成 FE-PERF-009，点击后立即创建 B socket；cache 仅作为并行的快速绘制来源。
+6. **显式切换 generation**：点击时立即使 A 的后续 UI commit 失效；effect cleanup 继续负责 socket/rAF 资源释放。所有 Markdown/Mermaid/cache async task 在提交前校验 generation。
+7. **增加切换性能埋点**：统一记录 pointerdown、selection paint、shell paint、cache paint、ready 和 history complete，区分 UI 响应与数据完成。
+
+### 回归风险与预防
+
+- **Transition 导致 selected marker 延迟**：urgent selected ID 必须同步提交，只有 Chat workspace 重内容进入 transition。
+- **UI 显示 B，但命令仍发给 A**：Composer、approval、cancel 等业务动作必须绑定 hydrated session ID，而不是仅绑定 optimistic selected ID；hydration 前禁用或明确 loading。
+- **过早丢弃 A 更新影响后台状态**：只停止 A 的 active-pane UI projection；control-plane summary 和后台通知必须继续更新 A。
+- **取消 hover preview破坏单击**：保持当前“不在 mousedown 修改 Explorer tree state”的规则；取消工作应操作 ref/task token，不触发会吞 click 的树重渲染。
+- **并行 cache/socket 导致内容闪回或重复**：按 sessionId、generation、cursor 仲裁，低 cursor cache 不得覆盖 live state。
+- **缓存 tail 与真实 transcript 不一致**：preview view model 带 cursor/version；cache 更新、clear、compaction 后失效。
+- **回滚信号**：selected marker 指向 B 但 Composer 发往 A、消息闪回/重复、Running A 从列表消失、单击需要两次、或切换后旧 Session commit 持续出现。
+
+### 验证方式
+
+1. 新增 production-browser E2E 场景：A 持续 Streaming，B 分别为 memory hit、IDB hit、miss；每种场景至少运行 30 次。
+2. 验收指标：
+   - `pointerdown → selected marker paint` P75 小于 100ms，P95 小于 200ms；
+   - `pointerdown → loading shell/cached paint` P75 小于 200ms；
+   - cache miss 时 socket constructor 不等待 250ms hydrate；
+   - 点击后 A 不再产生 active-pane React commit；
+   - Hover visual 在 Running 情况下无超过 100ms 的可见冻结。
+3. React Profiler 验证纯 A Streaming 不再 render Explorer 根、B row、Composer 和 Inspector 静态区域。
+4. 回归测试覆盖：单击一次切换、hover preview 不吞 click、running indicator、后台 summary、approval/Composer session 绑定、scroll restore。
+5. 使用相同 fixture 对比 Smooth streaming on/off 和 preview on/off，确认收益来自热路径/切换架构，而不是隐藏动画。
+
+---
+
+## FE-PERF-019：Session Hover Preview 不是实时视图，打开后不会显示对应 Session 的最新状态
+
+### 最新复核状态
+
+**按需后台 Live Preview 已接入并通过聚焦回归。** Preview 打开后，Dashboard control socket 复用现有 `subscribe` room、`session:ready`、`server:history`、`event:appended`、`state:changed`、`session:token_delta` 和 queue 事件维护轻量 projection；关闭后发送新增的 `unsubscribe` 并离开 room，不创建第二条 socket。UI 仍只显示最近 12 项并按该窗口计算 220–520px 高度，同时显示 `live/cached/stale`。cache 只负责首绘，live projection 使用空基线，避免旧 cache 在相同 seq 覆盖 authoritative history；先到 live event 与后到 history 按 seq 合并。聚焦验证为 Dashboard 164/164、Host 68/68、两侧 typecheck 与生产构建通过。真实 Host 浏览器 Preview 专项动作仍缺独立 harness，因此不能把单元/协议测试冒充完整 E2E。
+
+### 问题描述
+
+当前 Hover Preview 的产品外观是完整 ChatPanel，用户自然会将其理解为对应 Session 的当前状态；但实现实际上只是**打开瞬间读取一次内存 cache 的静态快照**：
+
+1. `SessionHoverPreview` 等待 350ms 后调用一次 `getCachedSessionView(sessionId)`。
+2. 读取被包在 `useMemo([anchor, getCachedSessionView, ready])` 中。Preview 保持打开时，这三个依赖不变化，因此不会再次读取 cache。
+3. `SessionViewCache` 只有 `get/set/patch`，没有 subscribe/version API；cache 更新不会通知 Preview。
+4. Control plane 的 `SessionSummary` 只包含 status、eventCount、lastEventAt 等摘要，没有消息文本、tool output、streaming tail，因此不能补全实时 Chat Preview。
+5. 对非当前 Session，浏览器没有 session-detail subscription。只有当前 active Session 的 `useSession` socket 持有完整 state/timeline/streamingText。
+6. 即使 preview 的目标恰好曾被打开并进入 cache，cache 写入新 entry 后，Preview 也仍持有第一次 `cached` 对象。
+7. Streaming token 尚未形成 timeline event 前只存在 active `streamingText`，当前 cache snapshot 本身也不包含 live token tail，所以 preview 最多显示最近 checkpoint/event，而不是屏幕上的实时输出。
+
+因此该问题有两个层次：
+
+- **确定性 UI bug**：已打开 Preview 不订阅 cache，后续 cache 更新不可见。
+- **架构能力缺失**：后台 Session 没有轻量 preview detail subscription，摘要流不足以构造真实 Chat tail。
+
+不能通过定时重复调用 `cache.get()` 完整解决；那只能看到 checkpoint，并会刷新 LRU `cachedAt`、增加 render/CPU，仍看不到未落盘的 streaming token。
+
+### 复现方式
+
+#### 自动化 Repro
+
+1. 渲染 `SessionHoverPreview`，`getCachedSessionView` 首次返回包含 `old snapshot` 的 entry。
+2. 推进 350ms timer，确认 Preview 显示旧内容。
+3. 将 getter 背后的 entry 替换为 seq 更高且包含 `latest realtime output` 的新对象。
+4. 使用相同 anchor/getter rerender Preview。
+5. 当前结果仍显示 `old snapshot`，不显示 `latest realtime output`。该临时 Repro 已执行并通过 1/1。
+
+#### 真实业务 Repro
+
+1. 启动 Session A，让其持续 Streaming 或执行工具。
+2. 切换到 Session B，使 A 成为后台 Running Session。
+3. Hover A 并保持 Preview 打开。
+4. 让 A 继续产生消息、tool result 或状态变化。
+5. 对比 Session card 的 status/event count 与 Preview 内容：卡片摘要可能更新，Preview Chat 保持打开瞬间的旧快照。
+6. 关闭后重新 Hover：若 A 的 cache 恰好已被其他路径更新，可能看到较新 checkpoint；若 A 从未作为 active Session 在本浏览器中被缓存，Preview 可能完全不出现。
+
+### 修复方案
+
+先定义 Preview 的产品语义为“近实时只读 tail”，并明确 freshness，不再伪装成无时间信息的完整实时 Chat。
+
+1. **建立独立 Preview Store**：按 sessionId 保存 `status/cursor/tailItems/streamingTail/updatedAt/source`，提供 `useSyncExternalStore` 订阅。Preview 订阅 store，而不是执行一次 cache getter。
+2. **扩展服务端轻量订阅协议**：新增 subscribe/unsubscribe session preview，或在 summary delta 中提供受限的 tail event 流。只订阅当前 hover 目标，350ms 后建立，pointer leave 后延迟短暂取消，避免 N 个后台完整 socket。
+3. **采用 snapshot + delta**：首次订阅返回最近固定数量（如 12 项）的 authoritative tail 和 cursor，后续只推 event/state/streaming delta；出现 revision gap 时重新请求 snapshot。
+4. **Active Session 桥接**：如果 hover 目标就是浏览器已有 live projection 的 Session，直接桥接其 state/timeline/streamingText，不经过 durable cache。
+5. **Cache 仅作首帧 fallback**：可立即显示缓存 tail，但标记 `Cached · updated ...`；收到 live snapshot 后替换为 `Live`。离线或订阅失败时明确显示 cached/stale，而不是静默陈旧。
+6. **限制渲染成本**：Store 直接维护最后 N 个 Preview view models，不调用完整 `visibleTranscript` 后再 slice，也不挂载全部 ChatPanel 功能；使用轻量只读 PreviewTranscript。
+7. **生命周期与背压**：同一时刻最多一个 hover preview subscription；切换 anchor 使用 generation token，旧 delta 丢弃；后台 token 按帧/固定频率合并。
+
+### 回归风险与预防
+
+- **额外订阅放大 Host 与浏览器负载**：只在 350ms hover 成立后订阅一个目标，leave 后取消；协议限制 tail 数量和 token 更新频率。
+- **跨 Session 串数据**：每个 snapshot/delta 携带 sessionId、subscriptionId、cursor/revision；store 提交前检查当前 anchor generation。
+- **Snapshot 与 delta 之间丢事件或重复**：采用 cursor 对账；delta `seq <= cursor` 去重，发现 gap 重新拉 snapshot。
+- **Live token 与最终 llm_response 重复**：最终事件到达时以 call/message identity 替换 streaming tail，而不是追加第二条消息。
+- **Preview 实时更新加剧 FE-PERF-018 卡顿**：使用轻量 tail view model、帧级批处理和独立 external store；禁止每个 token重渲染 Explorer/完整 ChatPanel。
+- **权限或隐私越界**：Preview subscription 必须复用 Session 可见性和 tenant/workspace authorization，不能因 Hover 绕过访问控制。
+- **离线时错误显示 Live**：以 subscription heartbeat/controller 状态驱动 freshness badge；断线立即降级为 Cached/Stale。
+- **Hover leave 后更新卸载组件**：unsubscribe + generation guard；服务端 unsubscribe 失败也由 client subscriptionId 丢弃迟到事件。
+- **回滚信号**：Host WS 流量显著上升、Preview 串 Session、重复消息、Explorer Hover 更卡、离开后仍持续接收 preview delta，或 Live badge 与真实连接状态不一致。
+
+### 验证方式
+
+1. 组件测试：Preview 打开后 store 推送新 snapshot/delta，无需改变 anchor 即显示最新内容。
+2. 协议测试：snapshot→delta、重复 seq、gap resync、unsubscribe、快速 A→B hover、断线重连。
+3. E2E：后台 A Running、当前 B；保持 Hover A，验证 user message、tool result、streaming tail 和 terminal status 均在 Preview 更新。
+4. Freshness 验证：cache 首帧显示 Cached；live ready 后显示 Live；断线后在规定时间内变为 Stale。
+5. 性能验收：同一时刻最多一个 preview subscription；Preview token 更新不使 Explorer 根或主 ChatPanel rerender；Hover 时无超过 100ms 的主线程冻结。
+6. 关闭 Preview 后验证网络 delta 停止，store listener 清零，迟到事件不改变下一目标。
+7. 与真实 Session 页面对比相同 cursor 下的最后 N 项，文本、tool status、顺序一致。
+
+---
+
 ## 修复拓扑顺序
 
 以下顺序是依赖拓扑，不是简单的优先级列表。箭头 `A → B` 表示 **B 必须在 A 的基础能力合入并通过门禁后才能开始或合入**。没有依赖边的节点可以并行，但必须使用独立 feature flag 和基准，避免多个优化同时改变相同热路径后无法归因。
 
 ```mermaid
 flowchart TD
-  B0[Gate 0: 基线与可观测性] --> A1[001 PWA precache]
-  B0 --> A2[002 Timeline fast path + batch]
-  B0 --> A8[008 Artifacts 限流/按需加载]
-  B0 --> A9[009 Hydrate 与 Socket 并行]
-  B0 --> A15[015 Models query scope]
+  classDef done fill:#dcfce7,stroke:#15803d,color:#14532d
+  classDef current fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef later fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef deferred fill:#f3f4f6,stroke:#6b7280,color:#374151,stroke-dasharray:5 5
+  classDef gate fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
 
-  A2 --> A3[003 Cache checkpoint/增量持久化]
-  A2 --> A5[005 ChatPanel 历史索引增量化]
-  A2 --> A6[006 Inspector 增量索引/虚拟化]
-  A2 --> A7[007 Session summary 增量协议]
+  subgraph DONE[已由当前代码和测试证明的基础]
+    D1[Timeline strict-append fast path<br/>frame batch 与 generation 隔离]:::done
+    D2[Durable cache checkpoint<br/>切换强制 flush 与 cursor 防倒退]:::done
+    D3[Hydrate 与 Session socket 并行<br/>server-first/cache-first 仲裁]:::done
+    D4[Control summary frame batch<br/>Host 全量列表广播节流]:::done
+    D5[Optimistic Session selection<br/>旧 Session live state 不泄漏]:::done
+    D6[PWA bounded activation<br/>13 entries / 396.04 KiB precache]:::done
+    D7[Tool failure 结构化<br/>Provider retry 与 sandbox]:::done
+    D8[Overflow、Memory、Skill refresh<br/>核心生命周期已实现]:::done
+    D9[逻辑 Tenant Unit、OTLP、备份校验<br/>Eval 平台主体已实现]:::done
+  end
 
-  A5 --> A4[004 Streaming 状态边界下沉]
-  A5 --> A13[013 Markdown suffix + Draft debounce]
-  A6 --> A14[014 精确滚动恢复]
+  subgraph NOW[当前发布必须完成：用户直接问题]
+    C1[Preview room 生命周期<br/>Control socket 按需 subscribe/unsubscribe<br/>复用既有 ready/history/event/state/token]:::current
+    C2[Realtime Preview projection<br/>snapshot + history + delta + streaming tail<br/>cursor 防倒退、订阅引用计数和 stale 标记]:::current
+    C3[Preview UI 接线<br/>仍只显示最近 12 项<br/>紧凑高度与 Live/Cached/Stale]:::current
+    C4[Summary store 收口<br/>接入生产或删除死实现<br/>保留 frame batch 与引用稳定]:::current
+    C5[Running A → Running B → 回看 A<br/>点击即时反馈且旧事件不污染]:::current
+    G1[聚焦 Gate<br/>shared + host + dashboard tests<br/>typecheck + build + diff check]:::gate
+    G2[真实浏览器 Gate<br/>真实 Host 后台 token/tool 更新<br/>Headless 切换和 Preview 对账]:::gate
+    G3[LXD 发布 Gate<br/>checksum、restart、health、release SHA]:::gate
+  end
 
-  A1 --> A10[010 细粒度拆包]
-  A10 --> A11[011 Mermaid viewport render queue]
-  A7 --> A12[012 Files/Sessions 分页与标准化 store]
+  D1 --> C2
+  D2 --> C2
+  D3 --> C5
+  D4 --> C4
+  D5 --> C5
+  C1 --> C2 --> C3 --> C5
+  C4 --> C5
+  C5 --> G1 --> G2 --> G3
 
-  A4 --> A16[016 Scroll/Model 微优化]
-  A13 --> A16
-  A14 --> A16
+  subgraph LATER[独立后续优化：不冒充本次已完成]
+    L1[Chat base/live-tail 增量 view model<br/>Streaming owner 下沉]:::later
+    L2[Inspector、Artifacts、Files 虚拟化<br/>服务端 cursor pagination 与 cancel]:::later
+    L3[IndexedDB v2 migration 骨架<br/>增量 Timeline schema 与旧 namespace GC]:::later
+    L4[Markdown suffix parser<br/>精确 Virtuoso 阅读位置恢复]:::later
+    L5[Settings/Files 继续拆包<br/>弱网与移动 CPU 预算]:::later
+    L6[完整数据 retention/delete/export<br/>PITR、SBOM、签名 attestation]:::later
+  end
 
-  A3 --> G1[Gate 1: Session 数据一致性]
-  A9 --> G1
-  A7 --> G1
-  A4 --> G2[Gate 2: Streaming/交互]
-  A5 --> G2
-  A6 --> G2
-  A13 --> G2
-  A14 --> G2
-  A1 --> G3[Gate 3: 发布与弱网]
-  A10 --> G3
-  A11 --> G3
-  A8 --> G4[Gate 4: 规模化数据]
-  A12 --> G4
-  A15 --> G4
+  G3 --> L1
+  L1 --> L4
+  D4 --> L2
+  D2 --> L3
+  D6 --> L5
+  D9 --> L6
+
+  subgraph DEFERRED[明确 deferred 或条件触发：不进入当前发布 Graph]
+    F1[MCP runtime<br/>Executor MCP subprocess 与 tools/list/call]:::deferred
+    F2[Durable Sub-agent suspend/resume<br/>跨进程 registry、delivery retry、orphan scanner]:::deferred
+    F3[每 Unit worker/container/remote pool<br/>cgroup、rootless OCI、drain/migrate]:::deferred
+    F4[Evaluation 真实 trace corpus<br/>受控三 Agent parity 与机器证据归档]:::deferred
+  end
+
+  L6 -.产品需求或威胁模型触发.-> F1
+  L6 -.产品需求或威胁模型触发.-> F2
+  L6 -.公开不可信多租户触发.-> F3
+  D9 -.独立评测计划.-> F4
 ```
 
 ### Gate 0：先建立基线，禁止直接开始大改
@@ -798,6 +1105,7 @@ flowchart TD
 - **FE-PERF-008**：Artifacts 分支与 Session 热路径低耦合，可独立并行。
 - **FE-PERF-009**：先只调整 hydrate/connect 调度并保留 cache schema，避免与 003 同时修改时无法区分竞态来自连接还是持久层。
 - **FE-PERF-015**：Query scope 独立，可并行，但必须在任何 host/identity cache 统一工作前完成。
+- **FE-PERF-017**：有界更新激活可立即独立修复，但必须和 001 一起通过 Gate 3，分别验证 worker 安装时间与点击后激活时间。
 
 **层 1 合入规则**：每项独立 PR、独立 feature flag；禁止把 002 与 003 放在同一个不可拆分 PR 中。
 
@@ -821,7 +1129,9 @@ flowchart TD
 - **FE-PERF-004 必须在 005 后**：先固定 base/live-tail view model，再下沉 Streaming owner，避免拆分后在多个边界重复建立索引。
 - **FE-PERF-013 必须在 005 后**：Markdown suffix parser 应消费稳定 live tail，而不是直接绑定当前全量 ChatPanel 数据。
 - **FE-PERF-014 必须在 006 后**：Inspector/Transcript 的 virtualizer key/index 约定稳定后再保存滚动 snapshot，避免保存旧 DOM/索引语义。
-- **FE-PERF-016 最后执行**：它是微优化，只有在 004/013/014 稳定后测量才有意义；提前做会被大结构变更覆盖。
+- **FE-PERF-019 必须在 007 和 005 后**：先确定 revisioned summary/preview delta 语义和轻量 tail view model，再建立实时订阅；禁止直接给完整 ChatPanel 增加第二条永久 Session socket。
+- **FE-PERF-018 必须在 002、005、004、009、019 后合流**：可以先独立添加埋点和 urgent selected-row state，但完整切换优化还要避免 realtime Preview 与 Running 主路径竞争。
+- **FE-PERF-016 最后执行**：它是微优化，只有在 004/013/014/018 稳定后测量才有意义；提前做会被大结构变更覆盖。
 
 ### 拓扑层 4：资源与规模化数据
 
@@ -841,7 +1151,7 @@ flowchart TD
 
 #### Gate 2：Streaming 与交互
 
-覆盖 004、005、006、013、014：
+覆盖 004、005、006、013、014、018、019：
 
 - 纯 Streaming 只更新必要子树；approval、tool result、模型和 Composer 状态不陈旧。
 - Pinned、向上阅读、切换恢复、jump-to-message、异步行高变化均通过。
@@ -849,7 +1159,7 @@ flowchart TD
 
 #### Gate 3：发布、离线与弱网
 
-覆盖 001、010、011：
+覆盖 001、010、011、017：
 
 - 在线首开、PWA 首装、离线重启、SW 更新、动态 chunk 首次和二次加载全部通过。
 - 不存在 ChunkLoadError 增长、空白 fallback 或 cache 无界增长。

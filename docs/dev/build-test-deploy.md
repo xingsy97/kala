@@ -38,18 +38,47 @@ pnpm run build:release-assets -- --repo <owner>/<repo> --no-native --skip-dashbo
 
 `--skip-dashboard-build` still requires `packages/dashboard/dist/index.html` to exist. If it is missing, the release script fails before producing a host bundle.
 
-## Remote Deploy
+## Transactional Deploy
 
-Build release assets first, then deploy with explicit remote settings:
+The normative restart and deployment contract is [`../architecture/graceful-restart-and-deployment.md`](../architecture/graceful-restart-and-deployment.md). This runbook must not weaken that contract.
+
+Use the single `deploy:remote` entry point for LXD and SSH. It builds and verifies release assets unless `--skip-build` is explicitly supplied. Inspect the supported command without selecting a target or causing side effects:
+
+```bash
+pnpm run deploy:remote -- --help
+```
+
+### LXD
+
+The standard local LXD deployment is:
+
+```bash
+pnpm run deploy:remote -- --lxd <container>
+```
+
+The conventional standalone defaults are `--host-url http://127.0.0.1:13000`, `--remote-bin /home/ubuntu/.bin`, and `--service agent-runlab-host`. Override them only when the target uses a different supervisor contract:
+
+```bash
+pnpm run deploy:remote -- \
+  --lxd <container> \
+  --host-url <host-url-reachable-from-container> \
+  --remote-bin <remote-bin-dir> \
+  --service <systemd-unit>
+```
+
+Use `--dry-run` to validate target selection without building, transferring, activating, restarting, or cleaning anything. Use `--skip-build` only when the current `release/` was already built; digest verification still runs.
+
+### SSH
+
+Deploy with explicit remote settings:
 
 ```bash
 pnpm run deploy:remote -- \
   --ssh <ssh-target> \
   --host-url <host-url-reachable-from-remote> \
-  --remote-bin <remote-bin-dir>
+  --remote-bin <remote-bin-dir> \
+  --service <systemd-unit>
 ```
-
-The deploy script seeds a timestamped upload directory from the currently installed assets, then uses compressed `rsync` transfer with checksum-based skipping and block deltas. `rsync` must be installed locally and remotely. It backs up replaced files, installs the completed upload atomically, and requests a graceful host restart through `/runtime/restart`. Transfer and install stages report their elapsed time. A stalled SSH transfer fails after two minutes of inactivity and retries the partial upload up to two times instead of hanging indefinitely.
 
 Useful optional flags:
 
@@ -58,6 +87,7 @@ pnpm run deploy:remote -- \
   --ssh <ssh-target> \
   --host-url <host-url-reachable-from-remote> \
   --remote-bin <remote-bin-dir> \
+  --service <systemd-unit> \
   --restart-mode checkpoint \
   --restart-timeout-ms 600000 \
   --status-timeout-ms 660000
@@ -69,6 +99,27 @@ Equivalent environment variables are available for local shell aliases or CI sec
 AK_DEPLOY_SSH=<ssh-target>
 AK_DEPLOY_HOST_URL=<host-url-reachable-from-remote>
 AK_DEPLOY_REMOTE_BIN=<remote-bin-dir>
+AK_DEPLOY_SERVICE=<systemd-unit>
 ```
 
-Do not commit personal SSH targets, ports, or machine paths into package scripts or docs.
+SSH and LXD are transport adapters for the same target-side transaction. The command stages an immutable generation, validates its manifest, hands finalization to a worker outside the Host cgroup, atomically activates `current` after checkpoint readiness, and requests restart through `/runtime/restart`. Never replace it with direct live-file copies or a direct service restart.
+
+### Self-deployment from a hosted Session
+
+A deployment started from a Session running on the target Host must use durable asynchronous handoff. The supported topology is:
+
+```text
+Session on target Runtime Host
+  -> external Tool Executor with repository and target access
+  -> deploy:remote LXD or SSH transport
+  -> external target-side finalizer
+  -> checkpoint restart and planned continuation
+```
+
+The Runtime Host may be inside LXD, but the `--lxd` command normally runs on the Box Executor that can access the LXD daemon. Running it inside the target container itself is unsupported unless that environment independently has the repository, build toolchain, `lxc` access, and required privileges.
+
+When the command prints `accepted: true`, the initiating Tool call must end immediately. Do not poll the transaction from that same Tool call: its durable Tool result is the origin barrier the finalizer is waiting for. A later Tool turn or an independent operator may read the reported transaction file and verify completion. A fixed sleep is not a valid substitute.
+
+Final acceptance must check the transaction phase, PID change, `current` generation, exact bundle digest, HTTP readiness, Executor reconnection, participant cursor monotonicity, continuation outcome, and absence of new structured interrupted responses during the deployment window. Count structured `llm_response` events—not raw JSONL string occurrences, which may include quoted source code or Tool output.
+
+Do not commit personal SSH targets, public domains, ports, container names, credentials, or machine paths into package scripts or docs.

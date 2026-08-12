@@ -1,0 +1,32 @@
+[Unit]
+Description=Agent RunLab Runtime Unit %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=agent-runlab
+Group=agent-runlab
+EnvironmentFile=-/etc/agent-runlab/standalone.env
+Environment=AGENT_KERNEL_DEPLOYMENT_MODE=standalone
+Environment=HOST_PORT=13001
+Environment=HOST_LISTEN_HOST=127.0.0.1
+Environment=SESSIONS_DIR=/var/lib/agent-runlab/units/%i/sessions
+Environment=AGENT_KERNEL_ARTIFACTS_DIR=/var/lib/agent-runlab/units/%i/artifacts
+Environment=HOST_EXECUTOR_IDENTITIES=/var/lib/agent-runlab/units/%i/executor-identities.json
+ExecStart=/usr/bin/flock --exclusive --nonblock /var/lib/agent-runlab/units/%i/write.lock /usr/bin/node /var/lib/agent-runlab/deploy/current/bundle-dashboard-with-runtime.cjs --port 13001
+Restart=always
+RestartSec=2s
+TimeoutStopSec=90s
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/agent-runlab/deploy
+ReadWritePaths=/var/lib/agent-runlab/units/%i /run/agent-runlab
+RuntimeDirectory=agent-runlab
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
