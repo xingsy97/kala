@@ -27,6 +27,7 @@ export function inProcessRlToolDispatcher(workdir: string): ToolDispatcher {
       try {
         const content = await tool.run(eff.input, {
           sessionId,
+          callId: eff.callId,
           sandbox,
           signal: controller.signal,
           cwd: eff.cwd ?? workdir,

@@ -31,6 +31,7 @@ import type { AuditLogger } from '../audit-log.js'
 import { parseWire } from '../wire-validation.js'
 import { sessionRoom } from './rooms.js'
 import { executorAnnouncedConnectionMeta, executorPendingConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
+import type { ExecutorInstallationStore } from '../store/executor-installation.js'
 
 export type ExecutorNs = Namespace<
   ExecutorClientToServerEvents,
@@ -42,6 +43,7 @@ export type ExecutorDeps = {
   executors: ReturnType<typeof createExecutorRegistry>
   defaultConfig: AgentConfig | (() => AgentConfig)
   auth?: AuthConfig
+  installations?: ExecutorInstallationStore
   audit?: AuditLogger
   broadcastError(
     sessionId: string,
@@ -61,6 +63,7 @@ export function configureExecutorNamespace(
   deps: ExecutorDeps,
 ): void {
   const executorIdentities = new WeakMap<object, ExecutorIdentity>()
+  const executorAnnouncements = new WeakMap<object, ExecutorAnnounce>()
   ns.use((socket, nextFn) => {
     const auth = socket.handshake.auth as HandshakeAuth | undefined
     if (!auth || auth.role !== 'executor') {
@@ -132,26 +135,35 @@ export function configureExecutorNamespace(
       })
       socket.data.connectionMeta = connectionMeta
       deps.audit?.log({ action: 'executor.announce_accept', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'ok', metadata: { ...auditConnectionMeta(connectionMeta), workspaceName: payload.workspaceName } })
+      executorAnnouncements.set(socket, payload)
       deps.executors.attach(socket, payload, auth.clientVersion)
+      const installId = payload.installId ?? auth.installId
+      if (installId && identity?.token) {
+        deps.installations?.markOnline(installId, payload.workspaceId, {
+          executorId: payload.executorId,
+          ...(payload.executorVersion ? { executorVersion: payload.executorVersion } : {}),
+          workspaceName: payload.workspaceName,
+        })
+      }
     })
-    socket.on('executor:bg_task_updated', (rawPayload: ServerBgTaskUpdated) => {
+    socket.on('executor:bg_task_updated', async (rawPayload: ServerBgTaskUpdated) => {
       const payload = parseWire(schema.ServerBgTaskUpdatedSchema, rawPayload, {
         channel: 'executor:bg_task_updated',
         peer: socket.id,
       })
-      if (!payload) return
+      if (!payload || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, payload.workspaceId, payload.sessionId)) return
       const room = sessionRoom(payload.sessionId)
       deps.dashboardNs.to(room).emit('server:control_update', {
         kind: 'bg_task_updated',
         ...payload,
       })
     })
-    socket.on('executor:tool_progress', (rawPayload) => {
+    socket.on('executor:tool_progress', async (rawPayload) => {
       const payload = parseWire(schema.ToolProgressPayloadSchema, rawPayload, {
         channel: 'executor:tool_progress',
         peer: socket.id,
       })
-      if (!payload) return
+      if (!payload || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, undefined, payload.sessionId)) return
       deps.dashboardNs
         .to(sessionRoom(payload.sessionId))
         .emit('server:control_update', {
@@ -159,38 +171,51 @@ export function configureExecutorNamespace(
           ...payload,
         })
     })
-    socket.on('executor:bg_task_evicted', (rawPayload: ServerBgTaskEvicted) => {
+    socket.on('executor:bg_task_evicted', async (rawPayload: ServerBgTaskEvicted) => {
       const payload = parseWire(schema.ServerBgTaskEvictedSchema, rawPayload, {
         channel: 'executor:bg_task_evicted',
         peer: socket.id,
       })
-      if (!payload) return
+      if (!payload || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, payload.workspaceId, payload.sessionId)) return
       const room = sessionRoom(payload.sessionId)
       deps.dashboardNs.to(room).emit('server:control_update', {
         kind: 'bg_task_evicted',
         ...payload,
       })
     })
-    socket.on('executor:terminal_output', (rawPayload: ServerTerminalOutput) => {
+    socket.on('executor:terminal_output', async (rawPayload: ServerTerminalOutput) => {
       const payload = parseWire(schema.ServerTerminalOutputSchema, rawPayload, {
         channel: 'executor:terminal_output',
         peer: socket.id,
       })
-      if (!payload) return
+      if (!payload || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, payload.workspaceId, payload.sessionId)) return
       deps.dashboardNs.to(sessionRoom(payload.sessionId)).emit('server:terminal_output', payload)
     })
-    socket.on('executor:terminal_exit', (rawPayload: ServerTerminalExit) => {
+    socket.on('executor:terminal_exit', async (rawPayload: ServerTerminalExit) => {
       const payload = parseWire(schema.ServerTerminalExitSchema, rawPayload, {
         channel: 'executor:terminal_exit',
         peer: socket.id,
       })
-      if (!payload) return
+      if (!payload || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, payload.workspaceId, payload.sessionId)) return
       deps.dashboardNs.to(sessionRoom(payload.sessionId)).emit('server:terminal_exit', payload)
     })
     socket.on('disconnect', () => {
       deps.executors.detach(socket)
     })
   })
+}
+
+async function acceptsExecutorSessionPayload(
+  socket: object,
+  store: SessionStore,
+  announcements: WeakMap<object, ExecutorAnnounce>,
+  payloadWorkspaceId: string | undefined,
+  sessionId: string,
+): Promise<boolean> {
+  const announcement = announcements.get(socket)
+  if (!announcement || (payloadWorkspaceId !== undefined && payloadWorkspaceId !== announcement.workspaceId)) return false
+  const record = store.get(sessionId) ?? await store.load(sessionId).catch(() => undefined)
+  return record?.workspaceId === announcement.workspaceId
 }
 
 function publicExecutorIdentity(identity: ExecutorIdentity): Record<string, unknown> {

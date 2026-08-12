@@ -37,6 +37,7 @@ import type {
   ClientListFiles,
   ClientReadBgOutput,
   ClientReadOverflow,
+  ClientTerminalCloseSession,
   ClientTerminalCreate,
   ClientTerminalInput,
   ClientTerminalKill,
@@ -61,6 +62,7 @@ import type { ToolDispatcher } from '../loop.js'
 import type { AuditLogger } from '../audit-log.js'
 
 export const DEFAULT_TOOL_ACK_TIMEOUT_MS = 60_000
+export const TERMINAL_ACK_TIMEOUT_MS = 5_000
 
 /**
  * How long to hold a detached executor's pending calls and its "attached"
@@ -107,6 +109,7 @@ export type ExecutorLookup = {
   inputTerminal(payload: ClientTerminalInput): void
   resizeTerminal(payload: ClientTerminalResize): void
   killTerminal(payload: ClientTerminalKill): Promise<TerminalKillResult>
+  closeSessionTerminals(payload: ClientTerminalCloseSession): void
   workspaceExec(payload: WorkspaceExecRequest): Promise<WorkspaceExecResponse>
   workspaceReadBinary(payload: WorkspaceReadBinaryRequest): Promise<WorkspaceReadBinaryResponse>
 }
@@ -128,6 +131,7 @@ export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
   ): void
   activeSessions(): string[]
   snapshot(): AttachedExecutor[]
+  measureLatency(workspaceId: string): Promise<{ rttMs?: number; error?: string }>
   renameWorkspace(workspaceId: string, workspaceName: string): AttachedExecutor | undefined
   onChange(listener: ExecutorChangeListener): () => void
 }
@@ -350,6 +354,21 @@ export function createExecutorRegistry(
   }
 
   return {
+    async measureLatency(workspaceId) {
+      const bind = findBindByWorkspace(workspaceId)
+      if (!bind) return { error: 'workspace offline' }
+      return await new Promise((resolve) => {
+        const started = performance.now()
+        let settled = false
+        const timer = setTimeout(() => { settled = true; resolve({ error: 'no response' }) }, 3_000)
+        bind.socket.emit('executor:health_ping', Date.now(), () => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve({ rttMs: Math.max(0, Math.round(performance.now() - started)) })
+        })
+      })
+    },
     attach(socket, announcement, clientVersion) {
       const executorId = announcement.executorId
       const workspaceId = announcement.workspaceId
@@ -757,7 +776,17 @@ export function createExecutorRegistry(
         }
       }
       return await new Promise<TerminalCreateResult>((resolve) => {
-        bind.socket.emit('terminal:create', payload, (result) => resolve(result))
+        let settled = false
+        const timer = setTimeout(() => {
+          settled = true
+          resolve({ requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, error: 'terminal create acknowledgement timed out' })
+        }, TERMINAL_ACK_TIMEOUT_MS)
+        bind.socket.emit('terminal:create', payload, (result) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve(result)
+        })
       })
     },
     inputTerminal(payload) {
@@ -781,8 +810,22 @@ export function createExecutorRegistry(
         }
       }
       return await new Promise<TerminalKillResult>((resolve) => {
-        bind.socket.emit('terminal:kill', payload, (result) => resolve(result))
+        let settled = false
+        const timer = setTimeout(() => {
+          settled = true
+          resolve({ requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId: payload.terminalId, killed: false, error: 'terminal kill acknowledgement timed out' })
+        }, TERMINAL_ACK_TIMEOUT_MS)
+        bind.socket.emit('terminal:kill', payload, (result) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve(result)
+        })
       })
+    },
+    closeSessionTerminals(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      bind?.socket.emit('terminal:close_session', payload)
     },
     async workspaceExec(payload) {
       const bind = findBindByWorkspace(payload.workspaceId)

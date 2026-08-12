@@ -61,6 +61,15 @@ export const EMPTY_SESSION_PROJECTION: SessionProjection = {
   hydratedSessionId: null,
 }
 
+export function reduceSessionProjectionBatch(
+  current: SessionProjection,
+  events: readonly SessionProjectionEvent[],
+): SessionProjection {
+  let next = current
+  for (const event of events) next = reduceSessionProjection(next, event)
+  return next
+}
+
 export function reduceSessionProjection(
   current: SessionProjection,
   event: SessionProjectionEvent,
@@ -152,6 +161,12 @@ function authoritativeTimeline(entries: readonly TimelineEntry[]): readonly Time
 
 export function mergeBySeq(prev: readonly TimelineEntry[], add: readonly TimelineEntry[]): readonly TimelineEntry[] {
   if (add.length === 0) return prev
+  // The live event stream and ordinary history tail are strictly increasing.
+  // Preserve those entry identities and append in O(add.length); replay overlap,
+  // metadata enrichment, gaps inserted before the tail, and malformed ordering
+  // deliberately fall through to the authoritative merge below.
+  const previousLastSeq = prev.at(-1)?.seq ?? Number.NEGATIVE_INFINITY
+  if (isStrictlyIncreasingAfter(add, previousLastSeq)) return [...prev, ...add]
   const map = new Map<number, TimelineEntry>()
   for (const entry of prev) map.set(entry.seq, entry)
   for (const entry of add) {
@@ -159,6 +174,15 @@ export function mergeBySeq(prev: readonly TimelineEntry[], add: readonly Timelin
     if (!existing || sameTimelineEvent(existing, entry)) map.set(entry.seq, existing ? { ...existing, ...entry } : entry)
   }
   return [...map.values()].sort((a, b) => a.seq - b.seq)
+}
+
+function isStrictlyIncreasingAfter(entries: readonly TimelineEntry[], previousSeq: number): boolean {
+  let lastSeq = previousSeq
+  for (const entry of entries) {
+    if (entry.seq <= lastSeq) return false
+    lastSeq = entry.seq
+  }
+  return true
 }
 
 function sameTimelineEvent(a: TimelineEntry, b: TimelineEntry): boolean {

@@ -39,14 +39,17 @@ import {
   EMPTY_SESSION_PROJECTION,
   mergeBySeq,
   reduceSessionProjection,
+  reduceSessionProjectionBatch,
   timelineEntry,
   type ConnectionStatus,
   type SessionProjectionEvent,
   type TimelineEntry,
 } from './session-projection.js'
-import type { CachedSessionView, SessionViewCache } from './session-view-cache.js'
+import type { CachedSessionView, CachedSessionViewInput, SessionViewCache } from './session-view-cache.js'
 import { readBooleanPref, PREF_SMOOTH_STREAMING_TEXT } from './lib/prefs.js'
 import { emitRpc, emitRpcInBackground } from './socket-rpc.js'
+import { SessionSummaryStore } from './app-logic/session-summary-store.js'
+import { DashboardConnectionManager } from './dashboard-connection-manager.js'
 
 export type { ConnectionStatus, TimelineEntry } from './session-projection.js'
 
@@ -97,12 +100,19 @@ type BoundDashboardSocket = {
 export type UseSessionOptions = {
   host: string
   sessionId: string | null
+  socket?: DashboardSocket | null
   token?: string
   cache?: SessionViewCache & { hydrate?(sessionId: string): Promise<CachedSessionView | null> }
   onForked?: (payload: SessionReadyEvent) => void
 }
 
 const CONTROL_SOCKET_SESSION_ID = '__agent-kernel-control__'
+const connectionManagers = new WeakMap<DashboardSocket, DashboardConnectionManager>()
+export function dashboardConnectionManager(socket: DashboardSocket): DashboardConnectionManager {
+  let manager = connectionManagers.get(socket)
+  if (!manager) { manager = new DashboardConnectionManager(socket); connectionManagers.set(socket, manager) }
+  return manager
+}
 
 /**
  * Text-reveal pacing lives in the text-reveal feature module (presentation
@@ -115,11 +125,16 @@ import { shouldCommitStreamFrame, streamReleaseCount } from './features/chat/tex
 export function useSession({
   host,
   sessionId,
+  socket: sharedSocket,
   token,
   cache,
   onForked,
 }: UseSessionOptions): SessionView {
-  const [projection, dispatchProjection] = useReducer(reduceSessionProjection, EMPTY_SESSION_PROJECTION)
+  const [projection, dispatchProjection] = useReducer(
+    (current: typeof EMPTY_SESSION_PROJECTION, events: readonly SessionProjectionEvent[]) => reduceSessionProjectionBatch(current, events),
+    EMPTY_SESSION_PROJECTION,
+  )
+  const dispatchProjectionEvent = (event: SessionProjectionEvent): void => dispatchProjection([event])
   const [streamingText, setStreamingText] = useState('')
   const [boundSocket, setBoundSocket] = useState<BoundDashboardSocket | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
@@ -132,30 +147,44 @@ export function useSession({
   const streamRafRef = useRef<number | null>(null)
   const onForkedRef = useRef(onForked)
   onForkedRef.current = onForked
+  const pendingCacheCheckpointRef = useRef<{ sessionId: string; view: CachedSessionViewInput } | null>(null)
 
   useEffect(() => {
     if (!cache || !projection.sessionId || projection.hydratedSessionId !== projection.sessionId) return
-    cache.set(projection.sessionId, {
+    const checkpoint = {
       sessionId: projection.sessionId, status: projection.status, state: projection.state,
       config: projection.config, contextSnapshot: projection.contextSnapshot, timeline: projection.timeline,
       queuedMessages: projection.queuedMessages, lastError: projection.lastError,
       parentSessionId: projection.parentSessionId, parentCursor: projection.parentCursor,
       selectedModel: projection.selectedModel, hydratedSessionId: projection.hydratedSessionId,
-    })
+    }
+    pendingCacheCheckpointRef.current = { sessionId: projection.sessionId, view: checkpoint }
+    const timer = window.setTimeout(() => {
+      if (pendingCacheCheckpointRef.current?.view !== checkpoint) return
+      cache.set(projection.sessionId!, checkpoint)
+      pendingCacheCheckpointRef.current = null
+    }, 1_000)
+    return () => window.clearTimeout(timer)
   }, [cache, projection])
+
+  useEffect(() => () => {
+    const pending = pendingCacheCheckpointRef.current
+    if (cache && pending) cache.set(pending.sessionId, pending.view)
+    pendingCacheCheckpointRef.current = null
+  }, [cache, sessionId])
 
   useEffect(() => {
     const generation = ++generationRef.current
     if (sessionId === null) {
-      socketRef.current?.close()
+      if (!sharedSocket) socketRef.current?.close()
       socketRef.current = null
       setBoundSocket(null)
-      dispatchProjection({ kind: 'select', generation, sessionId: null })
+      dispatchProjectionEvent({ kind: 'select', generation, sessionId: null })
       setStreamingText('')
       return
     }
     let cached = cache?.get(sessionId) ?? null
-    dispatchProjection({ kind: 'select', generation, sessionId, cached })
+    dispatchProjectionEvent({ kind: 'select', generation, sessionId, cached })
     setStreamingText('')
     streamBufferRef.current = ''
     if (streamRafRef.current !== null) {
@@ -183,7 +212,7 @@ export function useSession({
       if (projectionQueue.length === 0) return
       const batch = projectionQueue
       projectionQueue = []
-      for (const evt of batch) dispatchProjection(evt)
+      dispatchProjection(batch)
     }
     const enqueueProjection = (evt: SessionProjectionEvent): void => {
       projectionQueue.push(evt)
@@ -306,20 +335,30 @@ export function useSession({
     }
 
     let disposed = false
+    let liveBaselineReceived = false
     let socket: DashboardSocket | null = null
     let reconnectCleanup: (() => void) | null = null
-    const connect = async (): Promise<void> => {
-      if (!cached && cache?.hydrate) {
-        // IndexedDB can be blocked by another tab or browser shutdown recovery.
-        // Durable cache is an optimization and must never block the live socket.
-        cached = await Promise.race([
-          cache.hydrate(sessionId),
-          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 250)),
-        ])
-        if (disposed) return
-        if (cached) dispatchProjection({ kind: 'hydrate', generation, sessionId, cached })
+    // Durable hydration and the live socket race independently. IndexedDB is a
+    // paint optimization; it must never delay the authoritative connection.
+    if (!cached && cache?.hydrate) {
+      void cache.hydrate(sessionId).then((hydrated) => {
+        if (disposed || liveBaselineReceived || !hydrated) return
+        cached = hydrated
+        dispatchProjectionEvent({ kind: 'hydrate', generation, sessionId, cached: hydrated })
+      })
+    }
+    const connect = (): void => {
+      if (sharedSocket !== undefined) {
+        if (sharedSocket === null) return
+        socket = sharedSocket
+        socketRef.current = socket
+        bindSocket(socket)
+        setBoundSocket({ sessionId, socket })
+        const cursor = cached?.timeline.at(-1)?.seq
+        const releaseChannel = dashboardConnectionManager(socket).acquire(`session:${sessionId}`, cursor)
+        reconnectCleanup = releaseChannel
+        return
       }
-
       socket = socketIo(`${host}/dashboard`, {
         auth: {
           sessionId,
@@ -367,8 +406,9 @@ export function useSession({
         return
       }
       if (p.sessionId !== sessionId) return
+      liveBaselineReceived = true
       flushProjectionQueue()
-      dispatchProjection({ kind: 'ready', generation, sessionId, payload: p })
+      dispatchProjectionEvent({ kind: 'ready', generation, sessionId, payload: p })
       // Timeline was cleared for a fresh connect; ask the host to replay
       // the log so a page reload doesn't leave the user staring at an
       // empty timeline for a session that already has history. Live
@@ -382,7 +422,7 @@ export function useSession({
         resetHistoryBaseOnNextReplay = true
         if (hydration.resetTimeline) {
           cache?.delete(p.sessionId)
-          dispatchProjection({ kind: 'reset_timeline', generation, sessionId })
+          dispatchProjectionEvent({ kind: 'reset_timeline', generation, sessionId })
         }
         socket.emit('client:load_history', { sessionId: p.sessionId })
         return
@@ -397,7 +437,7 @@ export function useSession({
       const reset = resetHistoryBaseOnNextReplay
       resetHistoryBaseOnNextReplay = false
       flushProjectionQueue()
-      dispatchProjection({ kind: 'history', generation, sessionId, entries: p.entries.map(timelineEntry), reset })
+      dispatchProjectionEvent({ kind: 'history', generation, sessionId, entries: p.entries.map(timelineEntry), reset })
     })
     socket.on('state:changed', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
@@ -421,7 +461,7 @@ export function useSession({
         // on the next animation frame so React reuses that row instead of
         // briefly removing it and remounting completed Markdown/code.
         flushProjectionQueue()
-        dispatchProjection({ kind: 'appended', generation, sessionId, payload: p })
+        dispatchProjectionEvent({ kind: 'appended', generation, sessionId, payload: p })
         requestAnimationFrame(() => { if (isCurrentSocket()) resetStream() })
         return
       }
@@ -440,14 +480,14 @@ export function useSession({
       if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) {
         const items = p.items ?? []
-        dispatchProjection({ kind: 'queue', generation, sessionId, items })
+        dispatchProjectionEvent({ kind: 'queue', generation, sessionId, items })
       }
     })
     socket.on('session:error', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       resetStream()
       flushProjectionQueue()
-      dispatchProjection({ kind: 'error', generation, sessionId, error: p })
+      dispatchProjectionEvent({ kind: 'error', generation, sessionId, error: p })
     })
     socket.on('session:token_delta', (p) => {
       if (!isCurrentSocket()) return
@@ -457,10 +497,10 @@ export function useSession({
       if (p.kind === 'host_restart') noteHostRestart(p)
       if (p.kind === 'session_meta_changed' && p.sessionId === sessionId && p.preferences && 'selectedModel' in p.preferences) {
         const model = p.preferences.selectedModel && p.preferences.selectedModel.length > 0 ? p.preferences.selectedModel : null
-        dispatchProjection({ kind: 'model', generation, sessionId, selectedModel: model })
+        dispatchProjectionEvent({ kind: 'model', generation, sessionId, selectedModel: model })
       }
     })
-    socket.on('connect_error', (err) => {
+    if (!sharedSocket) socket.on('connect_error', (err) => {
       if (!isCurrentSocket()) return
       // Version / auth failures are handshake-time — no point retrying.
       // Stop the socket.io retry loop and hold in an error state so the
@@ -469,31 +509,31 @@ export function useSession({
       if (msg === 'version_incompatible' || msg === 'auth_failed') {
         socket.disconnect()
       }
-      dispatchProjection({ kind: 'status', generation, sessionId, status: 'error' })
+      dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
     })
-    socket.io.on('reconnect_failed', () => {
+    if (!sharedSocket) socket.io.on('reconnect_failed', () => {
       if (!isCurrentSocket()) return
-      dispatchProjection({ kind: 'status', generation, sessionId, status: 'error' })
+      dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
     })
-    socket.on('disconnect', (reason) => {
+    if (!sharedSocket) socket.on('disconnect', (reason) => {
       if (!isCurrentSocket()) return
       // Server-initiated disconnect (e.g. workspaceId conflict analogue on
       // dashboard side, or host shutdown) is terminal — don't let socket.io
       // keep dialing.
       if (reason === 'io server disconnect') {
         if (Date.now() < plannedRestartUntil) {
-          dispatchProjection({ kind: 'status', generation, sessionId, status: 'disconnected' })
+          dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'disconnected' })
           return
         }
         socket.disconnect()
-        dispatchProjection({ kind: 'status', generation, sessionId, status: 'error' })
+        dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
         return
       }
-      dispatchProjection({ kind: 'status', generation, sessionId, status: 'disconnected' })
+      dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'disconnected' })
     })
     socket.on('server:compact_status', (p: CompactStatusEvent) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
-      dispatchProjection({ kind: 'compact', generation, sessionId, compactStatus: p })
+      dispatchProjectionEvent({ kind: 'compact', generation, sessionId, compactStatus: p })
     })
     }
 
@@ -517,11 +557,11 @@ export function useSession({
       pendingCommit = ''
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', handleVisibilityChange)
       reconnectCleanup?.()
-      socket?.close()
+      if (!sharedSocket) socket?.close()
       if (socketRef.current === socket) socketRef.current = null
       setBoundSocket((current) => current?.socket === socket ? null : current)
     }
-  }, [host, sessionId, token, cache])
+  }, [host, sessionId, token, cache, sharedSocket])
 
   const {
     status, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
@@ -612,7 +652,7 @@ export function useDashboardControlSocket(host: string, token?: string, enabled 
     if (!enabled) { setSocket(null); return }
     const next = socketIo(`${host}/dashboard`, {
       auth: {
-        sessionId: CONTROL_SOCKET_SESSION_ID,
+        clientId: `dashboard-${CONTROL_SOCKET_SESSION_ID}`,
         role: 'dashboard',
         clientVersion: PROTOCOL_VERSION,
         ...(token !== undefined ? { token } : {}),
@@ -623,6 +663,7 @@ export function useDashboardControlSocket(host: string, token?: string, enabled 
       reconnectionAttempts: 30,
       randomizationFactor: 0.5,
     }) as DashboardSocket
+    dashboardConnectionManager(next).acquire('global')
     setSocket(next)
     return () => {
       next.close()
@@ -872,9 +913,13 @@ export function useControlPlane(
   const [sessions, setSessions] = useState<readonly SessionSummary[]>([])
   const [executorsLoaded, setExecutorsLoaded] = useState(false)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  const summaryStoreRef = useRef<SessionSummaryStore | null>(null)
+  if (summaryStoreRef.current === null) summaryStoreRef.current = new SessionSummaryStore()
 
   useEffect(() => {
+    const summaryStore = summaryStoreRef.current!
     if (!socket) {
+      summaryStore.clear()
       setExecutors([])
       setSessions([])
       setExecutorsLoaded(false)
@@ -882,7 +927,27 @@ export function useControlPlane(
       return
     }
     let active = true
+    let summaryRaf: number | null = null
+    let summaryUpdates: Array<(sessions: readonly SessionSummary[]) => readonly SessionSummary[]> = []
     const isActive = (): boolean => active
+    const flushSummaryUpdates = (): void => {
+      if (summaryRaf !== null) {
+        cancelAnimationFrame(summaryRaf)
+        summaryRaf = null
+      }
+      if (summaryUpdates.length === 0) return
+      const updates = summaryUpdates
+      summaryUpdates = []
+      setSessions((current) => summaryStore.replace(updates.reduce((next, update) => update(next), current)))
+    }
+    const enqueueSummaryUpdate = (update: (sessions: readonly SessionSummary[]) => readonly SessionSummary[]): void => {
+      summaryUpdates.push(update)
+      if (summaryRaf !== null) return
+      summaryRaf = requestAnimationFrame(() => {
+        summaryRaf = null
+        flushSummaryUpdates()
+      })
+    }
     const onExecutors = (p: { executors: readonly AttachedExecutor[] }): void => {
       if (!isActive()) return
       setExecutors(p.executors)
@@ -890,7 +955,8 @@ export function useControlPlane(
     }
     const onSessions = (p: { sessions: readonly SessionSummary[] }): void => {
       if (!isActive()) return
-      setSessions((prev) => mergeSessionSummaries(prev, p.sessions))
+      flushSummaryUpdates()
+      setSessions(summaryStore.replace(p.sessions))
       setSessionsLoaded(true)
     }
     const onExecutorChanged = (change: Extract<ControlUpdate, { kind: 'executor_changed' }>): void => {
@@ -920,21 +986,15 @@ export function useControlPlane(
     const onControlUpdate = (payload: ControlUpdate): void => {
       if (!isActive()) return
       if (payload.kind === 'session_meta_changed') {
-        setSessions((prev) => prev.map((s) => (
-          s.sessionId === payload.sessionId
-            ? {
-                ...s,
-                ...(payload.label !== undefined && payload.label.trim().length > 0
-                  ? { label: payload.label }
-                  : payload.label !== undefined
-                    ? { label: undefined }
-                    : {}),
-                ...(payload.preferences !== undefined
-                  ? { preferences: payload.preferences }
-                  : {}),
-              }
-            : s
-        )))
+        setSessions(summaryStore.update(payload.sessionId, (s) => ({
+          ...s,
+          ...(payload.label !== undefined && payload.label.trim().length > 0
+            ? { label: payload.label }
+            : payload.label !== undefined
+              ? { label: undefined }
+              : {}),
+          ...(payload.preferences !== undefined ? { preferences: payload.preferences } : {}),
+        })))
       }
       if (payload.kind === 'executor_changed') {
         onExecutorChanged(payload)
@@ -942,11 +1002,11 @@ export function useControlPlane(
     }
     const onEventAppended: DashboardServerToClientEvents['event:appended'] = (p) => {
       if (!isActive()) return
-      setSessions((prev) => updateSessionSummaryFromEvent(prev, p))
+      enqueueSummaryUpdate((prev) => updateSessionSummaryFromEvent(prev, p))
     }
     const onStateChanged: DashboardServerToClientEvents['state:changed'] = (p) => {
       if (!isActive()) return
-      setSessions((prev) => updateSessionSummary(prev, p.sessionId, (s) => ({
+      enqueueSummaryUpdate((prev) => updateSessionSummary(prev, p.sessionId, (s) => ({
         ...s,
         status: p.state.status,
         ...(p.state.cwd ? { currentCwd: p.state.cwd } : { currentCwd: undefined }),
@@ -955,7 +1015,7 @@ export function useControlPlane(
     const onMessageQueue: DashboardServerToClientEvents['server:message_queue'] = (p) => {
       if (!isActive()) return
       if (p.pending > 0) {
-        setSessions((prev) => updateSessionSummary(prev, p.sessionId, (s) => ({
+        enqueueSummaryUpdate((prev) => updateSessionSummary(prev, p.sessionId, (s) => ({
           ...s,
           status: isRestingSessionStatus(s.status) ? 'idle' : s.status,
         })))
@@ -971,7 +1031,7 @@ export function useControlPlane(
       payload,
     ) => {
       if (!isActive()) return
-      setSessions((prev) => prev.filter((s) => s.sessionId !== payload.sessionId))
+      setSessions(summaryStore.delete(payload.sessionId))
     }
     socket.on('server:session_deleted', onSessionDeleted)
 
@@ -985,6 +1045,9 @@ export function useControlPlane(
 
     return () => {
       active = false
+      if (summaryRaf !== null) cancelAnimationFrame(summaryRaf)
+      summaryRaf = null
+      summaryUpdates = []
       socket.off('server:executors', onExecutors)
       socket.off('server:sessions', onSessions)
       socket.off('server:control_update', onControlUpdate)

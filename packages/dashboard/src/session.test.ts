@@ -25,6 +25,23 @@ function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry
 }
 
 describe('mergeBySeq', () => {
+  it('appends a strictly increasing live tail while preserving entry identities', () => {
+    const first = entry(1, 'user_message')
+    const second = entry(2, 'llm_response')
+    const third = entry(3, 'user_message')
+
+    const merged = mergeBySeq([first], [second, third])
+
+    expect(merged.map((item) => item.seq)).toEqual([1, 2, 3])
+    expect(merged[0]).toBe(first)
+    expect(merged[1]).toBe(second)
+    expect(merged[2]).toBe(third)
+  })
+
+  it('falls back to authoritative merging when the added tail is not increasing', () => {
+    expect(mergeBySeq([entry(1, 'user_message')], [entry(3, 'user_message'), entry(2, 'llm_response')]).map((item) => item.seq)).toEqual([1, 2, 3])
+  })
+
   it('sorts and fills missing history entries', () => {
     expect(mergeBySeq([entry(3, 'user_message')], [entry(1, 'user_message')]).map((e) => e.seq)).toEqual([1, 3])
   })

@@ -62,7 +62,6 @@ import { sessionRoom } from './connection/rooms.js'
 import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, claimRoute, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount } from './http/routes.js'
 import { SessionArtifactRegistry } from './session-artifact-registry.js'
 import { MemoStore } from './memo-store.js'
-import { firstForwardedHeader, powershellQuoteLocal, shellQuoteLocal } from './shell-quote.js'
 import type { AuthConfig } from './auth-control.js'
 import type { AuditLogger } from './audit-log.js'
 import { noopAuditLogger } from './audit-log.js'
@@ -73,10 +72,15 @@ import type { DeploymentMode, RuntimeCapabilities } from '@agent-kernel/shared'
 import { FULL_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 import type { SocketAdminConfig } from './socket-admin.js'
 import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinator.js'
+import { inspectUnitQuiescence } from './tenant-runtime/quiescence.js'
 import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
 import { loadPersistedMessageQueue, persistMessageQueueSnapshot } from './message-queue-store.js'
 import { readSessionLog } from './store/log.js'
 import { modelIdFromRef, resolveModelContextWindow } from './model-capabilities.js'
+import type { WebSearchCredentialStore } from './web-search/index.js'
+import type { WebSearchCredentialStatus } from './web-search/credential-store.js'
+import { ExecutorInstallationStore } from './store/executor-installation.js'
+import { attachExecutorInstallationRoutes } from './http/executor-installation-routes.js'
 
 export type HostServerOptions = {
   port: number
@@ -119,6 +123,10 @@ export type HostServerOptions = {
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
   skills?: SkillRegistry | SkillManager
+  webSearchCredentials?: WebSearchCredentialStore
+  webSearchCredentialStatus?: () => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
+  setWebSearchCredential?: (provider: 'serper', key: string) => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
+  deleteWebSearchCredential?: (provider: 'serper') => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
   artifactRootDir?: string | false
   docsRootDir?: string
   /**
@@ -239,6 +247,15 @@ export async function startHostServer(
   const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
   const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
   await workspaceAliases.load()
+  const executorInstallations = new ExecutorInstallationStore(join(options.sessionsDir, '..', 'executor-installations.json'))
+  executorInstallations.load()
+  attachExecutorInstallationRoutes(http, {
+    store: executorInstallations,
+    ...(auth?.executorIdentityStore ? { identities: auth.executorIdentityStore } : {}),
+    ...(auth ? { auth } : {}),
+    deploymentMode,
+    audit,
+  })
 
   // Web Push (see docs/planning/roadmap-notes/pwa-mobile-and-push.md §5).
   // Fail-open: if VAPID isn't configured / can't be generated, dispatcher
@@ -256,20 +273,6 @@ export async function startHostServer(
   const pushRoutes = createPushRoutes({ store: pushStore, vapid, dispatcher: pushDispatcher, activity: pushActivity })
   http.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const requestUrl = new URL(req.url ?? '/', 'http://localhost')
-    if (requestUrl.pathname === '/install' && req.method === 'GET') {
-      claimRoute(req)
-      const invite = requestUrl.searchParams.get('invite')
-      const origin = `${firstForwardedHeader(req.headers['x-forwarded-proto']) ?? 'http'}://${firstForwardedHeader(req.headers['x-forwarded-host']) ?? req.headers.host ?? 'localhost'}`
-      const script = `#!/bin/sh\nset -eu\nexport COMPONENT=executor HOST_URL=${shellQuoteLocal(origin)} AGENT_KERNEL_RELEASE_BASE_URL=${shellQuoteLocal(`${origin}/release-assets`)} SANDBOX_ROOTS="$HOME"${invite ? ` EXECUTOR_INVITE=${shellQuoteLocal(invite)}` : ''}\ncurl -fsSL ${shellQuoteLocal(`${origin}/release-assets/run.sh`)} | bash\n`
-      res.writeHead(200, { 'content-type': 'text/x-shellscript; charset=utf-8', 'cache-control': 'no-store' });res.end(script);return
-    }
-    if (requestUrl.pathname === '/install.ps1' && req.method === 'GET') {
-      claimRoute(req)
-      const invite = requestUrl.searchParams.get('invite')
-      const origin = `${firstForwardedHeader(req.headers['x-forwarded-proto']) ?? 'http'}://${firstForwardedHeader(req.headers['x-forwarded-host']) ?? req.headers.host ?? 'localhost'}`
-      const script = `$ErrorActionPreference='Stop'; function Get-RunLabFile([string]$Uri,[string]$Path,[string]$Label){try{Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 $Uri -OutFile $Path|Out-Null}catch{Remove-Item -Force -ErrorAction SilentlyContinue $Path; throw "Agent RunLab $Label download failed: $($_.Exception.Message)"}; $prefix=if(Test-Path $Path){$text=[System.IO.File]::ReadAllText($Path).TrimStart();$text.Substring(0,[Math]::Min(32,$text.Length))}else{''}; if(!(Test-Path $Path)-or (Get-Item $Path).Length-eq 0-or $prefix-match '^<!DOCTYPE|^<html'){Remove-Item -Force -ErrorAction SilentlyContinue $Path; throw "Agent RunLab $Label download returned HTML or an empty response. Check access policy for /release-assets/*."}}; $env:HOST_URL=${powershellQuoteLocal(origin)}; $env:SANDBOX_ROOTS=$env:USERPROFILE; ${invite ? `$env:EXECUTOR_INVITE=${powershellQuoteLocal(invite)}; ` : ''}$d=Join-Path $env:LOCALAPPDATA 'AgentRunLab'; New-Item -ItemType Directory -Force -Path $d|Out-Null; $exe=Join-Path $d 'agent-kernel-executor.cjs'; $tmp="$exe.download"; $sum=Join-Path $d 'SHA256SUMS.download'; try{Get-RunLabFile ${powershellQuoteLocal(`${origin}/release-assets/agent-kernel-executor.cjs`)} $tmp 'executor'; Get-RunLabFile ${powershellQuoteLocal(`${origin}/release-assets/SHA256SUMS`)} $sum 'checksum'; $expected=((Get-Content $sum|Where-Object {$_ -match ' agent-kernel-executor\\.cjs$'}|Select-Object -First 1)-split '\\s+')[0]; if(!$expected){throw 'Agent RunLab SHA256SUMS does not contain the executor checksum'}; if((Get-FileHash $tmp -Algorithm SHA256).Hash-ne $expected.ToUpperInvariant()){throw 'Agent RunLab executor checksum mismatch'}; Move-Item -Force $tmp $exe}finally{Remove-Item -Force -ErrorAction SilentlyContinue $tmp,$sum}; node $exe`
-      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });res.end(script);return
-    }
     if ((req.url ?? '/').split('?')[0]?.startsWith('/push/')) claimRoute(req)
     // pushRoutes returns true when it handled the request. Anything not
     // matching /push/* falls through to attachJsonRoutes and beyond.
@@ -335,9 +338,23 @@ export async function startHostServer(
     deploymentMode,
     metrics,
     memoStore,
+    ...(options.webSearchCredentials && options.webSearchCredentialStatus && options.setWebSearchCredential && options.deleteWebSearchCredential ? {
+      webSearchCredentials: {
+        get: (provider: 'serper') => options.webSearchCredentials!.get(provider),
+        status: options.webSearchCredentialStatus,
+        set: options.setWebSearchCredential,
+        delete: options.deleteWebSearchCredential,
+      },
+    } : {}),
     sessions: store,
     executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     toolRegistry: () => (typeof options.defaultConfig === 'function' ? options.defaultConfig() : options.defaultConfig).tools,
+    toolResultPersisted: async (sessionId, callId) => {
+      const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
+      if (!record) return false
+      const parsed = await readSessionLog(record.logPath)
+      return parsed.events.some((entry) => entry.event.kind === 'tool_result' && entry.event.callId === callId)
+    },
     restartStatus: () => restart?.status() ?? {
       pid: process.pid,
       startedAt: new Date(0).toISOString(),
@@ -348,7 +365,19 @@ export async function startHostServer(
       if (!restart) throw new Error('restart coordinator is not ready')
       return restart.request(input)
     },
+    commitRestartActivation: (attemptId) => restart?.commitActivation(attemptId) ?? null,
     abortRestart: () => restart?.abort() ?? null,
+    unitQuiescence: () => inspectUnitQuiescence({ loop, store }, messageQueues.isStable()),
+    reserveCutover: async () => {
+      loop.beginDrain('checkpoint')
+      const sessionIds = store.list().map((record) => record.sessionId)
+      await Promise.all(sessionIds.map((sessionId) => loop.waitForCheckpoint(sessionId)))
+      await messageQueues.waitForStable()
+      const snapshot = inspectUnitQuiescence({ loop, store }, messageQueues.isStable())
+      if (!snapshot.safe) throw new Error('Unit did not reach a stable cutover boundary')
+      return snapshot
+    },
+    releaseCutover: () => loop.endDrain(),
     enqueueUserMessage: async ({ sessionId, text }) => {
       // Persist as a queued follow-up and drain immediately. Delivered as soon
       // as any in-flight turn finishes; no live socket required.
@@ -504,6 +533,16 @@ export async function startHostServer(
   }
 
   const messageQueues: MessageQueueManager = {
+    isStable() {
+      return queueLoads.size === 0 && queueMutations.size === 0 && drainingQueues.size === 0
+    },
+    async waitForStable() {
+      while (!messageQueues.isStable()) {
+        await Promise.all([...queueLoads.values()].map((pending) => pending.catch(() => [])))
+        await Promise.all([...queueMutations.values()].map((pending) => pending.catch(() => undefined)))
+        if (drainingQueues.size > 0) await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    },
     async hydrate(sessionId) {
       await loadQueue(sessionId)
     },
@@ -574,10 +613,11 @@ export async function startHostServer(
     },
     snapshot: queueSnapshot,
     async drain(sessionId) {
-      if (closed || drainingQueues.has(sessionId)) return
+      if (closed || loop.isDraining() || drainingQueues.has(sessionId)) return
       drainingQueues.add(sessionId)
       try {
         while (!closed) {
+          if (loop.isDraining()) return
           await loadQueue(sessionId)
           if ((queuedMessages.get(sessionId)?.length ?? 0) === 0) return
           let record = store.get(sessionId)
@@ -852,6 +892,7 @@ export async function startHostServer(
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
     ...(options.hookRunner !== undefined ? { hookRunner: options.hookRunner } : {}),
     skills,
+    ...(options.webSearchCredentials ? { webSearchCredentials: options.webSearchCredentials } : {}),
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
   }
   loop = runHostLoop(loopDeps)
@@ -924,6 +965,7 @@ export async function startHostServer(
     executors,
     defaultConfig: getDefaultConfig,
     ...(auth ? { auth } : {}),
+    installations: executorInstallations,
     audit,
     broadcastError,
     dashboardNs,
@@ -952,6 +994,11 @@ export async function startHostServer(
     // Executor no longer subscribes to session:error — it's UI-only.
   }
 
+  // Planned continuation must finish before mutable traffic can race Session
+  // hydration or Queue drain. Crash recovery has already happened while loading
+  // records; this path consumes only a validated restart marker.
+  await restart.resumeMarkedSessions()
+
   await new Promise<void>((resolve, reject) => {
     if (http.listening) {
       resolve()
@@ -976,11 +1023,6 @@ export async function startHostServer(
   const addr = http.address()
   const port =
     typeof addr === 'object' && addr && 'port' in addr ? addr.port : options.port
-
-  // Finish recovery before accepting the startup path as ready. Detached
-  // recovery raced dashboard hydration/queue drain and could issue two LLM
-  // calls for one durable `thinking` state.
-  await restart.resumeMarkedSessions()
 
   return {
     io,

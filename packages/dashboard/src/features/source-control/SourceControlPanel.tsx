@@ -1,3 +1,4 @@
+import { randomId } from '../../lib/random-id.js'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import { AlertCircle, ChevronDown, ChevronRight, Columns2, FileCode2, Folder, GitBranch, List, ListTree, Loader2, RefreshCw, Rows3 } from 'lucide-react'
@@ -447,12 +448,12 @@ function DiffError({ message }: { message: string }): JSX.Element {
 }
 
 async function requestGitStatus(socket: DashboardSocket, payload: { workspaceId: string; sessionId?: string; cwd?: string }): Promise<GitStatusResult> {
-  const requestId = crypto.randomUUID()
+  const requestId = randomId()
   return await gitStatus(socket, { requestId, ...payload })
 }
 
 async function requestGitDiff(socket: DashboardSocket, payload: { workspaceId: string; sessionId?: string; cwd?: string; path: string; staged: boolean }): Promise<GitDiffResult> {
-  const requestId = crypto.randomUUID()
+  const requestId = randomId()
   return await gitDiff(socket, { requestId, ...payload })
 }
 

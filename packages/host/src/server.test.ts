@@ -294,6 +294,54 @@ describe('wire protocol', () => {
     }
   })
 
+  it('returns 404 for stale static chunks instead of the SPA HTML shell', async () => {
+    await server.close()
+    const staticDir = mkdtempSync(join(tmpdir(), 'agent-kernel-static-'))
+    await writeFile(join(staticDir, 'index.html'), '<!doctype html><title>dashboard shell</title>', 'utf8')
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      staticDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const staleChunk = await fetch(`${url}/assets/index-stale.js`)
+    expect(staleChunk.status).toBe(404)
+    expect(staleChunk.headers.get('content-type') ?? '').not.toContain('text/html')
+
+    const spaRoute = await fetch(`${url}/sessions/example`)
+    expect(spaRoute.status).toBe(200)
+    expect(spaRoute.headers.get('content-type')).toContain('text/html')
+    expect(await spaRoute.text()).toContain('dashboard shell')
+
+    rmSync(staticDir, { recursive: true, force: true })
+  })
+
+  it('returns 404 for stale embedded chunks instead of the SPA HTML shell', async () => {
+    await server.close()
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      embeddedStaticAssets: [
+        { path: 'index.html', contentBase64: Buffer.from('<!doctype html><title>embedded shell</title>').toString('base64') },
+      ],
+    })
+    url = `http://localhost:${server.port}`
+
+    const staleChunk = await fetch(`${url}/assets/index-stale.js`)
+    expect(staleChunk.status).toBe(404)
+    expect(staleChunk.headers.get('content-type') ?? '').not.toContain('text/html')
+
+    const spaRoute = await fetch(`${url}/sessions/example`)
+    expect(spaRoute.status).toBe(200)
+    expect(spaRoute.headers.get('content-type')).toContain('text/html')
+    expect(await spaRoute.text()).toContain('embedded shell')
+  })
+
   it('serves local release assets without SPA fallback', async () => {
     const releaseDir = mkdtempSync(join(tmpdir(), 'agent-kernel-release-assets-'))
     const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-release-sessions-'))
@@ -320,21 +368,17 @@ describe('wire protocol', () => {
       expect(await ok.text()).toContain('echo local')
       const missing = await fetch(`http://localhost:${localServer.port}/release-assets/missing.sh`)
       expect(missing.status).toBe(404)
-      const powershell = await fetch(`http://localhost:${localServer.port}/install.ps1?invite=abc'def`, {
+      const powershell = await fetch(`http://localhost:${localServer.port}/install.ps1`, {
         headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'downloads.example.test' },
       })
       expect(powershell.status).toBe(200)
       expect(powershell.headers.get('content-type')).toContain('text/plain')
       const script = await powershell.text()
       expect(script).toContain("$ErrorActionPreference='Stop'")
-      expect(script).toContain("$env:HOST_URL='https://downloads.example.test'")
-      expect(script).toContain("$env:EXECUTOR_INVITE='abc''def'")
-      expect(script).toContain('Invoke-WebRequest -UseBasicParsing')
-      expect(script).toContain('|Out-Null')
-      expect(script).not.toContain("$r.Headers['Content-Type']")
-      expect(script).toContain('SHA256SUMS')
-      expect(script).toContain('Get-FileHash')
-      expect(script).toContain('checksum mismatch')
+      expect(script).toContain('$code=$env:RUNLAB_SETUP_CODE')
+      expect(script).toContain('https://downloads.example.test/install/session')
+      expect(script).toContain('https://downloads.example.test/install/assets/install-executor.ps1')
+      expect(script).not.toContain('EXECUTOR_INVITE')
       expect(script).not.toContain('<!DOCTYPE html>')
     } finally {
       await localServer.close()

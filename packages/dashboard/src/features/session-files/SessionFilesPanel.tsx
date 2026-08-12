@@ -1,3 +1,4 @@
+import { randomId } from '../../lib/random-id.js'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import Editor from '@monaco-editor/react'
 import { FitAddon } from '@xterm/addon-fit'
@@ -643,7 +644,7 @@ function SessionTerminal({ socket, workspaceId, sessionId, cwd }: { socket: Dash
   useEffect(() => {
     return () => {
       if (!socket || !workspaceId || !terminalId) return
-      socket.emit('terminal:kill', { requestId: crypto.randomUUID(), workspaceId, sessionId, terminalId }, () => {})
+      socket.emit('terminal:kill', { requestId: randomId(), workspaceId, sessionId, terminalId }, () => {})
     }
   }, [socket, workspaceId, sessionId, terminalId])
 
@@ -716,7 +717,7 @@ function SessionTerminal({ socket, workspaceId, sessionId, cwd }: { socket: Dash
 
 async function requestDir(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string | undefined): Promise<DirListResult> {
   return await new Promise((resolve) => {
-    const requestId = crypto.randomUUID()
+    const requestId = randomId()
     const timer = window.setTimeout(() => {
       socket.off('server:dir_list', handler)
       resolve({ requestId, workspaceId, path: path ?? '', roots: [], entries: [], error: 'timed out' })
@@ -738,7 +739,7 @@ async function requestFile(socket: DashboardSocket, workspaceId: string, session
   // refactor.md). We keep returning FileContentsResult so the surrounding
   // viewer / download logic stays unchanged; MIME → kind mapping happens
   // in classifyFileContent() below.
-  const requestId = crypto.randomUUID()
+  const requestId = randomId()
   void sessionId
   const res = await workspaceReadBinary(socket, workspaceId, path, {
     ...(options.cwd ? { cwd: options.cwd } : {}),
@@ -794,7 +795,7 @@ function base64ToBytes(base64: string): Uint8Array {
 
 async function createTerminal(socket: DashboardSocket, payload: { workspaceId: string; sessionId: string; cwd?: string; cols: number; rows: number }): Promise<TerminalCreateResult> {
   return await new Promise((resolve) => {
-    const requestId = crypto.randomUUID()
+    const requestId = randomId()
     const timer = window.setTimeout(() => resolve({ requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, error: 'timed out' }), 5000)
     socket.emit('terminal:create', { requestId, ...payload }, (result) => {
       window.clearTimeout(timer)
@@ -805,7 +806,7 @@ async function createTerminal(socket: DashboardSocket, payload: { workspaceId: s
 
 async function killTerminal(socket: DashboardSocket, payload: { workspaceId: string; sessionId: string; terminalId: string }): Promise<TerminalKillResult> {
   return await new Promise((resolve) => {
-    const requestId = crypto.randomUUID()
+    const requestId = randomId()
     const timer = window.setTimeout(() => resolve({ requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId: payload.terminalId, killed: false, error: 'timed out' }), 5000)
     socket.emit('terminal:kill', { requestId, ...payload }, (result) => {
       window.clearTimeout(timer)

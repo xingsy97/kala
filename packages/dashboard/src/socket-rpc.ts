@@ -1,6 +1,7 @@
 import type { RpcAck } from '@agent-kernel/shared'
 
 import type { DashboardSocket } from './session.js'
+import { randomId } from './lib/random-id.js'
 
 export async function emitRpc<T = undefined>(
   socket: DashboardSocket,
@@ -10,7 +11,7 @@ export async function emitRpc<T = undefined>(
 ): Promise<T> {
   const timeoutMs = options.timeoutMs ?? 10_000
   const attempts = options.attempts ?? 3
-  const operationId = options.operationId ?? crypto.randomUUID()
+  const operationId = options.operationId ?? randomId()
   let lastError: unknown
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {

@@ -80,6 +80,7 @@ export type ExecutorOptions = {
   token?: string
   invite?: string
   executorId?: string
+  installId?: string
   onToken?(token: string): void
   tools?: readonly Tool[]
   logger?: Pick<RuntimeLogger, 'debug' | 'info' | 'warn'>
@@ -171,6 +172,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
 
   const announcement: ExecutorAnnounce = {
     executorId,
+    ...(options.installId ? { installId: options.installId } : {}),
     executorVersion: EXECUTOR_VERSION,
     build: executorBuildInfo(),
     capabilities: executorCapabilities(tools, sandboxRoots),
@@ -329,6 +331,8 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     if (ctrl) ctrl.abort()
   })
 
+  socket.on('executor:health_ping', (_sentAt, ack) => ack(Date.now()))
+
   const terminals = createTerminalManager({
     sandbox,
     emitOutput(payload) {
@@ -340,19 +344,31 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   })
 
   socket.on('terminal:create', async (payload, ack) => {
+    if (payload.workspaceId !== workspaceId) {
+      ack({ requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, error: 'workspace mismatch' })
+      return
+    }
     ack(await terminals.create(payload))
   })
 
   socket.on('terminal:input', (payload) => {
-    terminals.input(payload)
+    if (payload.workspaceId === workspaceId) terminals.input(payload)
   })
 
   socket.on('terminal:resize', (payload) => {
-    terminals.resize(payload)
+    if (payload.workspaceId === workspaceId) terminals.resize(payload)
   })
 
   socket.on('terminal:kill', (payload, ack) => {
+    if (payload.workspaceId !== workspaceId) {
+      ack({ requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId: payload.terminalId, killed: false, error: 'workspace mismatch' })
+      return
+    }
     ack(terminals.kill(payload))
+  })
+
+  socket.on('terminal:close_session', (payload) => {
+    if (payload.workspaceId === workspaceId) terminals.closeSession(payload)
   })
 
   // Host-internal filesystem/background RPCs also arrive as ordinary
@@ -459,6 +475,7 @@ async function runOne(
   try {
     const content = await tool.run(payload.input, {
       sessionId: payload.sessionId,
+      callId: payload.callId,
       sandbox,
       signal,
       ...(payload.cwd ? { cwd: payload.cwd } : {}),

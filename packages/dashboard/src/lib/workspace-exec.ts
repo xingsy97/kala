@@ -9,6 +9,8 @@
  * the dashboard on top of these two primitives.
  */
 
+import { randomId } from './random-id.js'
+import { dashboardConnectionManager } from '../session.js'
 import type { Socket } from 'socket.io-client'
 
 import type {
@@ -36,13 +38,29 @@ export type WorkspaceExecOptions = {
 
 const DEFAULT_ACK_BUFFER_MS = 2_000
 
+async function ensureWorkspaceSubscription(socket: WorkspaceSocket, workspaceId: string): Promise<() => void> {
+  // Lightweight feature-test sockets used by isolated panels predate channel
+  // subscriptions; production Socket.IO sockets always provide on/off.
+  if (typeof socket.on !== 'function' || typeof socket.off !== 'function' || !('io' in socket)) return () => {}
+  const manager = dashboardConnectionManager(socket)
+  const release = manager.acquire(`workspace:${workspaceId}`)
+  const deadline = Date.now() + 1_500
+  while (Date.now() < deadline) {
+    const state = manager.snapshot().get(`workspace:${workspaceId}`)?.state
+    if (state === 'active' || state === 'rejected') break
+    await new Promise((resolve) => window.setTimeout(resolve, 10))
+  }
+  return release
+}
+
 export async function workspaceExec(
   socket: WorkspaceSocket,
   workspaceId: string,
   argv: readonly string[],
   options: WorkspaceExecOptions = {},
 ): Promise<WorkspaceExecResponse> {
-  const requestId = crypto.randomUUID()
+  const releaseSubscription = await ensureWorkspaceSubscription(socket, workspaceId)
+  const requestId = randomId()
   const payload: WorkspaceExecRequest = {
     requestId,
     workspaceId,
@@ -55,6 +73,7 @@ export async function workspaceExec(
   const ackTimeout = options.ackTimeoutMs ?? ((options.timeoutMs ?? 15_000) + DEFAULT_ACK_BUFFER_MS)
   return await new Promise<WorkspaceExecResponse>((resolve) => {
     const timer = window.setTimeout(() => {
+      releaseSubscription()
       resolve({
         requestId,
         stdout: '',
@@ -66,6 +85,7 @@ export async function workspaceExec(
     }, ackTimeout)
     socket.emit('workspace:exec', payload, (result: WorkspaceExecResponse) => {
       window.clearTimeout(timer)
+      releaseSubscription()
       resolve(result)
     })
   })
@@ -83,7 +103,8 @@ export async function workspaceReadBinary(
   path: string,
   options: WorkspaceReadBinaryOptions = {},
 ): Promise<WorkspaceReadBinaryResponse> {
-  const requestId = crypto.randomUUID()
+  const releaseSubscription = await ensureWorkspaceSubscription(socket, workspaceId)
+  const requestId = randomId()
   const payload: WorkspaceReadBinaryRequest = {
     requestId,
     workspaceId,
@@ -94,6 +115,7 @@ export async function workspaceReadBinary(
   const ackTimeout = options.ackTimeoutMs ?? 12_000
   return await new Promise<WorkspaceReadBinaryResponse>((resolve) => {
     const timer = window.setTimeout(() => {
+      releaseSubscription()
       resolve({
         requestId,
         base64: '',
@@ -104,6 +126,7 @@ export async function workspaceReadBinary(
     }, ackTimeout)
     socket.emit('workspace:read_binary', payload, (result: WorkspaceReadBinaryResponse) => {
       window.clearTimeout(timer)
+      releaseSubscription()
       resolve(result)
     })
   })

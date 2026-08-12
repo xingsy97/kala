@@ -2,7 +2,7 @@ import { createConfig, createInitialState } from '@agent-kernel/kernel'
 import type { ContextUsageSnapshot, EventAppendedEvent, SessionReadyEvent } from '@agent-kernel/shared'
 import { describe, expect, it } from 'vitest'
 
-import { EMPTY_SESSION_PROJECTION, reduceSessionProjection } from './session-projection.js'
+import { EMPTY_SESSION_PROJECTION, reduceSessionProjection, reduceSessionProjectionBatch } from './session-projection.js'
 
 const config = createConfig({ systemPrompt: 'system', tools: [] })
 const contextSnapshot: ContextUsageSnapshot = {
@@ -32,6 +32,18 @@ function selected(sessionId: string, generation = 1) {
 }
 
 describe('session projection reducer', () => {
+  it('reduces a queued frame in exactly the same order as individual events', () => {
+    const current = selected('session-a')
+    const events = [
+      { kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 1, 'first') } as const,
+      { kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 2, 'second') } as const,
+      { kind: 'status', generation: 1, sessionId: 'session-a', status: 'ready' } as const,
+    ]
+    const individual = events.reduce(reduceSessionProjection, current)
+
+    expect(reduceSessionProjectionBatch(current, events)).toEqual(individual)
+  })
+
   it('folds state and appends timeline in one transition', () => {
     const current = selected('session-a')
     const next = reduceSessionProjection(current, {

@@ -28,6 +28,10 @@ type EmittedCall = {
     | 'tool:cancel'
     | 'session:error'
     | 'executor:host_reject'
+    | 'executor:health_ping'
+    | 'terminal:create'
+    | 'terminal:kill'
+    | 'terminal:close_session'
   payload:
     | ToolCallMessage
     | { sessionId: string; callId: string }
@@ -110,6 +114,18 @@ function callEffect(
 }
 
 describe('ExecutorRegistry', () => {
+  it('measures Host to Executor latency and reports an offline workspace', async () => {
+    const registry = createExecutorRegistry(fakeIo() as never, makeResolver())
+    const socket = makeFakeSocket('latency')
+    socket.emit = (event, payload, ack) => {
+      socket.emitted.push({ event: event as EmittedCall['event'], payload: payload as EmittedCall['payload'], ...(ack ? { ack } : {}) })
+      if (event === 'executor:health_ping') ack?.({} as ToolResultAck)
+    }
+    registry.attach(socket as never, announceOf('exec-latency', 'ws-latency'))
+    await expect(registry.measureLatency('ws-latency')).resolves.toEqual({ rttMs: expect.any(Number) })
+    await expect(registry.measureLatency('missing')).resolves.toEqual({ error: 'workspace offline' })
+  })
+
   it('dispatches a tool call and resolves on ack', async () => {
     const reg = createExecutorRegistry(
       fakeIo() as never,
@@ -564,6 +580,26 @@ describe('ExecutorRegistry', () => {
     expect(first.emitted).toHaveLength(1) // tool:call went to the original
     first.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'ok' })
     return expect(p).resolves.toEqual({ ok: true, content: 'ok' })
+  })
+
+  it('times out terminal create/kill ACKs and routes Session cleanup', async () => {
+    vi.useFakeTimers()
+    try {
+      const reg = createExecutorRegistry(fakeIo() as never, makeResolver({ session: 'ws' }), 5_000)
+      const sock = makeFakeSocket('terminal')
+      reg.attach(sock as never, announceOf('e-terminal', 'ws'))
+
+      const create = reg.createTerminal({ requestId: 'create', workspaceId: 'ws', sessionId: 'session' })
+      const kill = reg.killTerminal({ requestId: 'kill', workspaceId: 'ws', sessionId: 'session', terminalId: 'term' })
+      reg.closeSessionTerminals({ workspaceId: 'ws', sessionId: 'session' })
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      await expect(create).resolves.toMatchObject({ error: 'terminal create acknowledgement timed out' })
+      await expect(kill).resolves.toMatchObject({ killed: false, error: 'terminal kill acknowledgement timed out' })
+      expect(sock.emitted.at(-1)).toMatchObject({ event: 'terminal:close_session', payload: { workspaceId: 'ws', sessionId: 'session' } })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('lets a new executor claim a workspaceId whose previous holder has disconnected', () => {

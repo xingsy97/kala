@@ -45,6 +45,11 @@ import type {
   ClientTerminalResize,
   ClientUpdateQueuedMessage,
   ClientSubscribe,
+  ClientUnsubscribe,
+  ClientSubscribeChannels,
+  ClientUnsubscribeChannels,
+  ChannelSubscriptionResult,
+  DashboardChannel,
   ClientUserApprove,
   ClientUserMessage,
   ClientUserReject,
@@ -109,6 +114,8 @@ export type QueuedUserMessage = {
 
 export type MessageQueueManager = {
   hydrate(sessionId: string): Promise<void>
+  isStable(): boolean
+  waitForStable(): Promise<void>
   enqueue(sessionId: string, msg: QueuedUserMessage, priority?: 'front'): Promise<void>
   reorder(sessionId: string, id: string, beforeId?: string | null): Promise<void>
   update(sessionId: string, id: string, text: string, content?: readonly MessageContent[]): Promise<void>
@@ -176,8 +183,8 @@ export function configureDashboardNamespace(
       nextFn(new Error(authResult.reason))
       return
     }
-    if (!auth.sessionId) {
-      nextFn(new Error('missing_session_id'))
+    if (!auth.sessionId && !auth.clientId) {
+      nextFn(new Error('missing_connection_identity'))
       return
     }
     const connectionMeta = dashboardConnectionMeta({
@@ -193,8 +200,9 @@ export function configureDashboardNamespace(
 
   ns.on('connection', async (socket) => {
     const auth = socket.handshake.auth as HandshakeAuth
-    // Middleware guarantees auth.sessionId is present for the dashboard role.
-    const sessionId = auth.sessionId!
+    const multiplexed = Boolean(auth.clientId)
+    // Legacy clients bind transport to one Session; multiplexed clients use a control placeholder until subscribing.
+    const sessionId = auth.sessionId ?? `control:${auth.clientId}`
     socket.on('client:connection_ping', (_sentAt, ack) => ack(Date.now()))
 
     // Local `vparse` — closes over `socket.id` + the connected sessionId so
@@ -212,10 +220,18 @@ export function configureDashboardNamespace(
       }
       return parseWire(s, raw, ctx)
     }
+    const subscribedSessions = new Set<string>()
+    const subscribedWorkspaces = new Set<string>()
+    socket.on('client:executor_ping', async (workspaceId, ack) => {
+      if (multiplexed && !subscribedWorkspaces.has(workspaceId)) { ack({ error: 'workspace is not subscribed' }); return }
+      ack(await deps.executors.measureLatency(workspaceId))
+    })
     const validateBgSessionAccess = async (targetSessionId: string, workspaceId: string): Promise<string | undefined> => {
-      if (targetSessionId !== sessionId) {
-        return 'This workspace operation belongs to another session. Switch back to that session and reopen the panel.'
+      if (multiplexed ? !subscribedSessions.has(targetSessionId) : targetSessionId !== sessionId) {
+        return 'This workspace operation belongs to an unsubscribed session.'
       }
+      if (multiplexed && !subscribedWorkspaces.has(workspaceId)) return 'workspace is not subscribed'
+
       const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId).catch(() => undefined))
       if (!record) return 'unknown session'
       if (record.workspaceId !== workspaceId) return 'session does not belong to workspace'
@@ -348,6 +364,51 @@ export function configureDashboardNamespace(
       }
     })
 
+    const subscribeSession = async (targetSessionId: string): Promise<number> => {
+      if (subscribedSessions.has(targetSessionId)) {
+        const existing = deps.store.get(targetSessionId) ?? await deps.store.load(targetSessionId, { recoverDangling: false }).catch(() => undefined)
+        return existing?.state.cursor ?? 0
+      }
+      let target = deps.store.get(targetSessionId)
+      if (!target) try { target = await deps.store.load(targetSessionId, { recoverDangling: false, runtimeConfig: getDefaultConfig() }) } catch { target = undefined }
+      if (target) await refreshSessionSkillsIfNeeded(deps, target)
+      await socket.join(sessionRoom(targetSessionId))
+      subscribedSessions.add(targetSessionId)
+      await deps.messageQueues.hydrate(targetSessionId)
+      const defaultModel = effectiveDefaultModel(deps)
+      const payload: SessionReadyEvent = target
+        ? readyEventFor(target, effectiveModelForRecord(deps, target), 'load', contextWindowForSession(deps, target))
+        : ephemeralReadyEventFor(targetSessionId, getDefaultConfig(), defaultModel, contextWindowForModelRef(deps, defaultModel))
+      socket.emit('session:ready', payload)
+      socket.emit('server:message_queue', deps.messageQueues.snapshot(targetSessionId))
+      if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(targetSessionId)
+      void deps.messageQueues.drain(targetSessionId)
+      return payload.cursor
+    }
+
+    const channelResult = async (raw: ClientSubscribeChannels | ClientUnsubscribeChannels, remove: boolean): Promise<ChannelSubscriptionResult | undefined> => {
+      const parsed = remove ? vparse(schema.ClientUnsubscribeChannelsSchema, raw, 'client:unsubscribe_channels') : vparse(schema.ClientSubscribeChannelsSchema, raw, 'client:subscribe_channels')
+      if (!parsed) return undefined
+      const accepted: DashboardChannel[] = [], rejected: Array<{ channel: DashboardChannel; code: string }> = [], cursors: Record<string, number> = {}
+      const uniqueChannels = [...new Set(parsed.channels)]
+      if (uniqueChannels.length > 128 || subscribedSessions.size + subscribedWorkspaces.size + uniqueChannels.length > 256) {
+        return { requestId: parsed.requestId, generation: parsed.generation, accepted, rejected: uniqueChannels.map((channel) => ({ channel, code: 'subscription_limit' })), cursors }
+      }
+      for (const channel of uniqueChannels) {
+        if (channel === 'global') { accepted.push(channel); continue }
+        const [kind, id] = channel.split(':', 2) as ['workspace' | 'session', string]
+        if (!id) { rejected.push({ channel, code: 'invalid_channel' }); continue }
+        if (kind === 'workspace') { if (remove) subscribedWorkspaces.delete(id); else subscribedWorkspaces.add(id); accepted.push(channel); continue }
+        if (remove) { subscribedSessions.delete(id); await socket.leave(sessionRoom(id)); accepted.push(channel); continue }
+        cursors[channel] = await subscribeSession(id); accepted.push(channel)
+      }
+      return { requestId: parsed.requestId, generation: parsed.generation, accepted, rejected, cursors }
+    }
+    socket.on('client:subscribe_channels', async (raw, ack) => ack((await channelResult(raw, false)) ?? { requestId: raw.requestId, generation: raw.generation, accepted: [], rejected: [], cursors: {} }))
+    socket.on('client:restore_subscriptions', async (raw, ack) => ack((await channelResult(raw, false)) ?? { requestId: raw.requestId, generation: raw.generation, accepted: [], rejected: [], cursors: {} }))
+    socket.on('client:unsubscribe_channels', async (raw, ack) => ack((await channelResult(raw, true)) ?? { requestId: raw.requestId, generation: raw.generation, accepted: [], rejected: [], cursors: {} }))
+
+    if (!multiplexed) {
     // Do NOT auto-create the session on connect. A dashboard opening a fresh
     // random UUID must not materialize a JSONL file on disk — otherwise
     // "click New" and "delete last session" both silently resurrect an empty
@@ -386,10 +447,12 @@ export function configureDashboardNamespace(
     if (record && !isRestingStatus(record.state.status)) void deps.loop.resumeSession(sessionId)
     void deps.messageQueues.drain(sessionId)
 
+    const desiredPreviewSessions = new Set<string>()
     socket.on('subscribe', async (raw: ClientSubscribe) => {
       const p = vparse(schema.ClientSubscribeSchema, raw, 'subscribe', (raw as ClientSubscribe | undefined)?.sessionId)
       if (!p) return
       const { sessionId } = p
+      desiredPreviewSessions.add(sessionId)
       let target = deps.store.get(sessionId)
       if (!target) {
         try {
@@ -401,6 +464,7 @@ export function configureDashboardNamespace(
       if (target) {
         await refreshSessionSkillsIfNeeded(deps, target)
       }
+      if (!desiredPreviewSessions.has(sessionId)) return
       await socket.join(sessionRoom(sessionId))
       await deps.messageQueues.hydrate(sessionId)
       const defaultModel = effectiveDefaultModel(deps)
@@ -417,6 +481,15 @@ export function configureDashboardNamespace(
       if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(sessionId)
       void deps.messageQueues.drain(sessionId)
     })
+
+    socket.on('unsubscribe', async (raw: ClientUnsubscribe) => {
+      const p = vparse(schema.ClientUnsubscribeSchema, raw, 'unsubscribe', (raw as ClientUnsubscribe | undefined)?.sessionId)
+      if (!p || p.sessionId === sessionId) return
+      desiredPreviewSessions.delete(p.sessionId)
+      await socket.leave(sessionRoom(p.sessionId))
+    })
+
+    }
 
     socket.on('client:user_message', async (raw: ClientUserMessage, ack) => {
       const p = vparse(schema.ClientUserMessageSchema, raw, 'client:user_message', (raw as ClientUserMessage | undefined)?.sessionId)
@@ -668,6 +741,9 @@ export function configureDashboardNamespace(
         deps.audit?.log({ action: 'workspace.exec', actor: auditActor(socket), target: { workspaceId: raw?.workspaceId ?? 'unknown' }, outcome: 'denied', error: 'invalid payload' })
         return ack?.({ requestId: raw?.requestId ?? '', stdout: '', stderr: '', exitCode: null, durationMs: 0, error: { code: 'EINVAL', message: 'invalid payload' } })
       }
+      if (multiplexed && !subscribedWorkspaces.has(raw.workspaceId)) {
+        return ack?.({ requestId: raw.requestId, stdout: '', stderr: '', exitCode: null, durationMs: 0, error: { code: 'EACCES', message: 'workspace is not subscribed' } })
+      }
       const argvHead = raw.argv.slice(0, 3).map((arg) => typeof arg === 'string' ? arg : String(arg))
       deps.audit?.log({
         action: 'workspace.exec',
@@ -683,6 +759,9 @@ export function configureDashboardNamespace(
       if (!raw || typeof raw !== 'object' || typeof raw.requestId !== 'string' || typeof raw.workspaceId !== 'string' || typeof raw.path !== 'string') {
         deps.audit?.log({ action: 'workspace.read_binary', actor: auditActor(socket), target: { workspaceId: raw?.workspaceId ?? 'unknown' }, outcome: 'denied', error: 'invalid payload' })
         return ack?.({ requestId: raw?.requestId ?? '', base64: '', mime: 'application/octet-stream', size: 0, error: { code: 'EINVAL', message: 'invalid payload' } })
+      }
+      if (multiplexed && !subscribedWorkspaces.has(raw.workspaceId)) {
+        return ack?.({ requestId: raw.requestId, base64: '', mime: 'application/octet-stream', size: 0, error: { code: 'EACCES', message: 'workspace is not subscribed' } })
       }
       deps.audit?.log({
         action: 'workspace.read_binary',
@@ -1001,6 +1080,7 @@ export function configureDashboardNamespace(
             }
           }
           if (record?.workspaceId) {
+            deps.executors.closeSessionTerminals({ workspaceId: record.workspaceId, sessionId: targetSessionId })
             await deps.executors.deleteOverflowSession(record.workspaceId, targetSessionId).catch(() => undefined)
           }
           await deps.store.delete(targetSessionId)

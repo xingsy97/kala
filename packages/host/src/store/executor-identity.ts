@@ -20,7 +20,7 @@ type FileShape = {
 }
 
 export type ExecutorPairingSummary = { id: string; code: string; workspaceId: string; label?: string; createdAt: string; expiresAt: string; status: 'pending'|'approved'|'rejected'|'claimed'|'expired' }
-type ExecutorPairingRecord = ExecutorPairingSummary & { claimHash: string; token?: string }
+type ExecutorPairingRecord = ExecutorPairingSummary & { claimHash: string }
 
 export type ExecutorInvite = {
   id: string
@@ -126,8 +126,8 @@ export class ExecutorIdentityStore {
     this.pairings.set(id,record);this.save();return {id:record.id,code:record.code,workspaceId:record.workspaceId,...(record.label?{label:record.label}:{}),createdAt:record.createdAt,expiresAt:record.expiresAt,status:record.status,claimSecret}
   }
   pairingSnapshot(): readonly ExecutorPairingSummary[] { return [...this.pairings.values()].map((p)=>({id:p.id,code:p.code,workspaceId:p.workspaceId,...(p.label?{label:p.label}:{}),createdAt:p.createdAt,expiresAt:p.expiresAt,status:Date.parse(p.expiresAt)<=Date.now()&&p.status==='pending'?'expired':p.status})) }
-  decidePairing(id:string, approved:boolean): ExecutorPairingSummary|undefined { const p=this.pairings.get(id);if(!p||p.status!=='pending'||Date.parse(p.expiresAt)<=Date.now())return undefined;p.status=approved?'approved':'rejected';if(approved)p.token=this.provisionWorkspace(p.workspaceId,p.label);this.save();return {id:p.id,code:p.code,workspaceId:p.workspaceId,...(p.label?{label:p.label}:{}),createdAt:p.createdAt,expiresAt:p.expiresAt,status:p.status} }
-  claimPairing(id:string, secret:string): {status:ExecutorPairingSummary['status'];token?:string}|undefined { const p=this.pairings.get(id);if(!p||p.claimHash!==hashToken(secret))return undefined;if(Date.parse(p.expiresAt)<=Date.now()&&p.status==='pending')p.status='expired';if(p.status==='approved'&&p.token){const token=p.token;delete p.token;p.status='claimed';this.save();return {status:'claimed',token}};return {status:p.status} }
+  decidePairing(id:string, approved:boolean): ExecutorPairingSummary|undefined { const p=this.pairings.get(id);if(!p||p.status!=='pending'||Date.parse(p.expiresAt)<=Date.now())return undefined;p.status=approved?'approved':'rejected';this.save();return {id:p.id,code:p.code,workspaceId:p.workspaceId,...(p.label?{label:p.label}:{}),createdAt:p.createdAt,expiresAt:p.expiresAt,status:p.status} }
+  claimPairing(id:string, secret:string): {status:ExecutorPairingSummary['status'];token?:string}|undefined { const p=this.pairings.get(id);if(!p||p.claimHash!==hashToken(secret))return undefined;if(Date.parse(p.expiresAt)<=Date.now()&&p.status==='pending')p.status='expired';if(p.status==='approved'){const token=this.provisionWorkspace(p.workspaceId,p.label);p.status='claimed';this.save();return {status:'claimed',token}};return {status:p.status} }
 
   consumeInvite(inviteToken: string | undefined, workspaceId: string, label?: string): { ok: true; token: string } | { ok: false; reason: string } {
     if (!inviteToken) return { ok: false, reason: 'missing_invite' }
