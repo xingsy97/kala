@@ -42,6 +42,7 @@ export function normalizePath(p: string): string {
 export function makeCtx(root: string, signal?: AbortSignal): ToolContext {
   return {
     sessionId: 'test-session',
+    callId: 'test-call',
     sandbox: createSandbox({ roots: [root] }),
     signal: signal ?? new AbortController().signal,
   }
@@ -54,6 +55,7 @@ export function makeCtxWithCwd(
 ): ToolContext {
   return {
     sessionId: 'test-session',
+    callId: 'test-call',
     sandbox: createSandbox({ roots: [root] }),
     cwd,
     signal: signal ?? new AbortController().signal,

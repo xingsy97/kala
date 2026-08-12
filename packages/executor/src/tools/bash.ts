@@ -55,6 +55,12 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
     const runInBackground = optionalBoolean(input, 'run_in_background') ?? optionalBoolean(input, 'background') ?? false
     const shell = selectShell(optionalString(input, 'shell'))
     const timeoutMs = bashTimeoutMs(input) ?? DEFAULT_TIMEOUT_MS
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...(ctx.env ?? {}),
+      AGENT_RUNLAB_SESSION_ID: ctx.sessionId,
+      AGENT_RUNLAB_CALL_ID: ctx.callId,
+    }
 
     const cwd = cwdInput ?? ctx.cwd ?? ctx.sandbox.roots[0] ?? process.cwd()
     let resolvedCwd: string
@@ -74,7 +80,7 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
     }
 
     if (runInBackground) {
-      const task = await startBackgroundShell({ sessionId: ctx.sessionId, command, cwd: resolvedCwd, env: ctx.env, shell })
+      const task = await startBackgroundShell({ sessionId: ctx.sessionId, command, cwd: resolvedCwd, env, shell })
       return JSON.stringify({
         taskId: task.taskId,
         note: 'started',
@@ -95,7 +101,7 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
       try {
         child = spawn(shell.executable, shellArgv(shell, command), {
           cwd: resolvedCwd,
-          env: ctx.env ?? process.env,
+          env,
           stdio: ['ignore', 'pipe', 'pipe'],
         })
       } catch (err) {
