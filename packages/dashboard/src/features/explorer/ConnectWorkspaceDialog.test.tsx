@@ -73,14 +73,14 @@ describe('ConnectWorkspaceDialog', () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 
-  it('stops polling and deletes the unused installation when closed', async () => {
+  it('stops polling without invalidating the copied setup command when closed', async () => {
     const view = render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
     await screen.findByText(/curl -fsSL/)
     view.rerender(<ConnectWorkspaceDialog open={false} onOpenChange={() => {}} />)
-    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs/inst_1' && init?.method === 'DELETE')).toBe(true))
     const count = vi.mocked(fetch).mock.calls.length
     await vi.advanceTimersByTimeAsync(5_000)
     expect(vi.mocked(fetch).mock.calls).toHaveLength(count)
+    expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs/inst_1' && init?.method === 'DELETE')).toBe(false)
   })
 
   it('shows pairing approval and handles clipboard failure', async () => {

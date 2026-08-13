@@ -51,9 +51,12 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
   useEffect(() => {
     if (!open) {
       generationRef.current += 1
-      const staleId = installationIdRef.current
+      // Do not delete the installation when the dialog closes. The normal flow
+      // is copy command → close dialog → run it in another terminal; deleting
+      // here invalidated the displayed one-time setup code before it could be
+      // claimed and made every copied command fail with HTTP 401. Unclaimed
+      // records are bounded by the Host TTL and expire automatically.
       installationIdRef.current = null
-      if (staleId) void fetch(`/api/executor-installs/${encodeURIComponent(staleId)}`, { method: 'DELETE' }).catch(() => undefined)
       setInstallation(null)
       setCommand('')
       setPairingCode(null)
