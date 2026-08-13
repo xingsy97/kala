@@ -265,11 +265,11 @@ describe('step: llm_response (plain answer)', () => {
 })
 
 describe('step: llm_response with tool calls', () => {
-  it('adds a safe fallback intent when an older provider omits _intent', () => {
+  it('keeps missing legacy intent absent instead of synthesizing misleading UI copy', () => {
     const s0 = { ...initial(), status: 'thinking' as const }
     const { next, effects } = step(s0, { kind: 'llm_response', message: asst({ type: 'tool_call', callId: 'intent-fallback', name: 'read_file', input: { path: '/tmp/config.ts' } }) }, CONFIG)
-    expect(next.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool_call', intent: 'read file: /tmp/config.ts' })
-    expect(effects[0]).toMatchObject({ intent: 'read file: /tmp/config.ts' })
+    expect(next.messages.at(-1)?.content[0]).toEqual({ type: 'tool_call', callId: 'intent-fallback', name: 'read_file', input: { path: '/tmp/config.ts' } })
+    expect(effects[0]).not.toHaveProperty('intent')
   })
 
   it('extracts intent metadata and removes it from execution input', () => {
@@ -300,7 +300,6 @@ describe('step: llm_response with tool calls', () => {
         callId: 'c1',
         name: 'read',
         input: { path: '/tmp/x' },
-        intent: 'read: /tmp/x',
         status: 'dispatched',
       },
     ])
@@ -310,7 +309,6 @@ describe('step: llm_response with tool calls', () => {
         callId: 'c1',
         name: 'read',
         input: { path: '/tmp/x' },
-        intent: 'read: /tmp/x',
       },
     ])
   })
@@ -338,7 +336,6 @@ describe('step: llm_response with tool calls', () => {
         callId: 'c1',
         name: 'write',
         input: { path: '/tmp/x', content: 'y' },
-        intent: 'write: /tmp/x',
       },
     ])
   })

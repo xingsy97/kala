@@ -81,12 +81,11 @@ function appendCancelledResultsForOrphanedToolCalls(messages: readonly Message[]
   return [...messages, ...repairs]
 }
 
-function fallbackToolIntent(name: string, input: Record<string, unknown>): string {
-  const target = ['path', 'cwd', 'pattern', 'query', 'url', 'command']
-    .map((key) => input[key])
-    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
-  const readableName = name.replaceAll('_', ' ')
-  return target ? `${readableName}: ${target.trim().slice(0, 100)}` : `Run ${readableName}.`
+function fallbackToolIntent(_name: string, _input: Record<string, unknown>): undefined {
+  // Execution remains backward compatible when a provider violates the modern
+  // required schema, but absent business context must stay absent. Synthesizing
+  // generic copy turns a protocol defect into misleading product UI.
+  return undefined
 }
 
 export function onLlmResponse(
@@ -103,10 +102,10 @@ export function onLlmResponse(
       if (content.type !== 'tool_call') return content
       const input = content.input ?? {}
       const rawIntent = input._intent
-      const explicitIntent = typeof rawIntent === 'string' && rawIntent.trim().length > 0 ? rawIntent.trim().slice(0, 160) : undefined
+      const explicitIntent = typeof rawIntent === 'string' && rawIntent.trim().length > 0 ? rawIntent.trim().slice(0, 240) : undefined
       const { _intent: _discarded, ...executionInput } = input
       const intent = explicitIntent ?? fallbackToolIntent(content.name, executionInput)
-      return { ...content, input: executionInput, intent }
+      return { ...content, input: executionInput, ...(intent ? { intent } : {}) }
     }),
   }
   const messages = [...state.messages, sanitizedMessage]

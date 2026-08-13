@@ -48,12 +48,9 @@ export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolEx
         if (streamingActive) return null
         return <ThinkingRow progress={progress} />
       case 'executing_tools':
-        // The current Tool Card already communicates live execution. A second
-        // full-width status row duplicated that information and previously mixed
-        // in lifetime call counts, producing labels such as "+4833 earlier".
-        return null
+        return <ThinkingRow progress={progress} />
       case 'awaiting_approval':
-        return <AwaitingApprovalRow />
+        return progress?.intention ? <ThinkingRow progress={progress} /> : <AwaitingApprovalRow />
     }
   }
   // Bridge the socket round-trip between user submit and the kernel's first
@@ -66,16 +63,16 @@ function ThinkingRow({ progress }: { progress?: AgentProgress }): JSX.Element {
   const { t } = useTranslation()
   return (
     <div
-      className="ak-thinking-row mb-3 inline-flex items-center gap-2 overflow-hidden rounded-full border border-border/70 bg-white/90 px-3 py-1.5 text-xs text-foreground shadow-sm ring-1 ring-white/80 dark:bg-zinc-950/90 dark:ring-white/10"
+      className="ak-thinking-row mb-3 flex w-full min-w-0 items-start gap-2 rounded-lg border border-border/70 bg-white/90 px-3 py-2 text-xs text-foreground shadow-sm ring-1 ring-white/80 dark:bg-zinc-950/90 dark:ring-white/10"
       data-testid="inline-status-thinking"
       role="status"
       aria-live="polite"
     >
-      <span className="relative z-[1] flex h-3 w-3 flex-none items-center justify-center text-primary" aria-hidden="true">
+      <span className="relative z-[1] mt-0.5 flex h-3 w-3 flex-none items-center justify-center text-primary" aria-hidden="true">
         <span className="absolute h-3 w-3 rounded-full bg-current opacity-20 ak-thinking-dot" />
         <span className="relative h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_10px_hsl(var(--primary)/0.55)]" />
       </span>
-      <span className="relative z-[1] font-medium">{progress?.label ?? t('chatStatus.thinking')}</span>
+      <span className="relative z-[1] min-w-0 whitespace-pre-wrap break-words font-medium leading-relaxed" data-testid={progress?.intention ? 'inline-status-intention' : undefined}>{progress?.label ?? t('chatStatus.thinking')}</span>
     </div>
   )
 }

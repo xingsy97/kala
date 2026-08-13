@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
+import { notify } from './notify.js'
 
 import type { Message, MessageContent } from '@agent-kernel/kernel'
 
@@ -732,8 +733,17 @@ export function App(): JSX.Element {
   }
 
   const onApprovalModeChange = (mode: import('@agent-kernel/kernel').ApprovalMode): void => {
-    if (!session.socket || config.sessionId === null) return
-    setSessionApprovalMode(session.socket, config.sessionId, mode)
+    if (!session.socket || activeSessionId === null) {
+      notify.error('Unable to change approval mode', { description: 'No active Session connection.' })
+      return
+    }
+    void setSessionApprovalMode(session.socket, activeSessionId, mode).then(() => {
+      notify.success(`Approval mode changed to ${mode === 'allow_all' ? 'Allow all' : mode}`)
+    }).catch((error) => {
+      notify.error('Unable to change approval mode', {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    })
   }
 
   const runCompactNow = (): void => {
@@ -1160,7 +1170,6 @@ export function App(): JSX.Element {
   const taskItems = useMemo(() => tasksFromTimeline(session.timeline), [session.timeline])
   const agentProgress = useMemo(() => deriveAgentProgress(session.state, session.timeline), [session.state, session.timeline])
   const taskGraph = useMemo(() => taskGraphFromTimeline(session.timeline), [session.timeline])
-  const activeSessionStatus = selectedSessionActivity.status
   useRunningTitleIndicator(selectedSessionActivity.derived.isRunning)
   // Coarse status for the indicators (sidebar + title): collapses the rapid
   // thinking↔executing_tools flips within a running turn so those indicators
@@ -1468,7 +1477,9 @@ export function App(): JSX.Element {
         disabled: !canRun,
         disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => {
-          if (socket && activeSessionId !== null) setSessionApprovalMode(socket, activeSessionId, mode.value)
+          if (socket && activeSessionId !== null) void setSessionApprovalMode(socket, activeSessionId, mode.value).catch((error) => {
+            notify.error('Unable to change approval mode', { description: error instanceof Error ? error.message : String(error) })
+          })
         },
       })
     }
@@ -1711,7 +1722,7 @@ export function App(): JSX.Element {
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
             <WorkbenchToolbar
               sessionLabel={sessionLabel}
-              sessionActivityStatus={activeSessionStatus}
+              sessionActivityStatus={indicatorActiveSessionStatus}
               cwd={currentCwd}
               onOpenTopbar={() => setTopbarOpen(true)}
               topbarAvailable={!topbarOpen}
@@ -1791,6 +1802,7 @@ export function App(): JSX.Element {
                         onDismissCompactStatus={() => setCompactStatus({ kind: 'idle' })}
                         pendingApprovals={session.pendingApprovals}
                         activeToolCallIds={session.state?.pendingCalls.map((call) => call.callId) ?? []}
+                        badgeIntentionCallId={agentProgress.intention ? agentProgress.callId : undefined}
                         onReadOverflow={readOverflow}
                         onOpenWorkspaceFile={setWorkspaceFileViewTarget}
                         parentSessionId={activeSessionId ?? undefined}

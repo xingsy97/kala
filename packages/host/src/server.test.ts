@@ -217,6 +217,97 @@ describe('wire protocol', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('advertises an 8 MiB Socket.IO payload limit for bounded inline images', async () => {
+    const body = await fetch(`${url}/socket.io/?EIO=4&transport=polling`).then((response) => response.text())
+    const handshake = JSON.parse(body.slice(1)) as { maxPayload: number }
+    expect(handshake.maxPayload).toBe(8 * 1024 * 1024)
+  })
+
+  it('acknowledges approval-mode changes and persists the authoritative mode', async () => {
+    const sessionId = 'approval-mode-ack'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:set_approval_mode', {
+      operationId: 'approval-mode-ack-op',
+      sessionId,
+      mode: 'allow_all',
+    })
+
+    expect(ack).toEqual({ ok: true })
+    expect(server.store.get(sessionId)?.state.approvalMode).toBe('allow_all')
+    dashboard.close()
+  })
+
+  it('rejects invalid and oversized inline images before starting a turn', async () => {
+    const sessionId = 'wire-image-policy'
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const invalid = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'invalid image',
+      operationId: 'invalid-image',
+      content: [{ type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: Buffer.from('not png').toString('base64') } }],
+    })
+    expect(invalid).toMatchObject({ ok: false, error: expect.stringContaining('IMAGE_INVALID_BASE64') })
+
+    const oversizedBytes = Buffer.alloc(2 * 1024 * 1024 + 1)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(oversizedBytes)
+    const oversized = await dashboard.timeout(3000).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'oversized image',
+      operationId: 'oversized-image',
+      content: [{ type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: oversizedBytes.toString('base64') } }],
+    })
+    expect(oversized).toMatchObject({ ok: false, error: expect.stringContaining('IMAGE_TOO_LARGE') })
+    expect(server.store.get(sessionId)).toBeUndefined()
+    dashboard.close()
+  })
+
+  it('accepts a bounded two-image payload larger than the legacy 1 MiB transport limit', async () => {
+    const sessionId = 'wire-two-large-images'
+    const record = await server.store.ensure({ sessionId, defaultConfig: config })
+    record.record.state = { ...record.record.state, status: 'thinking' }
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const makePng = (): string => {
+      const bytes = Buffer.alloc(600_000)
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes)
+      return bytes.toString('base64')
+    }
+    const ack = await dashboard.timeout(3000).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'two screenshots',
+      mode: 'queue',
+      operationId: 'two-large-images',
+      content: [
+        { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: makePng() } },
+        { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: makePng() } },
+      ],
+    })
+    expect(ack).toMatchObject({ ok: true })
+    const queue = await new Promise<ServerMessageQueueEvent>((resolve) => {
+      dashboard.once('server:message_queue', resolve)
+      dashboard.emit('client:subscribe_channels', { requestId: 'queue-check', generation: 1, channels: [`session:${sessionId}`] }, () => {})
+    })
+    expect(queue.items?.[0]?.content?.filter((block) => block.type === 'image')).toHaveLength(2)
+    dashboard.close()
+  })
+
   it('exposes host restart runtime status over HTTP and settings', async () => {
     const status = await fetch(`${url}/runtime/restart/status`).then((r) => r.json() as Promise<{ pid: number; current: unknown }>)
     expect(status.pid).toBe(process.pid)
@@ -3287,6 +3378,8 @@ describe('wire protocol', () => {
     )
 
     const queueEvents: Array<{ pending: number; text?: string; mode?: string; id?: string }> = []
+    let queuedCommitObserved = false
+    let queueClearedAtCommit = false
     dashboard.on('server:message_queue', (p) => {
       if (p.sessionId === sessionId) {
         queueEvents.push({
@@ -3295,7 +3388,11 @@ describe('wire protocol', () => {
           mode: p.items[0]?.mode,
           id: p.items[0]?.id,
         })
+        if (queuedCommitObserved && p.pending === 0) queueClearedAtCommit = true
       }
+    })
+    dashboard.on('event:appended', (p) => {
+      if (p.sessionId === sessionId && p.event.kind === 'user_message' && p.event.operationId === 'queued-second') queuedCommitObserved = true
     })
     const finalDone = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('queued turn never finished')), 4000)
@@ -3354,6 +3451,7 @@ describe('wire protocol', () => {
 
     expect(queueEvents.map((e) => e.pending)).toContain(1)
     expect(queueEvents.map((e) => e.pending)).toContain(0)
+    expect(queueClearedAtCommit).toBe(true)
     expect(queueEvents.some((e) => e.pending === 1 && e.text === 'second' && e.mode === 'queue' && typeof e.id === 'string')).toBe(true)
     expect(seenPrompts).toEqual(['first', 'first|second'])
     expect(seenModels).toEqual(['provider:model-a', 'provider:model-a'])

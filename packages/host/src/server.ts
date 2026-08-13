@@ -69,7 +69,7 @@ import { snapshotFromConfig, type ContextWindowOverride } from './context/manage
 import { setWireValidationLogger } from './wire-validation.js'
 import type { RuntimeLogger } from './logger.js'
 import type { DeploymentMode, RuntimeCapabilities } from '@agent-kernel/shared'
-import { FULL_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
+import { FULL_RUNTIME_CAPABILITIES, SOCKET_MAX_HTTP_BUFFER_BYTES } from '@agent-kernel/shared'
 import type { SocketAdminConfig } from './socket-admin.js'
 import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinator.js'
 import { inspectUnitQuiescence } from './tenant-runtime/quiescence.js'
@@ -148,6 +148,8 @@ export type HostServerOptions = {
   logger?: Pick<RuntimeLogger, 'warn'>
   deploymentMode?: DeploymentMode
   capabilities?: RuntimeCapabilities
+  /** Standalone defaults to true; embedders may explicitly retain the guard. */
+  allowAllApprovalMode?: boolean
 }
 
 export type HostServer = {
@@ -178,6 +180,7 @@ export async function startHostServer(
   const allowedOrigins = parseAllowedOrigins(process.env.AGENT_KERNEL_ALLOWED_ORIGINS)
   const io = new IOServer(http, {
     cors: allowedOrigins === null ? { origin: '*' } : { origin: allowedOrigins, credentials: true },
+    maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_BYTES,
     pingInterval: 20_000,
     pingTimeout: 30_000,
     connectionStateRecovery: {
@@ -650,6 +653,19 @@ export async function startHostServer(
           // user_message commit. A crash before commit leaves the item queued;
           // a crash after commit is recognized by operationId and only removes
           // the already-dispatched item on recovery.
+          const dequeueCommitted = async (): Promise<void> => {
+            if (closed) return
+            let changed = false
+            await withQueueMutation(sessionId, async () => {
+              if (closed) return
+              const queue = [...await loadQueue(sessionId)]
+              if (queue[0]?.id !== next.id) return
+              queue.shift()
+              await persistQueue(sessionId, queue)
+              changed = true
+            })
+            if (changed && !closed) emitQueueUpdate(sessionId)
+          }
           const alreadyDispatched = await sessionHasUserOperation(store, sessionId, next.operationId)
           if (!alreadyDispatched) {
             await loop.dispatch(sessionId, {
@@ -657,17 +673,10 @@ export async function startHostServer(
               operationId: next.operationId,
               text: next.text,
               ...(next.content ? { content: next.content } : {}),
-            }, next.model ? { model: next.model } : undefined)
+            }, { ...(next.model ? { model: next.model } : {}), onCommitted: dequeueCommitted })
+          } else {
+            await dequeueCommitted()
           }
-          if (closed) return
-          await withQueueMutation(sessionId, async () => {
-            if (closed) return
-            const queue = [...await loadQueue(sessionId)]
-            if (queue[0]?.id !== next.id) return
-            queue.shift()
-            await persistQueue(sessionId, queue)
-          })
-          if (!closed) emitQueueUpdate(sessionId)
         }
       } finally {
         drainingQueues.delete(sessionId)
@@ -943,6 +952,7 @@ export async function startHostServer(
     defaultConfig: getDefaultConfig,
     ...(auth ? { auth } : {}),
     audit,
+    allowAllApprovalMode: options.allowAllApprovalMode ?? true,
     broadcastError,
     contextWindowForModel,
     effectiveDefaultModel,

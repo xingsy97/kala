@@ -338,6 +338,7 @@ export function useSession({
     let liveBaselineReceived = false
     let socket: DashboardSocket | null = null
     let reconnectCleanup: (() => void) | null = null
+    let socketListenerCleanup: (() => void) | null = null
     // Durable hydration and the live socket race independently. IndexedDB is a
     // paint optimization; it must never delay the authoritative connection.
     if (!cached && cache?.hydrate) {
@@ -389,7 +390,21 @@ export function useSession({
     }
 
     const bindSocket = (socket: DashboardSocket): void => {
-      const isCurrentSocket = (): boolean => socketRef.current === socket
+      const listenerCleanups: Array<() => void> = []
+      const bind = <EventName extends keyof DashboardServerToClientEvents | 'connect_error' | 'disconnect'>(
+        event: EventName,
+        listener: EventName extends keyof DashboardServerToClientEvents
+          ? DashboardServerToClientEvents[EventName]
+          : (...args: never[]) => void,
+      ): void => {
+        socket.on(event as never, listener as never)
+        listenerCleanups.push(() => socket.off(event, listener as never))
+      }
+      socketListenerCleanup = () => {
+        for (const cleanup of listenerCleanups) cleanup()
+        listenerCleanups.length = 0
+      }
+      const isCurrentSocket = (): boolean => !disposed && socketRef.current === socket
       let plannedRestartUntil = 0
 
       const noteHostRestart = (event: HostRestartEvent): void => {
@@ -399,7 +414,7 @@ export function useSession({
         }
       }
 
-    socket.on('session:ready', (p) => {
+    bind('session:ready', (p) => {
       if (!isCurrentSocket()) return
       if (p.reason === 'forked') {
         onForkedRef.current?.(p)
@@ -432,14 +447,14 @@ export function useSession({
         sinceCursor: hydration.sinceCursor,
       })
     })
-    socket.on('server:history', (p) => {
+    bind('server:history', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       const reset = resetHistoryBaseOnNextReplay
       resetHistoryBaseOnNextReplay = false
       flushProjectionQueue()
       dispatchProjectionEvent({ kind: 'history', generation, sessionId, entries: p.entries.map(timelineEntry), reset })
     })
-    socket.on('state:changed', (p) => {
+    bind('state:changed', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       // Kept as a fallback / correction channel. The primary path is
       // `session:ready` (baseline) + `event:appended` (client-side fold
@@ -453,7 +468,7 @@ export function useSession({
       enqueueProjection({ kind: 'authoritative', generation, sessionId, payload: p })
       if (p.state.status !== 'thinking') resetStream()
     })
-    socket.on('event:appended', (p) => {
+    bind('event:appended', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
         // Commit the persisted response first, while the live tail still
@@ -469,38 +484,38 @@ export function useSession({
       // one React commit per animation frame.
       enqueueProjection({ kind: 'appended', generation, sessionId, payload: p })
     })
-    socket.on('approval:required', () => {
+    bind('approval:required', () => {
       // Best-effort: the reducer's next state:changed already carries the
       // authoritative pendingCalls list, so the derived pendingApprovals
       // updates from that. This handler is left as a hook point for
       // logging/telemetry — it must NOT maintain its own list, or the
       // banner-vs-card mismatch across reloads comes back.
     })
-    socket.on('server:message_queue', (p) => {
+    bind('server:message_queue', (p) => {
       if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) {
         const items = p.items ?? []
         dispatchProjectionEvent({ kind: 'queue', generation, sessionId, items })
       }
     })
-    socket.on('session:error', (p) => {
+    bind('session:error', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       resetStream()
       flushProjectionQueue()
       dispatchProjectionEvent({ kind: 'error', generation, sessionId, error: p })
     })
-    socket.on('session:token_delta', (p) => {
+    bind('session:token_delta', (p) => {
       if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) pushStreamDelta(p.text)
     })
-    socket.on('server:control_update', (p: ControlUpdate) => {
+    bind('server:control_update', (p: ControlUpdate) => {
       if (p.kind === 'host_restart') noteHostRestart(p)
       if (p.kind === 'session_meta_changed' && p.sessionId === sessionId && p.preferences && 'selectedModel' in p.preferences) {
         const model = p.preferences.selectedModel && p.preferences.selectedModel.length > 0 ? p.preferences.selectedModel : null
         dispatchProjectionEvent({ kind: 'model', generation, sessionId, selectedModel: model })
       }
     })
-    if (!sharedSocket) socket.on('connect_error', (err) => {
+    if (!sharedSocket) bind('connect_error', (err: Error) => {
       if (!isCurrentSocket()) return
       // Version / auth failures are handshake-time — no point retrying.
       // Stop the socket.io retry loop and hold in an error state so the
@@ -515,7 +530,7 @@ export function useSession({
       if (!isCurrentSocket()) return
       dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
     })
-    if (!sharedSocket) socket.on('disconnect', (reason) => {
+    if (!sharedSocket) bind('disconnect', (reason: string) => {
       if (!isCurrentSocket()) return
       // Server-initiated disconnect (e.g. workspaceId conflict analogue on
       // dashboard side, or host shutdown) is terminal — don't let socket.io
@@ -531,7 +546,7 @@ export function useSession({
       }
       dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'disconnected' })
     })
-    socket.on('server:compact_status', (p: CompactStatusEvent) => {
+    bind('server:compact_status', (p: CompactStatusEvent) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       dispatchProjectionEvent({ kind: 'compact', generation, sessionId, compactStatus: p })
     })
@@ -557,6 +572,8 @@ export function useSession({
       pendingCommit = ''
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', handleVisibilityChange)
       reconnectCleanup?.()
+      socketListenerCleanup?.()
+      socketListenerCleanup = null
       if (!sharedSocket) socket?.close()
       if (socketRef.current === socket) socketRef.current = null
       setBoundSocket((current) => current?.socket === socket ? null : current)
@@ -836,8 +853,8 @@ export function setSessionApprovalMode(
   socket: DashboardSocket,
   sessionId: string,
   mode: import('@agent-kernel/kernel').ApprovalMode,
-): void {
-  socket.emit('client:set_approval_mode', { sessionId, mode })
+): Promise<void> {
+  return emitRpc(socket, 'client:set_approval_mode', { sessionId, mode })
 }
 
 export function reorderQueuedMessage(

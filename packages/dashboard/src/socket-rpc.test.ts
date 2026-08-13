@@ -24,13 +24,15 @@ describe('emitRpc', () => {
     expect(emitWithAck.mock.calls[1]?.[1].operationId).toBe('stable-op')
   })
 
-  it('throws business errors from ACK envelopes', async () => {
+  it('throws business errors from ACK envelopes without retrying', async () => {
+    const emitWithAck = vi.fn().mockResolvedValue({ ok: false, error: 'IMAGE_TOO_LARGE: reduce the image size' })
     const socket = {
       connected: true,
       active: true,
-      timeout: () => ({ emitWithAck: async () => ({ ok: false, error: 'denied' }) }),
+      timeout: () => ({ emitWithAck }),
       connect: vi.fn(),
     }
-    await expect(emitRpc(socket as never, 'client:test', {}, { attempts: 1 })).rejects.toThrow('denied')
+    await expect(emitRpc(socket as never, 'client:test', {}, { attempts: 3 })).rejects.toThrow('IMAGE_TOO_LARGE')
+    expect(emitWithAck).toHaveBeenCalledTimes(1)
   })
 })

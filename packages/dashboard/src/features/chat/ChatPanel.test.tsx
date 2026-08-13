@@ -69,7 +69,18 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
   })
 
-  it('shows a live elapsed timer on the running tool card (not a separate inline status card)', () => {
+  it('shows the current running Intention in the persistent activity badge', () => {
+    render(
+      <InlineStatusRow
+        state={{ ...createInitialState({}), status: 'executing_tools', pendingCalls: [{ callId: 'c1', name: 'read', input: {}, status: 'dispatched' }] }}
+        streamingActive={false}
+        progress={{ phase: 'tools', label: 'In progress: Diagnose why Tool activity copy is duplicated across live surfaces.', intention: 'Diagnose why Tool activity copy is duplicated across live surfaces.', callId: 'c1', outcome: 'running' }}
+      />,
+    )
+    expect(screen.getByTestId('inline-status-intention').textContent).toBe('In progress: Diagnose why Tool activity copy is duplicated across live surfaces.')
+  })
+
+  it('shows a live elapsed timer on the running tool card alongside the intention badge', () => {
     render(
       <DashboardChatPanel
         toolCardMode="full"
@@ -295,7 +306,9 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getByTestId('tool-card-dots-dot-1')).toBeTruthy()
-    expect(screen.getByTestId('tool-card-dots-dot-1').style.maxWidth).toBe('90%')
+    expect(screen.getByTestId('tool-card-dots-dot-1').className).toContain('grid-cols-')
+    expect(screen.getByTestId('tool-card-dots-intent-dot-1').className).toContain('col-start-2')
+    expect(screen.getByTestId('tool-card-dots-intent-dot-1').className).not.toContain('truncate')
     expect(screen.queryByText('Tool activity')).toBeNull()
     expect(screen.queryByText('2')).toBeNull()
     expect(screen.getByLabelText('Assistant')).toBeTruthy()
@@ -303,8 +316,10 @@ describe('ChatPanel', () => {
     expect(screen.getAllByTestId('tool-activity-connector')).toHaveLength(1)
     expect(screen.getByTestId('tool-activity-connector').className).toContain('absolute')
     expect(screen.getByTestId('tool-activity-direction')).toBeTruthy()
-    expect(screen.getByTestId('tool-card-dot-dot-1').getAttribute('title')).toContain('read · /repo/a.ts · succeeded')
-    expect(screen.getByTestId('tool-card-dot-dot-2').getAttribute('title')).toContain('bash · pnpm test · failed')
+    expect(screen.getByTestId('tool-card-dot-dot-1').getAttribute('title')).toBe('Inspect the implementation before changing it.')
+    expect(screen.getByTestId('tool-card-dot-dot-2').getAttribute('title')).toBe('Run the focused tests to verify current behavior.')
+    expect(screen.getByTestId('tool-card-dot-dot-1').getAttribute('title')).not.toContain('/repo/a.ts')
+    expect(screen.getByTestId('tool-card-dot-dot-2').getAttribute('title')).not.toContain('pnpm test')
     expect(screen.getByTestId('tool-card-dot-dot-1').querySelector('[data-shape="read"]')).toBeTruthy()
     expect(screen.getByTestId('tool-card-dot-dot-2').querySelector('[data-shape="shell"]')).toBeTruthy()
 
@@ -314,7 +329,7 @@ describe('ChatPanel', () => {
     const hoverCard = screen.getByTestId('tool-card-preview-layer-dot-1')
     expect(screen.getByTestId('tool-call-detail-intent-dot-1').textContent).toBe('Inspect the implementation before changing it.')
     expect(hoverCard.className).toContain('fixed')
-    expect(hoverCard.className).toContain('w-[min(34rem,calc(100vw-1rem))]')
+    expect(hoverCard.style.width).toBe('544px')
     expect(hoverCard.getAttribute('data-placement')).toBe('right-below')
     expect(hoverCard.textContent).toContain('/repo/a.ts')
     expect(hoverCard.textContent).toContain('a')
@@ -327,8 +342,12 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-call-detail-intent-dot-2').textContent).toBe('Run the focused tests to verify current behavior.')
     const pinnedCard = screen.getByTestId('tool-card-preview-layer-dot-2')
     expect(pinnedCard.textContent).toContain('failed')
-    expect(pinnedCard.textContent).toContain('pnpm test')
+    expect(pinnedCard.textContent).toContain('result')
+    const technicalDetails = screen.getByTestId('tool-call-technical-details-dot-2')
+    expect(technicalDetails.hasAttribute('open')).toBe(false)
+    expect(technicalDetails.textContent).toContain('Technical details')
     expect(pinnedCard.className).toContain('pointer-events-auto')
+    expect(screen.getByTestId('tool-card-preview-close')).toBeTruthy()
     const previewScroll = screen.getByTestId('tool-card-preview-scroll-dot-2')
     expect(previewScroll.className).toContain('overflow-y-auto')
     fireEvent.wheel(previewScroll, { deltaY: 120 })
@@ -336,8 +355,8 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('tool-call-group-details-dot-1')).toBeNull()
 
     fireEvent.mouseEnter(firstDot)
-    expect(screen.getByTestId('tool-card-preview-layer-dot-1')).toBeTruthy()
-    expect(screen.queryByTestId('tool-card-preview-layer-dot-2')).toBeNull()
+    expect(screen.getByTestId('tool-card-preview-layer-dot-2')).toBeTruthy()
+    expect(screen.queryByTestId('tool-card-preview-layer-dot-1')).toBeNull()
     fireEvent.mouseLeave(firstDot)
     expect(screen.getByTestId('tool-card-preview-layer-dot-2')).toBeTruthy()
 
@@ -788,6 +807,11 @@ describe('ChatPanel', () => {
     expect(image?.getAttribute('src')).toBe('/session-artifacts/artifact-1?sessionId=session-1')
     fireEvent.click(button)
     expect(screen.getAllByAltText('Concept')).toHaveLength(2)
+    const dialog = screen.getByTestId('artifact-image-preview-dialog')
+    expect(dialog.className).toContain('w-screen')
+    expect(dialog.className).toContain('--ak-viewport-h')
+    expect(dialog.className).toContain('grid-rows-[auto_minmax(0,1fr)]')
+    expect(screen.getByTestId('artifact-image-preview-close').className).toContain('h-11 w-11')
   })
 
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
@@ -1318,11 +1342,81 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('try-again-message-1')).toBeNull()
   })
 
-  it('keeps persisted natural-language intent visible beside a collapsed tool dot', () => {
-    render(<DashboardChatPanel messages={[{ role: 'assistant', content: [{ type: 'tool_call', callId: 'intent-card', name: 'read', input: { path: '/repo/a.ts' }, intent: 'Inspect the current implementation before editing it.' }] }]} />)
+  it('shows settled intent as history but suppresses the running intent owned by the badge', () => {
+    const message = { role: 'assistant' as const, content: [{ type: 'tool_call' as const, callId: 'intent-card', name: 'read', input: { path: '/repo/a.ts' }, intent: 'Inspect the current implementation before editing it.' }] }
+    const { rerender } = render(<DashboardChatPanel messages={[message]} activeToolCallIds={[]} />)
     expect(screen.getByTestId('tool-card-dots-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
+
+    rerender(<DashboardChatPanel messages={[message]} activeToolCallIds={['intent-card']} badgeIntentionCallId="intent-card" />)
+    expect(screen.queryByTestId('tool-card-dots-intent-intent-card')).toBeNull()
     fireEvent.mouseEnter(screen.getByTestId('tool-card-dot-intent-card'))
     expect(screen.getByTestId('tool-call-detail-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
+    expect(screen.queryByTestId('tool-card-dots-intent-intent-card')).toBeNull()
+  })
+
+  it('lets inspection text replace the settled group summary and restores it after hover', () => {
+    const messages = [{ role: 'assistant' as const, content: [
+      { type: 'tool_call' as const, callId: 'history-1', name: 'read', input: {}, intent: 'Identify the original state projection defect.' },
+      { type: 'tool_call' as const, callId: 'history-2', name: 'grep', input: {}, intent: 'Confirm the final historical summary remains useful after execution.' },
+    ] }]
+    render(<DashboardChatPanel messages={messages} activeToolCallIds={[]} />)
+    expect(screen.getByTestId('tool-card-dots-intent-history-1').textContent).toBe('Confirm the final historical summary remains useful after execution.')
+    fireEvent.mouseEnter(screen.getByTestId('tool-card-dot-history-1'))
+    expect(screen.getByTestId('tool-card-dots-intent-history-1').textContent).toBe('Identify the original state projection defect.')
+    fireEvent.mouseLeave(screen.getByTestId('tool-card-dot-history-1'))
+    expect(screen.getByTestId('tool-card-dots-intent-history-1').textContent).toBe('Confirm the final historical summary remains useful after execution.')
+  })
+
+  it('keeps another inspected historical Intention visible while the badge owns a running call', () => {
+    const messages = [{ role: 'assistant' as const, content: [
+      { type: 'tool_call' as const, callId: 'old', name: 'read', input: {}, intent: 'Inspect the earlier projection behavior for comparison.' },
+      { type: 'tool_call' as const, callId: 'live', name: 'grep', input: {}, intent: 'Validate the current live activity de-duplication contract.' },
+    ] }]
+    render(<DashboardChatPanel messages={messages} activeToolCallIds={['live']} badgeIntentionCallId="live" />)
+    expect(screen.queryByTestId('tool-card-dots-intent-old')).toBeNull()
+    fireEvent.mouseEnter(screen.getByTestId('tool-card-dot-old'))
+    expect(screen.getByTestId('tool-card-dots-intent-old').textContent).toBe('Inspect the earlier projection behavior for comparison.')
+  })
+
+  it('hides the collapsed summary after expansion and exposes each row Intention', () => {
+    const messages = [{ role: 'assistant' as const, content: [
+      { type: 'tool_call' as const, callId: 'expand-1', name: 'read', input: { path: '/very/long/private/path' }, intent: 'Inspect the responsive activity header contract.' },
+      { type: 'tool_call' as const, callId: 'expand-2', name: 'grep', input: { pattern: 'private' }, intent: 'Verify technical parameters remain outside the default expanded header.' },
+    ] }]
+    render(<DashboardChatPanel messages={messages} activeToolCallIds={[]} />)
+    fireEvent.click(screen.getByTestId('tool-activity-direction'))
+    expect(screen.queryByTestId('tool-card-dots-intent-expand-1')).toBeNull()
+    expect(screen.getByTestId('grouped-tool-intent-expand-1').textContent).toBe('Inspect the responsive activity header contract.')
+    expect(screen.getByTestId('grouped-tool-intent-expand-2').textContent).toBe('Verify technical parameters remain outside the default expanded header.')
+    const expandedRow = screen.getByTestId('grouped-tool-row-expand-1')
+    expect(expandedRow.className).toContain('grid-cols-[auto_minmax(0,1fr)]')
+    expect(expandedRow.className).toContain('sm:grid-cols-[auto_minmax(0,1fr)_auto]')
+    expect(expandedRow.textContent).toContain('Inspect the responsive activity header contract.')
+    expect(screen.getByTestId('tool-call-group-toggle-expand-1').textContent).not.toContain('/very/long/private/path')
+    expect(screen.getByTestId('tool-call-group-details-expand-1').textContent).toContain('/very/long/private/path')
+    expect(screen.getByTestId('tool-call-group-details-expand-1').textContent).toContain('/private/')
+  })
+
+  it('aggregates completed legacy calls without Intention instead of repeating placeholders', () => {
+    const calls = Array.from({ length: 53 }, (_, index) => ({ type: 'tool_call' as const, callId: `legacy-${index}`, name: 'read_file', input: { path: `/private/${index}` } }))
+    const results = calls.map((call, index) => ({ type: 'tool_result' as const, callId: call.callId, ok: index >= 49 ? false : true, content: index >= 49 ? 'failed' : 'ok' }))
+    render(<DashboardChatPanel activeToolCallIds={[]} messages={[{ role: 'assistant', content: calls }, { role: 'tool', content: results }]} />)
+    fireEvent.click(screen.getByTestId('tool-activity-direction'))
+    expect(screen.queryByText(/completed operations have no recorded Intention/)).toBeNull()
+    expect(screen.queryByText('Details available')).toBeNull()
+    expect(screen.getAllByTestId(/grouped-tool-row-legacy-/)).toHaveLength(53)
+    expect(screen.getByTestId('tool-call-group-details-legacy-0').textContent).toContain('/private/0')
+  })
+
+  it('distinguishes grep search dots from file-read dots', () => {
+    render(<DashboardChatPanel activeToolCallIds={[]} messages={[{ role: 'assistant', content: [
+      { type: 'tool_call', callId: 'grep-shape', name: 'grep', input: {}, intent: 'Locate matching behavior references.' },
+      { type: 'tool_call', callId: 'read-shape', name: 'read_file', input: {}, intent: 'Inspect the selected implementation.' },
+      { type: 'tool_call', callId: 'reads-shape', name: 'read_files', input: {}, intent: 'Compare related implementation files.' },
+    ] }]} />)
+    expect(screen.getByTestId('tool-card-dot-grep-shape').querySelector('[data-shape="search"]')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dot-read-shape').querySelector('[data-shape="read"]')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dot-reads-shape').querySelector('[data-shape="read"]')).toBeTruthy()
   })
 
   it('flags a pending tool_call but shows no inline approve/reject buttons (they live in the composer flip)', () => {
@@ -1447,9 +1541,7 @@ describe('ChatPanel', () => {
     expect(screen.getByText('Tool activity')).toBeTruthy()
     expect(screen.getByText('4 ops')).toBeTruthy()
     const intentSummary = screen.getByTestId('tool-call-intent-summary-c1')
-    expect(intentSummary.textContent).toContain('Inspect the target implementation.')
-    expect(intentSummary.textContent).toContain('Locate all relevant references.')
-    expect(intentSummary.textContent).toContain('+1 more')
+    expect(intentSummary.textContent).toBe('Verify the change with focused tests.')
     expect(screen.getByText('1 Failed')).toBeTruthy()
     expect(screen.getAllByText(/Failed/i)).toHaveLength(1)
     expect(screen.getByText('3 Succeeded')).toBeTruthy()
@@ -1466,6 +1558,9 @@ describe('ChatPanel', () => {
 
     fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
     expect(screen.getByTestId('tool-call-detail-intent-c1').textContent).toBe('Inspect the target implementation.')
+    const technical = screen.getByTestId('tool-call-technical-details-c1')
+    expect(technical.hasAttribute('open')).toBe(false)
+    expect(technical.textContent).toContain('Technical details')
   })
 
   it('collapses mixed tool activity split across timeline items', () => {

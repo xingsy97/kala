@@ -29,6 +29,7 @@ import type {
 } from '@agent-kernel/kernel'
 import { step } from '@agent-kernel/kernel'
 
+import { TOOL_INTENTION_SYSTEM_INSTRUCTION } from './builtin-tools.js'
 import type { LLMAdapter } from './llm/adapter.js'
 import { redactLlmTrace, type LLMTrace } from '@agent-kernel/shared'
 import { estimateMessageTokens, estimateStringTokens, estimateToolSchemaTokens } from '@agent-kernel/shared/token-estimation'
@@ -185,6 +186,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             handle,
             loopGuard,
             ...(options?.model ? { model: options.model } : {}),
+            ...(options?.onCommitted ? { onCommitted: options.onCommitted } : {}),
             drain: () => drainMode,
             steerStop: () => steerStopSessions.has(sessionId),
             toolStarted: markToolStarted,
@@ -508,6 +510,7 @@ export async function dispatchOne(
   const { record, next, effects } = await commitTransition(
     deps, sessionId, event, llmTrace, model, extras,
   )
+  await runtime?.onCommitted?.(event)
 
   // Cancellation of in-flight IO is the host's job (SPEC §Non-goals:
   // "Cancellation of in-flight tools — Only handles state — Host cancels
@@ -625,7 +628,8 @@ async function performCallLlm(
   const model = runtime?.model ?? deps.models?.get(sessionId)
   const controller = new AbortController()
   aborts.set(sessionId, controller)
-  const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
+  const assembledMessages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
+  const messages = withCurrentToolIntentionInstruction(assembledMessages)
   await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, messages, effect)
   const live = deps.store.get(sessionId)
   if (!live || live.state.status !== 'thinking' || controller.signal.aborted || isCancelledSubAgentChild(sessionId)) {
@@ -779,6 +783,20 @@ async function maybeRecordTokenUsageObservation(
   } catch {
     // Observability only.
   }
+}
+
+export function withCurrentToolIntentionInstruction(messages: readonly Message[]): readonly Message[] {
+  const instruction = TOOL_INTENTION_SYSTEM_INSTRUCTION
+  const alreadyCurrent = messages.some((message) => message.role === 'system' && message.content.some(
+    (content) => content.type === 'text' && content.text.includes(instruction),
+  ))
+  if (alreadyCurrent) return messages
+  const firstSystemIndex = messages.findIndex((message) => message.role === 'system')
+  if (firstSystemIndex < 0) return [{ role: 'system', content: [{ type: 'text', text: instruction }] }, ...messages]
+  const current = messages[firstSystemIndex]!
+  return messages.map((message, index) => index === firstSystemIndex
+    ? { ...current, content: [...current.content, { type: 'text', text: instruction }] }
+    : message)
 }
 
 function callLlmOnce(input: {

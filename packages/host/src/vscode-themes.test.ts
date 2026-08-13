@@ -20,6 +20,7 @@ describe('vscode theme marketplace service', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     delete process.env.AGENT_KERNEL_OPEN_VSX_BASE_URL
     delete process.env.AGENT_KERNEL_VSCODE_THEME_CACHE_DIR
     await rm(cacheDir, { recursive: true, force: true })

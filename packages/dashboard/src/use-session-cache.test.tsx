@@ -101,6 +101,30 @@ describe('useSession session view cache', () => {
     expect(sockets).toHaveLength(1)
     expect(sockets[0]?.connected).toBe(true)
   })
+  it('removes session listeners when a shared socket is rebound', async () => {
+    sockets.length = 0
+    const wrapper = ({ sessionId }: { sessionId: string }) => {
+      const socket = useDashboardControlSocket('http://host', undefined, true)
+      return useSession({ host: 'http://host', sessionId, socket }).streamingText
+    }
+    const view = renderHook(({ sessionId }) => wrapper({ sessionId }), {
+      initialProps: { sessionId: 's1' },
+    })
+    await waitFor(() => expect(sockets).toHaveLength(1))
+    const socket = sockets[0]!
+    expect(socket.handlers.get('session:token_delta')).toHaveLength(1)
+
+    view.rerender({ sessionId: 's2' })
+    await waitFor(() => expect(socket.handlers.get('session:token_delta')).toHaveLength(1))
+    view.rerender({ sessionId: 's1' })
+    await waitFor(() => expect(socket.handlers.get('session:token_delta')).toHaveLength(1))
+
+    // Every delta must have exactly one consumer after repeated workspace/session
+    // switches; leaked handlers append the same streamed text multiple times.
+    expect(socket.handlers.get('event:appended')).toHaveLength(1)
+    expect(socket.handlers.get('state:changed')).toHaveLength(1)
+  })
+
   it('keeps a dashboard control socket independent from the selected session hook', async () => {
     const { rerender, unmount } = renderHook(
       ({ sessionId }) => ({

@@ -188,6 +188,8 @@ export type LoopDrainSessionSnapshot = {
 
 export type DispatchOptions = {
   model?: string
+  /** Resolves at the durable event-commit boundary, before effect fan-out. */
+  onCommitted?: (event: AgentEvent) => void | Promise<void>
 }
 
 /**
@@ -199,6 +201,7 @@ export type LoopRuntime = {
   handle: LoopHandle
   loopGuard: Map<string, PostCompactionLoopGuard>
   model?: string
+  onCommitted?: (event: AgentEvent) => void | Promise<void>
   drain?: () => LoopDrainMode
   /** Per-session steer stop: halt the autonomous loop before the next think. */
   steerStop?: () => boolean

@@ -9,7 +9,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 
 import { SessionStore } from './store/session.js'
 import { readSessionLog } from './store/log.js'
-import { runHostLoop } from './loop.js'
+import { runHostLoop, withCurrentToolIntentionInstruction } from './loop.js'
 import type {
   LoopBroadcast,
   SubAgentFinishedPayload,
@@ -28,6 +28,23 @@ import { SUMMARY_PREFIX } from './extensions/compaction.js'
  * gates (schema, min length, non-conversational). Kept in one place so
  * loop.test.ts summarizer mocks don't diverge from real prompt shape.
  */
+describe('current Tool Intention instruction assembly', () => {
+  it('injects the current instruction into legacy Session messages without rewriting history', () => {
+    const legacy = [{ role: 'system' as const, content: [{ type: 'text' as const, text: 'legacy prompt' }] }]
+    const assembled = withCurrentToolIntentionInstruction(legacy)
+    expect(assembled).toHaveLength(1)
+    expect(assembled[0]?.role).toBe('system')
+    expect(assembled[0]?.content[0]).toEqual({ type: 'text', text: 'legacy prompt' })
+    expect(assembled[0]?.content[1]).toMatchObject({ type: 'text', text: expect.stringContaining('include the required _intent argument') })
+  })
+
+  it('is idempotent for current Session prompts', () => {
+    const legacy = [{ role: 'system' as const, content: [{ type: 'text' as const, text: 'legacy prompt' }] }]
+    const once = withCurrentToolIntentionInstruction(legacy)
+    expect(withCurrentToolIntentionInstruction(once)).toBe(once)
+  })
+})
+
 const OK_SUMMARY_BODY = `# Compacted Context
 ## User Intent And Constraints
 - User wants the requested change made without touching unrelated modules.

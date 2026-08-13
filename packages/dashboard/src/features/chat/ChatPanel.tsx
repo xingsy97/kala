@@ -23,6 +23,7 @@ import {
   Code2,
   Copy,
   FileText,
+  FileSearch,
   Globe,
   GripVertical,
   Image,
@@ -91,6 +92,7 @@ import { RevealCursor, RevealTail, canFadeRevealTail } from './text-reveal/index
 import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTranscript.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 import { transcriptItemKey } from './transcript-key.js'
+import { toolDotRailBudget, toolPreviewGeometry, visibleToolDots, type ToolPreviewGeometry } from './tool-dot-layout.js'
 
 type Props = {
   messages?: readonly Message[]
@@ -101,6 +103,8 @@ type Props = {
   pendingApprovals?: readonly ApprovalRequiredEvent[]
   /** Authoritative live calls from AgentState.pendingCalls. */
   activeToolCallIds?: readonly string[]
+  /** Tool Intention currently owned by the persistent Agent activity Badge. */
+  badgeIntentionCallId?: string
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   onReadOverflow?: (callId: string) => Promise<{ content?: string; error?: string }>
   footerSlot?: JSX.Element | null
@@ -199,6 +203,7 @@ export function ChatPanel({
   onSuggest,
   pendingApprovals,
   activeToolCallIds,
+  badgeIntentionCallId,
   onApprovalDecision,
   onReadOverflow,
   footerSlot,
@@ -392,6 +397,7 @@ export function ChatPanel({
             toolExecutionStartedAt={toolExecutionStartedAt}
             toolCardMode={toolCardMode}
             activeToolCallIds={activeToolCallIdSet}
+            badgeIntentionCallId={badgeIntentionCallId}
           />
         )
       }
@@ -423,6 +429,7 @@ export function ChatPanel({
           liveToolActivityTailCount={liveToolActivityTailCount}
           toolCardMode={toolCardMode}
           activeToolCallIds={activeToolCallIdSet}
+          badgeIntentionCallId={badgeIntentionCallId}
           assistantRerunTarget={assistantRerunTarget}
         />
       )
@@ -444,6 +451,7 @@ export function ChatPanel({
       toolExecutionStartedAt,
       toolCardMode,
       activeToolCallIdSet,
+      badgeIntentionCallId,
     ],
   )
 
@@ -837,6 +845,7 @@ function ToolActivityTranscriptRow({
   toolExecutionStartedAt,
   toolCardMode,
   activeToolCallIds,
+  badgeIntentionCallId,
 }: {
   item: Extract<RenderTranscriptItem, { kind: 'tool_activity' }>
   highlighted: boolean
@@ -847,6 +856,7 @@ function ToolActivityTranscriptRow({
   toolExecutionStartedAt?: number | null
   toolCardMode: ToolCardMode
   activeToolCallIds: ReadonlySet<string> | null
+  badgeIntentionCallId?: string
 }): JSX.Element {
   if (toolCardMode === 'dots') {
     return (
@@ -886,6 +896,7 @@ function ToolActivityTranscriptRow({
             toolExecutionStartedAt={toolExecutionStartedAt}
             toolCardMode={toolCardMode}
             activeToolCallIds={activeToolCallIds}
+            badgeIntentionCallId={badgeIntentionCallId}
           />
         </div>
       </div>
@@ -1196,6 +1207,7 @@ function MessageRow({
   liveToolActivityTailCount,
   toolCardMode,
   activeToolCallIds,
+  badgeIntentionCallId,
   assistantRerunTarget,
 }: {
   index: number
@@ -1216,6 +1228,7 @@ function MessageRow({
   liveToolActivityTailCount: number
   toolCardMode: ToolCardMode
   activeToolCallIds: ReadonlySet<string> | null
+  badgeIntentionCallId?: string
   assistantRerunTarget?: MessageRerunTarget | null
 }): JSX.Element | null {
   const { t } = useTranslation()
@@ -1414,6 +1427,7 @@ function MessageRow({
                   liveToolActivityTailCount={liveToolActivityTailCount}
                   toolCardMode={toolCardMode}
                   activeToolCallIds={activeToolCallIds}
+                  badgeIntentionCallId={badgeIntentionCallId}
                 />
               )
             }
@@ -1971,9 +1985,16 @@ function ArtifactMarkdownImage({ src, alt }: { src: string; alt: string }): JSX.
         <img src={src} alt={alt} onError={() => setFailed(true)} loading="lazy" />
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex h-[calc(var(--ak-viewport-h,100dvh)-1rem)] w-[calc(100vw-1rem)] max-w-none items-center justify-center bg-background/98 p-4 sm:max-w-6xl">
-          <DialogTitle className="sr-only">{alt}</DialogTitle>
-          <img src={src} alt={alt} className="max-h-full max-w-full object-contain" />
+        <DialogContent className="h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top))] w-screen max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-x-0 bg-black p-0 pb-[env(safe-area-inset-bottom)] sm:h-[min(92dvh,56rem)] sm:w-[calc(100vw-2rem)] sm:max-w-6xl sm:rounded-lg sm:border-x sm:pb-0" data-testid="artifact-image-preview-dialog">
+          <DialogHeader className="relative min-h-14 justify-center border-b border-white/10 bg-black/90 px-4 py-2 pr-14 text-white">
+            <DialogTitle className="truncate text-sm sm:text-base">{alt}</DialogTitle>
+            <DialogClose className="absolute right-2 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70" aria-label="Close image preview" data-testid="artifact-image-preview-close">
+              <X className="h-5 w-5" aria-hidden="true" />
+            </DialogClose>
+          </DialogHeader>
+          <div className="flex min-h-0 min-w-0 touch-pan-x touch-pan-y items-center justify-center overflow-auto overscroll-contain bg-black p-2 sm:p-4">
+            <img src={src} alt={alt} className="block max-h-full max-w-full object-contain" />
+          </div>
         </DialogContent>
       </Dialog>
     </>
@@ -2612,10 +2633,12 @@ function ToolCallInlineDetail({
   call,
   approval,
   onApprovalDecision,
+  compactNarrative = false,
 }: {
   call: ToolCallContent
   approval: ApprovalRequiredEvent | null
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
+  compactNarrative?: boolean
 }): JSX.Element {
   const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
   const hasDiffPreview = isPendingApproval && hasDiffPreviewForTool(call.name)
@@ -2625,32 +2648,39 @@ function ToolCallInlineDetail({
       className="min-w-0 overflow-hidden rounded-md border border-border/40 bg-background/40"
       data-testid={isPendingApproval ? `tool-call-pending-${call.callId}` : undefined}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2.5 py-1.5 text-[11px]">
-        <ToolTextBadge>request</ToolTextBadge>
-        <span className="min-w-0 truncate font-mono text-foreground">{call.name}</span>
-        {summary ? <ToolCallInputFieldBadges fields={summary.fields} /> : null}
-        {isPendingApproval ? (
-          <ToolTextBadge tone="warning">Approval needed</ToolTextBadge>
-        ) : null}
-      </div>
+      {!compactNarrative ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2.5 py-1.5 text-[11px]">
+          <ToolTextBadge>request</ToolTextBadge>
+          <span className="min-w-0 truncate font-mono text-foreground">{call.name}</span>
+          {isPendingApproval ? (
+            <ToolTextBadge tone="warning">Approval needed</ToolTextBadge>
+          ) : null}
+        </div>
+      ) : null}
       {call.intent ? (
-        <p className="border-b border-border/30 px-2.5 py-2 text-[11px] leading-relaxed text-foreground" data-testid={`tool-call-detail-intent-${call.callId}`}>
+        <p className="border-b border-border/30 px-2.5 py-2 text-[12px] leading-relaxed text-foreground whitespace-pre-wrap break-words" data-testid={`tool-call-detail-intent-${call.callId}`}>
           {call.intent}
         </p>
       ) : null}
-      {isPendingApproval && hasDiffPreview ? (
-        <div className="p-2">
-          <DiffPreview toolName={call.name} input={approval.input} />
+      <details className="border-b border-border/30 text-[11px]" data-testid={`tool-call-technical-details-${call.callId}`}>
+        <summary className="cursor-pointer select-none px-2.5 py-1.5 font-medium text-muted-foreground hover:text-foreground">Technical details</summary>
+        <div className="border-t border-border/30">
+          {summary ? <div className="flex flex-wrap gap-1.5 px-2.5 py-2"><ToolCallInputFieldBadges fields={summary.fields} /></div> : null}
+          {isPendingApproval && hasDiffPreview ? (
+            <div className="p-2">
+              <DiffPreview toolName={call.name} input={approval.input} />
+            </div>
+          ) : summary?.rows?.length ? (
+            <ToolCallInputSummaryRows rows={summary.rows} />
+          ) : (
+            <ScrollArea>
+              <pre className="min-w-0 whitespace-pre-wrap break-words px-2.5 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                {JSON.stringify(call.input, null, 2)}
+              </pre>
+            </ScrollArea>
+          )}
         </div>
-      ) : summary?.rows?.length ? (
-        <ToolCallInputSummaryRows rows={summary.rows} />
-      ) : (
-        <ScrollArea>
-          <pre className="min-w-0 whitespace-pre-wrap break-words px-2.5 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
-            {JSON.stringify(call.input, null, 2)}
-          </pre>
-        </ScrollArea>
-      )}
+      </details>
       {isPendingApproval ? (
         <p className="border-t border-border/30 px-2.5 py-1.5 text-[11px] italic text-amber-700 dark:text-amber-300">
           Approve or reject below.
@@ -2741,8 +2771,10 @@ function countDisplayLines(value: string): number {
 
 function ToolResultInlineDetail({
   result,
+  compactNarrative = false,
 }: {
   result: ToolResultContent
+  compactNarrative?: boolean
 }): JSX.Element {
   const overflowReader = useContext(OverflowReaderContext)
   const isOverflowed = detectOverflowMarker(result.content)
@@ -2764,7 +2796,7 @@ function ToolResultInlineDetail({
   return (
     <div className="min-w-0 overflow-hidden rounded-md border border-border/40 bg-background/40">
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2.5 py-1.5 text-[11px]">
-        <ToolTextBadge tone={result.ok ? 'success' : 'danger'}>{result.ok ? 'succeeded' : 'failed'}</ToolTextBadge>
+        <ToolTextBadge tone={compactNarrative ? 'neutral' : result.ok ? 'success' : 'danger'}>{compactNarrative ? 'result' : result.ok ? 'succeeded' : 'failed'}</ToolTextBadge>
         {parsedError?.code ? <ToolTextBadge tone="danger">{parsedError.code}</ToolTextBadge> : null}
         {displayOutput.metadata ? <ToolResultMetadataFields metadata={displayOutput.metadata} compact /> : null}
         {isOverflowed ? (
@@ -2910,6 +2942,7 @@ function ToolCallGroupBlock({
   toolExecutionStartedAt,
   toolCardMode = 'dots',
   activeToolCallIds,
+  badgeIntentionCallId,
 }: {
   group: ToolCallGroup
   messageIndex: number
@@ -2919,6 +2952,7 @@ function ToolCallGroupBlock({
   toolExecutionStartedAt?: number | null
   toolCardMode?: ToolCardMode
   activeToolCallIds: ReadonlySet<string> | null
+  badgeIntentionCallId?: string
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null)
@@ -2944,7 +2978,7 @@ function ToolCallGroupBlock({
         : null
   const groupLifecycle = summarizeToolGroupLifecycle(group, approvalByCallId, activeToolCallIds)
   const toolMix = summarizeToolMix(group.calls)
-  const groupIntent = summarizeToolIntents(group.calls, 3)
+  const fallbackIntent = [...group.calls].reverse().find((call) => call.intent?.trim())?.intent?.trim() ?? ''
   const primaryTargets = summarizePrimaryTargets(rows, group.mixed ? 2 : 1)
   const groupTitle = group.mixed ? 'Tool activity' : group.toolName
   const liveTailCount = Math.max(0, Math.round(liveToolActivityTailCount))
@@ -2971,18 +3005,19 @@ function ToolCallGroupBlock({
     observer.observe(dotBoundary)
     return () => observer.disconnect()
   }, [dotBoundary])
-  const railBudget = dotBoundaryWidth * 0.9
-  const arrowWidth = 24
+  const railBudget = toolDotRailBudget(dotBoundaryWidth)
   const gapWidth = 8
   const omissionWidth = 40
-  const limitWithoutOmission = dotBoundaryWidth > 0 ? Math.max(1, Math.floor((railBudget - arrowWidth + gapWidth) / (nodePixels + gapWidth))) : 20
+  const limitWithoutOmission = railBudget > 0 ? Math.max(2, Math.floor((railBudget + gapWidth) / (nodePixels + gapWidth))) : 8
   const visibleDotLimit = dots.length > limitWithoutOmission
-    ? Math.max(2, Math.floor((railBudget - arrowWidth - omissionWidth + gapWidth) / (nodePixels + gapWidth)))
+    ? Math.max(2, Math.floor((railBudget - omissionWidth + gapWidth) / (nodePixels + gapWidth)))
     : limitWithoutOmission
-  const visibleDots = middleTruncatedToolActivityDots(dots, visibleDotLimit)
+  const preferredDotIds = [pinnedCallId, ...dots.filter((dot) => dot.status === 'running').map((dot) => dot.callId)].filter((id): id is string => Boolean(id))
+  const visibleDots = visibleToolDots(dots, visibleDotLimit, preferredDotIds)
   const omittedDotCount = Math.max(0, dots.length - visibleDots.length)
   const collapsedDots = toolCardMode === 'dots' && !open
   const showRows = open || anyPending || (!collapsedDots && autoRevealTail)
+
   // Live running state for this group: any dispatched call without a result and
   // not waiting on approval. When running, this card itself carries the dynamic
   // affordances that used to live in a second, redundant inline status card
@@ -2992,7 +3027,7 @@ function ToolCallGroupBlock({
   // A running call keeps its animated dot, but must not open the hover preview
   // until the user explicitly hovers, focuses, or pins that dot. Auto-opening
   // the fixed layer obscures transcript content while long-running tools execute.
-  const previewCallId = hoveredCallId ?? pinnedCallId
+  const previewCallId = pinnedCallId ?? hoveredCallId
   const previewCall = previewCallId
     ? group.calls.find((call) => call.callId === previewCallId) ?? null
     : null
@@ -3003,12 +3038,11 @@ function ToolCallGroupBlock({
     ? dots.find((dot) => dot.callId === previewCallId)?.status ?? null
     : null
   const previewResult = previewCallId ? group.results.get(previewCallId) ?? null : null
-  const [previewPosition, setPreviewPosition] = useState<{
-    left: number
-    top: number
-    horizontal: 'right' | 'left'
-    vertical: 'above' | 'below'
-  } | null>(null)
+  const runningIntentCall = [...group.calls].reverse().find((call) => dots.find((dot) => dot.callId === call.callId)?.status === 'running' && call.intent?.trim())
+  const inspectedIntent = previewCallId !== badgeIntentionCallId ? previewCall?.intent?.trim() : ''
+  const groupOwnsBadgeIntention = group.calls.some((call) => call.callId === badgeIntentionCallId)
+  const displayedIntent = inspectedIntent || (!runningIntentCall && !groupOwnsBadgeIntention ? fallbackIntent : '')
+  const [previewPosition, setPreviewPosition] = useState<ToolPreviewGeometry | null>(null)
   useEffect(() => {
     if (!collapsedDots || !previewCallId || !previewRow || !previewStatus || typeof document === 'undefined') {
       setPreviewPosition(null)
@@ -3019,16 +3053,21 @@ function ToolCallGroupBlock({
       setPreviewPosition(null)
       return
     }
-    const rect = anchor.getBoundingClientRect()
-    const cardWidth = Math.min(544, window.innerWidth - 16)
-    const horizontal = rect.right + 12 + cardWidth <= window.innerWidth - 8 ? 'right' : 'left'
-    const vertical = rect.top >= Math.min(360, window.innerHeight * 0.45) ? 'above' : 'below'
-    setPreviewPosition({
-      left: horizontal === 'right' ? rect.right + 12 : Math.max(8, rect.left - 12),
-      top: vertical === 'above' ? rect.top - 8 : rect.bottom + 8,
-      horizontal,
-      vertical,
-    })
+    const update = (): void => {
+      const rect = anchor.getBoundingClientRect()
+      setPreviewPosition(toolPreviewGeometry({
+        anchor: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      }))
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('orientationchange', update)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('orientationchange', update)
+    }
   }, [collapsedDots, previewCallId, previewStatus])
 
   const toggleOpen = (): void => {
@@ -3061,12 +3100,11 @@ function ToolCallGroupBlock({
     >
       {collapsedDots ? (
         <div
-          className="flex min-h-7 w-fit min-w-0 items-center overflow-visible"
-          style={{ maxWidth: '90%' }}
+          className="grid min-h-7 w-full min-w-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0 overflow-visible max-sm:grid-cols-[minmax(0,1fr)_auto]"
           data-testid={`tool-card-dots-${group.firstCallId}`}
           aria-label={`${group.calls.length} tool calls`}
         >
-          <div className="relative flex min-w-0 flex-none items-center gap-2 py-1">
+          <div className="relative flex min-w-0 flex-none items-center gap-2 overflow-hidden py-1" style={{ width: railBudget || undefined, maxWidth: '100%' }} data-testid="tool-activity-rail">
             <span className="pointer-events-none absolute left-2 right-2 top-1/2 z-0 h-0.5 -translate-y-1/2 rounded-full bg-muted-foreground/60 shadow-[0_0_4px_hsl(var(--muted-foreground)/0.28)]" data-testid="tool-activity-connector" aria-hidden="true" />
             {visibleDots.map((dot, index) => (
               <div key={dot.callId} className="relative z-10 flex flex-none items-center">
@@ -3099,52 +3137,58 @@ function ToolCallGroupBlock({
           <button
             type="button"
             onClick={toggleOpen}
-            className="ml-1 flex h-6 w-5 flex-none items-center justify-center rounded text-muted-foreground/65 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-5"
+            className="col-start-3 row-start-1 flex h-6 w-6 flex-none items-center justify-center rounded text-muted-foreground/65 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-sm:col-start-2 sm:h-5"
             aria-label="Expand tool activity"
             data-testid="tool-activity-direction"
           >
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
-          {groupIntent ? (
+          {displayedIntent ? (
             <p
-              className="ml-2 min-w-0 max-w-[min(36rem,calc(100vw-8rem))] truncate text-[11px] leading-5 text-muted-foreground"
-              title={groupIntent}
+              className="col-start-2 row-start-1 min-w-0 whitespace-normal break-words text-[11px] leading-5 text-foreground/85 max-sm:col-span-2 max-sm:col-start-1 max-sm:row-start-2 max-sm:pr-1"
               data-testid={`tool-card-dots-intent-${group.firstCallId}`}
             >
-              {groupIntent}
+              {displayedIntent}
             </p>
           ) : null}
           {previewCallId && previewCall && previewRow && previewStatus && previewPosition && typeof document !== 'undefined'
             ? createPortal(
                 <div
                   className={cn(
-                    'fixed z-[100] w-[min(34rem,calc(100vw-1rem))] rounded-xl border border-border/80 bg-popover p-2 text-popover-foreground shadow-2xl',
+                    'fixed z-[100] flex min-h-0 flex-col overflow-hidden border border-border/80 bg-popover p-2 text-popover-foreground shadow-2xl',
+                    previewPosition.mobile ? 'rounded-t-2xl rounded-b-xl' : 'rounded-xl',
                     pinnedCallId === previewCallId ? 'pointer-events-auto' : 'pointer-events-none',
-                    previewPosition.horizontal === 'left' && '-translate-x-full',
-                    previewPosition.vertical === 'above' && '-translate-y-full',
                   )}
-                  style={{ left: previewPosition.left, top: previewPosition.top }}
+                  style={{ left: previewPosition.left, top: previewPosition.top, width: previewPosition.width, maxHeight: previewPosition.maxHeight }}
                   data-placement={`${previewPosition.horizontal}-${previewPosition.vertical}`}
+                  data-mobile={previewPosition.mobile ? 'true' : 'false'}
                   data-testid={`tool-card-preview-layer-${previewCallId}`}
-                  role="tooltip"
+                  role={pinnedCallId === previewCallId ? 'dialog' : 'tooltip'}
                   onWheel={(event) => event.stopPropagation()}
                   onPointerDown={(event) => event.stopPropagation()}
                 >
                   <div className="mb-2 flex min-w-0 items-center justify-between gap-3 px-1 py-0.5">
                     <div className="flex min-w-0 items-center gap-2">
                       <ToolNameChip name={previewCall.name} />
-                      <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={previewRow.primary}>{previewRow.primary}</span>
                     </div>
-                    <ToolTextBadge tone={previewStatus === 'failed' ? 'danger' : previewStatus === 'succeeded' ? 'success' : previewStatus === 'approval' ? 'warning' : 'neutral'}>
-                      {previewStatus}
-                    </ToolTextBadge>
+                    <span className="flex flex-none items-center gap-1">
+                      <ToolTextBadge tone={previewStatus === 'failed' ? 'danger' : previewStatus === 'succeeded' ? 'success' : previewStatus === 'approval' ? 'warning' : 'neutral'}>
+                        {previewStatus}
+                      </ToolTextBadge>
+                      {pinnedCallId === previewCallId ? (
+                        <button type="button" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setPinnedCallId(null)} aria-label="Close tool details" data-testid="tool-card-preview-close">
+                          <X className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      ) : null}
+                    </span>
                   </div>
-                  <div className="grid max-h-[min(28rem,calc(100vh-1rem))] min-w-0 touch-pan-y gap-2 overflow-y-auto overscroll-contain pr-1" data-testid={`tool-card-preview-scroll-${previewCallId}`}>
+                  <div className="grid min-h-0 min-w-0 flex-1 touch-pan-y gap-2 overflow-y-auto overscroll-contain pr-1" data-testid={`tool-card-preview-scroll-${previewCallId}`}>
                     <ToolCallInlineDetail
                       call={previewCall}
                       approval={approvalByCallId.get(previewCallId) ?? null}
+                      compactNarrative
                     />
-                    {previewResult ? <ToolResultInlineDetail result={previewResult} /> : <GroupSummaryPreview row={previewRow} status={previewStatus} />}
+                    {previewResult ? <ToolResultInlineDetail result={previewResult} compactNarrative /> : <GroupSummaryPreview row={previewRow} status={previewStatus} />}
                   </div>
                 </div>,
                 document.body,
@@ -3156,7 +3200,7 @@ function ToolCallGroupBlock({
         type="button"
         onClick={toggleOpen}
         className={cn(
-          'grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors',
+          'grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors max-sm:grid-cols-[auto_minmax(0,1fr)]',
           anyPending
             ? 'hover:bg-amber-100/40 dark:hover:bg-amber-950/30'
             : 'hover:bg-muted',
@@ -3179,15 +3223,15 @@ function ToolCallGroupBlock({
         />
         <span className="flex min-w-0 items-center gap-1.5">
           <ToolNameChip name={groupTitle} />
-          {singleCall?.intent ? (
+          {toolCardMode !== 'dots' && singleCall?.intent ? (
             <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={singleCall.intent} data-testid={`tool-call-intent-${singleCall.callId}`}>
               {singleCall.intent}
             </span>
-          ) : groupIntent ? (
-            <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={groupIntent} data-testid={`tool-call-intent-summary-${group.firstCallId}`}>
-              {groupIntent}
+          ) : toolCardMode !== 'dots' && fallbackIntent ? (
+            <span className="min-w-0 whitespace-normal break-words text-[11px] text-muted-foreground" data-testid={`tool-call-intent-summary-${group.firstCallId}`}>
+              {fallbackIntent}
             </span>
-          ) : singleRow?.primary ? (
+          ) : toolCardMode !== 'dots' && singleRow?.primary ? (
             <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={singleRow.primary}>
               {singleRow.primary}
             </span>
@@ -3195,7 +3239,7 @@ function ToolCallGroupBlock({
             <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={toolMix}>
               {toolMix}
             </span>
-          ) : primaryTargets ? (
+          ) : toolCardMode !== 'dots' && primaryTargets ? (
             <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={primaryTargets}>
               {primaryTargets}
             </span>
@@ -3206,7 +3250,7 @@ function ToolCallGroupBlock({
             </span>
           ) : null}
         </span>
-        <span className="flex min-w-0 flex-none items-center gap-1.5">
+        <span className="flex min-w-0 flex-none flex-wrap items-center justify-end gap-1.5 max-sm:col-span-2 max-sm:justify-start max-sm:pl-5">
           {singleHeaderResult.kind === 'delta' ? <ToolDeltaBadges metric={singleHeaderResult.metric} /> : null}
           {singleHeaderResult.kind === 'text' && shouldShowCompactHeaderText(singleCall?.name ?? '', singleHeaderResult.text) ? (
             <span className="hidden h-5 max-w-32 items-center truncate rounded bg-background/70 px-1.5 text-[11px] leading-none text-muted-foreground lg:inline-flex" title={singleHeaderResult.title ?? singleHeaderResult.text}>
@@ -3283,6 +3327,11 @@ function ToolCallGroupBlock({
             }
             const tailVisible = visibleTailCallIds?.has(row.callId) ?? false
             if (!open && !pending && !tailVisible) return null
+            const rowStatus = approvalByCallId.has(row.callId)
+              ? 'approval' as const
+              : group.results.has(row.callId)
+                ? group.results.get(row.callId)!.ok ? 'succeeded' as const : 'failed' as const
+                : 'running' as const
             return (
               <div
                 key={row.callId}
@@ -3292,11 +3341,7 @@ function ToolCallGroupBlock({
                 <GroupSummaryRow
                   row={row}
                   intent={call.intent}
-                  status={approvalByCallId.has(row.callId)
-                    ? 'approval'
-                    : group.results.has(row.callId)
-                      ? group.results.get(row.callId)!.ok ? 'succeeded' : 'failed'
-                      : 'running'}
+                  status={rowStatus}
                   onClick={() =>
                     setExpandedCallId((cur) => (cur === row.callId ? null : row.callId))
                   }
@@ -3325,7 +3370,7 @@ function ToolCallGroupBlock({
 type ToolActivityDot = {
   callId: string
   status: 'succeeded' | 'failed' | 'approval' | 'running' | 'orphaned'
-  kind: 'read' | 'write' | 'shell' | 'web' | 'todo' | 'memory' | 'agent' | 'other'
+  kind: 'read' | 'search' | 'write' | 'shell' | 'web' | 'todo' | 'memory' | 'agent' | 'other'
   title: string
 }
 
@@ -3343,24 +3388,21 @@ function toolActivityDots(
       : result
         ? result.ok ? 'succeeded' : 'failed'
         : isActiveToolCall(call.callId, activeToolCallIds) ? 'running' : 'orphaned'
-    const target = row?.primary && row.primary !== call.callId ? ` · ${row.primary}` : ''
-    const delta = typeof row?.secondary === 'object' && row.secondary.kind === 'delta'
-      ? ` · +${row.secondary.additions} -${row.secondary.deletions}`
-      : ''
     return {
       callId: call.callId,
       status,
       kind: toolActivityKind(call.name),
-      title: `${call.name}${target} · ${status}${delta}`,
+      title: call.intent?.trim() || `${call.name} · ${status}`,
     }
   })
 }
 
-const READ_TOOLS = new Set(['read', 'read_file', 'read_files', 'ls', 'glob', 'grep'])
+const READ_TOOLS = new Set(['read', 'read_file', 'read_files', 'ls', 'glob'])
 const FILE_MUTATION_TOOLS = new Set(['write', 'write_file', 'edit', 'replace_in_file', 'replace_many_in_file', 'apply_file_patch'])
 const SHELL_TOOLS = new Set(['bash', 'bash_output', 'kill_shell'])
 
 function toolActivityKind(toolName: string): ToolActivityDot['kind'] {
+  if (toolName === 'grep' || toolName === 'multi_grep') return 'search'
   if (READ_TOOLS.has(toolName)) return 'read'
   if (FILE_MUTATION_TOOLS.has(toolName)) return 'write'
   if (SHELL_TOOLS.has(toolName)) return 'shell'
@@ -3372,7 +3414,7 @@ function toolActivityKind(toolName: string): ToolActivityDot['kind'] {
 }
 
 function ToolActivityGlyph({ dot, size }: { dot: ToolActivityDot; size: number }): JSX.Element {
-  const Icon = dot.kind === 'read' ? Eye : dot.kind === 'write' ? PenLine : dot.kind === 'shell' ? Terminal : dot.kind === 'web' ? Globe : dot.kind === 'todo' ? ListChecks : dot.kind === 'memory' ? Brain : dot.kind === 'agent' ? Bot : Wrench
+  const Icon = dot.kind === 'read' ? Eye : dot.kind === 'search' ? FileSearch : dot.kind === 'write' ? PenLine : dot.kind === 'shell' ? Terminal : dot.kind === 'web' ? Globe : dot.kind === 'todo' ? ListChecks : dot.kind === 'memory' ? Brain : dot.kind === 'agent' ? Bot : Wrench
   return (
     <span data-shape={dot.kind} className={cn('relative flex items-center justify-center rounded-full transition-transform group-hover/dot:scale-110', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300', dot.status === 'orphaned' && 'text-muted-foreground/70')} style={{ width: size, height: size }}>
       {dot.status === 'running' ? <span className="absolute inset-[-3px] animate-ping rounded-full bg-violet-500/25" aria-hidden="true" /> : null}

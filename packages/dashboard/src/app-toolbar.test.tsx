@@ -67,13 +67,42 @@ describe('WorkbenchToolbar', () => {
     expect(indicator.textContent).toContain('Thinking')
   })
 
-  it('shows tool execution as a distinct single-layer status pill', () => {
-    renderToolbar({ sessionSelected: true, sessionActivityStatus: 'executing_tools', onChangeCwd: vi.fn() })
-
-    const indicator = screen.getByTestId('session-status-indicator')
-    expect(indicator.textContent).toContain('Running tools')
-    expect(indicator.className).toContain('border-violet-500/25')
-    expect(indicator.querySelector('.lucide-wrench')).toBeTruthy()
+  it('keeps one stable spinner DOM node across rapid running-state updates', () => {
+    const { rerender } = render(
+      <WorkbenchToolbar
+        sessionLabel="Loaded session"
+        cwd="/workspace"
+        onOpenTopbar={() => {}}
+        topbarAvailable={false}
+        onOpenExplorer={() => {}}
+        explorerAvailable={false}
+        onOpenInspector={() => {}}
+        inspectorAvailable={false}
+        onChangeCwd={() => {}}
+        sessionSelected
+        sessionActivityStatus="loading"
+      />,
+    )
+    const spinner = screen.getByTestId('session-status-spinner')
+    rerender(
+      <WorkbenchToolbar
+        sessionLabel="Loaded session"
+        cwd="/workspace"
+        onOpenTopbar={() => {}}
+        topbarAvailable={false}
+        onOpenExplorer={() => {}}
+        explorerAvailable={false}
+        onOpenInspector={() => {}}
+        inspectorAvailable={false}
+        onChangeCwd={() => {}}
+        sessionSelected
+        sessionActivityStatus="loading"
+      />,
+    )
+    expect(screen.getByTestId('session-status-spinner')).toBe(spinner)
+    expect(spinner.className).toContain('ak-session-status-spinner')
+    expect(screen.getByTestId('session-status-indicator').textContent).toBeTruthy()
+    expect(screen.getByTestId('session-status-indicator').getAttribute('data-status')).toBe('loading')
   })
 })
 

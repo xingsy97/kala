@@ -55,6 +55,7 @@ import type {
   ClientUserReject,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
+  RpcAck,
   EventAppendedEvent,
   CompactionMetadata,
   HandshakeAuth,
@@ -65,7 +66,7 @@ import type {
   SessionReadyEvent,
   SubAgentSummary,
 } from '@agent-kernel/shared'
-import { isCompatibleVersion, schema } from '@agent-kernel/shared'
+import { isCompatibleVersion, schema, validateClientMessagePayload, validateInlineMessageImages } from '@agent-kernel/shared'
 import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
 import type { SessionSummary } from '@agent-kernel/shared'
 import type {
@@ -142,6 +143,7 @@ export type DashboardDeps = {
   defaultConfig: AgentConfig | (() => AgentConfig)
   auth?: AuthConfig
   audit?: AuditLogger
+  allowAllApprovalMode?: boolean
   broadcastError(
     sessionId: string,
     scope: SessionErrorScope,
@@ -492,8 +494,12 @@ export function configureDashboardNamespace(
     }
 
     socket.on('client:user_message', async (raw: ClientUserMessage, ack) => {
+      const payloadError = validateClientMessagePayload(raw)
+      if (payloadError) { ack?.({ ok: false, error: `${payloadError.code}: ${payloadError.message}` }); return }
       const p = vparse(schema.ClientUserMessageSchema, raw, 'client:user_message', (raw as ClientUserMessage | undefined)?.sessionId)
-      if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
+      if (!p) { ack?.({ ok: false, error: 'INVALID_MESSAGE: invalid payload' }); return }
+      const imageValidation = validateInlineMessageImages(p.content)
+      if (!imageValidation.ok) { ack?.({ ok: false, error: `${imageValidation.error.code}: ${imageValidation.error.message}` }); return }
       const result = await operations.run(p.operationId, async () => {
         deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
         await handleUserMessage(deps, p)
@@ -590,27 +596,34 @@ export function configureDashboardNamespace(
       // and log stay coherent without any special-case wiring here.
       deps.loop.cancelStream(p.sessionId)
     })
-    socket.on('client:set_approval_mode', async (raw: ClientSetApprovalMode) => {
+    socket.on('client:set_approval_mode', async (raw: ClientSetApprovalMode, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientSetApprovalModeSchema, raw, 'client:set_approval_mode', (raw as ClientSetApprovalMode | undefined)?.sessionId)
-      if (!p) return
-      // Guard rail: `allow_all` may only be set when the operator opted in
-      // via env flag on the host. Prevents a compromised dashboard from
-      // silently disabling every approval prompt on an unattended session.
-      // The other three modes are freely settable.
-      if (p.mode === 'allow_all' && process.env.AK_ALLOW_ALL_OK !== '1') {
-        deps.audit?.log({ action: 'dashboard.approval_mode_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'denied', metadata: { mode: p.mode }, error: 'AK_ALLOW_ALL_OK is not enabled' })
-        deps.broadcastError(
-          p.sessionId,
-          'host',
-          'approval mode "allow_all" requires AK_ALLOW_ALL_OK=1 on the host',
-        )
+      if (!p) { ack?.({ ok: false, error: 'invalid approval mode request' }); return }
+      // Host-owned guard rail. Standalone product composition enables this by
+      // default; embedders may disable it explicitly. Executor installation and
+      // environment never control Session approval policy.
+      if (p.mode === 'allow_all' && deps.allowAllApprovalMode === false) {
+        deps.audit?.log({ action: 'dashboard.approval_mode_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'denied', metadata: { mode: p.mode }, error: 'allow_all is disabled by the host' })
+        deps.broadcastError(p.sessionId, 'host', 'approval mode "allow_all" is disabled by the host')
+        ack?.({ ok: false, error: 'approval mode "allow_all" is disabled by the host' })
         return
       }
-      await safeDispatch(deps, p.sessionId, {
-        kind: 'approval_mode_changed',
-        mode: p.mode,
+      const result = await operations.run(p.operationId, async () => {
+        const record = await loadRecordForDashboard(deps, p.sessionId)
+        if (!record) throw new Error('unknown session')
+        await deps.loop.dispatch(p.sessionId, { kind: 'approval_mode_changed', mode: p.mode })
+        // Changing to allow_all must also unblock calls already parked by the
+        // previous mode; otherwise the selector appears to do nothing.
+        if (p.mode === 'allow_all') {
+          for (const call of record.state.pendingCalls) {
+            if (call.status === 'awaiting_approval') {
+              await deps.loop.dispatch(p.sessionId, { kind: 'user_approve', callId: call.callId })
+            }
+          }
+        }
       })
-      deps.audit?.log({ action: 'dashboard.approval_mode_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { mode: p.mode } })
+      ack?.(result)
+      deps.audit?.log({ action: 'dashboard.approval_mode_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: result.ok ? 'ok' : 'error', metadata: { mode: p.mode }, ...(!result.ok ? { error: result.error } : {}) })
     })
     socket.on('client:set_cwd', async (raw: ClientSetCwd) => {
       const p = vparse(schema.ClientSetCwdSchema, raw, 'client:set_cwd', (raw as ClientSetCwd | undefined)?.sessionId)

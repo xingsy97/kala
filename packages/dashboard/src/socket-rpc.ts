@@ -3,6 +3,8 @@ import type { RpcAck } from '@agent-kernel/shared'
 import type { DashboardSocket } from './session.js'
 import { randomId } from './lib/random-id.js'
 
+class RpcBusinessError extends Error {}
+
 export async function emitRpc<T = undefined>(
   socket: DashboardSocket,
   event: string,
@@ -18,9 +20,10 @@ export async function emitRpc<T = undefined>(
       const result = await (socket.timeout(timeoutMs) as unknown as {
         emitWithAck(name: string, body: Record<string, unknown>): Promise<RpcAck<T>>
       }).emitWithAck(event, { ...payload, operationId })
-      if (!result.ok) throw new Error(result.error)
+      if (!result.ok) throw new RpcBusinessError(result.error)
       return ('value' in result ? result.value : undefined) as T
     } catch (error) {
+      if (error instanceof RpcBusinessError) throw error
       lastError = error
       if (!socket.active && !socket.connected) socket.connect()
     }

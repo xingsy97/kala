@@ -5,17 +5,91 @@ import type { TimelineEntry } from '../../session.js'
 export type AgentProgress = {
   phase: 'idle' | 'thinking' | 'tools' | 'approval' | 'done' | 'error'
   label: string
+  intention?: string
+  callId?: string
+  outcome?: 'running' | 'succeeded' | 'failed' | 'approval'
 }
 
-export function deriveAgentProgress(state: AgentState | null, _timeline: readonly TimelineEntry[]): AgentProgress {
+type PersistedToolCall = { callId: string; intention: string }
+
+export function deriveAgentProgress(state: AgentState | null, timeline: readonly TimelineEntry[]): AgentProgress {
   const status = state?.status
-  // Tool cards are the single source of truth for live tool activity. Do not
-  // derive a second status from the lifetime timeline: a long tool can be
-  // healthy for minutes, and cumulative call counts are not user progress.
-  if (status === 'thinking') return { phase: 'thinking', label: 'Preparing the next step' }
-  if (status === 'executing_tools') return { phase: 'tools', label: 'Working' }
-  if (status === 'awaiting_approval') return { phase: 'approval', label: 'Waiting for approval' }
+  const calls = persistedToolIntentions(timeline)
+
+  if (status === 'executing_tools') {
+    const current = latestPendingIntention(state!, calls, 'dispatched')
+    return current
+      ? { phase: 'tools', label: `In progress: ${current.intention}`, intention: current.intention, callId: current.callId, outcome: 'running' }
+      : { phase: 'tools', label: 'Working' }
+  }
+
+  if (status === 'awaiting_approval') {
+    const current = latestPendingIntention(state!, calls, 'awaiting_approval')
+    return current
+      ? { phase: 'approval', label: `Awaiting approval: ${current.intention}`, intention: current.intention, callId: current.callId, outcome: 'approval' }
+      : { phase: 'approval', label: 'Waiting for approval' }
+  }
+
+  if (status === 'thinking') {
+    const previous = latestSettledToolIntention(timeline, calls)
+    if (previous) {
+      const prefix = previous.ok ? 'Previous step completed' : 'Previous step did not complete'
+      return {
+        phase: 'thinking',
+        label: `${prefix}: ${previous.intention}`,
+        intention: previous.intention,
+        callId: previous.callId,
+        outcome: previous.ok ? 'succeeded' : 'failed',
+      }
+    }
+    return { phase: 'thinking', label: 'Planning the next step' }
+  }
+
   if (status === 'error') return { phase: 'error', label: 'The turn needs attention' }
   if (status === 'done') return { phase: 'done', label: 'Turn complete' }
   return { phase: 'idle', label: 'Ready' }
+}
+
+function persistedToolIntentions(timeline: readonly TimelineEntry[]): Map<string, PersistedToolCall> {
+  const calls = new Map<string, PersistedToolCall>()
+  for (const entry of timeline) {
+    if (entry.event.kind !== 'llm_response') continue
+    for (const content of entry.event.message.content) {
+      if (content.type !== 'tool_call') continue
+      const intention = content.intent?.trim()
+      if (intention) calls.set(content.callId, { callId: content.callId, intention })
+    }
+  }
+  return calls
+}
+
+function latestPendingIntention(
+  state: AgentState,
+  calls: ReadonlyMap<string, PersistedToolCall>,
+  pendingStatus: 'dispatched' | 'awaiting_approval',
+): PersistedToolCall | undefined {
+  for (let index = state.pendingCalls.length - 1; index >= 0; index -= 1) {
+    const pending = state.pendingCalls[index]
+    if (pending?.status !== pendingStatus) continue
+    const call = calls.get(pending.callId)
+    if (call) return call
+  }
+  return undefined
+}
+
+function latestSettledToolIntention(
+  timeline: readonly TimelineEntry[],
+  calls: ReadonlyMap<string, PersistedToolCall>,
+): (PersistedToolCall & { ok: boolean }) | undefined {
+  // A previous-step bridge is turn-local. Once a newer user_message starts a
+  // turn, an older result must not reappear while the Agent plans its first step.
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const event = timeline[index]?.event
+    if (!event) continue
+    if (event.kind === 'user_message') return undefined
+    if (event.kind !== 'tool_result') continue
+    const call = calls.get(event.callId)
+    if (call) return { ...call, ok: event.ok }
+  }
+  return undefined
 }

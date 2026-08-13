@@ -55,9 +55,9 @@ export function renderToolSchema(
       ...properties,
       _intent: {
         type: 'string',
-        minLength: 1,
-        maxLength: 160,
-        description: 'Briefly explain in the user’s current language what this tool call is about to do and why it is needed. Use one natural-language sentence, do not merely restate the arguments, and do not include secrets, tokens, or sensitive file contents.',
+        minLength: 12,
+        maxLength: 240,
+        description: 'State the concrete user- or product-facing objective this tool call advances and why this step is needed, in the user’s current language. Use one natural-language sentence with enough domain context to distinguish this step from other calls. Do not merely name the tool or operation (for example, “read file”, “search code”, or “run tests”), paraphrase arguments, include commands/paths/parameters, or include secrets, tokens, or sensitive file contents. Good example: “Identify why completed Tool intentions remain visible so the activity Badge and Dot Line can be de-duplicated safely.”',
       },
     },
   }

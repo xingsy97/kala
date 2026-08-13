@@ -33,6 +33,8 @@ export function resolveBuiltinAgentModule(input: {
 
 export type AgentSystemPromptPreset = 'codex' | 'claude-code' | 'custom'
 
+export const TOOL_INTENTION_SYSTEM_INSTRUCTION = 'For every tool call, include the required _intent argument. It must be one natural-language sentence in the user’s current language that states the concrete user- or product-facing objective advanced by this specific call and why this step is needed. Never use a generic operation label such as “read file”, “search code”, or “run tests”; never paraphrase arguments or include commands, paths, parameters, secrets, or sensitive contents.'
+
 export const AGENT_SYSTEM_PROMPT_PRESETS: readonly { id: AgentSystemPromptPreset; label: string; description: string }[] = [
   { id: 'codex', label: 'Codex', description: 'Direct coding-agent prompt with explicit execution and verification rules.' },
   { id: 'claude-code', label: 'Claude Code', description: 'Concise pair-programming prompt shaped for file edits, commands, and progress tracking.' },
@@ -71,6 +73,7 @@ const codexSystemPromptPlugin: SystemPromptPlugin = {
       'When editing, keep unrelated files and user changes intact. Do not revert work you did not make.',
       'If the user asks you to modify files, run commands, or continue unfinished work, either ask a necessary clarification, explain a real blocker, or continue by using tools. Do not claim that you changed, ran, verified, or completed something unless a tool result confirms it.',
       'For multi-step work, keep a concise task list and update it as the state changes. Mark work complete only after verification.',
+      TOOL_INTENTION_SYSTEM_INSTRUCTION,
       'Report concrete outcomes: what changed, what was verified, and what remains risky or untested.',
     ].join('\n\n')
   },
@@ -84,6 +87,7 @@ export const DEFAULT_CUSTOM_SYSTEM_PROMPT = [
   'When editing, keep unrelated files and user changes intact. Do not revert work you did not make.',
   'If the user asks you to modify files, run commands, or continue unfinished work, either ask a necessary clarification, explain a real blocker, or continue by using tools. Do not claim that you changed, ran, verified, or completed something unless a tool result confirms it.',
   'For multi-step work, keep a concise task list and update it as the state changes. Mark work complete only after verification.',
+  TOOL_INTENTION_SYSTEM_INSTRUCTION,
   'Report concrete outcomes: what changed, what was verified, and what remains risky or untested.',
   'When referencing a file, use a Markdown link such as [filename](path/to/this/file).',
 ].join('\n\n')
@@ -110,6 +114,7 @@ const claudeCodeSystemPromptPlugin: SystemPromptPlugin = {
       'If you say you added, updated, fixed, removed, ran, or verified something, that statement must be backed by a tool call result in the current turn.',
       'Respect existing user changes. Never revert unrelated work. Avoid destructive shell commands unless the user explicitly requests them.',
       'Use todo tracking for multi-step work. Keep exactly one active task and mark tasks complete only after the corresponding work is actually done.',
+      TOOL_INTENTION_SYSTEM_INSTRUCTION,
       'Finish with a short report of changed files, verification, and any remaining risks.',
     ].join('\n\n')
   },
@@ -178,6 +183,11 @@ const filesystemToolset: ToolsetPlugin = {
         whenToUse: ['Search code symbols, error strings, config keys, or behavior references.', 'Use before reading many files.'],
         constraints: ['Scope by path or glob when possible.', 'Use case_insensitive only when needed.'],
       }, { type: 'object', required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string', description: 'Filter files by glob.' }, output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'] }, case_insensitive: { type: 'boolean' } } }),
+      tool('multi_grep', 'executor', 'read', false, 'multi_grep', {
+        purpose: 'Run multiple bounded regex searches in one ordered Tool call.',
+        whenToUse: ['Investigate several related symbols or failure signatures together.', 'Reduce repeated grep calls while preserving per-search output sections.'],
+        constraints: ['Keep each search scoped where possible.', 'Use at most 20 searches; output is bounded by max_bytes.'],
+      }, { type: 'object', required: ['searches'], properties: { searches: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' }, output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'] }, case_insensitive: { type: 'boolean' } } } }, max_bytes: { type: 'integer', minimum: 1, maximum: 1000000 } } }),
       tool('write_file', 'executor', 'write', true, 'write_file', {
         purpose: 'Create or fully overwrite one UTF-8 text file, creating parent directories as needed.',
         whenToUse: ['Create new files or fully replace generated files.'],
