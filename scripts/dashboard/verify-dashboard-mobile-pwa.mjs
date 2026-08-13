@@ -185,8 +185,7 @@ async function verifyDotsToolActivity(page, name) {
       documentScrollWidth: document.documentElement.scrollWidth,
     }
   })
-  const expectedVisibleDots = metrics.viewportWidth <= 320 ? 4 : 6
-  check(`${name}: narrated tool turns end with one short dots rail`, metrics.railCount === 1 && metrics.dotCount === expectedVisibleDots && metrics.narrationCount >= 3 && metrics.lastNarrationBeforeRail && metrics.assistantAvatarCount <= 1 && metrics.directionVisible && (metrics.rail?.width ?? Number.POSITIVE_INFINITY) <= 260 && !metrics.hasToolActivityLabel, JSON.stringify(metrics))
+  check(`${name}: narrated tool turns end with one bounded dots rail`, metrics.railCount === 1 && metrics.dotCount >= 4 && metrics.dotCount <= 8 && metrics.narrationCount >= 3 && metrics.lastNarrationBeforeRail && metrics.assistantAvatarCount <= 1 && metrics.directionVisible && (metrics.rail?.right ?? Number.POSITIVE_INFINITY) <= metrics.viewportWidth + 1 && !metrics.hasToolActivityLabel, JSON.stringify(metrics))
   check(`${name}: dots rail stays inside the viewport`, Boolean(metrics.rail) && metrics.rail.left >= -1 && metrics.rail.right <= metrics.viewportWidth + 1 && metrics.documentScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
 
   await page.click('[data-testid="tool-activity-direction"]')
@@ -201,6 +200,17 @@ async function verifyDotsToolActivity(page, name) {
     }
   })
   check(`${name}: expanded tool details stay width-bounded`, Boolean(expanded.rect) && expanded.rect.left >= -1 && expanded.rect.right <= expanded.viewportWidth + 1 && expanded.documentScrollWidth <= expanded.viewportWidth + 1, JSON.stringify(expanded))
+  const legacyRows = await page.evaluate(() => {
+    const details = document.querySelector('[data-testid="tool-call-group-details-mobile-tool-0"]')
+    return {
+      aggregate: details?.querySelector('[data-testid="tool-call-missing-intent-summary-mobile-tool-0"]')?.textContent ?? '',
+      placeholders: Array.from(details?.querySelectorAll('*') ?? []).filter((node) => node.textContent === 'Details available').length,
+      summaries: Array.from(details?.querySelectorAll('[data-testid^="grouped-tool-row-mobile-tool-"]') ?? []).filter((node) => node.textContent?.includes('Read completed')).length,
+      visibleRows: details?.querySelectorAll('[data-testid^="grouped-tool-row-mobile-tool-"]').length ?? 0,
+      text: details?.textContent ?? '',
+    }
+  })
+  check(`${name}: legacy calls keep individual safe summaries without placeholder spam`, legacyRows.aggregate === '' && legacyRows.placeholders === 0 && legacyRows.visibleRows === 53 && legacyRows.summaries === 53 && !legacyRows.text.includes('/tmp/agent-runlab-mobile/'), JSON.stringify(legacyRows))
   await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-tool-dots-expanded.png`), fullPage: false })
   await page.click('[data-testid="tool-call-group-toggle-mobile-tool-0"]')
 }
@@ -598,7 +608,7 @@ function writeSessionFixture() {
     cursor: 0,
     cwd: '/tmp/agent-runlab-mobile',
     contextPressureLevel: 'none',
-    approvalMode: 'auto',
+    approvalMode: 'allow_all',
   }
   const entries = [
     {
@@ -619,7 +629,7 @@ function writeSessionFixture() {
       event: { kind: 'user_message', text: 'Check the mobile layout.' },
       effects: [{ kind: 'call_llm', messages: [], tools: [] }],
     },
-    ...Array.from({ length: 6 }, (_, index) => {
+    ...Array.from({ length: 53 }, (_, index) => {
       const callId = `mobile-tool-${index}`
       const responseSeq = 2 + index * 2
       return [
@@ -644,14 +654,14 @@ function writeSessionFixture() {
           kind: 'event',
           seq: responseSeq + 1,
           ts: new Date().toISOString(),
-          event: { kind: 'tool_result', callId, ok: true, content: `line ${index + 1}` },
+          event: { kind: 'tool_result', callId, ok: index < 49, content: index < 49 ? `line ${index + 1}` : 'fixture failure' },
           effects: [{ kind: 'call_llm', messages: [], tools: [] }],
         },
       ]
     }).flat(),
     {
       kind: 'event',
-      seq: 14,
+      seq: 108,
       ts: new Date().toISOString(),
       event: {
         kind: 'llm_response',

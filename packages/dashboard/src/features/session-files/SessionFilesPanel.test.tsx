@@ -144,6 +144,18 @@ describe('SessionFilesPanel', () => {
     expect(screen.queryByTestId('monaco-editor')).toBeNull()
   })
 
+  it('uses a full-height mobile file-view contract with reachable scrolling actions and close control', async () => {
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: 'hello', size: 5 } })
+    render(<WorkspaceFileViewDialog open onOpenChange={() => {}} socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" target={{ path: '/repo/very/long/path/notes.txt' }} />)
+    await screen.findByTestId('monaco-editor')
+    const dialog = screen.getByTestId('session-file-view-dialog')
+    expect(dialog.className).toContain('w-screen')
+    expect(dialog.className).toContain('--ak-viewport-h')
+    expect(dialog.className).toContain('grid-rows-[auto_minmax(0,1fr)]')
+    expect(screen.getByTestId('session-file-view-actions').className).toContain('overflow-x-auto')
+    expect(screen.getByTestId('session-file-view-close').className).toContain('h-11 w-11')
+  })
+
   it('renders image files in the sidebar file view modal and supports view actions', async () => {
     const socket = makeSessionFilesSocket({
       file: { kind: 'image', content: 'aW1hZ2U=', size: 5, encoding: 'base64', mediaType: 'image/png' },

@@ -265,19 +265,20 @@ export function DirectoryPicker({
           data-testid="directory-picker-finder"
           viewportRef={finderScrollRef}
         >
-          <div className="flex min-h-full w-max min-w-full">
+          <div className="flex min-h-full min-w-full md:w-max">
             {columns.length === 0 ? (
               <div className="flex h-48 w-full items-center justify-center text-sm text-muted-foreground">
                 {loadingPath !== null ? t('directory.loading') : t('directory.selectWorkspace')}
               </div>
             ) : null}
-            {columns.map((column) => (
+            {columns.map((column, index) => (
               <DirectoryColumn
                 key={column.path}
                 column={column}
                 cwd={value}
                 loadingPath={loadingPath}
                 onOpen={openDir}
+                mobileHidden={index !== columns.length - 1}
               />
             ))}
           </div>
@@ -292,15 +293,17 @@ function DirectoryColumn({
   cwd,
   loadingPath,
   onOpen,
+  mobileHidden,
 }: {
   column: DirColumn
   cwd: string
   loadingPath: string | null
   onOpen(path: string): void
+  mobileHidden: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="w-64 shrink-0 border-r border-border/50" data-testid="finder-column">
+    <div className={cn('w-full min-w-0 shrink-0 border-border/50 md:w-64 md:border-r', mobileHidden && 'hidden md:block')} data-testid="finder-column">
       <div
         className="truncate border-b border-border/50 px-3 py-2 font-mono text-[11px] text-muted-foreground"
         title={column.path}

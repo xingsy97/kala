@@ -71,6 +71,33 @@ describe('NewSessionDialog', () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it('uses one visible Finder column on mobile while preserving desktop column history', async () => {
+    const harness = makeSocket()
+    render(<NewSessionDialog open workspaces={[wsA]} socket={harness.socket as never} onCreate={() => {}} onCreateSimpleChat={() => {}} onCancel={() => {}} />)
+    await waitFor(() => expect(harness.lastDirRequest()).toBeTruthy())
+    act(() => harness.emitDirList({ requestId: harness.lastDirRequest().requestId, workspaceId: 'ws-a', path: '/tmp/root', roots: ['/tmp/root'], entries: [{ name: 'project', path: '/tmp/root/project', type: 'directory' }] }))
+    fireEvent.click(screen.getByText('project'))
+    act(() => harness.emitDirList({ requestId: harness.lastDirRequest().requestId, workspaceId: 'ws-a', path: '/tmp/root/project', roots: ['/tmp/root'], entries: [] }))
+    const columns = screen.getAllByTestId('finder-column')
+    expect(columns).toHaveLength(2)
+    expect(columns[0]!.className).toContain('hidden md:block')
+    expect(columns[1]!.className).not.toContain('hidden md:block')
+    expect(screen.getByTestId('directory-picker-finder').querySelector('.w-64')).toBeNull()
+  })
+
+  it('uses the shared mobile Sheet contract with a touch-sized close control', () => {
+    render(
+      <NewSessionDialog open workspaces={[wsA]} socket={makeSocket().socket as never} onCreate={() => {}} onCreateSimpleChat={() => {}} onCancel={() => {}} />,
+    )
+    const dialog = screen.getByTestId('new-session-dialog')
+    expect(dialog.className).toContain('!bottom-0')
+    expect(dialog.className).toContain('w-screen')
+    expect(dialog.className).toContain('--ak-viewport-h')
+    expect(dialog.className).toContain('grid-rows-[auto_minmax(0,1fr)_auto]')
+    expect(dialog.className).toContain('sm:max-w-4xl')
+    expect(screen.getByTestId('new-session-close').className).toContain('h-11 w-11')
+  })
+
   it('presents chat and workspace sessions as explicit creation paths', () => {
     const onCreateSimpleChat = vi.fn()
     render(

@@ -2,14 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AttachedExecutor } from '@agent-kernel/shared'
 
+import { X } from 'lucide-react'
+
 import { Button } from '../../components/ui/button.js'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  dialogMobileSheetClassName,
+  dialogTouchCloseClassName,
 } from '../../components/ui/dialog.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
@@ -103,16 +108,19 @@ export function NewSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !submitting) onCancel() }}>
-      <DialogContent className="h-[min(90dvh,44rem)] max-w-4xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]" data-testid="new-session-dialog">
-        <DialogHeader className="border-b border-border/50 px-4 py-3">
+      <DialogContent className={cn(dialogMobileSheetClassName, 'h-[min(calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem),44rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-4xl')} data-testid="new-session-dialog">
+        <DialogHeader className="relative border-b border-border/50 px-4 py-2 pr-14 sm:py-3">
           <DialogTitle>{t('dialogs.newSession')}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="hidden sm:block">
             {t('dialogs.newSessionDescription')}
           </DialogDescription>
+          <DialogClose className={dialogTouchCloseClassName} disabled={submitting} aria-label={t('common.close')} data-testid="new-session-close">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </DialogClose>
         </DialogHeader>
-        <div className="grid min-h-0 grid-rows-[minmax(8rem,0.42fr)_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
-          <aside className="flex min-h-0 flex-col border-b border-border/50 bg-muted md:border-b-0 md:border-r">
-            <div className="px-2 pt-2">
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
+          <aside className="flex min-h-0 flex-col border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r md:bg-muted">
+            <div className="px-2 pt-2 max-md:hidden">
               <button
                 type="button"
                 data-testid="new-session-simple-chat"
@@ -128,9 +136,9 @@ export function NewSessionDialog({
                 </div>
               </button>
             </div>
-            <div className="px-3 py-2 text-xs font-medium text-muted-foreground">{t('dialogs.workspaceSessions')}</div>
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="space-y-1 px-2 pb-2">
+            <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground"><span>{t('dialogs.workspaceSessions')}</span><button type="button" disabled={submitting} onClick={onCreateSimpleChat} className="ml-auto rounded px-2 py-1 text-primary hover:bg-primary/10 md:hidden">{t('dialogs.simpleChat')}</button></div>
+            <ScrollArea className="min-h-0 flex-1 max-md:max-h-24">
+              <div className="flex gap-2 px-2 pb-2 md:block md:space-y-1">
                 {workspaces.length === 0 ? (
                   <div className="rounded border border-dashed border-border/60 px-3 py-3 text-xs text-muted-foreground">
                     {t('dialogs.noExecutorOnline')}
@@ -151,7 +159,7 @@ export function NewSessionDialog({
                     data-testid={`workspace-pick-${w.workspaceId}`}
                     onClick={() => selectWorkspace(w.workspaceId)}
                     className={cn(
-                      'w-full rounded-md border px-2 py-2 text-left transition-colors',
+                      'min-w-[13rem] flex-1 rounded-md border px-2 py-2 text-left transition-colors md:w-full md:min-w-0',
                       workspaceId === w.workspaceId
                         ? 'border-primary bg-primary/10 text-foreground'
                         : 'border-border/60 bg-card hover:bg-secondary',
@@ -194,7 +202,7 @@ export function NewSessionDialog({
             {error}
           </div>
         ) : null}
-        <DialogFooter className="border-t border-border/50 px-4 py-3">
+        <DialogFooter className="border-t border-border/50 px-3 py-2 sm:px-4 sm:py-3">
           <Button variant="outline" onClick={onCancel} disabled={submitting} data-testid="workspace-picker-cancel">
             {t('common.cancel')}
           </Button>
