@@ -38,6 +38,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [dashboard/browser-core-local-runtime.md](dashboard/browser-core-local-runtime.md) | Browser-core local runtime option — planned |
 | [dashboard/frontend-modernization-plan.md](dashboard/frontend-modernization-plan.md) | Phased modernization: auto-animate, TanStack Query, Motion, typewriter |
 | [dashboard/session-runtime-interaction-sot.md](dashboard/session-runtime-interaction-sot.md) | **Normative.** Running-Session shell responsiveness, hover preview, status UI, overlays, stress testing, and deployment gates |
+| [dashboard/tool-card-mode.md](dashboard/tool-card-mode.md) | **Normative.** Tool Card modes, live/previous Intention Badge semantics, Dot Line de-duplication, details, and responsive verification gates |
 
 ### Executor — tool sandbox (`packages/executor`)
 
