@@ -5,7 +5,16 @@ import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
-import type { ContextUsageSnapshot, FileListEntry, HumanAttentionTimeline, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
+import {
+  MAX_MESSAGE_IMAGES,
+  validateClientMessagePayload,
+  validateInlineMessageImages,
+  type ContextUsageSnapshot,
+  type FileListEntry,
+  type HumanAttentionTimeline,
+  type ModelInfo,
+  type QueuedMessagePreview,
+} from '@agent-kernel/shared'
 import type {
   AgentConfig,
   AgentState,
@@ -33,6 +42,7 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { SimpleComposerInput } from './composer/SimpleComposerInput.js'
 import { useComposerMode } from './composer/useComposerMode.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
+import { prepareComposerImage } from './image-compression.js'
 
 type Props = {
   disabled?: boolean
@@ -79,13 +89,6 @@ type PastedImage = {
   mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
   base64: string
 }
-
-const IMAGE_MEDIA_TYPES = new Set<PastedImage['mediaType']>([
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/gif',
-])
 
 export const APPROVAL_MODES: ReadonlyArray<{
   value: ApprovalMode
@@ -430,6 +433,11 @@ export function Composer({
       type: 'image',
       source: { kind: 'base64', mediaType: img.mediaType, data: img.base64 },
     }))
+    const imageValidation = validateInlineMessageImages(images)
+    if (!imageValidation.ok) {
+      setPendingToast(imageValidation.error.message)
+      return
+    }
     const extraBlocks: TextContent[] = []
     if (onReadFile) {
       const mentions = collectMentionPaths(trimmed)
@@ -453,6 +461,11 @@ export function Composer({
           setPendingToast(`@${path}: ${err instanceof Error ? err.message : String(err)}`)
         }
       }
+    }
+    const payloadError = validateClientMessagePayload({ text: trimmed, mode: sendMode, content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...extraBlocks, ...images] })
+    if (payloadError) {
+      setPendingToast(payloadError.message)
+      return
     }
     const submittedText = text
     const submittedImages = pastedImages
@@ -484,19 +497,19 @@ export function Composer({
     const items = Array.from(data?.items ?? [])
     const imageItems = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
     const added: PastedImage[] = []
+    if (pastedImages.length + imageItems.length > MAX_MESSAGE_IMAGES) {
+      setPendingToast(`A message can contain at most ${MAX_MESSAGE_IMAGES} images.`)
+      return []
+    }
     for (const item of imageItems) {
       const file = item.getAsFile()
       if (!file) continue
-      const mediaType = (IMAGE_MEDIA_TYPES.has(file.type as PastedImage['mediaType'])
-        ? file.type
-        : 'image/png') as PastedImage['mediaType']
-      const dataUrl = await readFileAsDataUrl(file)
-      const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+      const prepared = await prepareComposerImage(file)
       added.push({
         id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        dataUrl,
-        mediaType,
-        base64,
+        dataUrl: prepared.dataUrl,
+        mediaType: prepared.mediaType,
+        base64: prepared.base64,
       })
     }
     return added
@@ -1430,15 +1443,6 @@ function QueueAction({
       {children}
     </button>
   )
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error ?? new Error('failed to read pasted image'))
-    reader.onload = () => resolve(String(reader.result ?? ''))
-    reader.readAsDataURL(file)
-  })
 }
 
 type MentionState = {

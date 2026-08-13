@@ -3,6 +3,7 @@ export { readFilesTool } from './read-files.js'
 export { lsTool } from './ls.js'
 export { globTool } from './glob.js'
 export { grepTool } from './grep.js'
+export { multiGrepTool } from './multi-grep.js'
 export { writeFileTool } from './write-file.js'
 export { replaceInFileTool } from './replace-in-file.js'
 export { replaceManyInFileTool } from './replace-many-in-file.js'
@@ -24,6 +25,7 @@ import { readFilesTool } from './read-files.js'
 import { lsTool } from './ls.js'
 import { globTool } from './glob.js'
 import { grepTool } from './grep.js'
+import { multiGrepTool } from './multi-grep.js'
 import { writeFileTool } from './write-file.js'
 import { replaceInFileTool } from './replace-in-file.js'
 import { replaceManyInFileTool } from './replace-many-in-file.js'
@@ -46,6 +48,7 @@ export const allTools: readonly Tool[] = [
   lsTool,
   globTool,
   grepTool,
+  multiGrepTool,
   shellTool,
   bashTool,
   bashOutputTool,

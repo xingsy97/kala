@@ -8,6 +8,7 @@ export {
   lsTool,
   globTool,
   grepTool,
+  multiGrepTool,
   writeFileTool,
   replaceInFileTool,
   replaceManyInFileTool,

@@ -691,7 +691,7 @@ describe('Composer', () => {
     const onSubmit = vi.fn()
     renderComposer({ onSubmit })
 
-    const file = new File([new Uint8Array([0, 1, 2])], 'pasted.png', { type: 'image/png' })
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'pasted.png', { type: 'image/png' })
     const clipboardData = {
       items: [
         {
@@ -744,6 +744,38 @@ describe('Composer', () => {
     expect(removeBtn).toBeTruthy()
     fireEvent.click(removeBtn as Element)
     expect(screen.queryByTestId('pasted-image-tray')).toBeNull()
+  })
+
+  it('rejects more than four pasted images before adding attachments', async () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit })
+    const files = Array.from({ length: 5 }, (_, index) => new File([new Uint8Array([index])], `pic-${index}.png`, { type: 'image/png' }))
+    fireEvent.paste(screen.getByTestId('composer-input'), {
+      clipboardData: {
+        items: files.map((file) => ({ kind: 'file' as const, type: file.type, getAsFile: () => file })),
+      },
+    })
+    expect((await screen.findByTestId('composer-toast')).textContent).toContain('at most 4 images')
+    expect(screen.queryByTestId('pasted-image-tray')).toBeNull()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('keeps an oversized pasted image and explains why it cannot be sent', async () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit })
+    const file = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'large.gif', { type: 'image/gif' })
+    fireEvent.paste(screen.getByTestId('composer-input'), {
+      clipboardData: {
+        items: [{ kind: 'file' as const, type: file.type, getAsFile: () => file }],
+      },
+    })
+    await screen.findByTestId('pasted-image-tray')
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'keep this' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+    expect((await screen.findByTestId('composer-toast')).textContent).toContain('at most 2 MiB')
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'keep this')
+    expect(screen.getByTestId('pasted-image-tray')).toBeTruthy()
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it('opens the mention picker when the user types @ and inserts the picked path', async () => {
