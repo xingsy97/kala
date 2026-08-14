@@ -3104,9 +3104,12 @@ function ToolCallGroupBlock({
           data-testid={`tool-card-dots-${group.firstCallId}`}
           aria-label={`${group.calls.length} tool calls`}
         >
-          <div className="relative flex min-w-0 flex-none items-center gap-2 overflow-hidden py-1" style={{ width: railBudget || undefined, maxWidth: '100%' }} data-testid="tool-activity-rail">
-            <span className="pointer-events-none absolute left-2 right-2 top-1/2 z-0 h-0.5 -translate-y-1/2 rounded-full bg-muted-foreground/60 shadow-[0_0_4px_hsl(var(--muted-foreground)/0.28)]" data-testid="tool-activity-connector" aria-hidden="true" />
-            {visibleDots.map((dot, index) => (
+          <div className="min-w-0 flex-none overflow-hidden" style={{ width: railBudget || undefined, maxWidth: '100%' }} data-testid="tool-activity-rail">
+            <div className="relative flex w-max min-w-0 items-center gap-2 py-1">
+              {visibleDots.length > 1 ? (
+                <span className="pointer-events-none absolute top-1/2 z-0 h-0.5 -translate-y-1/2 rounded-full bg-muted-foreground/60 shadow-[0_0_4px_hsl(var(--muted-foreground)/0.28)]" style={{ left: nodePixels / 2, right: nodePixels / 2 }} data-testid="tool-activity-connector" aria-hidden="true" />
+              ) : null}
+              {visibleDots.map((dot, index) => (
               <div key={dot.callId} className="relative z-10 flex flex-none items-center">
                 <button
                   type="button"
@@ -3132,7 +3135,8 @@ function ToolCallGroupBlock({
                   <button type="button" onClick={toggleOpen} className="relative z-20 ml-2 flex h-6 min-w-9 flex-none items-center justify-center rounded-full bg-background px-1.5 font-mono text-[11px] font-bold tabular-nums text-foreground shadow-[0_0_0_4px_hsl(var(--background))] ring-1 ring-inset ring-foreground/30 hover:bg-muted" title={`${omittedDotCount} omitted tool calls`} aria-label={`${omittedDotCount} omitted tool calls; expand to inspect`} data-testid="tool-activity-omission">+{omittedDotCount}</button>
                 ) : null}
               </div>
-            ))}
+              ))}
+            </div>
           </div>
           <button
             type="button"
