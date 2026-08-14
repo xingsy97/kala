@@ -2,7 +2,7 @@
 
 **Status:** normative user-journey acceptance criteria
 **Authority:** verification policy is owned by [`../meta/testing.md`](../meta/testing.md); mode behavior is owned by [`../architecture/deployment-mode-contract.md`](../architecture/deployment-mode-contract.md)
-**Last reviewed:** 2026-07-29
+**Last reviewed:** 2026-08-14
 
 A visible control is not accepted because it renders or opens. Every critical control must complete its user-visible task through UI, transport, backend prerequisites, persistence, failure handling, and recovery.
 
@@ -27,6 +27,10 @@ A visible control is not accepted because it renders or opens. Every critical co
 | Standalone | Benchmark/Evaluation | Navigation/actions visible; default wizard completes; progress and artifacts persist | Standalone benchmark smoke |
 | SaaS | Benchmark/Evaluation | Absent from nav/routes/commands/Settings; every raw HTTP and protocol action denied | enumerated deny matrix, not one representative route |
 | Both | Responsive surfaces | Settings, Session Settings, image preview, task panel, drawers and alerts fit; body scrolls; header/footer remain operable; keyboard/safe-area behavior | 320×568, 375×667, 390×844 PWA, 430×932, desktop |
+
+## Coverage status semantics
+
+The executable coverage ledger is [`system-e2e-coverage-ledger.md`](system-e2e-coverage-ledger.md). A row is `complete` only when its automated proof satisfies the production-artifact reality standard in [`product-e2e-harness.md`](product-e2e-harness.md). Component tests, fixture-driven browser checks, endpoint probes, and manual production observations may be listed as supporting evidence but cannot change a row to `complete`.
 
 ## Feature-state rule
 

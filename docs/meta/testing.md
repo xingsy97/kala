@@ -6,7 +6,14 @@
 
 **Deployment contract**: [`../architecture/deployment-mode-contract.md`](../architecture/deployment-mode-contract.md)
 
-The testing strategy tracks the architecture: pure-function Kernel → integration-tested Host → contract-tested Executor → Gateway/identity/Unit isolation → real-browser and full-system acceptance. The rule of thumb: **push tests as low as possible.** A bug caught by a unit test is orders of magnitude cheaper than one caught by e2e.
+The testing strategy tracks the architecture: pure-function Kernel → integration-tested Host → contract-tested Executor → Gateway/identity/Unit isolation → real-browser and full-system acceptance.
+
+Two rules apply together and neither replaces the other:
+
+1. **Push defect localization as low as possible.** A unit test is the fastest way to pinpoint an invariant failure.
+2. **Prove every critical user journey at its real product boundary.** Unit, component, mock, fixture, and protocol tests supplement this proof; they never substitute for it.
+
+The full-system standard is defined by the [Product E2E Harness Contract](../testing/product-e2e-harness.md) and tracked per journey in the [Critical User Action Acceptance Matrix](../testing/critical-user-action-matrix.md).
 
 ---
 
@@ -14,7 +21,7 @@ The testing strategy tracks the architecture: pure-function Kernel → integrati
 
 ```
                        ┌──────────────────┐
-                       │   e2e (browser)   │  ← slow, brittle, few
+                       │   e2e (journeys)   │  ← one real proof per critical journey
                        └──────────────────┘
                      ┌──────────────────────┐
                      │  integration (host)   │  ← medium
@@ -27,13 +34,15 @@ The testing strategy tracks the architecture: pure-function Kernel → integrati
                  └──────────────────────────────┘
 ```
 
-Approximate share:
+Approximate implementation share (not an acceptance quota):
 - Kernel: 100% unit
 - Host: 70% unit + 30% integration (mocked LLM & socket)
 - Executor: 80% unit + 20% integration (real fs, tmpdir)
 - Dashboard: component tests plus targeted Puppeteer verification scripts for real browser/layout checks
 - SaaS Gateway and Unit routing: identity/session and two-Unit integration tests
 - Full system: mode-specific task-chain acceptance for the critical action matrix
+
+Passing a percentage target cannot compensate for a missing critical-journey proof.
 
 ---
 
@@ -207,18 +216,29 @@ The rule is stricter than jsdom/component coverage because these checks run agai
 
 ---
 
-## 6. Full-system e2e (dashboard + host + executor + replay/fork)
+## 6. Full-system E2E (critical user journeys)
 
-A single golden-path test that:
-1. Starts Host + Executor + Dashboard
-2. Sends a user message: "Create a file /tmp/e2e-test.txt with contents 'hello'"
-3. LLM returns tool_call for `write`
-4. Dashboard auto-approves (or e2e clicks the approve button)
-5. Executor writes the file
-6. LLM returns text response "Done, created the file"
-7. Assert: file exists on disk, contents match, session status is `done`
+A full-system E2E is a task chain, not a component render or a collection of endpoint probes. Except for an explicitly documented external-capability boundary, it must use:
 
-If this test fails, something big is broken.
+1. the production build or release artifact users receive;
+2. the real user entry in Chromium when the journey has UI;
+3. real HTTP and Socket.IO transports;
+4. real Host and Executor processes;
+5. real persistence and filesystem/process/service side effects;
+6. an isolated OS environment when the feature mutates OS state;
+7. the final user-visible state and the authoritative backend state;
+8. reload, reconnect, or restart proof for durable behavior;
+9. failure/retry and cleanup proof where applicable.
+
+The public Internet, a production public domain, third-party identity provider, paid model provider, push delivery network, and unavailable physical device are valid external-capability boundaries. A test may replace only that boundary with a controlled implementation using the same public protocol. It must label the substitution and cannot claim compatibility with the omitted external provider or device.
+
+Examples:
+
+- Add Workspace does not pass when `/install` and its assets return `200`; it passes when a command copied from the production Dashboard installs in a clean Linux system, starts the service, connects the Executor, displays the Workspace, survives restart, rejects replay, and cleans up.
+- Terminal does not pass when a component emits `terminal:input`; it passes when real Chromium keyboard input crosses Host and Executor, reaches a real PTY, produces visible output, resizes, closes, and cleans up after reconnect.
+- PWA update does not pass from source-code pattern checks; it passes when an old production service worker controls a page, a new build is deployed, update/reload completes, and the active Session remains usable.
+
+The required journey set is the Critical User Action Acceptance Matrix, not one representative golden path.
 
 ---
 
@@ -233,12 +253,23 @@ If this test fails, something big is broken.
 ### 7.2 Naming
 
 - Test files: `<subject>.test.ts` sit next to `<subject>.ts`
-- E2e: `<flow>.spec.ts` in `e2e/`
+- Full-system E2E: `verify-<journey>.mjs` under `scripts/product-e2e/`; focused browser checks keep the `scripts/dashboard/verify-*.mjs` naming
 - Fixtures: descriptive filenames, not `test-1.json`
 
 ### 7.3 Isolation
 
-Each test file is a hermetic unit — no shared mutable state, no test-order dependencies.
+Each test file is a hermetic unit — no shared mutable state, no test-order dependencies. System E2E uses unique ports, HOME/data roots, browser profiles, Sessions, Workspaces, and LXD instances, and verifies their deletion.
+
+### 7.4 Truthful labels
+
+- `unit`: no process/network boundary.
+- `component`: rendered component with substituted dependencies.
+- `integration`: two or more real product modules, possibly with a controlled boundary.
+- `browser-check`: real browser but not necessarily a complete task chain.
+- `system-e2e`: production artifact plus complete real task chain under the rules in §6.
+- `external-canary`: includes a public provider/domain/device outside the hermetic product boundary.
+
+Test names, comments, reports, and release notes must use these labels. A fixture-driven browser check must not be reported as a system E2E.
 
 ---
 
@@ -252,6 +283,8 @@ The repository CI workflow is the executable source for current jobs. Required r
 4. SaaS Gateway/identity/two-Unit isolation acceptance;
 5. mode-specific critical user task chains and screenshots;
 6. real provider and real-device checks when affected.
+
+Each critical-action row must link to an executable system-E2E scenario or carry an explicit gap/owner. Fast CI may omit slow system lanes, but release acceptance may not turn an omitted lane into a pass.
 
 If browser or SaaS lanes are not automated in the current GitHub workflow, they remain mandatory release evidence and must be reported as manual—not described as an existing CI job.
 
