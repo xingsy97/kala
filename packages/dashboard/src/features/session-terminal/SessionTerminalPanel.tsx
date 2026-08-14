@@ -36,6 +36,8 @@ export function SessionTerminalPanel({
   const [terminalId, setTerminalIdState] = useState<string | null>(null)
   const [status, setStatus] = useState<TerminalStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  const inputContextRef = useRef({ socket, workspaceId, sessionId, status })
+  inputContextRef.current = { socket, workspaceId, sessionId, status }
 
   const setTerminalId = useCallback((value: string | null): void => {
     terminalIdRef.current = value
@@ -50,6 +52,17 @@ export function SessionTerminalPanel({
     term.loadAddon(new SearchAddon())
     terminalRef.current = term
     fitRef.current = fit
+    const inputDisposable = term.onData((data) => {
+      const current = inputContextRef.current
+      const id = terminalIdRef.current
+      if (!current.socket || !current.workspaceId || !id || current.status !== 'running') return
+      current.socket.emit('terminal:input', {
+        workspaceId: current.workspaceId,
+        sessionId: current.sessionId,
+        terminalId: id,
+        data,
+      })
+    })
     if (hostRef.current) {
       term.open(hostRef.current)
       fit.fit()
@@ -57,6 +70,7 @@ export function SessionTerminalPanel({
     return () => {
       // A panel detach must not kill the Session PTY. Explicit Kill and Session
       // deletion are the only terminal-destruction paths.
+      inputDisposable.dispose()
       term.dispose()
       terminalRef.current = null
       fitRef.current = null
@@ -94,12 +108,8 @@ export function SessionTerminalPanel({
   }, [sessionId, socket, t, workspaceId])
 
   useEffect(() => {
-    const term = terminalRef.current
-    if (!term || !socket || !workspaceId || !terminalId || status !== 'running') return
-    const disposable = term.onData((data) => socket.emit('terminal:input', { workspaceId, sessionId, terminalId, data }))
-    term.focus()
-    return () => disposable.dispose()
-  }, [sessionId, socket, status, terminalId, workspaceId])
+    if (status === 'running' && terminalId) terminalRef.current?.focus()
+  }, [status, terminalId])
 
   useEffect(() => {
     const host = hostRef.current
