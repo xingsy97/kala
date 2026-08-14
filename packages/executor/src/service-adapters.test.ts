@@ -1,3 +1,8 @@
+import { spawn } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it, vi } from 'vitest'
 
 import { createLinuxServicePlan, executeLinuxServicePlan, renderLinuxServiceFiles } from './linux-service.js'
@@ -16,6 +21,31 @@ const session: InstallerSession = {
 }
 
 describe('Linux service adapter', () => {
+  it('writes private files through a real Node stdin pipe without exposing contents in argv', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'runlab-linux-service-write-'))
+    try {
+      const privateSession: InstallerSession = {
+        ...session,
+        mode: 'user',
+        executable: join(root, 'runlab-executor'),
+        credential: { token: 'real-pipe-secret' },
+      }
+      const plan = createLinuxServicePlan('install', 'user', root, privateSession)
+      const writes = plan.commands.filter((command) => command.stdin !== undefined)
+      expect(writes).toHaveLength(3)
+      for (const command of writes) {
+        expect(command.args.join(' ')).not.toContain('real-pipe-secret')
+        const result = await spawnCommand(command)
+        expect(result.code, result.stderr).toBe(0)
+      }
+      expect(readFileSync(plan.paths.credential, 'utf8')).toBe('real-pipe-secret\n')
+      expect(statSync(plan.paths.credential).mode & 0o777).toBe(0o600)
+      expect(readFileSync(plan.paths.unit, 'utf8')).toContain('runlab-executor')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('keeps credentials out of the unit and rolls partial installation back', async () => {
     const rendered = renderLinuxServiceFiles(session, '/home/example')
     expect(rendered.unit).not.toContain('secret-value')
@@ -36,6 +66,19 @@ describe('Linux service adapter', () => {
     expect(seen.some((value) => value.includes('disable --now'))).toBe(true)
   })
 })
+
+function spawnCommand(command: { file: string; args: readonly string[]; stdin?: string }): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command.file, [...command.args], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
+    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+    child.once('error', reject)
+    child.once('close', (code) => resolve({ code: code ?? -1, stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() }))
+    child.stdin.end(command.stdin)
+  })
+}
 
 describe('macOS service adapter', () => {
   it('renders safe system and user launchd definitions and rolls back writes', async () => {

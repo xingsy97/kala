@@ -100,8 +100,20 @@ function systemdQuote(value: string): string {
 }
 
 function privateWrite(path: string, contents: string): Command {
-  // Content is sent over stdin and never appears in argv or diagnostics.
-  return { file: 'install', args: ['-D', '-m', '0600', '/dev/stdin', path], stdin: contents }
+  // Content is sent over stdin and never appears in argv or diagnostics. Do not
+  // use `install /dev/stdin`: Node supplies stdin as an anonymous pipe, and GNU
+  // install tries to reopen /dev/stdin, which fails with ENXIO for that pipe.
+  // Pass the destination as a positional parameter so it is never shell-parsed.
+  return {
+    file: 'sh',
+    args: [
+      '-c',
+      'set -eu; target=$1; parent=${target%/*}; [ "$parent" = "$target" ] || mkdir -p -- "$parent"; umask 077; tmp="${target}.tmp.$$"; trap \'rm -f -- "$tmp"\' EXIT HUP INT TERM; cat > "$tmp"; chmod 0600 -- "$tmp"; mv -f -- "$tmp" "$target"; trap - EXIT HUP INT TERM',
+      'runlab-private-write',
+      path,
+    ],
+    stdin: contents,
+  }
 }
 
 export function createLinuxServicePlan(
