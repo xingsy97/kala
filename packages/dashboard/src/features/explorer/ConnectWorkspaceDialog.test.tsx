@@ -20,13 +20,22 @@ describe('ConnectWorkspaceDialog', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url === '/api/executor-installs' && init?.method === 'POST') return response(base)
-      if (url.endsWith('/events?after=0')) return response({ events: [] })
-      if (url === '/api/executor-installs/inst_1' && init?.method === 'PATCH') {
-        const patch = JSON.parse(String(init.body)) as Record<string, string>
-        const platform = patch.platform ?? 'linux'
-        return response({ ...base, ...patch, command: platform === 'windows' ? "$env:RUNLAB_SETUP_CODE='A1B2C3D4E5'; $env:RUNLAB_INSTALL_MODE='temporary'; irm 'http://localhost:3000/install.ps1' | iex" : base.command })
+      if (url === '/api/executor-installs' && init?.method === 'POST') {
+        const input = JSON.parse(String(init.body)) as Record<string, string>
+        if (input.platform === 'windows' || input.mode === 'temporary') {
+          return response({
+            ...base,
+            id: 'inst_2',
+            ...input,
+            command: input.platform === 'windows'
+              ? "$env:RUNLAB_SETUP_CODE='F6E7D8C9B0'; $env:RUNLAB_INSTALL_MODE='temporary'; irm 'http://localhost:3000/install.ps1' | iex"
+              : "curl -fsSL 'http://localhost:3000/install' | RUNLAB_SETUP_CODE='F6E7D8C9B0' RUNLAB_INSTALL_MODE='temporary' sh",
+            setupCode: 'F6E7D8C9B0',
+          })
+        }
+        return response(base)
       }
+      if (url.endsWith('/events?after=0')) return response({ events: [] })
       if (url === '/api/executor-installs/inst_1' && init?.method === 'DELETE') return response({ ok: true })
       if (url.endsWith('/approve')) return response({ ...base, status: 'paired', seq: 4 })
       if (url.endsWith('/reject')) return response({ ...base, status: 'rejected', seq: 4 })
@@ -59,6 +68,8 @@ describe('ConnectWorkspaceDialog', () => {
     await vi.advanceTimersByTimeAsync(400)
     await waitFor(() => expect(screen.getByText(/install\.ps1/)).toBeTruthy())
     expect(screen.getByTestId('executor-terminal-command').textContent).toContain("RUNLAB_INSTALL_MODE='temporary'")
+    expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs' && init?.method === 'POST' && String(init.body).includes('temporary'))).toBe(true)
+    expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs/inst_1' && init?.method === 'DELETE')).toBe(true)
     fireEvent.click(screen.getByTestId('copy-executor-command'))
     await waitFor(() => expect(write).toHaveBeenCalledOnce())
     expect(write.mock.calls[0]![0]).not.toMatch(/[\r\n]/u)

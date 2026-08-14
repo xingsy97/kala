@@ -93,22 +93,27 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
 
   useEffect(() => {
     if (!open || !installation || !createdFormRef.current || sameForm(form, createdFormRef.current)) return
-    const installationId = installation.id
+    const previousInstallationId = installation.id
     const generation = generationRef.current
     const controller = new AbortController()
     const timeout = window.setTimeout(() => {
-      void request<InstallResponse>(`/api/executor-installs/${encodeURIComponent(installationId)}`, {
-        method: 'PATCH',
+      // A setup command contains a one-time code that the Host stores only as a
+      // hash. PATCH cannot regenerate that command for a new platform or mode.
+      // Create a replacement first, then retire the still-unclaimed old record.
+      void request<InstallResponse>('/api/executor-installs', {
+        method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(toApiInput(form)),
         signal: controller.signal,
-      }).then((updated) => {
+      }).then((created) => {
         if (generationRef.current !== generation) return
+        installationIdRef.current = created.id
         createdFormRef.current = form
-        setInstallation(updated)
-        if (updated.command !== undefined) setCommand(updated.command)
-        updatePairingCode(updated, setPairingCode)
+        setInstallation(created)
+        setCommand(created.command ?? '')
+        updatePairingCode(created, setPairingCode)
         setError(null)
+        void fetch(`/api/executor-installs/${encodeURIComponent(previousInstallationId)}`, { method: 'DELETE' }).catch(() => {})
       }).catch((cause: unknown) => {
         if (!controller.signal.aborted && generationRef.current === generation) setError(errorMessage(cause))
       })

@@ -71,6 +71,7 @@
     "verify:dashboard-top-pages": "node scripts/dashboard/verify-dashboard-top-pages.mjs",
     "verify:tasks-button": "node scripts/dashboard/verify-tasks-button.mjs",
     "verify:e2e:add-workspace-linux-service": "node scripts/product-e2e/verify-add-workspace-linux-service.mjs",
+    "verify:e2e:add-workspace-linux-temporary": "node scripts/product-e2e/verify-add-workspace-linux-temporary.mjs",
     "verify:e2e:core-workspace-journeys": "node scripts/product-e2e/verify-core-workspace-journeys.mjs",
     "verify:e2e:controlled-agent-journey": "node scripts/product-e2e/verify-controlled-agent-journey.mjs",
     "verify:e2e:pwa-update-reload": "node scripts/product-e2e/verify-pwa-update-reload.mjs",

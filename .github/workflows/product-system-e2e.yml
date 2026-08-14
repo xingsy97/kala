@@ -41,6 +41,10 @@ jobs:
         env:
           PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/add-workspace-linux-service
         run: pnpm run verify:e2e:add-workspace-linux-service
+      - name: Add Workspace Linux temporary system E2E
+        env:
+          PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/add-workspace-linux-temporary
+        run: pnpm run verify:e2e:add-workspace-linux-temporary
       - name: Core Workspace journeys system E2E
         env:
           PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/core-workspace-journeys

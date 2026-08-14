@@ -9,7 +9,7 @@ This ledger prevents a lower-layer test or fixture-driven browser check from bei
 | Journey | Strongest current evidence | Reality break | Status | Required system E2E |
 |---|---|---|---|---|
 | Add Workspace — Linux service | `scripts/product-e2e/verify-add-workspace-linux-service.mjs` | Public domain/reverse proxy is an explicit external canary; macOS/Windows are separate journeys | Complete (Linux local-origin) | Production Dashboard → copied command → clean LXD → checksum/native install → systemd active/enabled → Workspace visible → restart/replay/cleanup |
-| Add Workspace — temporary | Installer protocol tests | No real foreground Executor lifecycle | Gap | Dashboard command in clean LXD → Workspace online → terminate → offline/cleanup |
+| Add Workspace — temporary | `scripts/product-e2e/verify-add-workspace-linux-temporary.mjs` | Public origin and non-Linux platforms remain separate canaries | Complete (Linux local-origin) | Dashboard command in clean LXD → Workspace online → terminate → offline/cleanup |
 | New Session | `scripts/product-e2e/verify-core-workspace-journeys.mjs` | Deletion and active-turn switching remain separate scenarios | Complete (create/select/reload) | Production bundle, UI create, exact selected ID, reload, persisted cwd |
 | Running Session switch | `scripts/product-e2e/verify-controlled-agent-journey.mjs` | Hover-preview stress and mobile touch remain | Complete (desktop pointer) | Active turn plus real click/hover switch to another Session without blocked UI |
 | Direct/queued message | `verify-dashboard-real.mjs` | Source processes and external-provider dependency; reconnect matrix incomplete | Partial | Controlled protocol provider, production processes, ACK/queue/edit/reorder/delete/drain/reconnect |
