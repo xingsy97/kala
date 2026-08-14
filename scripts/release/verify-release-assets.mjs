@@ -103,10 +103,10 @@ for (const asset of manifest.assets) {
 for (const installer of ['install-executor.sh', 'install-executor.ps1']) {
   if (!manifest.assets.includes(installer)) fail(`manifest missing ${installer}`)
   const text = readFileSync(join(releaseDir, installer), 'utf8')
-  for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'manifest.json', 'SHA256SUMS', 'runlab-executor-', 'CJS fallback is intentionally disabled', '--internal-installer']) {
+  for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'SHA256SUMS', 'runlab-executor-', '--internal-installer']) {
     if (!text.includes(marker)) fail(`${installer} missing required installer marker: ${marker}`)
   }
-  if (text.includes('agent-kernel-executor.cjs')) fail(`${installer} must not fall back to CJS`)
+  if (text.includes('agent-kernel-executor.cjs') || text.includes('manifest.json')) fail(`${installer} must use the Host-scoped checksum index without CJS or manifest fallback`)
 }
 const installerSyntax = spawnSync('bash', ['-n', join(releaseDir, 'install-executor.sh')], { stdio: 'inherit' })
 if (installerSyntax.status !== 0) fail('install-executor.sh failed bash syntax check')

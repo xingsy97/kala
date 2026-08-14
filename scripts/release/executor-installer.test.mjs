@@ -29,19 +29,17 @@ test('uses product native names while retaining deterministic legacy names', () 
   assert.throws(() => executorNativeAssetName('freebsd-x64'))
 })
 
-test('generates fail-closed installers that require native manifest entries and checksums', () => {
+test('generates fail-closed installers that require checksummed native executables', () => {
   const sh = generateExecutorInstallerSh({ repo: 'owner/repo', tag: 'v1.2.3' })
   const ps1 = generateExecutorInstallerPs1({ repo: 'owner/repo', tag: 'latest' })
   for (const text of [sh, ps1]) {
     assert.match(text, /RUNLAB_INSTALLER_ALLOW_UNSIGNED/)
-    assert.match(text, /manifest\.json/)
     assert.match(text, /SHA256SUMS/)
     assert.match(text, /runlab-executor-/)
-    assert.match(text, /CJS fallback is intentionally disabled/)
     assert.match(text, /--internal-installer/)
   }
-  assert.doesNotMatch(sh, /agent-kernel-executor\.cjs/)
-  assert.doesNotMatch(ps1, /agent-kernel-executor\.cjs/)
+  assert.doesNotMatch(sh, /agent-kernel-executor\.cjs|manifest\.json/)
+  assert.doesNotMatch(ps1, /agent-kernel-executor\.cjs|manifest\.json/)
 
   const dir = mkdtempSync(join(tmpdir(), 'runlab-installer-test-'))
   try {

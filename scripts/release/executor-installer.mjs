@@ -54,9 +54,7 @@ download_metadata() {
   name="$1"; wget -q --https-only --tries=3 --timeout=30 -O "$WORK_DIR/$name" "$BASE_URL/$name" || fail "failed to download $name"
   size=$(wc -c < "$WORK_DIR/$name" | tr -d ' '); [ "$size" -le "$MAX_METADATA_BYTES" ] || fail "$name exceeds metadata size limit"
 }
-download_metadata manifest.json
 download_metadata SHA256SUMS
-grep -Fq '"runlab-executor"' "$WORK_DIR/manifest.json" && grep -Fq "\"$asset\"" "$WORK_DIR/manifest.json" || fail "current release has no native executor for $target; CJS fallback is intentionally disabled"
 expected=$(awk -v file="$asset" '$2 == file && $1 ~ /^[0-9a-fA-F]{64}$/ {print tolower($1)}' "$WORK_DIR/SHA256SUMS")
 [ -n "$expected" ] || fail "SHA256SUMS has no valid entry for $asset"
 wget -q --https-only --tries=3 --timeout=30 -O "$WORK_DIR/$asset" "$BASE_URL/$asset" || fail "failed to download $asset"
@@ -82,13 +80,9 @@ $asset = "runlab-executor-$target" + $(if ($os -eq 'win32') { '.exe' } else { ''
 $work = Join-Path ([IO.Path]::GetTempPath()) ("runlab-installer-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $work | Out-Null
 try {
-  foreach ($name in @('manifest.json', 'SHA256SUMS')) {
-    Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$name" -OutFile (Join-Path $work $name)
-    if ((Get-Item (Join-Path $work $name)).Length -gt $maxBytes) { throw "$name exceeds metadata size limit" }
-  }
-  $manifest = Get-Content -Raw (Join-Path $work 'manifest.json') | ConvertFrom-Json
-  $native = $manifest.nativeAssets.'runlab-executor'
-  if (($manifest.assets -notcontains $asset) -or ($native -notcontains $asset)) { throw "Current release has no native executor for $target; CJS fallback is intentionally disabled" }
+  $name = 'SHA256SUMS'
+  Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$name" -OutFile (Join-Path $work $name)
+  if ((Get-Item (Join-Path $work $name)).Length -gt $maxBytes) { throw "$name exceeds metadata size limit" }
   $escaped = [regex]::Escape($asset)
   $line = Get-Content (Join-Path $work 'SHA256SUMS') | Where-Object { $_ -match "^([0-9a-fA-F]{64})  $escaped$" } | Select-Object -First 1
   if (-not $line) { throw "SHA256SUMS has no valid entry for $asset" }

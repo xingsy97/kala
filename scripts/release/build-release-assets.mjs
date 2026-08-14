@@ -370,7 +370,9 @@ function prepareEmbeddedReleaseAssetsForHost() {
     writeFileSync(path, unifiedBootstrap({ repo, tag, component }))
     chmodSync(path, 0o755)
   }
-  const embeddedNames = [executorCjs, 'run.sh', 'install-executor.sh', 'install-executor.ps1']
+  const nativeExecutor = currentNativeTarget ? executorNativeAssetName(currentNativeTarget) : undefined
+  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', 'install-executor.ps1']
+    .filter((name) => name && exists(name))
   writeSha256Sums(embeddedNames)
   return embeddedReleaseAssetsBanner(outDir, [...embeddedNames, 'SHA256SUMS'])
 }

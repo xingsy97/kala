@@ -167,6 +167,11 @@ function bootstrapEnvironment(origin: string, snapshot: { id: string; mode: stri
     EXECUTOR_INSTALL_MODE: snapshot.mode,
     EXECUTOR_INSTALL_PLATFORM: snapshot.platform,
     EXECUTOR_INSTALL_ROOT: snapshot.workspaceRoot,
+    RUNLAB_RELEASE_ASSETS_URL: `${origin}/install/assets`,
+    // The self-hosted release currently has checksums but no detached signing
+    // infrastructure. This authorization is scoped to the one-time Host-issued
+    // install session; the installer still verifies the downloaded executable.
+    RUNLAB_INSTALLER_ALLOW_UNSIGNED: '1',
     ...(snapshot.label ? { EXECUTOR_INSTALL_LABEL: snapshot.label } : {}),
   }
 }
@@ -176,10 +181,10 @@ function installCommand(origin: string, platform: string, mode: string, setupCod
     : `curl -fsSL ${quoteSh(`${origin}/install`)} | RUNLAB_SETUP_CODE=${quoteSh(setupCode)} RUNLAB_INSTALL_MODE=${quoteSh(mode)} sh`
 }
 function renderShellBootstrap(origin: string): string {
-  return `#!/bin/sh\nset -eu\ncode=\${RUNLAB_SETUP_CODE:-}\nif [ -z "$code" ]; then printf 'Agent RunLab setup code: ' >&2; IFS= read -r code; fi\ncase "$code" in *[!A-Fa-f0-9-]*|'') echo 'Invalid setup code' >&2; exit 1;; esac\nclaim=$(curl -fsSL -X POST -H 'content-type: application/json' -H 'accept: text/x-shellscript' --data "{\\"setupCode\\":\\"$code\\"}" ${quoteSh(`${origin}/install/session`)})\neval "$claim"\ncurl -fsSL ${quoteSh(`${origin}/install/assets/install-executor.sh`)} | sh\n`
+  return `#!/bin/sh\nset -eu\ncode=\${RUNLAB_SETUP_CODE:-}\nif [ -z "$code" ]; then printf 'Agent RunLab setup code: ' >&2; IFS= read -r code; fi\ncase "$code" in *[!A-Fa-f0-9-]*|'') echo 'Invalid setup code' >&2; exit 1;; esac\ncommand -v bash >/dev/null 2>&1 || { echo 'Agent RunLab installer: bash is required' >&2; exit 1; }\ninstaller=\$(mktemp)\ntrap 'rm -f "$installer"' EXIT HUP INT TERM\ncurl -fSL --retry 3 --retry-connrefused -o "$installer" ${quoteSh(`${origin}/install/assets/install-executor.sh`)} || { echo 'Agent RunLab installer: failed to download installer asset' >&2; exit 1; }\nclaim=\$(curl -fSL --retry 3 --retry-connrefused -X POST -H 'content-type: application/json' -H 'accept: text/x-shellscript' --data "{\\"setupCode\\":\\"$code\\"}" ${quoteSh(`${origin}/install/session`)}) || { echo 'Agent RunLab installer: setup code is invalid, expired, or already used' >&2; exit 1; }\neval "$claim"\nbash "$installer"\n`
 }
 function renderPowerShellBootstrap(origin: string): string {
-  return `$ErrorActionPreference='Stop'; $code=$env:RUNLAB_SETUP_CODE; if([string]::IsNullOrWhiteSpace($code)){$code=Read-Host 'Agent RunLab setup code'}; $claim=Invoke-RestMethod -Method Post -ContentType 'application/json' -Body (@{setupCode=$code}|ConvertTo-Json -Compress) -Uri ${quotePs(`${origin}/install/session`)}; $claim.env.psobject.Properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name,[string]$_.Value,'Process') }; iex (irm ${quotePs(`${origin}/install/assets/install-executor.ps1`)})`
+  return `$ErrorActionPreference='Stop'; $code=$env:RUNLAB_SETUP_CODE; if([string]::IsNullOrWhiteSpace($code)){$code=Read-Host 'Agent RunLab setup code'}; $installer=Join-Path ([IO.Path]::GetTempPath()) ('runlab-bootstrap-'+[guid]::NewGuid()+'.ps1'); try { Invoke-WebRequest -UseBasicParsing -Uri ${quotePs(`${origin}/install/assets/install-executor.ps1`)} -OutFile $installer; $claim=Invoke-RestMethod -Method Post -ContentType 'application/json' -Body (@{setupCode=$code}|ConvertTo-Json -Compress) -Uri ${quotePs(`${origin}/install/session`)}; $claim.env.psobject.Properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name,[string]$_.Value,'Process') }; & $installer } finally { Remove-Item $installer -Force -ErrorAction SilentlyContinue }`
 }
 function allowClaimAttempt(attempts: Map<string, { count: number; resetAt: number }>, key: string): boolean {
   const now = Date.now()

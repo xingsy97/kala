@@ -93,7 +93,7 @@ if (dryRun) {
   console.log('dry run complete: no build, SSH command, upload, activation, restart, or rollback was executed')
   process.exit(0)
 }
-if (!effectiveArgs.includes('--skip-build')) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--no-native', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
+if (!effectiveArgs.includes('--skip-build')) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
 stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
 const sums = readFileSync(join(releaseDir, 'SHA256SUMS'), 'utf8')
 const bundleHash = sums.match(/^([a-f0-9]{64})\s+bundle-dashboard-with-runtime\.cjs$/m)?.[1]
@@ -153,7 +153,7 @@ function run(command, args, options = {}) {
 
 function deployLxd({ container, remoteBin, service, skipBuild }) {
   const releaseDir = join(root, 'release')
-  if (!skipBuild) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--no-native', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
+  if (!skipBuild) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
   stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
   const sums = readFileSync(join(releaseDir, 'SHA256SUMS'), 'utf8')
   const files = releaseFiles(releaseDir)
