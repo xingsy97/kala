@@ -536,6 +536,27 @@ describe('Explorer', () => {
     expect(onSelect).toHaveBeenCalledWith(target.sessionId)
   })
 
+  it('keeps click as a fallback when Tree activation is lost after pointerdown', () => {
+    const onSelect = vi.fn()
+    const target = { ...sessionSummary, sessionId: 'click-fallback-session', status: 'idle' as const }
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary, target]}
+        selectedSessionId={sessionSummary.sessionId}
+        onSelect={onSelect}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const targetRow = screen.getAllByTestId('session-row').find((row) => row.getAttribute('data-session-id') === target.sessionId)!
+    fireEvent.click(targetRow)
+    expect(onSelect).toHaveBeenCalledWith(target.sessionId)
+  })
+
   it('clears the focused session when clicking empty explorer space', () => {
     const onSelect = vi.fn()
     const onClearSelection = vi.fn()

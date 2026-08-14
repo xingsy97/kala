@@ -1,3 +1,6 @@
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -9,7 +12,7 @@ export class ProductE2EHarness {
     this.name = options.name ?? 'product-e2e'
     this.chromePath = options.chromePath ?? process.env.CHROME_PATH ?? '/snap/bin/chromium'
     this.headless = options.headless ?? true
-    this.evidenceRoot = options.evidenceRoot ?? join(tmpdir(), `agent-runlab-program-${Date.now()}`)
+    this.evidenceRoot = options.evidenceRoot ?? process.env.PRODUCT_E2E_EVIDENCE_ROOT ?? join(tmpdir(), `agent-runlab-program-${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2, 10)}`)
     this.browser = null
     this.contexts = []
     this.resources = []
@@ -29,8 +32,9 @@ export class ProductE2EHarness {
     const page = await context.newPage()
     await page.setViewport(viewport)
     page.setDefaultTimeout(60_000)
-    const actor = { name, context, page, requests: [], responses: [], consoleErrors: [], pageErrors: [] }
+    const actor = { name, context, page, requests: [], requestFailures: [], responses: [], consoleErrors: [], pageErrors: [] }
     page.on('request', (request) => actor.requests.push({ method: request.method(), url: request.url(), navigation: request.isNavigationRequest() }))
+    page.on('requestfailed', (request) => actor.requestFailures.push({ url: request.url(), error: request.failure()?.errorText ?? 'unknown' }))
     page.on('response', (response) => {
       if (response.status() >= 400 && !response.url().includes('favicon')) actor.responses.push({ status: response.status(), url: response.url() })
     })
@@ -59,6 +63,13 @@ export class ProductE2EHarness {
     this.resources.push({ kind, id, cleanup, cleaned: false })
   }
 
+  registerProcess(name, child, logs = []) {
+    this.registerResource('process', name, async () => stopProcess(child))
+    child.stdout?.on('data', (chunk) => logs.push(`[stdout] ${chunk.toString()}`))
+    child.stderr?.on('data', (chunk) => logs.push(`[stderr] ${chunk.toString()}`))
+    return { child, logs }
+  }
+
   async screenshot(actor, name, options = {}) {
     const path = join(this.evidenceRoot, `${safeName(actor.name)}-${safeName(name)}.png`)
     await actor.page.screenshot({ path, fullPage: options.fullPage ?? false })
@@ -66,6 +77,21 @@ export class ProductE2EHarness {
   }
 
   async finalize(extra = {}) {
+    // Freeze browser evidence and close actors before tearing down Host/Executor.
+    // Pages persist state during unload; stopping Host first creates teardown-only
+    // connection errors that are not product-journey failures.
+    const actors = this.contexts.map((actor) => ({
+      name: actor.name,
+      url: actor.page.url(),
+      failedResponses: [...actor.responses],
+      requestFailures: [...actor.requestFailures],
+      consoleErrors: [...actor.consoleErrors],
+      pageErrors: [...actor.pageErrors],
+    }))
+    for (const actor of this.contexts) await actor.context.close().catch(() => {})
+    await this.browser?.close().catch(() => {})
+    this.browser = null
+
     const cleanup = []
     for (const resource of [...this.resources].reverse()) {
       try {
@@ -78,25 +104,16 @@ export class ProductE2EHarness {
         this.failures.push({ name: `cleanup:${resource.kind}:${resource.id}`, ok: false, error: String(error) })
       }
     }
-    const actors = this.contexts.map((actor) => ({
-      name: actor.name,
-      url: actor.page.url(),
-      failedResponses: actor.responses,
-      consoleErrors: actor.consoleErrors,
-      pageErrors: actor.pageErrors,
-    }))
     const report = { name: this.name, generatedAt: new Date().toISOString(), steps: this.steps, actors, cleanup, failures: this.failures, ...extra }
     const reportPath = join(this.evidenceRoot, 'report.json')
     await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
-    for (const actor of this.contexts) await actor.context.close().catch(() => {})
-    await this.browser?.close().catch(() => {})
-    this.browser = null
     return { report, reportPath, evidenceRoot: this.evidenceRoot }
   }
 
   assertClean(report) {
     const actorFailures = report.actors.flatMap((actor) => [
       ...actor.failedResponses.map((item) => `${actor.name}: HTTP ${item.status} ${item.url}`),
+      ...(actor.requestFailures ?? []).map((item) => `${actor.name}: request ${item.error} ${item.url}`),
       ...actor.consoleErrors.map((item) => `${actor.name}: console ${item}`),
       ...actor.pageErrors.map((item) => `${actor.name}: page ${item}`),
     ])
@@ -112,6 +129,69 @@ export async function clickByTestId(page, testId) {
 
 export async function waitForText(page, text, timeout = 60_000) {
   await page.waitForFunction((expected) => document.body.innerText.includes(expected), { timeout }, text)
+}
+
+export function startProcess(command, args, options = {}) {
+  return spawn(command, args, {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    detached: options.detached ?? true,
+    stdio: options.stdio ?? ['ignore', 'pipe', 'pipe'],
+  })
+}
+
+export async function runCommand(command, args, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 120_000
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] })
+    const stdout = []
+    const stderr = []
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 2_000).unref()
+    }, timeoutMs)
+    child.stdout.on('data', (chunk) => stdout.push(Buffer.from(chunk)))
+    child.stderr.on('data', (chunk) => stderr.push(Buffer.from(chunk)))
+    child.once('error', reject)
+    child.once('close', (code, signal) => {
+      clearTimeout(timer)
+      const result = { code: code ?? -1, signal, stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() }
+      if (options.allowFailure || code === 0) resolve(result)
+      else reject(new Error(`${command} ${args.join(' ')} failed (${code ?? signal}): ${result.stderr || result.stdout}`))
+    })
+    child.stdin.end(options.stdin)
+  })
+}
+
+export async function waitForHttp(url, options = {}) {
+  const deadline = Date.now() + (options.timeoutMs ?? 30_000)
+  let last
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url)
+      if (response.ok) return response
+      last = new Error(`HTTP ${response.status}`)
+    } catch (error) { last = error }
+    await sleep(options.intervalMs ?? 150)
+  }
+  throw new Error(`timed out waiting for ${url}: ${last instanceof Error ? last.message : String(last)}`)
+}
+
+export async function waitFor(check, options = {}) {
+  const deadline = Date.now() + (options.timeoutMs ?? 30_000)
+  let last
+  while (Date.now() < deadline) {
+    try {
+      const value = await check()
+      if (value) return value
+    } catch (error) { last = error }
+    await sleep(options.intervalMs ?? 150)
+  }
+  throw new Error(`timed out waiting for ${options.name ?? 'condition'}${last ? `: ${String(last)}` : ''}`)
+}
+
+export function sha256File(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
 export async function loginWithPassword(page, { productOrigin, loginName, password }) {
@@ -163,6 +243,17 @@ async function submitVisibleForm(page, selector) {
 }
 
 function safeName(value) { return value.replace(/[^a-zA-Z0-9_-]+/gu, '-') }
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }
+async function stopProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise((resolve) => child.once('exit', resolve))
+  try { process.kill(-child.pid, 'SIGTERM') } catch { child.kill('SIGTERM') }
+  const stopped = await Promise.race([exited.then(() => true), sleep(3_000).then(() => false)])
+  if (!stopped) {
+    try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
+    await Promise.race([exited, sleep(2_000)])
+  }
+}
 function serializable(value) {
   if (value === undefined) return null
   try { return JSON.parse(JSON.stringify(value)) } catch { return String(value) }

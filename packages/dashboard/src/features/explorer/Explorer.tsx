@@ -1173,6 +1173,13 @@ function SessionRow({
         selected && 'bg-accent',
         EXPLORER_ROW_GRID,
       )}
+      onClick={() => {
+        // Keep a click fallback in addition to the eager pointerdown path. The
+        // virtualized Tree may commit a controlled selection update between
+        // pointerdown and its own onActivate callback; a row-local click keeps
+        // the user action authoritative without depending on Tree internals.
+        if (!editing) onPointerActivateSession(s.sessionId)
+      }}
       onMouseDown={(e) => {
         // Suppress the second `click` in a native double-click sequence so it
         // doesn't reach the react-arborist row handler and re-activate the
@@ -1186,7 +1193,7 @@ function SessionRow({
         if (e.detail >= 2) e.preventDefault()
       }}
       onPointerDown={(e) => {
-        if (e.button > 0 || selected || editing) return
+        if (e.button > 0 || editing) return
         onPointerActivateSession(s.sessionId)
       }}
       onDoubleClick={(e) => {

@@ -1,0 +1,72 @@
+name: Product System E2E
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-system-e2e
+  cancel-in-progress: false
+
+jobs:
+  linux-system-e2e:
+    name: production artifact / Chromium / LXD
+    runs-on: [self-hosted, linux, x64, lxd-container]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Preflight real-system capabilities
+        run: |
+          set -eu
+          test -x /snap/bin/chromium || test -n "$(command -v chromium || true)"
+          lxc info >/dev/null
+          lxc image info ubuntu:24.04 >/dev/null
+          test -z "$(lxc list 'runlab-e2e-*' --format csv -c n)"
+      - name: Build production release artifacts
+        run: pnpm run build:release-assets -- --repo local/agent-runlab
+      - name: Verify release artifacts
+        run: pnpm run verify:release-assets && pnpm run verify:release-install
+      - name: Add Workspace Linux service system E2E
+        env:
+          PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/add-workspace-linux-service
+        run: pnpm run verify:e2e:add-workspace-linux-service
+      - name: Core Workspace journeys system E2E
+        env:
+          PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/core-workspace-journeys
+        run: pnpm run verify:e2e:core-workspace-journeys
+      - name: Controlled agent journey system E2E
+        env:
+          PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/controlled-agent-journey
+        run: pnpm run verify:e2e:controlled-agent-journey
+      - name: PWA update/reload system E2E
+        env:
+          PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/pwa-update-reload
+        run: pnpm run verify:e2e:pwa-update-reload
+      - name: Emergency orphan cleanup
+        if: always()
+        run: |
+          set +e
+          lxc list 'runlab-e2e-*' --format csv -c n | while read -r name; do
+            test -z "$name" || lxc delete --force "$name"
+          done
+          remaining=$(lxc list 'runlab-e2e-*' --format csv -c n)
+          test -z "$remaining"
+      - name: Upload structured system-E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-system-e2e-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 30
