@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,6 +25,13 @@ const harness = new ProductE2EHarness({ name: 'controlled-agent-journey' })
 const providerRequests = []
 const hostLogs = []
 const executorLogs = []
+let releaseFirstProvider
+const firstProviderGate = new Promise((resolve) => { releaseFirstProvider = resolve })
+let subAgentSpawned = false
+let subAgentCompleted = false
+let cancellableSubAgentSpawned = false
+let releaseCancelledChild
+const cancelledChildGate = new Promise((resolve) => { releaseCancelledChild = resolve })
 let actor
 let primarySessionId
 let secondarySessionId
@@ -46,14 +53,41 @@ const provider = createServer(async (req, res) => {
   const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
   providerRequests.push(body)
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
+  const latestRequestText = JSON.stringify((body.messages ?? []).at(-1) ?? null)
   const callIndex = providerRequests.length
-  if (callIndex === 1) {
-    sendSse(res, { type: 'message_start', message: { id: 'msg_tool', usage: { input_tokens: 10, output_tokens: 0 } } })
-    sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'controlled-read-1', name: 'read_file', input: {} } })
-    await sleep(1_500)
-    sendSse(res, { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ path: 'controlled.txt', _intent: intention }) } })
+  if (latestRequestText.includes('spawn cancellable subagent') && !cancellableSubAgentSpawned) {
+    cancellableSubAgentSpawned = true
+    sendSse(res, { type: 'message_start', message: { id: 'msg_agent_cancel', usage: { input_tokens: 10, output_tokens: 0 } } })
+    sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'controlled-agent-cancel', name: 'agent', input: {} } })
+    sendSse(res, { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ prompt: 'Wait until interrupted and do not finish.', max_turns: 3, _intent: 'Start a cancellable child to verify interruption and cleanup.' }) } })
     sendSse(res, { type: 'content_block_stop', index: 0 })
     sendSse(res, { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 8 } })
+  } else if (latestRequestText.includes('Wait until interrupted and do not finish')) {
+    await cancelledChildGate
+    if (!res.writableEnded && !res.destroyed) sendTextResponse(res, 'UNEXPECTED_CHILD_COMPLETION', 'msg_cancel_child')
+  } else if (latestRequestText.includes('spawn controlled subagent') && !subAgentSpawned) {
+    subAgentSpawned = true
+    sendSse(res, { type: 'message_start', message: { id: 'msg_agent', usage: { input_tokens: 10, output_tokens: 0 } } })
+    sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'controlled-agent-1', name: 'agent', input: {} } })
+    sendSse(res, { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ prompt: 'Return SUBAGENT_E2E_SUCCESS and finish.', max_turns: 2, _intent: 'Delegate a bounded child task to prove the complete sub-agent lifecycle.' }) } })
+    sendSse(res, { type: 'content_block_stop', index: 0 })
+    sendSse(res, { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 8 } })
+  } else if (latestRequestText.includes('Return SUBAGENT_E2E_SUCCESS') && !subAgentCompleted) {
+    subAgentCompleted = true
+    sendTextResponse(res, 'SUBAGENT_E2E_SUCCESS', 'msg_child')
+  } else if (subAgentCompleted && latestRequestText.includes('SUBAGENT_E2E_SUCCESS')) {
+    sendTextResponse(res, 'Parent observed child success.', 'msg_parent_final')
+  } else if (callIndex === 1) {
+    sendSse(res, { type: 'message_start', message: { id: 'msg_tool', usage: { input_tokens: 10, output_tokens: 0 } } })
+    for (let index = 0; index < 3; index += 1) {
+      sendSse(res, { type: 'content_block_start', index, content_block: { type: 'tool_use', id: `controlled-read-${index + 1}`, name: 'read_file', input: {} } })
+    }
+    await firstProviderGate
+    for (let index = 0; index < 3; index += 1) {
+      sendSse(res, { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ path: 'controlled.txt', _intent: `${intention} Step ${index + 1}.` }) } })
+      sendSse(res, { type: 'content_block_stop', index })
+    }
+    sendSse(res, { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 18 } })
   } else {
     sendSse(res, { type: 'message_start', message: { id: 'msg_final', usage: { input_tokens: 20, output_tokens: 0 } } })
     sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
@@ -95,6 +129,12 @@ try {
   })
 
   actor = await harness.newActor('operator')
+  await actor.page.evaluateOnNewDocument(() => {
+    const original = window.matchMedia.bind(window)
+    window.matchMedia = (query) => query === '(hover: hover) and (pointer: fine)'
+      ? { matches: true, media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true }
+      : original(query)
+  })
   await actor.page.goto(origin, { waitUntil: 'networkidle2' })
   primarySessionId = await createSession(actor.page)
   secondarySessionId = await createSession(actor.page)
@@ -103,16 +143,52 @@ try {
   await harness.step('send message and switch Sessions during a live provider stream', async () => {
     await clickByTestId(actor.page, 'approval-mode-picker')
     await clickByTestId(actor.page, 'approval-mode-option-allow_all')
+    await clickByTestId(actor.page, 'send-mode-toggle')
+    await clickByTestId(actor.page, 'send-mode-queue')
     await actor.page.click('[data-testid="composer-input"]')
     await actor.page.keyboard.type('Read controlled.txt and report the result.')
     await clickByTestId(actor.page, 'composer-send')
     await waitFor(() => providerRequests.length >= 1, { timeoutMs: 20_000, name: 'provider request' })
+    for (const text of ['queue-second', 'queue-third', 'queue-delete']) {
+      await actor.page.click('[data-testid="composer-input"]')
+      await actor.page.keyboard.type(text)
+      await clickByTestId(actor.page, 'composer-send')
+    }
+    await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="queued-message-row"]').length === 3)
+    await actor.page.reload({ waitUntil: 'networkidle2' })
+    await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="queued-message-row"]').length === 3)
+    const rows = await actor.page.$$('[data-testid="queued-message-row"]')
+    await rows[1].$eval('[data-testid="queued-message-edit"]', (element) => element.click())
+    await actor.page.waitForSelector('[data-testid="queued-message-edit-input"]')
+    await actor.page.click('[data-testid="queued-message-edit-input"]')
+    await actor.page.keyboard.down('Control'); await actor.page.keyboard.press('KeyA'); await actor.page.keyboard.up('Control')
+    await actor.page.keyboard.type('queue-third-edited')
+    await clickByTestId(actor.page, 'queued-message-save')
+    await actor.page.waitForFunction(() => (document.querySelector('[data-testid="queued-messages-dock"]')?.textContent ?? '').includes('queue-third-edited'))
+    const updatedRows = await actor.page.$$('[data-testid="queued-message-row"]')
+    const editedRow = await findRowByText(updatedRows, 'queue-third-edited')
+    await editedRow.$eval('[data-testid="queued-message-up"]', (element) => element.click())
+    const deleteRows = await actor.page.$$('[data-testid="queued-message-row"]')
+    const deleteRow = await findRowByText(deleteRows, 'queue-delete')
+    await deleteRow.$eval('[data-testid="queued-message-delete"]', (element) => element.click())
+    await actor.page.waitForFunction(() => {
+      const text = document.querySelector('[data-testid="queued-messages-dock"]')?.textContent ?? ''
+      return document.querySelectorAll('[data-testid="queued-message-row"]').length === 2 && text.includes('queue-third-edited') && !text.includes('queue-delete')
+    })
     const started = performance.now()
     await selectSession(actor.page, secondarySessionId)
     const switchedInMs = Math.round(performance.now() - started)
     if (switchedInMs > 1_000) throw new Error(`running Session switch took ${switchedInMs}ms`)
+    const primaryRow = await visibleSessionRow(actor.page, primarySessionId)
+    await primaryRow.hover()
+    await actor.page.waitForSelector('[data-testid="session-hover-preview"]', { timeout: 10_000 })
+    await actor.page.waitForFunction(() => document.querySelector('[data-testid="session-hover-preview-freshness"]')?.textContent === 'live', { timeout: 5_000 })
+    const freshness = await actor.page.$eval('[data-testid="session-hover-preview-freshness"]', (element) => element.textContent ?? '')
+    const previewText = await actor.page.$eval('[data-testid="session-hover-preview-summary"]', (element) => element.textContent ?? '')
+    if (!previewText.includes('Read controlled.txt')) throw new Error(`preview omitted latest content: ${previewText.slice(0, 500)}`)
+    releaseFirstProvider()
     await selectSession(actor.page, primarySessionId)
-    return { primarySessionId, secondarySessionId, switchedInMs }
+    return { primarySessionId, secondarySessionId, switchedInMs, previewFreshness: freshness }
   })
 
   await harness.step('prove custom prompt, tool intention, real result, and final response', async () => {
@@ -122,6 +198,8 @@ try {
       : String(providerRequests[0]?.system ?? '')
     if (!requestSystem.includes(customPrompt)) throw new Error(`custom prompt missing from real provider request: ${requestSystem.slice(0, 1_500)}`)
     await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-read-1"]')
+    await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-read-2"]')
+    await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-read-3"]')
     await actor.page.waitForSelector('[data-testid="tool-card-dots-intent-controlled-read-1"]')
     const intent = await actor.page.$eval('[data-testid="tool-card-dots-intent-controlled-read-1"]', (element) => element.textContent ?? '')
     if (!intent.includes(intention)) throw new Error(`intention missing from dot line: ${intent}`)
@@ -131,18 +209,68 @@ try {
     const previewText = await actor.page.$eval('[data-testid="tool-card-preview-scroll-controlled-read-1"]', (element) => element.textContent ?? '')
     const resultVisible = previewText.includes('CONTROLLED_TOOL_FILE')
     if (!detail.includes(intention) || !resultVisible) throw new Error(`expanded tool detail/result is incomplete: ${previewText.slice(0, 1_500)}`)
+    const geometry = await actor.page.evaluate(() => {
+      const connector = document.querySelector('[data-testid="tool-activity-connector"]')?.getBoundingClientRect()
+      const first = document.querySelector('[data-testid="tool-card-dot-controlled-read-1"]')?.getBoundingClientRect()
+      const last = document.querySelector('[data-testid="tool-card-dot-controlled-read-3"]')?.getBoundingClientRect()
+      const preview = document.querySelector('[data-testid^="tool-card-preview-layer-"]')?.getBoundingClientRect()
+      const chat = document.querySelector('[data-testid="chat-panel"]')?.getBoundingClientRect()
+      return { connector, first, last, preview, chat }
+    })
+    if (!geometry.connector || !geometry.first || !geometry.last || geometry.connector.right > geometry.last.right + 2) throw new Error(`invalid tool connector geometry: ${JSON.stringify(geometry)}`)
     await harness.screenshot(actor, 'controlled-tool-complete')
-    return { providerRequests: providerRequests.length, intention, resultVisible: true, customPromptForwarded: true }
+    return { providerRequests: providerRequests.length, intention, resultVisible: true, customPromptForwarded: true, toolCount: 3, geometry }
+  })
+
+  await harness.step('spawn and complete a live Sub-agent Session', async () => {
+    await actor.page.click('[data-testid="composer-input"]')
+    await actor.page.keyboard.type('spawn controlled subagent')
+    await clickByTestId(actor.page, 'composer-send')
+    await actor.page.waitForSelector('[data-testid="sub-agent-row-controlled-agent-1"]', { timeout: 30_000 })
+    await actor.page.waitForFunction(() => document.querySelector('[data-testid="sub-agent-row-controlled-agent-1"]')?.getAttribute('data-sub-agent-status') === 'completed', { timeout: 30_000 })
+    await clickByTestId(actor.page, 'sub-agent-toggle-controlled-agent-1')
+    const childLog = await waitFor(() => {
+      const file = readdirSync(sessionsDir).find((name) => !name.includes(primarySessionId) && !name.includes(secondarySessionId) && readFileSync(join(sessionsDir, name), 'utf8').includes('SUBAGENT_E2E_SUCCESS'))
+      return file ? join(sessionsDir, file) : undefined
+    }, { timeoutMs: 30_000, name: 'persisted child Session result' })
+    return { spawned: subAgentSpawned, completed: subAgentCompleted, status: 'completed', childLog }
+  })
+
+  await harness.step('interrupt a live Sub-agent and persist cancelled state', async () => {
+    const cancelSessionId = await createSession(actor.page)
+    await actor.page.waitForSelector('[data-testid="composer-send"]', { timeout: 30_000 })
+    await clickByTestId(actor.page, 'approval-mode-picker')
+    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
+    await actor.page.click('[data-testid="composer-input"]')
+    await actor.page.keyboard.type('spawn cancellable subagent')
+    const requestsBefore = providerRequests.length
+    await clickByTestId(actor.page, 'composer-send')
+    await waitFor(() => providerRequests.length > requestsBefore, { timeoutMs: 20_000, name: 'cancellable parent provider request' })
+    await actor.page.waitForSelector('[data-testid="sub-agent-row-controlled-agent-cancel"][data-sub-agent-status="running"]', { timeout: 30_000 })
+    await clickByTestId(actor.page, 'sub-agent-interrupt-controlled-agent-cancel')
+    await actor.page.waitForFunction(() => document.querySelector('[data-testid="sub-agent-row-controlled-agent-cancel"]')?.getAttribute('data-sub-agent-status') === 'cancelled', { timeout: 30_000 })
+    releaseCancelledChild()
+    return { spawned: cancellableSubAgentSpawned, status: 'cancelled', sessionId: cancelSessionId }
   })
 
   await harness.step('reload and replay tool intention/result from persistence', async () => {
+    await selectSession(actor.page, primarySessionId)
+    const expectedFailureStart = actor.requestFailures.length
     await actor.page.reload({ waitUntil: 'networkidle2' })
     await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-read-1"]')
     const text = await actor.page.$eval('[data-testid="tool-card-dots-intent-controlled-read-1"]', (element) => element.textContent ?? '')
     if (!text.includes(intention)) throw new Error('persisted intention missing after reload')
-    return { sessionId: primarySessionId, replayed: true }
+    const reloadFailures = actor.requestFailures.slice(expectedFailureStart)
+    if (reloadFailures.some((item) => !(item.error === 'net::ERR_ABORTED' && item.url.endsWith('/manifest.webmanifest')))) {
+      throw new Error(`unexpected reload request failure: ${JSON.stringify(reloadFailures)}`)
+    }
+    actor.requestFailures.splice(expectedFailureStart)
+    return { sessionId: primarySessionId, replayed: true, expectedManifestAborts: reloadFailures.length }
   })
+
 } catch (error) { thrown = error } finally {
+  releaseFirstProvider?.()
+  releaseCancelledChild?.()
   result = await harness.finalize({
     revision: (await runCommand('git', ['rev-parse', 'HEAD'], { cwd: root, allowFailure: true })).stdout.trim(),
     controlledBoundaries: ['paid model provider replaced by same-protocol Anthropic Messages SSE server'],
@@ -168,19 +296,21 @@ async function createSession(page) {
   await page.waitForSelector('[data-testid="dialog-overlay"]', { hidden: true })
   return new URL(page.url()).searchParams.get('sessionId')
 }
-async function selectSession(page, id) {
+async function visibleSessionRow(page, id) {
   const selector = `[data-testid="session-row"][data-session-id="${id}"]`
   await page.waitForSelector(selector)
   const rows = await page.$$(selector)
-  let visible
   for (const row of rows) {
     if (await row.evaluate((element) => {
       const rect = element.getBoundingClientRect()
       const style = getComputedStyle(element)
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.pointerEvents !== 'none'
-    })) { visible = row; break }
+    })) return row
   }
-  if (!visible) throw new Error(`no visible Session row for ${id}`)
+  throw new Error(`no visible Session row for ${id}`)
+}
+async function selectSession(page, id) {
+  const visible = await visibleSessionRow(page, id)
   const hit = await visible.evaluate((element) => {
     const rect = element.getBoundingClientRect()
     const x = rect.left + Math.min(100, rect.width / 2)
@@ -194,6 +324,17 @@ async function selectSession(page, id) {
   } catch (error) {
     throw new Error(`clicking visible Session ${id} hit ${hit.target} but URL stayed ${page.url()}`, { cause: error })
   }
+}
+async function findRowByText(rows, text) {
+  for (const row of rows) if (await row.evaluate((element, expected) => element.textContent?.includes(expected), text)) return row
+  throw new Error(`queued row not found: ${text}`)
+}
+function sendTextResponse(res, text, id) {
+  sendSse(res, { type: 'message_start', message: { id, usage: { input_tokens: 5, output_tokens: 0 } } })
+  sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
+  sendSse(res, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })
+  sendSse(res, { type: 'content_block_stop', index: 0 })
+  sendSse(res, { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 3 } })
 }
 function sendSse(res, value) { res.write(`data: ${JSON.stringify(value)}\n\n`) }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }

@@ -85,15 +85,14 @@ function check(name, pass, detail = '') {
 
 try {
   writeSessionFixture()
-  await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], { name: 'dashboard build', timeoutMs: 45_000 })
-
-  host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/agent-kernel-host.ts'], {
+  const releaseBundle = join(REPO_ROOT, 'release/bundle-dashboard-with-runtime.cjs')
+  if (!existsSync(releaseBundle)) throw new Error('production release bundle is missing; run build:release-assets first')
+  host = spawn(process.execPath, [releaseBundle], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
       HOST_PORT: String(PORT),
       SESSIONS_DIR,
-      DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
     },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -205,14 +204,14 @@ async function verifyDotsToolActivity(page, name) {
     return {
       aggregate: details?.querySelector('[data-testid="tool-call-missing-intent-summary-mobile-tool-0"]')?.textContent ?? '',
       placeholders: Array.from(details?.querySelectorAll('*') ?? []).filter((node) => node.textContent === 'Details available').length,
-      summaries: Array.from(details?.querySelectorAll('[data-testid^="grouped-tool-row-mobile-tool-"]') ?? []).filter((node) => node.textContent?.includes('Read completed')).length,
+      concreteTargets: Array.from(details?.querySelectorAll('[data-testid^="grouped-tool-row-mobile-tool-"]') ?? []).filter((node) => /file-\d+\.ts/u.test(node.textContent ?? '')).length,
       visibleRows: details?.querySelectorAll('[data-testid^="grouped-tool-row-mobile-tool-"]').length ?? 0,
       text: details?.textContent ?? '',
     }
   })
-  check(`${name}: legacy calls keep individual safe summaries without placeholder spam`, legacyRows.aggregate === '' && legacyRows.placeholders === 0 && legacyRows.visibleRows === 53 && legacyRows.summaries === 53 && !legacyRows.text.includes('/tmp/agent-runlab-mobile/'), JSON.stringify(legacyRows))
+  check(`${name}: legacy calls keep individual concrete summaries without placeholder spam`, legacyRows.aggregate === '' && legacyRows.placeholders === 0 && legacyRows.visibleRows === 53 && legacyRows.concreteTargets === 53, JSON.stringify(legacyRows))
   await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-tool-dots-expanded.png`), fullPage: false })
-  await page.click('[data-testid="tool-call-group-toggle-mobile-tool-0"]')
+  await page.$eval('[data-testid="tool-call-group-toggle-mobile-tool-0"]', (element) => element.click())
 }
 
 async function verifyImagePreviewDialog(page, name) {

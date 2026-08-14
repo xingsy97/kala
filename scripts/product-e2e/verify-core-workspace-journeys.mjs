@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,6 +31,13 @@ mkdirSync(home, { recursive: true })
 mkdirSync(sessionsDir, { recursive: true })
 mkdirSync(workspace, { recursive: true })
 writeFileSync(join(workspace, 'e2e-visible.txt'), 'FILES_E2E_VISIBLE\n', 'utf8')
+writeFileSync(join(workspace, 'e2e-binary.bin'), Buffer.from([0, 255, 1, 254, 2, 253]))
+execFileSync('git', ['init', '-q'], { cwd: workspace })
+execFileSync('git', ['config', 'user.email', 'e2e@example.test'], { cwd: workspace })
+execFileSync('git', ['config', 'user.name', 'E2E'], { cwd: workspace })
+execFileSync('git', ['add', 'e2e-visible.txt'], { cwd: workspace })
+execFileSync('git', ['commit', '-qm', 'baseline'], { cwd: workspace })
+writeFileSync(join(workspace, 'e2e-visible.txt'), 'FILES_E2E_VISIBLE\nGIT_DIFF_VISIBLE\n', 'utf8')
 
 function startHost(label) {
   const child = startProcess(bundle, [], {
@@ -146,7 +154,19 @@ try {
     await actor.page.waitForFunction(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].some((item) => item.textContent?.includes('e2e-visible.txt')), { timeout: 30_000 })
     await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].find((item) => item.textContent?.includes('e2e-visible.txt'))?.click())
     await actor.page.waitForFunction(() => document.body.innerText.includes('FILES_E2E_VISIBLE'), { timeout: 30_000 })
-    return { path: join(workspace, 'e2e-visible.txt'), visibleContents: true }
+    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].find((item) => item.textContent?.includes('e2e-binary.bin'))?.click())
+    await actor.page.waitForFunction(() => document.body.innerText.includes('Binary file cannot be viewed'), { timeout: 30_000 })
+    return { path: join(workspace, 'e2e-visible.txt'), visibleContents: true, binaryHandled: true }
+  })
+
+  await harness.step('show real Git status and diff through Source Control UI', async () => {
+    await clickByTestId(actor.page, 'right-panel-git-tab')
+    await actor.page.waitForSelector('[data-testid="source-control-panel"]')
+    await actor.page.waitForFunction(() => [...document.querySelectorAll('[data-testid="source-control-file"]')].some((item) => item.textContent?.includes('e2e-visible.txt')), { timeout: 30_000 })
+    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid="source-control-file"]')].find((item) => item.textContent?.includes('e2e-visible.txt'))?.click())
+    await actor.page.waitForSelector('[data-testid="source-control-diff-dialog"]')
+    await actor.page.waitForFunction(() => document.body.innerText.includes('GIT_DIFF_VISIBLE'), { timeout: 30_000 })
+    return { repo: workspace, modifiedFile: 'e2e-visible.txt', diffVisible: true }
   })
 
   await harness.step('save custom system prompt through production Settings UI', async () => {
@@ -201,6 +221,9 @@ try {
     return { sessionId, promptRestored: true, expectedTransientConnectionErrors: restartErrors.length, expectedTransientRequestFailures: restartRequestFailures.length }
   })
 
+  const expectedMonacoAborts = actor.requestFailures.filter((item) => item.error === 'net::ERR_ABORTED' && item.url.includes('monaco-editor') && item.url.includes('editor.worker'))
+  actor.requestFailures = actor.requestFailures.filter((item) => !expectedMonacoAborts.includes(item))
+  await harness.step('account for Monaco worker cancellation after diff teardown', async () => ({ expectedMonacoWorkerAborts: expectedMonacoAborts.length }))
   await harness.screenshot(actor, 'core-journeys-complete')
 } catch (error) {
   thrown = error

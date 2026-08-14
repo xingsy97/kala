@@ -49,7 +49,7 @@ describe('SessionPreviewStore', () => {
     store.connect(socket, cache)
 
     const stop = store.watch('preview-session')
-    expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('subscribe', { sessionId: 'preview-session' })
+    expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('client:subscribe_channels', expect.objectContaining({ channels: ['session:preview-session'] }), expect.any(Function))
     expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('client:load_history', { sessionId: 'preview-session' })
 
     handlers.get('session:ready')?.({
@@ -65,7 +65,7 @@ describe('SessionPreviewStore', () => {
     expect(store.get('preview-session')?.freshness).toBe('live')
     expect(store.get('preview-session')?.streamingText).toBe('live token')
     stop()
-    expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('unsubscribe', { sessionId: 'preview-session' })
+    expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('client:unsubscribe_channels', expect.objectContaining({ channels: ['session:preview-session'] }), expect.any(Function))
     vi.useRealTimers()
   })
 })

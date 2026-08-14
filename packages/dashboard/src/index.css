@@ -575,13 +575,16 @@ body {
  * chrome off-screen. Accessibility text scaling still works via the app's
  * own font-size control.
  */
-@media (pointer: coarse) and (hover: none) {
+@media (any-pointer: coarse), (max-width: 768px) {
   input:not([type='checkbox']):not([type='radio']):not([type='range']),
   textarea,
   select,
   [contenteditable='true'] {
-    font-size: max(16px, 1em);
+    font-size: max(16px, 1em) !important;
   }
+}
+
+@media (pointer: coarse) and (hover: none) {
   /* Row-action overlays are revealed on hover on desktop; touch devices have no
      hover, so keep them visible there instead (otherwise rename/hide/delete are
      unreachable on mobile). */

@@ -57,6 +57,8 @@ jobs:
         env:
           PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/pwa-update-reload
         run: pnpm run verify:e2e:pwa-update-reload
+      - name: Production responsive/PWA viewport matrix
+        run: pnpm run verify:dashboard-mobile-pwa
       - name: Emergency orphan cleanup
         if: always()
         run: |
