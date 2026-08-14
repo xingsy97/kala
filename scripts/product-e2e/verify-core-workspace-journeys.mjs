@@ -111,10 +111,33 @@ try {
     await actor.page.waitForFunction(() => /running|运行/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
     await actor.page.waitForSelector('.xterm-helper-textarea')
     await actor.page.click('.xterm-helper-textarea')
-    await actor.page.keyboard.type("printf 'TERMINAL_E2E_OK\\n'\n")
+    await actor.page.keyboard.type("printf 'TERMINAL_E2E_OK\\n'")
+    await actor.page.keyboard.press('Enter')
     await actor.page.waitForFunction(() => (document.querySelector('.xterm-rows')?.textContent ?? '').includes('TERMINAL_E2E_OK'), { timeout: 30_000 })
     const output = await actor.page.$eval('.xterm-rows', (element) => element.textContent ?? '')
     return { status: 'running', outputTail: output.slice(-500) }
+  })
+
+  await harness.step('resize, kill, restart, and reuse the real PTY', async () => {
+    await actor.page.setViewport({ width: 1180, height: 760 })
+    await sleep(300)
+    await actor.page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="session-terminal-panel"]')
+      const kill = [...(panel?.querySelectorAll('button') ?? [])].find((button) => /kill|终止/iu.test(button.getAttribute('title') ?? button.getAttribute('aria-label') ?? ''))
+      kill?.click()
+    })
+    await actor.page.waitForFunction(() => /exited|已退出/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
+    await actor.page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="session-terminal-panel"]')
+      const restart = [...(panel?.querySelectorAll('button') ?? [])].find((button) => /restart|重新启动|重启/iu.test(button.getAttribute('title') ?? button.getAttribute('aria-label') ?? ''))
+      restart?.click()
+    })
+    await actor.page.waitForFunction(() => /running|运行/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
+    await actor.page.click('.xterm-helper-textarea')
+    await actor.page.keyboard.type("printf 'TERMINAL_RESTART_OK\\n'")
+    await actor.page.keyboard.press('Enter')
+    await actor.page.waitForFunction(() => (document.querySelector('.xterm-rows')?.textContent ?? '').includes('TERMINAL_RESTART_OK'), { timeout: 30_000 })
+    return { resized: true, killed: true, restarted: true, reused: true }
   })
 
   await harness.step('read real Workspace file through Files UI', async () => {
@@ -153,6 +176,7 @@ try {
   await harness.step('restart Host and prove custom prompt plus Session survive', async () => {
     const initial = harness.resources.find((item) => item.kind === 'process' && item.id === 'production-host-initial')
     const expectedErrorStart = actor.consoleErrors.length
+    const expectedRequestFailureStart = actor.requestFailures.length
     await initial.cleanup()
     initial.cleaned = true
     startHost('production-host-restarted')
@@ -168,8 +192,13 @@ try {
     if (restartErrors.some((message) => !message.includes('ERR_CONNECTION_REFUSED'))) {
       throw new Error(`unexpected console error during restart: ${restartErrors.join(' | ')}`)
     }
+    const restartRequestFailures = actor.requestFailures.slice(expectedRequestFailureStart)
+    if (restartRequestFailures.some((item) => !item.error.includes('ERR_CONNECTION_REFUSED'))) {
+      throw new Error(`unexpected request failure during restart: ${JSON.stringify(restartRequestFailures)}`)
+    }
     actor.consoleErrors.splice(expectedErrorStart)
-    return { sessionId, promptRestored: true, expectedTransientConnectionErrors: restartErrors.length }
+    actor.requestFailures.splice(expectedRequestFailureStart)
+    return { sessionId, promptRestored: true, expectedTransientConnectionErrors: restartErrors.length, expectedTransientRequestFailures: restartRequestFailures.length }
   })
 
   await harness.screenshot(actor, 'core-journeys-complete')
@@ -196,3 +225,5 @@ if (thrown) {
   process.exit(1)
 }
 console.log(`PASS core-workspace-journeys system E2E\nEvidence: ${result.evidenceRoot}`)
+
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }

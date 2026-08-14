@@ -52,7 +52,18 @@ describe('TerminalManager', () => {
     expect(reused.replay?.endsWith('tail')).toBe(true)
     expect(spawn).toHaveBeenCalledTimes(1)
 
-    manager.closeSession(base)
+    const killed = manager.kill({ ...base, requestId: 'kill-1', terminalId: first.terminalId! })
+    expect(killed.killed).toBe(true)
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+
+    const restarted = await manager.create({ ...base, requestId: 'r3', cwd: '/tmp' })
+    expect(restarted.terminalId).not.toBe(first.terminalId)
+    expect(restarted.reused).not.toBe(true)
+    expect(spawn).toHaveBeenCalledTimes(2)
+    manager.input({ ...base, terminalId: restarted.terminalId!, data: 'after restart\r' })
+    const restartedChild = vi.mocked(spawn).mock.results[1]!.value as { stdin: { write: ReturnType<typeof vi.fn> } }
+    expect(restartedChild.stdin.write).toHaveBeenCalledWith('after restart\n')
+
+    manager.closeSession(base)
   })
 })

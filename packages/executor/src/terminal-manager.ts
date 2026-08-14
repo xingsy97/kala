@@ -239,8 +239,16 @@ export function createTerminalManager(input: {
       record.terminal.resize(payload.cols, payload.rows)
     },
     kill(payload) {
-      const record = terminals.get(keyOf(payload.workspaceId, payload.sessionId, payload.terminalId))
+      const key = keyOf(payload.workspaceId, payload.sessionId, payload.terminalId)
+      const record = terminals.get(key)
       if (!record) return { requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId: payload.terminalId, killed: false, error: 'terminal not found' }
+      // Retire the record before acknowledging Kill. Restart creates a new PTY
+      // immediately after this ACK; waiting for the asynchronous child exit
+      // event leaves the old record reusable and sends input to a dying PTY.
+      record.exited = true
+      terminals.delete(key)
+      const sessionKey = sessionKeyOf(payload.workspaceId, payload.sessionId)
+      if (sessionTerminals.get(sessionKey) === record) sessionTerminals.delete(sessionKey)
       record.terminal.kill('SIGTERM')
       return { requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId: payload.terminalId, killed: true }
     },
