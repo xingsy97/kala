@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -148,15 +148,28 @@ try {
     return { resized: true, killed: true, restarted: true, reused: true }
   })
 
-  await harness.step('read real Workspace file through Files UI', async () => {
+  await harness.step('read and download real Workspace files through Files UI', async () => {
     await clickByTestId(actor.page, 'right-panel-files-tab')
     await actor.page.waitForSelector('[data-testid="session-files-panel"]')
     await actor.page.waitForFunction(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].some((item) => item.textContent?.includes('e2e-visible.txt')), { timeout: 30_000 })
     await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].find((item) => item.textContent?.includes('e2e-visible.txt'))?.click())
     await actor.page.waitForFunction(() => document.body.innerText.includes('FILES_E2E_VISIBLE'), { timeout: 30_000 })
-    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].find((item) => item.textContent?.includes('e2e-binary.bin'))?.click())
-    await actor.page.waitForFunction(() => document.body.innerText.includes('Binary file cannot be viewed'), { timeout: 30_000 })
-    return { path: join(workspace, 'e2e-visible.txt'), visibleContents: true, binaryHandled: true }
+    const binaryRow = await findFileRow(actor.page, 'e2e-binary.bin')
+    await binaryRow.click()
+    await actor.page.evaluate(() => {
+      window.__runlabDownload = null
+      window.showSaveFilePicker = async (options) => ({
+        createWritable: async () => ({
+          write: async (blob) => { window.__runlabDownload = { name: options.suggestedName, bytes: [...new Uint8Array(await blob.arrayBuffer())] } },
+          close: async () => {},
+        }),
+      })
+    })
+    const freshBinaryRow = await findFileRow(actor.page, 'e2e-binary.bin')
+    await freshBinaryRow.evaluate((element) => element.parentElement?.querySelector('button[aria-label^="Download "]')?.click())
+    const downloaded = await actor.page.waitForFunction(() => Boolean(window.__runlabDownload?.bytes), { timeout: 30_000 }).then(async () => await actor.page.evaluate(() => window.__runlabDownload))
+    if (downloaded.name !== 'e2e-binary.bin' || JSON.stringify(downloaded.bytes) !== JSON.stringify([0, 255, 1, 254, 2, 253])) throw new Error(`download bytes mismatch: ${JSON.stringify(downloaded)}`)
+    return { path: join(workspace, 'e2e-visible.txt'), visibleContents: true, binaryHandled: true, downloaded }
   })
 
   await harness.step('show real Git status and diff through Source Control UI', async () => {
@@ -249,4 +262,11 @@ if (thrown) {
 }
 console.log(`PASS core-workspace-journeys system E2E\nEvidence: ${result.evidenceRoot}`)
 
+async function findFileRow(page, name) {
+  const rows = await page.$$('[data-testid="session-file-file"]')
+  for (const rowButton of rows) {
+    if (await rowButton.evaluate((element, expected) => element.textContent?.includes(expected), name)) return rowButton
+  }
+  throw new Error(`file row not found: ${name}`)
+}
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }

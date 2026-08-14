@@ -52,10 +52,28 @@ const provider = createServer(async (req, res) => {
   for await (const chunk of req) chunks.push(Buffer.from(chunk))
   const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
   providerRequests.push(body)
-  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
   const latestRequestText = JSON.stringify((body.messages ?? []).at(-1) ?? null)
-  const callIndex = providerRequests.length
-  if (latestRequestText.includes('spawn cancellable subagent') && !cancellableSubAgentSpawned) {
+  if (latestRequestText.includes('Child must fail from provider')) {
+    res.writeHead(500, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'SUBAGENT_PROVIDER_FAILURE' } }))
+    return
+  }
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
+  if (latestRequestText.includes('spawn failing subagent')) {
+    sendToolResponse(res, 'controlled-agent-fail', 'agent', { prompt: 'Child must fail from provider.', max_turns: 1, _intent: 'Spawn a child whose provider fails to prove failure propagation.' }, 'msg_agent_fail')
+  } else if (latestRequestText.includes('run controlled write shell test')) {
+    sendToolResponse(res, 'matrix-write-1', 'write_file', { path: 'matrix-e2e.txt', content: 'MATRIX_E2E_OK\n', _intent: 'Create the matrix fixture before validating it with a shell test.' }, 'msg_matrix_write')
+  } else if (latestRequestText.includes('matrix-write-1') || latestRequestText.includes('matrix-e2e.txt')) {
+    sendToolResponse(res, 'matrix-shell-1', 'shell', { command: "test \"$(cat matrix-e2e.txt)\" = MATRIX_E2E_OK && printf MATRIX_SHELL_OK", _intent: 'Run a real shell assertion against the newly written fixture.' }, 'msg_matrix_shell')
+  } else if (latestRequestText.includes('MATRIX_SHELL_OK')) {
+    sendTextResponse(res, 'MATRIX_TOOL_CHAIN_COMPLETE', 'msg_matrix_final')
+  } else if (latestRequestText.includes('attempt denied outside read')) {
+    sendSse(res, { type: 'message_start', message: { id: 'msg_denied', usage: { input_tokens: 8, output_tokens: 0 } } })
+    sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'controlled-denied-read', name: 'read_file', input: {} } })
+    sendSse(res, { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ path: '../outside.txt', _intent: 'Attempt an out-of-workspace read to prove sandbox denial reaches the UI.' }) } })
+    sendSse(res, { type: 'content_block_stop', index: 0 })
+    sendSse(res, { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } })
+  } else if (latestRequestText.includes('spawn cancellable subagent') && !cancellableSubAgentSpawned) {
     cancellableSubAgentSpawned = true
     sendSse(res, { type: 'message_start', message: { id: 'msg_agent_cancel', usage: { input_tokens: 10, output_tokens: 0 } } })
     sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'controlled-agent-cancel', name: 'agent', input: {} } })
@@ -77,7 +95,7 @@ const provider = createServer(async (req, res) => {
     sendTextResponse(res, 'SUBAGENT_E2E_SUCCESS', 'msg_child')
   } else if (subAgentCompleted && latestRequestText.includes('SUBAGENT_E2E_SUCCESS')) {
     sendTextResponse(res, 'Parent observed child success.', 'msg_parent_final')
-  } else if (callIndex === 1) {
+  } else if (latestRequestText.includes('Read controlled.txt and report the result.')) {
     sendSse(res, { type: 'message_start', message: { id: 'msg_tool', usage: { input_tokens: 10, output_tokens: 0 } } })
     for (let index = 0; index < 3; index += 1) {
       sendSse(res, { type: 'content_block_start', index, content_block: { type: 'tool_use', id: `controlled-read-${index + 1}`, name: 'read_file', input: {} } })
@@ -102,6 +120,18 @@ const provider = createServer(async (req, res) => {
   res.end()
 })
 
+function startHost(label) {
+  const host = startProcess(bundle, [], { cwd: root, env: {
+    ...process.env,
+    HOME: home,
+    HOST_LISTEN_HOST: '127.0.0.1', HOST_PORT: String(hostPort), SESSIONS_DIR: sessionsDir,
+    AGENT_KERNEL_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), EXECUTOR_TOKENS: JSON.stringify([{ token }]),
+    ANTHROPIC_API_KEY: 'controlled-key', ANTHROPIC_MODEL: 'controlled-model', ANTHROPIC_BASE_URL: `${providerOrigin}/v1/messages`,
+  } })
+  harness.registerProcess(label, host, hostLogs)
+  return host
+}
+
 try {
   if (!existsSync(bundle) || !existsSync(executorAsset)) throw new Error('production release assets are missing')
   await new Promise((resolve) => provider.listen(providerPort, '127.0.0.1', resolve))
@@ -110,14 +140,7 @@ try {
   harness.registerResource('state-root', stateRoot, async () => rmSync(stateRoot, { recursive: true, force: true }))
 
   await harness.step('start production Host and Executor with controlled protocol provider', async () => {
-    const host = startProcess(bundle, [], { cwd: root, env: {
-      ...process.env,
-      HOME: home,
-      HOST_LISTEN_HOST: '127.0.0.1', HOST_PORT: String(hostPort), SESSIONS_DIR: sessionsDir,
-      AGENT_KERNEL_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), EXECUTOR_TOKENS: JSON.stringify([{ token }]),
-      ANTHROPIC_API_KEY: 'controlled-key', ANTHROPIC_MODEL: 'controlled-model', ANTHROPIC_BASE_URL: `${providerOrigin}/v1/messages`,
-    } })
-    harness.registerProcess('production-host', host, hostLogs)
+    const host = startHost('production-host-initial')
     await waitForHttp(`${origin}/settings`)
     const executor = startProcess(executorAsset, ['--host', origin, '--sandbox-root', workspace], { cwd: workspace, env: {
       ...process.env, HOME: home, HOST_URL: origin, EXECUTOR_TOKEN: token, WORKSPACE_NAME: 'controlled-agent-workspace',
@@ -155,8 +178,11 @@ try {
       await clickByTestId(actor.page, 'composer-send')
     }
     await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="queued-message-row"]').length === 3)
-    await actor.page.reload({ waitUntil: 'networkidle2' })
-    await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="queued-message-row"]').length === 3)
+    await waitFor(() => {
+      const file = readdirSync(sessionsDir).find((name) => name.includes(primarySessionId))
+      const text = file ? readFileSync(join(sessionsDir, file), 'utf8') : ''
+      return text.includes('queue-second') && text.includes('queue-third') && text.includes('queue-delete')
+    }, { timeoutMs: 20_000, name: 'three persisted queue messages' })
     const rows = await actor.page.$$('[data-testid="queued-message-row"]')
     await rows[1].$eval('[data-testid="queued-message-edit"]', (element) => element.click())
     await actor.page.waitForSelector('[data-testid="queued-message-edit-input"]')
@@ -175,6 +201,27 @@ try {
       const text = document.querySelector('[data-testid="queued-messages-dock"]')?.textContent ?? ''
       return document.querySelectorAll('[data-testid="queued-message-row"]').length === 2 && text.includes('queue-third-edited') && !text.includes('queue-delete')
     })
+    const expectedConsoleStart = actor.consoleErrors.length
+    const expectedFailureStart = actor.requestFailures.length
+    const initialHost = harness.resources.find((item) => item.kind === 'process' && item.id === 'production-host-initial')
+    await initialHost.cleanup(); initialHost.cleaned = true
+    const reconnectLogStart = executorLogs.length
+    startHost('production-host-restarted-during-turn')
+    await waitForHttp(`${origin}/settings`, { timeoutMs: 30_000 })
+    await waitFor(() => executorLogs.slice(reconnectLogStart).some((line) => line.includes('socket connected; announcing workspace')), { timeoutMs: 30_000, name: 'Executor reconnect after Host restart' })
+    await actor.page.reload({ waitUntil: 'networkidle2' })
+    await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]', { timeout: 30_000 })
+    await actor.page.waitForFunction(() => {
+      const text = document.querySelector('[data-testid="queued-messages-dock"]')?.textContent ?? ''
+      return document.querySelectorAll('[data-testid="queued-message-row"]').length === 2 && text.includes('queue-third-edited') && text.includes('queue-second')
+    }, { timeout: 30_000 })
+    const restartConsole = actor.consoleErrors.slice(expectedConsoleStart)
+    const restartFailures = actor.requestFailures.slice(expectedFailureStart)
+    if (restartConsole.some((message) => !message.includes('ERR_CONNECTION_REFUSED')) || restartFailures.some((item) => !item.error.includes('ERR_CONNECTION_REFUSED'))) {
+      throw new Error(`unexpected restart errors: ${JSON.stringify({ restartConsole, restartFailures })}`)
+    }
+    actor.consoleErrors.splice(expectedConsoleStart)
+    actor.requestFailures.splice(expectedFailureStart)
     const started = performance.now()
     await selectSession(actor.page, secondarySessionId)
     const switchedInMs = Math.round(performance.now() - started)
@@ -193,6 +240,15 @@ try {
 
   await harness.step('prove custom prompt, tool intention, real result, and final response', async () => {
     await actor.page.waitForFunction(() => document.body.innerText.includes('Controlled tool flow completed.'), { timeout: 30_000 })
+    await waitFor(() => {
+      const file = readdirSync(sessionsDir).find((name) => name.includes(primarySessionId))
+      if (!file) return false
+      const lines = readFileSync(join(sessionsDir, file), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+      const userTexts = lines.filter((entry) => entry.kind === 'event' && entry.event?.kind === 'user_message').map((entry) => entry.event.text)
+      return userTexts.filter((text) => text === 'queue-second').length === 1
+        && userTexts.filter((text) => text === 'queue-third-edited').length === 1
+        && userTexts.filter((text) => text === 'queue-delete').length === 0
+    }, { timeoutMs: 30_000, name: 'exactly-once queued message commits' })
     const requestSystem = Array.isArray(providerRequests[0]?.system)
       ? providerRequests[0].system.map((block) => block?.text ?? '').join('\n')
       : String(providerRequests[0]?.system ?? '')
@@ -222,6 +278,35 @@ try {
     return { providerRequests: providerRequests.length, intention, resultVisible: true, customPromptForwarded: true, toolCount: 3, geometry }
   })
 
+  await harness.step('run real write and shell test tool chain', async () => {
+    const matrixSessionId = await createSession(actor.page)
+    await clickByTestId(actor.page, 'approval-mode-picker')
+    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
+    await actor.page.click('[data-testid="composer-input"]')
+    await actor.page.keyboard.type('run controlled write shell test')
+    await clickByTestId(actor.page, 'composer-send')
+    await actor.page.waitForFunction(() => document.body.innerText.includes('MATRIX_TOOL_CHAIN_COMPLETE'), { timeout: 30_000 })
+    if (readFileSync(join(workspace, 'matrix-e2e.txt'), 'utf8') !== 'MATRIX_E2E_OK\n') throw new Error('write_file side effect missing')
+    await actor.page.waitForSelector('[data-testid="tool-card-dot-matrix-write-1"]')
+    await actor.page.waitForSelector('[data-testid="tool-card-dot-matrix-shell-1"]')
+    return { sessionId: matrixSessionId, fileWritten: true, shellAsserted: true }
+  })
+
+  await harness.step('surface real sandbox path denial in tool UI', async () => {
+    const denialSessionId = await createSession(actor.page)
+    await clickByTestId(actor.page, 'approval-mode-picker')
+    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
+    await actor.page.click('[data-testid="composer-input"]')
+    await actor.page.keyboard.type('attempt denied outside read')
+    await clickByTestId(actor.page, 'composer-send')
+    await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-denied-read"]', { timeout: 30_000 })
+    await clickByTestId(actor.page, 'tool-card-dot-controlled-denied-read')
+    const denialText = await actor.page.$eval('[data-testid="tool-card-preview-scroll-controlled-denied-read"]', (element) => element.textContent ?? '')
+    if (!/EACCES|outside|denied|not allowed/iu.test(denialText)) throw new Error(`sandbox denial missing: ${denialText}`)
+    return { sessionId: denialSessionId, denied: true, diagnostic: denialText.slice(-500) }
+  })
+
+  await selectSession(actor.page, primarySessionId)
   await harness.step('spawn and complete a live Sub-agent Session', async () => {
     await actor.page.click('[data-testid="composer-input"]')
     await actor.page.keyboard.type('spawn controlled subagent')
@@ -234,6 +319,19 @@ try {
       return file ? join(sessionsDir, file) : undefined
     }, { timeoutMs: 30_000, name: 'persisted child Session result' })
     return { spawned: subAgentSpawned, completed: subAgentCompleted, status: 'completed', childLog }
+  })
+
+  await harness.step('propagate a real child provider failure to the parent card', async () => {
+    const failureSessionId = await createSession(actor.page)
+    await clickByTestId(actor.page, 'approval-mode-picker')
+    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
+    await actor.page.click('[data-testid="composer-input"]')
+    await actor.page.keyboard.type('spawn failing subagent')
+    await clickByTestId(actor.page, 'composer-send')
+    await actor.page.waitForSelector('[data-testid="sub-agent-row-controlled-agent-fail"]', { timeout: 30_000 })
+    await actor.page.waitForFunction(() => document.querySelector('[data-testid="sub-agent-row-controlled-agent-fail"]')?.getAttribute('data-sub-agent-status') === 'failed', { timeout: 30_000 })
+    const cardText = await actor.page.$eval('[data-testid="sub-agent-row-controlled-agent-fail"]', (element) => element.textContent ?? '')
+    return { sessionId: failureSessionId, failed: true, cardText: cardText.slice(-500) }
   })
 
   await harness.step('interrupt a live Sub-agent and persist cancelled state', async () => {
@@ -328,6 +426,13 @@ async function selectSession(page, id) {
 async function findRowByText(rows, text) {
   for (const row of rows) if (await row.evaluate((element, expected) => element.textContent?.includes(expected), text)) return row
   throw new Error(`queued row not found: ${text}`)
+}
+function sendToolResponse(res, callId, name, input, id) {
+  sendSse(res, { type: 'message_start', message: { id, usage: { input_tokens: 5, output_tokens: 0 } } })
+  sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: callId, name, input: {} } })
+  sendSse(res, { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } })
+  sendSse(res, { type: 'content_block_stop', index: 0 })
+  sendSse(res, { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } })
 }
 function sendTextResponse(res, text, id) {
   sendSse(res, { type: 'message_start', message: { id, usage: { input_tokens: 5, output_tokens: 0 } } })

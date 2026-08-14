@@ -43,6 +43,7 @@ jobs:
           done
           curl -fsS http://localhost:13001/runtime/capabilities >/dev/null
           test -n "$(docker compose ps -q)"
+          mkdir -p "${{ runner.temp }}/evidence"
       - name: Validate local SaaS deployment policy
         run: pnpm run saas:validate && pnpm run saas:check
       - name: Verify two-tenant isolation
