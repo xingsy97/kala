@@ -449,17 +449,19 @@ export async function startHostServer(
     : undefined
   attachDynamicStaticMountHandler(http, socketAdminMount)
 
+  const hasReleaseAssets = Boolean(options.releaseAssetsDir || options.embeddedReleaseAssets?.length)
+  const releaseAssetsDir = options.releaseAssetsDir ?? process.cwd()
   if (options.dashboardHandler) {
-    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir, options.embeddedReleaseAssets)
+    if (hasReleaseAssets) attachReleaseAssetsHandler(http, releaseAssetsDir, options.embeddedReleaseAssets)
     attachRequestHandler(http, options.dashboardHandler)
   } else if (options.staticDir) {
-    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir, options.embeddedReleaseAssets)
+    if (hasReleaseAssets) attachReleaseAssetsHandler(http, releaseAssetsDir, options.embeddedReleaseAssets)
     attachStaticHandler(http, options.staticDir)
   } else if (options.embeddedStaticAssets && options.embeddedStaticAssets.length > 0) {
-    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir, options.embeddedReleaseAssets)
+    if (hasReleaseAssets) attachReleaseAssetsHandler(http, releaseAssetsDir, options.embeddedReleaseAssets)
     attachEmbeddedStaticHandler(http, options.embeddedStaticAssets)
-  } else if (options.releaseAssetsDir) {
-    attachReleaseAssetsHandler(http, options.releaseAssetsDir, options.embeddedReleaseAssets)
+  } else if (hasReleaseAssets) {
+    attachReleaseAssetsHandler(http, releaseAssetsDir, options.embeddedReleaseAssets)
   }
 
   const queuedMessages = new Map<string, QueuedUserMessage[]>()

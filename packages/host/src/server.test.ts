@@ -517,6 +517,29 @@ describe('wire protocol', () => {
     }
   })
 
+  it('serves embedded installer assets without requiring a local release directory', async () => {
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-embedded-installer-sessions-'))
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      embeddedReleaseAssets: [
+        { path: 'install-executor.sh', contentBase64: Buffer.from('#!/bin/sh\necho embedded installer\n').toString('base64') },
+      ],
+    })
+
+    try {
+      const response = await fetch(`http://localhost:${localServer.port}/install/assets/install-executor.sh`)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toContain('text/x-shellscript')
+      expect(await response.text()).toContain('embedded installer')
+    } finally {
+      await localServer.close()
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
   it('updates agent prompt settings through HTTP', async () => {
     let selectedPreset: 'codex' | 'claude-code' | 'custom' = 'codex'
     const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-agent-prompt-'))
