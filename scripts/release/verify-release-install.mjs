@@ -83,6 +83,19 @@ try {
   if (!dashboardHtml.includes('<html')) {
     fail(`GET / did not return an HTML dashboard shell (got ${dashboardHtml.slice(0, 200)})`)
   }
+  for (const [asset, expectedType] of [
+    ['install-executor.sh', 'text/x-shellscript'],
+    ['install-executor.ps1', 'text/plain'],
+  ]) {
+    const assetRes = await fetch(`${url}/install/assets/${asset}`)
+    if (assetRes.status !== 200) fail(`GET /install/assets/${asset} returned ${assetRes.status}`)
+    if (!assetRes.headers.get('content-type')?.includes(expectedType)) {
+      fail(`GET /install/assets/${asset} returned unexpected content-type ${assetRes.headers.get('content-type')}`)
+    }
+    const actual = await assetRes.text()
+    const expected = readFileSync(join(releaseDir, asset), 'utf8')
+    if (actual !== expected) fail(`GET /install/assets/${asset} did not return the built release asset`)
+  }
   console.log(`release install smoke passed on port ${port} in ${installDir}`)
 } catch (err) {
   console.error(`FAIL ${err instanceof Error ? err.message : String(err)}`)

@@ -109,6 +109,12 @@ if (includeDashboard && skipDashboardBuild) {
   assertDashboardDistReady(dashboardDist)
 }
 
+// The host bundle is built before finalizeRelease(), so every asset that must be
+// served from an embedded-only deployment has to exist before the host banner is
+// generated. Keep this in front of buildEntries; moving it back below the host
+// build silently produces a valid bundle with broken /install/assets URLs.
+prepareBootstrapAssets()
+
 const buildEntries = [...entries].sort((a, b) => {
   if (a.component === 'host' && b.component !== 'host') return 1
   if (b.component === 'host' && a.component !== 'host') return -1
@@ -175,22 +181,11 @@ for (const file of [...releaseFiles(), 'SHA256SUMS']) {
 }
 
 function finalizeRelease() {
-  const bootstrapAssets = []
+  const bootstrapAssets = prepareBootstrapAssets()
   if (includeDashboard && existsSync(modelCatalogSeed)) {
     copyFileSync(modelCatalogSeed, join(outDir, 'agent-runlab-model-catalog-seed.json'))
   }
   if (component !== 'dashboard') {
-    const path = join(outDir, 'run.sh')
-    writeFileSync(path, unifiedBootstrap({ repo, tag, component }))
-    chmodSync(path, 0o755)
-    bootstrapAssets.push('run.sh')
-    if (component === 'all' || component === 'executor') {
-      const shPath = join(outDir, 'install-executor.sh')
-      writeFileSync(shPath, generateExecutorInstallerSh({ repo, tag }))
-      chmodSync(shPath, 0o755)
-      writeFileSync(join(outDir, 'install-executor.ps1'), generateExecutorInstallerPs1({ repo, tag }))
-      bootstrapAssets.push('install-executor.sh', 'install-executor.ps1')
-    }
     if (component === 'all' || component === 'host') {
       for (const asset of [
         'deploy/standalone-systemd/agent-runlab-ingress.service',
@@ -248,6 +243,23 @@ function finalizeRelease() {
   writeFileSync(join(outDir, 'RELEASE_NOTES.md'), releaseNotes(manifest))
 
   writeSha256Sums(releaseFiles())
+}
+
+function prepareBootstrapAssets() {
+  const bootstrapAssets = []
+  if (component === 'dashboard' || nativeOnly) return bootstrapAssets
+  const runPath = join(outDir, 'run.sh')
+  writeFileSync(runPath, unifiedBootstrap({ repo, tag, component }))
+  chmodSync(runPath, 0o755)
+  bootstrapAssets.push('run.sh')
+  if (component === 'all' || component === 'executor') {
+    const shPath = join(outDir, 'install-executor.sh')
+    writeFileSync(shPath, generateExecutorInstallerSh({ repo, tag }))
+    chmodSync(shPath, 0o755)
+    writeFileSync(join(outDir, 'install-executor.ps1'), generateExecutorInstallerPs1({ repo, tag }))
+    bootstrapAssets.push('install-executor.sh', 'install-executor.ps1')
+  }
+  return bootstrapAssets
 }
 
 function writeSha256Sums(files) {
@@ -358,8 +370,9 @@ function prepareEmbeddedReleaseAssetsForHost() {
     writeFileSync(path, unifiedBootstrap({ repo, tag, component }))
     chmodSync(path, 0o755)
   }
-  writeSha256Sums([executorCjs, 'run.sh'])
-  return embeddedReleaseAssetsBanner(outDir, [executorCjs, 'run.sh', 'SHA256SUMS'])
+  const embeddedNames = [executorCjs, 'run.sh', 'install-executor.sh', 'install-executor.ps1']
+  writeSha256Sums(embeddedNames)
+  return embeddedReleaseAssetsBanner(outDir, [...embeddedNames, 'SHA256SUMS'])
 }
 
 function embeddedReleaseAssetsBanner(dir, names) {
