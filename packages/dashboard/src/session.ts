@@ -741,8 +741,8 @@ export function deleteSession(
   socket: DashboardSocket,
   sessionId: string,
   options: { cascade?: boolean } = {},
-): void {
-  socket.emit('client:delete_session', { sessionId, ...(options.cascade ? { cascade: true } : {}) })
+): Promise<void> {
+  return emitRpc(socket, 'client:delete_session', { sessionId, ...(options.cascade ? { cascade: true } : {}) })
 }
 
 /**

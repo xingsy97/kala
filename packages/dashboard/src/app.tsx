@@ -936,22 +936,29 @@ export function App(): JSX.Element {
     }
   }
   const deleteSessionAt = useCallback((sessionId: string, options: { cascade?: boolean } = {}): void => {
-    if (!controlSocket) return
-    for (const id of sessionIdsForCacheInvalidation(controlSessionsRef.current, sessionId, Boolean(options.cascade))) {
-      sessionViewCache.delete(id)
-      deleteSessionScrollState(id)
+    if (!controlSocket) {
+      notify.error('Session could not be deleted', { description: 'Host is not connected.' })
+      return
     }
-    deleteSession(controlSocket, sessionId, options)
-    if (sessionId === config.sessionId) {
-      suppressNextAutoSessionSelection.current = true
-      setMetadataOpen(false)
-      setCwdDialogOpen(false)
-      setConfig((prev) => ({
-        ...prev,
-        sessionId: null,
-        explicit: false,
-      }))
-    }
+    void deleteSession(controlSocket, sessionId, options).then(() => {
+      for (const id of sessionIdsForCacheInvalidation(controlSessionsRef.current, sessionId, Boolean(options.cascade))) {
+        sessionViewCache.delete(id)
+        deleteSessionScrollState(id)
+      }
+      if (sessionId === config.sessionId) {
+        suppressNextAutoSessionSelection.current = true
+        setMetadataOpen(false)
+        setCwdDialogOpen(false)
+        setConfig((prev) => ({
+          ...prev,
+          sessionId: null,
+          explicit: false,
+        }))
+      }
+      notify.success('Session deleted')
+    }).catch((error: unknown) => {
+      notify.error('Session could not be deleted', { description: error instanceof Error ? error.message : String(error) })
+    })
   }, [config.sessionId, controlSocket, sessionViewCache])
   const renameSessionAt = useCallback((sessionId: string, label: string): void => {
     if (!controlSocket) return

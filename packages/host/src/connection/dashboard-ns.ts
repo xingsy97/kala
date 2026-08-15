@@ -1077,10 +1077,10 @@ export function configureDashboardNamespace(
       }
     })
 
-    socket.on('client:delete_session', async (raw: ClientDeleteSession) => {
+    socket.on('client:delete_session', async (raw: ClientDeleteSession, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientDeleteSessionSchema, raw, 'client:delete_session', (raw as ClientDeleteSession | undefined)?.sessionId)
-      if (!p) return
-      try {
+      if (!p) { ack?.({ ok: false, error: 'invalid delete session request' }); return }
+      const result = await operations.run(p.operationId, async () => {
         const targetIds = p.cascade
           ? collectSessionDescendants(await deps.store.listSummaries(), p.sessionId)
           : [p.sessionId]
@@ -1102,13 +1102,9 @@ export function configureDashboardNamespace(
           deps.audit?.log({ action: 'dashboard.session_delete', actor: auditActor(socket), target: { sessionId: targetSessionId, workspaceId: record?.workspaceId }, outcome: 'ok', refs: p.cascade ? { rootSessionId: p.sessionId } : undefined })
           ns.emit('server:session_deleted', { sessionId: targetSessionId })
         }
-      } catch (err) {
-        deps.broadcastError(
-          p.sessionId,
-          'host',
-          err instanceof Error ? err.message : String(err),
-        )
-      }
+      })
+      ack?.(result)
+      if (!result.ok) deps.broadcastError(p.sessionId, 'host', result.error)
     })
 
     socket.on('client:update_preferences', async (raw) => {

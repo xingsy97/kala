@@ -2060,7 +2060,7 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    dashboard.emit('client:delete_session', { sessionId: 'delete-parent', cascade: true })
+    await new Promise<void>((resolve, reject) => dashboard.emit('client:delete_session', { operationId: 'delete-cascade-op', sessionId: 'delete-parent', cascade: true }, (ack) => ack.ok ? resolve() : reject(new Error(ack.error))))
     let summaries = await server.store.listSummaries()
     for (let i = 0; i < 50 && summaries.length !== 1; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -4296,7 +4296,7 @@ describe('wire protocol', () => {
     const deleted = new Promise<{ sessionId: string }>((resolve) => {
       dashboard.on('server:session_deleted', resolve)
     })
-    dashboard.emit('client:delete_session', { sessionId })
+    await new Promise<void>((resolve, reject) => dashboard.emit('client:delete_session', { operationId: 'delete-lifecycle-op', sessionId }, (ack) => ack.ok ? resolve() : reject(new Error(ack.error))))
     await deleted
     await new Promise((r) => setTimeout(r, 50))
     expect(calls).toEqual([

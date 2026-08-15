@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 import type { TimelineEntry } from './session.js'
-import { deriveHumanAttentionTimeline, deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
+import { deleteSession, deriveHumanAttentionTimeline, deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
 
 function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry {
   if (kind === 'llm_response') {
@@ -23,6 +23,37 @@ function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry
     effects: [{ kind: 'call_llm', messages: [], tools: [] }],
   }
 }
+
+describe('deleteSession', () => {
+  it('uses an acknowledged idempotent RPC payload', async () => {
+    const emitWithAck = vi.fn().mockResolvedValue({ ok: true })
+    const socket = {
+      connected: true,
+      active: true,
+      timeout: vi.fn(() => ({ emitWithAck })),
+      connect: vi.fn(),
+    }
+
+    await deleteSession(socket as never, 'session-1', { cascade: true })
+
+    expect(emitWithAck).toHaveBeenCalledWith('client:delete_session', expect.objectContaining({
+      operationId: expect.any(String),
+      sessionId: 'session-1',
+      cascade: true,
+    }))
+  })
+
+  it('rejects when the Host refuses deletion', async () => {
+    const socket = {
+      connected: true,
+      active: true,
+      timeout: () => ({ emitWithAck: vi.fn().mockResolvedValue({ ok: false, error: 'delete denied' }) }),
+      connect: vi.fn(),
+    }
+
+    await expect(deleteSession(socket as never, 'session-1')).rejects.toThrow('delete denied')
+  })
+})
 
 describe('mergeBySeq', () => {
   it('appends a strictly increasing live tail while preserving entry identities', () => {
