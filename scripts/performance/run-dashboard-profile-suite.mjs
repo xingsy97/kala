@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { gitRevision, sha256File } from './profiling-utils.mjs'
@@ -14,11 +15,16 @@ const historyOnly = args.includes('--history-only')
 const streamingOnly = args.includes('--streaming-only')
 const keepMaps = args.includes('--keep-profiling-build')
 const bundle = join(root, 'release/bundle-dashboard-with-runtime.cjs')
+const dashboardDist = join(root, 'packages/dashboard/dist')
+const releaseDir = join(root, 'release')
+const backupRoot = mkdtempSync(join(tmpdir(), 'runlab-profile-artifact-backup-'))
 mkdirSync(outputRoot, { recursive: true })
+if (existsSync(dashboardDist)) cpSync(dashboardDist, join(backupRoot, 'dashboard-dist'), { recursive: true })
+if (existsSync(releaseDir)) cpSync(releaseDir, join(backupRoot, 'release'), { recursive: true })
 
 let succeeded = false
 try {
-  run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab', '--skip-package-build'], {
+  run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab'], {
     ...process.env,
     RUNLAB_PROFILE_SOURCEMAP: '1',
   })
@@ -55,10 +61,15 @@ try {
   console.log(`Dashboard profiling evidence: ${outputRoot}`)
 } finally {
   if (!keepMaps) {
-    run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab', '--skip-package-build'], { ...process.env, RUNLAB_PROFILE_SOURCEMAP: '0' })
-    const maps = readdirSync(join(root, 'packages/dashboard/dist/assets')).filter((name) => name.endsWith('.map'))
-    if (maps.length > 0) throw new Error(`ordinary release unexpectedly contains source maps: ${maps.join(', ')}`)
+    rmSync(dashboardDist, { recursive: true, force: true })
+    rmSync(releaseDir, { recursive: true, force: true })
+    if (existsSync(join(backupRoot, 'dashboard-dist'))) cpSync(join(backupRoot, 'dashboard-dist'), dashboardDist, { recursive: true })
+    if (existsSync(join(backupRoot, 'release'))) cpSync(join(backupRoot, 'release'), releaseDir, { recursive: true })
+    const assets = join(dashboardDist, 'assets')
+    const maps = existsSync(assets) ? readdirSync(assets).filter((name) => name.endsWith('.map')) : []
+    if (maps.length > 0) throw new Error(`restored ordinary release unexpectedly contains source maps: ${maps.join(', ')}`)
   }
+  rmSync(backupRoot, { recursive: true, force: true })
   if (!succeeded) console.error(`Profiling suite failed; partial evidence may remain at ${outputRoot}`)
 }
 

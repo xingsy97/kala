@@ -44,9 +44,9 @@ This performs the following sequence:
 4. Starts the production Host and Executor with a same-protocol SSE provider.
 5. Streams 240 Markdown chunks and executes eight real `read_file` Tools.
 6. Writes source-mapped hotspot reports.
-7. Rebuilds the ordinary release without source maps, even when profiling fails.
+7. Restores the exact pre-profile Dashboard dist and release artifacts from a temporary backup, even when profiling fails.
 
-Never deploy the temporary profiling build. The suite restores the normal release in `finally`; verify this if the process was externally killed.
+Never deploy the temporary profiling build. The suite restores the exact pre-profile artifacts in `finally`; verify this if the process was externally killed.
 
 ### 2. Inspect evidence before editing
 
@@ -251,9 +251,13 @@ Inspect captured Host/Executor logs. Common causes are the wrong production exec
 
 Isolate Host `HOME`; personal model settings may override environment defaults. The streaming profiler writes a minimal isolated Agent configuration.
 
+### Profile suite stops during package build
+
+The suite builds workspace packages before profiling so Dashboard source maps, Host protocol types, and the embedded release are from one revision. Fix or finish any concurrent source changes that leave package builds inconsistent; do not bypass this preflight with stale `dist` output. The suite restores the pre-profile artifacts even when this build fails.
+
 ### CPU hotspots remain minified
 
-The profile and source maps must come from the same build. Run the suite, or rebuild with `RUNLAB_PROFILE_SOURCEMAP=1` and profile before rebuilding again.
+The profile and source maps must come from the same build. The analyzer fails by default when no profile bundle URL matches a source map. Run the suite, or rebuild with `RUNLAB_PROFILE_SOURCEMAP=1` and profile before rebuilding again. Use `--allow-unmapped` only for deliberate minified fallback analysis.
 
 ### Cold-load frame count is zero
 

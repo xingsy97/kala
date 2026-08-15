@@ -104,7 +104,7 @@ try {
     action: async () => {
       await clickVisibleSession(page, longSessionId)
       await page.waitForFunction((last) => document.body.innerText.includes(`Completed item ${last}.`), {}, longTurns - 1)
-      await page.waitForFunction(() => document.querySelectorAll('[data-testid="timeline-minimap-item"]').length === 120)
+      await page.waitForFunction((expected) => document.querySelectorAll('[data-testid="timeline-minimap-item"]').length === expected, {}, Math.min(longTurns * 4, 120))
     },
   })
 

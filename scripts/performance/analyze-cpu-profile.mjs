@@ -8,14 +8,15 @@ const requireFromPerfHarness = createRequire(new URL('../../packages/perf-harnes
 const { SourceMapConsumer } = requireFromPerfHarness('source-map')
 const args = process.argv.slice(2).filter((arg) => arg !== '--')
 if (args.length === 0 || args.includes('--help')) {
-  console.log('Usage: node scripts/performance/analyze-cpu-profile.mjs PROFILE... [--maps DIR] [--output FILE] [--top N]')
+  console.log('Usage: node scripts/performance/analyze-cpu-profile.mjs PROFILE... [--maps DIR] [--output FILE] [--top N] [--allow-unmapped]')
   process.exit(args.length === 0 ? 1 : 0)
 }
 const option = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined }
 const mapDir = resolve(option('--maps') ?? join(root, 'packages/dashboard/dist/assets'))
 const output = option('--output')
 const topN = Number(option('--top') ?? 30)
-const profiles = args.filter((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--maps' && args[index - 1] !== '--output' && args[index - 1] !== '--top').map(resolve)
+const allowUnmapped = args.includes('--allow-unmapped')
+const profiles = args.filter((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--maps' && args[index - 1] !== '--output' && args[index - 1] !== '--top').map((path) => resolve(path))
 if (!existsSync(mapDir)) throw new Error(`source-map directory not found: ${mapDir}`)
 
 const maps = new Map()
@@ -29,6 +30,7 @@ for (const path of profiles) {
   const profile = JSON.parse(readFileSync(path, 'utf8'))
   const nodes = new Map((profile.nodes ?? []).map((node) => [node.id, node.callFrame]))
   const totals = new Map()
+  let mappedSamples = 0
   for (let index = 0; index < (profile.samples ?? []).length; index += 1) {
     const frame = nodes.get(profile.samples[index])
     if (!frame) continue
@@ -39,17 +41,21 @@ for (const path of profiles) {
     let line = frame.lineNumber >= 0 ? frame.lineNumber + 1 : null
     if (map) {
       const original = map.originalPositionFor({ line: frame.lineNumber + 1, column: frame.columnNumber })
-      functionName = original.name ?? functionName
-      source = original.source ?? source
-      line = original.line ?? line
+      if (original.source) {
+        mappedSamples += 1
+        functionName = original.name ?? functionName
+        source = original.source
+        line = original.line ?? line
+      }
     }
     const key = JSON.stringify([functionName, source, line])
     const current = totals.get(key) ?? { functionName, source, line, selfMs: 0 }
     current.selfMs += Math.max(0, profile.timeDeltas?.[index] ?? 0) / 1000
     totals.set(key, current)
   }
+  if (mappedSamples === 0 && !allowUnmapped) throw new Error(`no source map matches profile bundle URLs: ${path}`)
   const hotSpots = [...totals.values()].sort((left, right) => right.selfMs - left.selfMs).slice(0, topN).map((item) => ({ ...item, selfMs: Math.round(item.selfMs * 10) / 10 }))
-  reports.push({ profile: path, sourceMapped: true, hotSpots })
+  reports.push({ profile: path, sourceMapped: mappedSamples > 0, mappedSamples, hotSpots })
 }
 for (const map of maps.values()) map.destroy()
 
