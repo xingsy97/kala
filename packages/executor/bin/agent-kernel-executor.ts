@@ -198,20 +198,27 @@ function printVersion(): void {
 function printServiceCommands(mode: ServiceMode, executable = process.execPath): void {
   const user = mode === 'user' ? ' --user' : ''
   const modeFlag = mode === 'user' ? '--user' : '--system'
-  process.stdout.write(`\nAgent RunLab Executor service controls:\n`)
-  process.stdout.write(`  Status:  systemctl${user} status runlab-executor.service\n`)
-  process.stdout.write(`  Logs:    journalctl${user} -u runlab-executor.service -f\n`)
-  process.stdout.write(`  Restart: systemctl${user} restart runlab-executor.service\n`)
-  process.stdout.write(`  Stop:    systemctl${user} stop runlab-executor.service\n`)
-  process.stdout.write(`  Start:   systemctl${user} start runlab-executor.service\n`)
-  process.stdout.write(`  Remove:  ${JSON.stringify(executable)} service uninstall ${modeFlag}\n`)
+  process.stdout.write(`\n============================================================\n`)
+  process.stdout.write(`  SERVICE INSTALLED AND RUNNING\n`)
+  process.stdout.write(`============================================================\n`)
+  process.stdout.write(`\nManage the Agent RunLab Executor service:\n\n`)
+  process.stdout.write(`  Status    systemctl${user} status runlab-executor.service\n`)
+  process.stdout.write(`  Logs      journalctl${user} -u runlab-executor.service -f\n`)
+  process.stdout.write(`  Restart   systemctl${user} restart runlab-executor.service\n`)
+  process.stdout.write(`  Stop      systemctl${user} stop runlab-executor.service\n`)
+  process.stdout.write(`  Start     systemctl${user} start runlab-executor.service\n`)
+  process.stdout.write(`  Uninstall ${JSON.stringify(executable)} service uninstall ${modeFlag}\n`)
+  process.stdout.write(`\nThese commands are also available through the installed Executor CLI.\n`)
 }
 
 function printForegroundCommands(): void {
-  process.stdout.write(`\nExecutor is running in this terminal.\n`)
-  process.stdout.write(`  Stop: press Ctrl+C\n`)
-  process.stdout.write(`  Status: keep this terminal open and look for \"welcome from host\" and \"awaiting tool calls\" above.\n`)
-  process.stdout.write(`  Logs: this terminal is the log stream; set LOG_LEVEL=debug for connection details.\n`)
+  process.stdout.write(`\n============================================================\n`)
+  process.stdout.write(`  EXECUTOR CONNECTED - FOREGROUND MODE\n`)
+  process.stdout.write(`============================================================\n`)
+  process.stdout.write(`\n  Stop    Press Ctrl+C\n`)
+  process.stdout.write(`  Status  Look for \"welcome from host\" and \"awaiting tool calls\" above\n`)
+  process.stdout.write(`  Logs    This terminal is the live log stream (LOG_LEVEL=debug for details)\n`)
+  process.stdout.write(`\nKeep this terminal open while using this Workspace.\n`)
 }
 
 /**
@@ -318,7 +325,7 @@ async function runInternalInstaller(): Promise<void> {
   await reportInstallation(env, 'starting')
   await executeLinuxServicePlan(plan, { run: runServiceCommand })
   rmSync(sessionFile, { force: true })
-  process.stdout.write(`\nAgent RunLab Executor was installed and started as a ${installerSession.mode} service.\n`)
+  process.stdout.write(`[4/4] Service started and connected.\n`)
   printServiceCommands(installerSession.mode, executable)
 }
 

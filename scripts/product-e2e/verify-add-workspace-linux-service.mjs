@@ -100,8 +100,9 @@ try {
       const records = await (await import('node:fs/promises')).readFile(join(stateRoot, 'executor-installations.json'), 'utf8').catch(() => '<missing>')
       throw new Error(`installation did not complete\nstdout:\n${execution.stdout}\nstderr:\n${execution.stderr}\nrecords:\n${records}\nservice:\n${serviceDiagnostics.stdout}\n${serviceDiagnostics.stderr}`, { cause: error })
     }
-    for (const expected of ['systemctl status runlab-executor.service', 'journalctl -u runlab-executor.service -f', 'systemctl restart runlab-executor.service', 'systemctl stop runlab-executor.service', 'service uninstall --system']) {
-      if (!execution.stdout.includes(expected)) throw new Error(`installer output omitted lifecycle command: ${expected}\n${execution.stdout}`)
+    if (/% Total|Xferd|Average Speed/u.test(`${execution.stdout}\n${execution.stderr}`)) throw new Error(`installer output contains curl progress noise:\n${execution.stdout}\n${execution.stderr}`)
+    for (const expected of ['[1/4] Downloading verified installer', '[2/4] Validating setup code', '[3/4] Installing Executor', '[4/4] Service started and connected', 'SERVICE INSTALLED AND RUNNING', 'systemctl status runlab-executor.service', 'journalctl -u runlab-executor.service -f', 'systemctl restart runlab-executor.service', 'systemctl stop runlab-executor.service', 'service uninstall --system']) {
+      if (!execution.stdout.includes(expected)) throw new Error(`installer output omitted lifecycle summary: ${expected}\n${execution.stdout}`)
     }
     return execution
   }, (execution) => ({ exitCode: execution.code, stdout: execution.stdout.slice(-1_000), stderr: execution.stderr.slice(-1_000), installationId }))
@@ -145,7 +146,7 @@ try {
     const status = await runCommand('lxc', ['exec', container, '--', cli, 'service', 'status', '--system'])
     if (!status.stdout.includes('Active: active')) throw new Error(`CLI status omitted active service: ${status.stdout}`)
     const restart = await runCommand('lxc', ['exec', container, '--', cli, 'service', 'restart', '--system'])
-    if (!restart.stdout.includes('Agent RunLab Executor service controls')) throw new Error(`CLI restart omitted lifecycle controls: ${restart.stdout}`)
+    if (!restart.stdout.includes('SERVICE INSTALLED AND RUNNING') || !restart.stdout.includes('Manage the Agent RunLab Executor service')) throw new Error(`CLI restart omitted lifecycle controls: ${restart.stdout}`)
     await waitFor(async () => {
       const value = await runCommand('lxc', ['exec', container, '--', 'systemctl', 'is-active', 'runlab-executor.service'], { allowFailure: true })
       return value.stdout.trim() === 'active'

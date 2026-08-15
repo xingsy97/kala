@@ -79,7 +79,8 @@ try {
     if (service.code === 0) throw new Error('temporary mode unexpectedly installed a service')
     const snapshot = await fetch(`${localProbe}/api/executor-installs/${encodeURIComponent(installationId)}`).then((response) => response.json())
     if (snapshot.status !== 'completed' || snapshot.mode !== 'temporary') throw new Error(`unexpected installation snapshot: ${JSON.stringify(snapshot)}`)
-    await waitFor(() => temporaryLogs.some((line) => line.includes('Stop: press Ctrl+C')) && temporaryLogs.some((line) => line.includes('Logs: this terminal is the log stream')), { timeoutMs: 30_000, name: 'temporary lifecycle instructions' })
+    await waitFor(() => temporaryLogs.some((line) => line.includes('EXECUTOR CONNECTED - FOREGROUND MODE')) && temporaryLogs.some((line) => line.includes('Stop    Press Ctrl+C')) && temporaryLogs.some((line) => line.includes('Logs    This terminal is the live log stream')), { timeoutMs: 30_000, name: 'temporary lifecycle instructions' })
+    if (temporaryLogs.some((line) => /% Total|Xferd|Average Speed/u.test(line))) throw new Error(`temporary installer output contains curl progress noise: ${temporaryLogs.join('')}`)
     await harness.screenshot(actor, 'temporary-workspace-online')
     return { status: snapshot.status, mode: snapshot.mode, serviceInstalled: false }
   })

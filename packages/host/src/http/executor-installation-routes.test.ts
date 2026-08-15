@@ -42,6 +42,10 @@ describe('executor installation routes', () => {
     expect(installerScript).toContain('bash "$installer"')
     expect(installerScript.indexOf('/install/assets/install-executor.sh')).toBeLessThan(installerScript.indexOf('/install/session'))
     expect(installerScript).not.toContain('| sh')
+    expect(installerScript).toContain('curl --fail --silent --show-error --location')
+    expect(installerScript).toContain('[1/4] Downloading verified installer')
+    expect(installerScript).toContain('[3/4] Installing Executor')
+    expect(installerScript).not.toContain('curl -fSL')
     const claimed = await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })
     expect(claimed.status).toBe(200)
     const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string; RUNLAB_RELEASE_ASSETS_URL: string; RUNLAB_INSTALLER_ALLOW_UNSIGNED: string } }
