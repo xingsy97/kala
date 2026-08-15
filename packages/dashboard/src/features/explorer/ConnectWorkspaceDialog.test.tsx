@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ConnectWorkspaceDialog } from './ConnectWorkspaceDialog.js'
 
@@ -14,6 +14,11 @@ function response(body: unknown, ok = true): Response {
 }
 
 describe('ConnectWorkspaceDialog', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux x86_64' })
