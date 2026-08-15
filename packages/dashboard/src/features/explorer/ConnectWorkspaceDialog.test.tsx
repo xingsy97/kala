@@ -51,7 +51,14 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByTestId('connect-workspace-linux').getAttribute('aria-pressed')).toBe('true')
     expect(screen.queryByLabelText(/workspace root/i)).toBeNull()
     expect(screen.queryByText(/no sudo required/i)).toBeNull()
-    const command = screen.getByTestId('executor-terminal-command').textContent ?? ''
+    expect(screen.getByRole('region', { name: 'Installation options' })).toBeTruthy()
+    expect(screen.getByTestId('connect-workspace-linux').className).toContain('bg-accent')
+    expect(screen.getByTestId('connect-workspace-service').className).toContain('bg-background')
+    expect(screen.getByTestId('installation-status').querySelector('svg')).toBeTruthy()
+    const terminal = screen.getByTestId('executor-terminal-command')
+    expect(terminal.className).toContain('rounded-2xl')
+    expect(terminal.className).not.toContain('ring-1')
+    const command = terminal.textContent ?? ''
     expect(command).toContain('/install')
     expect(command).toContain('A1B2C3D4E5')
     expect(command).not.toContain('\n')
