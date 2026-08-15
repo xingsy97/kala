@@ -2091,7 +2091,7 @@ export function App(): JSX.Element {
       )}
       {runtimeCapabilities.workspace ? <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
-          className="ak-drawer-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:w-96 sm:rounded-none"
+          className="ak-drawer-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none translate-x-0 translate-y-0 gap-0 overflow-hidden border-0 bg-sidebar p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-2xl sm:w-96 sm:rounded-r-3xl"
           data-testid="explorer-drawer"
         >
           <DialogHeader className="sr-only">
@@ -2121,7 +2121,7 @@ export function App(): JSX.Element {
       </Dialog> : null}
       <Dialog open={inspectorDrawerOpen && !wideLayout && hasSelectedSession} onOpenChange={setInspectorDrawerOpen}>
         <DialogContent
-          className="ak-drawer-right right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto translate-x-0 translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] sm:w-[26rem] sm:rounded-none"
+          className="ak-drawer-right right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto translate-x-0 translate-y-0 gap-0 overflow-hidden border-0 bg-card p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] shadow-2xl sm:w-[26rem] sm:rounded-l-3xl"
           data-testid="inspector-drawer-mobile"
         >
           <DialogHeader className="sr-only">

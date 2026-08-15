@@ -29,7 +29,10 @@ describe('AppShellNav', () => {
       expect(screen.getByTestId(`app-shell-nav-${id}`)).toBeTruthy()
     }
     expect(screen.queryByTestId('app-shell-nav-settings')).toBeNull()
-    expect(screen.getByTestId('app-shell-nav-agent').getAttribute('aria-current')).toBe('page')
+    const active = screen.getByTestId('app-shell-nav-agent')
+    expect(active.getAttribute('aria-current')).toBe('page')
+    expect(active.className).toContain('text-foreground')
+    expect(active.className).not.toContain('text-primary')
     expect(screen.getByTestId('app-shell-open-evaluation').getAttribute('href')).toBe('http://127.0.0.1:13180')
     expect(screen.getByTestId('app-shell-open-evaluation').getAttribute('target')).toBe('_blank')
   })

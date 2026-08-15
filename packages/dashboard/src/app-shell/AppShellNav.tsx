@@ -74,10 +74,10 @@ export function AppShellNav({
     const containerRect = container.getBoundingClientRect()
     const activeRect = activeButton.getBoundingClientRect()
     setActivePill({
-      left: activeRect.left - containerRect.left + container.scrollLeft + 2,
-      top: activeRect.top - containerRect.top + 2,
-      width: Math.max(0, activeRect.width - 4),
-      height: Math.max(0, activeRect.height - 4),
+      left: activeRect.left - containerRect.left + container.scrollLeft,
+      top: activeRect.top - containerRect.top,
+      width: Math.max(0, activeRect.width),
+      height: Math.max(0, activeRect.height),
     })
   }, [])
 
@@ -139,7 +139,7 @@ export function AppShellNav({
       >
         {activePill ? (
           <span
-            className="pointer-events-none absolute z-0 rounded-md bg-primary/10 shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.22)] transition-[transform,width,height,opacity] duration-200 ease-out motion-reduce:transition-none"
+            className="pointer-events-none absolute z-0 rounded-lg bg-accent shadow-[inset_0_0_0_1px_hsl(var(--border)/0.4)] transition-[transform,width,height,opacity] duration-200 ease-out motion-reduce:transition-none"
             style={{
               width: activePill.width,
               height: activePill.height,
@@ -163,8 +163,8 @@ export function AppShellNav({
               className={cn(
                 'relative z-10 h-9 flex-none snap-start gap-1.5 overflow-hidden px-2 text-xs transition-colors duration-150 sm:h-8 sm:px-2.5',
                 active
-                  ? 'text-primary'
-                  : 'text-muted-foreground hover:text-foreground',
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
               )}
             >
               <Icon className="relative h-4 w-4 flex-none" aria-hidden />
