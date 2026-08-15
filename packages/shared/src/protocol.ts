@@ -256,6 +256,7 @@ export type EventAppendedEvent = {
   hasLlmTraceArtifact?: boolean
   llmTrace?: LLMTrace
   model?: string
+  timing?: import('./turn-timing.js').EventTimingMetadata
   /**
    * Rich metadata for `messages_replaced (reason='compaction')` events.
    * The kernel event itself only carries `replaceRange` +
@@ -1131,6 +1132,7 @@ export type ToolCallMessage = {
   input: Record<string, unknown>
   cwd?: string
   ackTimeoutMs?: number
+  turnId?: string
 }
 
 export type ToolCancelMessage = {
@@ -1143,6 +1145,7 @@ export type ToolResultAck = {
   ok: boolean
   content: string
   failure?: import('@agent-kernel/kernel').ToolFailure
+  durationMs?: number
 }
 
 // ============================================================================

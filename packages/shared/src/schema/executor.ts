@@ -183,6 +183,7 @@ export const ToolCallMessageSchema = z.object({
   input: z.record(z.string(), z.unknown()),
   cwd: z.string().optional(),
   ackTimeoutMs: z.number().int().nonnegative().optional(),
+  turnId: WireIdSchema.optional(),
 }) satisfies z.ZodType<ToolCallMessage>
 
 export const ToolCancelMessageSchema = z.object({
@@ -195,4 +196,5 @@ export const ToolResultAckSchema = z.object({
   ok: z.boolean(),
   content: z.string(),
   failure: z.object({ code: z.string(), category: z.enum(['input','precondition','execution','infrastructure','cancelled']), outcome: z.enum(['blocked','failed','cancelled','timeout','indeterminate']), retryable: z.boolean(), responsibility: z.enum(['model','workspace','provider','user','system']), timeoutStage: z.enum(['queue','acknowledgement','execution','idle_output']).optional() }).optional(),
+  durationMs: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<ToolResultAck>

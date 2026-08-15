@@ -316,6 +316,7 @@ export function configureDashboardNamespace(
               ...(e.llmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
               ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
               ...(e.model ? { model: e.model } : {}),
+              ...(e.timing ? { timing: e.timing } : {}),
               ...(meta ? { compactionMetadata: meta } : {}),
             }
           })

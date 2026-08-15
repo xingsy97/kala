@@ -84,7 +84,7 @@ describe('executor idempotency', () => {
     await new Promise((r) => setTimeout(r, 10))
 
     expect(runs).toHaveBeenCalledTimes(1)
-    expect(ack1).toHaveBeenCalledWith({ callId: 'call-A', ok: true, content: 'ran-tool' })
+    expect(ack1).toHaveBeenCalledWith(expect.objectContaining({ callId: 'call-A', ok: true, content: 'ran-tool', durationMs: expect.any(Number) }))
 
     // second tool:call with same callId — must NOT re-run, must ack from cache
     const ack2 = vi.fn()
@@ -96,7 +96,7 @@ describe('executor idempotency', () => {
     await new Promise((r) => setTimeout(r, 10))
 
     expect(runs).toHaveBeenCalledTimes(1) // still 1 — didn't re-run
-    expect(ack2).toHaveBeenCalledWith({ callId: 'call-A', ok: true, content: 'ran-tool' })
+    expect(ack2).toHaveBeenCalledWith(expect.objectContaining({ callId: 'call-A', ok: true, content: 'ran-tool', durationMs: expect.any(Number) }))
   })
 
   it('does not collide when two Sessions reuse the same provider callId', async () => {
@@ -116,8 +116,8 @@ describe('executor idempotency', () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     expect(runs).toHaveBeenCalledTimes(2)
-    expect(first).toHaveBeenCalledWith({ callId: 'same-call', ok: true, content: 'ran-session-a' })
-    expect(second).toHaveBeenCalledWith({ callId: 'same-call', ok: true, content: 'ran-session-b' })
+    expect(first).toHaveBeenCalledWith(expect.objectContaining({ callId: 'same-call', ok: true, content: 'ran-session-a', durationMs: expect.any(Number) }))
+    expect(second).toHaveBeenCalledWith(expect.objectContaining({ callId: 'same-call', ok: true, content: 'ran-session-b', durationMs: expect.any(Number) }))
   })
 
   it('fans out completion to duplicate in-flight ACK callbacks without double-spawn', async () => {
@@ -160,7 +160,7 @@ describe('executor idempotency', () => {
     resolveRun!('slow-done')
     await new Promise((r) => setTimeout(r, 10))
 
-    const expected = { callId: 'call-B', ok: true, content: 'slow-done' }
+    const expected = expect.objectContaining({ callId: 'call-B', ok: true, content: 'slow-done', durationMs: expect.any(Number) })
     expect(ack1).toHaveBeenCalledWith(expected)
     expect(ack2).toHaveBeenCalledWith(expected)
     expect(runs).toHaveBeenCalledTimes(1) // never re-ran

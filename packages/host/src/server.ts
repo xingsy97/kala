@@ -673,6 +673,7 @@ export async function startHostServer(
             await loop.dispatch(sessionId, {
               kind: 'user_message',
               operationId: next.operationId,
+              queuedAt: next.createdAt,
               text: next.text,
               ...(next.content ? { content: next.content } : {}),
             }, { ...(next.model ? { model: next.model } : {}), onCommitted: dequeueCommitted })
@@ -767,6 +768,7 @@ export async function startHostServer(
         ...(hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
         ...(llmTrace ? { hasLlmTraceArtifact: true } : {}),
         ...(model ? { model } : {}),
+        ...(extras?.timing ? { timing: extras.timing } : {}),
         ...(extras?.compactionMetadata ? { compactionMetadata: extras.compactionMetadata } : {}),
       })
       io.of('/dashboard').to(room).emit('state:changed', {
@@ -789,6 +791,7 @@ export async function startHostServer(
         ...(hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
         ...(llmTrace ? { hasLlmTraceArtifact: true } : {}),
         ...(model ? { model } : {}),
+        ...(extras?.timing ? { timing: extras.timing } : {}),
         ...(extras?.compactionMetadata ? { compactionMetadata: extras.compactionMetadata } : {}),
       })
       io.of('/executor').to(room).emit('state:changed', {

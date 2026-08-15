@@ -314,7 +314,9 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     const controller = new AbortController()
     inFlight.set(key, controller)
     inFlightAcks.set(key, [ack])
-    const result = await runOne(tools, sandbox, controller.signal, payload, overflowConfig)
+    const started = performance.now()
+    const rawResult = await runOne(tools, sandbox, controller.signal, payload, overflowConfig)
+    const result = { ...rawResult, durationMs: Math.max(0, Math.round(performance.now() - started)) }
     try {
       // Keep the call in-flight until its receipt crosses the durability barrier.
       // Reconnect duplicates join the same ACK fan-out instead of observing an

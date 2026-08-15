@@ -58,6 +58,14 @@ describe('readSessionLog', () => {
     expect(parsed.warnings).toEqual([])
   })
 
+  it('round-trips bounded Turn timing metadata in the durable event entry', async () => {
+    const path = join(dir, 'timing.jsonl')
+    await writeHeader({ path, sessionId: 's-timing', config, initialState })
+    const summary = { turnId: 'turn-1', status: 'completed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z', wallDurationMs: 1000, estimated: false, queueDurationMs: 0, activeDurationMs: 1000, approvalWaitMs: 0, llm: { wallDurationMs: 1000, requestCount: 1 }, tools: { wallDurationMs: 0, aggregateDurationMs: 0, callCount: 0, peakConcurrency: 0, partial: false }, compactionDurationMs: 0, retryDurationMs: 0, recoveryDurationMs: 0 }
+    await appendEventEntry({ path, seq: 1, event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }, effects: [], timing: { turnId: 'turn-1', summary } })
+    expect((await readSessionLog(path)).events[0]?.timing?.summary).toEqual(summary)
+  })
+
   it('round-trips runtime metadata entries separately from kernel events', async () => {
     const path = join(dir, 'runtime-metadata.jsonl')
     await writeHeader({ path, sessionId: 's-runtime-meta', config, initialState })

@@ -30,6 +30,7 @@ import type {
 import { step } from '@agent-kernel/kernel'
 
 import { TOOL_INTENTION_SYSTEM_INSTRUCTION } from './builtin-tools.js'
+import { TurnTimingTracker, timedSpan } from './turn-timing.js'
 import type { LLMAdapter } from './llm/adapter.js'
 import { redactLlmTrace, type LLMTrace } from '@agent-kernel/shared'
 import { estimateMessageTokens, estimateStringTokens, estimateToolSchemaTokens } from '@agent-kernel/shared/token-estimation'
@@ -447,6 +448,7 @@ type CommittedTransition = {
 // read → step → durable append → broadcast section here; effects execute after
 // releasing this lock so recursive Tool/LLM events cannot deadlock.
 const commitTails = new WeakMap<HostLoopDeps['store'], Map<string, Promise<void>>>()
+const timingTrackers = new WeakMap<HostLoopDeps['store'], TurnTimingTracker>()
 
 async function commitTransition(
   deps: HostLoopDeps,
@@ -473,6 +475,13 @@ async function commitTransition(
       ? { ...event, message: next.messages.at(-1) ?? event.message }
       : event
     const safeLlmTrace = llmTrace ? redactLlmTrace(llmTrace) : undefined
+    let timingTracker = timingTrackers.get(deps.store)
+    if (!timingTracker) { timingTracker = new TurnTimingTracker(); timingTrackers.set(deps.store, timingTracker) }
+    if (!timingTracker.has(sessionId) && event.kind !== 'user_message' && (prior.status === 'thinking' || prior.status === 'executing_tools' || prior.status === 'awaiting_approval')) {
+      const parsed = await import('./store/log.js').then(({ readSessionLog }) => readSessionLog(record.logPath)).catch(() => undefined)
+      if (parsed) timingTracker.recover(sessionId, parsed.events)
+    }
+    const timing = extras?.timing ?? timingTracker.observe({ sessionId, event: committedEvent, prior, next, effects, ...(extras?.timingSpan ? { span: extras.timingSpan } : {}) })
     const usageChanged =
       next.usage.inputTokens !== prior.usage.inputTokens ||
       next.usage.outputTokens !== prior.usage.outputTokens ||
@@ -480,10 +489,10 @@ async function commitTransition(
       next.usage.cacheReadTokens !== prior.usage.cacheReadTokens
     await deps.store.record(
       sessionId, committedEvent, effects, next, usageChanged ? next.usage : undefined,
-      safeLlmTrace, model,
+      safeLlmTrace, model, timing,
     )
     safeBroadcast(() =>
-      deps.broadcast.onEvent(sessionId, next.cursor, committedEvent, effects, next, safeLlmTrace, model, extras),
+      deps.broadcast.onEvent(sessionId, next.cursor, committedEvent, effects, next, safeLlmTrace, model, { ...extras, ...(timing ? { timing } : {}) }),
     )
     committed = { record, next, effects }
   })
@@ -627,6 +636,8 @@ async function performCallLlm(
 ): Promise<void> {
   const model = runtime?.model ?? deps.models?.get(sessionId)
   const controller = new AbortController()
+  const llmStartedAt = new Date().toISOString()
+  const llmStartedMono = performance.now()
   aborts.set(sessionId, controller)
   const assembledMessages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
   const messages = withCurrentToolIntentionInstruction(assembledMessages)
@@ -701,6 +712,8 @@ async function performCallLlm(
       res.trace,
       res.trace?.model ?? model,
       runtime,
+      undefined,
+      { timingSpan: timedSpan('llm', `llm-${sessionId}-${deps.store.get(sessionId)?.state.cursor ?? 0}`, llmStartedAt, llmStartedMono, 'succeeded', { firstTokenMs: res.trace?.response?.metrics?.timeToFirstChunkMs }) },
     )
   } catch (err) {
     // AbortError from the fetch call means the user cancelled mid-stream.
@@ -722,11 +735,13 @@ async function performCallLlm(
         undefined,
         model,
         runtime,
+        undefined,
+        { timingSpan: timedSpan('llm', `llm-${sessionId}-${deps.store.get(sessionId)?.state.cursor ?? 0}`, llmStartedAt, llmStartedMono, 'cancelled') },
       )
       return
     }
     const message = err instanceof Error ? err.message : String(err)
-    await dispatchOne(deps, sessionId, { kind: 'llm_error', error: message }, aborts, undefined, model, runtime)
+    await dispatchOne(deps, sessionId, { kind: 'llm_error', error: message }, aborts, undefined, model, runtime, undefined, { timingSpan: timedSpan('llm', `llm-${sessionId}-${deps.store.get(sessionId)?.state.cursor ?? 0}`, llmStartedAt, llmStartedMono, 'failed') })
   } finally {
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
   }
@@ -983,6 +998,8 @@ async function performCallTool(
   runtime?: LoopRuntime,
   resultQueue?: SerialQueue,
 ): Promise<void> {
+  const toolStartedAt = new Date().toISOString()
+  const toolStartedMono = performance.now()
   runtime?.toolStarted?.(sessionId, effect.callId)
   try {
     const blockedByLoop = guardPostCompactionLoop(sessionId, effect, runtime?.loopGuard)
@@ -996,6 +1013,8 @@ async function performCallTool(
         aborts,
         runtime,
         resultQueue,
+        undefined,
+        timedSpan('tool', `tool-${effect.callId}`, toolStartedAt, toolStartedMono, 'failed', { callId: effect.callId }),
       )
       return
     }
@@ -1010,6 +1029,8 @@ async function performCallTool(
         aborts,
         runtime,
         resultQueue,
+        undefined,
+        timedSpan('tool', `tool-${effect.callId}`, toolStartedAt, toolStartedMono, 'failed', { callId: effect.callId }),
       )
       return
     }
@@ -1024,10 +1045,13 @@ async function performCallTool(
         aborts,
         runtime,
         resultQueue,
+        undefined,
+        timedSpan('tool', `tool-${effect.callId}`, toolStartedAt, toolStartedMono, 'failed', { callId: effect.callId }),
       )
       return
     }
-    const res = await dispatchConfiguredTool(deps, sessionId, effect, aborts)
+    const tracker = timingTrackers.get(deps.store)
+    const res = await dispatchConfiguredTool(deps, sessionId, effect, aborts, tracker?.currentTurnId(sessionId))
     await runPostToolHooks(deps, sessionId, effect, res)
     await dispatchToolResult(
       deps,
@@ -1039,6 +1063,7 @@ async function performCallTool(
       runtime,
       resultQueue,
       res.failure,
+      timedSpan('tool', `tool-${effect.callId}`, toolStartedAt, toolStartedMono, res.ok ? 'succeeded' : 'failed', { callId: effect.callId, ...(res.durationMs !== undefined ? { executorDurationMs: res.durationMs } : {}) }),
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -1051,6 +1076,8 @@ async function performCallTool(
       aborts,
       runtime,
       resultQueue,
+      undefined,
+      timedSpan('tool', `tool-${effect.callId}`, toolStartedAt, toolStartedMono, 'failed', { callId: effect.callId }),
     )
   } finally {
     runtime?.toolSettled?.(sessionId, effect.callId)
@@ -1067,6 +1094,7 @@ async function dispatchToolResult(
   runtime?: LoopRuntime,
   resultQueue?: SerialQueue,
   failure?: import('@agent-kernel/kernel').ToolFailure,
+  timingSpan?: import('./turn-timing.js').SpanObservation,
 ): Promise<void> {
   const write = async (): Promise<void> => {
     const record = deps.store.get(sessionId)
@@ -1085,6 +1113,8 @@ async function dispatchToolResult(
       undefined,
       undefined,
       runtime,
+      undefined,
+      timingSpan ? { timingSpan } : undefined,
     )
     await maybeCompactAfterToolResult(deps, sessionId, runtime)
   }

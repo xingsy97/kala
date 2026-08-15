@@ -496,13 +496,13 @@ export function createExecutorRegistry(
       }, detachGraceMs)
       detaching.set(workspaceId, { bind, timer })
     },
-    async callTool(sessionId, eff: CallToolEffect) {
+    async callTool(sessionId, eff: CallToolEffect, turnId?: string) {
       const picked = pickBindFor(sessionId)
       if (!picked.ok) return { ok: false, content: picked.reason, failure: { code: 'workspace_offline', category: 'precondition', outcome: 'blocked', retryable: true, responsibility: 'workspace' } }
       const bind = picked.bind
       const ackTimeoutMs = ackTimeoutMsFor(eff.name, eff.input, toolAckTimeoutMs)
       audit?.log({ action: 'tool.dispatch', actor: { kind: 'system' }, target: { sessionId, workspaceId: bind.announcement.workspaceId, callId: eff.callId, toolName: eff.name }, outcome: 'ok', metadata: { cwd: eff.cwd } })
-      return await new Promise<{ ok: boolean; content: string; failure?: import('@agent-kernel/kernel').ToolFailure }>((resolve) => {
+      return await new Promise<{ ok: boolean; content: string; failure?: import('@agent-kernel/kernel').ToolFailure; durationMs?: number }>((resolve) => {
         const deadlineAt = Date.now() + ackTimeoutMs
         const timer = setTimeout(() => {
           if (bind.pending.delete(eff.callId)) {
@@ -533,6 +533,7 @@ export function createExecutorRegistry(
             input: eff.input,
             ...(eff.cwd !== undefined ? { cwd: eff.cwd } : {}),
             ackTimeoutMs,
+            ...(turnId ? { turnId } : {}),
           },
           (ack: ToolResultAck) => {
             const pending = bind.pending.get(ack.callId)
@@ -540,7 +541,7 @@ export function createExecutorRegistry(
             clearTimeout(pending.timer)
             bind.pending.delete(ack.callId)
             audit?.log({ action: 'tool.result', actor: { kind: 'executor', executorId: bind.announcement.executorId, workspaceId: bind.announcement.workspaceId }, target: { sessionId, callId: ack.callId, toolName: eff.name }, outcome: ack.ok ? 'ok' : 'error', metadata: { contentBytes: Buffer.byteLength(ack.content, 'utf8') }, ...(ack.ok ? {} : { error: ack.content.slice(0, 200) }) })
-            pending.resolve({ ok: ack.ok, content: ack.content, ...(ack.failure ? { failure: ack.failure } : {}) })
+            pending.resolve({ ok: ack.ok, content: ack.content, ...(ack.failure ? { failure: ack.failure } : {}), ...(ack.durationMs !== undefined ? { durationMs: ack.durationMs } : {}) })
           },
         )
       })

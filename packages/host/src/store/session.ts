@@ -436,6 +436,7 @@ export class SessionStore {
     usageDelta?: UsageTotal,
     llmTrace?: LLMTrace,
     model?: string,
+    timing?: import('@agent-kernel/shared').EventTimingMetadata,
   ): Promise<void> {
     const previous = this.recordTails.get(sessionId) ?? Promise.resolve()
     const commit = previous.catch(() => undefined).then(async () => {
@@ -455,6 +456,7 @@ export class SessionStore {
         ...(usageDelta ? { usage: usageDelta } : {}),
         ...(llmTrace ? { llmTrace } : {}),
         ...(model ? { model } : {}),
+        ...(timing ? { timing } : {}),
       })
       // Publish in-memory state only after the durable append and fsync succeed.
       rec.state = nextState

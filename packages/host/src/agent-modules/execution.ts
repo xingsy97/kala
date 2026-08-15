@@ -10,6 +10,7 @@ export type ToolExecutionResult = {
   ok: boolean
   content: string
   failure?: import('@agent-kernel/kernel').ToolFailure
+  durationMs?: number
 }
 
 export async function dispatchConfiguredTool(
@@ -17,6 +18,7 @@ export async function dispatchConfiguredTool(
   sessionId: string,
   effect: CallToolEffect,
   aborts: Map<string, AbortController>,
+  turnId?: string,
 ): Promise<ToolExecutionResult> {
   const record = deps.store.get(sessionId)
   const schema = record?.config.tools.find((tool) => tool.name === effect.name)
@@ -25,7 +27,7 @@ export async function dispatchConfiguredTool(
   const executionKind = effect.name === 'websearch' ? 'host' : (schema?.executionKind ?? 'executor')
   if (executionKind === 'executor') {
     const handler = schema?.executionHandler ?? effect.name
-    return await deps.tools.callTool(sessionId, handler === effect.name ? effect : { ...effect, name: handler })
+    return await deps.tools.callTool(sessionId, handler === effect.name ? effect : { ...effect, name: handler }, turnId)
   }
 
   const handler = effect.name === 'websearch' ? 'websearch' : (schema?.executionHandler ?? effect.name)

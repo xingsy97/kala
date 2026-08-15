@@ -9,6 +9,7 @@ import type {
   Effect,
   UsageTotal,
 } from '@agent-kernel/kernel'
+import type { EventTimingMetadata } from './turn-timing.js'
 
 export type LogEntryKind = 'header' | 'event' | 'snapshot' | 'metadata' | 'runtime_metadata'
 
@@ -69,6 +70,7 @@ export type EventEntry = {
    * was suppressed or an older adapter didn't capture one.
    */
   model?: string
+  timing?: EventTimingMetadata
 }
 
 export type LogArtifactRef = {

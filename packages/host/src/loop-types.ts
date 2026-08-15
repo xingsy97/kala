@@ -87,6 +87,8 @@ export type CompactStatusPayload = CompactStatusEvent
  */
 export type EventBroadcastExtras = {
   compactionMetadata?: CompactionMetadata
+  timingSpan?: import('./turn-timing.js').SpanObservation
+  timing?: import('@agent-kernel/shared').EventTimingMetadata
 }
 
 export type SubAgentStartedPayload = {
@@ -111,10 +113,11 @@ export type SubAgentFinishedPayload = {
 }
 
 export type ToolDispatcher = {
-  callTool(sessionId: string, eff: CallToolEffect): Promise<{
+  callTool(sessionId: string, eff: CallToolEffect, turnId?: string): Promise<{
     ok: boolean
     content: string
     failure?: import('@agent-kernel/kernel').ToolFailure
+    durationMs?: number
   }>
   cancelPending(sessionId: string): void
 }

@@ -248,6 +248,20 @@ export const CompactionMetadataSchema = z.object({
   replacedCount: z.number().int().nonnegative(),
 }) satisfies z.ZodType<CompactionMetadata>
 
+const CompletedTimingSpanSchema = z.object({
+  spanId: z.string(), turnId: z.string(), kind: z.enum(['llm','tool','approval','compaction','retry','recovery']),
+  component: z.enum(['host','executor']), startedAt: z.string(), completedAt: z.string(), durationMs: z.number().int().nonnegative(),
+  status: z.enum(['succeeded','failed','cancelled','interrupted']), callId: z.string().optional(), executorDurationMs: z.number().int().nonnegative().optional(), firstTokenMs: z.number().int().nonnegative().optional(),
+})
+const TurnTimingSummarySchema = z.object({
+  turnId: z.string(), status: z.enum(['running','completed','failed','cancelled','interrupted']), startedAt: z.string(), completedAt: z.string().optional(), wallDurationMs: z.number().int().nonnegative(), estimated: z.boolean(),
+  queueDurationMs: z.number().int().nonnegative(), activeDurationMs: z.number().int().nonnegative(), approvalWaitMs: z.number().int().nonnegative(),
+  llm: z.object({ wallDurationMs: z.number().int().nonnegative(), requestCount: z.number().int().nonnegative(), firstTokenMs: z.number().int().nonnegative().optional() }),
+  tools: z.object({ wallDurationMs: z.number().int().nonnegative(), aggregateDurationMs: z.number().int().nonnegative(), callCount: z.number().int().nonnegative(), peakConcurrency: z.number().int().nonnegative(), partial: z.boolean() }),
+  compactionDurationMs: z.number().int().nonnegative(), retryDurationMs: z.number().int().nonnegative(), recoveryDurationMs: z.number().int().nonnegative(),
+})
+const EventTimingMetadataSchema = z.object({ turnId: z.string(), turnStartedAt: z.string().optional(), span: CompletedTimingSpanSchema.optional(), summary: TurnTimingSummarySchema.optional() })
+
 export const EventAppendedEventSchema = z.object({
   sessionId: z.string(),
   seq: z.number().int().nonnegative(),
@@ -258,6 +272,7 @@ export const EventAppendedEventSchema = z.object({
   hasLlmTraceArtifact: z.boolean().optional(),
   llmTrace: LLMTraceSchema.optional(),
   model: z.string().optional(),
+  timing: EventTimingMetadataSchema.optional(),
   compactionMetadata: CompactionMetadataSchema.optional(),
 }) satisfies z.ZodType<EventAppendedEvent>
 
@@ -894,6 +909,7 @@ export const EventEntrySchema = z.object({
   llmTrace: LLMTraceSchema.optional(),
   llmTraceArtifact: LogArtifactRefSchema.optional(),
   model: z.string().optional(),
+  timing: EventTimingMetadataSchema.optional(),
 }) satisfies z.ZodType<EventEntry>
 
 export const SnapshotEntrySchema = z.object({

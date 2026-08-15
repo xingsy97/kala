@@ -265,6 +265,7 @@ export type UserMessageEvent = {
   kind: 'user_message'
   /** Stable accepted-operation identity used for durable exactly-once Queue drain. */
   operationId?: string
+  queuedAt?: string
   text?: string
   content?: readonly MessageContent[]
 }

@@ -113,6 +113,7 @@ export type AppendEventParams = {
   usage?: UsageTotal
   llmTrace?: LLMTrace
   model?: string
+  timing?: import('@agent-kernel/shared').EventTimingMetadata
 }
 
 export async function appendEventEntry(
@@ -151,6 +152,7 @@ export async function appendEventEntry(
     ...(safeLlmTrace ? { llmTrace: summarizeLlmTrace(safeLlmTrace) } : {}),
     ...(llmTraceArtifact ? { llmTraceArtifact } : {}),
     ...(params.model ? { model: params.model } : {}),
+    ...(params.timing ? { timing: params.timing } : {}),
   }
   // Event entries are the authority for Session state. `appendFile()` resolving
   // only means bytes reached the kernel page cache; a crash could otherwise
