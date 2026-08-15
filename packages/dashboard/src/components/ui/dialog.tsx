@@ -11,7 +11,7 @@ export const DialogClose = DialogPrimitive.Close
 // Shared, concrete contracts used by the mobile Settings and Session Settings
 // surfaces. Keep feature-specific grid rows and desktop widths at each caller.
 export const dialogMobileSheetClassName =
-  '!bottom-0 !top-auto max-h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem)] w-screen max-w-none !translate-y-0 gap-0 overflow-hidden rounded-b-none rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)] sm:!bottom-auto sm:!top-[calc(50%+(env(safe-area-inset-top)-env(safe-area-inset-bottom))/2)] sm:w-[calc(100vw-2rem)] sm:!translate-y-[-50%] sm:rounded-lg sm:pb-0'
+  '!bottom-0 !top-auto max-h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem)] w-screen max-w-none !translate-y-0 gap-0 overflow-hidden rounded-b-none rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)] sm:!bottom-auto sm:!top-[calc(50%+(env(safe-area-inset-top)-env(safe-area-inset-bottom))/2)] sm:w-[calc(100vw-2rem)] sm:!translate-y-[-50%] sm:rounded-2xl sm:pb-0'
 
 export const dialogTouchCloseClassName =
   'absolute right-2 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -22,7 +22,7 @@ export const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn('ak-drawer-overlay fixed inset-0 z-50 bg-black/70 backdrop-blur-sm', className)}
+    className={cn('ak-drawer-overlay fixed inset-0 z-50 bg-black/55 backdrop-blur-[2px]', className)}
     data-testid="dialog-overlay"
     {...props}
   />
@@ -43,7 +43,7 @@ export const DialogContent = React.forwardRef<
         // between top and bottom safe-area insets. On iOS PWA with a
         // notch this pushes the dialog down enough that the top edge
         // no longer sits under the status bar / dynamic island.
-        'ak-motion-dialog fixed left-[50%] top-[calc(50%+(env(safe-area-inset-top)-env(safe-area-inset-bottom))/2)] z-50 grid max-h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem)] w-[calc(100vw-1rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden border border-border/60 bg-background p-6 shadow-lg sm:w-full sm:rounded-lg',
+        'ak-motion-dialog fixed left-[50%] top-[calc(50%+(env(safe-area-inset-top)-env(safe-area-inset-bottom))/2)] z-50 grid max-h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem)] w-[calc(100vw-1rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden border border-border/50 bg-background p-6 shadow-2xl sm:w-full sm:rounded-2xl',
         className,
       )}
       {...props}
