@@ -982,7 +982,7 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws relative min-w-0 cursor-pointer select-none px-3 py-2 hover:bg-accent/45',
+        'group/ws relative min-w-0 cursor-pointer select-none rounded-lg px-3 py-2 transition-colors hover:bg-accent/40',
         WORKSPACE_ROW_GRID,
       )}
     >
@@ -1162,9 +1162,9 @@ function SessionRow({
       data-testid="session-row"
       data-session-id={s.sessionId}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden rounded-lg px-3 py-1.5 transition-colors',
-        'hover:bg-accent/55',
-        selected && 'bg-accent/85',
+        'group relative min-w-0 cursor-pointer overflow-hidden rounded-xl px-3 py-1.5 transition-colors',
+        'hover:bg-accent/50',
+        selected && 'bg-accent shadow-[inset_0_0_0_1px_hsl(var(--border)/0.35)]',
         EXPLORER_ROW_GRID,
       )}
       onClick={() => {
@@ -1208,13 +1208,6 @@ function SessionRow({
         onPreviewLeave(s.sessionId)
       }}
     >
-      {selected ? (
-        <span
-          className="absolute bottom-2 left-0 top-2 w-0.5 rounded-r-full bg-primary"
-          data-testid="session-selected-marker"
-          aria-hidden="true"
-        />
-      ) : null}
       <div className={EXPLORER_RAIL_CELL}>
         {s.children.length > 0 ? (
           <button

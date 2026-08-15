@@ -920,7 +920,8 @@ describe('Explorer', () => {
     expect(sessionRow.className).toMatch(/bg-accent/)
     expect(sessionRow.className).toContain('grid-cols-[1rem_1rem_minmax(0,1fr)_auto]')
     expect(sessionRow.className).not.toMatch(/border-l-primary/)
-    expect(screen.getByTestId('session-selected-marker')).toBeTruthy()
+    expect(sessionRow.className).toContain('shadow-[inset_0_0_0_1px')
+    expect(screen.queryByTestId('session-selected-marker')).toBeNull()
   })
 
   it('filters sessions locally and highlights matched text', () => {
