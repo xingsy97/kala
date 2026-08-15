@@ -381,6 +381,25 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-input')).toBeTruthy()
   })
 
+  it('preserves the simple draft while switching to full mode', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer()
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    const simpleInput = screen.getByTestId('composer-input-simple')
+    simpleInput.textContent = 'draft survives the density switch'
+    fireEvent.input(simpleInput)
+    fireEvent.click(screen.getByTestId('composer-mode-toggle'))
+
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'draft survives the density switch')
+    expect(screen.getByTestId('composer-full-shell').className).not.toContain('gap-0')
+    const fullToggle = screen.getByTestId('composer-mode-toggle')
+    expect(screen.getByTestId('composer-footer').contains(fullToggle)).toBe(true)
+    expect(fullToggle.className).toContain('bg-transparent')
+  })
+
   it('supports slash commands in simple mode', () => {
     const onCompact = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')
@@ -446,19 +465,21 @@ describe('Composer', () => {
 
     expect(shell.contains(indicator)).toBe(true)
     expect(shell.contains(send)).toBe(true)
+    expect(shell.contains(screen.getByTestId('composer-config-trigger'))).toBe(true)
     expect(indicator.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(indicator.className).toContain('h-9')
     expect(send.className).toContain('h-9')
     expect(sendMode.className).toContain('h-9')
 
-    // The mode switch is attached to the input as its left layout segment.
+    // The mode switch is a quiet control inside the shared Composer surface,
+    // not a bordered segment that makes the capsule visually heavier.
     const modeToggle = screen.getByTestId('composer-mode-toggle')
     expect(modeToggle).toBeTruthy()
     expect(modeToggle.className).not.toContain('absolute')
-    expect(modeToggle.className).toContain('h-10')
-    expect(modeToggle.className).toContain('w-10')
-    expect(modeToggle.className).toContain('self-start')
-    expect(modeToggle.className).toContain('border-r-0')
+    expect(modeToggle.className).toContain('h-9')
+    expect(modeToggle.className).toContain('w-9')
+    expect(modeToggle.className).toContain('bg-transparent')
+    expect(modeToggle.className).toContain('border-0')
     expect(modeToggle.querySelector('svg')).toBeTruthy()
     expect(shell.contains(modeToggle)).toBe(true)
     expect(modeToggle.compareDocumentPosition(shell.querySelector('textarea, [contenteditable="true"]') ?? indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

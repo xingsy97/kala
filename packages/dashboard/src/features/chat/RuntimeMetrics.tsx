@@ -118,7 +118,7 @@ export function RuntimeMetrics({
         type="button"
         className={cn(
           'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-          isSimple ? 'h-9 min-w-9 rounded-full px-2' : 'h-8 rounded px-1',
+          isSimple ? 'h-9 min-w-9 rounded-lg px-1.5 sm:h-7 sm:min-w-7' : 'h-9 rounded-lg px-1.5 sm:h-7 sm:px-1',
         )}
         title={title}
         aria-label={title}

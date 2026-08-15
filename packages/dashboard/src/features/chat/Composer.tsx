@@ -566,7 +566,10 @@ export function Composer({
           onDelete={onQueuedDelete}
         />
         {mode === 'simple' ? (
-          <div className="relative flex items-center gap-0" data-testid="composer-simple-shell">
+          <div
+            className="relative flex min-h-12 items-center gap-1 rounded-2xl border border-border/60 bg-background/70 p-1 shadow-[0_8px_24px_hsl(var(--foreground)/0.06)] transition-[border-color,background-color,box-shadow] focus-within:border-ring/45 focus-within:bg-background focus-within:shadow-[0_10px_28px_hsl(var(--foreground)/0.09)] sm:min-h-10 sm:gap-0.5 sm:p-0.5"
+            data-testid="composer-simple-shell"
+          >
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
             <SlashCommandMenu
               commands={matchingCommands}
@@ -588,9 +591,19 @@ export function Composer({
                 onRemoveImage={(id) => removeImage(id)}
                 onPaste={(e) => { void handleSimplePaste(e) }}
                 onEnterSubmit={() => { void submit() }}
-                className="rounded-l-none"
+                className="border-0 bg-transparent shadow-none focus-within:border-0 focus-within:bg-transparent focus-within:ring-0"
               />
             </div>
+            <ComposerConfigButton
+              model={model}
+              models={models}
+              onModelChange={onModelChange}
+              approvalMode={approvalMode}
+              approvalModeLabel={approvalModeLabel}
+              onApprovalModeChange={onApprovalModeChange}
+              composerMode={mode}
+              onComposerModeChange={toggleMode}
+            />
             <RuntimeMetrics
               state={state}
               config={config}
@@ -614,12 +627,11 @@ export function Composer({
             />
           </div>
         ) : (
-        <div className="flex items-stretch gap-0" data-testid="composer-full-shell">
-          <ComposerModeToggle mode={mode} onToggle={toggleMode} />
+        <div className="flex items-stretch" data-testid="composer-full-shell">
         <div
           className={cn(
-            'min-w-0 flex-1 relative rounded-2xl rounded-l-none border border-border/60 bg-background/60 transition-shadow',
-            'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
+            'relative min-w-0 flex-1 rounded-2xl border border-border/60 bg-background/70 shadow-[0_8px_24px_hsl(var(--foreground)/0.06)] transition-[border-color,background-color,box-shadow]',
+            'focus-within:border-ring/45 focus-within:bg-background focus-within:shadow-[0_10px_28px_hsl(var(--foreground)/0.09)]',
           )}
         >
           {pastedImages.length > 0 ? (
@@ -751,9 +763,10 @@ export function Composer({
             ) : null}
           </div>
           <div
-            className="flex min-w-0 flex-row flex-wrap items-center gap-1.5 border-t border-border/50 px-2 py-2 sm:gap-2"
+            className="flex min-w-0 flex-row flex-wrap items-center gap-x-1 gap-y-1 border-t border-border/40 px-2 py-1.5 sm:gap-x-0.5 sm:py-1"
             data-testid="composer-footer"
           >
+            <ComposerModeToggle mode={mode} onToggle={toggleMode} />
             <ComposerConfigButton
               model={model}
               models={models}
@@ -772,7 +785,7 @@ export function Composer({
               disabled={models.length === 0}
             >
               <SelectTrigger
-                className="h-9 w-11 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent md:h-7 md:w-24 xl:w-40"
+                className="h-7 w-10 flex-none gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent md:w-24 xl:w-36"
                 data-testid="model-picker"
                 aria-label={t('common.model')}
               >
@@ -799,7 +812,7 @@ export function Composer({
             >
               <SelectTrigger
                 className={cn(
-                  'h-9 w-11 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent md:h-7 md:w-16 xl:w-32',
+                  'h-7 w-10 flex-none rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent md:w-16 xl:w-28',
                   approvalMode === 'allow_all'
                     ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
                     : approvalMode === 'ask'
@@ -834,7 +847,7 @@ export function Composer({
             </Select>
             </div>
             {footerExtras}
-            <div className="ml-auto flex min-w-0 max-w-full items-center gap-1.5 max-sm:w-full max-sm:justify-end" data-testid="composer-footer-actions">
+            <div className="ml-auto flex min-w-0 max-w-full items-center gap-0.5 max-sm:justify-end" data-testid="composer-footer-actions">
               <RuntimeMetrics
                 state={state}
                 config={config}
@@ -883,8 +896,8 @@ function ComposerModeToggle({ mode, onToggle }: { mode: 'simple' | 'full'; onTog
       data-testid="composer-mode-toggle"
       data-composer-mode={mode}
       className={cn(
-        'relative z-[1] flex h-10 w-10 flex-none self-start items-center justify-center rounded-l-2xl border border-r-0 border-border/60 bg-background/60 text-muted-foreground transition-colors',
-        'hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50',
+        'relative z-[1] flex h-9 w-9 flex-none items-center justify-center rounded-lg border-0 bg-transparent text-muted-foreground transition-colors sm:h-7 sm:w-7',
+        'hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
       )}
     >
       {mode === 'simple'
@@ -948,7 +961,7 @@ function SendButton({
         data-testid="composer-stop"
         className={cn(
           'flex-none rounded-full bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
-          isSimple ? 'h-9 text-xs font-medium max-sm:px-3 sm:px-3.5' : 'h-8 text-xs font-medium max-sm:px-3 sm:px-3',
+          isSimple ? 'h-9 text-xs font-medium max-sm:px-3 sm:h-8 sm:px-3' : 'h-9 text-xs font-medium max-sm:px-3 sm:h-8 sm:px-3',
         )}
         aria-label={t('chatStatus.stopTitle')}
         title={t('chatStatus.stopTitle')}
@@ -971,8 +984,8 @@ function SendButton({
         data-testid="composer-send"
         className={cn(
           isSimple
-            ? 'h-9 rounded-r-none rounded-l-full text-xs font-medium shadow-sm max-sm:pl-3 max-sm:pr-2.5 sm:pl-3.5 sm:pr-3'
-            : 'h-8 rounded-r-none rounded-l-full text-xs font-medium max-sm:pl-3 max-sm:pr-2.5 sm:pl-4 sm:pr-3',
+            ? 'h-9 rounded-r-none rounded-l-xl text-xs font-medium shadow-sm max-sm:pl-3 max-sm:pr-2.5 sm:h-8 sm:pl-3 sm:pr-2.5'
+            : 'h-9 rounded-r-none rounded-l-xl text-xs font-medium max-sm:pl-3 max-sm:pr-2.5 sm:h-8 sm:pl-3 sm:pr-2.5',
           disabled ? 'opacity-50' : '',
         )}
         aria-label={t('composer.sendMessage', { mode: modeLabel })}
@@ -985,8 +998,8 @@ function SendButton({
         type="button"
         onClick={() => setMenuOpen((v) => !v)}
         className={cn(
-          'flex flex-none items-center justify-center rounded-r-full border-l border-primary-foreground/30 bg-primary text-primary-foreground transition-colors hover:bg-primary/90',
-          isSimple ? 'h-9 px-2.5 shadow-sm' : 'h-8 px-2',
+          'flex flex-none items-center justify-center rounded-r-xl border-l border-primary-foreground/30 bg-primary text-primary-foreground transition-colors hover:bg-primary/90',
+          isSimple ? 'h-9 px-2 shadow-sm sm:h-8' : 'h-9 px-2 sm:h-8',
         )}
         data-testid="send-mode-toggle"
         aria-label={t('chat.transcript.sendMode')}
@@ -1111,7 +1124,7 @@ function ComposerConfigButton({
         aria-expanded={open}
         data-testid="composer-config-trigger"
         className={cn(
-          'inline-flex h-9 w-9 flex-none items-center justify-center rounded-full border border-border/50 bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+          'relative inline-flex h-9 w-9 flex-none items-center justify-center rounded-lg border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:h-7 sm:w-7',
           open && 'bg-accent text-foreground',
           approvalTone,
         )}
@@ -1296,7 +1309,7 @@ function QueuedMessagesDock({
   }
   return (
     <div
-      className="mb-2 rounded-2xl border border-border/50 bg-muted/40 px-3 py-2 text-xs"
+      className="mb-2 rounded-xl bg-muted/55 px-3 py-2 text-xs"
       data-testid="queued-messages-dock"
     >
       <div className="mb-1.5 flex items-center justify-between gap-3">
@@ -1318,7 +1331,7 @@ function QueuedMessagesDock({
           {items.map((item, index) => (
             <div
               key={item.id}
-              className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg border border-border/50 bg-background px-2 py-1.5"
+              className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg bg-background/85 px-2 py-1.5 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.35)]"
               data-testid="queued-message-row"
               title={queuedMessageSummary(item, t)}
               draggable={Boolean(onReorder)}

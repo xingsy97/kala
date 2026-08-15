@@ -237,9 +237,9 @@ export function SimpleComposerInput({
       data-placeholder={placeholder ?? ''}
       data-testid="composer-input-simple"
       className={cn(
-        'ak-composer-simple relative w-full whitespace-pre-wrap break-words rounded-2xl border border-border/60 bg-background/60 px-3 py-2 text-base leading-5 outline-none transition-colors sm:text-sm',
-        'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
-        'min-h-10 max-h-[calc(1.25rem*5+1rem)] overflow-y-auto',
+        'ak-composer-simple relative w-full whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-background/60 px-3 py-2 text-base leading-5 outline-none transition-colors sm:px-2.5 sm:py-1.5 sm:text-sm',
+        'focus-within:border-ring/45 focus-within:bg-background focus-within:ring-0',
+        'min-h-10 max-h-[calc(1.25rem*5+1rem)] overflow-y-auto sm:min-h-9',
         disabled ? 'cursor-not-allowed opacity-60' : '',
         className,
       )}
