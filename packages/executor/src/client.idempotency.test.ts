@@ -120,6 +120,48 @@ describe('executor idempotency', () => {
     expect(second).toHaveBeenCalledWith(expect.objectContaining({ callId: 'same-call', ok: true, content: 'ran-session-b', durationMs: expect.any(Number) }))
   })
 
+  it('acks internal directory RPCs even when the workspace receipt path is unwritable', async () => {
+    const socket = makeMockSocket()
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() }
+    startExecutor({
+      host: 'http://x', workspaceId: 'ws-internal', workspaceName: 'ws-internal', executorId: 'ex-internal',
+      tools: [{ name: '__fs_list_dirs', run: vi.fn(async () => JSON.stringify({ requestId: 'r1', workspaceId: 'ws-internal', path: '/workspace', roots: ['/workspace'], entries: [] })) }],
+      ioFactory: (() => socket) as never,
+      receiptStorePath: '/dev/null/execution-receipts.json',
+      logger,
+    })
+    socket.__trigger('connect')
+
+    const ack = vi.fn()
+    socket.__trigger('tool:call', { sessionId: '__internal:ws-internal', callId: 'direct-1', name: '__fs_list_dirs', input: { requestId: 'r1', workspaceId: 'ws-internal', path: '/workspace' } }, ack)
+    await vi.waitFor(() => expect(ack).toHaveBeenCalled())
+
+    expect(ack).toHaveBeenCalledWith(expect.objectContaining({ ok: true }))
+    expect(logger.info).toHaveBeenCalledWith(expect.objectContaining({ tool: '__fs_list_dirs', internal: true, input: expect.objectContaining({ path: '/workspace' }) }), 'tool execution started')
+    expect(logger.warn).not.toHaveBeenCalled()
+  })
+
+  it('returns an explicit failure instead of timing out when an agent tool receipt cannot persist', async () => {
+    const socket = makeMockSocket()
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() }
+    startExecutor({
+      host: 'http://x', workspaceId: 'ws-durability', workspaceName: 'ws-durability', executorId: 'ex-durability',
+      tools: [{ name: 'shell', run: vi.fn(async () => 'SIDE_EFFECT_COMPLETED') }],
+      ioFactory: (() => socket) as never,
+      receiptStorePath: '/dev/null/execution-receipts.json',
+      logger,
+    })
+    socket.__trigger('connect')
+
+    const ack = vi.fn()
+    socket.__trigger('tool:call', { sessionId: 'session-1', callId: 'call-durability', name: 'shell', input: { command: 'printf ok', env: { API_TOKEN: 'secret-token', NODE_ENV: 'test' } } }, ack)
+    await vi.waitFor(() => expect(ack).toHaveBeenCalled())
+
+    expect(ack).toHaveBeenCalledWith(expect.objectContaining({ ok: false, content: expect.stringContaining('EDURABILITY') }))
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ tool: 'shell' }), expect.stringContaining('durability failed'))
+    expect(logger.info).toHaveBeenCalledWith(expect.objectContaining({ input: { command: 'printf ok', env: { API_TOKEN: '[REDACTED]', NODE_ENV: 'test' } } }), 'tool execution started')
+  })
+
   it('fans out completion to duplicate in-flight ACK callbacks without double-spawn', async () => {
     let resolveRun: ((v: string) => void) | null = null
     const runs = vi.fn(

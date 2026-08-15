@@ -79,8 +79,25 @@ try {
     if (service.code === 0) throw new Error('temporary mode unexpectedly installed a service')
     const snapshot = await fetch(`${localProbe}/api/executor-installs/${encodeURIComponent(installationId)}`).then((response) => response.json())
     if (snapshot.status !== 'completed' || snapshot.mode !== 'temporary') throw new Error(`unexpected installation snapshot: ${JSON.stringify(snapshot)}`)
+    await waitFor(() => temporaryLogs.some((line) => line.includes('Stop: press Ctrl+C')) && temporaryLogs.some((line) => line.includes('Logs: this terminal is the log stream')), { timeoutMs: 30_000, name: 'temporary lifecycle instructions' })
     await harness.screenshot(actor, 'temporary-workspace-online')
     return { status: snapshot.status, mode: snapshot.mode, serviceInstalled: false }
+  })
+
+  await harness.step('browse temporary Workspace directory and create a Session', async () => {
+    const previous = new URL(actor.page.url()).searchParams.get('sessionId')
+    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].find((item) => !item.hasAttribute('disabled'))?.click())
+    await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
+    await actor.page.waitForSelector('[data-testid="finder-column"]', { timeout: 15_000 })
+    const dialogText = await actor.page.$eval('[data-testid="new-session-dialog"]', (element) => element.textContent ?? '')
+    if (dialogText.includes('Directory request timed out')) throw new Error(dialogText)
+    await actor.page.waitForFunction(() => !document.querySelector('[data-testid="new-session-create"]')?.hasAttribute('disabled'))
+    await clickByTestId(actor.page, 'new-session-create')
+    await actor.page.waitForFunction((oldId) => {
+      const next = new URL(location.href).searchParams.get('sessionId')
+      return Boolean(next && next !== oldId)
+    }, {}, previous)
+    return { sessionId: new URL(actor.page.url()).searchParams.get('sessionId'), directoryListed: true }
   })
 
   await harness.step('terminate foreground command and observe Workspace offline', async () => {

@@ -153,8 +153,10 @@ export function createLinuxServicePlan(
   session?: InstallerSession,
 ): LinuxServicePlan {
   const paths = linuxServicePaths(mode, home)
-  if (action === 'status') return { action, mode, paths, commands: [systemctl(mode, 'status', SERVICE_NAME)], rollback: [] }
+  if (action === 'status') return { action, mode, paths, commands: [{ ...systemctl(mode, 'status', SERVICE_NAME), allowFailure: true }], rollback: [] }
   if (action === 'logs') return { action, mode, paths, commands: [journalctl(mode)], rollback: [] }
+  if (action === 'start') return { action, mode, paths, commands: [systemctl(mode, 'start', SERVICE_NAME)], rollback: [] }
+  if (action === 'stop') return { action, mode, paths, commands: [systemctl(mode, 'stop', SERVICE_NAME)], rollback: [] }
   if (action === 'restart') return { action, mode, paths, commands: [systemctl(mode, 'restart', SERVICE_NAME)], rollback: [] }
   if (action === 'uninstall') {
     return {

@@ -66,6 +66,15 @@ describe('Linux service adapter', () => {
     expect(seen.some((value) => value.includes('disable --now'))).toBe(true)
   })
 
+  it('exposes status, logs, start, stop, restart, and uninstall service controls', () => {
+    expect(createLinuxServicePlan('status', 'user', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['--user', 'status', 'runlab-executor.service'] })
+    expect(createLinuxServicePlan('logs', 'user', '/home/example').commands[0]).toMatchObject({ file: 'journalctl', args: ['--user', '--unit', 'runlab-executor.service', '--follow'] })
+    expect(createLinuxServicePlan('start', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['start', 'runlab-executor.service'] })
+    expect(createLinuxServicePlan('stop', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['stop', 'runlab-executor.service'] })
+    expect(createLinuxServicePlan('restart', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['restart', 'runlab-executor.service'] })
+    expect(createLinuxServicePlan('uninstall', 'system', '/home/example').commands.some((command) => command.args.includes('disable'))).toBe(true)
+  })
+
   it('installs a separate persistent updater timer for managed generations', () => {
     const managed: InstallerSession = {
       ...session,

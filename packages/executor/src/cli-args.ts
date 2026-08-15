@@ -1,4 +1,4 @@
-export type ServiceAction = 'install' | 'status' | 'logs' | 'restart' | 'uninstall'
+export type ServiceAction = 'install' | 'status' | 'logs' | 'start' | 'stop' | 'restart' | 'uninstall'
 export type ServiceMode = 'system' | 'user'
 
 export type ExecutorCliArgs = {
@@ -20,7 +20,7 @@ export type ExecutorCliArgs = {
   updateRepo?: string
 }
 
-const SERVICE_ACTIONS = new Set<ServiceAction>(['install', 'status', 'logs', 'restart', 'uninstall'])
+const SERVICE_ACTIONS = new Set<ServiceAction>(['install', 'status', 'logs', 'start', 'stop', 'restart', 'uninstall'])
 
 /** Parses both the historical daemon flags and the runlab-executor service surface. */
 export function parseExecutorCliArgs(argv: readonly string[]): ExecutorCliArgs {

@@ -90,10 +90,19 @@ try {
   await harness.step('execute the exact Dashboard command as root in LXD', async () => {
     const command = await actor.page.$eval('[data-testid="executor-terminal-command"] pre', (element) => element.textContent ?? '')
     const execution = await runCommand('lxc', ['exec', container, '--cwd', workspace, '--', 'sh', '-lc', command], { cwd: root, timeoutMs: 180_000 })
-    installationId = await waitFor(async () => {
-      const records = JSON.parse(await (await import('node:fs/promises')).readFile(join(stateRoot, 'executor-installations.json'), 'utf8'))
-      return records.installations.find((item) => item.status === 'completed')?.id
-    }, { timeoutMs: 60_000, name: 'completed installation record' })
+    try {
+      installationId = await waitFor(async () => {
+        const records = JSON.parse(await (await import('node:fs/promises')).readFile(join(stateRoot, 'executor-installations.json'), 'utf8'))
+        return records.installations.find((item) => item.status === 'completed')?.id
+      }, { timeoutMs: 60_000, name: 'completed installation record' })
+    } catch (error) {
+      const serviceDiagnostics = await runCommand('lxc', ['exec', container, '--', 'sh', '-lc', 'systemctl status runlab-executor.service --no-pager || true; journalctl -u runlab-executor.service -n 100 --no-pager || true'], { allowFailure: true })
+      const records = await (await import('node:fs/promises')).readFile(join(stateRoot, 'executor-installations.json'), 'utf8').catch(() => '<missing>')
+      throw new Error(`installation did not complete\nstdout:\n${execution.stdout}\nstderr:\n${execution.stderr}\nrecords:\n${records}\nservice:\n${serviceDiagnostics.stdout}\n${serviceDiagnostics.stderr}`, { cause: error })
+    }
+    for (const expected of ['systemctl status runlab-executor.service', 'journalctl -u runlab-executor.service -f', 'systemctl restart runlab-executor.service', 'systemctl stop runlab-executor.service', 'service uninstall --system']) {
+      if (!execution.stdout.includes(expected)) throw new Error(`installer output omitted lifecycle command: ${expected}\n${execution.stdout}`)
+    }
     return execution
   }, (execution) => ({ exitCode: execution.code, stdout: execution.stdout.slice(-1_000), stderr: execution.stderr.slice(-1_000), installationId }))
 
@@ -115,8 +124,28 @@ try {
     return { service, status: snapshot.status }
   })
 
-  await harness.step('restart installed service and observe reconnect', async () => {
-    await runCommand('lxc', ['exec', container, '--', 'systemctl', 'restart', 'runlab-executor.service'])
+  await harness.step('browse installed Workspace directory and create a Session', async () => {
+    const previous = new URL(actor.page.url()).searchParams.get('sessionId')
+    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].find((item) => !item.hasAttribute('disabled'))?.click())
+    await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
+    await actor.page.waitForSelector('[data-testid="finder-column"]', { timeout: 15_000 })
+    const dialogText = await actor.page.$eval('[data-testid="new-session-dialog"]', (element) => element.textContent ?? '')
+    if (dialogText.includes('Directory request timed out')) throw new Error(dialogText)
+    await actor.page.waitForFunction(() => !document.querySelector('[data-testid="new-session-create"]')?.hasAttribute('disabled'))
+    await clickByTestId(actor.page, 'new-session-create')
+    await actor.page.waitForFunction((oldId) => {
+      const next = new URL(location.href).searchParams.get('sessionId')
+      return Boolean(next && next !== oldId)
+    }, {}, previous)
+    return { sessionId: new URL(actor.page.url()).searchParams.get('sessionId'), directoryListed: true }
+  })
+
+  await harness.step('use installed CLI service status/restart and observe reconnect', async () => {
+    const cli = '/var/lib/runlab-executor/current/runlab-executor'
+    const status = await runCommand('lxc', ['exec', container, '--', cli, 'service', 'status', '--system'])
+    if (!status.stdout.includes('Active: active')) throw new Error(`CLI status omitted active service: ${status.stdout}`)
+    const restart = await runCommand('lxc', ['exec', container, '--', cli, 'service', 'restart', '--system'])
+    if (!restart.stdout.includes('Agent RunLab Executor service controls')) throw new Error(`CLI restart omitted lifecycle controls: ${restart.stdout}`)
     await waitFor(async () => {
       const value = await runCommand('lxc', ['exec', container, '--', 'systemctl', 'is-active', 'runlab-executor.service'], { allowFailure: true })
       return value.stdout.trim() === 'active'

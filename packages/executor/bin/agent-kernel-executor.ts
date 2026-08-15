@@ -47,7 +47,8 @@ import { readExecutorCredential, readExecutorRuntimeConfig } from '../src/execut
 import { parseSandboxRootsEnv } from '../src/sandbox-roots-env.js'
 import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile } from '../src/workspace-id.js'
 import { bootstrapEnvironment, defaultManagedRoot, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
-import { createLinuxServicePlan, executeLinuxServicePlan, type Command } from '../src/linux-service.js'
+import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
+import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
@@ -68,16 +69,23 @@ type Args = {
   noUpdateCheck?: boolean
   updateRepo?: string
   config?: string
-  command?: 'run' | 'update'
+  command?: 'run' | 'update' | 'service'
   updateAction?: 'apply' | 'rollback'
+  serviceAction?: Exclude<ServiceAction, 'install'>
+  serviceMode?: ServiceMode
 }
 
 function parseArgs(argv: readonly string[]): Args {
-  const out: Args = { sandboxRoots: [], command: argv[0] === 'update' ? 'update' : 'run' }
+  const out: Args = { sandboxRoots: [], command: argv[0] === 'update' ? 'update' : argv[0] === 'service' ? 'service' : 'run' }
   let start = 0
   if (out.command === 'update') {
     if (argv[1] !== 'apply' && argv[1] !== 'rollback') throw new Error('Usage: runlab-executor update apply|rollback --config <path>')
     out.updateAction = argv[1]
+    start = 2
+  } else if (out.command === 'service') {
+    const action = argv[1]
+    if (!['status', 'logs', 'start', 'stop', 'restart', 'uninstall'].includes(action ?? '')) throw new Error('Usage: runlab-executor service status|logs|start|stop|restart|uninstall [--system|--user]')
+    out.serviceAction = action as Args['serviceAction']
     start = 2
   }
   for (let i = start; i < argv.length; i++) {
@@ -89,6 +97,12 @@ function parseArgs(argv: readonly string[]): Args {
     switch (key) {
       case '--auto-update':
         out.autoUpdate = true
+        break
+      case '--system':
+        out.serviceMode = 'system'
+        break
+      case '--user':
+        out.serviceMode = 'user'
         break
       case '-h':
       case '--help':
@@ -134,7 +148,9 @@ function printHelp(): void {
   process.stdout.write(`Agent RunLab Executor
 
 Usage:
-  agent-kernel-executor.cjs --host <url> [options]
+  runlab-executor --host <url> [options]
+  runlab-executor service status|logs|start|stop|restart|uninstall [--system|--user]
+  runlab-executor update apply|rollback --config <path>
 
 Options:
   -h, --help                 Show this help and exit.
@@ -150,6 +166,8 @@ Options:
   --no-update-check          Disable release update check.
   --update-repo <owner/repo> GitHub release repo. Defaults to AGENT_KERNEL_UPDATE_REPO.
   --config <path>             Managed service JSON config; credentials are loaded from its protected file.
+  --system                    Manage the system service.
+  --user                      Manage the current user's service.
 
 Common environment:
   HOST_URL                   Host URL used when --host is omitted.
@@ -163,15 +181,37 @@ Common environment:
   LOG_FORMAT                 pretty/human or json. Default: pretty.
 
 Examples:
-  node agent-kernel-executor.cjs --host http://localhost:3000
-  node agent-kernel-executor.cjs --host http://localhost:3000 --profile dev
-  HOST_URL=http://localhost:3000 node agent-kernel-executor.cjs --sandbox-root /workspace
-  EXECUTOR_INVITE=ak_invite_... node agent-kernel-executor.cjs --host http://host:3000
+  runlab-executor --host http://localhost:3000 --sandbox-root /workspace
+  runlab-executor --host http://localhost:3000 --profile dev
+  runlab-executor service status
+  runlab-executor service logs
+  runlab-executor service restart
+  runlab-executor service stop
+  runlab-executor service uninstall
 `)
 }
 
 function printVersion(): void {
   process.stdout.write(`Agent RunLab Executor ${executorReleaseVersion()}\n`)
+}
+
+function printServiceCommands(mode: ServiceMode, executable = process.execPath): void {
+  const user = mode === 'user' ? ' --user' : ''
+  const modeFlag = mode === 'user' ? '--user' : '--system'
+  process.stdout.write(`\nAgent RunLab Executor service controls:\n`)
+  process.stdout.write(`  Status:  systemctl${user} status runlab-executor.service\n`)
+  process.stdout.write(`  Logs:    journalctl${user} -u runlab-executor.service -f\n`)
+  process.stdout.write(`  Restart: systemctl${user} restart runlab-executor.service\n`)
+  process.stdout.write(`  Stop:    systemctl${user} stop runlab-executor.service\n`)
+  process.stdout.write(`  Start:   systemctl${user} start runlab-executor.service\n`)
+  process.stdout.write(`  Remove:  ${JSON.stringify(executable)} service uninstall ${modeFlag}\n`)
+}
+
+function printForegroundCommands(): void {
+  process.stdout.write(`\nExecutor is running in this terminal.\n`)
+  process.stdout.write(`  Stop: press Ctrl+C\n`)
+  process.stdout.write(`  Status: keep this terminal open and look for \"welcome from host\" and \"awaiting tool calls\" above.\n`)
+  process.stdout.write(`  Logs: this terminal is the log stream; set LOG_LEVEL=debug for connection details.\n`)
 }
 
 /**
@@ -273,9 +313,13 @@ async function runInternalInstaller(): Promise<void> {
   writeInstallerSession(sessionFile, installerSession)
   const plan = createLinuxServicePlan('install', installerSession.mode, homedir(), installerSession)
   await reportInstallation(env, 'service_installing')
+  // Enter `starting` before `systemctl enable --now`: a fast service can announce
+  // during that command, and Host only accepts online completion from starting.
+  await reportInstallation(env, 'starting')
   await executeLinuxServicePlan(plan, { run: runServiceCommand })
   rmSync(sessionFile, { force: true })
-  await reportInstallation(env, 'starting')
+  process.stdout.write(`\nAgent RunLab Executor was installed and started as a ${installerSession.mode} service.\n`)
+  printServiceCommands(installerSession.mode, executable)
 }
 
 function writeTemporaryConfig(session: InstallerSession): string {
@@ -311,6 +355,23 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (args.version) {
     printVersion()
+    return
+  }
+
+  if (args.command === 'service') {
+    if (process.platform !== 'linux') throw new Error('Executor service management is currently available on Linux only')
+    const systemPaths = linuxServicePaths('system', homedir())
+    const userPaths = linuxServicePaths('user', homedir())
+    const mode = args.serviceMode ?? (existsSync(systemPaths.config) ? 'system' : existsSync(userPaths.config) ? 'user' : undefined)
+    if (!mode) throw new Error('No managed Executor service was found. Install service mode from Add Workspace, or pass --system/--user explicitly.')
+    const plan = createLinuxServicePlan(args.serviceAction!, mode, homedir())
+    const results = await executeLinuxServicePlan(plan, { run: runServiceCommand })
+    for (const result of results) {
+      if (result.stdout) process.stdout.write(result.stdout)
+      if (result.stderr) process.stderr.write(result.stderr)
+    }
+    if (args.serviceAction === 'uninstall') process.stdout.write('\nAgent RunLab Executor service was removed.\n')
+    else if (args.serviceAction !== 'logs' && args.serviceAction !== 'status') printServiceCommands(mode)
     return
   }
 
@@ -430,7 +491,8 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   })
 
   await handle.ready
-  logger.info('executor announced; awaiting tool calls')
+  logger.info({ workspaceId: handle.workspaceId, workspaceName: handle.workspaceName, host, sandboxRoots }, 'executor announced; awaiting tool calls')
+  if (!managed?.serviceMode) printForegroundCommands()
   const updateControl = managed?.managedRoot && process.platform !== 'win32'
     ? await startUpdateControlServer({
         socketPath: join(managed.managedRoot, 'update-control.sock'),

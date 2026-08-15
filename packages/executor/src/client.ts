@@ -54,6 +54,30 @@ const noopLogger: Pick<RuntimeLogger, 'debug' | 'info' | 'warn'> = {
   warn() {},
 }
 
+const SENSITIVE_KEY = /(?:password|passwd|token|api[_-]?key|secret|authorization|cookie|credential|private[_-]?key|setup[_-]?code)/iu
+const LARGE_VALUE_KEY = /^(?:content|patch|stdin|oldText|newText)$/u
+const LOG_STRING_LIMIT = 500
+
+function safeToolInput(value: unknown, key = '', depth = 0): unknown {
+  if (SENSITIVE_KEY.test(key)) return '[REDACTED]'
+  if (depth > 4) return '[TRUNCATED depth]'
+  if (typeof value === 'string') {
+    const scrubbed = value
+      .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/giu, '$1[REDACTED]')
+      .replace(/(https?:\/\/[^\s/:]+:)[^@\s]+@/giu, '$1[REDACTED]@')
+      .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gu, '[REDACTED PRIVATE KEY]')
+    if (LARGE_VALUE_KEY.test(key) || scrubbed.length > LOG_STRING_LIMIT) {
+      return `${scrubbed.slice(0, LOG_STRING_LIMIT)}… [TRUNCATED ${scrubbed.length} chars]`
+    }
+    return scrubbed
+  }
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => safeToolInput(item, key, depth + 1))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 40).map(([childKey, child]) => [childKey, safeToolInput(child, childKey, depth + 1)]))
+  }
+  return value
+}
+
 export type ExecutorOptions = {
   /** Host URL (e.g. `wss://host.example.com` or `http://localhost:3000`). */
   host: string
@@ -197,7 +221,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
 
   const ready = new Promise<void>((resolve) => {
     socket.on('connect', () => {
-      logger.info({ socketId: socket.id, workspaceId, workspaceName }, 'socket connected; announcing workspace')
+      logger.info({ socketId: socket.id, workspaceId, workspaceName, ...(options.installId ? { installId: options.installId } : {}), executorVersion: announcement.executorVersion }, 'socket connected; announcing workspace')
       socket.emit('executor:announce', announcement)
       resolve()
     })
@@ -286,24 +310,22 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   })
 
   socket.on('tool:call', async (payload: ToolCallMessage, ack) => {
-    // Idempotency: two paths can send us the same callId — the normal LLM
-    // path via kernel `call_tool`, and `redispatchPending` on the host
-    // side when the socket reconnects. If we already ran this call, don't
-    // run it again; ack with the cached result.
-    await receiptStoreReady
+    const internal = payload.name.startsWith('__')
+    // Internal control-plane reads must never depend on a writable workspace
+    // receipt directory. Agent tools keep the durable exactly-once barrier.
+    if (!internal) await receiptStoreReady
     const key = receiptKey(payload.sessionId, payload.callId)
-    const cached = completedCalls.get(key) ?? receiptStore?.get(key)
+    const cached = completedCalls.get(key) ?? (!internal ? receiptStore?.get(key) : undefined)
     if (cached) {
+      logger.debug({ sessionId: payload.sessionId, callId: payload.callId, tool: payload.name }, 'tool result served from execution cache')
       ack(cached)
       return
     }
     if (drainRequested) {
+      logger.warn({ sessionId: payload.sessionId, callId: payload.callId, tool: payload.name }, 'tool rejected while Executor is draining')
       ack({ callId: payload.callId, ok: false, content: 'ERROR: EBUSY: executor is draining for a managed update; retry after reconnect' })
       return
     }
-    // Already running: attach this fresh socket's ACK callback to the same
-    // invocation. Ignoring it loses the result when the host has moved pending
-    // ownership to a replacement socket during reconnect.
     if (inFlight.has(key)) {
       const waiters = inFlightAcks.get(key) ?? []
       waiters.push(ack)
@@ -315,29 +337,34 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     inFlight.set(key, controller)
     inFlightAcks.set(key, [ack])
     const started = performance.now()
+    logger.info({ sessionId: payload.sessionId, callId: payload.callId, tool: payload.name, internal, input: safeToolInput(payload.input), ...(payload.cwd ? { cwd: payload.cwd } : {}) }, 'tool execution started')
     const rawResult = await runOne(tools, sandbox, controller.signal, payload, overflowConfig)
     const result = { ...rawResult, durationMs: Math.max(0, Math.round(performance.now() - started)) }
+    let replyResult = result
     try {
-      // Keep the call in-flight until its receipt crosses the durability barrier.
-      // Reconnect duplicates join the same ACK fan-out instead of observing an
-      // in-memory completion that could disappear on process restart.
-      await receiptStore?.set(key, result)
+      if (!internal) await receiptStore?.set(key, result)
       rememberCompleted(key, result)
+    } catch (error) {
+      logger.warn({ err: error, sessionId: payload.sessionId, callId: payload.callId, tool: payload.name, durationMs: result.durationMs }, 'tool result durability failed; returning an explicit failure instead of timing out')
+      replyResult = {
+        callId: payload.callId,
+        ok: false,
+        content: `ERROR: EDURABILITY: tool completed but its execution receipt could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+        durationMs: result.durationMs,
+      }
+      rememberCompleted(key, replyResult)
+    } finally {
       inFlight.delete(key)
       const waiters = inFlightAcks.get(key) ?? []
       inFlightAcks.delete(key)
-      for (const reply of waiters) reply(result)
-    } catch {
-      // Never acknowledge an execution result that was not made durable. Keep
-      // duplicate callbacks silent so the Host retains its absolute deadline
-      // and can settle the operation as a timeout rather than a false success.
-      inFlight.delete(key)
-      inFlightAcks.delete(key)
+      logger.info({ sessionId: payload.sessionId, callId: payload.callId, tool: payload.name, internal, ok: replyResult.ok, durationMs: result.durationMs, resultBytes: Buffer.byteLength(replyResult.content, 'utf8') }, 'tool execution completed')
+      for (const reply of waiters) reply(replyResult)
     }
   })
 
   socket.on('tool:cancel', (payload: ToolCancelMessage) => {
     const ctrl = inFlight.get(receiptKey(payload.sessionId, payload.callId))
+    logger.info({ sessionId: payload.sessionId, callId: payload.callId, found: Boolean(ctrl) }, 'tool cancellation requested')
     if (ctrl) ctrl.abort()
   })
 

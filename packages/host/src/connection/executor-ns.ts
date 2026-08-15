@@ -139,11 +139,13 @@ export function configureExecutorNamespace(
       deps.executors.attach(socket, payload, auth.clientVersion)
       const installId = payload.installId ?? auth.installId
       if (installId && identity?.token) {
-        deps.installations?.markOnline(installId, payload.workspaceId, {
+        const completed = deps.installations?.markOnline(installId, payload.workspaceId, {
           executorId: payload.executorId,
           ...(payload.executorVersion ? { executorVersion: payload.executorVersion } : {}),
           workspaceName: payload.workspaceName,
         })
+        deps.audit?.log({ action: 'executor_install.online', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: completed ? 'ok' : 'error', metadata: { installId }, ...(completed ? {} : { error: 'installation record did not accept online transition' }) })
+        if (!completed) deps.broadcastError(payload.workspaceId, 'host', `Executor connected, but installation ${installId} could not be marked complete. Re-open Add Workspace or reinstall this Executor.`)
       }
     })
     socket.on('executor:bg_task_updated', async (rawPayload: ServerBgTaskUpdated) => {

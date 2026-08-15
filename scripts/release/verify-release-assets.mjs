@@ -158,8 +158,8 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   })
   if (executorHelp.status !== 0) fail('executor --help smoke test should exit 0')
   const helpOutput = `${executorHelp.stdout}\n${executorHelp.stderr}`
-  if (!helpOutput.includes('Agent RunLab Executor') || !helpOutput.includes('Usage:') || !helpOutput.includes('agent-kernel-executor.cjs --host <url>') || !helpOutput.includes('--sandbox-root <path>')) {
-    fail('executor --help smoke test did not print CLI usage')
+  if (!helpOutput.includes('Agent RunLab Executor') || !helpOutput.includes('Usage:') || !helpOutput.includes('runlab-executor --host <url>') || !helpOutput.includes('--sandbox-root <path>') || !helpOutput.includes('service status|logs|start|stop|restart|uninstall')) {
+    fail('executor --help smoke test did not print daemon and service lifecycle usage')
   }
   if (helpOutput.includes('connecting to')) {
     fail('executor --help must not connect to a host')
