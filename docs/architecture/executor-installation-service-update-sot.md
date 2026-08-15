@@ -288,7 +288,7 @@ flowchart TD
   J -->|no| L[Switch previous and restart]
 ```
 
-The updater never overwrites the running executable. It keeps current and previous generations. Update/restart ownership belongs to the service manager/updater, not the Executor process. This avoids single-instance lock conflicts.
+The updater never overwrites the running executable. It keeps current and previous generations. Update/restart ownership belongs to a separate OS-managed updater job, not the main Executor process. On Linux, `runlab-executor-update.timer` activates a oneshot updater which coordinates with the main service through a local mode-`0600` control socket, waits for Tool and PTY quiescence, switches `current`, restarts `runlab-executor.service`, and verifies that the expected release and Workspace identity reconnect. A missed drain deadline resumes admission and postpones the update. Failed post-activation health switches `current` back to `previous`, restarts again, and verifies recovery. This avoids single-instance lock conflicts and prevents the update coordinator from disappearing with the process it restarts.
 
 ## 10. Reliability and security invariants
 

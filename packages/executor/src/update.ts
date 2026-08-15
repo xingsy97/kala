@@ -31,6 +31,7 @@ export interface UpdateLifecycle {
   restart(plan: RestartPlan): Promise<void>
   health(manifest: SignedUpdateManifest): Promise<void>
   reconnect(manifest: SignedUpdateManifest): Promise<void>
+  rollbackHealth?(previousGeneration: string): Promise<void>
 }
 export type RestartPlan = {
   reason: 'activate' | 'rollback'
@@ -99,8 +100,9 @@ export class GenerationUpdater {
       return { status: 'current', release: manifest.release }
     }
 
+    const artifactUrl = new URL(manifest.artifact.url, opts.manifestUrl).toString()
     const artifact = await downloadBytes(
-      manifest.artifact.url,
+      artifactUrl,
       Math.min(manifest.artifact.size, opts.maxArtifactBytes ?? DEFAULT_ARTIFACT_BYTES),
       opts,
     )
@@ -140,7 +142,8 @@ export class GenerationUpdater {
         await atomicSymlink(plan.current, oldCurrent)
         try {
           await opts.lifecycle.restart({ reason: 'rollback', current: oldCurrent, previous: plan.generation })
-          await opts.lifecycle.reconnect(manifest)
+          if (opts.lifecycle.rollbackHealth) await opts.lifecycle.rollbackHealth(oldCurrent)
+          else await opts.lifecycle.reconnect(manifest)
         } catch (rollbackError) {
           throw new AggregateError([error, rollbackError], 'update failed and rollback recovery failed')
         }
@@ -185,7 +188,7 @@ export function parseManifest(signed: string): SignedUpdateManifest {
   if (!isRecord(value) || value.version !== 1 || typeof value.release !== 'string' ||
       !isChannel(value.channel) || !isRecord(value.protocol) || !isRecord(value.artifact) ||
       !Number.isSafeInteger(value.protocol.min) || !Number.isSafeInteger(value.protocol.max) ||
-      typeof value.artifact.url !== 'string' || !/^https:\/\//u.test(value.artifact.url) ||
+      typeof value.artifact.url !== 'string' || (!/^https:\/\//u.test(value.artifact.url) && !/^\.\/[A-Za-z0-9_.-]+$/u.test(value.artifact.url)) ||
       !Number.isSafeInteger(value.artifact.size) || (value.artifact.size as number) <= 0 ||
       typeof value.artifact.sha256 !== 'string' || !SHA256.test(value.artifact.sha256) ||
       (value.artifact.file !== undefined && typeof value.artifact.file !== 'string')) {

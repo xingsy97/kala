@@ -116,6 +116,7 @@ async function spawnTerminal(input: {
 }
 
 export type TerminalManager = {
+  activeCount(): number
   create(payload: ClientTerminalCreate): Promise<TerminalCreateResult>
   input(payload: ClientTerminalInput): void
   resize(payload: ClientTerminalResize): void
@@ -163,6 +164,9 @@ export function createTerminalManager(input: {
   }
 
   return {
+    activeCount() {
+      return terminals.size + pendingCreates.size
+    },
     async create(payload) {
       const sessionKey = sessionKeyOf(payload.workspaceId, payload.sessionId)
       const existing = sessionTerminals.get(sessionKey)

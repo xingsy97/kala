@@ -65,6 +65,25 @@ describe('Linux service adapter', () => {
     await expect(executeLinuxServicePlan(plan, runner)).rejects.toThrow('boom')
     expect(seen.some((value) => value.includes('disable --now'))).toBe(true)
   })
+
+  it('installs a separate persistent updater timer for managed generations', () => {
+    const managed: InstallerSession = {
+      ...session,
+      managedRoot: '/var/lib/runlab-executor',
+      update: {
+        manifestUrl: 'https://agent.example.test/install/assets/executor-update-manifest.json',
+        publicKeyFile: '/var/lib/runlab-executor/update-public-key.pem',
+        channel: 'stable',
+        intervalMinutes: 60,
+      },
+    }
+    const rendered = renderLinuxServiceFiles(managed, '/home/example')
+    expect(rendered.unit).toContain('/current/runlab-executor')
+    expect(rendered.updateUnit).toContain('update apply --config')
+    expect(rendered.updateTimer).toContain('Persistent=true')
+    const plan = createLinuxServicePlan('install', 'system', '/home/example', managed)
+    expect(plan.commands.some((command) => command.args.includes('runlab-executor-update.timer'))).toBe(true)
+  })
 })
 
 function spawnCommand(command: { file: string; args: readonly string[]; stdin?: string }): Promise<{ code: number; stdout: string; stderr: string }> {

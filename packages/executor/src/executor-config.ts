@@ -9,6 +9,15 @@ export type ExecutorRuntimeConfig = {
   credentialFile: string
   installationId?: string
   installationSource?: 'dashboard-native' | 'package-manager' | 'container' | 'legacy-cjs'
+  managedRoot?: string
+  serviceMode?: 'system' | 'user'
+  update?: {
+    enabled: boolean
+    manifestUrl: string
+    publicKeyFile: string
+    channel: 'stable' | 'beta' | 'nightly'
+    intervalMinutes: number
+  }
 }
 
 export function readExecutorRuntimeConfig(path: string): ExecutorRuntimeConfig {
@@ -25,6 +34,11 @@ export function readExecutorRuntimeConfig(path: string): ExecutorRuntimeConfig {
   if (value.version !== 1 || typeof value.host !== 'string' || !/^https?:\/\//u.test(value.host) ||
       typeof value.credentialFile !== 'string' || !Array.isArray(value.sandboxRoots) ||
       value.sandboxRoots.some((root) => typeof root !== 'string' || !root)) throw new Error('Invalid Executor config')
+  if (value.update && (typeof value.update.enabled !== 'boolean' || typeof value.update.manifestUrl !== 'string' ||
+      !/^https?:\/\//u.test(value.update.manifestUrl) || typeof value.update.publicKeyFile !== 'string' ||
+      !['stable', 'beta', 'nightly'].includes(value.update.channel) || !Number.isSafeInteger(value.update.intervalMinutes) || value.update.intervalMinutes < 5)) {
+    throw new Error('Invalid Executor update config')
+  }
   return value as ExecutorRuntimeConfig
 }
 

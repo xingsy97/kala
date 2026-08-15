@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { copyFileSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
@@ -72,6 +72,8 @@ const expectedAssets = [
   'RELEASE_NOTES.md',
   'manifest.json',
   'SHA256SUMS',
+  'executor-update-manifest.json',
+  'executor-update-public-key.pem',
 ]
 const legacyAssets = [
   'run-host.sh',
@@ -182,6 +184,7 @@ for (const file of [...releaseFiles(), 'SHA256SUMS']) {
 
 function finalizeRelease() {
   const bootstrapAssets = prepareBootstrapAssets()
+  if (entries.some((entry) => entry.name === 'agent-kernel-executor') && currentNativeTarget && exists(executorNativeAssetName(currentNativeTarget))) writeExecutorUpdateManifest()
   if (includeDashboard && existsSync(modelCatalogSeed)) {
     copyFileSync(modelCatalogSeed, join(outDir, 'agent-runlab-model-catalog-seed.json'))
   }
@@ -215,6 +218,7 @@ function finalizeRelease() {
     .concat(includeDashboard && exists('agent-runlab-docs.tar.gz') ? ['agent-runlab-docs.tar.gz'] : [])
     .concat(includeDashboard && exists('agent-runlab-model-catalog-seed.json') ? ['agent-runlab-model-catalog-seed.json'] : [])
     .concat(bootstrapAssets)
+    .concat(entries.some((entry) => entry.name === 'agent-kernel-executor') && exists('executor-update-manifest.json') ? ['executor-update-manifest.json', 'executor-update-public-key.pem'] : [])
   const hasNativeAssets = builtEntries.some((entry) => entry.natives.length > 0)
   const manifest = {
     name: packageJson.name,
@@ -268,6 +272,28 @@ function writeSha256Sums(files) {
     .map((file) => `${sha256(join(outDir, file))}  ${file}`)
     .join('\n')
   writeFileSync(join(outDir, 'SHA256SUMS'), `${sums}\n`)
+}
+
+function writeExecutorUpdateManifest() {
+  const target = detectNativeTarget()
+  const asset = executorNativeAssetName(target)
+  if (!exists(asset)) return
+  const tagged = String(tag).replace(/^v/u, '')
+  const release = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(tagged) ? tagged : packageJson.version
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(release)) return
+  const configured = process.env.RUNLAB_EXECUTOR_UPDATE_PRIVATE_KEY_PEM
+  if (!configured && tag !== 'latest') throw new Error('RUNLAB_EXECUTOR_UPDATE_PRIVATE_KEY_PEM is required for signed Executor releases')
+  const pair = configured
+    ? { privateKey: createPrivateKey(configured), publicKey: createPublicKey(configured) }
+    : generateKeyPairSync('ed25519')
+  const publicPem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+  const signed = JSON.stringify({
+    version: 1, release, channel: 'stable', protocol: { min: 1, max: 1 },
+    artifact: { url: `./${asset}`, size: statSync(join(outDir, asset)).size, sha256: sha256(join(outDir, asset)), file: 'runlab-executor' },
+  })
+  const signature = sign(null, Buffer.from(signed), pair.privateKey).toString('base64')
+  writeFileSync(join(outDir, 'executor-update-manifest.json'), `${JSON.stringify({ signed, signature })}\n`)
+  writeFileSync(join(outDir, 'executor-update-public-key.pem'), publicPem)
 }
 
 function releaseFiles() {
@@ -371,7 +397,8 @@ function prepareEmbeddedReleaseAssetsForHost() {
     chmodSync(path, 0o755)
   }
   const nativeExecutor = currentNativeTarget ? executorNativeAssetName(currentNativeTarget) : undefined
-  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', 'install-executor.ps1']
+  if (nativeExecutor && exists(nativeExecutor)) writeExecutorUpdateManifest()
+  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', 'install-executor.ps1', 'executor-update-manifest.json', 'executor-update-public-key.pem']
     .filter((name) => name && exists(name))
   writeSha256Sums(embeddedNames)
   return embeddedReleaseAssetsBanner(outDir, [...embeddedNames, 'SHA256SUMS'])

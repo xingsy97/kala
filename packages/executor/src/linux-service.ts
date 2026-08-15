@@ -18,6 +18,8 @@ export type LinuxServicePaths = {
   config: string
   credential: string
   serviceName: string
+  updateUnit: string
+  updateTimer: string
 }
 
 export type LinuxServicePlan = {
@@ -45,12 +47,16 @@ export function linuxServicePaths(mode: ServiceMode, home: string): LinuxService
         unit: `/etc/systemd/system/${SERVICE_NAME}`,
         config: '/etc/runlab-executor/executor.json',
         credential: '/etc/runlab-executor/credential',
+        updateUnit: '/etc/systemd/system/runlab-executor-update.service',
+        updateTimer: '/etc/systemd/system/runlab-executor-update.timer',
       }
     : {
         serviceName: SERVICE_NAME,
         unit: join(home, '.config', 'systemd', 'user', SERVICE_NAME),
         config: join(home, '.config', 'runlab-executor', 'executor.json'),
         credential: join(home, '.config', 'runlab-executor', 'credential'),
+        updateUnit: join(home, '.config', 'systemd', 'user', 'runlab-executor-update.service'),
+        updateTimer: join(home, '.config', 'systemd', 'user', 'runlab-executor-update.timer'),
       }
 }
 
@@ -59,6 +65,8 @@ export function renderLinuxServiceFiles(session: InstallerSession, home: string)
   unit: string
   config: string
   credential: string
+  updateUnit?: string
+  updateTimer?: string
 } {
   const paths = linuxServicePaths(session.mode, home)
   const config = `${JSON.stringify({
@@ -70,6 +78,8 @@ export function renderLinuxServiceFiles(session: InstallerSession, home: string)
     credentialFile: paths.credential,
     ...(session.installationId ? { installationId: session.installationId } : {}),
     installationSource: 'dashboard-native',
+    ...(session.managedRoot ? { managedRoot: session.managedRoot, serviceMode: session.mode } : {}),
+    ...(session.update ? { update: { enabled: true, ...session.update } } : {}),
   }, null, 2)}\n`
   const credential = session.credential.token
     ? `${session.credential.token}\n`
@@ -91,7 +101,27 @@ UMask=0077
 [Install]
 WantedBy=${session.mode === 'system' ? 'multi-user.target' : 'default.target'}
 `
-  return { paths, unit, config, credential }
+  const updateUnit = session.update ? `[Unit]
+Description=Agent RunLab Executor managed update
+After=network-online.target runlab-executor.service
+
+[Service]
+Type=oneshot
+ExecStart=${systemdQuote(session.executable)} update apply --config ${systemdQuote(paths.config)}
+` : undefined
+  const updateTimer = session.update ? `[Unit]
+Description=Check for Agent RunLab Executor updates
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=${session.update.intervalMinutes}min
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+` : undefined
+  return { paths, unit, config, credential, ...(updateUnit ? { updateUnit } : {}), ...(updateTimer ? { updateTimer } : {}) }
 }
 
 function systemdQuote(value: string): string {
@@ -131,7 +161,8 @@ export function createLinuxServicePlan(
       action, mode, paths,
       commands: [
         { ...systemctl(mode, 'disable', '--now', SERVICE_NAME), allowFailure: true },
-        { file: 'rm', args: ['-f', paths.unit, paths.config, paths.credential] },
+        { ...systemctl(mode, 'disable', '--now', 'runlab-executor-update.timer'), allowFailure: true },
+        { file: 'rm', args: ['-f', paths.unit, paths.config, paths.credential, paths.updateUnit, paths.updateTimer] },
         systemctl(mode, 'daemon-reload'),
       ],
       rollback: [],
@@ -147,12 +178,15 @@ export function createLinuxServicePlan(
       privateWrite(paths.config, rendered.config),
       privateWrite(paths.credential, rendered.credential),
       privateWrite(paths.unit, rendered.unit),
+      ...(rendered.updateUnit && rendered.updateTimer ? [privateWrite(paths.updateUnit, rendered.updateUnit), privateWrite(paths.updateTimer, rendered.updateTimer)] : []),
       systemctl(mode, 'daemon-reload'),
       systemctl(mode, 'enable', '--now', SERVICE_NAME),
+      ...(rendered.updateTimer ? [systemctl(mode, 'enable', '--now', 'runlab-executor-update.timer')] : []),
     ],
     rollback: [
       { ...systemctl(mode, 'disable', '--now', SERVICE_NAME), allowFailure: true },
-      { file: 'rm', args: ['-f', paths.unit, paths.config, paths.credential] },
+      { ...systemctl(mode, 'disable', '--now', 'runlab-executor-update.timer'), allowFailure: true },
+      { file: 'rm', args: ['-f', paths.unit, paths.config, paths.credential, paths.updateUnit, paths.updateTimer] },
       systemctl(mode, 'daemon-reload'),
     ],
   }

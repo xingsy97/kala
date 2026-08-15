@@ -45,10 +45,8 @@ import { subscribeBackgroundTasks } from './tools/background-shell.js'
 import { createTerminalManager } from './terminal-manager.js'
 import { ExecutionReceiptStore } from './execution-receipts.js'
 import type { RuntimeLogger } from './logger.js'
-import packageJson from '../package.json' with { type: 'json' }
+import { executorReleaseVersion } from './build-info.js'
 import { failureForToolError } from './tool-failure.js'
-
-const EXECUTOR_VERSION = packageJson.version
 
 const noopLogger: Pick<RuntimeLogger, 'debug' | 'info' | 'warn'> = {
   debug() {},
@@ -112,6 +110,11 @@ export type ExecutorHandle = {
    * Never resolves during normal operation.
    */
   readonly permanentError: Promise<PermanentError>
+  readonly activeToolCount: () => number
+  readonly activeTerminalCount: () => number
+  readonly draining: () => boolean
+  beginDrain(): void
+  resume(): void
   close(): void
 }
 
@@ -150,6 +153,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   }) as Socket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>
 
   const inFlight = new Map<string, AbortController>()
+  let drainRequested = false
   // A reconnect can redispatch a callId while the original invocation is still
   // running. Keep every socket ACK callback so completion reaches whichever
   // socket the host currently tracks instead of being stranded on the old one.
@@ -173,7 +177,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   const announcement: ExecutorAnnounce = {
     executorId,
     ...(options.installId ? { installId: options.installId } : {}),
-    executorVersion: EXECUTOR_VERSION,
+    executorVersion: executorReleaseVersion(),
     build: executorBuildInfo(),
     capabilities: executorCapabilities(tools, sandboxRoots),
     workspaceId,
@@ -293,6 +297,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
       ack(cached)
       return
     }
+    if (drainRequested) {
+      ack({ callId: payload.callId, ok: false, content: 'ERROR: EBUSY: executor is draining for a managed update; retry after reconnect' })
+      return
+    }
     // Already running: attach this fresh socket's ACK callback to the same
     // invocation. Ignoring it loses the result when the host has moved pending
     // ownership to a replacement socket during reconnect.
@@ -399,6 +407,11 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     socket,
     ready,
     permanentError,
+    activeToolCount: () => inFlight.size,
+    activeTerminalCount: () => terminals.activeCount(),
+    draining: () => drainRequested,
+    beginDrain() { drainRequested = true },
+    resume() { drainRequested = false },
     close() {
       unsubscribeBg()
       terminals.closeAll()

@@ -28,16 +28,19 @@
  * `workspaceId` matches this executor's stored workspace id.
  */
 
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import process from 'node:process'
 
 import lockfile from 'proper-lockfile'
 
-import packageJson from '../package.json' with { type: 'json' }
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
+import { applyManagedUpdate, rollbackManagedUpdate } from '../src/update-runtime.js'
+import { startUpdateControlServer } from '../src/update-control.js'
+import { executorReleaseVersion } from '../src/build-info.js'
 import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
 import { readPairingJson } from '../src/pairing-response.js'
 import { readExecutorCredential, readExecutorRuntimeConfig } from '../src/executor-config.js'
@@ -50,7 +53,6 @@ import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 
 const logger = createRuntimeLogger('agent-kernel-executor')
-const VERSION = packageJson.version
 
 type Args = {
   help?: boolean
@@ -66,11 +68,19 @@ type Args = {
   noUpdateCheck?: boolean
   updateRepo?: string
   config?: string
+  command?: 'run' | 'update'
+  updateAction?: 'apply' | 'rollback'
 }
 
 function parseArgs(argv: readonly string[]): Args {
-  const out: Args = { sandboxRoots: [] }
-  for (let i = 0; i < argv.length; i++) {
+  const out: Args = { sandboxRoots: [], command: argv[0] === 'update' ? 'update' : 'run' }
+  let start = 0
+  if (out.command === 'update') {
+    if (argv[1] !== 'apply' && argv[1] !== 'rollback') throw new Error('Usage: runlab-executor update apply|rollback --config <path>')
+    out.updateAction = argv[1]
+    start = 2
+  }
+  for (let i = start; i < argv.length; i++) {
     const a = argv[i]!
     if (a === '--') continue
     const eq = a.indexOf('=')
@@ -161,7 +171,7 @@ Examples:
 }
 
 function printVersion(): void {
-  process.stdout.write(`Agent RunLab Executor ${VERSION}\n`)
+  process.stdout.write(`Agent RunLab Executor ${executorReleaseVersion()}\n`)
 }
 
 /**
@@ -231,6 +241,15 @@ async function runInternalInstaller(): Promise<void> {
     version: 1, mode: service && process.getuid?.() === 0 ? 'system' : 'user', executable,
     host: env.HOST_URL, ...(env.EXECUTOR_INSTALL_LABEL ? { name: env.EXECUTOR_INSTALL_LABEL } : {}),
     sandboxRoots: [workspaceRoot], credential: { token: redeemed.token }, installationId: env.EXECUTOR_INSTALL_ID,
+    ...(service ? {
+      managedRoot,
+      update: {
+        manifestUrl: `${env.HOST_URL.replace(/\/$/u, '')}/install/assets/executor-update-manifest.json`,
+        publicKeyFile: join(managedRoot, 'update-public-key.pem'),
+        channel: 'stable' as const,
+        intervalMinutes: 60,
+      },
+    } : {}),
   }
   if (!service) {
     await reportInstallation(env, 'starting')
@@ -239,9 +258,17 @@ async function runInternalInstaller(): Promise<void> {
     process.env.SANDBOX_ROOTS = workspaceRoot
     return await main(['--host', env.HOST_URL, '--sandbox-root', workspaceRoot, '--config', writeTemporaryConfig(installerSession)])
   }
-  mkdirSync(join(managedRoot, 'current'), { recursive: true, mode: 0o700 })
-  copyFileSync(process.execPath, executable)
-  chmodSync(executable, 0o755)
+  const release = executorReleaseVersion()
+  const generation = join(managedRoot, 'generations', release)
+  mkdirSync(generation, { recursive: true, mode: 0o700 })
+  const generationExecutable = join(generation, 'runlab-executor')
+  copyFileSync(process.execPath, generationExecutable)
+  chmodSync(generationExecutable, 0o755)
+  rmSync(join(managedRoot, 'current'), { recursive: true, force: true })
+  symlinkSync(generation, join(managedRoot, 'current'), process.platform === 'win32' ? 'junction' : 'dir')
+  const keyResponse = await fetch(`${env.HOST_URL.replace(/\/$/u, '')}/install/assets/executor-update-public-key.pem`)
+  if (!keyResponse.ok) throw new Error(`failed to download Executor update verification key: ${keyResponse.status}`)
+  writeFileSync(join(managedRoot, 'update-public-key.pem'), await keyResponse.text(), { mode: 0o600 })
   const sessionFile = join(managedRoot, 'installer-session.json')
   writeInstallerSession(sessionFile, installerSession)
   const plan = createLinuxServicePlan('install', installerSession.mode, homedir(), installerSession)
@@ -288,6 +315,17 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   const managed = args.config ? readExecutorRuntimeConfig(args.config) : undefined
+  if (args.command === 'update') {
+    if (!managed?.update?.enabled || !managed.managedRoot || !managed.serviceMode) throw new Error('managed updates are not configured for this Executor service')
+    const workspaceId = loadOrCreateWorkspaceId(undefined, normalizeExecutorProfile(managed.profile))
+    const common = { root: managed.managedRoot, serviceMode: managed.serviceMode, workspaceId, socketPath: join(managed.managedRoot, 'update-control.sock'), reconnectTimeoutMs: 60_000, logger }
+    if (args.updateAction === 'rollback') await rollbackManagedUpdate(common)
+    else {
+      const result = await applyManagedUpdate({ ...common, manifestUrl: managed.update.manifestUrl, publicKeyPath: managed.update.publicKeyFile, currentVersion: executorReleaseVersion(), channel: managed.update.channel, protocol: Number(PROTOCOL_VERSION.split('.')[0]) })
+      logger.info({ result }, 'managed Executor update finished')
+    }
+    return
+  }
   const host = args.host ?? managed?.host ?? process.env.HOST_URL
   const name = args.name ?? managed?.name ?? process.env.WORKSPACE_NAME
   const envRoots = parseSandboxRootsEnv(process.env.SANDBOX_ROOTS)
@@ -393,11 +431,24 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
 
   await handle.ready
   logger.info('executor announced; awaiting tool calls')
+  const updateControl = managed?.managedRoot && process.platform !== 'win32'
+    ? await startUpdateControlServer({
+        socketPath: join(managed.managedRoot, 'update-control.sock'),
+        status: () => ({
+          version: executorReleaseVersion(), workspaceId: handle.workspaceId,
+          connected: handle.socket.connected, draining: handle.draining(),
+          activeTools: handle.activeToolCount(), activeTerminals: handle.activeTerminalCount(),
+        }),
+        beginDrain: () => handle.beginDrain(),
+        resume: () => handle.resume(),
+      })
+    : null
 
   const shutdown = (): void => {
     logger.info('shutting down')
     handle.close()
-    process.exit(0)
+    void updateControl?.close().finally(() => process.exit(0))
+    if (!updateControl) process.exit(0)
   }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)

@@ -12,6 +12,8 @@ export type InstallerSession = {
   sandboxRoots: string[]
   credential: { token?: string; invite?: string }
   installationId?: string
+  managedRoot?: string
+  update?: { manifestUrl: string; publicKeyFile: string; channel: 'stable' | 'beta' | 'nightly'; intervalMinutes: number }
 }
 
 function optionalString(value: unknown, name: string): string | undefined {
@@ -72,5 +74,20 @@ export function readInstallerSession(path: string): InstallerSession {
     sandboxRoots: [...input.sandboxRoots] as string[],
     credential: { ...(token ? { token } : {}), ...(invite ? { invite } : {}) },
     ...(optionalString(input.installationId, 'installationId') ? { installationId: input.installationId as string } : {}),
+    ...(optionalString(input.managedRoot, 'managedRoot') ? { managedRoot: input.managedRoot as string } : {}),
+    ...(parseUpdate(input.update) ? { update: parseUpdate(input.update)! } : {}),
   }
+}
+
+function parseUpdate(value: unknown): InstallerSession['update'] | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid installer session update')
+  const input = value as Record<string, unknown>
+  const manifestUrl = optionalString(input.manifestUrl, 'update.manifestUrl')
+  const publicKeyFile = optionalString(input.publicKeyFile, 'update.publicKeyFile')
+  if (!manifestUrl || !publicKeyFile || !/^https?:\/\//u.test(manifestUrl) ||
+      !['stable', 'beta', 'nightly'].includes(String(input.channel)) || !Number.isSafeInteger(input.intervalMinutes) || Number(input.intervalMinutes) < 5) {
+    throw new Error('Invalid installer session update')
+  }
+  return { manifestUrl, publicKeyFile, channel: input.channel as 'stable' | 'beta' | 'nightly', intervalMinutes: Number(input.intervalMinutes) }
 }
