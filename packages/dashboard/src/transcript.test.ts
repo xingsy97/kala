@@ -10,6 +10,19 @@ const system: Message = {
   content: [{ type: 'text', text: 'sys' }],
 }
 
+describe('Turn timing transcript projection', () => {
+  it('attaches a durable Turn summary only to its terminal assistant message', () => {
+    const summary = { turnId: 'turn-1', status: 'completed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z', wallDurationMs: 1000, estimated: false, queueDurationMs: 0, activeDurationMs: 1000, approvalWaitMs: 0, llm: { wallDurationMs: 1000, requestCount: 1 }, tools: { wallDurationMs: 0, aggregateDurationMs: 0, callCount: 0, peakConcurrency: 0, partial: false }, compactionDurationMs: 0, retryDurationMs: 0, recoveryDurationMs: 0 }
+    const timeline: TimelineEntry[] = [
+      { seq: 1, ts: '2026-01-01T00:00:00Z', event: { kind: 'user_message', text: 'go' }, effects: [] },
+      { seq: 2, ts: '2026-01-01T00:00:01Z', event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }, effects: [], timing: { turnId: 'turn-1', summary } },
+    ]
+    const items = visibleTranscript([], timeline, '')
+    expect(items[0]).not.toHaveProperty('turnTiming')
+    expect(items[1]).toMatchObject({ kind: 'message', turnTiming: summary })
+  })
+})
+
 describe('appendTranscriptBaseItems', () => {
   it('preserves historical item identity when timeline only appends', () => {
     const first: TimelineEntry = { seq: 1, ts: '2026-01-01T00:00:00Z', event: { kind: 'user_message', text: 'one' }, effects: [] }

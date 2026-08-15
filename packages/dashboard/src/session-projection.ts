@@ -17,6 +17,7 @@ export type TimelineEntry = {
   hasLlmTraceArtifact?: boolean
   llmTrace?: LLMTrace
   model?: string
+  timing?: import('@agent-kernel/shared').EventTimingMetadata
   compactionMetadata?: CompactionMetadata
 }
 
@@ -146,6 +147,7 @@ export function timelineEntry(p: EventAppendedEvent): TimelineEntry {
     ...(p.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
     ...(p.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
     ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}), ...(p.model ? { model: p.model } : {}),
+    ...(p.timing ? { timing: p.timing } : {}),
     ...(p.compactionMetadata ? { compactionMetadata: p.compactionMetadata } : {}),
   }
 }

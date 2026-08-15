@@ -14,6 +14,23 @@ function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Elemen
 }
 
 describe('ChatPanel', () => {
+  it('renders and expands one durable Turn timing footer', () => {
+    const summary = {
+      turnId: 'turn-1', status: 'completed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:01:42Z', wallDurationMs: 102000, estimated: false,
+      queueDurationMs: 2000, activeDurationMs: 76000, approvalWaitMs: 24000,
+      llm: { wallDurationMs: 31000, requestCount: 3, firstTokenMs: 4200 },
+      tools: { wallDurationMs: 45000, aggregateDurationMs: 87000, callCount: 12, peakConcurrency: 4, partial: false },
+      compactionDurationMs: 0, retryDurationMs: 0, recoveryDurationMs: 0,
+    }
+    const items = [{ kind: 'message' as const, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Done.' }] }, turnTiming: summary }]
+    render(<DashboardChatPanel items={items} messages={[]} />)
+    const footer = screen.getByTestId('turn-timing-turn-1')
+    expect(footer.textContent).toContain('Completed · 1m 42s')
+    expect(footer.textContent).toContain('12 Tools · 3 model calls')
+    fireEvent.click(footer.querySelector('button')!)
+    expect(screen.getByTestId('turn-timing-details-turn-1').textContent).toContain('peak concurrency 4')
+  })
+
   it('renders empty state', () => {
     render(<ChatPanel messages={[]} />)
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()

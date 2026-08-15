@@ -2,9 +2,19 @@ import 'fake-indexeddb/auto'
 
 import { createInitialState } from '@agent-kernel/kernel'
 import { openDB } from 'idb'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDurableSessionViewCache, sessionCacheNamespace } from './durable-session-cache.js'
+
+let priorScheduler: unknown
+beforeEach(() => {
+  priorScheduler = (globalThis as { scheduler?: unknown }).scheduler
+  ;(globalThis as { scheduler?: { postTask<T>(callback: () => T | Promise<T>): Promise<T> } }).scheduler = { postTask: async (callback) => await callback() }
+})
+afterEach(() => {
+  if (priorScheduler === undefined) delete (globalThis as { scheduler?: unknown }).scheduler
+  else (globalThis as { scheduler?: unknown }).scheduler = priorScheduler
+})
 
 describe('durable session cache', () => {
   it('hydrates a snapshot across cache instances and partitions hosts', async () => {

@@ -21,7 +21,7 @@ export type CompactBoundary = {
 }
 
 export type TranscriptItem =
-  | { kind: 'message'; message: Message; seq?: number; ts?: string; streaming?: boolean }
+  | { kind: 'message'; message: Message; seq?: number; ts?: string; streaming?: boolean; turnTiming?: import('@agent-kernel/shared').TurnTimingSummary }
   | {
       kind: 'pending_user_message'
       id: string
@@ -154,7 +154,7 @@ export function transcriptBaseItems(
         },
       })
     } else if (event.kind === 'llm_response') {
-      out.push({ kind: 'message', seq: entry.seq, ts: entry.ts, message: event.message })
+      out.push({ kind: 'message', seq: entry.seq, ts: entry.ts, message: event.message, ...(entry.timing?.summary ? { turnTiming: entry.timing.summary } : {}) })
     } else if (event.kind === 'tool_result') {
       out.push({
         kind: 'message',

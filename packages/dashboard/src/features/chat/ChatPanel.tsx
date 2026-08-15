@@ -431,6 +431,7 @@ export function ChatPanel({
           activeToolCallIds={activeToolCallIdSet}
           badgeIntentionCallId={badgeIntentionCallId}
           assistantRerunTarget={assistantRerunTarget}
+          turnTiming={item.turnTiming}
         />
       )
     },
@@ -1209,6 +1210,7 @@ function MessageRow({
   activeToolCallIds,
   badgeIntentionCallId,
   assistantRerunTarget,
+  turnTiming,
 }: {
   index: number
   message: Message
@@ -1230,6 +1232,7 @@ function MessageRow({
   activeToolCallIds: ReadonlySet<string> | null
   badgeIntentionCallId?: string
   assistantRerunTarget?: MessageRerunTarget | null
+  turnTiming?: import('@agent-kernel/shared').TurnTimingSummary
 }): JSX.Element | null {
   const { t } = useTranslation()
   const messageText = messagePlainText(message.content)
@@ -1443,6 +1446,7 @@ function MessageRow({
               />
             )
           })}
+          {message.role === 'assistant' && !streaming && turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
           {message.role === 'assistant' && !streaming && assistantActions ? (
             <MessageActions
               align="start"
@@ -1462,6 +1466,40 @@ function MessageRow({
       </div>
     </div>
   )
+}
+
+function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared').TurnTimingSummary }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const statusLabel = summary.status === 'completed' ? 'Completed' : summary.status === 'failed' ? 'Failed' : summary.status === 'cancelled' ? 'Cancelled' : summary.status === 'interrupted' ? 'Interrupted' : 'Running'
+  const rows = [
+    ['Active work', summary.activeDurationMs], ['Approval wait', summary.approvalWaitMs],
+    ['Model', summary.llm.wallDurationMs], ['Tools', summary.tools.wallDurationMs],
+    ['Compaction', summary.compactionDurationMs], ['Retry', summary.retryDurationMs], ['Recovery', summary.recoveryDurationMs],
+  ].filter(([, value]) => Number(value) > 0)
+  return (
+    <div className="max-w-xl" data-testid={`turn-timing-${summary.turnId}`}>
+      <button type="button" className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <span aria-hidden="true">{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
+        <span>{statusLabel} · {formatTurnDuration(summary.wallDurationMs)}</span>
+        <span className="ml-auto truncate">{summary.tools.callCount > 0 ? `${summary.tools.callCount} Tools` : ''}{summary.tools.callCount > 0 && summary.llm.requestCount > 0 ? ' · ' : ''}{summary.llm.requestCount > 0 ? `${summary.llm.requestCount} model calls` : ''}</span>
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+      </button>
+      {open ? (
+        <div className="grid gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 text-[11px] sm:grid-cols-2" data-testid={`turn-timing-details-${summary.turnId}`}>
+          {rows.map(([label, value]) => <div key={String(label)} className="flex justify-between gap-4"><span className="text-muted-foreground">{label}</span><span className="font-medium text-foreground">{formatTurnDuration(Number(value))}</span></div>)}
+          {summary.tools.callCount > 0 ? <div className="col-span-full border-t border-border/50 pt-2 text-muted-foreground">Tool wall {formatTurnDuration(summary.tools.wallDurationMs)} · aggregate {formatTurnDuration(summary.tools.aggregateDurationMs)} · peak concurrency {summary.tools.peakConcurrency}{summary.tools.partial ? ' · partial Executor timing' : ''}</div> : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function formatTurnDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  if (ms > 0 && seconds === 0) return '<1s'
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
 }
 
 function assistantMessageActions(
