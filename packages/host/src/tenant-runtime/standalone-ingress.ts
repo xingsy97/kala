@@ -2,6 +2,7 @@ import { createServer, type Server as HttpServer } from 'node:http'
 
 import { createRuntimeUnitIngress } from './runtime-unit-ingress.js'
 import { STANDALONE_RUNTIME_UNIT_ID } from './standalone-unit.js'
+import { readStandaloneRouteState } from './standalone-slot-state.js'
 
 export type StandaloneIngress = {
   readonly http: HttpServer
@@ -15,6 +16,7 @@ export type StandaloneIngress = {
 export async function startStandaloneIngress(options: {
   port: number
   unitOrigin: string
+  routeStatePath?: string
   listenHost?: string
 }): Promise<StandaloneIngress> {
   const http = createServer((request, response) => {
@@ -23,9 +25,25 @@ export async function startStandaloneIngress(options: {
       response.end(JSON.stringify({ error: 'NOT_FOUND' }))
     }
   })
+  let cachedOrigin = options.unitOrigin
+  let cachedGeneration = 0
+  const resolveOrigin = async (): Promise<string> => {
+    if (!options.routeStatePath) return options.unitOrigin
+    try {
+      const state = await readStandaloneRouteState(options.routeStatePath)
+      if (state.generation >= cachedGeneration) {
+        cachedGeneration = state.generation
+        cachedOrigin = state.slots[state.activeSlot].origin
+      }
+    } catch {
+      // Keep the last valid route. A partial or missing file must never route
+      // traffic to an unverified candidate.
+    }
+    return cachedOrigin
+  }
   const ingress = createRuntimeUnitIngress({
     isRoutableRequest: (request) => !(request.url ?? '/').startsWith('/internal/'),
-    resolve: () => ({ unitId: STANDALONE_RUNTIME_UNIT_ID, origin: options.unitOrigin }),
+    resolve: async () => ({ unitId: STANDALONE_RUNTIME_UNIT_ID, origin: await resolveOrigin() }),
   })
   ingress.attach(http)
   await new Promise<void>((resolve, reject) => {

@@ -1,6 +1,6 @@
 [Unit]
 Description=Agent RunLab Deploy Supervisor
-After=network-online.target user4@example.com
+After=network-online.target agent-runlab-ingress.service
 Wants=network-online.target
 
 [Service]

@@ -8,6 +8,7 @@ Type=exec
 User=agent-runlab
 Group=agent-runlab
 EnvironmentFile=-/etc/agent-runlab/ingress.env
+Environment=AGENT_RUNLAB_ROUTE_STATE=/var/lib/agent-runlab/deploy/route-state.json
 ExecStart=/usr/bin/node /opt/agent-runlab/control/agent-runlab-standalone-ingress.cjs
 Restart=always
 RestartSec=2s
@@ -16,7 +17,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/run/agent-runlab
+ReadOnlyPaths=/var/lib/agent-runlab/deploy/route-state.json
 RuntimeDirectory=agent-runlab
 UMask=0077
 

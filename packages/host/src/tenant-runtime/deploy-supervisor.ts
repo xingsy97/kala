@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 
 import { readJsonFile, writeJsonFile } from './atomic-json-file.js'
 import type { UnitQuiescence } from './quiescence.js'
+import { advanceStandaloneRoute, otherSlot, type StandaloneRouteState, type StandaloneSlot } from './standalone-slot-state.js'
 
 export type DeploymentPhase =
   | 'staged'
@@ -28,18 +29,23 @@ export type DeploymentReceipt = {
   requestedAt: string
   updatedAt: string
   previousRelease?: string
+  previousSlot?: StandaloneSlot
+  candidateSlot?: StandaloneSlot
   activatedPid?: number
   error?: string
   quiescence?: UnitQuiescence
 }
 
 export type DeploySupervisorAdapter = {
-  inspectQuiescence(): Promise<UnitQuiescence>
-  reserveCutover(): Promise<UnitQuiescence>
-  stopIngress(): Promise<void>
-  startIngress(): Promise<void>
-  restartUnit(): Promise<void>
-  verifyUnit(expectedSha256: string): Promise<{ pid: number }>
+  routeState(): Promise<StandaloneRouteState>
+  inspectQuiescence(slot: StandaloneSlot): Promise<UnitQuiescence>
+  reserveCutover(slot: StandaloneSlot): Promise<UnitQuiescence>
+  selfTestRelease(releaseDir: string): Promise<void>
+  activateSlot(slot: StandaloneSlot, releaseDir: string): Promise<void>
+  startSlot(slot: StandaloneSlot): Promise<void>
+  stopSlot(slot: StandaloneSlot): Promise<void>
+  verifySlot(slot: StandaloneSlot, expectedSha256: string): Promise<{ pid: number }>
+  switchRoute(state: StandaloneRouteState): Promise<void>
 }
 
 export class StandaloneDeploySupervisor {
@@ -90,43 +96,49 @@ export class StandaloneDeploySupervisor {
     if (receipt.phase === 'rolling_back') return await this.rollback(receipt, receipt.error ?? 'deployment rollback resumed')
     try {
       if (receipt.phase === 'staged') receipt = await this.transition(receipt, 'validating')
-      const currentLink = join(this.root, 'current')
       if (receipt.phase === 'validating' || receipt.phase === 'waiting_for_boundary') {
-        const quiescence = await this.adapter.inspectQuiescence()
-        if (!quiescence.safe) return await this.transition(receipt, 'waiting_for_boundary', { quiescence })
-        const previousRelease = receipt.previousRelease ?? await readLinkTarget(currentLink)
-        const reserved = await this.adapter.reserveCutover()
-        if (!reserved.safe) return await this.transition(receipt, 'waiting_for_boundary', { quiescence: reserved, previousRelease })
-        receipt = await this.transition(receipt, 'reserved', { quiescence: reserved, previousRelease })
+        const route = await this.adapter.routeState()
+        const previousSlot = receipt.previousSlot ?? route.activeSlot
+        const candidateSlot = receipt.candidateSlot ?? otherSlot(previousSlot)
+        await this.adapter.selfTestRelease(receipt.releaseDir)
+        const quiescence = await this.adapter.inspectQuiescence(previousSlot)
+        if (!quiescence.safe) return await this.transition(receipt, 'waiting_for_boundary', { quiescence, previousSlot, candidateSlot })
+        const previousRelease = receipt.previousRelease ?? resolve(this.root, 'releases', route.slots[previousSlot].releaseId)
+        const reserved = await this.adapter.reserveCutover(previousSlot)
+        if (!reserved.safe) return await this.transition(receipt, 'waiting_for_boundary', { quiescence: reserved, previousRelease, previousSlot, candidateSlot })
+        receipt = await this.transition(receipt, 'reserved', { quiescence: reserved, previousRelease, previousSlot, candidateSlot })
       }
       if (receipt.phase === 'reserved') {
-        await this.adapter.stopIngress()
+        await this.adapter.stopSlot(receipt.previousSlot!)
         receipt = await this.transition(receipt, 'activating')
       }
       if (receipt.phase === 'activating') {
-        await activateRelease(currentLink, receipt.releaseDir)
-        await this.adapter.restartUnit()
+        await this.adapter.activateSlot(receipt.candidateSlot!, receipt.releaseDir)
+        await this.adapter.startSlot(receipt.candidateSlot!)
         receipt = await this.transition(receipt, 'verifying')
       }
-      const verified = await this.adapter.verifyUnit(receipt.bundleSha256)
-      await this.adapter.startIngress()
+      const verified = await this.adapter.verifySlot(receipt.candidateSlot!, receipt.bundleSha256)
+      const route = await this.adapter.routeState()
+      await this.adapter.switchRoute(advanceStandaloneRoute(route, { slot: receipt.candidateSlot!, releaseId: receipt.releaseId }))
       return await this.transition(receipt, 'completed', { activatedPid: verified.pid })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (receipt.previousRelease) return await this.rollback(await this.transition(receipt, 'rolling_back', { error: message }), message)
-      await this.adapter.startIngress().catch(() => undefined)
       return await this.transition(receipt, 'failed', { error: message })
     }
   }
 
   private async rollback(receipt: DeploymentReceipt, message: string): Promise<DeploymentReceipt> {
     const previousRelease = receipt.previousRelease
-    if (!previousRelease) return await this.transition(receipt, 'failed', { error: `${message}; rollback predecessor missing` })
+    const previousSlot = receipt.previousSlot
+    if (!previousRelease || !previousSlot) return await this.transition(receipt, 'failed', { error: `${message}; rollback predecessor missing` })
     try {
-      await activateRelease(join(this.root, 'current'), previousRelease)
-      await this.adapter.restartUnit()
-      await this.adapter.verifyUnit(sha256(await readFile(join(previousRelease, 'bundle-dashboard-with-runtime.cjs'))))
-      await this.adapter.startIngress()
+      if (receipt.candidateSlot) await this.adapter.stopSlot(receipt.candidateSlot).catch(() => undefined)
+      await this.adapter.activateSlot(previousSlot, previousRelease)
+      await this.adapter.startSlot(previousSlot)
+      await this.adapter.verifySlot(previousSlot, sha256(await readFile(join(previousRelease, 'bundle-dashboard-with-runtime.cjs'))))
+      const route = await this.adapter.routeState()
+      await this.adapter.switchRoute(advanceStandaloneRoute(route, { slot: previousSlot, releaseId: basename(previousRelease) }))
       return await this.transition(receipt, 'rolled_back', { error: message })
     } catch (rollbackError) {
       return await this.transition(receipt, 'failed', { error: `${message}; rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}` })

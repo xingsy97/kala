@@ -1,5 +1,5 @@
 [Unit]
-Description=Agent RunLab Runtime Unit %i
+Description=Agent RunLab Runtime Slot %i for logical Unit local
 After=network-online.target
 Wants=network-online.target
 
@@ -8,14 +8,15 @@ Type=exec
 User=agent-runlab
 Group=agent-runlab
 EnvironmentFile=-/etc/agent-runlab/standalone.env
+EnvironmentFile=/etc/agent-runlab/slots/%i.env
+Environment=HOME=/var/lib/agent-runlab
 Environment=AGENT_KERNEL_DEPLOYMENT_MODE=standalone
-Environment=HOST_PORT=13001
 Environment=HOST_LISTEN_HOST=127.0.0.1
-Environment=SESSIONS_DIR=/var/lib/agent-runlab/units/%i/sessions
-Environment=AGENT_KERNEL_ARTIFACTS_DIR=/var/lib/agent-runlab/units/%i/artifacts
-Environment=HOST_EXECUTOR_IDENTITIES=/var/lib/agent-runlab/units/%i/executor-identities.json
-ExecStart=/usr/bin/flock --exclusive --nonblock /var/lib/agent-runlab/units/%i/write.lock /usr/bin/node /var/lib/agent-runlab/deploy/current/bundle-dashboard-with-runtime.cjs --port 13001
-Restart=always
+Environment=SESSIONS_DIR=/var/lib/agent-runlab/.agent-kernel/sessions
+Environment=AGENT_KERNEL_ARTIFACTS_DIR=/var/lib/agent-runlab/.agent-kernel/artifacts
+Environment=HOST_EXECUTOR_IDENTITIES=/var/lib/agent-runlab/.agent-kernel/executor-identities.json
+ExecStart=/usr/bin/flock --exclusive --nonblock /var/lib/agent-runlab/units/local/write.lock /usr/bin/node /var/lib/agent-runlab/deploy/slots/%i/bundle-dashboard-with-runtime.cjs --port ${HOST_PORT}
+Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=90s
 KillMode=control-group
@@ -24,7 +25,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/var/lib/agent-runlab/deploy
-ReadWritePaths=/var/lib/agent-runlab/units/%i /run/agent-runlab
+ReadWritePaths=/var/lib/agent-runlab/units/local /var/lib/agent-runlab/.agent-kernel /var/lib/agent-runlab/.cache /run/agent-runlab
 RuntimeDirectory=agent-runlab
 UMask=0077
 

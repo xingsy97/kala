@@ -16,6 +16,7 @@ async function main(): Promise<void> {
     port: publicPort,
     listenHost: process.env.AGENT_RUNLAB_INGRESS_HOST?.trim() || '0.0.0.0',
     unitOrigin: `http://${unitHost}:${unitPort}`,
+    ...(process.env.AGENT_RUNLAB_ROUTE_STATE?.trim() ? { routeStatePath: process.env.AGENT_RUNLAB_ROUTE_STATE.trim() } : {}),
   })
   process.stdout.write(`${JSON.stringify({ event: 'standalone_ingress_ready', port: ingress.port, unitId: ingress.unitId })}\n`)
   const close = async (): Promise<void> => { await ingress.close(); process.exit(0) }

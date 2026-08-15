@@ -1,100 +1,75 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readlink, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { StandaloneDeploySupervisor, activateRelease } from './deploy-supervisor.js'
+import { StandaloneDeploySupervisor } from './deploy-supervisor.js'
+import type { StandaloneRouteState, StandaloneSlot } from './standalone-slot-state.js'
 
 const roots: string[] = []
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex')
+const safe = { safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }
 
 async function release(root: string, name: string, content: string): Promise<string> {
-  const dir = join(root, 'releases', name)
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, 'bundle-dashboard-with-runtime.cjs'), content)
-  return dir
+  const dir = join(root, 'releases', name); await mkdir(dir, { recursive: true }); await writeFile(join(dir, 'bundle-dashboard-with-runtime.cjs'), content); return dir
 }
-
+function initialRoute(): StandaloneRouteState { return { schemaVersion: 1, generation: 1, activeSlot: 'blue', slots: { blue: { origin: 'http://127.0.0.1:13001', releaseId: 'old' }, green: { origin: 'http://127.0.0.1:13002', releaseId: 'old' } }, updatedAt: new Date().toISOString() } }
+function harness(route = initialRoute()) {
+  let current = route
+  const calls: string[] = []
+  const adapter = {
+    routeState: async () => current,
+    inspectQuiescence: vi.fn(async (_slot: StandaloneSlot) => safe),
+    reserveCutover: vi.fn(async (_slot: StandaloneSlot) => safe),
+    selfTestRelease: vi.fn(async (_dir: string) => {}),
+    activateSlot: vi.fn(async (slot: StandaloneSlot, dir: string) => { calls.push(`activate:${slot}:${dir.split('/').at(-1)}`) }),
+    startSlot: vi.fn(async (slot: StandaloneSlot) => { calls.push(`start:${slot}`) }),
+    stopSlot: vi.fn(async (slot: StandaloneSlot) => { calls.push(`stop:${slot}`) }),
+    verifySlot: vi.fn(async (slot: StandaloneSlot, _sha: string) => { calls.push(`verify:${slot}`); return { pid: slot === 'green' ? 42 : 7 } }),
+    switchRoute: vi.fn(async (next: StandaloneRouteState) => { calls.push(`route:${next.activeSlot}`); current = next }),
+  }
+  return { adapter, calls, route: () => current, failNextVerification: () => adapter.verifySlot.mockImplementationOnce(async () => { throw new Error('unhealthy') }) }
+}
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
 
-describe('Standalone Deploy Supervisor', () => {
-  it('waits outside drain while Unit is busy and keeps the staged release inactive', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'deploy-supervisor-wait-')); roots.push(root)
-    const oldRelease = await release(root, 'old', 'old')
-    const nextRelease = await release(root, 'next', 'next')
-    await activateRelease(join(root, 'current'), oldRelease)
-    const restartUnit = vi.fn(async () => {})
-    const supervisor = new StandaloneDeploySupervisor(root, {
-      reserveCutover: async () => ({ safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }),
-      stopIngress: async () => {},
-      startIngress: async () => {},
-      inspectQuiescence: async () => ({ safe: false, queueStable: true, activeLlmCalls: 1, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }),
-      restartUnit,
-      verifyUnit: async () => ({ pid: 2 }),
-    })
-    const staged = await supervisor.stage({ operationId: 'op-wait', releaseDir: nextRelease, expectedSha256: digest('next') })
-    const waiting = await supervisor.reconcile(staged.deploymentId)
-    expect(waiting.phase).toBe('waiting_for_boundary')
-    expect(restartUnit).not.toHaveBeenCalled()
-    expect(await readlink(join(root, 'current'))).toBe(oldRelease)
+describe('Standalone Deploy Supervisor slots', () => {
+  it('waits outside drain while active slot is busy', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-slot-wait-')); roots.push(root); await release(root, 'old', 'old'); const next = await release(root, 'next', 'next')
+    const h = harness(); h.adapter.inspectQuiescence.mockResolvedValueOnce({ ...safe, safe: false, activeLlmCalls: 1 })
+    const supervisor = new StandaloneDeploySupervisor(root, h.adapter)
+    const staged = await supervisor.stage({ operationId: 'op-wait', releaseDir: next, expectedSha256: digest('next') })
+    expect((await supervisor.reconcile(staged.deploymentId)).phase).toBe('waiting_for_boundary')
+    expect(h.adapter.stopSlot).not.toHaveBeenCalled(); expect(h.route().activeSlot).toBe('blue')
   })
 
-  it('activates once safe, verifies the Unit, and is idempotent by operation id', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'deploy-supervisor-complete-')); roots.push(root)
-    const nextRelease = await release(root, 'next', 'next')
-    const restartUnit = vi.fn(async () => {})
-    const supervisor = new StandaloneDeploySupervisor(root, {
-      reserveCutover: async () => ({ safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }),
-      stopIngress: async () => {},
-      startIngress: async () => {},
-      inspectQuiescence: async () => ({ safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }),
-      restartUnit,
-      verifyUnit: async (sha) => { expect(sha).toBe(digest('next')); return { pid: 42 } },
-    })
-    const staged = await supervisor.stage({ operationId: 'op-complete', releaseDir: nextRelease, expectedSha256: digest('next') })
-    expect((await supervisor.stage({ operationId: 'op-complete', releaseDir: nextRelease, expectedSha256: digest('next') })).deploymentId).toBe(staged.deploymentId)
+  it('hands the write lease from blue to green before routing new traffic', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-slot-ok-')); roots.push(root); await release(root, 'old', 'old'); const next = await release(root, 'next', 'next')
+    const h = harness(); const supervisor = new StandaloneDeploySupervisor(root, h.adapter)
+    const staged = await supervisor.stage({ operationId: 'op-ok', releaseDir: next, expectedSha256: digest('next') })
     const completed = await supervisor.reconcile(staged.deploymentId)
-    expect(completed).toMatchObject({ phase: 'completed', activatedPid: 42 })
-    expect(restartUnit).toHaveBeenCalledTimes(1)
+    expect(completed).toMatchObject({ phase: 'completed', previousSlot: 'blue', candidateSlot: 'green', activatedPid: 42 })
+    expect(h.calls).toEqual(['stop:blue', 'activate:green:next', 'start:green', 'verify:green', 'route:green'])
+    expect(h.route()).toMatchObject({ generation: 2, activeSlot: 'green', slots: { blue: { releaseId: 'old' }, green: { releaseId: 'next' } } })
+    expect((await supervisor.stage({ operationId: 'op-ok', releaseDir: next, expectedSha256: digest('next') })).deploymentId).toBe(staged.deploymentId)
   })
 
-  it('resumes a persisted rollback without reactivating the failed release', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'deploy-supervisor-resume-')); roots.push(root)
-    const oldRelease = await release(root, 'old', 'old')
-    const nextRelease = await release(root, 'next', 'next')
-    await activateRelease(join(root, 'current'), nextRelease)
-    const adapter = {
-      inspectQuiescence: async () => ({ safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }),
-      reserveCutover: async () => ({ safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }),
-      stopIngress: vi.fn(async () => {}), startIngress: vi.fn(async () => {}), restartUnit: vi.fn(async () => {}), verifyUnit: async () => ({ pid: 9 }),
-    }
-    const supervisor = new StandaloneDeploySupervisor(root, adapter)
-    const staged = await supervisor.stage({ operationId: 'op-resume', releaseDir: nextRelease, expectedSha256: digest('next') })
-    const receiptPath = join(root, 'receipts', `${staged.deploymentId}.json`)
-    await writeFile(receiptPath, JSON.stringify({ ...staged, phase: 'rolling_back', previousRelease: oldRelease, error: 'crashed' }))
-    const resumed = await new StandaloneDeploySupervisor(root, adapter).reconcile(staged.deploymentId)
-    expect(resumed.phase).toBe('rolled_back')
-    expect(await readlink(join(root, 'current'))).toBe(oldRelease)
-    expect(adapter.stopIngress).not.toHaveBeenCalled()
+  it('restores the previous slot and route when candidate verification fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-slot-rollback-')); roots.push(root); const old = await release(root, 'old', 'old'); const next = await release(root, 'next', 'next')
+    const h = harness(); h.failNextVerification(); const supervisor = new StandaloneDeploySupervisor(root, h.adapter)
+    const staged = await supervisor.stage({ operationId: 'op-bad', releaseDir: next, expectedSha256: digest('next') })
+    const receipt = await supervisor.reconcile(staged.deploymentId)
+    expect(receipt.phase).toBe('rolled_back')
+    expect(h.calls).toEqual(['stop:blue', 'activate:green:next', 'start:green', 'stop:green', 'activate:blue:old', 'start:blue', 'verify:blue', 'route:blue'])
+    expect(h.route().activeSlot).toBe('blue')
   })
 
-  it('rolls the active symlink back when verification fails', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'deploy-supervisor-rollback-')); roots.push(root)
-    const oldRelease = await release(root, 'old', 'old')
-    const nextRelease = await release(root, 'next', 'next')
-    await activateRelease(join(root, 'current'), oldRelease)
-    let verification = 0
-    const supervisor = new StandaloneDeploySupervisor(root, {
-      reserveCutover: async () => ({ safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }),
-      stopIngress: async () => {},
-      startIngress: async () => {},
-      inspectQuiescence: async () => ({ safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }),
-      restartUnit: async () => {},
-      verifyUnit: async () => { verification += 1; if (verification === 1) throw new Error('unhealthy'); return { pid: 7 } },
-    })
-    const staged = await supervisor.stage({ operationId: 'op-rollback', releaseDir: nextRelease, expectedSha256: digest('next') })
-    expect((await supervisor.reconcile(staged.deploymentId)).phase).toBe('rolled_back')
-    expect(await readlink(join(root, 'current'))).toBe(oldRelease)
+  it('resumes a persisted rollback after Supervisor restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-slot-resume-')); roots.push(root); const old = await release(root, 'old', 'old'); const next = await release(root, 'next', 'next')
+    const h = harness(); const supervisor = new StandaloneDeploySupervisor(root, h.adapter)
+    const staged = await supervisor.stage({ operationId: 'op-resume', releaseDir: next, expectedSha256: digest('next') })
+    await writeFile(join(root, 'receipts', `${staged.deploymentId}.json`), JSON.stringify({ ...staged, phase: 'rolling_back', previousRelease: old, previousSlot: 'blue', candidateSlot: 'green', error: 'crashed' }))
+    const receipt = await new StandaloneDeploySupervisor(root, h.adapter).reconcile(staged.deploymentId)
+    expect(receipt.phase).toBe('rolled_back'); expect(h.calls).toEqual(['stop:green', 'activate:blue:old', 'start:blue', 'verify:blue', 'route:blue'])
   })
 })

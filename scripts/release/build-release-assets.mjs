@@ -196,6 +196,8 @@ function finalizeRelease() {
         'deploy/standalone-systemd/agent-runlab-deploy-supervisor.service',
         'scripts/deploy/install-standalone-systemd.mjs',
         'scripts/deploy/cutover-standalone-systemd.mjs',
+        'scripts/deploy/standalone-data-migration.mjs',
+        'scripts/deploy/rollback-standalone-systemd.mjs',
       ]) {
         const target = join(outDir, basename(asset))
         copyFileSync(join(root, asset), target)

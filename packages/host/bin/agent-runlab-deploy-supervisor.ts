@@ -4,39 +4,47 @@ import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { spawn } from 'node:child_process'
 
-import { StandaloneDeploySupervisor } from '../src/tenant-runtime/deploy-supervisor.js'
+import { StandaloneDeploySupervisor, activateRelease } from '../src/tenant-runtime/deploy-supervisor.js'
+import { readStandaloneRouteState, writeStandaloneRouteState, type StandaloneSlot } from '../src/tenant-runtime/standalone-slot-state.js'
 import type { UnitQuiescence } from '../src/tenant-runtime/quiescence.js'
 
 const sleep = (ms: number): Promise<void> => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
 async function main(): Promise<void> {
   const root = resolve(process.env.AGENT_RUNLAB_DEPLOY_ROOT ?? '/var/lib/agent-runlab/deploy')
-  const unitOrigin = (process.env.AGENT_RUNLAB_UNIT_ORIGIN ?? 'http://127.0.0.1:13001').replace(/\/$/u, '')
-  const unitService = process.env.AGENT_RUNLAB_UNIT_SERVICE ?? 'user4@example.com'
+  const routeStatePath = resolve(process.env.AGENT_RUNLAB_ROUTE_STATE_PERSISTENT ?? join(root, 'route-state.json'))
+  const unitService = (slot: StandaloneSlot): string => `agent-runlab-unit@${slot}.service`
+  const slotOrigin = async (slot: StandaloneSlot): Promise<string> => (await readStandaloneRouteState(routeStatePath)).slots[slot].origin
   const pollMs = positive(process.env.AGENT_RUNLAB_DEPLOY_POLL_MS, 1000)
-  const ingressService = process.env.AGENT_RUNLAB_INGRESS_SERVICE ?? 'agent-runlab-ingress.service'
   const supervisor = new StandaloneDeploySupervisor(root, {
-    inspectQuiescence: async () => await fetchJson<UnitQuiescence>(`${unitOrigin}/internal/runtime/quiescence`),
-    reserveCutover: async () => await postJson<UnitQuiescence>(`${unitOrigin}/internal/runtime/cutover/reserve`),
-    stopIngress: async () => await systemctl('stop', ingressService),
-    startIngress: async () => await systemctl('start', ingressService),
-    restartUnit: async () => await systemctl('restart', unitService),
-    verifyUnit: async (expectedSha256) => {
-      const deadline = Date.now() + 30_000
+    routeState: async () => await readStandaloneRouteState(routeStatePath),
+    inspectQuiescence: async (slot) => await fetchJson<UnitQuiescence>(`${await slotOrigin(slot)}/internal/runtime/quiescence`),
+    reserveCutover: async (slot) => await postJson<UnitQuiescence>(`${await slotOrigin(slot)}/internal/runtime/cutover/reserve`),
+    selfTestRelease: async (releaseDir) => {
+      const result = await command('/usr/bin/node', ['--check', join(releaseDir, 'bundle-dashboard-with-runtime.cjs')], true)
+      if (result.trim()) process.stdout.write(result)
+    },
+    activateSlot: async (slot, releaseDir) => await activateRelease(join(root, 'slots', slot), releaseDir),
+    startSlot: async (slot) => await systemctl('enable', '--now', unitService(slot)),
+    stopSlot: async (slot) => await systemctl('disable', '--now', unitService(slot)),
+    verifySlot: async (slot, expectedSha256) => {
+      const origin = await slotOrigin(slot)
+      const deadline = Date.now() + 60_000
       while (Date.now() < deadline) {
         try {
-          const capabilities = await fetchJson<{ mode: string; capabilities: { operations: boolean; pipeline: boolean } }>(`${unitOrigin}/runtime/capabilities`)
+          const capabilities = await fetchJson<{ mode: string; capabilities: { operations: boolean; pipeline: boolean } }>(`${origin}/runtime/capabilities`)
           if (capabilities.mode !== 'standalone' || !capabilities.capabilities.operations || !capabilities.capabilities.pipeline) throw new Error('Standalone capability profile mismatch')
-          const currentBundle = join(root, 'current', 'bundle-dashboard-with-runtime.cjs')
-          const actual = createHash('sha256').update(await readFile(currentBundle)).digest('hex')
+          const activeBundle = join(root, 'slots', slot, 'bundle-dashboard-with-runtime.cjs')
+          const actual = createHash('sha256').update(await readFile(activeBundle)).digest('hex')
           if (actual !== expectedSha256) throw new Error('active bundle digest mismatch')
-          return { pid: Number((await systemctlOutput('show', '--property=MainPID', '--value', unitService)).trim()) }
-        } catch {
-          await sleep(250)
-        }
+          const pid = Number((await systemctlOutput('show', '--property=MainPID', '--value', unitService(slot))).trim())
+          if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('slot has no live pid')
+          return { pid }
+        } catch { await sleep(250) }
       }
-      throw new Error('Unit verification timed out')
+      throw new Error(`Unit slot ${slot} verification timed out`)
     },
+    switchRoute: async (state) => { await writeStandaloneRouteState(routeStatePath, state) },
   })
   let stopping = false
   process.on('SIGTERM', () => { stopping = true })
