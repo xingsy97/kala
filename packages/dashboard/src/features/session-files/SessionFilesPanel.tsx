@@ -274,9 +274,9 @@ function SessionFilesPanelImpl({
   if (mode === 'sidebar') {
     return (
       <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="session-files-panel">
-        <div className="flex h-9 flex-none items-center gap-2 border-b border-sidebar-border/60 px-3">
+        <div className="flex h-10 flex-none items-center gap-2 border-b border-sidebar-border/40 bg-muted/15 px-3" data-testid="session-files-toolbar">
           <span className="min-w-0 flex-1 truncate text-[11px] text-sidebar-foreground/60">{cwd || 'Workspace files'}</span>
-          <Button variant="ghost" size="icon" className="h-7 w-7 flex-none text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title="Refresh files" aria-label="Refresh files">
+          <Button variant="ghost" size="icon" className="h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title="Refresh files" aria-label="Refresh files">
             {loadingPath ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
         </div>

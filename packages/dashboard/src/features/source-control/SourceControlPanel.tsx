@@ -110,7 +110,7 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="source-control-panel">
-      <div className="flex h-9 flex-none items-center gap-2 border-b border-sidebar-border/60 px-3">
+      <div className="flex h-10 flex-none items-center gap-2 border-b border-sidebar-border/40 bg-muted/15 px-3" data-testid="source-control-toolbar">
         <GitBranch className="h-3.5 w-3.5 flex-none text-sidebar-foreground/70" />
         <div className="min-w-0 flex-1 truncate text-xs text-sidebar-foreground/75">
           {status?.repo?.branch ?? status?.repo?.head ?? 'Repository'}
@@ -119,7 +119,7 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
         <Button
           variant="ghost"
           size="icon"
-          className={cn('h-7 w-7 flex-none text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground', fileCount > 0 && 'text-sidebar-foreground')}
+          className={cn('h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground', fileCount > 0 && 'text-sidebar-foreground')}
           disabled={fileCount === 0}
           onClick={toggleViewMode}
           title={viewMode === 'tree' ? 'Show as list' : 'Show as tree'}
@@ -130,7 +130,7 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
         >
           {viewMode === 'tree' ? <List className="h-3.5 w-3.5" /> : <ListTree className="h-3.5 w-3.5" />}
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7 flex-none text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground" disabled={!online || loading} onClick={() => void refresh()} title="Refresh source control" aria-label="Refresh source control">
+        <Button variant="ghost" size="icon" className="h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" disabled={!online || loading} onClick={() => void refresh()} title="Refresh source control" aria-label="Refresh source control">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </Button>
       </div>
