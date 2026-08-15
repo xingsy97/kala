@@ -110,16 +110,16 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="source-control-panel">
-      <div className="flex h-8 flex-none items-center gap-1.5 border-b border-sidebar-border px-1.5">
+      <div className="flex h-9 flex-none items-center gap-2 border-b border-sidebar-border/60 px-3">
         <GitBranch className="h-3.5 w-3.5 flex-none text-sidebar-foreground/70" />
         <div className="min-w-0 flex-1 truncate text-xs text-sidebar-foreground/75">
           {status?.repo?.branch ?? status?.repo?.head ?? 'Repository'}
         </div>
-        {fileCount > 0 ? <span className="rounded bg-sidebar-accent px-1.5 py-0.5 text-[10px] leading-none text-sidebar-foreground/75">{fileCount}</span> : null}
+        {fileCount > 0 ? <span className="font-mono text-[10px] tabular-nums text-sidebar-foreground/55">{fileCount}</span> : null}
         <Button
           variant="ghost"
           size="icon"
-          className={cn('h-6 w-6 flex-none text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground', fileCount > 0 && 'bg-sidebar-accent/60')}
+          className={cn('h-7 w-7 flex-none text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground', fileCount > 0 && 'text-sidebar-foreground')}
           disabled={fileCount === 0}
           onClick={toggleViewMode}
           title={viewMode === 'tree' ? 'Show as list' : 'Show as tree'}
@@ -130,15 +130,15 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
         >
           {viewMode === 'tree' ? <List className="h-3.5 w-3.5" /> : <ListTree className="h-3.5 w-3.5" />}
         </Button>
-        <Button variant="ghost" size="icon" className="h-6 w-6 flex-none text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground" disabled={!online || loading} onClick={() => void refresh()} title="Refresh source control" aria-label="Refresh source control">
+        <Button variant="ghost" size="icon" className="h-7 w-7 flex-none text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground" disabled={!online || loading} onClick={() => void refresh()} title="Refresh source control" aria-label="Refresh source control">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-1" style={{ fontSize: fontSizePx }}>
+      <div className="min-h-0 flex-1 overflow-auto p-1.5" style={{ fontSize: fontSizePx }}>
         {!online ? (
           <EmptyState message="Workspace executor is offline." />
         ) : loading && !status ? (
-          <div className="flex items-center gap-2 p-3 text-xs text-sidebar-foreground/60"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading changes</div>
+          <div className="flex min-h-28 items-center justify-center gap-2 p-3 text-xs text-sidebar-foreground/60"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading changes</div>
         ) : status?.error ? (
           <ErrorState message={status.error.message} />
         ) : fileCount === 0 ? (
@@ -436,11 +436,11 @@ function statusBadgeClass(status: GitFileChange['status']): string {
 }
 
 function EmptyState({ message }: { message: string }): JSX.Element {
-  return <div className="p-3 text-xs text-sidebar-foreground/60">{message}</div>
+  return <div className="flex min-h-28 flex-col items-center justify-center gap-2 px-4 text-center text-xs text-sidebar-foreground/60"><GitBranch className="h-5 w-5 opacity-60" aria-hidden="true" />{message}</div>
 }
 
 function ErrorState({ message }: { message: string }): JSX.Element {
-  return <div className="flex gap-2 p-3 text-xs text-sidebar-foreground/70"><AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none text-amber-500" /><span className="min-w-0 break-words">{message}</span></div>
+  return <div className="flex min-h-28 items-center justify-center gap-2 px-4 text-center text-xs text-sidebar-foreground/70"><AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none text-amber-500" /><span className="min-w-0 break-words">{message}</span></div>
 }
 
 function DiffError({ message }: { message: string }): JSX.Element {

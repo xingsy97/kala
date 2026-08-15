@@ -274,13 +274,19 @@ function SessionFilesPanelImpl({
   if (mode === 'sidebar') {
     return (
       <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="session-files-panel">
-        <div ref={treeHostRef} className="min-h-0 flex-1 overflow-hidden p-1">
+        <div className="flex h-9 flex-none items-center gap-2 border-b border-sidebar-border/60 px-3">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-sidebar-foreground/60">{cwd || 'Workspace files'}</span>
+          <Button variant="ghost" size="icon" className="h-7 w-7 flex-none text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title="Refresh files" aria-label="Refresh files">
+            {loadingPath ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
+        <div ref={treeHostRef} className="min-h-0 flex-1 overflow-hidden p-1.5">
           {!online ? (
-            <div className="p-3 text-xs text-sidebar-foreground/60">Workspace executor is offline.</div>
+            <WorkspaceToolState tone="offline" message="Workspace executor is offline." />
           ) : nodes.length === 0 && loadingPath ? (
             <div className="flex items-center gap-2 p-3 text-xs text-sidebar-foreground/60"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading files</div>
           ) : nodes.length === 0 ? (
-            <div className="p-3 text-xs text-sidebar-foreground/60">No files.</div>
+            <WorkspaceToolState tone="empty" message="No files in this workspace." />
           ) : (
             <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={14} rowHeight={28} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
               {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} onDownload={downloadNode} downloadingPath={downloadingPath} surface="sidebar" />}
@@ -332,6 +338,15 @@ function SessionFilesPanelImpl({
 }
 
 export const SessionFilesPanel = memo(SessionFilesPanelImpl)
+
+function WorkspaceToolState({ tone, message }: { tone: 'offline' | 'empty'; message: string }): JSX.Element {
+  return (
+    <div className="flex min-h-28 flex-col items-center justify-center gap-2 px-4 text-center text-xs text-sidebar-foreground/60" data-testid={`session-files-${tone}`}>
+      {tone === 'offline' ? <SquareTerminal className="h-5 w-5 opacity-60" aria-hidden="true" /> : <Folder className="h-5 w-5 opacity-60" aria-hidden="true" />}
+      <span>{message}</span>
+    </div>
+  )
+}
 
 function useElementSize<T extends HTMLElement>(): [(node: T | null) => void, { width: number; height: number }] {
   const [node, setNode] = useState<T | null>(null)
