@@ -567,7 +567,7 @@ export function Composer({
         />
         {mode === 'simple' ? (
           <div
-            className="relative flex min-h-12 items-center gap-1 rounded-2xl border border-border/60 bg-background/70 p-1 shadow-[0_8px_24px_hsl(var(--foreground)/0.06)] transition-[border-color,background-color,box-shadow] focus-within:border-ring/45 focus-within:bg-background focus-within:shadow-[0_10px_28px_hsl(var(--foreground)/0.09)] sm:min-h-10 sm:gap-0.5 sm:p-0.5"
+            className="relative flex min-h-11 items-center gap-0.5 rounded-2xl border border-border/60 bg-background/70 px-1 py-0.5 shadow-[0_6px_18px_hsl(var(--foreground)/0.05)] transition-[border-color,background-color,box-shadow] focus-within:border-ring/45 focus-within:bg-background focus-within:shadow-[0_8px_22px_hsl(var(--foreground)/0.07)] sm:min-h-10 sm:px-0.5"
             data-testid="composer-simple-shell"
           >
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
@@ -896,13 +896,13 @@ function ComposerModeToggle({ mode, onToggle }: { mode: 'simple' | 'full'; onTog
       data-testid="composer-mode-toggle"
       data-composer-mode={mode}
       className={cn(
-        'relative z-[1] flex h-9 w-9 flex-none items-center justify-center rounded-lg border-0 bg-transparent text-muted-foreground transition-colors sm:h-7 sm:w-7',
-        'hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+        'relative z-[1] flex h-10 w-8 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors sm:h-7 sm:w-7 sm:rounded-md',
+        'active:text-foreground sm:hover:bg-accent/70 sm:hover:text-foreground focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
       )}
     >
       {mode === 'simple'
-        ? <PanelTopClose className="h-4 w-4" aria-hidden="true" />
-        : <PanelTopOpen className="h-4 w-4" aria-hidden="true" />}
+        ? <PanelTopClose className="h-3.5 w-3.5" aria-hidden="true" />
+        : <PanelTopOpen className="h-3.5 w-3.5" aria-hidden="true" />}
     </button>
   )
 }
@@ -960,14 +960,14 @@ function SendButton({
         disabled={!stop.onClick}
         data-testid="composer-stop"
         className={cn(
-          'flex-none rounded-full bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
-          isSimple ? 'h-9 text-xs font-medium max-sm:px-3 sm:h-8 sm:px-3' : 'h-9 text-xs font-medium max-sm:px-3 sm:h-8 sm:px-3',
+          'flex-none rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90',
+          isSimple ? 'h-9 w-9 p-0 shadow-[0_2px_8px_hsl(var(--destructive)/0.2)] sm:h-8 sm:w-8' : 'h-9 text-xs font-medium max-sm:px-3 sm:h-8 sm:px-3',
         )}
         aria-label={t('chatStatus.stopTitle')}
         title={t('chatStatus.stopTitle')}
       >
-        <Square className={cn('h-3.5 w-3.5', 'sm:mr-1.5')} aria-hidden="true" />
-        <span className="hidden sm:inline">{t('chatStatus.stop')}</span>
+        <Square className={cn('h-3.5 w-3.5', !isSimple && 'sm:mr-1.5')} aria-hidden="true" />
+        <span className={isSimple ? 'sr-only' : 'hidden sm:inline'}>{t('chatStatus.stop')}</span>
       </Button>
     )
   }
@@ -1124,12 +1124,12 @@ function ComposerConfigButton({
         aria-expanded={open}
         data-testid="composer-config-trigger"
         className={cn(
-          'relative inline-flex h-9 w-9 flex-none items-center justify-center rounded-lg border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:h-7 sm:w-7',
-          open && 'bg-accent text-foreground',
+          'relative inline-flex h-10 w-8 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors active:text-foreground sm:h-7 sm:w-7 sm:rounded-md sm:hover:bg-accent/70 sm:hover:text-foreground',
+          open && 'text-foreground sm:bg-accent/70',
           approvalTone,
         )}
       >
-        <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+        <SlidersHorizontal className="h-3.5 w-3.5 stroke-[1.75]" aria-hidden="true" />
       </button>
       {open ? (
         <div

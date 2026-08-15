@@ -118,7 +118,7 @@ export function RuntimeMetrics({
         type="button"
         className={cn(
           'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-          isSimple ? 'h-9 min-w-9 rounded-lg px-1.5 sm:h-7 sm:min-w-7' : 'h-9 rounded-lg px-1.5 sm:h-7 sm:px-1',
+          isSimple ? 'h-10 min-w-8 rounded-none px-1 sm:h-7 sm:min-w-7 sm:rounded-md sm:hover:bg-accent/70' : 'h-9 rounded-lg px-1.5 sm:h-7 sm:px-1',
         )}
         title={title}
         aria-label={title}
@@ -128,7 +128,7 @@ export function RuntimeMetrics({
       >
         <svg
           viewBox="0 0 20 20"
-          className="h-5 w-5 flex-none -rotate-90"
+          className={cn('flex-none -rotate-90', isSimple ? 'h-[18px] w-[18px]' : 'h-5 w-5')}
           aria-hidden="true"
         >
           <defs>
@@ -143,7 +143,7 @@ export function RuntimeMetrics({
             r={ringRadius}
             className="stroke-border"
             fill="none"
-            strokeWidth="3"
+            strokeWidth={isSimple ? 2.25 : 3}
           />
           <circle
             cx="10"
@@ -152,7 +152,7 @@ export function RuntimeMetrics({
             className={tone}
             fill="none"
             stroke={`url(#${ringGradientId})`}
-            strokeWidth="3"
+            strokeWidth={isSimple ? 2.25 : 3}
             strokeLinecap="round"
             strokeDasharray={ringCircumference}
             strokeDashoffset={ringOffset}
