@@ -2709,72 +2709,86 @@ export function WorkbenchToolbar({
   )
 }
 
-const ConnectionStatus = memo(function ConnectionStatus({ socket, status, transport, cursor, workspaceId, executorConnected, onResync }: { socket: DashboardSocket | null; status: string; transport?: string; cursor: number; workspaceId?: string; executorConnected: boolean; onResync(): void }): JSX.Element {
+export const ConnectionStatus = memo(function ConnectionStatus({ socket, status, transport, cursor, workspaceId, executorConnected, onResync }: { socket: DashboardSocket | null; status: string; transport?: string; cursor: number; workspaceId?: string; executorConnected: boolean; onResync(): void }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [hostRtt, setHostRtt] = useState<number | null>(null)
   const [executorRtt, setExecutorRtt] = useState<number | null>(null)
+  const [hostError, setHostError] = useState<string | null>(null)
   const [executorError, setExecutorError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [copied, setCopied] = useState(false)
   const label = hostStatusLabel(status, t)
 
   const measure = useCallback(() => {
-    if (!socket?.connected) return
+    if (!socket?.connected) {
+      setHostRtt(null)
+      setExecutorRtt(null)
+      setHostError('Disconnected')
+      setExecutorError(executorConnected ? 'Unavailable' : 'Offline')
+      setChecking(false)
+      return
+    }
     setChecking(true)
+    let pending = workspaceId && executorConnected ? 2 : 1
+    const finish = (): void => {
+      pending -= 1
+      if (pending === 0) setChecking(false)
+    }
     const hostStart = performance.now()
     socket.timeout(3000).emit('client:connection_ping', Date.now(), (err: unknown) => {
       setHostRtt(err ? null : Math.round(performance.now() - hostStart))
+      setHostError(err ? 'Timed out' : null)
+      finish()
     })
     if (workspaceId && executorConnected) {
       socket.timeout(3500).emit('client:executor_ping', workspaceId, (err: unknown, result?: { rttMs?: number; error?: string }) => {
-        setChecking(false)
         if (err || result?.error) {
           setExecutorRtt(null)
-          setExecutorError(result?.error ?? 'Measurement timed out')
+          setExecutorError(result?.error ? 'Unavailable' : 'Timed out')
         } else {
           setExecutorRtt(result?.rttMs ?? null)
-          setExecutorError(null)
+          setExecutorError(result?.rttMs === undefined ? 'Not measured' : null)
         }
+        finish()
       })
     } else {
-      setChecking(false)
       setExecutorRtt(null)
-      setExecutorError(executorConnected ? null : 'Offline')
+      setExecutorError(executorConnected ? 'Not measured' : 'Offline')
     }
   }, [executorConnected, socket, workspaceId])
 
   useEffect(() => {
-    if (!open) return
     measure()
-    const timer = setInterval(measure, 5000)
-    return () => clearInterval(timer)
+    const timer = window.setInterval(measure, open ? 5_000 : 15_000)
+    return () => window.clearInterval(timer)
   }, [measure, open])
 
-  const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline', sessionCursor: cursor }
+  const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, hostError, executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline', sessionCursor: cursor }
   const copy = (): void => { void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => setCopied(false)) }
   const healthy = status === 'ready' && executorConnected && !executorError
   const headlineLatency = executorRtt ?? hostRtt
 
   return (
     <div className="relative">
-      <button type="button" onClick={() => setOpen((value) => !value)} className="inline-flex h-8 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground" data-testid="connection-status" data-status={status} aria-expanded={open}>
+      <button type="button" onClick={() => setOpen((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8" data-testid="connection-status" data-status={status} aria-expanded={open}>
         <span className={cn('h-2 w-2 rounded-full', statusDot(status))} />
         <span className="hidden sm:inline">{label}</span>
-        {headlineLatency !== null ? <span className="hidden font-mono text-[10px] tabular-nums text-muted-foreground lg:inline">{headlineLatency} ms</span> : null}
+        <span className="hidden font-mono text-[10px] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineLatency !== null ? `${headlineLatency} ms` : checking ? 'Measuring…' : '—'}</span>
       </button>
       {open ? (
-        <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-sm rounded-2xl border border-border/50 bg-popover p-4 text-xs shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96" data-testid="connection-status-popover">
+        <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-sm rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96" data-testid="connection-status-popover">
           <div className="flex items-start justify-between gap-3 pb-3">
-            <div><h3 className="text-sm font-semibold">Connection health</h3><p className="mt-0.5 text-[11px] text-muted-foreground">Current path and measured latency</p></div>
-            <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : 'bg-amber-500')} />{healthy ? 'Healthy' : 'Attention'}</span>
+            <div><h3 className="text-sm font-semibold">Connection health</h3><p className="mt-0.5 text-[11px] text-muted-foreground">Reachability and round-trip latency</p></div>
+            <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : 'bg-amber-500')} />{healthy ? 'Healthy' : 'Check connection'}</span>
           </div>
-          <div className="divide-y divide-border/40 rounded-xl bg-muted/25 px-3">
-            <HealthRow label="Device → Host" state={status === 'ready' ? 'Connected' : label} latency={hostRtt} measuring={checking && hostRtt === null} />
+          <div className="divide-y divide-border/30 rounded-2xl bg-muted/20 px-3">
+            <HealthRow label="Device → Host" state={status === 'ready' ? hostError ?? 'Connected' : label} latency={hostRtt} measuring={checking && hostRtt === null && !hostError} />
             <HealthRow label="Host → Executor" state={!executorConnected ? 'Offline' : executorError ?? 'Connected'} latency={executorRtt} measuring={checking && executorConnected && executorRtt === null && !executorError} />
-            <HealthRow label="Session" state={status === 'ready' ? 'Synchronized' : label} />
+            <HealthRow label="Session sync" state={status === 'ready' ? 'Synchronized' : label} />
           </div>
-          <details className="mt-3 text-xs"><summary className="cursor-pointer select-none py-1 font-medium text-muted-foreground hover:text-foreground">Diagnostics</summary><div className="mt-2 space-y-3"><p className="text-[11px] text-muted-foreground">Transport: {transport ?? 'unknown'}</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" className="h-7" disabled={checking} onClick={measure}>{checking ? 'Measuring…' : 'Measure latency'}</Button><Button size="sm" variant="ghost" className="h-7" onClick={onResync}>Resync</Button><Button size="sm" variant="ghost" className="h-7" onClick={copy}>{copied ? 'Copied' : 'Copy diagnostics'}</Button></div></div></details>
+          <div className="mt-3 flex items-center gap-2"><Button size="sm" variant="outline" className="h-8" disabled={checking || !socket?.connected} onClick={measure}>{checking ? 'Measuring…' : 'Measure again'}</Button><Button size="sm" variant="ghost" className="h-8" onClick={onResync}>Resync</Button></div>
+          <details className="mt-2 text-xs"><summary className="cursor-pointer select-none rounded-lg px-2 py-2 font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground">Diagnostics</summary><div className="mt-1 flex items-center justify-between gap-3 rounded-lg bg-muted/20 px-3 py-2"><p className="min-w-0 truncate text-[11px] text-muted-foreground">Transport · {transport ?? 'unknown'}</p><Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button></div></details>
         </div>
       ) : null}
     </div>
