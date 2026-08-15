@@ -12,7 +12,7 @@ The current Standalone composition runs the public ingress, Dashboard, Agent run
 The target composition separates three lifecycle owners:
 
 1. **Stable Ingress** owns the public HTTP and WebSocket address.
-2. **Standalone Runtime Unit `local`** owns the complete Standalone product runtime.
+2. **Standalone Runtime Unit `local`**, materialized in alternating runtime slots `blue` and `green`, owns the complete Standalone product runtime.
 3. **Deploy Supervisor** owns immutable releases, deferred cutover, health verification, and rollback.
 
 The components are separate systemd services in one Linux environment. Docker is not required. The same design works when that Linux environment is provided by a virtual machine or a system container.
@@ -64,7 +64,7 @@ The refactor must provide:
 flowchart LR
     B[Browser] --> I[Stable Ingress]
     E[Workspace Executors] --> I
-    I --> U[Runtime Unit local]
+    I --> U[Active slot blue or green for logical Unit local]
     D[Deploy Supervisor] --> I
     D --> U
 
@@ -80,7 +80,8 @@ The Linux service layout is:
 
 ```text
 agent-runlab-ingress.service
-user4@example.com
+user2@example.com
+user3@example.com
 agent-runlab-deploy-supervisor.service
 ```
 
@@ -131,13 +132,17 @@ Capabilities are derived from installed modules and then checked against the pro
 
 ## 5. Standalone Runtime Unit
 
-Standalone creates exactly one Unit:
+Standalone creates exactly one **logical** Unit with two replaceable process slots:
 
 ```text
 unitId = local
 profile = standalone
-dataRoot = existing Standalone data root
+dataRoot = shared logical Unit root
+slots = blue | green
+activeSlot = exactly one slot recorded by Stable Ingress
 ```
+
+A slot is a process/release identity, not a second Workspace or tenant. Both slots refer to the same logical Unit data root, but the operating-system write lease permits at most one slot process to run against it. The inactive slot is stopped except while undergoing artifact/config self-test that does not open mutable Unit state.
 
 The first implementation may wrap the mature Host runtime behind a private loopback listener. This preserves proven Agent behavior while moving public routing and process lifecycle outside the Unit.
 
@@ -161,7 +166,7 @@ The Unit does not own:
 
 ## 6. Stable Ingress
 
-Standalone Ingress always resolves trusted public traffic to Unit `local`. SaaS Ingress resolves trusted Gateway routes to tenant Units.
+Standalone Ingress resolves trusted public traffic to the active slot recorded in an atomically replaced route-state file. The route contains a schema version, monotonically increasing generation, active slot, and both private origins. It is re-read without restarting Ingress. Existing WebSockets remain attached to the process that accepted them until that process stops; new HTTP/WebSocket connections use the current route. SaaS Ingress resolves trusted Gateway routes to tenant Units.
 
 Ingress must proxy:
 
@@ -237,7 +242,7 @@ Reading quiescence must never call `beginDrain()` or reject new messages.
 
 The Supervisor polls quiescence outside the Unit process. If the Unit is busy, the deployment remains staged. It does not block unrelated work.
 
-When the Unit is naturally safe, the Supervisor obtains a short cutover reservation. Reservation starts checkpoint drain inside the private Unit, waits for LLM/Tool checkpoints and queue mutations, then stops Stable Ingress before activation. During the bounded replacement window:
+When the active slot is naturally safe, the Supervisor first self-tests the inactive slot's immutable release without opening mutable state, then obtains a short cutover reservation. Reservation starts checkpoint drain inside the active slot and waits for LLM/Tool checkpoints and queue mutations. Stable Ingress remains alive. The Supervisor stops the active slot to release the write lease, starts the inactive slot against the shared logical Unit data root, verifies it privately, and atomically updates route state. During the bounded replacement window:
 
 - no new Agent turn starts;
 - current durable writes finish;
@@ -246,7 +251,7 @@ When the Unit is naturally safe, the Supervisor obtains a short cutover reservat
 - systemd replaces the Unit process;
 - the new Unit is verified privately before Ingress resumes.
 
-The first production implementation provides bounded unavailability and retry-based reconnect, not zero downtime. Requests arriving after Ingress stops may fail or retry at the client; they are not claimed as durably accepted until a stable external admission queue exists. Because Ingress remains stopped during private verification, a failed new release cannot accept writes before rollback.
+The implementation provides bounded unavailability and retry-based reconnect, not zero downtime. During write-lease handoff Ingress remains reachable but its old upstream is stopped, so new requests receive bounded 502/503 responses and clients retry; they are not claimed as durably accepted until a stable external admission queue exists. A candidate cannot accept public writes before private verification and route commit. If verification fails, the Supervisor restarts and verifies the previous slot before restoring its route.
 
 ### 7.5 Receipts and idempotency
 
@@ -270,7 +275,7 @@ Only one Runtime Unit generation may write a Unit data root.
 
 The migration starts with an operating-system lock owned by the Unit process. The production contract also records a monotonically increasing generation. A stale process must fail writes after a newer generation becomes active.
 
-Blue-green warm-up, if added, is read-only until the old Unit releases the lease. Two Units must never write the same Session Store concurrently.
+Candidate warm-up is limited to executable, manifest, environment, filesystem-permission, container-backend, and capability-profile self-tests that do not open mutable Unit state. The candidate Host process starts only after the old slot releases the lease. Two slots must never write the same Session Store concurrently.
 
 ## 9. Health, verification, and rollback
 
@@ -292,7 +297,7 @@ If verification fails:
 1. restore the previous release route;
 2. restart the previous Unit generation;
 3. verify previous readiness;
-4. mark the receipt `rolled_back` or `rollback_failed`;
+4. mark the receipt `rolled_back` or `rollback_failed`; a data rollback failure is fail-closed and the legacy service is not started against an empty state root;
 5. retain the failed release and redacted diagnostics for inspection.
 
 ## 10. Data and compatibility migration
@@ -301,7 +306,7 @@ If verification fails:
 
 The migration must not require moving or rewriting existing Session, Artifact, Executor identity, Workspace alias, or notification data merely to introduce the Unit boundary.
 
-The external cutover copies existing Standalone mutable data into the `local` Unit root only after the legacy service has stopped, then assigns the Unit service account as owner. This avoids double writers and avoids depending on legacy home-directory permissions. Release files remain separate from mutable data.
+The external cutover atomically renames the existing `.agent-kernel` state tree into the `local` Unit HOME only after the legacy service has stopped, then assigns the Unit service account as owner. The source and target must be on the same filesystem; this avoids duplicating large Session data, avoids ENOSPC during migration, and preserves inode identity. Bounded provider configuration files are copied separately. Release files remain separate from mutable data.
 
 ### 10.2 Migration procedure
 
@@ -310,7 +315,7 @@ The external cutover copies existing Standalone mutable data into the `local` Un
 3. install Ingress, Unit, and Supervisor services disabled;
 4. validate configuration and release manifests;
 5. stop the legacy service from an external control process;
-6. copy the compatible mutable roots into the `local` Unit root and verify ownership;
+6. atomically move the compatible mutable state tree into the `local` Unit HOME, copy bounded provider settings, and verify ownership;
 7. acquire the `local` Unit write lease;
 8. start the Unit on its private origin;
 9. start Ingress on the public address;
