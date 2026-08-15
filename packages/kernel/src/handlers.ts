@@ -61,8 +61,19 @@ export function onUserMessage(
 }
 
 function appendCancelledResultsForOrphanedToolCalls(messages: readonly Message[]): readonly Message[] {
+  // A fresh user message closes only the immediately preceding turn. Earlier
+  // turns already crossed this same boundary and therefore cannot acquire new
+  // unresolved calls. Restricting the scan to the suffix after the last user
+  // message avoids replaying the entire growing transcript on every turn.
+  let turnStart = 0
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role !== 'user') continue
+    turnStart = index + 1
+    break
+  }
   const unresolved = new Map<string, ToolCallContent>()
-  for (const message of messages) {
+  for (let index = turnStart; index < messages.length; index += 1) {
+    const message = messages[index]!
     for (const content of message.content) {
       if (content.type === 'tool_call') unresolved.set(content.callId, content)
       if (content.type === 'tool_result') unresolved.delete(content.callId)

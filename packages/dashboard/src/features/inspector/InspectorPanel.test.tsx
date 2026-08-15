@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState, type AgentState } from '@agent-kernel/kernel'
 import type { TimelineEntry } from '../../session.js'
-import { InspectorPanel } from './InspectorPanel.js'
+import { InspectorPanel, sampledTimelineEntries } from './InspectorPanel.js'
 
 type Handler = (payload: unknown) => void
 
@@ -239,6 +239,22 @@ describe('InspectorPanel', () => {
     expect(screen.getByTestId('timeline-row-header').className).toContain('overflow-hidden')
     expect(screen.getByTestId('timeline-row-summary').className).toContain('truncate')
     expect(screen.getByTestId('timeline-minimap')).toBeTruthy()
+  })
+
+  it('samples large trace minimaps to a fixed DOM budget', () => {
+    const largeTimeline: TimelineEntry[] = Array.from({ length: 5_000 }, (_, index) => ({
+      seq: index + 1,
+      ts: '2026-07-06T06:00:00Z',
+      event: { kind: 'user_message' as const, text: `message ${index}` },
+      effects: [],
+    }))
+
+    const sampled = sampledTimelineEntries(largeTimeline, 2_501)
+
+    expect(sampled).toHaveLength(121)
+    expect(sampled[0]?.seq).toBe(1)
+    expect(sampled.at(-1)?.seq).toBe(5_000)
+    expect(sampled.some((entry) => entry.seq === 2_501)).toBe(true)
   })
 
   it('keeps trace minimap, state diff, and reducer rows on the same active event', () => {

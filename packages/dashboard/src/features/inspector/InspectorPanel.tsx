@@ -31,6 +31,7 @@ import type {
 import { type HumanAttentionTimeline, type LLMTrace, type ServerHistoryPayload, type ServerLogArtifactPayload } from '@agent-kernel/shared'
 import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
 import { useTranslation } from 'react-i18next'
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 
 import type { DashboardSocket, TimelineEntry } from '../../session.js'
 import { stateFlow, type StateFlowStep } from '../../state-flow.js'
@@ -655,48 +656,63 @@ function ReducerTrace({
   activeReplaySeq: number | null
 }): JSX.Element {
   const { t } = useTranslation()
+  const virtuoso = useRef<VirtuosoHandle | null>(null)
+  const parsedQuery = useMemo(() => parseTraceQuery(query), [query])
+  const flowBySeq = useMemo(() => new Map(flow.map((step) => [step.seq, step])), [flow])
+  const visible = useMemo(() => {
+    let priorCallLlm: PriorCallLlm | null = null
+    let messageIndex = -1
+    return timeline.flatMap((entry) => {
+      const currentPrior = entry.event.kind === 'llm_response' ? priorCallLlm : null
+      const producesMessage = entry.event.kind === 'user_message' || entry.event.kind === 'llm_response' || entry.event.kind === 'tool_result'
+      if (producesMessage) messageIndex += 1
+      const currentMessageIndex = producesMessage && messageIndex < messagesCount ? messageIndex : null
+      const inbound = inboundOf(entry.event)
+      const matches = entryMatchesFilter(entry, filter) && traceEntryMatchesQuery(entry, parsedQuery, inbound.source, eventSummary(entry.event, currentPrior))
+      const callLlm = entry.effects.find((effect): effect is CallLlmEffect => effect.kind === 'call_llm')
+      if (callLlm) priorCallLlm = { seq: entry.seq, effect: callLlm }
+      return matches ? [{ entry, priorCallLlm: currentPrior, flow: flowBySeq.get(entry.seq), messageIndex: currentMessageIndex }] : []
+    })
+  }, [filter, flowBySeq, messagesCount, parsedQuery, timeline])
+  const selectedIndex = useMemo(() => visible.findIndex((item) => item.entry.seq === activeReplaySeq), [activeReplaySeq, visible])
+  useEffect(() => {
+    if (selectedIndex >= 0) virtuoso.current?.scrollToIndex({ index: selectedIndex, align: 'center', behavior: 'auto' })
+  }, [selectedIndex])
   if (timeline.length === 0) {
     return <EmptyBlock label={t('inspector.empty.noReducerEvents')} />
   }
-  const parsedQuery = parseTraceQuery(query)
-  const visible = timeline.filter((entry) => {
-    const inbound = inboundOf(entry.event)
-    const prior = findPriorCallLlm(timeline, timeline.indexOf(entry))
-    return entryMatchesFilter(entry, filter) && traceEntryMatchesQuery(entry, parsedQuery, inbound.source, eventSummary(entry.event, prior))
-  })
   if (visible.length === 0) {
     return <EmptyBlock label={t('inspector.empty.noEventsMatch')} />
   }
   return (
     <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_1rem] gap-1 bg-sidebar">
-      <ScrollArea className="min-h-0 min-w-0">
-      <div className="min-w-0 space-y-1 px-2 pb-3 pt-1" data-testid="reducer-trace-list">
-        {visible.map((entry) => {
-          const i = timeline.indexOf(entry)
-          const priorCallLlm = findPriorCallLlm(timeline, i)
-          const flowStep = flow.find((s) => s.seq === entry.seq)
-          const isSelected = activeReplaySeq === entry.seq
-          return (
-            <ReducerTraceRow
-              key={entry.seq}
-              entry={entry}
-              flow={flowStep}
-              priorCallLlm={priorCallLlm}
-              selected={isSelected}
-              messageIndex={messageIndexFor(timeline, i, messagesCount)}
-              onSelect={() => {
-                onReplaySeqChange(entry.seq)
-              }}
-              onInspect={() => onInspectReplaySeq(entry.seq)}
-              teachingMode={teachingMode}
-              onForkRequest={onForkRequest}
-              onJumpToMessage={onJumpToMessage}
-            />
-          )
-        })}
+      <div className="min-h-0 min-w-0" data-testid="reducer-trace-list">
+        <Virtuoso
+          ref={virtuoso}
+          style={{ height: '100%' }}
+          data={visible}
+          initialItemCount={Math.min(20, visible.length)}
+          computeItemKey={(_index, item) => item.entry.seq}
+          increaseViewportBy={{ top: 240, bottom: 240 }}
+          itemContent={(_index, item) => (
+            <div className="px-2 py-0.5">
+              <ReducerTraceRow
+                entry={item.entry}
+                flow={item.flow}
+                priorCallLlm={item.priorCallLlm}
+                selected={activeReplaySeq === item.entry.seq}
+                messageIndex={item.messageIndex}
+                onSelect={() => onReplaySeqChange(item.entry.seq)}
+                onInspect={() => onInspectReplaySeq(item.entry.seq)}
+                teachingMode={teachingMode}
+                onForkRequest={onForkRequest}
+                onJumpToMessage={onJumpToMessage}
+              />
+            </div>
+          )}
+        />
       </div>
-      </ScrollArea>
-      <TimelineMinimap entries={visible} selectedSeq={activeReplaySeq} onSelect={onReplaySeqChange} />
+      <TimelineMinimap entries={visible.map((item) => item.entry)} selectedSeq={activeReplaySeq} onSelect={onReplaySeqChange} />
     </div>
   )
 }
@@ -2311,17 +2327,33 @@ function DiffRow({ item }: { item: StateDiff }): JSX.Element {
   )
 }
 
+const TIMELINE_MINIMAP_MAX_ITEMS = 120
+
+export function sampledTimelineEntries(entries: readonly TimelineEntry[], selectedSeq: number | null, limit = TIMELINE_MINIMAP_MAX_ITEMS): readonly TimelineEntry[] {
+  if (entries.length <= limit) return entries
+  const selected = selectedSeq === null ? undefined : entries.find((entry) => entry.seq === selectedSeq)
+  const sampled = new Map<number, TimelineEntry>()
+  for (let index = 0; index < limit; index += 1) {
+    const sourceIndex = Math.round(index * (entries.length - 1) / (limit - 1))
+    const entry = entries[sourceIndex]
+    if (entry) sampled.set(entry.seq, entry)
+  }
+  if (selected) sampled.set(selected.seq, selected)
+  return [...sampled.values()].sort((left, right) => left.seq - right.seq)
+}
+
 function TimelineMinimap({ entries, selectedSeq, onSelect }: { entries: readonly TimelineEntry[]; selectedSeq: number | null; onSelect(seq: number | null): void }): JSX.Element {
+  const sampled = useMemo(() => sampledTimelineEntries(entries, selectedSeq), [entries, selectedSeq])
   return (
     <div className="my-1 flex min-h-0 w-4 flex-col rounded-md bg-background/60 p-1 ring-1 ring-border/25" data-testid="timeline-minimap">
-      {entries.map((entry) => {
+      {sampled.map((entry) => {
         const cat = primaryCategory(entry)
         return (
           <button
             key={entry.seq}
             type="button"
             onClick={() => onSelect(entry.seq)}
-            className={cn('mx-auto my-px min-h-[4px] w-1.5 flex-1 rounded-full opacity-70 transition-all hover:w-2 hover:opacity-100', minimapTone(cat), selectedSeq === entry.seq ? 'w-2 opacity-100 ring-1 ring-primary/70' : '')}
+            className={cn('mx-auto my-px min-h-[2px] w-1.5 flex-1 rounded-full opacity-70 transition-all hover:w-2 hover:opacity-100', minimapTone(cat), selectedSeq === entry.seq ? 'w-2 opacity-100 ring-1 ring-primary/70' : '')}
             title={`#${entry.seq} ${entry.event.kind}`}
             aria-label={`select replay cursor ${entry.seq}`}
             aria-current={selectedSeq === entry.seq ? 'true' : undefined}

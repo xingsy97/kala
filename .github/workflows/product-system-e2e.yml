@@ -59,6 +59,12 @@ jobs:
         run: pnpm run verify:e2e:pwa-update-reload
       - name: Production responsive/PWA viewport matrix
         run: pnpm run verify:dashboard-mobile-pwa
+      - name: Production long-session performance budget
+        env:
+          PERF_TURNS: '300'
+          PERF_ASSERT_BUDGET: '1'
+          PERF_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/performance
+        run: pnpm run perf:profile-production
       - name: Emergency orphan cleanup
         if: always()
         run: |

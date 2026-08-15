@@ -86,9 +86,10 @@ vi.mock('react-virtuoso', async () => {
       scrollTo: virtuosoScrollToMock,
       scrollBy: virtuosoScrollByMock,
     }))
-    const totalCount = typeof props.totalCount === 'number' ? props.totalCount : 0
-    const itemContent = props.itemContent as ((index: number) => React.ReactNode) | undefined
-    const computeItemKey = props.computeItemKey as ((index: number) => React.Key) | undefined
+    const data = Array.isArray(props.data) ? props.data : undefined
+    const totalCount = typeof props.totalCount === 'number' ? props.totalCount : data?.length ?? 0
+    const itemContent = props.itemContent as ((index: number, item?: unknown) => React.ReactNode) | undefined
+    const computeItemKey = props.computeItemKey as ((index: number, item?: unknown) => React.Key) | undefined
     const components = props.components as { Footer?: React.ComponentType<{ context?: unknown }>; Scroller?: React.ComponentType<React.HTMLAttributes<HTMLDivElement>> } | undefined
     const context = props.context
     ;(globalThis as typeof globalThis & {
@@ -101,8 +102,8 @@ vi.mock('react-virtuoso', async () => {
     const children: React.ReactNode[] = Array.from({ length: totalCount }, (_, index) =>
       React.createElement(
         'div',
-        { key: computeItemKey?.(index) ?? index, 'data-testid': 'virtuoso-test-item' },
-        itemContent?.(index),
+        { key: computeItemKey?.(index, data?.[index]) ?? index, 'data-testid': 'virtuoso-test-item' },
+        itemContent?.(index, data?.[index]),
       ),
     )
     if (components?.Footer) children.push(React.createElement(components.Footer, { key: 'footer', context }))

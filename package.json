@@ -84,6 +84,8 @@
     "publish:all": "pnpm run publish:kernel && pnpm run publish:host && pnpm run publish:executor",
     "perf:scenario": "pnpm --filter @agent-kernel/perf-harness scenario",
     "perf:regression": "pnpm --filter @agent-kernel/perf-harness perf",
+    "perf:profile-production": "node scripts/performance/profile-dashboard-production.mjs",
+    "perf:profile-streaming": "node scripts/performance/profile-dashboard-streaming.mjs",
     "saas:secrets": "node scripts/saas-local/generate-secrets.mjs",
     "saas:validate": "node scripts/saas-local/validate-compose-policy.mjs",
     "saas:check": "node scripts/saas-local/preflight.mjs",

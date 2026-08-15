@@ -123,6 +123,33 @@ describe('step: user_message', () => {
     expect(effects[0]).toMatchObject({ kind: 'call_llm' })
   })
 
+  it('repairs only the current turn without rescanning completed historical turns', () => {
+    const completed = Array.from({ length: 2_000 }, (_, index): Message[] => [
+      { role: 'user', content: [{ type: 'text', text: `turn ${index}` }] },
+      asst({ type: 'tool_call', callId: `done-${index}`, name: 'read_file', input: { path: `${index}.ts` } }),
+      { role: 'tool', content: [{ type: 'tool_result', callId: `done-${index}`, ok: true, content: 'ok' }] },
+    ]).flat()
+    const s0: AgentState = {
+      ...initial(),
+      status: 'error',
+      messages: [
+        ...initial().messages,
+        ...completed,
+        { role: 'user', content: [{ type: 'text', text: 'current turn' }] },
+        asst({ type: 'tool_call', callId: 'current-orphan', name: 'bash', input: { command: 'sleep 90' } }),
+      ],
+      pendingCalls: [],
+    }
+
+    const started = performance.now()
+    const { next } = step(s0, { kind: 'user_message', text: 'continue' }, CONFIG)
+    const duration = performance.now() - started
+    const cancelled = next.messages.flatMap((message) => message.content).filter((content) => content.type === 'tool_result' && content.content === 'cancelled by user')
+
+    expect(cancelled).toEqual([{ type: 'tool_result', callId: 'current-orphan', ok: false, content: 'cancelled by user' }])
+    expect(duration).toBeLessThan(20)
+  })
+
   it('cursor advances by exactly 1', () => {
     const s0 = initial()
     const { next } = step(s0, { kind: 'user_message', text: 'hi' }, CONFIG)
