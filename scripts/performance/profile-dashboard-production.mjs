@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 import puppeteer from 'puppeteer-core'
+import { browserMetadata, resolveChrome, startProfileWindow, stopProfileWindow, summarizeCpuProfile } from './profiling-utils.mjs'
 
 const root = new URL('../..', import.meta.url).pathname
 const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
@@ -17,7 +18,7 @@ const evidenceRoot = process.env.PERF_EVIDENCE_ROOT ?? join(stateRoot, 'evidence
 const longSessionId = `perf-long-${Date.now()}`
 const longTurns = Number(process.env.PERF_TURNS ?? 1_250)
 const shortSessionId = `perf-short-${Date.now()}`
-const chrome = process.env.CHROME_PATH ?? ['/usr/bin/chromium', '/snap/bin/chromium', '/usr/bin/google-chrome'].find(existsSync)
+const chrome = resolveChrome()
 const hostLogs = []
 let host
 let browser
@@ -50,6 +51,8 @@ try {
   const report = {
     generatedAt: new Date().toISOString(),
     artifact: bundle,
+    artifactMetadata: await browserMetadata(browser, page, bundle, root),
+    parameters: { longTurns, viewport: { width: 1440, height: 900 }, cacheEnabled: false },
     sessions: { longSessionId, shortSessionId, longTimelineEntries: longTurns * 4 + 1 },
     scenarios: {},
   }
@@ -178,25 +181,10 @@ async function sampleScenario({ name, page, cdp, evidenceRoot, action }) {
   await page.evaluate(() => { if (window.__runlabPerf) { window.__runlabPerf.longTasks = []; window.__runlabPerf.events = [] } })
   const tracePath = join(evidenceRoot, `${name}.trace.json`)
   const cpuPath = join(evidenceRoot, `${name}.cpuprofile.json`)
-  const framePromise = startFrameProbe(page)
-  await cdp.send('Profiler.enable')
-  await cdp.send('Profiler.setSamplingInterval', { interval: 200 })
-  await cdp.send('Profiler.start')
-  await cdp.send('Tracing.start', {
-    transferMode: 'ReturnAsStream',
-    categories: ['devtools.timeline', 'v8.execute', 'blink.user_timing', 'loading', 'disabled-by-default-devtools.timeline', 'disabled-by-default-v8.cpu_profiler'].join(','),
-    options: 'sampling-frequency=10000',
-  })
-  const started = performance.now()
+  const startedAt = await startProfileWindow(page, cdp)
   await action()
-  const durationMs = performance.now() - started
-  const { profile } = await cdp.send('Profiler.stop')
+  const { durationMs, profile, frames } = await stopProfileWindow(page, cdp, { startedAt, tracePath })
   writeFileSync(cpuPath, JSON.stringify(profile))
-  const tracingComplete = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve))
-  await cdp.send('Tracing.end')
-  const traceEvent = await tracingComplete
-  await copyCdpStream(cdp, traceEvent.stream, tracePath)
-  const frames = await stopFrameProbe(page, framePromise)
   const pageEvidence = await page.evaluate(() => ({
     url: location.href,
     longTasks: window.__runlabPerf?.longTasks ?? [],
@@ -238,62 +226,6 @@ async function sampleScenario({ name, page, cdp, evidenceRoot, action }) {
     tracePath,
     cpuPath,
   }
-}
-
-function startFrameProbe(page) {
-  return page.evaluate(() => {
-    window.__runlabFrames = []
-    window.__runlabFramesActive = true
-    let previous = performance.now()
-    const tick = (now) => {
-      window.__runlabFrames.push(now - previous)
-      previous = now
-      if (window.__runlabFramesActive) requestAnimationFrame(tick)
-    }
-    requestAnimationFrame(tick)
-  })
-}
-
-async function stopFrameProbe(page, started) {
-  await started
-  return page.evaluate(() => {
-    window.__runlabFramesActive = false
-    const values = (window.__runlabFrames ?? []).filter((value) => value > 0)
-    values.sort((a, b) => a - b)
-    const percentile = (p) => values[Math.min(values.length - 1, Math.floor(values.length * p))] ?? 0
-    return {
-      count: values.length,
-      avgMs: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0,
-      p95Ms: percentile(0.95), p99Ms: percentile(0.99), maxMs: values.at(-1) ?? 0,
-      over33Ms: values.filter((value) => value > 33).length,
-      over50Ms: values.filter((value) => value > 50).length,
-      over100Ms: values.filter((value) => value > 100).length,
-    }
-  })
-}
-
-function summarizeCpuProfile(profile) {
-  const frames = new Map((profile.nodes ?? []).map((node) => [node.id, node.callFrame]))
-  const totals = new Map()
-  for (let index = 0; index < (profile.samples ?? []).length; index += 1) {
-    const frame = frames.get(profile.samples[index])
-    if (!frame) continue
-    const key = `${frame.functionName || '(anonymous)'} @ ${frame.url?.split('/').pop() || '(native)'}:${(frame.lineNumber ?? -1) + 1}`
-    totals.set(key, (totals.get(key) ?? 0) + Math.max(0, profile.timeDeltas?.[index] ?? 0) / 1000)
-  }
-  return [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([frame, selfMs]) => ({ frame, selfMs: Math.round(selfMs * 10) / 10 }))
-}
-
-async function copyCdpStream(cdp, handle, path) {
-  const output = createWriteStream(path)
-  while (true) {
-    const chunk = await cdp.send('IO.read', { handle })
-    output.write(chunk.base64Encoded ? Buffer.from(chunk.data, 'base64') : chunk.data)
-    if (chunk.eof) break
-  }
-  output.end()
-  await new Promise((resolve, reject) => { output.on('finish', resolve); output.on('error', reject) })
-  await cdp.send('IO.close', { handle })
 }
 
 async function clickVisibleSession(page, sessionId) {

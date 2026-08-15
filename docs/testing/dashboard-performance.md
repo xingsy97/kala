@@ -1,5 +1,7 @@
 # Dashboard production performance profiling
 
+For the reusable commands, evidence layout, A/B workflow, source-map attribution, scenario authoring rules, and troubleshooting, see [Dashboard production profiling runbook](dashboard-performance-runbook.md).
+
 ## Standard
 
 Performance conclusions must come from the embedded production Dashboard bundle running in real Chromium against the real Host. Unit timing and component fixtures may guard algorithms, but they do not establish user-visible performance.

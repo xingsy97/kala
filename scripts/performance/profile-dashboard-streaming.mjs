@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import puppeteer from 'puppeteer-core'
+import { browserMetadata, resolveChrome, startProfileWindow, stopProfileWindow } from './profiling-utils.mjs'
 
 const root = new URL('../..', import.meta.url).pathname
 const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
@@ -19,7 +20,7 @@ const workspace = join(stateRoot, 'workspace')
 const home = join(stateRoot, 'home')
 const evidenceRoot = process.env.PERF_EVIDENCE_ROOT ?? join(stateRoot, 'evidence')
 const token = `perf-${process.pid}-${Date.now()}`
-const chrome = process.env.CHROME_PATH ?? ['/usr/bin/chromium','/snap/bin/chromium','/usr/bin/google-chrome'].find(existsSync)
+const chrome = resolveChrome()
 let call = 0
 let host
 let executorProcess
@@ -62,20 +63,14 @@ try{
  const page=await browser.newPage();await page.setViewport({width:1440,height:900});await page.setCacheEnabled(false)
  await page.evaluateOnNewDocument(()=>{window.__perf={long:[]};new PerformanceObserver(list=>{for(const e of list.getEntries())window.__perf.long.push({startTime:e.startTime,duration:e.duration})}).observe({type:'longtask',buffered:true})})
  await page.goto(origin,{waitUntil:'networkidle2'});await page.waitForFunction(()=>[...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].some(e=>!e.hasAttribute('disabled')),{timeout:60000});await page.evaluate(()=>[...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].find(e=>!e.hasAttribute('disabled'))?.click());await page.waitForSelector('[data-testid="new-session-dialog"]');await page.click('[data-testid="new-session-create"]');await page.waitForSelector('[data-testid="new-session-dialog"]',{hidden:true});await page.waitForSelector('[data-testid="composer-input"]')
- const cdp=await page.target().createCDPSession();await cdp.send('Performance.enable');await cdp.send('Profiler.enable');await cdp.send('Profiler.setSamplingInterval',{interval:200});await cdp.send('Profiler.start');await startTrace(cdp);await startFrames(page);await page.evaluate(()=>window.__perf.long=[])
- const started=performance.now()
+ const cdp=await page.target().createCDPSession();await cdp.send('Performance.enable');const startedAt=await startProfileWindow(page,cdp);await page.evaluate(()=>window.__perf.long=[])
  await page.type('[data-testid="composer-input"]','stream a long markdown response');await page.click('[data-testid="composer-send"]');await page.waitForFunction(()=>document.body.innerText.includes('token-239'),{timeout:60000})
  await page.waitForSelector('[data-testid="composer-send"]');await page.type('[data-testid="composer-input"]','run eight read tools');await page.click('[data-testid="composer-send"]');await page.waitForFunction(()=>document.body.innerText.includes('STREAMING_PROFILE_COMPLETE'),{timeout:60000})
- const durationMs=performance.now()-started;const {profile}=await cdp.send('Profiler.stop');writeFileSync(join(evidenceRoot,'streaming.cpuprofile.json'),JSON.stringify(profile));const traceComplete=new Promise(r=>cdp.once('Tracing.tracingComplete',r));await cdp.send('Tracing.end');const event=await traceComplete;await copy(cdp,event.stream,join(evidenceRoot,'streaming.trace.json'))
- const frames=await stopFrames(page);const pageData=await page.evaluate(()=>({longTasks:window.__perf.long,domNodes:document.getElementsByTagName('*').length,transcriptRows:document.querySelectorAll('[data-virt-index]').length,traceRows:document.querySelectorAll('[data-testid="timeline-row"]').length,minimapItems:document.querySelectorAll('[data-testid="timeline-minimap-item"]').length}))
- const metrics=Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(m=>[m.name,m.value]));const report={durationMs,frames,...pageData,metrics,providerCalls:call};writeFileSync(join(evidenceRoot,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({evidenceRoot,report},null,2))
+ const {durationMs,profile,frames}=await stopProfileWindow(page,cdp,{startedAt,tracePath:join(evidenceRoot,'streaming.trace.json')});writeFileSync(join(evidenceRoot,'streaming.cpuprofile.json'),JSON.stringify(profile));const pageData=await page.evaluate(()=>({longTasks:window.__perf.long,domNodes:document.getElementsByTagName('*').length,transcriptRows:document.querySelectorAll('[data-virt-index]').length,traceRows:document.querySelectorAll('[data-testid="timeline-row"]').length,minimapItems:document.querySelectorAll('[data-testid="timeline-minimap-item"]').length}))
+ const metrics=Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(m=>[m.name,m.value]));const report={generatedAt:new Date().toISOString(),artifactMetadata:await browserMetadata(browser,page,bundle,root),parameters:{tokenChunks:240,toolCalls:8,viewport:{width:1440,height:900}},durationMs,frames,...pageData,metrics,providerCalls:call};writeFileSync(join(evidenceRoot,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({evidenceRoot,report},null,2))
 }catch(error){console.error(error);console.error(processLogs.slice(-50).join(''));throw error}finally{await browser?.close().catch(()=>{});for(const p of [executorProcess,host])if(p?.exitCode===null)p.kill('SIGTERM');await new Promise(r=>provider.close(r)).catch(()=>{});if(!process.env.PERF_KEEP_STATE)rmSync(stateRoot,{recursive:true,force:true})}
 
 function sse(res,value){res.write(`data: ${JSON.stringify(value)}\n\n`)}
 function captureLogs(name,process){process.stdout?.on('data',chunk=>processLogs.push(`[${name}] ${chunk}`));process.stderr?.on('data',chunk=>processLogs.push(`[${name}] ${chunk}`))}
 async function waitFor(check,timeout){const end=Date.now()+timeout;while(Date.now()<end){if(check())return;await sleep(100)}throw new Error(`condition timeout; logs=${processLogs.slice(-30).join('')}`)}
 async function waitHttp(url){for(let i=0;i<150;i++){try{if((await fetch(url)).ok)return}catch{}await sleep(200)}throw new Error(`timeout ${url}; logs=${processLogs.slice(-30).join('')}`)}
-async function startTrace(cdp){await cdp.send('Tracing.start',{transferMode:'ReturnAsStream',categories:'devtools.timeline,v8.execute,blink.user_timing,disabled-by-default-devtools.timeline,disabled-by-default-v8.cpu_profiler',options:'sampling-frequency=10000'})}
-async function copy(cdp,handle,path){const out=createWriteStream(path);while(true){const x=await cdp.send('IO.read',{handle});out.write(x.base64Encoded?Buffer.from(x.data,'base64'):x.data);if(x.eof)break}out.end();await new Promise((r,j)=>{out.on('finish',r);out.on('error',j)});await cdp.send('IO.close',{handle})}
-async function startFrames(page){await page.evaluate(()=>{window.__frames=[];window.__framesOn=true;let p=performance.now();const f=n=>{window.__frames.push(n-p);p=n;if(window.__framesOn)requestAnimationFrame(f)};requestAnimationFrame(f)})}
-async function stopFrames(page){return page.evaluate(()=>{window.__framesOn=false;const v=window.__frames.filter(x=>x>0).sort((a,b)=>a-b),q=p=>v[Math.min(v.length-1,Math.floor(v.length*p))]??0;return{count:v.length,avgMs:v.reduce((a,b)=>a+b,0)/(v.length||1),p95Ms:q(.95),p99Ms:q(.99),maxMs:v.at(-1)??0,over33Ms:v.filter(x=>x>33).length,over50Ms:v.filter(x=>x>50).length,over100Ms:v.filter(x=>x>100).length}})}
