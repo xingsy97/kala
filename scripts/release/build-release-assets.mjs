@@ -194,6 +194,7 @@ function finalizeRelease() {
         'deploy/standalone-systemd/agent-runlab-ingress.service',
         'deploy/standalone-systemd/agent-runlab-unit@.service',
         'deploy/standalone-systemd/agent-runlab-deploy-supervisor.service',
+        'deploy/standalone-systemd/agent-runlab-migration-finalizer.service',
         'scripts/deploy/install-standalone-systemd.mjs',
         'scripts/deploy/cutover-standalone-systemd.mjs',
         'scripts/deploy/standalone-data-migration.mjs',

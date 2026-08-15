@@ -22,7 +22,7 @@ async function main() {
     await copyFile(join(source, name), join(releaseDir, name))
   }
   await mkdir(join(root, 'control'), { recursive: true, mode: 0o755 })
-  for (const name of ['agent-runlab-standalone-ingress.cjs', 'agent-runlab-deploy-supervisor.cjs']) await copyFile(join(source, name), join(root, 'control', name))
+  for (const name of ['agent-runlab-standalone-ingress.cjs', 'agent-runlab-deploy-supervisor.cjs', 'cutover-standalone-systemd.mjs', 'standalone-data-migration.mjs', 'rollback-standalone-systemd.mjs']) await copyFile(join(source, name), join(root, 'control', name))
   await mkdir(join(dataRoot, 'deploy', 'requests'), { recursive: true, mode: 0o700 })
   await mkdir(join(dataRoot, 'deploy', 'slots'), { recursive: true, mode: 0o700 })
   await mkdir(join(dataRoot, 'units', 'local'), { recursive: true, mode: 0o700 })
@@ -35,7 +35,7 @@ async function main() {
   await writeFile('/etc/agent-runlab/slots/green.env', 'HOST_PORT=13002\n', { mode: 0o644 })
   const route = { schemaVersion: 1, generation: 1, activeSlot: 'blue', slots: { blue: { origin: 'http://127.0.0.1:13001', releaseId }, green: { origin: 'http://127.0.0.1:13002', releaseId } }, updatedAt: new Date().toISOString() }
   await writeFile(join(dataRoot, 'deploy', 'route-state.json'), `${JSON.stringify(route, null, 2)}\n`, { mode: 0o644 })
-  for (const name of ['agent-runlab-ingress.service', 'agent-runlab-unit@.service', 'agent-runlab-deploy-supervisor.service']) await copyFile(join(source, name), join(unitDir, name))
+  for (const name of ['agent-runlab-ingress.service', 'agent-runlab-unit@.service', 'agent-runlab-deploy-supervisor.service', 'agent-runlab-migration-finalizer.service']) await copyFile(join(source, name), join(unitDir, name))
   await run('chown', ['-R', 'root:root', join(dataRoot, 'deploy')])
   await run('chmod', ['-R', 'go-w', join(dataRoot, 'deploy')])
   await run('chmod', ['711', dataRoot, join(dataRoot, 'units'), join(dataRoot, 'deploy'), join(dataRoot, 'deploy', 'releases'), join(dataRoot, 'deploy', 'slots'), releaseDir])

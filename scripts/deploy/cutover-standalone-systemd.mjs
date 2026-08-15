@@ -14,6 +14,7 @@ async function main() {
   const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
   if (receipt.phase !== 'installed_disabled') throw new Error('migration is not staged or was already attempted')
   const legacySettingsFingerprint = await settingsFingerprint('http://127.0.0.1:13000/settings')
+  await waitForLegacyBoundary()
   await run('systemctl', ['daemon-reload'])
   await run('systemctl', ['stop', legacyService])
   let migration
@@ -43,6 +44,21 @@ async function main() {
     await writeFile(receiptPath, `${JSON.stringify({ ...receipt, phase: 'rolled_back', error: error instanceof Error ? error.message : String(error), rolledBackAt: new Date().toISOString(), migration }, null, 2)}\n`, { mode: 0o600 })
     throw error
   }
+}
+
+async function waitForLegacyBoundary() {
+  const deadline = Date.now() + 60 * 60_000
+  while (Date.now() < deadline) {
+    const quiescence = await fetch('http://127.0.0.1:13000/internal/runtime/quiescence', { signal: AbortSignal.timeout(5000) }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`quiescence returned ${response.status}`)))
+    if (quiescence.safe) {
+      const reserved = await fetch('http://127.0.0.1:13000/internal/runtime/cutover/reserve', { method: 'POST', signal: AbortSignal.timeout(120_000) })
+      if (!reserved.ok) throw new Error(`cutover reservation returned ${reserved.status}: ${await reserved.text()}`)
+      const result = await reserved.json()
+      if (result.safe) return
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 1000))
+  }
+  throw new Error('legacy Host did not reach a safe cutover boundary within one hour')
 }
 
 async function settingsFingerprint(url) {

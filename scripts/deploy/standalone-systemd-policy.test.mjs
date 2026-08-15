@@ -35,4 +35,8 @@ test('installer fails closed on old Node and records explicit container backend 
   assert.match(cutover, /rollbackStandaloneData/)
   assert.match(migration, /\.claude\/settings\.json/)
   assert.match(migration, /\.config\/agent-kernel\/models\.json/)
+  const finalizer = await read('deploy/standalone-systemd/agent-runlab-migration-finalizer.service')
+  assert.match(finalizer, /Type=oneshot/)
+  assert.match(finalizer, /TimeoutStartSec=0/)
+  assert.match(finalizer, /cutover-standalone-systemd\.mjs/)
 })
