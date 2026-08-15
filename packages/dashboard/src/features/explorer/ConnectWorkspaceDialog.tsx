@@ -16,7 +16,9 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  dialogMobileSheetClassName,
 } from '../../components/ui/dialog.js'
+import { cn } from '../../lib/utils.js'
 
 type Props = {
   open: boolean
@@ -205,29 +207,30 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid max-h-[min(var(--ak-viewport-h,92dvh),48rem)] w-[calc(100vw-1rem)] min-w-0 max-w-3xl grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden border-border/50 bg-popover p-0 pb-[env(safe-area-inset-bottom)] shadow-2xl sm:w-[calc(100vw-2rem)] sm:rounded-3xl" data-testid="connect-workspace-dialog">
-        <DialogHeader className="px-5 pb-4 pt-5 pr-14 sm:px-6 sm:pb-5 sm:pt-6 sm:pr-14">
-          <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
-            <Terminal className="h-[18px] w-[18px]" />
+      <DialogContent className={cn(dialogMobileSheetClassName, 'grid min-w-0 max-w-4xl grid-rows-[auto_minmax(0,1fr)] border-0 bg-popover shadow-2xl sm:max-h-[min(var(--ak-viewport-h,92dvh),46rem)] sm:rounded-3xl')} data-testid="connect-workspace-dialog">
+        <DialogHeader className="border-b border-border/35 px-5 pb-4 pt-5 pr-14 sm:px-7 sm:pb-5 sm:pt-6 sm:pr-16">
+          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground" aria-hidden="true">
+            <Terminal className="h-3.5 w-3.5" /> Workspace setup
           </span>
-          <DialogTitle className="text-xl font-semibold tracking-tight">{t('explorer.connectDialog.title')}</DialogTitle>
-          <DialogDescription className="max-w-xl text-sm leading-5">{t('explorer.connectDialog.description')}</DialogDescription>
+          <DialogTitle className="text-xl font-semibold tracking-tight sm:text-2xl">{t('explorer.connectDialog.title')}</DialogTitle>
+          <DialogDescription className="max-w-2xl text-sm leading-5">{t('explorer.connectDialog.description')}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-5 pb-5 sm:px-6 sm:pb-6">
-          <div className="min-w-0 space-y-6">
+        <div className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto p-5 sm:p-7">
+          <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)] lg:gap-8">
             <section className="min-w-0 space-y-5" aria-label="Installation options">
+              <SectionLabel index="1" label={t('explorer.connectDialog.platform')} />
               <PlatformGroup label={t('explorer.connectDialog.platform')} selected={form.platform} labelFor={(value) => t(`explorer.connectDialog.platforms.${value}`)} onChange={(platform) => updateForm({ platform })} />
               <ChoiceGroup label={t('explorer.connectDialog.runMode')} values={MODES} selected={form.mode} labelFor={(value) => t(`explorer.connectDialog.modes.${value}`)} onChange={(mode) => updateForm({ mode })} />
-              <p className="text-xs leading-5 text-muted-foreground" data-testid="connect-workspace-mode-description">{t(`explorer.connectDialog.modeDescriptions.${form.mode}`)}</p>
+              <p className="rounded-xl bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground" data-testid="connect-workspace-mode-description">{t(`explorer.connectDialog.modeDescriptions.${form.mode}`)}</p>
             </section>
-            <section className="min-w-0 space-y-3">
+            <section className="min-w-0 space-y-3 lg:border-l lg:border-border/35 lg:pl-8">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-medium text-foreground">{t('explorer.connectDialog.runCommand')}</h3>
+                <SectionLabel index="2" label={t('explorer.connectDialog.runCommand')} />
                 <InstallStatus status={installation?.status ?? 'preparing'} label={t(`explorer.connectDialog.statuses.${installation?.status ?? 'preparing'}`)} />
               </div>
               <TerminalCommand command={command} copied={copied} onCopy={() => void copy()} />
               {pairingCode ? (
-                <div className="flex min-w-0 flex-col gap-3 rounded-xl bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between" data-testid="connect-workspace-pairing">
+                <div className="flex min-w-0 flex-col gap-3 rounded-2xl bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between" data-testid="connect-workspace-pairing">
                   <span className="flex min-w-0 items-center gap-2 text-sm"><ShieldCheck className="h-4 w-4 flex-none text-amber-600 dark:text-amber-300" /><span className="text-muted-foreground">{t('explorer.connectDialog.installationStatus')}</span><strong className="font-mono tracking-widest text-foreground">{pairingCode}</strong></span>
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" disabled={deciding} onClick={() => void decide('approve')}>{t('explorer.connectDialog.approve')}</Button>
@@ -235,7 +238,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
                   </div>
                 </div>
               ) : null}
-              {error || copyError ? <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error ?? copyError}</p> : null}
+              {error || copyError ? <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error ?? copyError}</p> : null}
             </section>
           </div>
         </div>
@@ -244,19 +247,23 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
   )
 }
 
+function SectionLabel({ index, label }: { index: string; label: string }): JSX.Element {
+  return <h3 className="flex items-center gap-2 text-sm font-medium text-foreground"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 font-mono text-[10px] text-primary">{index}</span>{label}</h3>
+}
+
 function PlatformGroup({ label, selected, labelFor, onChange }: { label: string; selected: ExecutorInstallPlatform; labelFor(value: ExecutorInstallPlatform): string; onChange(value: ExecutorInstallPlatform): void }): JSX.Element {
-  const icons = { linux: <LinuxMark />, macos: <Apple className="h-[18px] w-[18px]" />, windows: <Monitor className="h-[18px] w-[18px]" /> }
-  return <fieldset className="min-w-0 space-y-2.5"><legend className="text-sm font-medium">{label}</legend><div className="grid grid-cols-3 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex h-12 min-w-0 items-center justify-center gap-2 rounded-xl px-2 text-xs font-medium transition-colors sm:h-11 ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.55)]' : 'bg-muted/25 text-muted-foreground hover:bg-accent/60 hover:text-foreground'}`}>{icons[value]}<span className="truncate">{labelFor(value)}</span></button>)}</div></fieldset>
+  const icons = { linux: <LinuxMark />, macos: <Apple className="h-5 w-5" />, windows: <Monitor className="h-5 w-5" /> }
+  return <fieldset className="min-w-0"><legend className="sr-only">{label}</legend><div className="grid grid-cols-3 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-medium transition-[background-color,color,box-shadow,transform] active:scale-[0.98] ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.5)]' : 'bg-muted/20 text-muted-foreground hover:bg-accent/55 hover:text-foreground'}`}>{icons[value]}<span className="truncate">{labelFor(value)}</span></button>)}</div></fieldset>
 }
 
 function ChoiceGroup<T extends string>({ label, values, selected, labelFor, onChange }: { label: string; values: readonly T[]; selected: T; labelFor(value: T): string; onChange(value: T): void }): JSX.Element {
-  return <fieldset className="min-w-0 space-y-2.5"><legend className="text-sm font-medium">{label}</legend><div className="grid min-w-0 grid-cols-2 rounded-xl bg-muted/35 p-1">{values.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`h-10 min-w-0 rounded-lg px-3 text-xs font-medium transition-colors sm:h-9 ${selected === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{labelFor(value)}</button>)}</div></fieldset>
+  return <fieldset className="min-w-0 space-y-2.5"><legend className="text-xs font-medium text-muted-foreground">{label}</legend><div className="grid min-w-0 grid-cols-2 rounded-xl bg-muted/30 p-1">{values.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`h-10 min-w-0 rounded-lg px-3 text-xs font-medium transition-colors sm:h-9 ${selected === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{labelFor(value)}</button>)}</div></fieldset>
 }
 
 function TerminalCommand({ command, copied, onCopy }: { command: string; copied: boolean; onCopy(): void }): JSX.Element {
   const { t } = useTranslation()
   if (command.includes('\n') || command.includes('\r')) throw new Error('Executor install command must be one physical line')
-  return <section className="min-w-0 max-w-full overflow-hidden rounded-2xl bg-foreground text-background shadow-[0_12px_30px_hsl(var(--foreground)/0.12)]" data-testid="executor-terminal-command"><div className="flex min-w-0 items-start gap-3 px-4 py-4 sm:items-center"><Terminal className="mt-0.5 h-4 w-4 flex-none opacity-55 sm:mt-0" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-5">{command || t('explorer.connectDialog.preparing')}</pre><Button type="button" variant="ghost" size="sm" className="h-8 flex-none gap-1.5 rounded-lg bg-background/10 px-2.5 text-[11px] text-background hover:bg-background/20 hover:text-background" onClick={onCopy} disabled={!command} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button></div></section>
+  return <section className="min-w-0 max-w-full overflow-hidden rounded-2xl bg-foreground text-background shadow-[0_12px_30px_hsl(var(--foreground)/0.12)]" data-testid="executor-terminal-command"><div className="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-start"><span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none opacity-55" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-5">{command || t('explorer.connectDialog.preparing')}</pre></span><Button type="button" variant="ghost" size="sm" className="h-9 w-full flex-none gap-1.5 rounded-lg bg-background/10 px-3 text-[11px] text-background hover:bg-background/20 hover:text-background sm:w-auto" onClick={onCopy} disabled={!command} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button></div></section>
 }
 
 function InstallStatus({ status, label }: { status: string; label: string }): JSX.Element {

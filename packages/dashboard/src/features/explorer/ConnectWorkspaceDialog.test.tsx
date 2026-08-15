@@ -55,8 +55,13 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByTestId('connect-workspace-linux').className).toContain('bg-accent')
     expect(screen.getByTestId('connect-workspace-service').className).toContain('bg-background')
     expect(screen.getByTestId('installation-status').querySelector('svg')).toBeTruthy()
+    const dialog = screen.getByTestId('connect-workspace-dialog')
+    expect(dialog.className).toContain('rounded-t-2xl')
+    expect(dialog.className).toContain('sm:rounded-3xl')
+    expect(screen.getByText('Workspace setup')).toBeTruthy()
     const terminal = screen.getByTestId('executor-terminal-command')
     expect(terminal.className).toContain('rounded-2xl')
+    expect(screen.getByTestId('copy-executor-command').className).toContain('w-full')
     expect(terminal.className).not.toContain('ring-1')
     const command = terminal.textContent ?? ''
     expect(command).toContain('/install')
