@@ -963,10 +963,10 @@ function WorkspaceRow({
       ? t('explorer.sessionsNoWorkspace')
       : w.online ? t('explorer.online') : t('explorer.offline')
   const metaBadgeCls = w.workspaceId === null
-    ? 'border-muted-foreground/20 bg-muted/45 text-muted-foreground'
+    ? 'bg-muted-foreground/45'
     : w.online
-      ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-      : 'border-muted-foreground/20 bg-muted/45 text-muted-foreground'
+      ? 'bg-emerald-500'
+      : 'bg-muted-foreground/45'
   const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
   const canCreateSession = w.workspaceId !== null
   const canRename = w.workspaceId !== null
@@ -982,7 +982,7 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws relative min-w-0 cursor-pointer select-none px-3 py-1.5 hover:bg-accent/50',
+        'group/ws relative min-w-0 cursor-pointer select-none px-3 py-2 hover:bg-accent/45',
         WORKSPACE_ROW_GRID,
       )}
     >
@@ -1015,14 +1015,8 @@ function WorkspaceRow({
           ariaLabel={t('explorer.renameWorkspace')}
         />
       ) : (
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            className={cn('inline-flex h-4 flex-none items-center rounded border px-1 text-[10px] font-semibold leading-none', metaBadgeCls)}
-            data-testid="workspace-status-badge"
-            title={meta}
-          >
-            {meta}
-          </span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn('h-2 w-2 flex-none rounded-full', metaBadgeCls)} data-testid="workspace-status-badge" title={meta} aria-label={meta}><span className="sr-only">{meta}</span></span>
           <span
             className="min-w-0 truncate font-semibold leading-5 text-foreground"
             style={{ fontSize: fontSizePx }}
@@ -1168,9 +1162,9 @@ function SessionRow({
       data-testid="session-row"
       data-session-id={s.sessionId}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden px-3 py-1.5 transition-colors',
-        'hover:bg-accent',
-        selected && 'bg-accent',
+        'group relative min-w-0 cursor-pointer overflow-hidden rounded-lg px-3 py-1.5 transition-colors',
+        'hover:bg-accent/55',
+        selected && 'bg-accent/85',
         EXPLORER_ROW_GRID,
       )}
       onClick={() => {
@@ -1216,7 +1210,7 @@ function SessionRow({
     >
       {selected ? (
         <span
-          className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full bg-primary"
+          className="absolute bottom-2 left-0 top-2 w-0.5 rounded-r-full bg-primary"
           data-testid="session-selected-marker"
           aria-hidden="true"
         />
