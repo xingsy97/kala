@@ -122,23 +122,26 @@ export function GroupSummaryRow({
     <button
       type="button"
       onClick={onClick}
-      className="group/summary grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 rounded-md px-2 py-2 text-left text-xs transition-colors hover:bg-muted sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-y-0.5"
+      className="group/summary grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 rounded-lg px-2 py-2 text-left text-xs transition-colors hover:bg-muted/70 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-y-0.5"
       data-testid={`grouped-tool-row-${row.callId}`}
     >
       <Icon className={cn('h-3 w-3 flex-none', toneClass)} aria-hidden="true" />
       <span className="min-w-0">
-        <span className="flex min-w-0 items-baseline gap-1.5">
-          <span className="flex-none font-mono text-[11px] font-semibold text-foreground">{toolName}</span>
+        <span className="flex min-w-0 items-baseline gap-1.5 text-muted-foreground">
+          <span className="flex-none font-mono text-[10px] font-medium">{toolName}</span>
           <span className="flex-none text-muted-foreground/60" aria-hidden="true">·</span>
           {hideTechnicalSummary ? (
             <span className={cn('min-w-0 whitespace-pre-wrap break-words text-[11px] leading-5 text-foreground', !intent && 'truncate')} title={intent ?? undefined}>
               {intent ?? fallbackSummary ?? missingIntentLabel}
             </span>
           ) : (
-            <span className="min-w-0 truncate font-mono text-[11px] text-foreground" title={row.primary}>
+            <span className="min-w-0 truncate font-mono text-[10px]" title={row.primary}>
               {row.primary}
             </span>
           )}
+        </span>
+        <span className="mt-0.5 block min-w-0 truncate text-[11px] leading-4 text-foreground/90" title={intent ?? fallbackSummary ?? missingIntentLabel} data-testid={`grouped-tool-primary-${row.callId}`}>
+          {intent ?? fallbackSummary ?? missingIntentLabel}
         </span>
         {!hideTechnicalSummary && text ? (
           <span className="mt-0.5 block truncate text-[10px] leading-4 text-muted-foreground sm:hidden" title={text}>{text}</span>
@@ -160,11 +163,7 @@ export function GroupSummaryRow({
           {text}
         </span>
       ) : null}
-      {intent ? (
-        <span className={hideTechnicalSummary ? 'sr-only' : 'col-start-2 col-end-4 min-w-0 truncate text-[11px] text-muted-foreground'} title={intent} data-testid={`grouped-tool-intent-${row.callId}`}>
-          {intent}
-        </span>
-      ) : null}
+      {intent ? <span className="sr-only" data-testid={`grouped-tool-intent-${row.callId}`}>{intent}</span> : null}
     </button>
   )
 }
