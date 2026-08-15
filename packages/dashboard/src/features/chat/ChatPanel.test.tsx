@@ -1572,6 +1572,9 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/grep · \/needle\//)).toBeTruthy()
     expect(screen.getByText(/edit · \/repo\/a\.ts/)).toBeTruthy()
     expect(screen.getByText(/bash · pnpm test/)).toBeTruthy()
+    const grepRow = screen.getByTestId('grouped-tool-row-c2')
+    expect(grepRow.querySelector('.sm\\:hidden')?.textContent).toContain('1 hit in /repo')
+    expect(grepRow.className).toContain('grid-cols-[auto_minmax(0,1fr)]')
     expect(screen.getByTestId('grouped-tool-intent-c1').textContent).toBe('Inspect the target implementation.')
     expect(screen.getByTestId('grouped-tool-intent-c4').textContent).toBe('Verify the change with focused tests.')
 

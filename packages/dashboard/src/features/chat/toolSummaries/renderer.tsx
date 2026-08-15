@@ -87,6 +87,7 @@ export function toolStatusIcon(ok: boolean): ToolIconRenderer {
 
 export function GroupSummaryRow({
   row,
+  toolName,
   status,
   intent,
   fallbackSummary,
@@ -94,6 +95,7 @@ export function GroupSummaryRow({
   onClick,
 }: {
   row: SummaryRow
+  toolName: string
   status?: 'succeeded' | 'failed' | 'approval' | 'running'
   intent?: string
   fallbackSummary?: string
@@ -124,15 +126,24 @@ export function GroupSummaryRow({
       data-testid={`grouped-tool-row-${row.callId}`}
     >
       <Icon className={cn('h-3 w-3 flex-none', toneClass)} aria-hidden="true" />
-      {hideTechnicalSummary ? (
-        <span className={cn('min-w-0 whitespace-pre-wrap break-words text-[11px] leading-5 text-foreground', !intent && 'truncate')} title={intent ?? undefined}>
-          {intent ?? fallbackSummary ?? missingIntentLabel}
+      <span className="min-w-0">
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="flex-none font-mono text-[11px] font-semibold text-foreground">{toolName}</span>
+          <span className="flex-none text-muted-foreground/60" aria-hidden="true">·</span>
+          {hideTechnicalSummary ? (
+            <span className={cn('min-w-0 whitespace-pre-wrap break-words text-[11px] leading-5 text-foreground', !intent && 'truncate')} title={intent ?? undefined}>
+              {intent ?? fallbackSummary ?? missingIntentLabel}
+            </span>
+          ) : (
+            <span className="min-w-0 truncate font-mono text-[11px] text-foreground" title={row.primary}>
+              {row.primary}
+            </span>
+          )}
         </span>
-      ) : (
-        <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={row.primary}>
-          {row.primary}
-        </span>
-      )}
+        {!hideTechnicalSummary && text ? (
+          <span className="mt-0.5 block truncate text-[10px] leading-4 text-muted-foreground sm:hidden" title={text}>{text}</span>
+        ) : null}
+      </span>
       {delta ? (
         <span className="col-start-2 inline-flex h-5 w-fit flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[11px] leading-none sm:col-start-3 sm:row-start-1" aria-label={`${delta.additions} additions, ${delta.deletions} deletions`}>
           <span className="inline-flex h-5 items-center gap-1 border-r border-border/50 px-1.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300">
@@ -145,7 +156,7 @@ export function GroupSummaryRow({
           </span>
         </span>
       ) : !hideTechnicalSummary && text ? (
-        <span className="inline-flex h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[11px] leading-none text-muted-foreground" title={text}>
+        <span className="hidden h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[11px] leading-none text-muted-foreground sm:inline-flex" title={text}>
           {text}
         </span>
       ) : null}

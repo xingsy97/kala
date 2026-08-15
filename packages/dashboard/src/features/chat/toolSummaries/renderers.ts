@@ -290,6 +290,7 @@ export const lsRenderer: GroupedToolRenderer = ({ calls, results }) => {
 
 export const RENDERERS: Record<string, GroupedToolRenderer> = {
   bash: bashRenderer,
+  shell: bashRenderer,
   read: readRenderer,
   read_file: readRenderer,
   read_files: readFilesRenderer,

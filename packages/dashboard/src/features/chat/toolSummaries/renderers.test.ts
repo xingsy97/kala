@@ -12,6 +12,15 @@ function result(callId: string, ok = true, content = 'ok'): ToolResultContent {
 }
 
 describe('tool summary renderers', () => {
+  it('summarizes shell with the command instead of generic key-value input', () => {
+    const rows = pickRenderer('shell')({
+      calls: [call('shell', { command: 'git status --short && git diff --check' }, 'c1')],
+      results: new Map([['c1', result('c1')]]),
+    })
+
+    expect(rows).toEqual([{ callId: 'c1', primary: 'git status --short && git diff --check', secondary: 'ok', ok: true }])
+  })
+
   it('summarizes read_file like a single file read', () => {
     const rows = pickRenderer('read_file')({
       calls: [call('read_file', { path: 'src/app.ts' }, 'c1')],

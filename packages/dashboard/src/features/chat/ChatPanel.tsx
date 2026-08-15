@@ -3382,6 +3382,7 @@ function ToolCallGroupBlock({
               >
                 <GroupSummaryRow
                   row={row}
+                  toolName={call.name}
                   intent={call.intent}
                   status={rowStatus}
                   onClick={() =>
