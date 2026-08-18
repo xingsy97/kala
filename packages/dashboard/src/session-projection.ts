@@ -137,7 +137,11 @@ function projectionFromCache(cached: CachedSessionView): Partial<SessionProjecti
     state: cached.state, config: cached.config, contextSnapshot: cached.contextSnapshot,
     timeline: cached.timeline, queuedMessages: cached.queuedMessages, lastError: cached.lastError,
     parentSessionId: cached.parentSessionId, parentCursor: cached.parentCursor,
-    selectedModel: cached.selectedModel, hydratedSessionId: cached.sessionId,
+    // Cached content is paint-ready, but it is not an authoritative live
+    // baseline. Only session:ready may mark the current selection hydrated;
+    // otherwise a stale cached running state can override a terminal Host
+    // summary while switching Sessions and make a completed row flash running.
+    selectedModel: cached.selectedModel, hydratedSessionId: null,
   }
 }
 

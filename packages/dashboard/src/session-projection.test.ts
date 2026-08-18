@@ -74,6 +74,28 @@ describe('session projection reducer', () => {
     expect(gap.timeline.map((entry) => entry.seq)).toEqual([1, 3])
   })
 
+  it('keeps cached running state non-authoritative until session:ready', () => {
+    const cachedState = { ...createInitialState({ sessionId: 'session-done' }), status: 'executing_tools' as const }
+    const cached = {
+      sessionId: 'session-done', status: 'ready' as const, state: cachedState, config,
+      contextSnapshot, timeline: [], queuedMessages: [], lastError: null,
+      parentSessionId: null, parentCursor: null, selectedModel: null, hydratedSessionId: 'session-done',
+    }
+    const selectedFromCache = reduceSessionProjection(EMPTY_SESSION_PROJECTION, {
+      kind: 'select', generation: 1, sessionId: 'session-done', cached,
+    })
+
+    expect(selectedFromCache.state?.status).toBe('executing_tools')
+    expect(selectedFromCache.hydratedSessionId).toBeNull()
+
+    const authoritativeDone = { ...ready('session-done'), state: { ...ready('session-done').state, status: 'done' as const } }
+    const hydrated = reduceSessionProjection(selectedFromCache, {
+      kind: 'ready', generation: 1, sessionId: 'session-done', payload: authoritativeDone,
+    })
+    expect(hydrated.hydratedSessionId).toBe('session-done')
+    expect(hydrated.state?.status).toBe('done')
+  })
+
   it('accepts authoritative state and context as one correction', () => {
     const current = selected('session-a')
     const authoritativeState = {

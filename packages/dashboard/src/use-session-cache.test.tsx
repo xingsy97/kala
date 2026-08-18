@@ -318,7 +318,7 @@ describe('useSession session view cache', () => {
     const { result } = renderHook(() => useSession({ host: 'http://host.test', sessionId: 's1', cache }))
 
     await waitFor(() => expect(result.current.timeline.map((entry) => entry.seq)).toEqual([1, 3]))
-    expect(result.current.hydratedSessionId).toBe('s1')
+    expect(result.current.hydratedSessionId).toBeNull()
 
     sockets[0]!.serverEmit('session:ready', {
       sessionId: 's1',
@@ -329,6 +329,7 @@ describe('useSession session view cache', () => {
       contextSnapshot: null,
     })
 
+    await waitFor(() => expect(result.current.hydratedSessionId).toBe('s1'))
     expect(sockets[0]!.emitted).toContainEqual({
       event: 'client:load_history',
       payload: { sessionId: 's1', sinceCursor: 3 },

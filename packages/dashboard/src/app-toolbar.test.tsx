@@ -135,6 +135,23 @@ describe('deriveSelectedSessionActivity', () => {
     expect(activity.usesLiveProjection).toBe(false)
   })
 
+  it('keeps a completed Host summary stable while stale cached running content paints', () => {
+    const activity = deriveSelectedSessionActivity({
+      selectedSessionId: 'session-done',
+      hydratedSessionId: null,
+      summaryStatus: 'done',
+      liveStatus: 'executing_tools',
+      streamingActive: false,
+      awaitingAck: false,
+      compactRunning: false,
+    })
+
+    expect(activity.status).toBe('done')
+    expect(activity.indicatorStatus).toBe('done')
+    expect(activity.derived.isRunning).toBe(false)
+    expect(activity.usesLiveProjection).toBe(false)
+  })
+
   it('uses live state only after the selected session projection is hydrated', () => {
     const activity = deriveSelectedSessionActivity({
       selectedSessionId: 'session-b',
