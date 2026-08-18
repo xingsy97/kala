@@ -106,7 +106,9 @@ for (const installer of ['install-executor.sh', 'install-executor.ps1']) {
   for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'SHA256SUMS', 'runlab-executor-', '--internal-installer']) {
     if (!text.includes(marker)) fail(`${installer} missing required installer marker: ${marker}`)
   }
-  if (text.includes('agent-kernel-executor.cjs') || text.includes('manifest.json')) fail(`${installer} must use the Host-scoped checksum index without CJS or manifest fallback`)
+  if (text.includes('manifest.json')) fail(`${installer} must use the Host-scoped checksum index without manifest fallback`)
+  if (installer === 'install-executor.sh' && text.includes('agent-kernel-executor.cjs')) fail(`${installer} must remain native-only`)
+  if (installer === 'install-executor.ps1' && (!text.includes('agent-kernel-executor.cjs') || !text.includes('Get-Command node'))) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
 }
 const installerSyntax = spawnSync('bash', ['-n', join(releaseDir, 'install-executor.sh')], { stdio: 'inherit' })
 if (installerSyntax.status !== 0) fail('install-executor.sh failed bash syntax check')

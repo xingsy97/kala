@@ -24,9 +24,9 @@ on:
         required: false
         default: ''
       native_targets:
-        description: 'Comma-separated native targets to build: any of linux-x64, darwin-x64, win32-x64. Empty = linux-x64 only.'
+        description: 'Comma-separated native targets to build: any of linux-x64, darwin-x64, win32-x64. Empty builds all supported desktop x64 targets.'
         required: false
-        default: 'linux-x64'
+        default: 'linux-x64,darwin-x64,win32-x64'
 
 jobs:
   resolve:
@@ -73,7 +73,7 @@ jobs:
           esac
 
           if [ -z "$NATIVE_TARGETS" ]; then
-            NATIVE_TARGETS="linux-x64"
+            NATIVE_TARGETS="linux-x64,darwin-x64,win32-x64"
           fi
           MATRIX_ENTRIES=""
           for t in $(echo "$NATIVE_TARGETS" | tr ',' ' '); do
@@ -126,7 +126,9 @@ jobs:
       - uses: actions/upload-artifact@v5
         with:
           name: native-${{ matrix.target }}
-          path: release/agent-kernel-*-${{ matrix.target }}*
+          path: |
+            release/agent-kernel-*-${{ matrix.target }}*
+            release/runlab-executor-${{ matrix.target }}*
           if-no-files-found: error
 
   cjs-release:
@@ -223,6 +225,13 @@ jobs:
           find release -maxdepth 1 -type f \( -name 'agent-kernel-*' -o -name '*.cjs' -o -name '*.sh' \) -print0 \
             | xargs -0 -r chmod +x
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --finalize-only
+      - name: Require installable desktop Executor assets
+        if: needs.resolve.outputs.component == 'all' || needs.resolve.outputs.component == 'executor'
+        run: |
+          test -f release/runlab-executor-linux-x64
+          test -f release/runlab-executor-darwin-x64
+          test -f release/runlab-executor-win32-x64.exe
+          grep -q 'runlab-executor-win32-x64.exe' release/SHA256SUMS
       - run: pnpm run verify:release-assets
       - name: Upload native assets and refreshed metadata
         env:

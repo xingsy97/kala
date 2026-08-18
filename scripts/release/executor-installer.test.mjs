@@ -39,7 +39,15 @@ test('generates fail-closed installers that require checksummed native executabl
     assert.match(text, /--internal-installer/)
   }
   assert.doesNotMatch(sh, /agent-kernel-executor\.cjs|manifest\.json/)
-  assert.doesNotMatch(ps1, /agent-kernel-executor\.cjs|manifest\.json/)
+  assert.match(ps1, /agent-kernel-executor\.cjs/)
+  assert.match(ps1, /Get-Command node/)
+  assert.match(ps1, /Get-FileHash -Algorithm SHA256/)
+  assert.match(ps1, /Read-Host 'Install the official Node\.js LTS package with Windows Package Manager \(winget\)\? \[y\/N\]'/)
+  assert.match(ps1, /winget\.Source install --id OpenJS\.NodeJS\.LTS --exact --source winget/)
+  assert.match(ps1, /RUNLAB_INSTALL_NODE/)
+  assert.match(ps1, /GetEnvironmentVariable\('Path', 'Machine'\)/)
+  assert.match(ps1, /Node\.js installation was not approved/)
+  assert.doesNotMatch(ps1, /manifest\.json|RuntimeInformation\]::OSArchitecture/)
 
   const dir = mkdtempSync(join(tmpdir(), 'runlab-installer-test-'))
   try {

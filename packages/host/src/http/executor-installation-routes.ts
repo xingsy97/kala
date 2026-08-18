@@ -184,7 +184,56 @@ function renderShellBootstrap(origin: string): string {
   return `#!/bin/sh\nset -eu\ncode=\${RUNLAB_SETUP_CODE:-}\nif [ -z "$code" ]; then printf 'Agent RunLab setup code: ' >&2; IFS= read -r code; fi\ncase "$code" in *[!A-Fa-f0-9-]*|'') echo 'Invalid setup code' >&2; exit 1;; esac\ncommand -v bash >/dev/null 2>&1 || { echo 'Agent RunLab installer: bash is required' >&2; exit 1; }\ninstaller=\$(mktemp)\ntrap 'rm -f "$installer"' EXIT HUP INT TERM\nprintf '\\nAgent RunLab Executor setup\\n'\nprintf '[1/4] Downloading verified installer...\\n'\ncurl --fail --silent --show-error --location --retry 3 --retry-connrefused -o "$installer" ${quoteSh(`${origin}/install/assets/install-executor.sh`)} || { echo 'Agent RunLab installer: failed to download installer asset' >&2; exit 1; }\nprintf '[2/4] Validating setup code...\\n'\nclaim=\$(curl --fail --silent --show-error --location --retry 3 --retry-connrefused -X POST -H 'content-type: application/json' -H 'accept: text/x-shellscript' --data "{\\"setupCode\\":\\"$code\\"}" ${quoteSh(`${origin}/install/session`)}) || { echo 'Agent RunLab installer: setup code is invalid, expired, or already used' >&2; exit 1; }\neval "$claim"\nprintf '[3/4] Installing Executor...\\n'\nbash "$installer"\n`
 }
 function renderPowerShellBootstrap(origin: string): string {
-  return `$ErrorActionPreference='Stop'; $code=$env:RUNLAB_SETUP_CODE; if([string]::IsNullOrWhiteSpace($code)){$code=Read-Host 'Agent RunLab setup code'}; $installer=Join-Path ([IO.Path]::GetTempPath()) ('runlab-bootstrap-'+[guid]::NewGuid()+'.ps1'); try { Invoke-WebRequest -UseBasicParsing -Uri ${quotePs(`${origin}/install/assets/install-executor.ps1`)} -OutFile $installer; $claim=Invoke-RestMethod -Method Post -ContentType 'application/json' -Body (@{setupCode=$code}|ConvertTo-Json -Compress) -Uri ${quotePs(`${origin}/install/session`)}; $claim.env.psobject.Properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name,[string]$_.Value,'Process') }; & $installer } finally { Remove-Item $installer -Force -ErrorAction SilentlyContinue }`
+  return `$ErrorActionPreference = 'Stop'
+$code = $env:RUNLAB_SETUP_CODE
+if ([string]::IsNullOrWhiteSpace($code)) { $code = Read-Host 'Agent RunLab setup code' }
+if ([string]::IsNullOrWhiteSpace($code)) { throw 'Agent RunLab setup code is required' }
+$installer = Join-Path ([IO.Path]::GetTempPath()) ('runlab-bootstrap-' + [guid]::NewGuid() + '.ps1')
+try {
+  Write-Host ''
+  Write-Host 'Agent RunLab Executor setup'
+  Write-Host '[1/4] Downloading verified installer...'
+  Invoke-WebRequest -UseBasicParsing -Uri ${quotePs(`${origin}/install/assets/install-executor.ps1`)} -OutFile $installer
+  if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+    $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    $target = switch ($architecture.ToLowerInvariant()) { 'amd64' { 'win32-x64' } 'x64' { 'win32-x64' } 'arm64' { 'win32-arm64' } default { throw "Unsupported Windows architecture: $architecture" } }
+    $sums = (Invoke-WebRequest -UseBasicParsing -Uri ${quotePs(`${origin}/install/assets/SHA256SUMS`)}).Content
+    $hasNative = $sums -match "(?m)^[0-9a-fA-F]{64}  runlab-executor-$([regex]::Escape($target))\\.exe$"
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    $nodeVersion = if ($nodeCommand) { & $nodeCommand.Source --version 2>$null } else { '' }
+    if (-not $hasNative -and (-not $nodeCommand -or $nodeVersion -notmatch '^v(2[2-9]|[3-9][0-9])\\.')) {
+      $installChoice = $env:RUNLAB_INSTALL_NODE
+      if ([string]::IsNullOrWhiteSpace($installChoice)) {
+        Write-Host ''
+        Write-Host 'Agent RunLab needs Node.js 22+ because this release has no native Windows Executor.'
+        $installChoice = Read-Host 'Install the official Node.js LTS package with Windows Package Manager (winget)? [y/N]'
+      }
+      if ($installChoice -notmatch '^(?i:y|yes|1|true)$') { throw 'Node.js installation was not approved. The setup code was not consumed. Install Node.js 22+ from https://nodejs.org/ and run this command again.' }
+      $winget = Get-Command winget -ErrorAction SilentlyContinue
+      if (-not $winget) { throw 'Windows Package Manager (winget) is unavailable. The setup code was not consumed. Install Node.js 22+ from https://nodejs.org/ and run this command again.' }
+      Write-Host 'Installing the official Node.js LTS package with winget...'
+      & $winget.Source install --id OpenJS.NodeJS.LTS --exact --source winget --accept-package-agreements --accept-source-agreements --silent
+      if ($LASTEXITCODE -ne 0) { throw "winget failed to install Node.js LTS (exit code $LASTEXITCODE). The setup code was not consumed." }
+      $env:Path = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -join [IO.Path]::PathSeparator
+      $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+      $nodeVersion = if ($nodeCommand) { & $nodeCommand.Source --version 2>$null } else { '' }
+      if (-not $nodeCommand -or $nodeVersion -notmatch '^v(2[2-9]|[3-9][0-9])\\.') { throw 'Node.js was installed but Node.js 22+ is not available in this PowerShell session. The setup code was not consumed; open a new PowerShell window and run this command again.' }
+      Write-Host "Node.js $nodeVersion installed successfully."
+    }
+  }
+  Write-Host '[2/4] Validating setup code...'
+  $claim = Invoke-RestMethod -Method Post -ContentType 'application/json' -Headers @{ Accept = 'application/json' } -Body (@{ setupCode = $code } | ConvertTo-Json -Compress) -Uri ${quotePs(`${origin}/install/session`)}
+  if ($null -eq $claim -or $null -eq $claim.env) { throw 'Agent RunLab Host returned an invalid installation session' }
+  $properties = $claim.env.PSObject.Properties
+  if ($null -eq $properties -or $properties.Count -eq 0) { throw 'Agent RunLab Host returned an empty installation environment' }
+  $properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name, [string]$_.Value, 'Process') }
+  Write-Host '[3/4] Starting Executor...'
+  & $installer
+  if ($LASTEXITCODE -ne 0) { throw "Agent RunLab Executor installer exited with code $LASTEXITCODE" }
+} finally {
+  Remove-Item $installer -Force -ErrorAction SilentlyContinue
+}
+`
 }
 function allowClaimAttempt(attempts: Map<string, { count: number; resetAt: number }>, key: string): boolean {
   const now = Date.now()
