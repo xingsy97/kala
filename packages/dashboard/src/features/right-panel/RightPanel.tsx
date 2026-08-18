@@ -46,7 +46,11 @@ export function RightPanel({
 }
 
 function PanelContent({ active, testId, children }: { active: boolean; testId: string; children: ReactNode }): JSX.Element {
-  return <div className={cn('absolute inset-0 min-h-0 overflow-hidden', !active && 'invisible pointer-events-none')} aria-hidden={!active} data-testid={testId}>{children}</div>
+  // Keep inactive tools mounted so terminal processes and file state survive tab
+  // switches, but remove their entire subtree from layout and hit testing.
+  // `visibility: hidden` is insufficient because descendants may explicitly set
+  // `visibility: visible`, which previously left Inspector covering Terminal.
+  return <div className={cn('absolute inset-0 min-h-0 overflow-hidden', !active && 'hidden')} aria-hidden={!active} data-testid={testId}>{children}</div>
 }
 
 function TabButton({ active, onClick, icon, label, testId }: { active: boolean; onClick(): void; icon: ReactNode; label: string; testId: string }): JSX.Element {
