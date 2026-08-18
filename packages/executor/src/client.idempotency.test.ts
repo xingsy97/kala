@@ -260,6 +260,41 @@ describe('executor idempotency', () => {
     })
   })
 
+  it('logs transient connection failures as compact summaries without raw error objects', () => {
+    const socket = makeMockSocket()
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() }
+    startExecutor({
+      host: 'https://host.example',
+      workspaceId: 'ws-log',
+      workspaceName: 'ws-log',
+      executorId: 'ex-log',
+      tools: [],
+      logger,
+      ioFactory: (() => socket) as never,
+      receiptStorePath: false,
+    })
+    const error = Object.assign(new Error('websocket error'), {
+      type: 'TransportError',
+      description: { message: 'Client network socket disconnected\nbefore secure TLS connection was established', code: 'ECONNRESET' },
+    })
+
+    socket.__trigger('connect_error', error)
+
+    expect(logger.warn).toHaveBeenCalledWith({
+      errorType: 'TransportError',
+      reason: 'Client network socket disconnected before secure TLS connection was established',
+      code: 'ECONNRESET',
+    }, 'host connection failed; retrying')
+    const warning = logger.warn.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(warning).not.toHaveProperty('err')
+    expect(JSON.stringify(warning)).not.toContain('stack')
+    expect(JSON.stringify(warning)).not.toContain('\\n')
+    expect(logger.debug).toHaveBeenCalledWith(expect.objectContaining({
+      errorType: 'TransportError',
+      diagnostic: expect.not.stringContaining('\n'),
+    }), 'host connection failure diagnostic')
+  })
+
   it('resolves permanentError on version_incompatible connect_error', async () => {
     const socket = makeMockSocket()
     const handle = startExecutor({

@@ -57,6 +57,29 @@ const noopLogger: Pick<RuntimeLogger, 'debug' | 'info' | 'warn'> = {
 const SENSITIVE_KEY = /(?:password|passwd|token|api[_-]?key|secret|authorization|cookie|credential|private[_-]?key|setup[_-]?code)/iu
 const LARGE_VALUE_KEY = /^(?:content|patch|stdin|oldText|newText)$/u
 const LOG_STRING_LIMIT = 500
+const CONNECTION_ERROR_LIMIT = 300
+const CONNECTION_DIAGNOSTIC_LIMIT = 1_500
+
+function compactLogText(value: unknown, limit: number): string {
+  const text = String(value ?? '').replace(/\s+/gu, ' ').trim()
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`
+}
+
+function connectionErrorSummary(error: unknown): { errorType: string; reason: string; code?: string | number } {
+  const value = error as { name?: unknown; type?: unknown; message?: unknown; description?: unknown; code?: unknown }
+  const description = value?.description as { message?: unknown; code?: unknown } | undefined
+  const innerReason = description && typeof description === 'object' ? description.message : description
+  const outerReason = value?.message ?? error
+  const reason = compactLogText(innerReason || outerReason || 'unknown connection error', CONNECTION_ERROR_LIMIT)
+  const errorType = compactLogText(value?.type || value?.name || 'ConnectionError', 80)
+  const code = description && typeof description === 'object' ? description.code : value?.code
+  return { errorType, reason, ...(typeof code === 'string' || typeof code === 'number' ? { code } : {}) }
+}
+
+function compactDiagnostic(error: unknown): string {
+  const value = error as { stack?: unknown; message?: unknown }
+  return compactLogText(value?.stack || value?.message || error, CONNECTION_DIAGNOSTIC_LIMIT)
+}
 
 function safeToolInput(value: unknown, key = '', depth = 0): unknown {
   if (SENSITIVE_KEY.test(key)) return '[REDACTED]'
@@ -228,22 +251,9 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   })
 
   socket.on('connect_error', (err) => {
-    const e = err as Error & { description?: unknown; context?: unknown; type?: string }
-    const detailParts: string[] = []
-    if (e.type) detailParts.push(`type=${e.type}`)
-    if (e.description) {
-      const d = e.description as { message?: string; code?: string | number } | number | string
-      if (typeof d === 'object' && d !== null) {
-        if (d.message) detailParts.push(`inner=${d.message}`)
-        if (d.code !== undefined) detailParts.push(`code=${d.code}`)
-      } else {
-        detailParts.push(`description=${d}`)
-      }
-    }
-    logger.warn(
-      { err: e, details: detailParts },
-      `connect_error: ${e.message || String(err)}`,
-    )
+    const summary = connectionErrorSummary(err)
+    logger.warn(summary, 'host connection failed; retrying')
+    logger.debug({ ...summary, diagnostic: compactDiagnostic(err) }, 'host connection failure diagnostic')
   })
   socket.on('disconnect', (reason) => {
     logger.info({ reason }, 'socket disconnected')
