@@ -69,7 +69,7 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
   })
 
-  it('keeps the thinking row visible while the transcript skeleton is loading', () => {
+  it('keeps the thinking row visible beside the compact history loading indicator', () => {
     render(
       <ChatPanel
         loading
@@ -84,6 +84,9 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+    expect(screen.getByTestId('transcript-history-loading-indicator').textContent).toContain('Loading conversation history')
+    expect(screen.getByTestId('transcript-loading-state').querySelectorAll('.rounded-full')).toHaveLength(1)
+    expect(screen.getByTestId('transcript-loading-state').querySelectorAll('.h-16')).toHaveLength(0)
   })
 
   it('shows the current running Intention in the persistent activity badge', () => {
@@ -137,10 +140,14 @@ describe('ChatPanel', () => {
     }
   })
 
-  it('shows a transcript skeleton instead of the empty welcome while loading', () => {
+  it('shows one compact history indicator instead of fake message cards while loading', () => {
     render(<ChatPanel loading messages={[]} />)
 
-    expect(screen.getByTestId('transcript-loading-state')).toBeTruthy()
+    const loading = screen.getByTestId('transcript-loading-state')
+    expect(screen.getByTestId('transcript-history-loading-indicator').textContent).toContain('Loading conversation history')
+    expect(loading.className).toContain('min-h-20')
+    expect(loading.querySelectorAll('.h-16')).toHaveLength(0)
+    expect(loading.querySelectorAll('.h-7.w-7.rounded-full')).toHaveLength(0)
     expect(screen.queryByText(/No messages yet/i)).toBeNull()
   })
 

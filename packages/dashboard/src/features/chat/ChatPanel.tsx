@@ -29,6 +29,7 @@ import {
   Image,
   Lightbulb,
   ListChecks,
+  Loader2,
   Maximize2,
   Pencil,
   PenLine,
@@ -494,7 +495,7 @@ export function ChatPanel({
         {loading ? (
           <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
             <TranscriptLoadingState />
-            {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
+            {footerSlot ? <div className="pl-0 pt-2 sm:pl-10">{footerSlot}</div> : null}
           </div>
         ) : isEmpty ? (
           <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
@@ -1032,17 +1033,13 @@ function useVirtualTranscriptScrollToken(
 }
 
 function TranscriptLoadingState(): JSX.Element {
+  const { t } = useTranslation()
   return (
-    <div className="mx-auto flex w-full flex-col gap-4 py-4 sm:py-6" data-testid="transcript-loading-state">
-      {Array.from({ length: 3 }).map((_, index) => (
-        <div key={index} className="flex min-w-0 gap-3">
-          <div className="h-7 w-7 flex-none rounded-full bg-muted" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="h-3 w-20 rounded bg-muted" />
-            <div className="h-16 rounded-lg bg-muted/50" />
-          </div>
-        </div>
-      ))}
+    <div className="mx-auto flex min-h-20 w-full items-center justify-center py-3" data-testid="transcript-loading-state">
+      <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground" data-testid="transcript-history-loading-indicator" role="status">
+        <Loader2 className="h-3.5 w-3.5 flex-none animate-spin" aria-hidden="true" />
+        <span className="truncate">{t('chat.transcript.loadingHistory')}</span>
+      </div>
     </div>
   )
 }

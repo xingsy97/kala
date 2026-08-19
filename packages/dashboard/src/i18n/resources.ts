@@ -944,6 +944,7 @@ export const resources = {
           expectedOutput: 'Expected output:',
         },
         transcript: {
+          loadingHistory: 'Loading conversation history…',
           emptyTitle: 'What can I help with?',
           emptyDescription: 'Ask a question, request code changes, or pick one of the suggestions below to get started.',
           empty: 'No messages yet - type below to begin.',
@@ -2357,6 +2358,7 @@ export const resources = {
           expectedOutput: '预期输出：',
         },
         transcript: {
+          loadingHistory: '正在加载对话记录…',
           emptyTitle: '需要我做什么？',
           emptyDescription: '可以提问、要求修改代码，或选择下方建议开始。',
           empty: '还没有消息 - 在下方输入开始。',
