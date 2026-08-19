@@ -76,3 +76,7 @@ experiments/**/workspaces/
 # Per-package scratch directories (local debug/probe scripts, not committed)
 packages/*/scratch/
 tmp/
+
+# Optional machine-local privacy denylist. The canonical location is inside
+# .git/privacy-denylist; this protects explicit local overrides too.
+.privacy-denylist

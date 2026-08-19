@@ -12,7 +12,7 @@ for (const binary of ['syft', 'grype', 'trivy', 'cosign']) {
   if (strict && !available) failures.push(`missing security tool ${binary}`)
   else process.stdout.write(`${available ? 'PASS' : 'SKIP'} ${binary}\n`)
 }
-const tracked = spawnSync('git', ['grep', '-IlE', '(AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)', '--', ':!references/**', ':!node_modules/**'], { encoding: 'utf8' })
-if (tracked.status === 0 && tracked.stdout.trim()) failures.push(`possible tracked secrets:\n${tracked.stdout.trim()}`)
+const privacy = spawnSync(process.execPath, ['scripts/security/privacy-check.mjs', '--repository'], { encoding: 'utf8' })
+if (privacy.status !== 0) failures.push('privacy gate rejected the repository snapshot; run pnpm privacy:check for redacted diagnostics')
 if (failures.length) { for (const failure of failures) process.stderr.write(`FAIL ${failure}\n`); process.exit(1) }
 process.stdout.write('PASS supply-chain release gate\n')

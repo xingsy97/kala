@@ -13,6 +13,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  privacy:
+    name: privacy gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Scan repository snapshot
+        env:
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+        run: node scripts/security/privacy-check.mjs --repository
+      - name: Scan pull request commit range
+        if: github.event_name == 'pull_request'
+        env:
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+        run: node scripts/security/privacy-check.mjs --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+      - name: Scan pushed commit range
+        if: github.event_name == 'push'
+        env:
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if [[ "$BEFORE" =~ ^0+$ ]]; then
+            node scripts/security/privacy-check.mjs --range "$AFTER"
+          else
+            node scripts/security/privacy-check.mjs --range "$BEFORE..$AFTER"
+          fi
+
   fast:
     name: typecheck / unit / boundaries
     runs-on: ubuntu-latest
