@@ -1,5 +1,8 @@
 import { EventEmitter } from 'node:events'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const ptySpawn = vi.fn()
+vi.mock('node-pty', () => ({ spawn: ptySpawn }))
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(() => {
@@ -23,6 +26,28 @@ import { createTerminalManager } from './terminal-manager.js'
 const base = { workspaceId: 'ws', sessionId: 'session' }
 
 describe('TerminalManager', () => {
+  afterEach(() => {
+    delete process.env.AGENT_KERNEL_TERMINAL_DISABLE_PTY
+    vi.clearAllMocks()
+  })
+
+  it('falls back when node-pty imports but its platform native module fails during spawn', async () => {
+    ptySpawn.mockImplementationOnce(() => { throw new Error('Failed to load native module: conpty.node') })
+    const manager = createTerminalManager({
+      sandbox: { roots: [], resolve: async (path) => path },
+      emitOutput: vi.fn(),
+      emitExit: vi.fn(),
+    })
+
+    const created = await manager.create({ ...base, requestId: 'native-missing', cwd: '/tmp' })
+
+    expect(created.error).toBeUndefined()
+    expect(created.terminalId).toBeTruthy()
+    expect(ptySpawn).toHaveBeenCalledTimes(1)
+    expect(spawn).toHaveBeenCalledTimes(1)
+    manager.closeAll()
+  })
+
   it('keeps one terminal per Session, replays a 1 MiB ring, and closes only that Session', async () => {
     process.env.AGENT_KERNEL_TERMINAL_DISABLE_PTY = '1'
     const manager = createTerminalManager({

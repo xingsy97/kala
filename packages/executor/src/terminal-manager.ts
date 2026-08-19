@@ -104,13 +104,20 @@ async function spawnTerminal(input: {
 }): Promise<TerminalProcess> {
   const nodePty = await tryLoadNodePty()
   if (nodePty) {
-    return nodePty.spawn(input.shell, [], {
-      name: 'xterm-256color',
-      cols: input.cols,
-      rows: input.rows,
-      cwd: input.cwd,
-      env: input.env,
-    })
+    try {
+      return nodePty.spawn(input.shell, [], {
+        name: 'xterm-256color',
+        cols: input.cols,
+        rows: input.rows,
+        cwd: input.cwd,
+        env: input.env,
+      })
+    } catch {
+      // node-pty's JavaScript can load from a single-file CJS release while its
+      // platform native module (for example conpty.node on Windows) is absent.
+      // That failure happens at spawn(), not import(), so fall back here instead
+      // of surfacing a broken Terminal to the user.
+    }
   }
   return createFallbackTerminal(input)
 }

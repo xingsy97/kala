@@ -110,6 +110,15 @@ for (const installer of ['install-executor.sh', 'install-executor.ps1']) {
   if (installer === 'install-executor.sh' && text.includes('agent-kernel-executor.cjs')) fail(`${installer} must remain native-only`)
   if (installer === 'install-executor.ps1' && (!text.includes('agent-kernel-executor.cjs') || !text.includes('Get-Command node'))) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
 }
+for (const target of ['win32-x64', 'win32-arm64']) {
+  const archive = `node-pty-${target}.tar.gz`
+  if (!manifest.assets.includes(archive) || !existsSync(join(releaseDir, archive))) fail(`release missing Windows Terminal companion ${archive}`)
+  const listing = spawnSync('tar', ['-tzf', join(releaseDir, archive)], { encoding: 'utf8' })
+  if (listing.status !== 0) fail(`${archive} is not a readable tar archive`)
+  for (const required of [`${target}/conpty.node`, `${target}/pty.node`, `${target}/winpty-agent.exe`]) {
+    if (!listing.stdout.split('\n').includes(required)) fail(`${archive} missing ${required}`)
+  }
+}
 const installerSyntax = spawnSync('bash', ['-n', join(releaseDir, 'install-executor.sh')], { stdio: 'inherit' })
 if (installerSyntax.status !== 0) fail('install-executor.sh failed bash syntax check')
 

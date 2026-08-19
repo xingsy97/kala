@@ -13,6 +13,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-terminal-e2e:
+    name: Windows Executor / ConPTY Terminal
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Enable pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Build Windows production release artifacts
+        run: pnpm run build:release-assets -- --repo local/agent-runlab
+      - name: Verify Windows release and ConPTY companion
+        shell: pwsh
+        run: |
+          pnpm run verify:release-assets
+          if (-not (Test-Path release/runlab-executor-win32-x64.exe)) { throw 'missing Windows Executor' }
+          if (-not (Test-Path release/node-pty-win32-x64.tar.gz)) { throw 'missing ConPTY companion' }
+          tar -xzf release/node-pty-win32-x64.tar.gz -C release
+          New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null
+          Move-Item release/win32-x64 release/prebuilds/win32-x64 -Force
+          if (-not (Test-Path release/prebuilds/win32-x64/conpty.node)) { throw 'ConPTY native was not installed beside Executor' }
+      - name: Real Windows Terminal lifecycle E2E
+        run: node scripts/product-e2e/verify-windows-terminal.mjs
+
   linux-system-e2e:
     name: production artifact / Chromium / LXD
     runs-on: [self-hosted, linux, x64, lxd-container]

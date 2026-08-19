@@ -96,6 +96,13 @@ try {
     const expected = readFileSync(join(releaseDir, asset), 'utf8')
     if (actual !== expected) fail(`GET /install/assets/${asset} did not return the built release asset`)
   }
+  for (const asset of ['node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz']) {
+    const assetRes = await fetch(`${url}/install/assets/${asset}`)
+    if (assetRes.status !== 200) fail(`GET /install/assets/${asset} returned ${assetRes.status}`)
+    const actual = Buffer.from(await assetRes.arrayBuffer())
+    const expected = readFileSync(join(releaseDir, asset))
+    if (!actual.equals(expected)) fail(`GET /install/assets/${asset} did not return the exact ConPTY companion bytes`)
+  }
   console.log(`release install smoke passed on port ${port} in ${installDir}`)
 } catch (err) {
   console.error(`FAIL ${err instanceof Error ? err.message : String(err)}`)

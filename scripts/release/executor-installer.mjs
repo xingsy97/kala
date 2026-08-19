@@ -127,6 +127,26 @@ try {
   Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$asset" -OutFile $binary
   $actual = (Get-FileHash -Algorithm SHA256 $binary).Hash.ToLowerInvariant()
   if ($actual -ne $expected) { throw "Checksum mismatch for $asset" }
+  if ($isWindowsPlatform) {
+    $ptyArchive = "node-pty-$target.tar.gz"
+    $ptyEscaped = [regex]::Escape($ptyArchive)
+    $ptyLine = $sums | Where-Object { $_ -match "^([0-9a-fA-F]{64})  $ptyEscaped$" } | Select-Object -First 1
+    if ($ptyLine) {
+      $ptyPath = Join-Path $work $ptyArchive
+      Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$ptyArchive" -OutFile $ptyPath
+      $ptyExpected = ($ptyLine -split '\\s+')[0].ToLowerInvariant()
+      $ptyActual = (Get-FileHash -Algorithm SHA256 $ptyPath).Hash.ToLowerInvariant()
+      if ($ptyActual -ne $ptyExpected) { throw "Checksum mismatch for $ptyArchive" }
+      $tar = Get-Command tar -ErrorAction SilentlyContinue
+      if ($tar) {
+        & $tar.Source -xzf $ptyPath -C $work
+        if ($LASTEXITCODE -ne 0) { throw "Failed to extract $ptyArchive" }
+        $prebuilds = Join-Path $work 'prebuilds'
+        New-Item -ItemType Directory -Path $prebuilds -Force | Out-Null
+        Move-Item (Join-Path $work $target) (Join-Path $prebuilds $target) -Force
+      }
+    }
+  }
   if (-not $isWindowsPlatform -and -not $useNode) {
     & chmod +x $binary
     if ($LASTEXITCODE -ne 0) { throw "Failed to make $asset executable" }

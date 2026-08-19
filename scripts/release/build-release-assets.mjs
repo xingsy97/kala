@@ -69,6 +69,8 @@ const expectedAssets = [
   'run.sh',
   'install-executor.sh',
   'install-executor.ps1',
+  'node-pty-win32-x64.tar.gz',
+  'node-pty-win32-arm64.tar.gz',
   'RELEASE_NOTES.md',
   'manifest.json',
   'SHA256SUMS',
@@ -265,6 +267,14 @@ function prepareBootstrapAssets() {
     chmodSync(shPath, 0o755)
     writeFileSync(join(outDir, 'install-executor.ps1'), generateExecutorInstallerPs1({ repo, tag }))
     bootstrapAssets.push('install-executor.sh', 'install-executor.ps1')
+    for (const target of ['win32-x64', 'win32-arm64']) {
+      const prebuilds = join(root, 'packages/executor/node_modules/node-pty/prebuilds', target)
+      if (!existsSync(prebuilds)) continue
+      const archive = `node-pty-${target}.tar.gz`
+      const packed = spawnSync('tar', ['-czf', join(outDir, archive), '-C', dirname(prebuilds), target], { encoding: 'utf8' })
+      if (packed.status !== 0) throw new Error(`failed to package ${archive}: ${packed.stderr}`)
+      bootstrapAssets.push(archive)
+    }
   }
   return bootstrapAssets
 }
@@ -401,7 +411,7 @@ function prepareEmbeddedReleaseAssetsForHost() {
   }
   const nativeExecutor = currentNativeTarget ? executorNativeAssetName(currentNativeTarget) : undefined
   if (nativeExecutor && exists(nativeExecutor)) writeExecutorUpdateManifest()
-  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', 'install-executor.ps1', 'executor-update-manifest.json', 'executor-update-public-key.pem']
+  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', 'install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json', 'executor-update-public-key.pem']
     .filter((name) => name && exists(name))
   writeSha256Sums(embeddedNames)
   return embeddedReleaseAssetsBanner(outDir, [...embeddedNames, 'SHA256SUMS'])

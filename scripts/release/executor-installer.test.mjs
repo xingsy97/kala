@@ -47,6 +47,9 @@ test('generates fail-closed installers that require checksummed native executabl
   assert.match(ps1, /RUNLAB_INSTALL_NODE/)
   assert.match(ps1, /GetEnvironmentVariable\('Path', 'Machine'\)/)
   assert.match(ps1, /Node\.js installation was not approved/)
+  assert.match(ps1, /node-pty-\$target\.tar\.gz/)
+  assert.match(ps1, /Get-FileHash -Algorithm SHA256 \$ptyPath/)
+  assert.match(ps1, /Join-Path \$work 'prebuilds'/)
   assert.doesNotMatch(ps1, /manifest\.json|RuntimeInformation\]::OSArchitecture/)
 
   const dir = mkdtempSync(join(tmpdir(), 'runlab-installer-test-'))
