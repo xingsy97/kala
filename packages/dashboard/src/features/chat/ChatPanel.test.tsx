@@ -838,6 +838,8 @@ describe('ChatPanel', () => {
     expect(dialog.className).toContain('--ak-viewport-h')
     expect(dialog.className).toContain('grid-rows-[auto_minmax(0,1fr)]')
     expect(screen.getByTestId('artifact-image-preview-close').className).toContain('h-11 w-11')
+    expect(screen.getByTestId('readonly-image-preview-controls')).toBeTruthy()
+    expect(screen.getByTestId('artifact-image-preview-full')).toBeTruthy()
   })
 
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
@@ -955,11 +957,13 @@ describe('ChatPanel', () => {
     const dialog = screen.getByTestId('message-image-preview-dialog')
     expect(dialog.className).toContain('w-screen')
     expect(dialog.className).toContain('rounded-none')
-    expect(dialog.className).toContain('sm:max-w-[72rem]')
+    expect(dialog.className).toContain('sm:max-w-[80rem]')
+    expect(dialog.className).toContain('sm:h-[min(94dvh,64rem)]')
     expect(screen.getByTestId('message-image-preview-close').className).toContain('h-11')
+    expect(screen.getByTestId('readonly-image-preview-controls')).toBeTruthy()
     const fullImage = screen.getByTestId('message-image-preview-full') as HTMLImageElement
     expect(fullImage.src).toContain('data:image/png;base64,iVBORw0KGgo=')
-    expect(fullImage.className).toContain('max-h-full')
+    expect(fullImage.className).toContain('max-w-none')
     expect(fullImage.className).not.toContain('100dvh')
   })
 

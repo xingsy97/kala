@@ -9,7 +9,7 @@
  * view, dialogs inside the visible viewport, and touch inputs at 16px+.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -25,11 +25,12 @@ const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_MOBILE_PWA_PORT ?? 3186)
 const HOST_URL = `http://localhost:${PORT}`
 const SESSION_ID = `mobile-pwa-${Date.now()}`
+const ARTIFACT_ID = `mobile-preview-${Date.now()}`
 const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-mobile-pwa-sessions-'))
 const SHOTS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-mobile-pwa-shots-'))
 const CHROME = process.env.CHROME_PATH ?? detectBrowser()
 
-const cases = [
+const allCases = [
   {
     name: 'desktop browser',
     viewport: { width: 1440, height: 820, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
@@ -66,12 +67,20 @@ const cases = [
     fullSettings: false,
   },
   {
+    name: 'iPad landscape',
+    viewport: { width: 1024, height: 768, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+    standalone: false,
+    fullSettings: false,
+  },
+  {
     name: 'standalone PWA',
     viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
     standalone: true,
     fullSettings: true,
   },
 ]
+const requestedCase = process.env.VERIFY_MOBILE_PWA_CASE?.trim().toLowerCase()
+const cases = requestedCase ? allCases.filter((entry) => slug(entry.name) === requestedCase) : allCases
 
 const checks = []
 const hostLog = []
@@ -149,6 +158,7 @@ async function verifyScenario(scenario) {
   await verifyDotsToolActivity(page, scenario.name)
   await focusComposerAndVerify(page, scenario.name)
   await verifyImagePreviewDialog(page, scenario.name)
+  await verifyArtifactImagePreviewDialog(page, scenario.name)
   await verifySessionMetadataDialog(page, scenario.name)
   await verifySettingsDialog(page, scenario.name, scenario.fullSettings !== false)
   await verifyConnectWorkspaceDialog(page, scenario.name)
@@ -251,9 +261,72 @@ async function verifyImagePreviewDialog(page, name) {
   const closeIsTouchSized = Boolean(metrics.close) && metrics.close.width >= 43 && metrics.close.height >= 43
   check(`${name}: image preview fits the visible viewport`, dialogFits && imageFits && metrics.documentScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
   check(`${name}: image preview close control is touch-sized`, closeIsTouchSized, JSON.stringify(metrics))
+  const zoomIn = await page.$('[aria-label="Zoom in"]')
+  if (zoomIn) {
+    for (let index = 0; index < 12; index += 1) await zoomIn.click()
+    await sleep(50)
+  }
+  const zoomMetrics = await page.evaluate(() => {
+    const stage = document.querySelector('[data-testid="readonly-image-preview-stage"]')
+    const content = document.querySelector('[data-testid="readonly-image-preview-scroll-content"]')
+    const zoom = document.querySelector('[data-testid="readonly-image-preview-zoom"]')
+    return {
+      stageWidth: stage?.clientWidth ?? 0,
+      stageHeight: stage?.clientHeight ?? 0,
+      contentWidth: content?.scrollWidth ?? 0,
+      contentHeight: content?.scrollHeight ?? 0,
+      overflowX: stage ? getComputedStyle(stage).overflowX : '',
+      overflowY: stage ? getComputedStyle(stage).overflowY : '',
+      zoom: zoom?.textContent ?? '',
+    }
+  })
+  check(`${name}: image preview zoom owns real scroll geometry`, zoomMetrics.zoom === '400%' && zoomMetrics.overflowX === 'auto' && zoomMetrics.overflowY === 'auto' && zoomMetrics.contentWidth > zoomMetrics.stageWidth && zoomMetrics.contentHeight > zoomMetrics.stageHeight, JSON.stringify(zoomMetrics))
+  await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-image-preview.png`), fullPage: false })
   await page.click('[data-testid="message-image-preview-close"]')
   await page.waitForFunction(() => !document.querySelector('[data-testid="message-image-preview-dialog"]'))
   // Let Radix finish removing the modal overlay before clicking app chrome.
+  await sleep(150)
+}
+
+async function verifyArtifactImagePreviewDialog(page, name) {
+  await page.waitForSelector('[data-testid="artifact-markdown-image"]')
+  const triggerVisible = await page.$eval('[data-testid="artifact-markdown-image"]', (element) => {
+    const rect = element.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return false
+    element.click()
+    return true
+  })
+  check(`${name}: artifact image trigger is visible and interactive`, triggerVisible)
+  await page.waitForSelector('[data-testid="artifact-image-preview-dialog"]')
+  await sleep(150)
+  const metrics = await page.evaluate(() => {
+    const dialog = document.querySelector('[data-testid="artifact-image-preview-dialog"]')
+    const image = document.querySelector('[data-testid="artifact-image-preview-full"]')
+    const controls = document.querySelector('[data-testid="readonly-image-preview-controls"]')
+    const rectFor = (element) => {
+      const rect = element?.getBoundingClientRect()
+      return rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height } : null
+    }
+    return {
+      dialog: rectFor(dialog),
+      image: rectFor(image),
+      controls: rectFor(controls),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.visualViewport?.height ?? window.innerHeight,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      imageComplete: image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0,
+    }
+  })
+  const fits = Boolean(metrics.dialog && metrics.image && metrics.controls)
+    && metrics.dialog.top >= -1 && metrics.dialog.left >= -1
+    && metrics.dialog.right <= metrics.viewportWidth + 1 && metrics.dialog.bottom <= metrics.viewportHeight + 1
+    && metrics.image.left >= metrics.dialog.left - 1 && metrics.image.right <= metrics.dialog.right + 1
+    && metrics.controls.left >= metrics.dialog.left - 1 && metrics.controls.right <= metrics.dialog.right + 1
+    && metrics.documentScrollWidth <= metrics.viewportWidth + 1
+  check(`${name}: artifact image uses the shared responsive preview`, fits && metrics.imageComplete, JSON.stringify(metrics))
+  await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-artifact-image-preview.png`), fullPage: false })
+  await page.click('[data-testid="artifact-image-preview-close"]')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="artifact-image-preview-dialog"]'))
   await sleep(150)
 }
 
@@ -598,6 +671,7 @@ async function verifyInspectorDefaults(page, name) {
 
 function writeSessionFixture() {
   const config = { tools: [], systemPrompt: 'mobile PWA layout fixture' }
+  const imageData = readFileSync(join(REPO_ROOT, 'packages/dashboard/public/icons/icon-512.png')).toString('base64')
   const initialState = {
     sessionId: SESSION_ID,
     messages: [{ role: 'system', content: [{ type: 'text', text: config.systemPrompt }] }],
@@ -667,8 +741,8 @@ function writeSessionFixture() {
         message: {
           role: 'assistant',
           content: [
-            { type: 'text', text: 'The dashboard should keep the composer visible without horizontal overflow on mobile and PWA surfaces.' },
-            { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nL8AAAAASUVORK5CYII=' } },
+            { type: 'text', text: `The dashboard should keep the composer visible without horizontal overflow on mobile and PWA surfaces.\n\n![Artifact preview](artifact://${ARTIFACT_ID})` },
+            { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: imageData } },
           ],
         },
         usage: { inputTokens: 48, outputTokens: 18 },
@@ -678,6 +752,23 @@ function writeSessionFixture() {
   ]
   mkdirSync(SESSIONS_DIR, { recursive: true })
   writeFileSync(join(SESSIONS_DIR, `${Date.now()}_${SESSION_ID}.jsonl`), `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`)
+  const artifactRoot = join(SESSIONS_DIR, '..', 'session-artifacts')
+  const artifactContent = join(artifactRoot, 'content')
+  mkdirSync(artifactContent, { recursive: true })
+  writeFileSync(join(artifactContent, `${ARTIFACT_ID}.png`), Buffer.from(imageData, 'base64'))
+  writeFileSync(join(artifactRoot, 'registry.json'), JSON.stringify({
+    schemaVersion: 1,
+    records: [{
+      artifactId: ARTIFACT_ID,
+      sessionId: SESSION_ID,
+      title: 'Artifact preview',
+      mediaType: 'image/png',
+      bytes: Buffer.from(imageData, 'base64').length,
+      sha256: 'browser-layout-fixture',
+      fileName: `${ARTIFACT_ID}.png`,
+      createdAt: new Date().toISOString(),
+    }],
+  }))
 }
 
 async function verifyHostListsFixture() {

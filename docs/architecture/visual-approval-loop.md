@@ -708,6 +708,23 @@ Visual Preview has explicit states for:
 - document archived;
 - confirmation blocked by incomplete coverage.
 
+### 10.5 Shared read-only image surface
+
+Visual Preview renders a Visual Document and is not itself an image viewer. However, every product surface that opens a raster image—including Message content, Session Artifacts, and Workspace File View—must reuse one shared read-only image canvas so that viewing behavior cannot drift between entry points.
+
+The shared canvas provides Fit, incremental zoom, 100% actual size, reset, and two-axis pan after the rendered image exceeds the viewport. Zoom must change the scrollable layout geometry; a transform that visually enlarges an image without enlarging its scroll area is not compliant. Opening a preview starts in Fit mode and changing the image resets it to Fit. The surface provides no editing, crop, rotate, annotation, layer, or property controls.
+
+Responsive behavior is defined by device class rather than by shrinking one desktop dialog:
+
+- narrow mobile and narrow landscape use a safe-area-aware full-screen surface;
+- iPad portrait and landscape use an immersive bounded surface with reachable controls and visible surrounding context;
+- wide desktop uses a bounded large dialog rather than an unbounded browser-sized image;
+- all modes reserve a stable header and control row, expose a touch target of at least 44 CSS pixels for close, and keep controls outside the panning region;
+- orientation and visual-viewport changes recompute Fit without requiring the preview to close;
+- long titles truncate visually but retain their accessible/full title value.
+
+Workspace File View retains file actions in its existing header and embeds only the shared canvas. Message and Artifact images reuse both the shared canvas and the shared dialog shell. Release verification covers all three entry points with real decodable images at narrow mobile, iPad portrait, iPad landscape, and desktop viewports; component-class assertions alone are insufficient.
+
 Raw JSON and stack traces are never the default user experience. A diagnostic ID links to bounded technical details.
 
 ## 11. Agent tools

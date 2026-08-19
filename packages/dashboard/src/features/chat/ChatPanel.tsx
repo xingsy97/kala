@@ -68,6 +68,7 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
+import { ReadonlyImagePreviewDialog } from '../../components/ReadonlyImagePreview.js'
 import { Textarea } from '../../components/ui/textarea.js'
 import { Typewriter } from '../../components/Typewriter.js'
 import { formatTokens } from '../../lib/format.js'
@@ -1744,32 +1745,17 @@ function ImageBlock({
           <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
       </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent
-          className="h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-screen max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-x-0 bg-black p-0 sm:h-[min(92dvh,56rem)] sm:w-[calc(100vw-2rem)] sm:max-w-[72rem] sm:rounded-lg sm:border-x"
-          data-testid="message-image-preview-dialog"
-        >
-          <DialogHeader className="relative min-h-14 justify-center border-b border-white/10 bg-black/90 px-4 py-2 pr-14 text-white sm:py-3">
-            <DialogTitle className="text-base">{t('chat.transcript.imagePreview')}</DialogTitle>
-            <DialogDescription className="hidden text-white/60 sm:block">{t('chat.transcript.imagePreviewDescription')}</DialogDescription>
-            <DialogClose
-              className="absolute right-2 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-              aria-label="Close image preview"
-              data-testid="message-image-preview-close"
-            >
-              <X className="h-5 w-5" aria-hidden="true" />
-            </DialogClose>
-          </DialogHeader>
-          <div className="flex min-h-0 min-w-0 touch-pan-x touch-pan-y items-center justify-center overflow-auto overscroll-contain bg-black p-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] sm:p-4">
-            <img
-              src={src}
-              alt=""
-              className="block max-h-full max-w-full object-contain sm:rounded-md"
-              data-testid="message-image-preview-full"
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ReadonlyImagePreviewDialog
+        open={open}
+        onOpenChange={setOpen}
+        src={src}
+        alt=""
+        title={t('chat.transcript.imagePreview')}
+        description={t('chat.transcript.imagePreviewDescription')}
+        dialogTestId="message-image-preview-dialog"
+        closeTestId="message-image-preview-close"
+        imageTestId="message-image-preview-full"
+      />
     </>
   )
 }
@@ -2022,19 +2008,16 @@ function ArtifactMarkdownImage({ src, alt }: { src: string; alt: string }): JSX.
       <button type="button" className="block max-w-full cursor-zoom-in" onClick={() => setOpen(true)} aria-label={`Open image preview: ${alt}`} data-testid="artifact-markdown-image">
         <img src={src} alt={alt} onError={() => setFailed(true)} loading="lazy" />
       </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top))] w-screen max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-x-0 bg-black p-0 pb-[env(safe-area-inset-bottom)] sm:h-[min(92dvh,56rem)] sm:w-[calc(100vw-2rem)] sm:max-w-6xl sm:rounded-lg sm:border-x sm:pb-0" data-testid="artifact-image-preview-dialog">
-          <DialogHeader className="relative min-h-14 justify-center border-b border-white/10 bg-black/90 px-4 py-2 pr-14 text-white">
-            <DialogTitle className="truncate text-sm sm:text-base">{alt}</DialogTitle>
-            <DialogClose className="absolute right-2 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70" aria-label="Close image preview" data-testid="artifact-image-preview-close">
-              <X className="h-5 w-5" aria-hidden="true" />
-            </DialogClose>
-          </DialogHeader>
-          <div className="flex min-h-0 min-w-0 touch-pan-x touch-pan-y items-center justify-center overflow-auto overscroll-contain bg-black p-2 sm:p-4">
-            <img src={src} alt={alt} className="block max-h-full max-w-full object-contain" />
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ReadonlyImagePreviewDialog
+        open={open}
+        onOpenChange={setOpen}
+        src={src}
+        alt={alt}
+        title={alt}
+        dialogTestId="artifact-image-preview-dialog"
+        closeTestId="artifact-image-preview-close"
+        imageTestId="artifact-image-preview-full"
+      />
     </>
   )
 }

@@ -174,6 +174,8 @@ describe('SessionFilesPanel', () => {
 
     const image = await screen.findByRole('img')
     expect(image.getAttribute('src')).toBe('data:image/png;base64,aW1hZ2U=')
+    expect(screen.getByTestId('session-file-image-stage').className).toContain('overflow-auto')
+    expect(screen.getByTestId('readonly-image-preview-controls')).toBeTruthy()
     expect(screen.getByText('image/png')).toBeTruthy()
     expect(socket.emitMock).toHaveBeenCalledWith('client:list_dirs', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo' }))
     expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ workspaceId: 'ws-1', path: '/repo/image.png' }), expect.any(Function))

@@ -30,6 +30,7 @@ import type {
 } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
+import { ReadonlyImageCanvas } from '../../components/ReadonlyImagePreview.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { DEFAULT_FILE_VIEW_FONT_SIZE, PREF_FILE_VIEW_FONT_SIZE, useNumberPref } from '../../lib/prefs.js'
 import { workspaceReadBinary } from '../../lib/workspace-exec.js'
@@ -131,8 +132,8 @@ export function WorkspaceFileViewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!bottom-0 !top-auto h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top))] max-h-none w-screen max-w-none !translate-y-0 grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-x-0 p-0 pb-[env(safe-area-inset-bottom)] sm:!bottom-auto sm:!top-[calc(50%+(env(safe-area-inset-top)-env(safe-area-inset-bottom))/2)] sm:h-[min(92dvh,52rem)] sm:w-[calc(100vw-2rem)] sm:max-w-[68.75rem] sm:!translate-y-[-50%] sm:rounded-lg sm:border-x sm:pb-0" data-testid="session-file-view-dialog">
-        <DialogHeader className="relative border-b border-border px-3 py-2.5 pr-14 sm:px-4 sm:pr-14">
+      <DialogContent className="!bottom-0 !top-auto h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top))] max-h-none min-w-0 w-screen max-w-none !translate-y-0 grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-x-0 p-0 pb-[env(safe-area-inset-bottom)] sm:!bottom-auto sm:!top-[calc(50%+(env(safe-area-inset-top)-env(safe-area-inset-bottom))/2)] sm:h-[min(92dvh,52rem)] sm:w-[calc(100vw-2rem)] sm:max-w-[68.75rem] sm:!translate-y-[-50%] sm:rounded-lg sm:border-x sm:pb-0" data-testid="session-file-view-dialog">
+        <DialogHeader className="relative min-w-0 max-w-full overflow-hidden border-b border-border px-3 py-2.5 pr-14 sm:px-4 sm:pr-14">
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1.5">
@@ -145,7 +146,7 @@ export function WorkspaceFileViewDialog({
                 {viewerMeta(viewer).map((item) => <span key={item}>{item}</span>)}
               </div>
             </div>
-            <div className="flex w-full min-w-0 flex-none items-center gap-1 overflow-x-auto overscroll-x-contain pb-0.5 sm:w-auto sm:flex-nowrap sm:justify-end sm:overflow-visible sm:pb-0" data-testid="session-file-view-actions">
+            <div className="flex w-full min-w-0 max-w-full flex-none items-center gap-1 overflow-x-auto overscroll-x-contain pb-0.5 sm:w-auto sm:flex-nowrap sm:justify-end sm:overflow-visible sm:pb-0" data-testid="session-file-view-actions">
               <div className="flex flex-wrap items-center gap-1">
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!copyableViewerContent(viewer)} onClick={() => void copyView('content')} title="Copy visible content" aria-label="Copy visible content">
                   {copied === 'content' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
@@ -185,7 +186,7 @@ export function WorkspaceFileViewDialog({
             <X className="h-5 w-5" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
-        <div className="min-h-0 min-w-0 overflow-hidden">
+        <div className="h-full min-h-0 min-w-0 overflow-hidden">
           <FileView viewer={viewer} path={viewPath} target={viewTarget ?? undefined} chrome={false} wordWrap={wordWrap} fontSizeDelta={fontSizeDelta} markdownMode={markdownMode} />
         </div>
       </DialogContent>
@@ -442,9 +443,12 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
   if (viewer.kind === 'image') {
     return (
       <ViewerShell title={viewer.path} meta={viewerMeta(viewer).join(' · ')} chrome={chrome}>
-        <div className="flex h-full min-h-0 min-w-0 touch-pan-x touch-pan-y items-center justify-center overflow-auto overscroll-contain bg-muted/25 p-2 sm:p-4" data-testid="session-file-image-stage">
-          <img className="block max-h-full max-w-full object-contain" src={`data:${viewer.mediaType};base64,${viewer.content}`} alt={viewer.path} />
-        </div>
+        <ReadonlyImageCanvas
+          src={`data:${viewer.mediaType};base64,${viewer.content}`}
+          alt={viewer.path}
+          stageTestId="session-file-image-stage"
+          imageTestId="session-file-image-preview"
+        />
       </ViewerShell>
     )
   }
@@ -524,7 +528,7 @@ function useFileViewFontSize(delta = 0): number {
 }
 
 function ViewerShell({ title, meta, children, chrome = true }: { title: string; meta?: string; children: ReactNode; chrome?: boolean }): JSX.Element {
-  if (!chrome) return <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">{children}</div>
+  if (!chrome) return <div className="flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden">{children}</div>
   return <div className="flex h-full min-h-0 min-w-0 flex-col"><div className="flex h-10 items-center gap-2 border-b border-border px-3"><div className="min-w-0 truncate font-mono text-xs">{title}</div>{meta ? <div className="ml-auto flex-none text-xs text-muted-foreground">{meta}</div> : null}</div><div className="min-h-0 flex-1 overflow-hidden">{children}</div></div>
 }
 
