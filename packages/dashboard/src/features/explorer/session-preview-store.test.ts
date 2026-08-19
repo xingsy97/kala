@@ -35,8 +35,7 @@ describe('SessionPreviewStore', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
-  it('reuses the control socket, coalesces token updates, and releases the room', async () => {
-    vi.useFakeTimers()
+  it('reuses the control socket, ignores high-frequency token deltas, and releases the room', () => {
     const handlers = new Map<string, (...args: never[]) => void>()
     const socket = {
       connected: true,
@@ -48,6 +47,8 @@ describe('SessionPreviewStore', () => {
     const store = new SessionPreviewStore()
     store.connect(socket, cache)
 
+    const listener = vi.fn()
+    const unsubscribe = store.subscribe('preview-session', listener)
     const stop = store.watch('preview-session')
     expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('client:subscribe_channels', expect.objectContaining({ channels: ['session:preview-session'] }), expect.any(Function))
     expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('client:load_history', { sessionId: 'preview-session' })
@@ -57,15 +58,19 @@ describe('SessionPreviewStore', () => {
       state: createInitialState({}),
       config: createConfig({ tools: [], systemPrompt: '' }),
     } as never)
-    handlers.get('session:token_delta')?.({ sessionId: 'preview-session', text: 'live ' } as never)
-    handlers.get('session:token_delta')?.({ sessionId: 'preview-session', text: 'token' } as never)
+    const notificationsAfterReady = listener.mock.calls.length
+    expect(handlers.has('session:token_delta')).toBe(false)
     expect(store.get('preview-session')?.streamingText).toBe('')
-    await vi.advanceTimersByTimeAsync(100)
+    expect(listener).toHaveBeenCalledTimes(notificationsAfterReady)
 
-    expect(store.get('preview-session')?.freshness).toBe('live')
-    expect(store.get('preview-session')?.streamingText).toBe('live token')
+    handlers.get('event:appended')?.({
+      sessionId: 'preview-session', seq: 1, ts: '2026-08-09T00:00:00.000Z',
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'Durable response.' }] }, usage: { inputTokens: 1, outputTokens: 1 } }, effects: [],
+    } as never)
+    expect(listener.mock.calls.length).toBeGreaterThan(notificationsAfterReady)
+
     stop()
+    unsubscribe()
     expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('client:unsubscribe_channels', expect.objectContaining({ channels: ['session:preview-session'] }), expect.any(Function))
-    vi.useRealTimers()
   })
 })

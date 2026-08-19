@@ -72,6 +72,16 @@ export function RuntimeMetrics({
     : evaluation.tone === 'warn'
       ? 'text-amber-600 dark:text-amber-300'
       : 'text-sky-600 dark:text-sky-300'
+  const barTone = evaluation.tone === 'error'
+    ? 'from-rose-400/75 via-rose-500/80 to-fuchsia-500/75'
+    : evaluation.tone === 'warn'
+      ? 'from-amber-300/75 via-amber-400/80 to-orange-500/75'
+      : 'from-cyan-400/70 via-sky-500/80 to-indigo-500/75'
+  const barGlow = evaluation.tone === 'error'
+    ? 'bg-rose-300 shadow-[0_0_7px_2px_rgb(251_113_133/0.42)]'
+    : evaluation.tone === 'warn'
+      ? 'bg-amber-200 shadow-[0_0_7px_2px_rgb(251_191_36/0.38)]'
+      : 'bg-sky-200 shadow-[0_0_7px_2px_rgb(56_189_248/0.38)]'
   const title = userContextWindow && userContextWindow > 0
     ? t('chat.runtimeMetrics.title', {
       input: formatTokens(contextTokens),
@@ -113,20 +123,32 @@ export function RuntimeMetrics({
   }, [contextSnapshot, t, userContextWindow])
 
   return (
-    <div className="relative flex-none" ref={ref}>
+    <div className={cn('relative flex-none', isSimple && 'h-1 w-full px-3')} ref={ref}>
       <button
         type="button"
         className={cn(
-          'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-          isSimple ? 'h-10 min-w-8 rounded-none px-1 sm:h-7 sm:min-w-7 sm:rounded-md sm:hover:bg-accent/70' : 'h-9 rounded-lg px-1.5 sm:h-7 sm:px-1',
+          'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground',
+          isSimple ? 'group absolute inset-x-3 -top-[5px] h-[14px] rounded-full p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/30' : 'h-9 rounded-lg px-1.5 hover:bg-accent sm:h-7 sm:px-1',
         )}
         title={title}
         aria-label={title}
         aria-expanded={open}
-        data-testid="context-usage-indicator"
+        data-testid={isSimple ? 'context-usage-bar' : 'context-usage-indicator'}
         onClick={() => setOpen((value) => !value)}
       >
-        <svg
+        {isSimple ? (
+          <span className="relative block h-[3px] w-full overflow-visible rounded-full bg-foreground/[0.055] shadow-[inset_0_1px_1px_rgb(255_255_255/0.05)] transition-colors duration-200 group-hover:bg-foreground/[0.085]" aria-hidden="true">
+            <span
+              className={cn('absolute inset-y-0 left-0 rounded-full bg-gradient-to-r opacity-90 transition-[width,filter,opacity] duration-[240ms] ease-out group-hover:brightness-110 group-hover:opacity-100', barTone)}
+              style={{ width: usedWidth }}
+            >
+              {userContextWindow && userContextWindow > 0 && visualRatio > 0 ? (
+                <span className={cn('absolute right-0 top-1/2 h-[3px] w-[3px] -translate-y-1/2 translate-x-1/2 rounded-full opacity-80 transition-opacity duration-200 group-hover:opacity-100', barGlow)} />
+              ) : null}
+            </span>
+            <span className="absolute inset-y-0 border-l border-foreground/10 bg-foreground/[0.025]" style={{ left: reservedStart, width: reservedWidth }} />
+          </span>
+        ) : <svg
           viewBox="0 0 20 20"
           className={cn('flex-none -rotate-90', isSimple ? 'h-[18px] w-[18px]' : 'h-5 w-5')}
           aria-hidden="true"
@@ -157,15 +179,15 @@ export function RuntimeMetrics({
             strokeDasharray={ringCircumference}
             strokeDashoffset={ringOffset}
           />
-        </svg>
-        {isSimple ? null : (
+        </svg>}
+        {!isSimple ? (
           <span className={cn(
             'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
             evaluation.tone === 'ok' && 'hidden sm:inline',
           )}>
             {percent !== null ? `${percent}%` : '?'}
           </span>
-        )}
+        ) : null}
       </button>
       {open ? (
         <div

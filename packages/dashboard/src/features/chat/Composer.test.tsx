@@ -451,7 +451,7 @@ describe('Composer', () => {
     expect(composer.className).not.toContain('max(env(safe-area-inset-bottom)')
   })
 
-  it('keeps context usage next to send in simple mode', () => {
+  it('places one usage bar above the simple input instead of an inline indicator', () => {
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
     renderComposer()
@@ -459,15 +459,18 @@ describe('Composer', () => {
     else window.localStorage.setItem('ak-composer-mode', previousMode)
 
     const shell = screen.getByTestId('composer-simple-shell')
-    const indicator = screen.getByTestId('context-usage-indicator')
+    const frame = screen.getByTestId('composer-simple-frame')
+    const indicator = screen.getByTestId('context-usage-bar')
     const send = screen.getByTestId('composer-send')
     const sendMode = screen.getByTestId('send-mode-toggle')
 
-    expect(shell.contains(indicator)).toBe(true)
+    expect(shell.contains(indicator)).toBe(false)
+    expect(frame.contains(indicator)).toBe(true)
     expect(shell.contains(send)).toBe(true)
     expect(shell.contains(screen.getByTestId('composer-config-trigger'))).toBe(true)
-    expect(indicator.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(indicator.className).toContain('h-10')
+    expect(indicator.compareDocumentPosition(shell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByTestId('context-usage-indicator')).toBeNull()
+    expect(indicator.className).toContain('inset-x-3')
     expect(send.className).toContain('h-9')
     expect(sendMode.className).toContain('h-9')
 

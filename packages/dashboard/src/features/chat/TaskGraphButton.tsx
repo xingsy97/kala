@@ -9,7 +9,7 @@ type Props = { graph: TaskGraphSnapshot | null }
 
 export function TaskGraphButton({ graph }: Props): JSX.Element | null {
   const [open, setOpen] = useState(false)
-  const [graphView, setGraphView] = useState(false)
+  const [graphView, setGraphView] = useState(true)
   const root = useRef<HTMLDivElement | null>(null)
   const popover = useRef<HTMLDivElement | null>(null)
   useEffect(() => {

@@ -1,9 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-import type {
-  DashboardServerToClientEvents,
-  ServerTokenDeltaEvent,
-} from '@agent-kernel/shared'
+import type { DashboardServerToClientEvents } from '@agent-kernel/shared'
 
 import { dashboardConnectionManager, type DashboardSocket } from '../../session.js'
 import {
@@ -16,7 +13,6 @@ import type { CachedSessionViewInput, SessionViewCache } from '../../session-vie
 
 export type SessionPreviewFreshness = 'cached' | 'live' | 'stale'
 const SESSION_PREVIEW_TIMELINE_LIMIT = 48
-const SESSION_PREVIEW_PUBLISH_INTERVAL_MS = 100
 export type SessionPreviewSnapshot = {
   sessionId: string
   view: CachedSessionViewInput
@@ -47,8 +43,6 @@ export class SessionPreviewStore {
   private socket: DashboardSocket | null = null
   private cache: SessionViewCache | null = null
   private generation = 0
-  private tokenPublishTimer: ReturnType<typeof setTimeout> | null = null
-  private readonly tokenDirtySessions = new Set<string>()
 
   get(sessionId: string): SessionPreviewSnapshot | null {
     return this.snapshots.get(sessionId) ?? null
@@ -88,7 +82,6 @@ export class SessionPreviewStore {
     socket.on('server:history', this.onHistory)
     socket.on('event:appended', this.onAppended)
     socket.on('state:changed', this.onStateChanged)
-    socket.on('session:token_delta', this.onTokenDelta)
     socket.on('server:message_queue', this.onMessageQueue)
     socket.on('server:session_deleted', this.onSessionDeleted)
     if (socket.connected) this.onConnect()
@@ -113,7 +106,6 @@ export class SessionPreviewStore {
       }
       this.watches.delete(sessionId)
       this.unsubscribeLive(sessionId)
-      this.tokenDirtySessions.delete(sessionId)
       const snapshot = this.snapshots.get(sessionId)
       if (snapshot?.freshness === 'live') this.set({ ...snapshot, freshness: 'cached', updatedAt: Date.now() })
       this.runtimes.delete(sessionId)
@@ -161,10 +153,7 @@ export class SessionPreviewStore {
       kind: 'appended', generation: runtime.generation, sessionId: payload.sessionId, payload,
     })
     runtime.projection = boundPreviewProjection(runtime.projection)
-    if (payload.event.kind === 'llm_response' || payload.event.kind === 'llm_error' || payload.event.kind === 'cancel') {
-      this.tokenDirtySessions.delete(payload.sessionId)
-      runtime.streamingText = ''
-    }
+    if (payload.event.kind === 'llm_response' || payload.event.kind === 'llm_error' || payload.event.kind === 'cancel') runtime.streamingText = ''
     this.publish(payload.sessionId, 'live')
   }
 
@@ -176,14 +165,6 @@ export class SessionPreviewStore {
     })
     runtime.projection = boundPreviewProjection(runtime.projection)
     this.publish(payload.sessionId, 'live')
-  }
-
-  private readonly onTokenDelta = (payload: ServerTokenDeltaEvent): void => {
-    const runtime = this.runtimes.get(payload.sessionId)
-    if (!runtime) return
-    runtime.streamingText += payload.text
-    this.tokenDirtySessions.add(payload.sessionId)
-    this.scheduleTokenPublish()
   }
 
   private readonly onMessageQueue: DashboardServerToClientEvents['server:message_queue'] = (payload) => {
@@ -198,7 +179,6 @@ export class SessionPreviewStore {
 
   private readonly onSessionDeleted: DashboardServerToClientEvents['server:session_deleted'] = (payload) => {
     this.watches.delete(payload.sessionId)
-    this.tokenDirtySessions.delete(payload.sessionId)
     this.delete(payload.sessionId)
   }
 
@@ -269,31 +249,15 @@ export class SessionPreviewStore {
     socket.off('server:history', this.onHistory)
     socket.off('event:appended', this.onAppended)
     socket.off('state:changed', this.onStateChanged)
-    socket.off('session:token_delta', this.onTokenDelta)
     socket.off('server:message_queue', this.onMessageQueue)
     socket.off('server:session_deleted', this.onSessionDeleted)
     for (const sessionId of this.watches.keys()) this.unsubscribeLive(sessionId)
-    if (this.tokenPublishTimer !== null) clearTimeout(this.tokenPublishTimer)
-    this.tokenPublishTimer = null
-    this.tokenDirtySessions.clear()
     this.socket = null
   }
 
   private unsubscribeLive(sessionId: string): void {
     this.channelReleases.get(sessionId)?.()
     this.channelReleases.delete(sessionId)
-  }
-
-  private scheduleTokenPublish(): void {
-    if (this.tokenPublishTimer !== null) return
-    this.tokenPublishTimer = setTimeout(() => {
-      this.tokenPublishTimer = null
-      const sessionIds = [...this.tokenDirtySessions]
-      this.tokenDirtySessions.clear()
-      for (const sessionId of sessionIds) {
-        if (this.watches.has(sessionId)) this.publish(sessionId, 'live')
-      }
-    }, SESSION_PREVIEW_PUBLISH_INTERVAL_MS)
   }
 
   private notify(sessionId: string): void {

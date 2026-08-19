@@ -25,7 +25,7 @@ describe('TaskGraphButton responsive graph view', () => {
     try {
       render(<TaskGraphButton graph={graph} />)
       fireEvent.click(screen.getByTestId('task-graph-trigger'))
-      fireEvent.click(screen.getByText('Graph view'))
+      expect(screen.getByText('List view')).toBeTruthy()
       expect(screen.getByTestId('task-graph-view').getAttribute('data-layout')).toBe('vertical')
       expect(screen.getByTestId('task-graph-popover').className).toContain('md:top-16')
     } finally {

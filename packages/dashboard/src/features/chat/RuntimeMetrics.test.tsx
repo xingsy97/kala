@@ -156,7 +156,7 @@ describe('RuntimeMetrics', () => {
     expect(popover.textContent ?? '').toContain('unknown')
   })
 
-  it('hides the precise usage percentage in simple density (keeps ring + tooltip + popover)', () => {
+  it('uses a full-width simple usage bar while keeping tooltip and popover details', () => {
     render(
       <RuntimeMetrics
         state={createInitialState({ sessionId: 'sess-simple' })}
@@ -168,7 +168,16 @@ describe('RuntimeMetrics', () => {
       />,
     )
 
-    const indicator = screen.getByTestId('context-usage-indicator')
+    const indicator = screen.getByTestId('context-usage-bar')
+    expect(screen.queryByTestId('context-usage-indicator')).toBeNull()
+    expect(indicator.className).toContain('inset-x-3')
+    expect(indicator.className).toContain('h-[14px]')
+    expect(indicator.className).toContain('absolute')
+    expect(indicator.firstElementChild?.className).toContain('h-[3px]')
+    const fill = indicator.firstElementChild?.firstElementChild
+    expect(fill?.className).toContain('bg-gradient-to-r')
+    expect(fill?.className).toContain('duration-[240ms]')
+    expect(fill?.firstElementChild?.className).toContain('shadow-[0_0_7px_2px')
     // No inline percentage number in the composer chrome...
     expect(indicator.textContent ?? '').not.toContain('%')
     // ...but the exact figure is still reachable via the tooltip and popover.

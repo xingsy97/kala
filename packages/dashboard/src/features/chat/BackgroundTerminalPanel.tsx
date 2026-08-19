@@ -131,7 +131,7 @@ export function BackgroundShellsButton({
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
-          className="grid max-h-[92dvh] w-[96vw] max-w-[min(80rem,96vw)] gap-0 overflow-hidden p-0 sm:rounded-xl grid-rows-[auto_minmax(0,1fr)]"
+          className="grid h-[min(92dvh,54rem)] w-[calc(100vw-1rem)] max-w-[min(80rem,calc(100vw-1rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:h-[min(88dvh,54rem)] sm:rounded-xl"
           data-testid="background-terminal-panel"
         >
           <DialogHeader className="border-b border-border/50 px-4 py-3">
@@ -154,13 +154,12 @@ export function BackgroundShellsButton({
               ) : null}
             </DialogTitle>
           </DialogHeader>
-          <div className="grid min-h-0 grid-rows-[minmax(0,38dvh)_minmax(0,1fr)] gap-0 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)] md:grid-rows-1">
+          <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-0 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)] md:grid-rows-1" data-testid="background-terminal-layout">
             <TaskList
               rows={rows}
               error={error}
               selectedTaskId={selectedTaskId}
               onSelect={setSelectedTaskId}
-              onKill={hasWorkspaceRegistry ? killTask : null}
             />
             <OutputPane
               row={selectedRow}
@@ -226,18 +225,16 @@ function TaskList({
   error,
   selectedTaskId,
   onSelect,
-  onKill,
 }: {
   rows: readonly TerminalRow[]
   error: string | null
   selectedTaskId: string | null
   onSelect: (id: string) => void
-  onKill: ((taskId: string) => Promise<unknown>) | null
 }): JSX.Element {
   const { t } = useTranslation()
   const [listRef] = useAutoAnimate<HTMLUListElement>()
   return (
-    <ScrollArea className="h-[28rem] border-r border-border/50">
+    <ScrollArea className="max-h-32 border-b border-border/50 md:h-full md:max-h-none md:border-b-0 md:border-r">
       {rows.length === 0 ? (
         <div className="space-y-2 px-3 py-6 text-xs text-muted-foreground" data-testid="bg-task-empty">
           {error ? (
@@ -288,24 +285,9 @@ function TaskList({
                     {row.origin === 'live' ? t('chat.backgroundShells.live') : t('chat.backgroundShells.replay')} · {row.taskId}
                   </span>
                 </button>
-                {onKill && row.status === 'running' ? (
-                  <button
-                    type="button"
-                    className="mt-0.5 flex-none rounded border border-border/60 px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    disabled={row.killing}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void onKill(row.taskId)
-                    }}
-                    data-testid={`bg-task-kill-${row.taskId}`}
-                  >
-                    {row.killing ? '...' : t('chat.backgroundShells.kill')}
-                  </button>
-                ) : (
-                  <span className="mt-0.5 flex-none rounded bg-secondary px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground">
-                    {row.status}
-                  </span>
-                )}
+                <span className="mt-0.5 hidden flex-none rounded bg-secondary px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground sm:inline-flex">
+                  {row.status}
+                </span>
               </div>
             </li>
           )
@@ -351,11 +333,11 @@ function OutputPane({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-col">
-      <div className="flex min-w-0 flex-col gap-2 border-b border-border/50 bg-background/50 px-3 py-2 text-[11px] text-muted-foreground">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-none flex-col gap-2 border-b border-border/50 bg-background/50 px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="min-w-0 truncate font-mono">task {row.taskId}</span>
           {row.pid !== undefined ? <span className="font-mono">pid {row.pid}</span> : null}
-          {row.cwd ? <span className="min-w-0 truncate font-mono">cwd {row.cwd}</span> : null}
+          {row.cwd ? <span className="max-w-full min-w-0 flex-1 truncate font-mono">cwd {row.cwd}</span> : null}
           {live ? (
             <span className="font-mono">
               {t('chat.backgroundShells.logged', { bytes: formatBytes(live.bytesLogged) })}
@@ -410,10 +392,10 @@ function OutputPane({
             {row.command}
           </pre>
         </div>
-        <ProcessDetails row={row} />
+        <div className="hidden sm:block"><ProcessDetails row={row} /></div>
       </div>
       <ScrollArea className="min-h-0 flex-1 bg-background" viewportRef={viewportRef} data-testid="bg-task-output">
-        <pre className="min-w-max whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-foreground">
+        <pre className="min-w-0 whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
           {truncatedNote}
           {output.length > 0
             ? output

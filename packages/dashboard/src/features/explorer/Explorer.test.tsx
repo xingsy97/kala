@@ -994,9 +994,11 @@ describe('Explorer', () => {
 
       const preview = screen.getByTestId('session-hover-preview')
       expect(preview).toBeTruthy()
-      expect(Number.parseFloat(preview.style.height)).toBeLessThan(672)
-      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('please write hello.txt')
-      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('Done.')
+      expect(preview.style.height).toBe('')
+      expect(screen.getByTestId('session-preview-activity').textContent).toContain('Idle')
+      expect(screen.getByTestId('session-preview-goal').textContent).toContain('please write hello.txt')
+      expect(screen.getByTestId('session-preview-response').textContent).toContain('Done.')
+      expect(screen.queryByTestId('session-preview-row')).toBeNull()
       expect(screen.queryByTestId('virtual-transcript')).toBeNull()
     } finally {
       vi.useRealTimers()
@@ -1024,7 +1026,7 @@ describe('Explorer', () => {
       )
       fireEvent.pointerEnter(screen.getByTestId('session-row'), { pointerType: 'mouse' })
       await act(async () => vi.advanceTimersByTime(50))
-      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('Done.')
+      expect(screen.getByTestId('session-preview-response').textContent).toContain('Done.')
       const updated = cachedSessionView(sessionSummary.sessionId)
       act(() => {
         cache.set(sessionSummary.sessionId, {
@@ -1035,13 +1037,13 @@ describe('Explorer', () => {
           }],
         })
       })
-      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('Latest realtime checkpoint.')
+      expect(screen.getByTestId('session-preview-response').textContent).toContain('Latest realtime checkpoint.')
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('shows only the recent preview window and keeps it compact for long sessions', async () => {
+  it('shows only the latest human goal instead of a raw event window for long sessions', async () => {
     vi.useFakeTimers()
     try {
       const cached = cachedSessionView(sessionSummary.sessionId)
@@ -1061,9 +1063,10 @@ describe('Explorer', () => {
       )
       fireEvent.pointerEnter(screen.getByTestId('session-row'), { pointerType: 'mouse' })
       await act(async () => vi.advanceTimersByTime(50))
-      expect(screen.getByTestId('session-hover-preview').style.height).toBe('520px')
-      expect(screen.getByTestId('session-hover-preview-summary').textContent).toContain('history-message-5')
-      expect(screen.getByTestId('session-hover-preview-summary').textContent).not.toContain('history-message-4')
+      expect(screen.getByTestId('session-hover-preview').style.height).toBe('')
+      expect(screen.getByTestId('session-preview-goal').textContent).toContain('history-message-16')
+      expect(screen.getByTestId('session-hover-preview-summary').textContent).not.toContain('history-message-15')
+      expect(screen.queryByTestId('session-preview-row')).toBeNull()
     } finally {
       vi.useRealTimers()
     }

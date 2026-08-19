@@ -566,10 +566,22 @@ export function Composer({
           onDelete={onQueuedDelete}
         />
         {mode === 'simple' ? (
-          <div
-            className="relative flex min-h-11 items-center gap-0.5 rounded-2xl border border-border/60 bg-background/70 px-1 py-0.5 shadow-[0_6px_18px_hsl(var(--foreground)/0.05)] transition-[border-color,background-color,box-shadow] focus-within:border-ring/45 focus-within:bg-background focus-within:shadow-[0_8px_22px_hsl(var(--foreground)/0.07)] sm:min-h-10 sm:px-0.5"
-            data-testid="composer-simple-shell"
-          >
+          <div className="flex flex-col gap-1" data-testid="composer-simple-frame">
+            <RuntimeMetrics
+              state={state}
+              config={config}
+              contextSnapshot={contextSnapshot}
+              modelInfo={modelInfoFor(models, model)}
+              queuedMessages={queuedMessages.length}
+              timeline={timeline}
+              density="simple"
+              onCompact={onCompact}
+              compactDisabled={disabled}
+            />
+            <div
+              className="relative flex min-h-11 items-center gap-0.5 rounded-2xl border border-border/60 bg-background/70 px-1 py-0.5 shadow-[0_6px_18px_hsl(var(--foreground)/0.05)] transition-[border-color,background-color,box-shadow] focus-within:border-ring/45 focus-within:bg-background focus-within:shadow-[0_8px_22px_hsl(var(--foreground)/0.07)] sm:min-h-10 sm:px-0.5"
+              data-testid="composer-simple-shell"
+            >
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
             <SlashCommandMenu
               commands={matchingCommands}
@@ -604,17 +616,6 @@ export function Composer({
               composerMode={mode}
               onComposerModeChange={toggleMode}
             />
-            <RuntimeMetrics
-              state={state}
-              config={config}
-              contextSnapshot={contextSnapshot}
-              modelInfo={modelInfoFor(models, model)}
-              queuedMessages={queuedMessages.length}
-              timeline={timeline}
-              density="simple"
-              onCompact={onCompact}
-              compactDisabled={disabled}
-            />
             <span className="hidden sm:inline-flex">
               <HumanAttentionIndicator timeline={humanAttention} density="simple" />
             </span>
@@ -625,6 +626,7 @@ export function Composer({
               density="simple"
               stop={showStopButton ? { onClick: onCancel } : undefined}
             />
+            </div>
           </div>
         ) : (
         <div className="flex items-stretch" data-testid="composer-full-shell">

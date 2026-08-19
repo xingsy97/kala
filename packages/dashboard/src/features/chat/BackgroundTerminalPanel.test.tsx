@@ -44,6 +44,10 @@ describe('BackgroundShellsButton', () => {
 
     fireEvent.click(trigger)
     expect(await screen.findByText('Workspace shells')).toBeTruthy()
+    expect(screen.getByTestId('background-terminal-panel').className).toContain('w-[calc(100vw-1rem)]')
+    expect(screen.getByTestId('background-terminal-layout').className).toContain('grid-rows-[auto_minmax(0,1fr)]')
+    expect(screen.queryByTestId('bg-task-kill-task-live-1')).toBeNull()
+    expect(screen.getAllByTestId('bg-task-kill-selected-task-live-1')).toHaveLength(1)
     expect(screen.getByText(/workspace live · task-live-1/i)).toBeTruthy()
     expect(screen.getByTestId('bg-task-command').textContent ?? '').toContain('pnpm dev -- --host 0.0.0.0')
     expect(screen.getByText('PID')).toBeTruthy()
