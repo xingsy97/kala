@@ -219,7 +219,17 @@ async function verifyDotsToolActivity(page, name) {
       text: details?.textContent ?? '',
     }
   })
-  check(`${name}: legacy calls keep individual concrete summaries without placeholder spam`, legacyRows.aggregate === '' && legacyRows.placeholders === 0 && legacyRows.visibleRows === 53 && legacyRows.concreteTargets === 53, JSON.stringify(legacyRows))
+  const narrow = await page.evaluate(() => window.innerWidth < 640)
+  if (narrow) {
+    const toggle = await page.$('[data-testid="tool-mobile-row-limit-toggle"]')
+    const toggleHeight = toggle ? await toggle.evaluate((element) => element.getBoundingClientRect().height) : 0
+    check(`${name}: mobile Tool details start bounded with a touch-sized Show all control`, legacyRows.aggregate === '' && legacyRows.placeholders === 0 && legacyRows.visibleRows <= 12 && legacyRows.visibleRows >= 8 && legacyRows.concreteTargets === legacyRows.visibleRows && toggleHeight >= 44, JSON.stringify({ ...legacyRows, toggleHeight }))
+    await toggle?.click()
+    const allRows = await page.$$eval('[data-testid^="grouped-tool-row-mobile-tool-"]', (rows) => rows.length)
+    check(`${name}: mobile Tool details reveal full history only on request`, allRows === 53, JSON.stringify({ allRows }))
+  } else {
+    check(`${name}: desktop legacy calls keep individual concrete summaries without placeholder spam`, legacyRows.aggregate === '' && legacyRows.placeholders === 0 && legacyRows.visibleRows === 53 && legacyRows.concreteTargets === 53, JSON.stringify(legacyRows))
+  }
   await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-tool-dots-expanded.png`), fullPage: false })
   await page.$eval('[data-testid="tool-call-group-toggle-mobile-tool-0"]', (element) => element.click())
 }
@@ -365,6 +375,16 @@ async function verifyViewportContract(page, name) {
   check(`${name}: document has no horizontal overflow`, metrics.bodyScrollWidth <= metrics.innerWidth + 1, JSON.stringify(metrics))
   check(`${name}: composer remains inside visible viewport`, Boolean(metrics.composer) && metrics.composer.bottom <= expectedHeight + 1 && metrics.composer.top >= -1, JSON.stringify(metrics))
   check(`${name}: toolbar and chat keep vertical order`, Boolean(metrics.toolbar && metrics.chat && metrics.composer) && metrics.toolbar.bottom <= metrics.chat.top + 1 && metrics.chat.bottom <= metrics.composer.bottom + 1, JSON.stringify(metrics))
+  const toolbarActions = await page.evaluate(() => ({
+    width: window.innerWidth,
+    explorer: Boolean(document.querySelector('[data-testid="explorer-toggle"]')),
+    terminal: Boolean(document.querySelector('[data-testid="terminal-toggle"]')),
+    inspector: Boolean(document.querySelector('[data-testid="inspector-toggle"]')),
+    titleWidth: document.querySelector('[data-testid="session-title"]')?.getBoundingClientRect().width ?? 0,
+  }))
+  if (toolbarActions.width < 640) {
+    check(`${name}: mobile toolbar keeps one Tools entry and preserves Session title space`, toolbarActions.explorer && !toolbarActions.terminal && toolbarActions.inspector && toolbarActions.titleWidth >= 80, JSON.stringify(toolbarActions))
+  }
   if (metrics.innerWidth < 600) {
     check(`${name}: touch form controls avoid iOS focus zoom`, metrics.minInputFontSize === null || metrics.minInputFontSize >= 16, JSON.stringify(metrics))
     check(`${name}: composer bottom padding stays compact`, metrics.composerPaddingBottom !== null && metrics.composerPaddingBottom <= 8, JSON.stringify(metrics))

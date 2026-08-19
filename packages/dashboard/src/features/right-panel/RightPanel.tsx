@@ -27,7 +27,7 @@ export function RightPanel({
   const { t } = useTranslation()
   return (
     <div className="flex h-full min-h-0 flex-col bg-card text-card-foreground" data-testid="right-panel">
-      <div className="flex h-12 flex-none items-center gap-1 border-b border-border/40 bg-muted/20 px-2 sm:h-11" role="tablist" aria-label="Workspace tools">
+      <div className="flex h-14 flex-none items-center gap-1 border-b border-border/40 bg-muted/20 px-2 sm:h-11" role="tablist" aria-label="Workspace tools">
         <TabButton active={activeTab === 'files'} onClick={() => onTabChange('files')} icon={<Files className="h-3.5 w-3.5" />} label="Files" testId="right-panel-files-tab" />
         <TabButton active={activeTab === 'git'} onClick={() => onTabChange('git')} icon={<GitBranch className="h-3.5 w-3.5" />} label="Git" testId="right-panel-git-tab" />
         <TabButton active={activeTab === 'terminal'} onClick={() => onTabChange('terminal')} icon={<SquareTerminal className="h-3.5 w-3.5" />} label={t('rightPanel.terminal')} testId="right-panel-terminal-tab" />
@@ -62,7 +62,7 @@ function TabButton({ active, onClick, icon, label, testId }: { active: boolean; 
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        'inline-flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-medium transition-colors sm:h-8 sm:flex-none sm:px-2.5',
+        'inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-medium transition-colors sm:h-8 sm:flex-none sm:px-2.5',
         active
           ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]'
           : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',

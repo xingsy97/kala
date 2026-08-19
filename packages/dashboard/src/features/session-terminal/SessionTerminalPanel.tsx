@@ -178,12 +178,12 @@ export function SessionTerminalPanel({
     <div className="flex h-full min-h-0 flex-col bg-[#0b0f14] text-white" data-testid="session-terminal-panel" data-terminal-status={status}>
       <div className="flex min-h-10 flex-none flex-wrap items-center gap-1.5 border-b border-border/35 bg-card/95 px-3 py-1 text-card-foreground" data-testid="terminal-toolbar">
         <span className="mr-auto inline-flex min-w-0 items-center gap-2 truncate text-xs text-muted-foreground" data-testid="terminal-status"><span className={`h-1.5 w-1.5 flex-none rounded-full ${!online || status === 'error' ? 'bg-rose-500' : status === 'running' ? 'bg-emerald-500' : status === 'starting' ? 'animate-pulse bg-amber-500' : 'bg-muted-foreground/50'}`} />{statusLabel}</span>
-        <Button size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled || status === 'starting' || status === 'running'} onClick={() => void start()}>
+        <Button size="sm" className="h-11 gap-1.5 rounded-lg px-3 sm:h-8" disabled={disabled || status === 'starting' || status === 'running'} onClick={() => void start()}>
           {status === 'starting' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}{t('terminal.start')}
         </Button>
-        <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg" disabled={disabled || status === 'starting'} onClick={() => void restart()} title={t('terminal.restart')} aria-label={t('terminal.restart')}><RefreshCw className="h-3.5 w-3.5" /></Button>
-        <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg" disabled={!terminalId || status !== 'running'} onClick={() => void kill()} title={t('terminal.kill')} aria-label={t('terminal.kill')}><Square className="h-3.5 w-3.5" /></Button>
-        <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg" onClick={() => terminalRef.current?.clear()} title={t('terminal.clear')} aria-label={t('terminal.clear')}><Eraser className="h-3.5 w-3.5" /></Button>
+        <Button size="icon" variant="ghost" className="h-11 w-11 rounded-lg sm:h-8 sm:w-8" disabled={disabled || status === 'starting'} onClick={() => void restart()} title={t('terminal.restart')} aria-label={t('terminal.restart')}><RefreshCw className="h-3.5 w-3.5" /></Button>
+        <Button size="icon" variant="ghost" className="h-11 w-11 rounded-lg sm:h-8 sm:w-8" disabled={!terminalId || status !== 'running'} onClick={() => void kill()} title={t('terminal.kill')} aria-label={t('terminal.kill')}><Square className="h-3.5 w-3.5" /></Button>
+        <Button size="icon" variant="ghost" className="h-11 w-11 rounded-lg sm:h-8 sm:w-8" onClick={() => terminalRef.current?.clear()} title={t('terminal.clear')} aria-label={t('terminal.clear')}><Eraser className="h-3.5 w-3.5" /></Button>
       </div>
       {!online ? <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200" role="status">{t('terminal.offlineHelp')}</div> : null}
       <div
@@ -195,7 +195,7 @@ export function SessionTerminalPanel({
       />
       <div className="flex flex-none gap-1.5 overflow-x-auto border-t border-border/40 bg-card px-2 py-1.5 text-card-foreground md:hidden" data-testid="terminal-touch-keys">
         {([[t('terminal.keys.esc'), '\u001b'], [t('terminal.keys.tab'), '\t'], ['Ctrl+C', '\u0003'], ['↑', '\u001b[A'], ['↓', '\u001b[B'], ['←', '\u001b[D'], ['→', '\u001b[C']] as const).map(([label, data]) => (
-          <Button key={label} size="sm" variant="outline" className="h-9 min-w-11 flex-none px-2 font-mono text-xs" disabled={status !== 'running'} onClick={() => sendKey(data)}>{label}</Button>
+          <Button key={label} size="sm" variant="outline" className="h-11 min-w-11 flex-none px-2 font-mono text-xs" disabled={status !== 'running'} onClick={() => sendKey(data)}>{label}</Button>
         ))}
       </div>
     </div>

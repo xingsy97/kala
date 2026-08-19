@@ -94,6 +94,7 @@ import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTransc
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 import { transcriptItemKey } from './transcript-key.js'
 import { toolDotRailBudget, toolPreviewGeometry, visibleToolDots, type ToolPreviewGeometry } from './tool-dot-layout.js'
+import { useIsMobile } from '../../app-logic/use-viewport.js'
 
 type Props = {
   messages?: readonly Message[]
@@ -2987,7 +2988,16 @@ function ToolCallGroupBlock({
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null)
   const [hoveredCallId, setHoveredCallId] = useState<string | null>(null)
   const [pinnedCallId, setPinnedCallId] = useState<string | null>(null)
+  const [showAllMobileRows, setShowAllMobileRows] = useState(false)
+  const isMobile = useIsMobile()
   const rows = summarizeToolActivityRows(group)
+  const mobileRows = useMemo(() => {
+    if (!isMobile || showAllMobileRows || rows.length <= 8) return rows
+    const critical = rows.filter((row) => approvalByCallId.has(row.callId) || isActiveToolCall(row.callId, activeToolCallIds) || group.results.get(row.callId)?.ok === false)
+    const recent = rows.slice(-8)
+    const visible = new Set([...critical, ...recent].map((row) => row.callId))
+    return rows.filter((row) => visible.has(row.callId))
+  }, [activeToolCallIds, approvalByCallId, group.results, isMobile, rows, showAllMobileRows])
   const anyPending = group.calls.some((c) => approvalByCallId.has(c.callId))
   const singleCall = group.calls.length === 1 ? group.calls[0]! : null
   const singleRow = singleCall ? rows.find((r) => r.callId === singleCall.callId) : null
@@ -3332,7 +3342,12 @@ function ToolCallGroupBlock({
           className="ak-expand-in flex min-w-0 max-w-full flex-col gap-0.5 overflow-hidden border-t border-border/40 px-3 pb-2 pt-1"
           data-testid={`tool-call-group-details-${group.firstCallId}`}
         >
-          {rows.map((row) => {
+          {isMobile && rows.length > 8 ? (
+            <button type="button" className="mb-1 flex min-h-12 w-full items-center justify-center rounded-lg border border-border/60 bg-background/70 px-3 text-xs font-medium text-foreground" onClick={() => setShowAllMobileRows((value) => !value)} data-testid="tool-mobile-row-limit-toggle">
+              {showAllMobileRows ? 'Show recent activity' : `Show all ${rows.length} operations`}
+            </button>
+          ) : null}
+          {mobileRows.map((row) => {
             const call = group.calls.find((c) => c.callId === row.callId)!
             const result = group.results.get(row.callId)
             const expanded = expandedCallId === row.callId

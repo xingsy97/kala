@@ -234,6 +234,41 @@ try {
     return { formats: cases.map(([name]) => name), realFilesystemRpc: true, csvTotalDataRows: 1_051, csvRenderedRows, markdownActiveContentBlocked: true, pdfViewerEnabled, pdfDefaultFallbackVerified: true }
   })
 
+  await harness.step('use Files and Terminal through the real mobile Tools drawer', async () => {
+    await actor.page.setViewport({ width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
+    await actor.page.waitForSelector('[data-testid="inspector-toggle"]')
+    await actor.page.click('[data-testid="inspector-toggle"]')
+    await actor.page.waitForSelector('[data-testid="inspector-drawer-mobile"]', { visible: true })
+    await sleep(250)
+    const drawer = await actor.page.$eval('[data-testid="inspector-drawer-mobile"]', (element) => {
+      const rect = element.getBoundingClientRect()
+      return { left: rect.left, right: rect.right, width: rect.width, viewportWidth: window.innerWidth, documentWidth: document.documentElement.scrollWidth }
+    })
+    if (drawer.left < -1 || drawer.right > drawer.viewportWidth + 1 || drawer.documentWidth > drawer.viewportWidth + 1) throw new Error(`mobile Tools drawer overflow: ${JSON.stringify(drawer)}`)
+    const tabHeights = await actor.page.$$eval('[role="tablist"][aria-label="Workspace tools"] [role="tab"]', (tabs) => tabs.map((tab) => tab.getBoundingClientRect().height))
+    if (tabHeights.length !== 4 || tabHeights.some((height) => height < 44)) throw new Error(`mobile Tool tabs are not touch-sized: ${JSON.stringify(tabHeights)}`)
+
+    await actor.page.click('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-terminal-tab"]')
+    await actor.page.waitForSelector('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-terminal-content"]', { visible: true })
+    await actor.page.waitForFunction(() => document.querySelector('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-terminal-tab"]')?.getAttribute('aria-selected') === 'true')
+    const terminalControls = await actor.page.$$eval('[data-testid="inspector-drawer-mobile"] [data-testid="terminal-toolbar"] button, [data-testid="inspector-drawer-mobile"] [data-testid="terminal-touch-keys"] button', (buttons) => buttons.map((button) => ({ label: button.getAttribute('aria-label') ?? button.textContent ?? '', height: button.getBoundingClientRect().height, width: button.getBoundingClientRect().width })))
+    if (terminalControls.length < 7 || terminalControls.some((control) => control.height < 44 || control.width < 44)) throw new Error(`mobile Terminal controls are not touch-sized: ${JSON.stringify(terminalControls)}`)
+
+    await actor.page.click('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-files-tab"]')
+    await actor.page.waitForSelector('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-files-content"] [data-testid="session-files-panel"]', { visible: true })
+    await actor.page.click('[data-testid="inspector-drawer-mobile"] [aria-label="Refresh files"]')
+    await sleep(150)
+    const csvRow = await findFileRow(actor.page, 'e2e-data.csv', '[data-testid="inspector-drawer-mobile"]')
+    await csvRow.evaluate((element) => element.click())
+    await actor.page.waitForSelector('[data-testid="session-file-table-preview"]')
+    const table = await actor.page.$eval('[data-testid="session-file-table-preview"]', (element) => ({ pageWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth, scrollable: Array.from(element.querySelectorAll('*')).some((child) => child.scrollWidth > child.clientWidth + 1) }))
+    if (table.pageWidth > table.viewportWidth + 1 || !table.scrollable) throw new Error(`mobile CSV table contract failed: ${JSON.stringify(table)}`)
+    await actor.page.click('[data-testid="session-file-view-close"]')
+    await actor.page.waitForSelector('[data-testid="session-file-view-dialog"]', { hidden: true })
+    await actor.page.setViewport({ width: 1180, height: 760, deviceScaleFactor: 1, isMobile: false, hasTouch: false })
+    return { drawer, tabHeights, terminalControls, csvHorizontallyScrollable: true }
+  })
+
   await harness.step('show real Git status and diff through Source Control UI', async () => {
     await clickByTestId(actor.page, 'right-panel-git-tab')
     await actor.page.waitForSelector('[data-testid="source-control-panel"]')
@@ -326,8 +361,8 @@ if (thrown) {
 }
 console.log(`PASS core-workspace-journeys system E2E\nEvidence: ${result.evidenceRoot}`)
 
-async function findFileRow(page, name) {
-  const rows = await page.$$('[data-testid="session-file-file"]')
+async function findFileRow(page, name, scope = '') {
+  const rows = await page.$$(`${scope} [data-testid="session-file-file"]`.trim())
   for (const rowButton of rows) {
     if (await rowButton.evaluate((element, expected) => element.textContent?.includes(expected), name)) return rowButton
   }

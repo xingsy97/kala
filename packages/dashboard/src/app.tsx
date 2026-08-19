@@ -1752,7 +1752,10 @@ export function App(): JSX.Element {
                 if (wideLayout) setInspectorOpen(true)
                 else setInspectorDrawerOpen(true)
               }}
-              terminalAvailable={hasSelectedSession}
+              // On phones the Inspector drawer already exposes Terminal as a
+              // tab. Keep one Tools entry instead of two adjacent 44px icons so
+              // the Session title remains readable.
+              terminalAvailable={hasSelectedSession && !isMobile}
               onChangeCwd={runtimeCapabilities.workspace ? openCwdDialog : undefined}
               sessionSelected={hasSelectedSession}
               sessionLoading={sessionListLoading && !hasSelectedSession}
