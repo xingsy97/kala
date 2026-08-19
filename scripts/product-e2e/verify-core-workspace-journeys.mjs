@@ -32,6 +32,15 @@ mkdirSync(sessionsDir, { recursive: true })
 mkdirSync(workspace, { recursive: true })
 writeFileSync(join(workspace, 'e2e-visible.txt'), 'FILES_E2E_VISIBLE\n', 'utf8')
 writeFileSync(join(workspace, 'e2e-binary.bin'), Buffer.from([0, 255, 1, 254, 2, 253]))
+writeFileSync(join(workspace, 'e2e-data.csv'), `name,note,value\nAda,"hello, world",=1+1\n${Array.from({ length: 1_050 }, (_, index) => `row-${index},note-${index},${index}`).join('\n')}\n`, 'utf8')
+writeFileSync(join(workspace, 'e2e-events.jsonl'), '{"kind":"ready","ok":true}\ninvalid-json\n{"kind":"done","ok":false}\n', 'utf8')
+writeFileSync(join(workspace, 'e2e-config.yaml'), 'server:\n  port: 3195\n', 'utf8')
+writeFileSync(join(workspace, 'e2e-config.toml'), '[server]\nport = 3195\n', 'utf8')
+writeFileSync(join(workspace, 'e2e-unsafe.xml'), '<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>\n', 'utf8')
+writeFileSync(join(workspace, 'e2e-app.log'), '\u001b[31mERROR\u001b[0m failed\nINFO ready\n', 'utf8')
+writeFileSync(join(workspace, 'e2e-change.patch'), '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n', 'utf8')
+writeFileSync(join(workspace, 'e2e-preview.md'), '[bad](javascript:alert(1))\n\n![remote](https://example.invalid/tracker.png)\n\n```mermaid\ngraph TD; A-->B\n```\n', 'utf8')
+writeFileSync(join(workspace, 'e2e-report.pdf'), Buffer.from('JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCnRyYWlsZXI8PC9Sb290IDEgMCBSPj4KJSVFT0YK', 'base64'))
 execFileSync('git', ['init', '-q'], { cwd: workspace })
 execFileSync('git', ['config', 'user.email', 'e2e@example.test'], { cwd: workspace })
 execFileSync('git', ['config', 'user.name', 'E2E'], { cwd: workspace })
@@ -93,9 +102,12 @@ try {
     await clickByTestId(actor.page, 'new-session-create')
     await actor.page.waitForFunction(() => new URL(location.href).searchParams.has('sessionId'))
     sessionId = new URL(actor.page.url()).searchParams.get('sessionId')
-    await actor.page.waitForSelector('[data-testid="session-selected-marker"]')
-    const selected = await actor.page.$eval('[data-testid="session-selected-marker"]', (element) => element.closest('[data-testid="session-row"]')?.getAttribute('data-session-id'))
-    if (!sessionId || selected !== sessionId) throw new Error(`created Session ${sessionId} but selected ${selected}`)
+    if (!sessionId) throw new Error('created Session ACK id missing from URL')
+    const rowSelector = `[data-testid="session-row"][data-session-id="${sessionId}"]`
+    await actor.page.waitForSelector(rowSelector)
+    await actor.page.waitForSelector('[data-testid="composer-input"]')
+    const selected = await actor.page.$eval(rowSelector, (element) => element.classList.contains('bg-accent'))
+    if (!selected) throw new Error(`created Session ${sessionId} row is not selected`)
     return { sessionId, url: actor.page.url(), selected }
   })
 
@@ -103,8 +115,8 @@ try {
     await actor.page.reload({ waitUntil: 'networkidle2' })
     await actor.page.waitForFunction((expected) => new URL(location.href).searchParams.get('sessionId') === expected, {}, sessionId)
     await actor.page.waitForSelector('[data-testid="composer-input"]')
-    const marker = await actor.page.$('[data-testid="session-selected-marker"]')
-    if (!marker) throw new Error('selected Session marker missing after reload')
+    const selectedRow = await actor.page.$(`[data-testid="session-row"][data-session-id="${sessionId}"]`)
+    if (!selectedRow || !(await selectedRow.evaluate((element) => element.classList.contains('bg-accent')))) throw new Error('selected Session row missing after reload')
     return { sessionId, restored: true }
   })
 
@@ -169,7 +181,57 @@ try {
     await freshBinaryRow.evaluate((element) => element.parentElement?.querySelector('button[aria-label^="Download "]')?.click())
     const downloaded = await actor.page.waitForFunction(() => Boolean(window.__runlabDownload?.bytes), { timeout: 30_000 }).then(async () => await actor.page.evaluate(() => window.__runlabDownload))
     if (downloaded.name !== 'e2e-binary.bin' || JSON.stringify(downloaded.bytes) !== JSON.stringify([0, 255, 1, 254, 2, 253])) throw new Error(`download bytes mismatch: ${JSON.stringify(downloaded)}`)
+    const close = await actor.page.$('[data-testid="session-file-view-close"]')
+    if (close) {
+      await close.click()
+      await actor.page.waitForSelector('[data-testid="session-file-view-dialog"]', { hidden: true })
+    }
     return { path: join(workspace, 'e2e-visible.txt'), visibleContents: true, binaryHandled: true, downloaded }
+  })
+
+  await harness.step('preview structured and document files through real filesystem RPC', async () => {
+    const pdfViewerEnabled = await actor.page.evaluate(() => navigator.pdfViewerEnabled === true)
+    let csvRenderedRows = 0
+    const cases = [
+      ['e2e-data.csv', 'session-file-table-preview', 'hello, world'],
+      ['e2e-events.jsonl', 'session-file-record-preview', 'Invalid JSON on Line 2'],
+      ['e2e-config.yaml', 'session-file-outline-preview', '3195'],
+      ['e2e-config.toml', 'session-file-outline-preview', 'server'],
+      ['e2e-unsafe.xml', 'session-file-outline-preview', 'DOCTYPE and ENTITY declarations are disabled'],
+      ['e2e-app.log', 'session-file-log-preview', 'ERROR failed'],
+      ['e2e-change.patch', 'session-file-diff-preview', '+new'],
+      ['e2e-preview.md', 'session-file-markdown-preview', '[Image blocked in preview: remote]'],
+      ['e2e-report.pdf', 'session-file-pdf-fallback', 'PDF ready for read-only preview'],
+    ]
+    for (const [name, testId, text] of cases) {
+      const row = await findFileRow(actor.page, name)
+      await row.evaluate((element) => element.click())
+      await actor.page.waitForSelector('[data-testid="session-file-view-dialog"]', { visible: true, timeout: 30_000 })
+      await actor.page.waitForSelector(`[data-testid="${testId}"]`, { timeout: 30_000 })
+      if (text) await actor.page.waitForFunction((expected) => document.body.innerText.includes(expected), { timeout: 30_000 }, text)
+      if (name === 'e2e-data.csv') {
+        await actor.page.waitForFunction(() => document.body.innerText.includes('rows and 0 columns omitted by preview limits'))
+        csvRenderedRows = await actor.page.$$eval('[data-testid="session-file-table-rows"] [data-item-index]', (items) => items.length)
+        if (csvRenderedRows <= 0 || csvRenderedRows >= 100) throw new Error(`CSV virtualization budget failed: ${csvRenderedRows} rendered rows`)
+        await actor.page.click('button[aria-label="Show source"]')
+        await actor.page.waitForFunction(() => document.body.innerText.includes('name,note,value'))
+        await actor.page.click('button[aria-label="Show structured preview"]')
+        await actor.page.waitForSelector('[data-testid="session-file-table-preview"]')
+      }
+      if (name === 'e2e-preview.md') {
+        const unsafeLink = await actor.page.$('[data-testid="session-file-markdown-preview"] a[href^="javascript:"]')
+        const externalImage = await actor.page.$('[data-testid="session-file-markdown-preview"] img')
+        const mermaidSvg = await actor.page.$('[data-testid="session-file-markdown-preview"] svg')
+        if (unsafeLink || externalImage || mermaidSvg) throw new Error('Markdown file preview exposed active content')
+      }
+      if (name === 'e2e-report.pdf') {
+        const download = await actor.page.$('button[aria-label="Download file"]')
+        if (!download) throw new Error('PDF fallback omitted Download file action')
+      }
+      await actor.page.click('[data-testid="session-file-view-close"]')
+      await actor.page.waitForSelector('[data-testid="session-file-view-dialog"]', { hidden: true })
+    }
+    return { formats: cases.map(([name]) => name), realFilesystemRpc: true, csvTotalDataRows: 1_051, csvRenderedRows, markdownActiveContentBlocked: true, pdfViewerEnabled, pdfDefaultFallbackVerified: true }
   })
 
   await harness.step('show real Git status and diff through Source Control UI', async () => {
@@ -236,7 +298,9 @@ try {
 
   const expectedMonacoAborts = actor.requestFailures.filter((item) => item.error === 'net::ERR_ABORTED' && item.url.includes('monaco-editor') && item.url.includes('editor.worker'))
   actor.requestFailures = actor.requestFailures.filter((item) => !expectedMonacoAborts.includes(item))
-  await harness.step('account for Monaco worker cancellation after diff teardown', async () => ({ expectedMonacoWorkerAborts: expectedMonacoAborts.length }))
+  const expectedMonacoPageErrors = actor.pageErrors.filter((message) => message === 'Error: Uncaught (in promise) Canceled: Canceled')
+  actor.pageErrors = actor.pageErrors.filter((message) => !expectedMonacoPageErrors.includes(message))
+  await harness.step('account for controlled preview capability fallbacks', async () => ({ expectedMonacoWorkerAborts: expectedMonacoAborts.length, expectedMonacoPageErrors: expectedMonacoPageErrors.length }))
   await harness.screenshot(actor, 'core-journeys-complete')
 } catch (error) {
   thrown = error

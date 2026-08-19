@@ -18,8 +18,8 @@ const checks = [
   },
   {
     label: 'Dashboard session authority and cache hydration', command: 'pnpm',
-    args: ['--dir', 'packages/dashboard', 'exec', 'vitest', 'run', 'src/session-projection.test.ts', 'src/use-session-cache.test.tsx', 'src/app-toolbar.test.tsx', 'src/session.test.ts'],
-    files: ['packages/dashboard/src/session-projection.test.ts', 'packages/dashboard/src/use-session-cache.test.tsx', 'packages/dashboard/src/app-toolbar.test.tsx', 'packages/dashboard/src/session.test.ts'],
+    args: ['--dir', 'packages/dashboard', 'exec', 'vitest', 'run', 'src/session-projection.test.ts', 'src/use-session-cache.test.tsx', 'src/app-toolbar.test.tsx', 'src/session.test.ts', 'src/features/session-files/SessionFilesPanel.test.tsx', 'src/features/session-files/file-preview-model.test.ts'],
+    files: ['packages/dashboard/src/session-projection.test.ts', 'packages/dashboard/src/use-session-cache.test.tsx', 'packages/dashboard/src/app-toolbar.test.tsx', 'packages/dashboard/src/session.test.ts', 'packages/dashboard/src/features/session-files/SessionFilesPanel.test.tsx', 'packages/dashboard/src/features/session-files/file-preview-model.test.ts'],
   },
   {
     label: 'Dashboard Tool intention, dot preview, Shell label, and line geometry', command: 'pnpm',

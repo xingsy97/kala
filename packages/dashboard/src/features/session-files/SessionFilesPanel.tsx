@@ -13,7 +13,8 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { MermaidBlock } from '../chat/MermaidBlock.js'
+import { StructuredFilePreview } from './StructuredFilePreview.js'
+import { buildPreviewModel, safeExternalHref } from './file-preview-model.js'
 import type { Socket } from 'socket.io-client'
 
 import type {
@@ -155,8 +156,8 @@ export function WorkspaceFileViewDialog({
                 <Button variant={wordWrap ? 'outline' : 'ghost'} size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text'} onClick={() => setWordWrap((value) => !value)} title="Toggle word wrap" aria-label="Toggle word wrap">
                   <WrapText className="h-3.5 w-3.5" />
                 </Button>
-                {isMarkdownViewer(viewer) ? (
-                  <Button variant={markdownMode === 'preview' ? 'outline' : 'ghost'} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setMarkdownMode((value) => value === 'preview' ? 'source' : 'preview')} title={markdownMode === 'preview' ? 'Show Markdown source' : 'Preview Markdown'} aria-label={markdownMode === 'preview' ? 'Show Markdown source' : 'Preview Markdown'}>
+                {hasRichPreview(viewer) ? (
+                  <Button variant={markdownMode === 'preview' ? 'outline' : 'ghost'} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setMarkdownMode((value) => value === 'preview' ? 'source' : 'preview')} title={markdownMode === 'preview' ? 'Show source' : 'Show structured preview'} aria-label={markdownMode === 'preview' ? 'Show source' : 'Show structured preview'}>
                     {markdownMode === 'preview' ? 'Source' : 'Preview'}
                   </Button>
                 ) : null}
@@ -431,10 +432,11 @@ type FileViewState =
   | { kind: 'binary'; path?: string; size?: number; message?: string; content?: string; mediaType?: string }
   | { kind: 'too_large' | 'not_found' | 'error'; path?: string; size?: number; message?: string }
 
-function FileView({ viewer, selected, path, target, chrome = true, wordWrap = true, fontSizeDelta = 0, markdownMode = 'source' }: { viewer: FileViewState; selected?: FileNode | null; path?: string; target?: WorkspaceFileTarget; chrome?: boolean; wordWrap?: boolean; fontSizeDelta?: number; markdownMode?: 'preview' | 'source' }): JSX.Element {
+function FileView({ viewer, selected, path, target, chrome = true, wordWrap = true, fontSizeDelta = 0, markdownMode = 'preview' }: { viewer: FileViewState; selected?: FileNode | null; path?: string; target?: WorkspaceFileTarget; chrome?: boolean; wordWrap?: boolean; fontSizeDelta?: number; markdownMode?: 'preview' | 'source' }): JSX.Element {
   const activePath = selected?.path ?? path ?? viewerPath(viewer)
   const language = useMemo(() => activePath ? languageForPath(activePath) : 'plaintext', [activePath])
   const fontSize = useFileViewFontSize(fontSizeDelta)
+  const previewModel = useMemo(() => viewer.kind === 'text' && !viewer.truncated ? buildPreviewModel(viewer.path, viewer.content) : null, [viewer])
   if (viewer.kind === 'empty') return <ViewerShell title="File view" chrome={chrome}><EmptyViewer /></ViewerShell>
   if (viewer.kind === 'loading') return <ViewerShell title={viewer.path} chrome={chrome}><div className="flex items-center gap-2 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading file</div></ViewerShell>
   if (viewer.kind === 'image') {
@@ -446,23 +448,17 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
       </ViewerShell>
     )
   }
-  if (viewer.kind === 'pdf') {
-    return (
-      <ViewerShell title={viewer.path} meta={viewerMeta(viewer).join(' · ')} chrome={chrome}>
-        <object className="h-full w-full bg-muted/25" data={`data:${viewer.mediaType};base64,${viewer.content}`} type={viewer.mediaType} data-testid="session-file-pdf-viewer">
-          <div className="p-4 text-sm text-muted-foreground">PDF view is unavailable in this browser.</div>
-        </object>
-      </ViewerShell>
-    )
-  }
+  if (viewer.kind === 'pdf') return <PdfFileView viewer={viewer} chrome={chrome} />
   if (viewer.kind !== 'text') {
     return <ViewerShell title={viewer.path ?? 'File view'} chrome={chrome}><FallbackViewer kind={viewer.kind} size={viewer.size} message={viewer.message} /></ViewerShell>
   }
   return (
     <ViewerShell title={viewer.path} meta={`${viewer.size !== undefined ? formatBytes(viewer.size) : ''}${viewer.truncated ? ' · view truncated' : ''}`} chrome={chrome}>
       {viewer.truncated ? <div className="border-b border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Large file view is capped. Full content was not loaded.</div> : null}
-      {language === 'markdown' && markdownMode === 'preview' ? (
+      {markdownMode === 'preview' && previewModel?.kind === 'source' && previewModel.format === 'Markdown' ? (
         <MarkdownFileView content={viewer.content} fontSize={fontSize} />
+      ) : markdownMode === 'preview' && previewModel && previewModel.kind !== 'source' ? (
+        <StructuredFilePreview path={viewer.path} content={viewer.content} fontSize={fontSize} />
       ) : (
         <Editor
           value={viewer.content}
@@ -481,6 +477,20 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
   )
 }
 
+function PdfFileView({ viewer, chrome }: { viewer: Extract<FileViewState, { kind: 'pdf' }>; chrome: boolean }): JSX.Element {
+  const pdfViewerAvailable = typeof navigator !== 'undefined' && navigator.pdfViewerEnabled === true
+  const [inlineRequested, setInlineRequested] = useState(false)
+  const objectUrl = useMemo(() => {
+    if (!pdfViewerAvailable || !inlineRequested) return null
+    try {
+      const bytes = Uint8Array.from(atob(viewer.content), (character) => character.charCodeAt(0))
+      return URL.createObjectURL(new Blob([bytes], { type: viewer.mediaType }))
+    } catch { return null }
+  }, [inlineRequested, pdfViewerAvailable, viewer.content, viewer.mediaType])
+  useEffect(() => () => { if (objectUrl) URL.revokeObjectURL(objectUrl) }, [objectUrl])
+  return <ViewerShell title={viewer.path} meta={viewerMeta(viewer).join(' · ')} chrome={chrome}>{objectUrl ? <iframe className="h-full w-full border-0 bg-muted/25" src={objectUrl} sandbox="allow-same-origin" referrerPolicy="no-referrer" title={`PDF preview: ${viewer.path}`} data-testid="session-file-pdf-viewer" /> : <div className="space-y-3 p-4 text-sm" data-testid="session-file-pdf-fallback"><div className="font-medium">PDF ready for read-only preview</div><div className="text-xs text-muted-foreground">Use Download file to open it with a trusted local viewer.{pdfViewerAvailable ? ' Inline preview uses this browser’s built-in PDF viewer.' : ' This browser does not provide a built-in PDF viewer.'}</div>{pdfViewerAvailable ? <Button size="sm" variant="outline" onClick={() => setInlineRequested(true)}>Open inline preview</Button> : null}</div>}</ViewerShell>
+}
+
 function MarkdownFileView({ content, fontSize }: { content: string; fontSize: number }): JSX.Element {
   return (
     <div className="h-full min-h-0 overflow-auto bg-background px-4 py-4 leading-[1.65] sm:px-6 sm:py-5" style={{ fontSize }} data-testid="session-file-markdown-preview">
@@ -492,8 +502,9 @@ function MarkdownFileView({ content, fontSize }: { content: string; fontSize: nu
         ul: ({ children }) => <ul className="my-2 list-disc pl-5">{children}</ul>,
         ol: ({ children }) => <ol className="my-2 list-decimal pl-5">{children}</ol>,
         li: ({ children }) => <li className="my-1">{children}</li>,
-        a: ({ children, href }) => <a className="text-primary underline underline-offset-2" href={href} target="_blank" rel="noreferrer">{children}</a>,
-        code: ({ className, children }) => className?.includes('language-mermaid') ? <MermaidBlock code={String(children).replace(/\n$/u, '')} /> : <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.92em]">{children}</code>,
+        a: ({ children, href }) => safeExternalHref(href) ? <a className="text-primary underline underline-offset-2" href={safeExternalHref(href)} target="_blank" rel="noreferrer">{children}</a> : <span>{children}</span>,
+        img: ({ alt }) => <span className="rounded bg-muted px-1.5 py-1 text-xs text-muted-foreground">[Image blocked in preview{alt ? `: ${alt}` : ''}]</span>,
+        code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.92em]">{children}</code>,
         pre: ({ children }) => <pre className="my-3 overflow-auto rounded bg-muted p-3 font-mono text-xs leading-5">{children}</pre>,
         blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
         table: ({ children }) => <div className="my-3 overflow-auto"><table className="w-full border-collapse text-left text-xs">{children}</table></div>,
@@ -569,8 +580,9 @@ function downloadableBlob(viewer: FileViewState): { blob: Blob } | undefined {
   return undefined
 }
 
-function isMarkdownViewer(viewer: FileViewState): boolean {
-  return viewer.kind === 'text' && languageForPath(viewer.path) === 'markdown'
+function hasRichPreview(viewer: FileViewState): boolean {
+  if (viewer.kind !== 'text' || viewer.truncated) return false
+  return buildPreviewModel(viewer.path, viewer.content).kind !== 'source' || languageForPath(viewer.path) === 'markdown'
 }
 
 function EmptyViewer(): JSX.Element {

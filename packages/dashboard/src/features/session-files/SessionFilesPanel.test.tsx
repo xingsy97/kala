@@ -23,6 +23,12 @@ vi.mock('react-arborist', () => ({
   ),
 }))
 
+vi.mock('react-virtuoso', () => ({
+  Virtuoso: ({ totalCount, itemContent, ...props }: { totalCount: number; itemContent: (index: number) => JSX.Element }) => (
+    <div {...props}>{Array.from({ length: totalCount }, (_, index) => <div key={index}>{itemContent(index)}</div>)}</div>
+  ),
+}))
+
 const writeMock = vi.fn()
 const writelnMock = vi.fn()
 const inputListeners: Array<(data: string) => void> = []
@@ -212,7 +218,8 @@ describe('SessionFilesPanel', () => {
     expect(screen.getByText('image/gif')).toBeTruthy()
   })
 
-  it('renders PDF files in the file view modal', async () => {
+  it('renders PDF files in the file view modal when the browser has a PDF viewer', async () => {
+    Object.defineProperty(navigator, 'pdfViewerEnabled', { configurable: true, value: true })
     const socket = makeSessionFilesSocket({
       file: { kind: 'pdf', content: 'JVBERi0x', size: 8, encoding: 'base64', mediaType: 'application/pdf' },
       entries: [{ name: 'report.pdf', path: '/repo/report.pdf', type: 'file', size: 8 }],
@@ -222,9 +229,24 @@ describe('SessionFilesPanel', () => {
 
     fireEvent.click(await screen.findByText('report.pdf'))
 
+    expect(await screen.findByTestId('session-file-pdf-fallback')).toBeTruthy()
+    expect(createObjectURLMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Open inline preview' }))
     const pdf = await screen.findByTestId('session-file-pdf-viewer')
-    expect(pdf.getAttribute('type')).toBe('application/pdf')
-    expect(pdf.getAttribute('data')).toBe('data:application/pdf;base64,JVBERi0x')
+    expect(pdf.getAttribute('src')).toBe('blob:mock')
+    expect(createObjectURLMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'application/pdf' }))
+    expect(pdf.getAttribute('sandbox')).toBe('allow-same-origin')
+    expect(pdf.getAttribute('referrerpolicy')).toBe('no-referrer')
+  })
+
+  it('shows a download-oriented PDF fallback without creating a Blob URL when the browser lacks a viewer', async () => {
+    Object.defineProperty(navigator, 'pdfViewerEnabled', { configurable: true, value: false })
+    const socket = makeSessionFilesSocket({ file: { kind: 'pdf', content: 'JVBERi0x', size: 8, encoding: 'base64', mediaType: 'application/pdf' }, entries: [{ name: 'report.pdf', path: '/repo/report.pdf', type: 'file' }] })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('report.pdf'))
+    expect(await screen.findByTestId('session-file-pdf-fallback')).toBeTruthy()
+    expect(screen.getByText(/Use Download file/u)).toBeTruthy()
+    expect(createObjectURLMock).not.toHaveBeenCalled()
   })
 
   it('opens Markdown files in rendered preview mode by default and can switch to source', async () => {
@@ -238,11 +260,82 @@ describe('SessionFilesPanel', () => {
     expect(preview.textContent).toContain('Title')
     expect(screen.queryByTestId('monaco-editor')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: /show markdown source/i }))
+    fireEvent.click(screen.getByRole('button', { name: /show source/i }))
     expect((await screen.findByTestId('monaco-editor')).getAttribute('data-language')).toBe('markdown')
 
-    fireEvent.click(screen.getByRole('button', { name: /preview markdown/i }))
+    fireEvent.click(screen.getByRole('button', { name: /show structured preview/i }))
     expect(await screen.findByTestId('session-file-markdown-preview')).toBeTruthy()
+  })
+
+  it('previews CSV as an inert virtualized table and switches to source', async () => {
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'text', content: 'name,note,value\nAda,"hello, world",=1+1', size: 42 },
+      entries: [{ name: 'people.csv', path: '/repo/people.csv', type: 'file', size: 42 }],
+    })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('people.csv'))
+    expect(await screen.findByTestId('session-file-table-preview')).toBeTruthy()
+    expect(screen.getByText('hello, world')).toBeTruthy()
+    expect(screen.getByText('=1+1')).toBeTruthy()
+    expect(screen.queryByTestId('monaco-editor')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /show source/i }))
+    expect((await screen.findByTestId('monaco-editor')).textContent).toContain('name,note,value')
+  })
+
+  it('previews JSONL records while retaining malformed-line diagnostics', async () => {
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: '{"ok":true}\ninvalid\n{"ok":false}', size: 34 }, entries: [{ name: 'events.jsonl', path: '/repo/events.jsonl', type: 'file' }] })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('events.jsonl'))
+    expect(await screen.findByTestId('session-file-record-preview')).toBeTruthy()
+    expect(screen.getByText(/Invalid JSON on Line 2/u)).toBeTruthy()
+    expect(screen.getByText('true')).toBeTruthy()
+    expect(screen.getByText('false')).toBeTruthy()
+  })
+
+  it('rejects XML entities in structured mode and keeps safe source available', async () => {
+    const xml = '<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>'
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: xml, size: xml.length }, entries: [{ name: 'unsafe.xml', path: '/repo/unsafe.xml', type: 'file' }] })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('unsafe.xml'))
+    expect(await screen.findByText(/DOCTYPE and ENTITY declarations are disabled/u)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /show source/i }))
+    expect((await screen.findByTestId('monaco-editor')).textContent).toContain('<!ENTITY')
+  })
+
+  it('previews logs without ANSI and filters levels', async () => {
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: '\u001b[31mERROR\u001b[0m failed\nINFO ready', size: 36 }, entries: [{ name: 'app.log', path: '/repo/app.log', type: 'file' }] })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('app.log'))
+    expect(await screen.findByTestId('session-file-log-preview')).toBeTruthy()
+    expect(screen.getByText('ERROR failed')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('\u001b')
+    fireEvent.click(screen.getByRole('button', { name: 'error' }))
+    expect(screen.queryByText('ERROR failed')).toBeNull()
+    expect(screen.getByText('INFO ready')).toBeTruthy()
+  })
+
+  it('previews patch additions and deletions with semantic rows', async () => {
+    const patch = '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new'
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: patch, size: patch.length }, entries: [{ name: 'change.patch', path: '/repo/change.patch', type: 'file' }] })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('change.patch'))
+    const preview = await screen.findByTestId('session-file-diff-preview')
+    expect(screen.getByText('+new').parentElement?.className).toContain('text-emerald')
+    expect(screen.getByText('-old').parentElement?.className).toContain('text-red')
+    expect(preview.textContent).toContain('@@ -1 +1 @@')
+  })
+
+  it('does not execute Mermaid or expose unsafe Markdown links', async () => {
+    const markdown = '[bad](javascript:alert(1))\n\n![remote](https://example.invalid/tracker.png)\n\n```mermaid\ngraph TD; A-->B\n```'
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: markdown, size: markdown.length } })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('README.md'))
+    const preview = await screen.findByTestId('session-file-markdown-preview')
+    expect(screen.queryByRole('link', { name: 'bad' })).toBeNull()
+    expect(preview.textContent).toContain('graph TD; A-->B')
+    expect(preview.textContent).toContain('[Image blocked in preview: remote]')
+    expect(preview.querySelector('img')).toBeNull()
+    expect(preview.querySelector('svg')).toBeNull()
   })
 
   it('toggles word wrap for text views in the sidebar modal', async () => {
