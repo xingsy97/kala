@@ -232,6 +232,23 @@ async function verifyDotsToolActivity(page, name) {
   }
   await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-tool-dots-expanded.png`), fullPage: false })
   await page.$eval('[data-testid="tool-call-group-toggle-mobile-tool-0"]', (element) => element.click())
+  await sleep(250)
+  const collapsedGeometry = await page.evaluate(() => {
+    const group = document.querySelector('[data-testid="tool-call-group-mobile-tool-0"]')
+    const virtualRow = group?.closest('[data-virt-index]')
+    const emptyRows = Array.from(document.querySelectorAll('[data-virt-index]')).filter((row) => {
+      const hasText = (row.textContent ?? '').trim().length > 0
+      const hasSemanticContent = Boolean(row.querySelector('[data-testid="tool-activity-rail"], img, [role="status"], [role="alert"]'))
+      return !hasText && !hasSemanticContent
+    })
+    return {
+      groupHeight: group?.getBoundingClientRect().height ?? null,
+      rowHeight: virtualRow?.getBoundingClientRect().height ?? null,
+      emptyRows: emptyRows.length,
+    }
+  })
+  check(`${name}: collapsed Tool activity releases expanded virtual-row height`, collapsedGeometry.groupHeight !== null && collapsedGeometry.groupHeight <= 64 && collapsedGeometry.rowHeight !== null && collapsedGeometry.rowHeight <= 120, JSON.stringify(collapsedGeometry))
+  check(`${name}: rendered transcript has no semantically empty virtual rows`, collapsedGeometry.emptyRows === 0, JSON.stringify(collapsedGeometry))
 }
 
 async function verifyImagePreviewDialog(page, name) {

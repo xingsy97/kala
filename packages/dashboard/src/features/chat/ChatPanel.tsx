@@ -321,14 +321,10 @@ export function ChatPanel({
       if (it.kind === 'message') {
         mi += 1
         const m = it.message
-        if (m.role === 'tool') {
-          const hasVisible = m.content.some(
-            (c) => c.type !== 'tool_result' || !groupedIds.has(c.callId),
-          )
-          if (!hasVisible) {
-            i += 1
-            continue
-          }
+        const visibleMessageContent = messageContentAfterGroupedResults(m, groupedIds)
+        if (!visibleMessageContent.some(isRenderableMessageContent)) {
+          i += 1
+          continue
         }
         kept.push(it)
         mapping.push(mi)
@@ -834,8 +830,11 @@ function isToolResultItemForKnownCalls(
 ): item is Extract<TranscriptItem, { kind: 'message' }> {
   if (!item || item.kind !== 'message' || item.message.role !== 'tool') return false
   if (item.message.content.length === 0) return false
-  return item.message.content.every(
+  const hasKnownResult = item.message.content.some(
     (content) => content.type === 'tool_result' && knownCallIds.has(content.callId),
+  )
+  return hasKnownResult && item.message.content.every(
+    (content) => (content.type === 'tool_result' && knownCallIds.has(content.callId)) || !isRenderableMessageContent(content),
   )
 }
 
@@ -1188,6 +1187,21 @@ function CompactBoundaryRow({
   )
 }
 
+function messageContentAfterGroupedResults(
+  message: Message,
+  groupedCallIds: ReadonlySet<string>,
+): MessageContent[] {
+  if (message.role !== 'tool') return [...message.content]
+  return message.content.filter(
+    (content) => content.type !== 'tool_result' || !groupedCallIds.has(content.callId),
+  )
+}
+
+function isRenderableMessageContent(content: MessageContent): boolean {
+  if (content.type === 'text' || content.type === 'thinking') return content.text.trim().length > 0
+  return true
+}
+
 function MessageRow({
   index,
   message,
@@ -1351,12 +1365,8 @@ function MessageRow({
       : 'text-muted-foreground'
   const label = message.role === 'assistant' ? 'Assistant' : 'Tool result'
 
-  const visibleContent: MessageContent[] =
-    message.role === 'tool'
-      ? message.content.filter(
-          (c) => c.type !== 'tool_result' || !groupedCallIds.has(c.callId),
-        )
-      : [...message.content]
+  const visibleContent = messageContentAfterGroupedResults(message, groupedCallIds)
+    .filter(isRenderableMessageContent)
 
   if (visibleContent.length === 0) return null
   const assistantActions = assistantMessageActions(message, visibleContent)

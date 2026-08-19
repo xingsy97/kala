@@ -1930,7 +1930,7 @@ describe('ChatPanel', () => {
     expect(screen.queryByText('Thinking')).toBeNull()
   })
 
-  it('keeps one dots rail when visible assistant narration separates tool turns', () => {
+  it('keeps one compact dots rail when narration and blank protocol content separate tool turns', () => {
     render(
       <DashboardChatPanel
         messages={[
@@ -1944,7 +1944,7 @@ describe('ChatPanel', () => {
           },
           {
             role: 'tool',
-            content: [{ type: 'tool_result', callId: 'narrated-1', ok: true, content: 'files' }],
+            content: [{ type: 'tool_result', callId: 'narrated-1', ok: true, content: 'files' }, { type: 'text', text: '   ' }],
           },
           {
             role: 'assistant',
@@ -1956,7 +1956,7 @@ describe('ChatPanel', () => {
           },
           {
             role: 'tool',
-            content: [{ type: 'tool_result', callId: 'narrated-2', ok: true, content: 'passed' }],
+            content: [{ type: 'tool_result', callId: 'narrated-2', ok: true, content: 'passed' }, { type: 'thinking', text: '\n' }],
           },
           {
             role: 'assistant',
@@ -1967,7 +1967,7 @@ describe('ChatPanel', () => {
           },
           {
             role: 'tool',
-            content: [{ type: 'tool_result', callId: 'narrated-3', ok: true, content: 'edited' }],
+            content: [{ type: 'tool_result', callId: 'narrated-3', ok: false, content: 'outside sandbox' }, { type: 'text', text: '' }],
           },
           {
             role: 'assistant',
@@ -1985,6 +1985,12 @@ describe('ChatPanel', () => {
     expect(screen.getByText('Apply the precise edit.')).toBeTruthy()
     expect(screen.getByText('Everything is complete.')).toBeTruthy()
     expect(screen.getAllByLabelText('Assistant')).toHaveLength(1)
+    expect(screen.getByTestId('tool-card-dot-narrated-3').querySelector('.text-rose-600')).toBeTruthy()
+    const virtualRows = Array.from(document.querySelectorAll('[data-virt-index]'))
+    expect(virtualRows).toHaveLength(5)
+    const textlessRows = virtualRows.filter((row) => (row.textContent ?? '').trim().length === 0)
+    expect(textlessRows).toHaveLength(1)
+    expect(textlessRows[0]?.querySelector('[data-testid="tool-activity-rail"]')).toBeTruthy()
     expect(
       screen.getByText('Everything is complete.').compareDocumentPosition(rail)
         & Node.DOCUMENT_POSITION_FOLLOWING,
