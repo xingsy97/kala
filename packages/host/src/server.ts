@@ -613,6 +613,16 @@ export async function startHostServer(
       if (!changed) return
       emitQueueUpdate(sessionId)
     },
+    async stop(sessionId) {
+      let changed = false
+      await withQueueMutation(sessionId, async () => {
+        const queue = await loadQueue(sessionId)
+        if (queue.length === 0) return
+        await persistQueue(sessionId, [])
+        changed = true
+      })
+      if (changed) emitQueueUpdate(sessionId)
+    },
     pending(sessionId) {
       return queuedMessages.get(sessionId)?.length ?? 0
     },
@@ -669,6 +679,10 @@ export async function startHostServer(
             if (changed && !closed) emitQueueUpdate(sessionId)
           }
           const alreadyDispatched = await sessionHasUserOperation(store, sessionId, next.operationId)
+          // Stop may clear the persisted queue while this drain was waiting on
+          // the active turn or log read. Re-check identity immediately before
+          // dispatch so an item removed by Stop cannot start a new turn.
+          if ((await loadQueue(sessionId))[0]?.id !== next.id) return
           if (!alreadyDispatched) {
             await loop.dispatch(sessionId, {
               kind: 'user_message',

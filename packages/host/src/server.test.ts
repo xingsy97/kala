@@ -465,10 +465,12 @@ describe('wire protocol', () => {
       expect(powershell.status).toBe(200)
       expect(powershell.headers.get('content-type')).toContain('text/plain')
       const script = await powershell.text()
-      expect(script).toContain("$ErrorActionPreference='Stop'")
-      expect(script).toContain('$code=$env:RUNLAB_SETUP_CODE')
+      expect(script).toContain("$ErrorActionPreference = 'Stop'")
+      expect(script).toContain('$code = $env:RUNLAB_SETUP_CODE')
       expect(script).toContain('https://downloads.example.test/install/session')
       expect(script).toContain('https://downloads.example.test/install/assets/install-executor.ps1')
+      expect(script).toContain('winget.Source install --id OpenJS.NodeJS.LTS')
+      expect(script.indexOf('winget.Source install')).toBeLessThan(script.indexOf('/install/session'))
       expect(script).not.toContain('EXECUTOR_INVITE')
       expect(script).not.toContain('<!DOCTYPE html>')
     } finally {
@@ -3921,6 +3923,62 @@ describe('wire protocol', () => {
     // Bug 1: a steer must never be surfaced to the dock as a queued message.
     expect(queueEvents.some((e) => e.text === 'steered' && e.mode === 'steer' && e.pending > 0)).toBe(false)
 
+    dashboard.close()
+  })
+
+  it('Stop discards pending steer and queue without auto-restarting the Session', async () => {
+    await server.close()
+    const sessionId = 'wire-stop-queue-steer'
+    const seenPrompts: string[] = []
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port, sessionsDir: dir, defaultConfig: config, httpServer: http, toolTimeoutMs: 2000,
+      llm: {
+        name: 'stop-queue-steer-test',
+        async call(params) {
+          const userText = params.messages.filter((message) => message.role === 'user').map((message) => message.content.map((part) => ('text' in part ? part.text : '')).join('')).join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) {
+            await new Promise<void>((_resolve, reject) => {
+              params.signal.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError' })), { once: true })
+            })
+          }
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    let latestQueue: ServerMessageQueueEvent | undefined
+    dashboard.on('server:message_queue', (payload) => { if (payload.sessionId === sessionId) latestQueue = payload })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    while (seenPrompts.length === 0) await new Promise((resolve) => setTimeout(resolve, 10))
+
+    dashboard.emit('client:user_message', { sessionId, text: 'later queue', mode: 'queue' })
+    dashboard.emit('client:user_message', { sessionId, text: 'pending steer', mode: 'steer' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    dashboard.emit('client:cancel', { sessionId })
+
+    const deadline = Date.now() + 3000
+    while (Date.now() < deadline && server.store.get(sessionId)?.state.status !== 'done') await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(server.store.get(sessionId)?.state.status).toBe('done')
+    expect(seenPrompts).toHaveLength(1)
+    expect(seenPrompts.some((prompt) => prompt.includes('pending steer'))).toBe(false)
+    expect(seenPrompts.some((prompt) => prompt.includes('later queue'))).toBe(false)
+    expect(latestQueue).toMatchObject({ pending: 0, items: [] })
+
+    dashboard.emit('client:user_message', { sessionId, text: 'resume explicitly', mode: 'steer' })
+    const resumeDeadline = Date.now() + 3000
+    while (Date.now() < resumeDeadline && !seenPrompts.some((prompt) => prompt.includes('resume explicitly'))) await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(seenPrompts.some((prompt) => prompt.includes('resume explicitly'))).toBe(true)
+    expect(seenPrompts.some((prompt) => prompt.includes('later queue'))).toBe(false)
     dashboard.close()
   })
 

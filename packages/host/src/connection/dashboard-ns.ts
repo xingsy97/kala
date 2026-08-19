@@ -121,6 +121,8 @@ export type MessageQueueManager = {
   reorder(sessionId: string, id: string, beforeId?: string | null): Promise<void>
   update(sessionId: string, id: string, text: string, content?: readonly MessageContent[]): Promise<void>
   delete(sessionId: string, id: string): Promise<void>
+  /** Stop control: discard queued steers and pause ordinary follow-ups until the next explicit send. */
+  stop(sessionId: string): Promise<void>
   pending(sessionId: string): number
   snapshot(sessionId: string): ServerMessageQueueEvent
   drain(sessionId: string): Promise<void>
@@ -528,6 +530,10 @@ export function configureDashboardNamespace(
     socket.on('client:cancel', async (raw: ClientCancel) => {
       const p = vparse(schema.ClientCancelSchema, raw, 'client:cancel', (raw as ClientCancel | undefined)?.sessionId)
       if (!p) return
+      // Establish the queue boundary before cancelling the turn. Otherwise the
+      // queue drainer can observe the resulting resting state and immediately
+      // start a queued steer/follow-up, making Stop appear ineffective.
+      await deps.messageQueues.stop(p.sessionId)
       const evt: AgentEvent = { kind: 'cancel' }
       await safeDispatch(deps, p.sessionId, evt)
     })

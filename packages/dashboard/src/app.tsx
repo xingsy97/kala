@@ -1377,7 +1377,10 @@ export function App(): JSX.Element {
         disabled: !canRun,
         disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => {
-          if (socket && activeSessionId !== null) cancelSession(socket, activeSessionId)
+          if (!socket || activeSessionId === null) return
+          setPendingUserMessages((items) => items.filter((item) => item.mode !== 'steer'))
+          setOptimisticQueuedMessages([])
+          cancelSession(socket, activeSessionId)
         },
       },
       {
@@ -1943,6 +1946,12 @@ export function App(): JSX.Element {
                             if (!session.socket || activeSessionId === null) return
                             if (cancelPendingSessionId === activeSessionId) return
                             if (awaitingAck) setCancelPendingSessionId(activeSessionId)
+                            // Stop supersedes all not-yet-executed control work.
+                            // The Host clears steer + follow-up queues atomically;
+                            // mirror that immediately so no optimistic row remains
+                            // stuck as "sending" or restarts the stopped Session.
+                            setPendingUserMessages((items) => items.filter((item) => item.mode !== 'steer'))
+                            setOptimisticQueuedMessages([])
                             cancelSession(session.socket, activeSessionId)
                           }}
                           onRenameSession={renameCurrentSessionFromSlash}

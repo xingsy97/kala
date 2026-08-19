@@ -158,6 +158,10 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
         }
       }
       if (event.kind === 'cancel') {
+        // An explicit Stop supersedes any pending polite steer boundary. Leaving
+        // this flag set lets the cancelled turn's cleanup schedule another cancel
+        // and can immediately restart a front-queued steer.
+        steerStopSessions.delete(sessionId)
         // Cancel cannot wait behind the active turn: that turn may itself be
         // blocked on the tool/LLM we need to abort. Coalesce concurrent clicks,
         // and ignore stale repeats once the reducer has already reached rest.
