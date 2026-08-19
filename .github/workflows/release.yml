@@ -123,6 +123,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
+      - name: Build and verify real Windows Terminal release path
+        if: matrix.target == 'win32-x64' && (needs.resolve.outputs.component == 'all' || needs.resolve.outputs.component == 'executor')
+        shell: pwsh
+        run: |
+          pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }}
+          pnpm run verify:release-assets
+          tar -xzf release/node-pty-win32-x64.tar.gz -C release
+          New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null
+          Move-Item release/win32-x64 release/prebuilds/win32-x64 -Force
+          node scripts/product-e2e/verify-windows-terminal.mjs
       - uses: actions/upload-artifact@v5
         with:
           name: native-${{ matrix.target }}

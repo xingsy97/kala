@@ -28,3 +28,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run ci:fast
+      - name: Recent product regression matrix
+        run: node scripts/testing/verify-recent-product-regressions.mjs

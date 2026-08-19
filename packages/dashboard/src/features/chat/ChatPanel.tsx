@@ -2659,10 +2659,18 @@ function ToolDeltaBadges({ metric }: { metric: SummaryDelta | null }): JSX.Eleme
   )
 }
 
+function toolDisplayName(name: string): string {
+  if (name === 'bash') return 'Shell'
+  if (name === 'bash_output') return 'Shell output'
+  if (name === 'kill_shell') return 'Stop shell'
+  return name
+}
+
 function ToolNameChip({ name }: { name: string }): JSX.Element {
+  const displayName = toolDisplayName(name)
   return (
-    <span className="inline-flex h-5 max-w-[45%] flex-none items-center rounded bg-background/85 px-1.5 font-mono text-[11px] leading-none text-foreground ring-1 ring-border/50" title={name}>
-      <span className="truncate">{name}</span>
+    <span className="inline-flex h-5 min-w-0 max-w-full items-center rounded bg-background/85 px-1.5 font-mono text-[11px] leading-none text-foreground ring-1 ring-border/50" title={displayName} data-tool-name={name} data-testid="tool-name-chip">
+      <span className="truncate">{displayName}</span>
     </span>
   )
 }
@@ -3210,7 +3218,7 @@ function ToolCallGroupBlock({
                   onPointerDown={(event) => event.stopPropagation()}
                 >
                   <div className="mb-2 flex min-w-0 items-center justify-between gap-3 px-1 py-0.5">
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
                       <ToolNameChip name={previewCall.name} />
                     </div>
                     <span className="flex flex-none items-center gap-1">
