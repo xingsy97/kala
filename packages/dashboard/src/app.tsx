@@ -1036,7 +1036,16 @@ export function App(): JSX.Element {
   const hasSelectedSession = currentSession !== undefined
   // Private Cloud Simple Chat has no workspace executor by design. Do not block the
   // empty-session entry point on an executor snapshot that is irrelevant there.
-  const sessionListLoading = sessionDirectoryIsLoading(runtimeCapabilities.workspace, control.sessionsLoaded, control.executorsLoaded)
+  // A Session directory is useful as soon as its own snapshot arrives. The
+  // Executor snapshot enriches workspace presence independently and must not
+  // prolong the directory's blocking state.
+  const sessionListLoading = sessionDirectoryIsLoading(control.sessionsLoaded)
+  const sessionDirectoryLoadingOwner = resolveSessionDirectoryLoadingOwner({
+    loading: sessionListLoading && !hasSelectedSession,
+    wideLayout,
+    explorerOpen,
+    explorerDrawerOpen,
+  })
   const selectedHistorySessionLoading = Boolean(
     hasSelectedSession &&
       session.historyLoadedSessionId !== activeSessionId &&
@@ -1728,7 +1737,7 @@ export function App(): JSX.Element {
                       <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
                     </div>
                     <div className="min-h-0 flex-1 overflow-hidden">
-                      <Explorer executors={control.executors} sessions={control.sessions} loading={!control.executorsLoaded || !control.sessionsLoaded} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={openConnectWorkspaceDialog} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} />
+                      <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={openConnectWorkspaceDialog} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} />
                     </div>
                   </div>
                 </ResizablePanel>
@@ -1772,11 +1781,11 @@ export function App(): JSX.Element {
               terminalAvailable={hasSelectedSession && !isMobile}
               onChangeCwd={runtimeCapabilities.workspace ? openCwdDialog : undefined}
               sessionSelected={hasSelectedSession}
-              sessionLoading={sessionListLoading && !hasSelectedSession}
+              sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
               sessionTabs={!explorerOpen ? <SessionTabStrip sessions={control.sessions} openIds={sessionTabs.state.open} pinned={sessionTabs.state.pinned} active={config.sessionId} onSelect={selectSession} onClose={sessionTabs.close} onPin={sessionTabs.pin} onReorder={sessionTabs.reorder} /> : undefined}
             />
             {sessionListLoading && !hasSelectedSession ? (
-              <SessionLoadingArea />
+              <SessionDirectoryPendingArea active={sessionDirectoryLoadingOwner === 'workbench'} />
             ) : !hasSelectedSession ? (
               <NoSessionArea
                 onNewSession={newSession}
@@ -2158,7 +2167,7 @@ export function App(): JSX.Element {
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden">
-              <Explorer executors={control.executors} sessions={control.sessions} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={connectWorkspaceFromExplorerDrawer} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} />
+              <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={connectWorkspaceFromExplorerDrawer} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} />
             </div>
           </div>
         </DialogContent>
@@ -2434,8 +2443,32 @@ function readInitialConfig(): Config {
   return { sessionId, explicit, ...(token !== undefined ? { token } : {}) }
 }
 
-export function sessionDirectoryIsLoading(workspaceEnabled: boolean, sessionsLoaded: boolean, executorsLoaded: boolean): boolean {
-  return !sessionsLoaded || (workspaceEnabled && !executorsLoaded)
+export function sessionDirectoryIsLoading(sessionsLoaded: boolean): boolean {
+  return !sessionsLoaded
+}
+
+export type SessionDirectoryLoadingOwner = 'explorer' | 'workbench' | null
+
+/**
+ * Gives the cold directory load one visible owner. The Explorer owns it while
+ * it is visible; otherwise the workbench owns it. This keeps the mobile drawer
+ * correct without allowing the title, list, and chat surface to announce the
+ * same pending request independently.
+ */
+export function resolveSessionDirectoryLoadingOwner({
+  loading,
+  wideLayout,
+  explorerOpen,
+  explorerDrawerOpen,
+}: {
+  loading: boolean
+  wideLayout: boolean
+  explorerOpen: boolean
+  explorerDrawerOpen: boolean
+}): SessionDirectoryLoadingOwner {
+  if (!loading) return null
+  if ((wideLayout && explorerOpen) || (!wideLayout && explorerDrawerOpen)) return 'explorer'
+  return 'workbench'
 }
 
 export function NoSessionArea({
@@ -2546,17 +2579,25 @@ function SessionErrorBanner({ error }: { error: SessionErrorEvent | null }): JSX
   )
 }
 
-function SessionLoadingArea(): JSX.Element {
+function SessionDirectoryPendingArea({ active }: { active: boolean }): JSX.Element {
   const { t } = useTranslation()
   return (
     <div
       className="flex-1 min-h-0 flex items-center justify-center bg-background text-sm text-muted-foreground"
-      data-testid="session-loading-placeholder"
+      data-testid="session-directory-pending"
+      data-loading-owner={active ? 'true' : undefined}
+      role={active ? 'status' : undefined}
+      aria-live={active ? 'polite' : undefined}
+      aria-hidden={active ? undefined : 'true'}
     >
-      <div className="inline-flex items-center gap-2">
-        <span className="ak-loading-spinner h-4 w-4" aria-hidden="true" />
-        <span>{t('common.loading')}</span>
-      </div>
+      {active ? (
+        <div className="inline-flex items-center gap-2">
+          <span className="ak-loading-spinner h-4 w-4" aria-hidden="true" />
+          <span>{t('app.loadingSessions')}</span>
+        </div>
+      ) : (
+        <Sparkles className="h-6 w-6 text-muted-foreground/30" aria-hidden="true" />
+      )}
     </div>
   )
 }
@@ -2575,7 +2616,7 @@ export function WorkbenchToolbar({
   terminalAvailable,
   onChangeCwd,
   sessionSelected,
-  sessionLoading = false,
+  sessionDirectoryLoading = false,
   sessionTabs,
 }: {
   sessionLabel: string
@@ -2591,11 +2632,15 @@ export function WorkbenchToolbar({
   terminalAvailable: boolean
   onChangeCwd?: () => void
   sessionSelected: boolean
-  sessionLoading?: boolean
+  sessionDirectoryLoading?: boolean
   sessionTabs?: React.ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
-  const displayLabel = sessionSelected ? sessionLabel : sessionLoading ? t('common.loading') : t('app.noSessionSelected')
+  const displayLabel = sessionSelected
+    ? sessionLabel
+    : sessionDirectoryLoading
+      ? t('app.sessionsTitle')
+      : t('app.noSessionSelected')
   return (
     <div
       className="flex min-h-9 flex-none items-center gap-1.5 bg-card px-2 py-1 text-sm text-card-foreground sm:gap-2 sm:px-3"
@@ -2631,12 +2676,9 @@ export function WorkbenchToolbar({
         className="inline-flex min-w-0 max-w-[55vw] items-center gap-1.5 sm:max-w-none"
         title={displayLabel}
         data-testid="session-title"
-        data-loading={sessionLoading ? 'true' : undefined}
       >
         {sessionSelected ? (
           <SessionStatusIndicator status={sessionActivityStatus} selected />
-        ) : sessionLoading ? (
-          <span className="ak-loading-spinner h-3.5 w-3.5 flex-none" aria-hidden="true" />
         ) : null}
         <span className="min-w-0 truncate font-medium" data-testid="session-label">
           {displayLabel}

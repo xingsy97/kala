@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NoSessionArea, WorkbenchToolbar, sessionDirectoryIsLoading } from './app.js'
+import { NoSessionArea, WorkbenchToolbar, resolveSessionDirectoryLoadingOwner, sessionDirectoryIsLoading } from './app.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity } from './app-logic/session-activity.js'
 
 function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]> = {}): void {
@@ -23,37 +23,41 @@ function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]
 }
 
 describe('session directory loading', () => {
-  it('does not wait for an executor snapshot when Private Cloud workspace support is disabled', () => {
-    expect(sessionDirectoryIsLoading(false, true, false)).toBe(false)
+  it('depends only on the Session snapshot', () => {
+    expect(sessionDirectoryIsLoading(false)).toBe(true)
+    expect(sessionDirectoryIsLoading(true)).toBe(false)
   })
 
-  it('still waits for both snapshots in Dedicated workspace mode', () => {
-    expect(sessionDirectoryIsLoading(true, true, false)).toBe(true)
-    expect(sessionDirectoryIsLoading(true, true, true)).toBe(false)
+  it('assigns cold loading to exactly one visible surface', () => {
+    expect(resolveSessionDirectoryLoadingOwner({ loading: true, wideLayout: true, explorerOpen: true, explorerDrawerOpen: false })).toBe('explorer')
+    expect(resolveSessionDirectoryLoadingOwner({ loading: true, wideLayout: true, explorerOpen: false, explorerDrawerOpen: false })).toBe('workbench')
+    expect(resolveSessionDirectoryLoadingOwner({ loading: true, wideLayout: false, explorerOpen: false, explorerDrawerOpen: true })).toBe('explorer')
+    expect(resolveSessionDirectoryLoadingOwner({ loading: true, wideLayout: false, explorerOpen: false, explorerDrawerOpen: false })).toBe('workbench')
+    expect(resolveSessionDirectoryLoadingOwner({ loading: false, wideLayout: true, explorerOpen: true, explorerDrawerOpen: false })).toBeNull()
   })
 })
 
 describe('WorkbenchToolbar', () => {
-  it('shows loading instead of no session selected while sessions are loading', () => {
-    renderToolbar({ sessionLoading: true })
+  it('keeps a stable Sessions title while the directory is loading', () => {
+    renderToolbar({ sessionDirectoryLoading: true })
 
-    expect(screen.getByTestId('session-title').getAttribute('data-loading')).toBe('true')
-    expect(screen.getByTestId('session-label').textContent).toBe('Loading...')
+    expect(screen.getByTestId('session-title').getAttribute('data-loading')).toBeNull()
+    expect(screen.getByTestId('session-label').textContent).toBe('Sessions')
     expect(screen.getByTestId('session-label').textContent).not.toBe('no session selected')
     const title = screen.getByTestId('session-title')
-    expect(title.querySelector('.ak-loading-spinner')).not.toBeNull()
+    expect(title.querySelector('.ak-loading-spinner')).toBeNull()
     expect(title.querySelector('svg.animate-spin')).toBeNull()
   })
 
   it('shows no session selected only after loading has settled without a selected session', () => {
-    renderToolbar({ sessionLoading: false })
+    renderToolbar({ sessionDirectoryLoading: false })
 
     expect(screen.getByTestId('session-title').getAttribute('data-loading')).toBeNull()
     expect(screen.getByTestId('session-label').textContent).toBe('no session selected')
   })
 
   it('keeps the selected session label when a session is active', () => {
-    renderToolbar({ sessionSelected: true, sessionLoading: true, sessionActivityStatus: 'loading', onChangeCwd: vi.fn() })
+    renderToolbar({ sessionSelected: true, sessionDirectoryLoading: true, sessionActivityStatus: 'loading', onChangeCwd: vi.fn() })
 
     expect(screen.getByTestId('session-label').textContent).toBe('Loaded session')
   })
