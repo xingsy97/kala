@@ -105,6 +105,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [operations/private-cloud-local-runbook.md](operations/private-cloud-local-runbook.md) | Single Docker Private Cloud stack with mandatory NFS Session storage, bootstrap, verification, backup, upgrade, and rollback |
+| [operations/dedicated-operator-cli.md](operations/dedicated-operator-cli.md) | Source-free Dedicated install, upgrade, rollback, backup, restore, and uninstall contract |
 | [operations/public-release-readiness.md](operations/public-release-readiness.md) | **Normative.** Public repository governance, unified version, distribution, supply-chain, operator CLI, and clean-environment release gates |
 | [operations/dedicated-platform-runtime-unit-cutover.md](operations/dedicated-platform-runtime-unit-cutover.md) | External staging, preflight, bounded cutover, verification, observation, and rollback for Dedicated Runtime Unit migration |
 

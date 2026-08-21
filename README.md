@@ -74,9 +74,10 @@ present and its clean-machine acceptance gate has passed.
 
 ## Platform deployment
 
-Dedicated currently has a production-grade request/receipt deployment path, but
-its public install/backup/restore/uninstall CLI is still part of the release-candidate
-work. Operators should follow the
+Dedicated release bundles include the source-free `runlab-dedicated` operator for
+install, status, upgrade, rollback, backup, restore, and data-preserving uninstall.
+Its contract is documented in the
+[Dedicated operator CLI runbook](docs/operations/dedicated-operator-cli.md). Operators should also follow the
 [Dedicated runbook](docs/operations/dedicated-platform-systemd-external-agent-handoff.md)
 and must perform cutover from a control process independent of the Runtime being
 replaced.

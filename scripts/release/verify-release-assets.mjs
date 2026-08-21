@@ -51,6 +51,7 @@ if (includesHost) {
     'agent-runlab-dedicated-migration-finalizer.service',
     'deployment.json',
     'install-dedicated-systemd.mjs',
+    'runlab-dedicated.mjs',
     'deploy-dedicated.mjs',
     'deploy-dashboard.mjs',
     'cutover-dedicated-systemd.mjs',
@@ -77,6 +78,9 @@ if (includesHost) {
   if (platformRuntime.includes('globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=')) fail('Self-hosted Platform Runtime must not embed Dashboard assets')
   const dashboardRelease = JSON.parse(readFileSync(join(releaseDir, 'dashboard-release.json'), 'utf8'))
   if (dashboardRelease.schemaVersion !== 1 || dashboardRelease.product !== 'agent-runlab-dashboard' || !dashboardRelease.files?.some((entry) => entry.path === 'index.html')) fail('release Dashboard manifest is invalid')
+  const operatorHelp = spawnSync('node', ['runlab-dedicated.mjs', '--help'], { cwd: releaseDir, encoding: 'utf8' })
+  if (operatorHelp.status !== 0 || !['install', 'status', 'upgrade', 'rollback', 'backup', 'restore', 'uninstall'].every((command) => operatorHelp.stdout.includes(command))) fail('Dedicated operator CLI help is incomplete')
+  accessSync(join(releaseDir, 'runlab-dedicated.mjs'), constants.X_OK)
 }
 
 const forbiddenLegacyEvaluationMarkers = [

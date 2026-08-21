@@ -188,6 +188,7 @@ function finalizeRelease() {
         'deploy/dedicated-systemd/agent-runlab-dedicated-migration-finalizer.service',
         'deploy/dedicated-systemd/deployment.json',
         'scripts/deploy/install-dedicated-systemd.mjs',
+        'scripts/deploy/runlab-dedicated.mjs',
         'scripts/deploy/deploy-dedicated.mjs',
         'scripts/deploy/deploy-dashboard.mjs',
         'scripts/deploy/cutover-dedicated-systemd.mjs',

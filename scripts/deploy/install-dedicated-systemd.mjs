@@ -37,7 +37,7 @@ async function main() {
   await mkdir(join(dataRoot, 'deploy', 'releases'), { recursive: true, mode: 0o711 })
   await installImmutableRelease(releaseFiles)
   await mkdir(join(root, 'control'), { recursive: true, mode: 0o755 })
-  for (const name of ['agent-runlab-dedicated-ingress.cjs', 'agent-runlab-dedicated-deploy-supervisor.cjs', 'deploy-dedicated.mjs', 'deploy-dashboard.mjs', 'cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'rollback-dedicated-systemd.mjs']) await copyFile(join(source, name), join(root, 'control', name))
+  for (const name of ['agent-runlab-dedicated-ingress.cjs', 'agent-runlab-dedicated-deploy-supervisor.cjs', 'runlab-dedicated.mjs', 'deploy-dedicated.mjs', 'deploy-dashboard.mjs', 'cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'rollback-dedicated-systemd.mjs']) await copyFile(join(source, name), join(root, 'control', name))
   await mkdir(join(dataRoot, 'deploy', 'requests'), { recursive: true, mode: 0o3770 })
   await mkdir(join(dataRoot, 'deploy', 'submissions'), { recursive: true, mode: 0o3770 })
   await mkdir(join(dataRoot, 'deploy', 'receipts'), { recursive: true, mode: 0o750 })
@@ -91,7 +91,7 @@ async function main() {
     schemaVersion: 1, revision: 1, phase: 'installed_disabled', releaseId: basename(releaseDir), installedAt, updatedAt: installedAt,
     releaseDigest: createHash('sha256').update(sums).digest('hex'),
     bundleSha256: createHash('sha256').update(await readFile(join(source, 'agent-runlab-runtime.cjs'))).digest('hex'),
-    containerBackend, ...(normalizedLegacyDataRoot ? { legacyDataRoot: normalizedLegacyDataRoot } : {}),
+    containerBackend, cleanInstall: !normalizedLegacyDataRoot, ...(normalizedLegacyDataRoot ? { legacyDataRoot: normalizedLegacyDataRoot } : {}),
   })
   process.stdout.write(`${JSON.stringify({ ok: true, phase: 'installed_disabled', releaseId })}\n`)
 }

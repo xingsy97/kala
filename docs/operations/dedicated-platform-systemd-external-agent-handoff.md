@@ -396,6 +396,8 @@ agent-runlab-dedicated-control-updater.service
 agent-runlab-dedicated-migration-finalizer.service
 update-dedicated-control-plane.mjs
 install-dedicated-systemd.mjs
+runlab-dedicated.mjs
+deploy-dedicated.mjs
 cutover-dedicated-systemd.mjs
 dedicated-data-migration.mjs
 dedicated-settings-fingerprint.mjs

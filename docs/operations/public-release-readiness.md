@@ -58,12 +58,15 @@ Cloud is the same Platform architecture with `multi-tenant`.
 
 ### Operator experience
 
-- [ ] Dedicated provides supported install, status, upgrade, rollback, backup,
+- [x] Dedicated provides supported install, status, upgrade, rollback, backup,
   restore, and uninstall commands without requiring a source checkout.
 - [ ] Private Cloud ships digest-pinned multi-architecture images and a versioned
   Compose bundle that does not build application source on the operator machine.
-- [ ] Destructive commands identify bounded targets, require explicit intent, and
+- [x] Destructive commands identify bounded targets, require explicit intent, and
   preserve recoverable data by default.
+
+The normative Dedicated command and recovery contract is
+[`dedicated-operator-cli.md`](dedicated-operator-cli.md).
 
 ### Acceptance
 

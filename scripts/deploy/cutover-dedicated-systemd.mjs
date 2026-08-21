@@ -66,14 +66,19 @@ async function resumeCutover(initial) {
   let receipt = initial
   if (at(receipt, 'installed_disabled')) {
     if (receipt.legacyDataRoot) await probeDedicatedAtomicRename({ sourceRoot: receipt.legacyDataRoot, dataRoot })
-    const legacySettingsFingerprint = await settingsFingerprint('http://127.0.0.1:13000/settings')
-    const legacyWasEnabled = await systemctlEnabled(legacyService)
-    await waitForLegacyBoundary()
-    receipt = await transition(receipt, 'boundary_reserved', { legacySettingsFingerprint, legacyWasEnabled, boundaryReservedAt: new Date().toISOString() })
+    if (receipt.cleanInstall) {
+      if (receipt.legacyDataRoot) throw new Error('clean install cannot have a legacy data root')
+      receipt = await transition(receipt, 'boundary_reserved', { cleanInstall: true, legacyWasEnabled: false, boundaryReservedAt: new Date().toISOString() })
+    } else {
+      const legacySettingsFingerprint = await settingsFingerprint('http://127.0.0.1:13000/settings')
+      const legacyWasEnabled = await systemctlEnabled(legacyService)
+      await waitForLegacyBoundary()
+      receipt = await transition(receipt, 'boundary_reserved', { legacySettingsFingerprint, legacyWasEnabled, boundaryReservedAt: new Date().toISOString() })
+    }
   }
   if (at(receipt, 'boundary_reserved')) {
     await run('systemctl', ['daemon-reload'])
-    await run('systemctl', ['stop', legacyService])
+    if (!receipt.cleanInstall) await run('systemctl', ['stop', legacyService])
     receipt = await transition(receipt, 'legacy_stopped', { legacyStoppedAt: new Date().toISOString() })
   }
   if (at(receipt, 'legacy_stopped')) {
@@ -95,7 +100,7 @@ async function resumeCutover(initial) {
     await run('systemctl', ['start', 'agent-runlab-dedicated-ingress.service'])
     await waitFor('http://127.0.0.1:13000/runtime/capabilities', isDedicatedCapabilities)
     const migratedSettingsFingerprint = await settingsFingerprint('http://127.0.0.1:13000/settings')
-    if (migratedSettingsFingerprint !== receipt.legacySettingsFingerprint) throw new Error('sanitised provider/model settings fingerprint changed during migration')
+    if (!receipt.cleanInstall && migratedSettingsFingerprint !== receipt.legacySettingsFingerprint) throw new Error('sanitised provider/model settings fingerprint changed during migration')
     receipt = await transition(receipt, 'ingress_started', { migratedSettingsFingerprint, ingressStartedAt: new Date().toISOString() })
   }
   if (at(receipt, 'ingress_started')) {
@@ -107,7 +112,7 @@ async function resumeCutover(initial) {
     receipt = await transition(receipt, 'services_enabled', { servicesEnabledAt: new Date().toISOString() })
   }
   if (at(receipt, 'services_enabled')) {
-    await run('systemctl', ['disable', legacyService])
+    if (!receipt.cleanInstall) await run('systemctl', ['disable', legacyService])
     receipt = await transition(receipt, 'legacy_disabled', { legacyDisabledAt: new Date().toISOString() })
   }
   if (at(receipt, 'legacy_disabled')) {
@@ -127,6 +132,10 @@ async function resumeRollback(initial) {
     receipt = await transition(receipt, 'rollback_data_restored', { rollbackDataRestoredAt: new Date().toISOString() })
   }
   if (at(receipt, 'rollback_data_restored')) {
+    if (receipt.cleanInstall) {
+      receipt = await transition(receipt, 'rolled_back', { rolledBackAt: new Date().toISOString(), cleanInstallStopped: true })
+      return receipt
+    }
     if (receipt.legacyWasEnabled === true) await run('systemctl', ['enable', legacyService])
     else if (receipt.legacyWasEnabled === false) await run('systemctl', ['disable', legacyService])
     await run('systemctl', ['start', legacyService])
