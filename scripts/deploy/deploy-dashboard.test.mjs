@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,5 +32,16 @@ describe('deploy:dashboard client', () => {
     const request = JSON.parse(readFileSync(join(value.deploy, 'requests', 'operation-dashboard-r2.json'), 'utf8'))
     expect(request).toMatchObject({ action: 'deploy', expectedGeneration: 7, stagedReleaseDir: join(value.deploy, 'submissions', 'operation-dashboard-r2') })
     expect(readFileSync(join(request.stagedReleaseDir, 'dashboard.tar.gz')).length).toBeGreaterThan(0)
+  })
+  it('finds a remote receipt by operation id when the file is named by deployment id', () => {
+    const value = fixture()
+    const receipt = { schemaVersion: 1, receiptRevision: 2, operationId: 'operation-dashboard-r2', deploymentId: 'deployment-dashboard-r2', phase: 'completed' }
+    writeFileSync(join(value.deploy, 'receipts', 'deployment-dashboard-r2.json'), JSON.stringify(receipt))
+    const bin = join(value.root, 'bin'); mkdirSync(bin)
+    const lxc = join(bin, 'lxc')
+    writeFileSync(lxc, '#!/bin/sh\n[ "$1" = exec ] || exit 64\nshift 3\nexec "$@"\n')
+    chmodSync(lxc, 0o755)
+    const output = JSON.parse(execFileSync(process.execPath, [script, 'status', 'operation-dashboard-r2', '--lxd', 'test-target', '--deploy-root', value.deploy], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } }))
+    expect(output).toEqual(receipt)
   })
 })
