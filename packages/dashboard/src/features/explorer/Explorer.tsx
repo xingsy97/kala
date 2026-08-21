@@ -310,7 +310,7 @@ function ExplorerImpl({
   }, [data])
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-sidebar/75">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-transparent">
       <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} />
       <div
         ref={ref}

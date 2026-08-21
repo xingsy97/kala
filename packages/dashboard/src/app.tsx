@@ -1727,21 +1727,23 @@ export function App(): JSX.Element {
                   defaultSize={20}
                   minSize={17}
                   maxSize={22}
-                  className="min-w-[240px] bg-sidebar text-sidebar-foreground"
+                  className="min-w-[264px] bg-transparent text-sidebar-foreground"
                   data-testid="explorer-panel"
                 >
-                  <div className="ak-motion-slide-left flex h-full min-h-0 flex-col">
-                    <div className="flex h-11 flex-none items-center border-b border-sidebar-border/50 bg-sidebar/80 px-2 backdrop-blur">
-                      <Menu className="h-3.5 w-3.5 flex-none" />
-                      <span className="min-w-0 flex-1 truncate text-xs font-medium">{t('app.sessionsTitle')}</span>
-                      <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-hidden">
-                      <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={openConnectWorkspaceDialog} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} />
+                  <div className="ak-motion-slide-left h-full min-h-0 p-3 pr-2">
+                    <div className="ak-navigation-surface flex h-full min-h-0 flex-col overflow-hidden" data-testid="explorer-surface">
+                      <div className="flex h-11 flex-none items-center border-b border-sidebar-border/40 bg-sidebar/65 px-2 backdrop-blur">
+                        <Menu className="h-3.5 w-3.5 flex-none" />
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium">{t('app.sessionsTitle')}</span>
+                        <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
+                      </div>
+                      <div className="min-h-0 flex-1 overflow-hidden">
+                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={openConnectWorkspaceDialog} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} />
+                      </div>
                     </div>
                   </div>
                 </ResizablePanel>
-                <ResizableHandle withHandle />
+                <ResizableHandle className="w-2 bg-transparent after:w-2 hover:bg-transparent focus-visible:bg-transparent [&>div]:opacity-0" />
               </>
             ) : null}
           </>

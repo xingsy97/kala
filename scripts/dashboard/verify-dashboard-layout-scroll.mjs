@@ -143,6 +143,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
     const main = document.querySelector('[data-testid="main-panel"]')
     const chat = document.querySelector('[data-testid="chat-panel"]')
     const explorer = document.querySelector('[data-testid="explorer-panel"]')
+    const explorerSurface = document.querySelector('[data-testid="explorer-surface"]')
     const inspector = document.querySelector('[data-testid="inspector-panel"]')
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
     const sidebarToggle = document.querySelector('[data-testid="sidebar-toggle"]')
@@ -161,6 +162,8 @@ async function verifyResponsivePanels(page, viewportWidth) {
       main: rectFor(main),
       chat: rectFor(chat),
       explorer: rectFor(explorer),
+      explorerSurface: rectFor(explorerSurface),
+      explorerSurfaceRadius: explorerSurface ? getComputedStyle(explorerSurface).borderRadius : '',
       inspector: rectFor(inspector),
       toolbar: rectFor(toolbar),
       sidebarTogglePresent: Boolean(sidebarToggle),
@@ -182,7 +185,8 @@ async function verifyResponsivePanels(page, viewportWidth) {
   const minMainWidth = viewportWidth === 1200 ? 660 : 820
   check(`wide layout keeps explorer rail at ${viewportWidth}px`, Boolean(metrics.explorer?.width), JSON.stringify(metrics))
   check(`wide layout keeps inspector rail at ${viewportWidth}px`, Boolean(metrics.inspector?.width), JSON.stringify(metrics))
-  check(`wide layout aligns explorer with workbench below top nav at ${viewportWidth}px`, metrics.explorer && metrics.toolbar && Math.abs(metrics.explorer.top - metrics.toolbar.top) <= 1 && metrics.toolbar.left >= metrics.explorer.right, JSON.stringify(metrics))
+  check(`wide layout keeps the floating explorer inset from its layout rail at ${viewportWidth}px`, metrics.explorer && metrics.explorerSurface && metrics.explorerSurface.left >= metrics.explorer.left + 11 && metrics.explorerSurface.top >= metrics.explorer.top + 11 && metrics.explorerSurface.bottom <= metrics.explorer.bottom - 11 && metrics.toolbar && metrics.toolbar.left >= metrics.explorer.right, JSON.stringify(metrics))
+  check(`wide layout gives the explorer a rounded navigation surface at ${viewportWidth}px`, metrics.explorerSurfaceRadius !== '' && metrics.explorerSurfaceRadius !== '0px', JSON.stringify(metrics))
   check(`wide layout keeps explorer readable at ${viewportWidth}px`, metrics.explorer?.width >= 240, JSON.stringify(metrics))
   check(`wide layout keeps session rows inside explorer at ${viewportWidth}px`, metrics.explorer && metrics.selectedSession && metrics.selectedSession.left >= metrics.explorer.left - 1 && metrics.selectedSession.right <= metrics.explorer.right + 1 && metrics.selectedSessionScrollWidth <= metrics.selectedSessionClientWidth + 1, JSON.stringify(metrics))
   check(`wide layout shows session cwd metadata at ${viewportWidth}px`, metrics.sessionCwdText.includes('/tmp') && !metrics.sessionCwdText.includes('cwd ') && metrics.sessionCwd && metrics.selectedSession && metrics.sessionCwd.bottom <= metrics.selectedSession.bottom + 1, JSON.stringify(metrics))

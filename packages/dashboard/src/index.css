@@ -193,6 +193,17 @@
     box-shadow: 0 1px 2px hsl(0 0% 0% / 0.22), 0 18px 45px hsl(0 0% 0% / 0.12);
   }
 
+  .ak-navigation-surface {
+    border: 1px solid hsl(var(--sidebar-border) / 0.62);
+    border-radius: calc(var(--radius) + 0.35rem);
+    background: hsl(var(--sidebar) / 0.92);
+    box-shadow: 0 1px 2px hsl(220 30% 10% / 0.045), 0 12px 32px hsl(220 30% 10% / 0.055);
+  }
+
+  .dark .ak-navigation-surface {
+    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.24), 0 14px 36px hsl(0 0% 0% / 0.16);
+  }
+
   .ak-segmented-control {
     display: inline-flex;
     align-items: center;
