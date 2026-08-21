@@ -5,11 +5,11 @@ import { buildPreviewModel, type LogLevel, type PreviewModel } from './file-prev
 
 export function StructuredFilePreview({ path, content, fontSize }: { path: string; content: string; fontSize: number }): JSX.Element | null {
   const model = useMemo(() => buildPreviewModel(path, content), [content, path])
-  if (model.kind === 'source') return null
+  if (model.kind === 'source' || model.kind === 'json') return null
   return <PreviewBody model={model} fontSize={fontSize} />
 }
 
-function PreviewBody({ model, fontSize }: { model: Exclude<PreviewModel, { kind: 'source' }>; fontSize: number }): JSX.Element {
+function PreviewBody({ model, fontSize }: { model: Exclude<PreviewModel, { kind: 'source' | 'json' }>; fontSize: number }): JSX.Element {
   if (model.kind === 'table') return <TablePreview model={model} fontSize={fontSize} />
   if (model.kind === 'records') return <RecordPreview model={model} fontSize={fontSize} />
   if (model.kind === 'outline') return <OutlinePreview model={model} fontSize={fontSize} />

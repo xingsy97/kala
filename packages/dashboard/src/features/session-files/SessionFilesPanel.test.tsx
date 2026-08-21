@@ -294,6 +294,19 @@ describe('SessionFilesPanel', () => {
     expect(screen.getByText('false')).toBeTruthy()
   })
 
+  it('previews JSON as a formatted document instead of a flattened path table', async () => {
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: '{"user":{"name":"Ada"},"items":[1,2]}', size: 42 }, entries: [{ name: 'data.json', path: '/repo/data.json', type: 'file' }] })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('data.json'))
+    const preview = await screen.findByTestId('session-file-json-preview')
+    const editor = screen.getByTestId('monaco-editor')
+    expect(editor.getAttribute('data-language')).toBe('json')
+    expect(editor.textContent).toContain('\n  "user": {')
+    expect(preview.textContent).not.toContain('$.user.name')
+    fireEvent.click(screen.getByRole('button', { name: /show source/i }))
+    expect(screen.getByTestId('monaco-editor').textContent).toBe('{"user":{"name":"Ada"},"items":[1,2]}')
+  })
+
   it('rejects XML entities in structured mode and keeps safe source available', async () => {
     const xml = '<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>'
     const socket = makeSessionFilesSocket({ file: { kind: 'text', content: xml, size: xml.length }, entries: [{ name: 'unsafe.xml', path: '/repo/unsafe.xml', type: 'file' }] })

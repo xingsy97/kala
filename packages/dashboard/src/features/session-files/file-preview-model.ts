@@ -2,7 +2,8 @@ export type PreviewKind = 'csv' | 'json' | 'jsonl' | 'yaml' | 'toml' | 'xml' | '
 
 export type PreviewModel =
   | { kind: 'table'; format: 'CSV' | 'TSV'; headers: string[]; rows: string[][]; omittedRows: number; omittedColumns: number; warnings: string[] }
-  | { kind: 'records'; format: 'JSON' | 'JSONL'; rows: Array<{ path: string; value: string }>; omittedNodes: number; error?: string }
+  | { kind: 'json'; format: 'JSON'; content: string; error?: string }
+  | { kind: 'records'; format: 'JSONL'; rows: Array<{ path: string; value: string }>; omittedNodes: number; error?: string }
   | { kind: 'outline'; format: 'YAML' | 'TOML' | 'XML'; rows: Array<{ depth: number; key: string; value?: string }>; omittedNodes: number; error?: string }
   | { kind: 'log'; rows: Array<{ level: LogLevel; text: string }>; omittedRows: number }
   | { kind: 'diff'; rows: Array<{ type: 'meta' | 'hunk' | 'add' | 'delete' | 'context'; text: string }>; omittedRows: number }
@@ -85,8 +86,12 @@ function parseDelimited(content: string, delimiter: ',' | '\t'): PreviewModel {
 }
 
 function parseJson(content: string): PreviewModel {
-  try { return flattenJson(JSON.parse(content), 'JSON') }
-  catch (error) { return { kind: 'records', format: 'JSON', rows: [], omittedNodes: 0, error: errorMessage(error) } }
+  try {
+    const parsed = JSON.parse(content) as unknown
+    return { kind: 'json', format: 'JSON', content: JSON.stringify(parsed, null, 2) ?? content }
+  } catch (error) {
+    return { kind: 'json', format: 'JSON', content, error: errorMessage(error) }
+  }
 }
 function parseJsonLines(content: string): PreviewModel {
   const values: unknown[] = [], errors: string[] = []
@@ -95,10 +100,10 @@ function parseJsonLines(content: string): PreviewModel {
     if (values.length >= MAX_ROWS) break
     try { values.push(JSON.parse(line)) } catch { errors.push(`Line ${index + 1}`) }
   }
-  const model = flattenJson(values, 'JSONL')
+  const model = flattenJsonLines(values)
   return { ...model, ...(errors.length ? { error: `Invalid JSON on ${errors.slice(0, 5).join(', ')}${errors.length > 5 ? '…' : ''}` } : {}) }
 }
-function flattenJson(value: unknown, format: 'JSON' | 'JSONL'): Extract<PreviewModel, { kind: 'records' }> {
+function flattenJsonLines(value: unknown): Extract<PreviewModel, { kind: 'records' }> {
   const rows: Array<{ path: string; value: string }> = []
   let seen = 0
   const visit = (input: unknown, path: string, depth: number): void => {
@@ -111,7 +116,7 @@ function flattenJson(value: unknown, format: 'JSON' | 'JSONL'): Extract<PreviewM
     for (const [key, child] of entries) visit(child, path ? `${path}.${key}` : key, depth + 1)
   }
   visit(value, '$', 0)
-  return { kind: 'records', format, rows, omittedNodes: Math.max(0, seen - rows.length) }
+  return { kind: 'records', format: 'JSONL', rows, omittedNodes: Math.max(0, seen - rows.length) }
 }
 
 function parseYamlOutline(content: string): PreviewModel {

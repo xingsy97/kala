@@ -11,10 +11,9 @@ describe('file preview model', () => {
     expect(buildPreviewModel('data.tsv', 'a\tb\n1\t2')).toMatchObject({ kind: 'table', format: 'TSV' })
   })
 
-  it('flattens JSON and JSONL while reporting malformed records', () => {
+  it('formats JSON as an indented document and flattens JSONL with malformed-line diagnostics', () => {
     const json = buildPreviewModel('data.json', '{"user":{"name":"Ada"},"items":[1,2]}')
-    expect(json).toMatchObject({ kind: 'records', format: 'JSON' })
-    if (json.kind === 'records') expect(json.rows).toContainEqual({ path: '$.user.name', value: 'Ada' })
+    expect(json).toMatchObject({ kind: 'json', format: 'JSON', content: '{\n  "user": {\n    "name": "Ada"\n  },\n  "items": [\n    1,\n    2\n  ]\n}' })
     const jsonl = buildPreviewModel('events.jsonl', '{"ok":true}\nnot-json\n{"ok":false}')
     expect(jsonl).toMatchObject({ kind: 'records', format: 'JSONL', error: expect.stringContaining('Line 2') })
   })
@@ -48,7 +47,7 @@ describe('file preview model', () => {
     const deep: Record<string, unknown> = {}; let cursor = deep
     for (let i = 0; i < 30; i += 1) { cursor.next = {}; cursor = cursor.next as Record<string, unknown> }
     const json = buildPreviewModel('deep.json', JSON.stringify(deep))
-    if (json.kind === 'records') expect(json.rows.some((row) => row.value === '[depth limit]')).toBe(true)
+    expect(json).toMatchObject({ kind: 'json', content: expect.stringContaining('\n') })
     const manyRows = buildPreviewModel('many.csv', `name\n${Array.from({ length: 1_050 }, (_, index) => index).join('\n')}`)
     expect(manyRows).toMatchObject({ kind: 'table', omittedRows: 50 })
     const largeJson = `{\"padding\":\"${'x'.repeat(3_000)}\",\"ok\":true}`
