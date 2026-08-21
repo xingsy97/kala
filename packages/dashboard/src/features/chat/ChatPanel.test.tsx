@@ -704,6 +704,24 @@ describe('ChatPanel', () => {
     expect(contentWrapper?.className).toContain('mx-auto')
   })
 
+  it('does not reserve avatar or grip rails for headerless continuation messages', () => {
+    render(
+      <ChatPanel
+        messages={[
+          { role: 'assistant', content: [{ type: 'text', text: 'first assistant' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'continued assistant' }] },
+          { role: 'user', content: [{ type: 'text', text: 'first user' }] },
+          { role: 'user', content: [{ type: 'text', text: 'continued user' }] },
+        ]}
+      />,
+    )
+
+    const rails = screen.getAllByTestId('message-avatar-rail')
+    expect(rails).toHaveLength(1)
+    expect(rails[0]?.className).toContain('sm:flex')
+    expect(screen.queryByTestId('message-grip-rail')).toBeNull()
+  })
+
   it('jumps to the bottom on first non-empty mount but not on ordinary appends', () => {
     const scrollToIndex = (globalThis as typeof globalThis & {
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>

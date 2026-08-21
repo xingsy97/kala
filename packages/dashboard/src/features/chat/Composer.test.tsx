@@ -106,6 +106,9 @@ describe('Composer', () => {
     expect(composer.style.getPropertyValue('--ak-chat-content-width')).toBe('104rem')
     expect(composer.querySelector('.ak-composer-container')).toBeTruthy()
     expect(composer.className).toContain('bg-transparent')
+    expect(composer.className).not.toContain('px-2')
+    expect(composer.className).not.toContain('sm:px-3')
+    expect(composer.className).not.toContain('lg:px-4')
     expect(composer.className).not.toContain('bg-card')
   })
 

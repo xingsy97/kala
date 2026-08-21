@@ -571,10 +571,9 @@ export function ChatPanel({
             highlightIndex={highlightItemIndex}
             footerSlot={
               footerSlot ? (
-                // Align with the assistant-message content column: avatar (w-7) +
-                // gap-3 = 2.5rem left inset, so the running/status/approval rows sit
-                // flush under the message body above them instead of the full column.
-                <div className="w-full pl-0 pt-1 sm:pl-10">{footerSlot}</div>
+                // Status rows share the content edge used by headerless live
+                // replies and the Composer. Labelled rows add their own avatar rail.
+                <div className="w-full pt-1" data-testid="transcript-footer-content">{footerSlot}</div>
               ) : null
             }
             itemClassName="ak-chat-container ak-chat-item mx-auto w-full min-w-0 overflow-x-hidden py-2 sm:py-3"
@@ -994,18 +993,16 @@ function ToolActivityTranscriptRow({
           highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
         )}
       >
-        <div className="flex w-7 flex-none items-start justify-center pt-0.5">
-          {hideHeader ? (
-            <GripHandle />
-          ) : (
+        {hideHeader ? null : (
+          <div className="hidden w-7 flex-none items-start justify-center pt-0.5 sm:flex" data-testid="message-avatar-rail">
             <div
               className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase tracking-wider text-foreground"
               aria-label={t('chat.transcript.searchCategories.assistant')}
             >
               AK
             </div>
-          )}
-        </div>
+          </div>
+        )}
         <div className="relative min-w-0 flex-1">
           {hideHeader ? null : (
             <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -1038,18 +1035,16 @@ function ToolActivityTranscriptRow({
         highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
       )}
     >
-      <div className="flex w-7 flex-none items-start justify-center pt-0.5">
-        {hideHeader ? (
-          <GripHandle />
-        ) : (
+      {hideHeader ? null : (
+        <div className="hidden w-7 flex-none items-start justify-center pt-0.5 sm:flex" data-testid="message-avatar-rail">
           <div
             className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase tracking-wider text-foreground"
             aria-label={t('chat.transcript.searchCategories.assistant')}
           >
             AK
           </div>
-        )}
-      </div>
+        </div>
+      )}
       <div className="relative min-w-0 flex-1">
         {hideHeader ? null : (
           <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -1472,11 +1467,6 @@ function MessageRow({
             } : undefined}
           />
         </div>
-        {hideHeader ? (
-          <div className="flex w-4 flex-none items-center">
-            <GripHandle />
-          </div>
-        ) : null}
       </div>
     )
   }
@@ -1508,10 +1498,8 @@ function MessageRow({
         highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
       )}
     >
-      <div className="flex w-7 flex-none items-start justify-center pt-0.5">
-        {hideHeader ? (
-          <GripHandle />
-        ) : (
+      {hideHeader ? null : (
+        <div className="hidden w-7 flex-none items-start justify-center pt-0.5 sm:flex" data-testid="message-avatar-rail">
           <div
             className={cn(
               'flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold uppercase tracking-wider',
@@ -1523,8 +1511,8 @@ function MessageRow({
           >
             {message.role === 'assistant' ? 'AK' : <Wrench className="h-3 w-3" aria-hidden="true" />}
           </div>
-        )}
-      </div>
+        </div>
+      )}
       <div className="relative min-w-0 max-w-full flex-1 overflow-hidden">
         {hideHeader ? null : (
           <div

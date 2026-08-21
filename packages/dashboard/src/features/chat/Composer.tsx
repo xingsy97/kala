@@ -546,7 +546,7 @@ export function Composer({
     <form
       onSubmit={handleSubmit}
       className={cn(
-        'bg-transparent px-2 sm:px-3 lg:px-4',
+        'bg-transparent',
         // Split the difference between the original full iOS safe-area shelf
         // and the too-tight fixed padding: half the safe area plus half the
         // compact baseline (2px simple / 4px full).
