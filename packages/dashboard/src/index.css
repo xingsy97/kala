@@ -204,6 +204,17 @@
     box-shadow: 0 1px 2px hsl(0 0% 0% / 0.24), 0 14px 36px hsl(0 0% 0% / 0.16);
   }
 
+  .ak-titlebar-surface {
+    border: 1px solid hsl(var(--border) / 0.58);
+    border-radius: calc(var(--radius) + 0.35rem);
+    background: hsl(var(--card) / 0.82);
+    box-shadow: 0 1px 2px hsl(220 30% 10% / 0.04), 0 10px 28px hsl(220 30% 10% / 0.045);
+  }
+
+  .dark .ak-titlebar-surface {
+    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.2), 0 12px 30px hsl(0 0% 0% / 0.14);
+  }
+
   .ak-segmented-control {
     display: inline-flex;
     align-items: center;

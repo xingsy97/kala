@@ -38,6 +38,16 @@ describe('session directory loading', () => {
 })
 
 describe('WorkbenchToolbar', () => {
+  it('renders the title controls as one inset floating surface', () => {
+    renderToolbar({ sessionSelected: true })
+
+    const rail = screen.getByTestId('workbench-toolbar-rail')
+    const surface = screen.getByTestId('workbench-toolbar')
+    expect(rail.contains(surface)).toBe(true)
+    expect(surface.className).toContain('ak-titlebar-surface')
+    expect(rail.className).toContain('p-2')
+  })
+
   it('uses one sidebar opener and does not duplicate it with a terminal shortcut', () => {
     const onOpenSidebar = vi.fn()
     renderToolbar({ sessionSelected: true, onOpenSidebar, sidebarAvailable: true })

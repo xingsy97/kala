@@ -145,6 +145,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
     const explorer = document.querySelector('[data-testid="explorer-panel"]')
     const explorerSurface = document.querySelector('[data-testid="explorer-surface"]')
     const inspector = document.querySelector('[data-testid="inspector-panel"]')
+    const workbench = document.querySelector('[data-testid="workbench-panel"]')
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
     const sidebarToggle = document.querySelector('[data-testid="sidebar-toggle"]')
     const selectedSession = document.querySelector(`[data-testid="session-row"][data-session-id="${document.location.search.match(/sessionId=([^&]+)/)?.[1] ?? ''}"]`)
@@ -165,7 +166,9 @@ async function verifyResponsivePanels(page, viewportWidth) {
       explorerSurface: rectFor(explorerSurface),
       explorerSurfaceRadius: explorerSurface ? getComputedStyle(explorerSurface).borderRadius : '',
       inspector: rectFor(inspector),
+      workbench: rectFor(workbench),
       toolbar: rectFor(toolbar),
+      toolbarRadius: toolbar ? getComputedStyle(toolbar).borderRadius : '',
       sidebarTogglePresent: Boolean(sidebarToggle),
       sessionCwdText: sessionLabel?.getAttribute('title') || '',
       sessionCwd: rectFor(sessionLabel),
@@ -174,6 +177,9 @@ async function verifyResponsivePanels(page, viewportWidth) {
       selectedSessionClientWidth: selectedSession?.clientWidth ?? 0,
     }
   })
+  const toolbarInset = viewportWidth < 640 ? 7 : 11
+  check(`title bar floats inside the workbench at ${viewportWidth}px`, metrics.workbench && metrics.toolbar && metrics.toolbar.left >= metrics.workbench.left + toolbarInset && metrics.toolbar.right <= metrics.workbench.right - toolbarInset && metrics.toolbar.top >= metrics.workbench.top + toolbarInset, JSON.stringify(metrics))
+  check(`title bar uses a rounded surface at ${viewportWidth}px`, metrics.toolbarRadius !== '' && metrics.toolbarRadius !== '0px', JSON.stringify(metrics))
   if (viewportWidth < 1180) {
     check(`narrow layout removes explorer rail at ${viewportWidth}px`, metrics.explorer === null, JSON.stringify(metrics))
     check(`narrow layout removes inspector rail at ${viewportWidth}px`, metrics.inspector === null, JSON.stringify(metrics))

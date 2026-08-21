@@ -2632,77 +2632,82 @@ export function WorkbenchToolbar({
       : t('app.noSessionSelected')
   return (
     <div
-      className="flex min-h-11 flex-none items-center gap-1.5 border-b border-border/30 bg-card/65 px-2 py-1.5 text-sm text-card-foreground backdrop-blur sm:gap-2 sm:px-4"
-      data-testid="workbench-toolbar"
+      className="flex-none p-2 sm:p-3"
+      data-testid="workbench-toolbar-rail"
     >
-      {topbarAvailable ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenTopbar}
-          title={t('app.expandTopbar')}
-          aria-label={t('app.expandTopbar')}
-          data-testid="topbar-toggle"
-          className="h-9 w-9 flex-none sm:h-8 sm:w-8"
-        >
-          <ChevronDown className="h-4 w-4" />
-        </Button>
-      ) : null}
-      {explorerAvailable ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenExplorer}
-          title={t('app.openExplorer')}
-          aria-label={t('app.openExplorer')}
-          data-testid="explorer-toggle"
-          className="h-9 w-9 flex-none sm:h-8 sm:w-8"
-        >
-          <Menu className="h-4 w-4" />
-        </Button>
-      ) : null}
-      <span
-        className="inline-flex min-w-0 max-w-[55vw] items-center gap-1.5 sm:max-w-none"
-        title={displayLabel}
-        data-testid="session-title"
+      <div
+        className="ak-titlebar-surface flex min-h-11 items-center gap-1.5 px-2 py-1.5 text-sm text-card-foreground backdrop-blur sm:gap-2 sm:px-3"
+        data-testid="workbench-toolbar"
       >
-        {sessionSelected ? (
-          <SessionStatusIndicator status={sessionActivityStatus} selected />
+        {topbarAvailable ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onOpenTopbar}
+            title={t('app.expandTopbar')}
+            aria-label={t('app.expandTopbar')}
+            data-testid="topbar-toggle"
+            className="h-9 w-9 flex-none sm:h-8 sm:w-8"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </Button>
         ) : null}
-        <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" data-testid="session-label">
-          {displayLabel}
-        </span>
-      </span>
-      {sessionSelected && onChangeCwd ? (
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={onChangeCwd}
-        title={cwd ? t('app.changeSessionCwd', { cwd }) : t('app.setSessionCwd')}
-        data-testid="cwd-button"
-        className="hidden h-8 min-w-0 max-w-[34vw] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground sm:inline-flex lg:max-w-[45%]"
-      >
-        <FolderOpen className="h-3.5 w-3.5 flex-none" />
-        <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
-          {cwd || t('app.cwdUnset')}
-        </span>
-      </Button>
-      ) : null}
-      {sessionTabs ? <div className="ml-2 min-w-0 flex-1 overflow-hidden">{sessionTabs}</div> : <span className="min-w-0 flex-1" />}
-      {sidebarAvailable ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenSidebar}
-          title={t('app.openSidebar')}
-          aria-label={t('app.openSidebar')}
-          data-testid="sidebar-toggle"
-          className="h-9 w-9 flex-none sm:h-8 sm:w-8"
+        {explorerAvailable ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onOpenExplorer}
+            title={t('app.openExplorer')}
+            aria-label={t('app.openExplorer')}
+            data-testid="explorer-toggle"
+            className="h-9 w-9 flex-none sm:h-8 sm:w-8"
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        ) : null}
+        <span
+          className="inline-flex min-w-0 max-w-[55vw] items-center gap-1.5 sm:max-w-none"
+          title={displayLabel}
+          data-testid="session-title"
         >
-          <PanelRight className="h-4 w-4" />
-        </Button>
-      ) : null}
+          {sessionSelected ? (
+            <SessionStatusIndicator status={sessionActivityStatus} selected />
+          ) : null}
+          <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" data-testid="session-label">
+            {displayLabel}
+          </span>
+        </span>
+        {sessionSelected && onChangeCwd ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onChangeCwd}
+            title={cwd ? t('app.changeSessionCwd', { cwd }) : t('app.setSessionCwd')}
+            data-testid="cwd-button"
+            className="hidden h-8 min-w-0 max-w-[34vw] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground sm:inline-flex lg:max-w-[45%]"
+          >
+            <FolderOpen className="h-3.5 w-3.5 flex-none" />
+            <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
+              {cwd || t('app.cwdUnset')}
+            </span>
+          </Button>
+        ) : null}
+        {sessionTabs ? <div className="ml-2 min-w-0 flex-1 overflow-hidden">{sessionTabs}</div> : <span className="min-w-0 flex-1" />}
+        {sidebarAvailable ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onOpenSidebar}
+            title={t('app.openSidebar')}
+            aria-label={t('app.openSidebar')}
+            data-testid="sidebar-toggle"
+            className="h-9 w-9 flex-none sm:h-8 sm:w-8"
+          >
+            <PanelRight className="h-4 w-4" />
+          </Button>
+        ) : null}
+      </div>
     </div>
   )
 }
