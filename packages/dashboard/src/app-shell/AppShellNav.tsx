@@ -104,7 +104,7 @@ export function AppShellNav({
       aria-label={t('appShell.nav.aria')}
       data-testid="app-shell-nav"
       data-collapsed="false"
-      className="sticky top-0 z-30 flex h-12 items-center gap-1 border-b border-border/45 bg-background/80 px-2 shadow-[0_1px_0_hsl(var(--card)/0.45)] backdrop-blur-xl sm:px-4"
+      className="sticky top-0 z-30 flex h-10 items-center gap-1 border-b border-border/45 bg-background/80 px-2 shadow-[0_1px_0_hsl(var(--card)/0.45)] backdrop-blur-xl sm:px-3"
     >
       <span
         aria-label="Agent Kernel"
@@ -160,7 +160,7 @@ export function AppShellNav({
               title={t(labelKey)}
               onClick={() => onSelect(id)}
               className={cn(
-                'relative z-10 h-9 flex-none snap-start gap-1.5 overflow-hidden px-2 text-xs transition-colors duration-150 sm:h-8 sm:px-2.5',
+                'relative z-10 h-8 flex-none snap-start gap-1.5 overflow-hidden px-2 text-xs transition-colors duration-150 sm:px-2.5',
                 active
                   ? 'text-foreground'
                   : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
@@ -174,7 +174,7 @@ export function AppShellNav({
       </div>
       <span className="ml-auto flex flex-none items-center gap-1">
         {evaluationUrl ? (
-          <Button variant="ghost" size="icon" asChild className="h-9 w-9 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8">
+          <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-muted-foreground hover:text-foreground">
             <a href={evaluationUrl} target="_blank" rel="noreferrer" data-testid="app-shell-open-evaluation" title={t('appShell.nav.evaluation')} aria-label={t('appShell.nav.evaluation')}><ExternalLink className="h-4 w-4" aria-hidden /></a>
           </Button>
         ) : null}
@@ -186,7 +186,7 @@ export function AppShellNav({
           onClick={onOpenSettings}
           title={t('app.openSettings')}
           aria-label={t('app.openSettings')}
-          className="h-9 w-9 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
+          className="h-8 w-8 text-muted-foreground hover:text-foreground"
         >
           <SettingsIcon className="h-4 w-4" aria-hidden />
         </Button>
@@ -198,7 +198,7 @@ export function AppShellNav({
           onClick={onCollapse}
           title={t('app.collapseTopbar')}
           aria-label={t('app.collapseTopbar')}
-          className="h-9 w-9 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
+          className="h-8 w-8 text-muted-foreground hover:text-foreground"
         >
           <ChevronUp className="h-4 w-4" aria-hidden />
         </Button>
@@ -219,8 +219,8 @@ function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin }
   }
   return (
     <details ref={detailsRef} className="relative" data-testid="account-menu">
-      <summary className="flex h-9 min-w-9 cursor-pointer list-none items-center justify-center gap-2 rounded-md px-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:h-8 [&::-webkit-details-marker]:hidden" aria-label={account ? t('appShell.account.trigger', { name: account.displayName }) : t('appShell.account.loading')} data-testid="account-menu-trigger">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-4 w-4" aria-hidden />}</span>
+      <summary className="flex h-8 min-w-8 cursor-pointer list-none items-center justify-center gap-2 rounded-md px-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden" aria-label={account ? t('appShell.account.trigger', { name: account.displayName }) : t('appShell.account.loading')} data-testid="account-menu-trigger">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-3.5 w-3.5" aria-hidden />}</span>
         {account ? <span className="hidden max-w-32 truncate lg:inline">{account.displayName}</span> : null}
       </summary>
       <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl" role="menu">

@@ -45,7 +45,8 @@ describe('WorkbenchToolbar', () => {
     const surface = screen.getByTestId('workbench-toolbar')
     expect(rail.contains(surface)).toBe(true)
     expect(surface.className).toContain('ak-titlebar-surface')
-    expect(rail.className).toContain('p-2')
+    expect(rail.className).toContain('p-1.5')
+    expect(surface.className).toContain('min-h-9')
   })
 
   it('uses one sidebar opener and does not duplicate it with a terminal shortcut', () => {

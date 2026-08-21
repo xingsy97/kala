@@ -177,8 +177,9 @@ async function verifyResponsivePanels(page, viewportWidth) {
       selectedSessionClientWidth: selectedSession?.clientWidth ?? 0,
     }
   })
-  const toolbarInset = viewportWidth < 640 ? 7 : 11
-  check(`title bar floats inside the workbench at ${viewportWidth}px`, metrics.workbench && metrics.toolbar && metrics.toolbar.left >= metrics.workbench.left + toolbarInset && metrics.toolbar.right <= metrics.workbench.right - toolbarInset && metrics.toolbar.top >= metrics.workbench.top + toolbarInset, JSON.stringify(metrics))
+  const toolbarInset = viewportWidth < 640 ? 5 : 7
+  const toolbarLeftInset = viewportWidth >= 1180 ? 3 : toolbarInset
+  check(`title bar floats inside the workbench at ${viewportWidth}px`, metrics.workbench && metrics.toolbar && metrics.toolbar.left >= metrics.workbench.left + toolbarLeftInset && metrics.toolbar.right <= metrics.workbench.right - toolbarInset && metrics.toolbar.top >= metrics.workbench.top + toolbarInset, JSON.stringify(metrics))
   check(`title bar uses a rounded surface at ${viewportWidth}px`, metrics.toolbarRadius !== '' && metrics.toolbarRadius !== '0px', JSON.stringify(metrics))
   if (viewportWidth < 1180) {
     check(`narrow layout removes explorer rail at ${viewportWidth}px`, metrics.explorer === null, JSON.stringify(metrics))

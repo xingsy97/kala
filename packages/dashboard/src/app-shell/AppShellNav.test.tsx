@@ -136,6 +136,13 @@ describe('AppShellNav', () => {
     expect(status.compareDocumentPosition(collapse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  it('uses a compact global navigation bar and controls', () => {
+    renderNav()
+    expect(screen.getByTestId('app-shell-nav').className).toContain('h-10')
+    expect(screen.getByTestId('app-shell-nav-agent').className).toContain('h-8')
+    expect(screen.getByTestId('app-shell-nav-settings-icon').className).toContain('h-8')
+  })
+
   it('does not render the inspector collapse control in the global nav', () => {
     renderNav()
     expect(screen.queryByTestId('app-shell-nav-inspector-icon')).toBeNull()
