@@ -46,6 +46,7 @@ describe('WorkbenchToolbar', () => {
     expect(rail.contains(surface)).toBe(true)
     expect(surface.className).toContain('ak-titlebar-surface')
     expect(rail.className).toContain('p-1.5')
+    expect(rail.className).toContain('min-[1180px]:pl-0')
     expect(surface.className).toContain('min-h-9')
   })
 

@@ -2632,7 +2632,7 @@ export function WorkbenchToolbar({
       : t('app.noSessionSelected')
   return (
     <div
-      className="flex-none p-1.5 sm:p-2 min-[1180px]:pl-1"
+      className="flex-none p-1.5 sm:p-2 min-[1180px]:pl-0"
       data-testid="workbench-toolbar-rail"
     >
       <div
