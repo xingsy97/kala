@@ -14,7 +14,7 @@ function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Elemen
 }
 
 describe('ChatPanel', () => {
-  it('renders and expands one durable Turn timing footer', () => {
+  it('orders message actions before timing and keeps call counts in expanded details', () => {
     const summary = {
       turnId: 'turn-1', status: 'completed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:01:42Z', wallDurationMs: 102000, estimated: false,
       queueDurationMs: 2000, activeDurationMs: 76000, approvalWaitMs: 24000,
@@ -22,14 +22,27 @@ describe('ChatPanel', () => {
       tools: { wallDurationMs: 45000, aggregateDurationMs: 87000, callCount: 12, peakConcurrency: 4, partial: false },
       compactionDurationMs: 0, retryDurationMs: 0, recoveryDurationMs: 0,
     }
-    const items = [{ kind: 'message' as const, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Done.' }] }, turnTiming: summary }]
-    render(<DashboardChatPanel items={items} messages={[]} />)
+    const items = [
+      { kind: 'message' as const, seq: 1, message: { role: 'user' as const, content: [{ type: 'text' as const, text: 'Do it.' }] } },
+      { kind: 'message' as const, seq: 2, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Done.' }] }, turnTiming: summary },
+    ]
+    render(<DashboardChatPanel items={items} messages={[]} onEditAndRerun={vi.fn()} />)
     const footer = screen.getByTestId('turn-timing-turn-1')
     expect(footer.parentElement?.getAttribute('data-testid')).toBe('assistant-message-footer')
     expect(footer.textContent).toContain('Completed · 1m 42s')
-    expect(footer.textContent).toContain('12 Tools · 3 model calls')
+    expect(footer.textContent).not.toContain('12 Tools')
+    expect(footer.textContent).not.toContain('3 model calls')
+    const messageFooter = screen.getByTestId('assistant-message-footer')
+    expect(Array.from(messageFooter.children)).toEqual([screen.getByTestId('message-actions-start'), footer])
+    expect(Array.from(screen.getByTestId('message-actions-start').children)).toEqual([
+      screen.getAllByTestId('copy-message')[1],
+      screen.getByTestId('try-again-message-1'),
+    ])
     fireEvent.click(footer.querySelector('button')!)
-    expect(screen.getByTestId('turn-timing-details-turn-1').textContent).toContain('peak concurrency 4')
+    const details = screen.getByTestId('turn-timing-details-turn-1')
+    expect(details.textContent).toContain('12 Tools')
+    expect(details.textContent).toContain('3 model calls')
+    expect(details.textContent).toContain('peak concurrency 4')
   })
 
   it('renders empty state', () => {

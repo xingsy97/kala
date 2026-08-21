@@ -1568,7 +1568,6 @@ function MessageRow({
           })}
           {message.role === 'assistant' && !streaming && (turnTiming || assistantActions) ? (
             <div className="flex min-w-0 flex-wrap items-start gap-1" data-testid="assistant-message-footer">
-              {turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
               {assistantActions ? <MessageActions
                 align="start"
                 copyText={assistantActions.copyText}
@@ -1578,6 +1577,7 @@ function MessageRow({
                   testId: `try-again-message-${index}`,
                 } : undefined}
               /> : null}
+              {turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
             </div>
           ) : null}
         </div>
@@ -1600,11 +1600,13 @@ function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared')
       <button type="button" className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <span aria-hidden="true">{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
         <span>{statusLabel} · {formatTurnDuration(summary.wallDurationMs)}</span>
-        <span className="ml-auto truncate">{summary.tools.callCount > 0 ? t('chatCommon.turnTiming.toolCalls', { count: summary.tools.callCount }) : ''}{summary.tools.callCount > 0 && summary.llm.requestCount > 0 ? ' · ' : ''}{summary.llm.requestCount > 0 ? t('chatCommon.turnTiming.modelCalls', { count: summary.llm.requestCount }) : ''}</span>
+        <span className="ml-auto" />
         {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
       </button>
       {open ? (
         <div className="grid gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 text-[11px] sm:grid-cols-2" data-testid={`turn-timing-details-${summary.turnId}`}>
+          {summary.tools.callCount > 0 ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.tools')}</span><span className="font-medium text-foreground">{t('chatCommon.turnTiming.toolCalls', { count: summary.tools.callCount })}</span></div> : null}
+          {summary.llm.requestCount > 0 ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.model')}</span><span className="font-medium text-foreground">{t('chatCommon.turnTiming.modelCalls', { count: summary.llm.requestCount })}</span></div> : null}
           {rows.map(([label, value]) => <div key={String(label)} className="flex justify-between gap-4"><span className="text-muted-foreground">{label}</span><span className="font-medium text-foreground">{formatTurnDuration(Number(value))}</span></div>)}
           {summary.tools.callCount > 0 ? <div className="col-span-full border-t border-border/50 pt-2 text-muted-foreground">{t('chatCommon.turnTiming.toolSummary', { wall: formatTurnDuration(summary.tools.wallDurationMs), aggregate: formatTurnDuration(summary.tools.aggregateDurationMs), concurrency: summary.tools.peakConcurrency })}{summary.tools.partial ? ` · ${t('chatCommon.turnTiming.partialExecutor')}` : ''}</div> : null}
         </div>
