@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../components/ui/button.js'
+import { ProductPage, ProductPageBody, ProductPageHeader, ProductPanel } from '../../components/ui/product-page.js'
 import { cn } from '../../lib/utils.js'
 
 type Step = {
@@ -66,78 +67,52 @@ export function PipelinePage(): JSX.Element {
   const footerLabel = current.kind === 'step' ? current.step.title : t('pipeline.principlesTitle')
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background" data-testid="pipeline-page">
-      <div className="flex items-center justify-between border-b border-border/50 px-6 py-3">
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-          <span className="text-foreground">{t('pipeline.title')}</span>
-          <span aria-hidden="true">·</span>
-          <span>{trackTitle}</span>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-testid="pipeline-scroll-body">
-        <div className="mx-auto flex min-h-full max-w-4xl items-center justify-center px-4 py-6 sm:px-8 sm:py-10">
+    <ProductPage testId="pipeline-page" className="overflow-hidden">
+      <ProductPageHeader eyebrow={t('pipeline.buttonLabel')} title={t('pipeline.title')} description={t('pipeline.description')} actions={
+        <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{trackTitle}</div>
+      } />
+      <ProductPageBody className="flex min-h-0 flex-col">
+        <ProductPanel className="relative">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-testid="pipeline-scroll-body">
+            <div className="mx-auto flex min-h-full max-w-4xl items-center justify-center px-4 py-6 sm:px-8 sm:py-10">
           {current.kind === 'step' ? (
             <StepSlide step={current.step} index={current.index} total={current.total} whereToLook={t('pipeline.whereToLook')} />
           ) : (
             <PrinciplesSlide t={t} />
           )}
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between border-t border-border/50 bg-muted/20 px-6 py-3">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => goto(safeCursor - 1)}
-          disabled={safeCursor === 0}
-          data-testid="pipeline-prev"
-          className="gap-1"
-        >
-          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-          {t('pipeline.prev')}
-        </Button>
-
-        <div className="flex flex-col items-center gap-1.5">
-          <div className="flex items-center gap-0.5" role="group" aria-label={t('pipeline.slidesLabel')}>
-            {slides.map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                aria-label={t('pipeline.slideNumber', { index: i + 1 })}
-                aria-current={i === safeCursor ? 'step' : undefined}
-                onClick={() => goto(i)}
-                data-testid={`pipeline-dot-${i}`}
-                className={cn(
-                  'flex h-11 min-w-8 items-center justify-center rounded-full transition-colors after:block after:h-2 after:rounded-full',
-                  i === safeCursor ? 'after:w-6 after:bg-primary' : 'after:w-2 after:bg-muted-foreground/30 hover:after:bg-muted-foreground/60',
-                )}
-              />
-            ))}
+            </div>
           </div>
-          <div className="text-[11px] text-muted-foreground">
-            <span className="font-mono">{safeCursor + 1} / {total}</span>
-            <span className="mx-1.5">·</span>
-            <span>{footerLabel}</span>
-          </div>
-        </div>
+          <div className="flex flex-none items-center justify-between border-t border-border/35 bg-muted/20 px-3 py-2 sm:px-5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => goto(safeCursor - 1)}
+              disabled={safeCursor === 0}
+              data-testid="pipeline-prev"
+              className="gap-1"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              {t('pipeline.prev')}
+            </Button>
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => goto(safeCursor + 1)}
-          disabled={safeCursor === total - 1}
-          data-testid="pipeline-next"
-          className="gap-1"
-        >
-          {t('pipeline.next')}
-          <ChevronRight className="h-4 w-4" aria-hidden="true" />
-        </Button>
-      </div>
-    </div>
+            <div className="flex min-w-0 flex-col items-center gap-1">
+              <div className="flex items-center gap-0.5" role="group" aria-label={t('pipeline.slidesLabel')}>
+                {slides.map((_, i) => (
+                  <button key={i} type="button" aria-label={t('pipeline.slideNumber', { index: i + 1 })} aria-current={i === safeCursor ? 'step' : undefined} onClick={() => goto(i)} data-testid={`pipeline-dot-${i}`} className={cn('flex h-8 min-w-6 items-center justify-center rounded-full transition-colors after:block after:h-1.5 after:rounded-full', i === safeCursor ? 'after:w-5 after:bg-primary' : 'after:w-1.5 after:bg-muted-foreground/30 hover:after:bg-muted-foreground/60')} />
+                ))}
+              </div>
+              <div className="max-w-[42vw] truncate text-[11px] text-muted-foreground"><span className="font-mono">{safeCursor + 1} / {total}</span><span className="mx-1.5">·</span><span>{footerLabel}</span></div>
+            </div>
+
+            <Button type="button" variant="ghost" size="sm" onClick={() => goto(safeCursor + 1)} disabled={safeCursor === total - 1} data-testid="pipeline-next" className="gap-1">
+              {t('pipeline.next')}
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        </ProductPanel>
+      </ProductPageBody>
+    </ProductPage>
   )
 }
 

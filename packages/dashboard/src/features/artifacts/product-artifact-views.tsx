@@ -13,6 +13,8 @@ import {
 } from '../../components/ui/dialog.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { JsonBlock } from '../../components/ui/json-block.js'
+import { ProductState } from '../../components/ui/product-state.js'
+import { cn } from '../../lib/utils.js'
 import { arrayField, arrayLength, asRecord, booleanField, formatBytes, formatBytesMetric, formatConfidence, formatDurationMetric, formatInteger, numberField, stringField } from './artifact-model.js'
 import { artifactRequest, downloadArtifact } from './artifact-client.js'
 
@@ -234,19 +236,14 @@ export function ArtifactInventory({
                   </div>
                 </details>
               </div>
-            ) : (
+            ) : !loading ? (
               <div className="text-xs text-muted-foreground">{t('artifacts.inventory.noManifest')}</div>
-            )}
+            ) : null}
           </aside>
           <div className="min-h-0 flex-1 p-3 sm:p-4">
-            {error ? (
-              <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
-                {error}
-              </div>
-            ) : null}
-            {loading && !manifest ? (
-              <div className="text-xs text-muted-foreground">{t('artifacts.inventory.loadingManifest')}</div>
-            ) : null}
+            {error && !manifest ? <ProductState compact kind="error" title={t('artifacts.state.errorTitle')} description={error} /> : null}
+            {error && manifest ? <InlineDataNotice kind="error">{error}</InlineDataNotice> : null}
+            {loading && !manifest ? <ProductState compact kind="loading" title={t('artifacts.state.loadingTitle')} description={t('artifacts.inventory.loadingManifest')} /> : null}
             {manifest ? (
               <>
               <div className="divide-y divide-border/35 overflow-hidden rounded-xl bg-card/70 ring-1 ring-border/40 md:hidden" data-testid="artifact-inventory-mobile-list">
@@ -732,14 +729,10 @@ export function ProfilesView({
         </div>
       </aside>
       <div className="min-h-0 flex-1 p-3 sm:p-4">
-        {error ? (
-          <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
-            {error}
-          </div>
-        ) : null}
-        {loading ? <div className="mb-3 text-xs text-muted-foreground">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</div> : null}
+        {error ? <InlineDataNotice kind="error">{error}</InlineDataNotice> : null}
+        {loading ? <InlineDataNotice kind="loading">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</InlineDataNotice> : null}
         <EnhancementActionPanel title={t('artifacts.profiles.actions')} actions={profileActionConfigs} onComplete={onArtifactActionComplete} />
-        {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.profiles.none')}</div> : null}
+        {manifest && rows.length === 0 && !error && !loading ? <ProductState compact kind="empty" title={t('artifacts.state.emptyTitle')} description={t('artifacts.profiles.none')} /> : null}
         {rows.length > 0 ? (
           <>
           <div className="divide-y divide-border/35 overflow-hidden rounded-xl bg-card/70 ring-1 ring-border/40 md:hidden" data-testid="profiles-mobile-list">
@@ -839,14 +832,10 @@ export function MemoryView({
         </div>
       </aside>
       <div className="min-h-0 flex-1 p-3 sm:p-4">
-        {error ? (
-          <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
-            {error}
-          </div>
-        ) : null}
-        {loading ? <div className="mb-3 text-xs text-muted-foreground">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</div> : null}
+        {error ? <InlineDataNotice kind="error">{error}</InlineDataNotice> : null}
+        {loading ? <InlineDataNotice kind="loading">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</InlineDataNotice> : null}
         <EnhancementActionPanel title={t('artifacts.memory.actions')} actions={memoryActionConfigs} onComplete={onArtifactActionComplete} />
-        {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.memory.none')}</div> : null}
+        {manifest && rows.length === 0 && !error && !loading ? <ProductState compact kind="empty" title={t('artifacts.state.emptyTitle')} description={t('artifacts.memory.none')} /> : null}
         {entries.length > 0 ? (
           <>
           <div className="divide-y divide-border/35 overflow-hidden rounded-xl bg-card/70 ring-1 ring-border/40 md:hidden" data-testid="memory-mobile-list">
@@ -948,14 +937,10 @@ export function OpsView({
         </div>
       </aside>
       <div className="min-h-0 flex-1 p-3 sm:p-4">
-        {error ? (
-          <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
-            {error}
-          </div>
-        ) : null}
-        {loading ? <div className="mb-3 text-xs text-muted-foreground">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</div> : null}
+        {error ? <InlineDataNotice kind="error">{error}</InlineDataNotice> : null}
+        {loading ? <InlineDataNotice kind="loading">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</InlineDataNotice> : null}
         <EnhancementActionPanel title={t('artifacts.ops.actions')} actions={opsActionConfigs} onComplete={onArtifactActionComplete} />
-        {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.ops.none')}</div> : null}
+        {manifest && rows.length === 0 && !error && !loading ? <ProductState compact kind="empty" title={t('artifacts.state.emptyTitle')} description={t('artifacts.ops.none')} /> : null}
         {rows.length > 0 ? (
           <ScrollArea className="h-full overflow-hidden rounded-xl bg-card/55 ring-1 ring-border/40">
             <div className="divide-y divide-border/50 text-xs">
@@ -1008,6 +993,10 @@ function groupOpsRows(rows: readonly OpsArtifactRow[], t: TFunction): Array<{ la
     groups.set(label, existing)
   }
   return [...groups.entries()].map(([label, groupRows]) => ({ label, rows: groupRows }))
+}
+
+function InlineDataNotice({ kind, children }: { kind: 'loading' | 'error'; children: React.ReactNode }): JSX.Element {
+  return <div className={cn('mb-3 rounded-lg px-3 py-2 text-xs', kind === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-muted/60 text-muted-foreground')} role={kind === 'error' ? 'alert' : 'status'} aria-live={kind === 'loading' ? 'polite' : undefined}>{children}</div>
 }
 
 

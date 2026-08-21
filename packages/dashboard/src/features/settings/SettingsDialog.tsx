@@ -34,6 +34,7 @@ import {
 } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
+import { ProductState } from '../../components/ui/product-state.js'
 import type { DurableSessionViewCache } from '../../durable-session-cache.js'
 import { SettingsSectionButton } from './controls.js'
 import { AgentSection } from './sections/AgentSection.js'
@@ -167,18 +168,9 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
           >
             <div className="mx-auto min-w-0 max-w-full overflow-x-hidden px-4 py-5 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-foreground md:max-w-3xl md:p-8" data-testid="settings-responsive-content">
               {loadError ? (
-                <div className="rounded-md border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
-                  <p>{t('settings.loadFailed', { error: loadError })}</p>
-                  <button
-                    type="button"
-                    className="mt-3 rounded-md border border-red-300/50 px-3 py-1.5 text-sm font-medium hover:bg-red-500/10"
-                    onClick={() => { void settingsQuery.refetch() }}
-                  >
-                    {t('common.reload')}
-                  </button>
-                </div>
+                <ProductState kind="error" title={t('settings.loadErrorTitle')} description={t('settings.loadFailed', { error: loadError })} primary={{ label: t('common.retry'), onClick: () => { void settingsQuery.refetch() } }} />
               ) : payload === null ? (
-                <div className="text-sm text-muted-foreground" role="status" aria-live="polite">{t('common.loading')}</div>
+                <ProductState kind="loading" title={t('settings.loadingTitle')} description={t('settings.loadingDescription')} />
               ) : section === 'runtime' ? (
                 <RuntimeSection payload={payload} />
               ) : section === 'connection' ? (

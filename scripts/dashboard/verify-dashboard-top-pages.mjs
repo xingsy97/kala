@@ -41,7 +41,7 @@ try {
     await page.goto(HOST_URL, { waitUntil: 'networkidle2', timeout: 20_000 })
     await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}' })
     await page.evaluate(() => document.fonts.ready)
-    for (const section of ['operations', 'artifacts', 'pipeline', 'docs']) {
+    for (const section of ['operations', 'artifacts', 'pipeline', 'docs', 'memo']) {
       await page.click(`[data-testid="app-shell-nav-${section}"]`)
       await page.waitForSelector(`[data-testid="${section === 'pipeline' ? 'pipeline-page' : `${section}-page`}"]`, { timeout: 10_000 })
       await sleep(100)

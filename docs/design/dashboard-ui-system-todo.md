@@ -1,8 +1,29 @@
 # Dashboard UI system redesign TODO
 
-> Status: planning only
+> Status: approved source of truth; implementation in progress
 >
-> This document defines the design direction, implementation sequence, acceptance criteria, and regression gates for the Dashboard UI redesign. It does **not** authorize implementation by itself and contains no implementation changes.
+> This document defines the design direction, implementation sequence, acceptance criteria, and regression gates for the Dashboard UI redesign. Product UI changes must conform to it.
+
+## 0. Implementation baseline (2026-08-21)
+
+Already implemented and retained as the baseline:
+
+- floating session navigation, session title surface, and Composer;
+- unified right Sidebar entry point for Files, Git, Terminal, and Inspector;
+- independent Dashboard release/deployment with generation-fenced receipts;
+- semantic `ProductState` states and shared workspace/navigation/title surfaces;
+- responsive phone/tablet drawers, safe-area handling, and durable session view state;
+- paginated artifact loading and structured file preview;
+- separate selected/running/waiting/error session semantics.
+
+Current implementation tranche:
+
+1. shared product-page header, navigation, content, and section primitives;
+2. Operations, Product Outputs, Pipeline, Memo, Docs, and Settings surface convergence;
+3. consistent loading, empty, offline, degraded, and error presentation;
+4. English/Chinese, keyboard, responsive, contrast, and real-browser acceptance.
+
+Checkboxes below are acceptance inventory. An unchecked historical item is not evidence that an already implemented capability should be rebuilt; verify current behavior first.
 
 ## 1. Objective
 

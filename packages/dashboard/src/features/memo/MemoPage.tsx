@@ -3,6 +3,7 @@ import { ImagePlus, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../components/ui/button.js'
+import { ProductPage, ProductPageBody, ProductPageHeader, ProductPanel } from '../../components/ui/product-page.js'
 import { sanitizeMemoHtml } from './memo-html.js'
 
 type MemoDocument = { content: string; revision: number; updatedAt: string }
@@ -53,21 +54,20 @@ export function MemoPage(): JSX.Element {
     update()
   }
 
-  return <main className="flex h-full min-h-0 flex-col bg-background" data-testid="memo-page">
-    <header className="flex h-12 items-center justify-between border-b px-4">
-      <div><h1 className="text-sm font-semibold">{t('memo.title')}</h1><p className="text-[11px] text-muted-foreground">{t('memo.subtitle')}</p></div>
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+  return <ProductPage testId="memo-page" className="overflow-hidden">
+    <ProductPageHeader title={t('memo.title')} description={t('memo.subtitle')} actions={<div className="inline-flex min-h-8 items-center gap-2 rounded-full bg-muted/70 px-3 text-xs text-muted-foreground">
         {status === 'saving' || status === 'loading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
         <span>{t(`memo.status.${status}`)}</span>
         {status === 'conflict' ? <Button size="sm" variant="outline" onClick={() => void load()}>{t('memo.reload')}</Button> : null}
-      </div>
-    </header>
-    <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col p-4 sm:p-8">
-      <div className="mb-2 flex items-center gap-2">
+      </div>} />
+    <ProductPageBody className="flex min-h-0 max-w-5xl flex-col">
+      <ProductPanel>
+      <div className="flex flex-none items-center gap-2 border-b border-border/35 px-3 py-2 sm:px-4">
         <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(event) => void insertImages(event.target.files)} />
-        <Button size="sm" variant="outline" onClick={() => fileInput.current?.click()}><ImagePlus className="mr-1.5 h-4 w-4" />{t('memo.image')}</Button>
+        <Button size="sm" variant="ghost" onClick={() => fileInput.current?.click()}><ImagePlus className="mr-1.5 h-4 w-4" />{t('memo.image')}</Button>
       </div>
-      <div ref={editor} contentEditable suppressContentEditableWarning onInput={update} onPaste={(event) => { const files=event.clipboardData.files; if(files.length){event.preventDefault();void insertImages(files)} }} className="min-h-0 flex-1 overflow-y-auto rounded-xl border bg-card p-5 text-sm leading-7 outline-none focus:ring-2 focus:ring-ring [&_img]:max-w-full [&_pre]:overflow-auto" aria-label={t('memo.editor')} />
-    </div>
-  </main>
+      <div ref={editor} contentEditable suppressContentEditableWarning onInput={update} onPaste={(event) => { const files=event.clipboardData.files; if(files.length){event.preventDefault();void insertImages(files)} }} className="min-h-0 flex-1 overflow-y-auto bg-card/35 p-5 text-sm leading-7 outline-none transition-shadow focus-visible:shadow-[inset_0_0_0_2px_hsl(var(--ring)/0.55)] sm:p-7 [&_img]:max-w-full [&_pre]:overflow-auto" aria-label={t('memo.editor')} />
+      </ProductPanel>
+    </ProductPageBody>
+  </ProductPage>
 }

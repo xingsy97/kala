@@ -17,4 +17,9 @@ describe('ProductState', () => {
     render(<ProductState kind="loading" title="Connecting workspace" description="Waiting for the Executor to come online." />)
     expect(screen.getByRole('status').textContent).toContain('Connecting workspace')
   })
+
+  it('supports a compact state treatment inside data panels', () => {
+    render(<ProductState compact kind="empty" title="Nothing here" description="Create the first item." />)
+    expect(screen.getByText('Nothing here').closest('section')?.className).toContain('py-5')
+  })
 })
