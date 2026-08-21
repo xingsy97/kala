@@ -29,6 +29,10 @@ jobs:
         env:
           PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
         run: node scripts/security/privacy-check.mjs --repository
+      - name: Scan complete Git history
+        env:
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+        run: node scripts/security/privacy-check.mjs --range HEAD
       - name: Scan pull request commit range
         if: github.event_name == 'pull_request'
         env:
@@ -62,5 +66,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run ci:fast
+      - run: pnpm run verify:licenses
       - name: Recent product regression matrix
         run: node scripts/testing/verify-recent-product-regressions.mjs

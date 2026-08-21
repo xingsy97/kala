@@ -1,6 +1,7 @@
 # Contributing to agent-kernel
 
-Thanks for reading this. `agent-kernel` is a pedagogical reference implementation, so contribution guidelines lean toward *clarity and readability* over feature velocity.
+Thanks for contributing to Agent RunLab. The project favors explicit contracts,
+recoverable state transitions, and readable implementations over feature velocity.
 
 ---
 
@@ -14,9 +15,9 @@ Thanks for reading this. `agent-kernel` is a pedagogical reference implementatio
 
 ## Before you open a PR
 
-- [ ] `pnpm -r typecheck` clean, no `any`
-- [ ] `pnpm -r test` passes with coverage meeting [`docs/meta/testing.md`](docs/meta/testing.md) targets
-- [ ] `pnpm -r build` succeeds — every package emits `dist/` with `.d.ts`
+- [ ] `pnpm run typecheck` passes
+- [ ] applicable targeted tests and `pnpm run test:fast` pass
+- [ ] `pnpm run privacy:check` and `pnpm run verify:licenses` pass
 - [ ] Doc changes are in the same PR as the code changes they describe
 - [ ] Commit message explains the *why*, not the *what* (the diff already shows the what)
 
@@ -55,10 +56,11 @@ pnpm -r test
 ```
 
 Requirements:
-- Node ≥ 20
-- pnpm ≥ 8
+- Node ≥ 22
+- pnpm 11.3.0 through Corepack
 
-For the Dashboard, you'll also need a browser and a running Host instance — see the [top-level README's Quick tour](README.md#quick-tour) for the three-terminal recipe.
+For the Dashboard, you'll also need a browser and a running Host instance — see
+the [top-level Quick Start](README.md#quick-start-from-source).
 
 ---
 
@@ -80,7 +82,7 @@ Each package has its own README. Read those first when working on a package.
 
 ## Filing bugs
 
-Include:
+Include only redacted information:
 - Package + version
 - Node version
 - Minimal reproduction (ideally a failing test)

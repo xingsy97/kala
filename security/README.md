@@ -20,6 +20,10 @@ CI runs both the checked-out snapshot scan and the pull-request commit range.
 Hooks are fast feedback, while the required CI check is the non-bypassable
 repository boundary.
 
+Release CI additionally scans the complete reachable Git history with
+`pnpm privacy:history`. Historical runtime assets are approved only by exact path
+and content hash; a current-tree pass alone is not sufficient for publication.
+
 ## Machine-local denylist
 
 Known private values must never be committed to the policy. Put one exact

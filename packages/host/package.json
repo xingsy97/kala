@@ -36,7 +36,6 @@
     "@agent-kernel/executor": "workspace:*",
     "@agent-kernel/kernel": "workspace:*",
     "@agent-kernel/shared": "workspace:*",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.212",
     "@aws-sdk/client-s3": "^3.1098.0",
     "@aws-sdk/s3-request-presigner": "^3.1098.0",
     "@socket.io/admin-ui": "^0.5.1",

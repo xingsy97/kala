@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose a product or architecture change
+title: "proposal: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user problem independently of a preferred implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Deployment and state impact
+      description: Note affected variants, protocols, persisted state, and recovery behavior.

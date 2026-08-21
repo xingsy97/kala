@@ -14,6 +14,7 @@
     "example.com",
     "example.org",
     "example.net",
+    "izs.me",
     "users.noreply.github.com"
   ],
   "allowedUuidPrefixes": [
@@ -22,6 +23,11 @@
   ],
   "allowedImagePaths": [
     "deploy/identity/favicon.svg",
+    "deploy/saas/branding/icon-dark.svg",
+    "deploy/saas/branding/icon.svg",
+    "deploy/saas/branding/logo-dark.svg",
+    "deploy/saas/branding/logo-light.svg",
+    "deploy/saas/local/caddy/favicon.svg",
     "deploy/private-cloud/branding/icon-dark.svg",
     "deploy/private-cloud/branding/icon.svg",
     "deploy/private-cloud/branding/logo-dark.svg",
@@ -47,6 +53,11 @@
   "ruleExceptions": [],
   "allowedBinaryHashes": {
     "deploy/identity/favicon.svg": "fe588e5f2ad0261bc0e9ae4fda5fd538d5bad1baec28141d2368a5ea30bd2631",
+    "deploy/saas/branding/icon-dark.svg": "c8056baa0e15de9b0ae580003fefd617c70b6fd5575eb0c7d5dc4c80b0224b71",
+    "deploy/saas/branding/icon.svg": "a9e9fe0907ce4654b5e0e9ca07c5289592166deb4ee7facf9f137b08d9b48ee3",
+    "deploy/saas/branding/logo-dark.svg": "bcd90411f38e7da771aa600d9ecf7dcff0475a1484c80b30c2a35517c55b3392",
+    "deploy/saas/branding/logo-light.svg": "5b703644d9fb74ab4b10b630fc4ee80d7926a142ac14a08633f039323c951ff1",
+    "deploy/saas/local/caddy/favicon.svg": "fe588e5f2ad0261bc0e9ae4fda5fd538d5bad1baec28141d2368a5ea30bd2631",
     "deploy/private-cloud/branding/icon-dark.svg": "c8056baa0e15de9b0ae580003fefd617c70b6fd5575eb0c7d5dc4c80b0224b71",
     "deploy/private-cloud/branding/icon.svg": "a9e9fe0907ce4654b5e0e9ca07c5289592166deb4ee7facf9f137b08d9b48ee3",
     "deploy/private-cloud/branding/logo-dark.svg": "bcd90411f38e7da771aa600d9ecf7dcff0475a1484c80b30c2a35517c55b3392",

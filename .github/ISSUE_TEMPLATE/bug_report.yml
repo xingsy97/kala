@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible Agent RunLab defect
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private endpoints, Session logs, or customer data. Report security issues privately through SECURITY.md.
+  - type: dropdown
+    id: variant
+    attributes:
+      label: Deployment variant
+      options: [Portable, Dedicated, Private Cloud, Development source]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or revision
+      placeholder: v0.2.0-rc.1 or a Git commit
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest safe sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include relevant OS, browser, topology, and error text only after redaction.
