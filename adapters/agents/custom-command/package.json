@@ -1,6 +1,7 @@
 {
+  "license": "MIT",
   "name": "@agent-kernel/eval-agent-custom-command",
-  "version": "0.1.10",
+  "version": "0.2.0-rc.1",
   "description": "Non-ranked deterministic command Agent backend for standalone evaluation development and deployment acceptance.",
   "type": "module",
   "main": "./dist/index.js",

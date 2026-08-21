@@ -46,12 +46,14 @@ Cloud is the same Platform architecture with `multi-tenant`.
 
 ### Version and supply chain
 
-- [ ] One product version is enforced across packages and artifacts.
-- [ ] Linux, macOS, and Windows x64/arm64 Portable artifacts are built where the
+- [x] One product version is enforced across packages and artifacts.
+- [x] Linux, macOS, and Windows x64/arm64 Portable build jobs exist on matching
+  runners where the
   runtime toolchain supports them.
 - [ ] Windows installer and uninstall path are verified.
-- [ ] Release assets and container images are signed keylessly with provenance.
-- [ ] SPDX or CycloneDX SBOMs and third-party notices ship with every distribution.
+- [x] GitHub release assets have a keyless checksum signature and GitHub build
+  provenance workflow; container signing remains pending.
+- [x] CycloneDX SBOMs and third-party notices ship with GitHub release assets.
 - [ ] Vulnerability scanning uses an explicit severity/exception policy.
 
 ### Operator experience

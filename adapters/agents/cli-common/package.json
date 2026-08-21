@@ -1,5 +1,5 @@
 {
-  "name": "@agent-kernel/eval-agent-cli-common", "version": "0.1.10", "private": true, "type": "module",
+  "name": "@agent-kernel/eval-agent-cli-common", "version": "0.2.0-rc.1", "license": "MIT", "type": "module",
   "main": "./dist/index.js", "types": "./dist/index.d.ts", "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": { "@agent-kernel/eval-protocol": "workspace:*", "@agent-kernel/eval-sdk": "workspace:*" },

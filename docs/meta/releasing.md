@@ -1,176 +1,73 @@
 # Releasing
 
-Packages are published independently on tag push:
+Agent RunLab uses one product version and one Git tag across the monorepo.
+`v0.2.0-rc.1`, for example, identifies the source revision, npm workspace
+packages, Portable assets, Dedicated bundle, Dashboard manifest, and Private
+Cloud images produced by that release. Protocol and persisted-schema versions
+remain independent compatibility contracts.
 
-| Tag pattern      | Publishes                                                  |
-| ---------------- | ---------------------------------------------------------- |
-| `kernel-v*`      | `@agent-kernel/kernel`                                     |
-| `host-v*`        | `@agent-kernel/host` (+ `shared`, `kernel` if newer)       |
-| `executor-v*`    | `@agent-kernel/executor` (+ `shared`, `kernel` if newer)   |
+## Version gate
 
-`@agent-kernel/shared` is not tag-driven directly; it rides along with `host`
-and `executor` because it is a transitive dep. `@agent-kernel/dashboard` is
-not published — it is only served by the host as a static bundle.
-
-## Cutting a release
+All workspace `package.json` files use the root product version. Public packages
+must declare MIT and cannot depend on private workspace packages. Verify before
+cutting a tag:
 
 ```bash
-# 1. Bump the version in the target package.json (and shared/kernel if their
-#    surface changed).
-pnpm --filter @agent-kernel/host exec npm version 0.2.0
-
-# 2. Commit + tag with the matching name.
-git commit -am "chore: release host 0.2.0"
-git tag host-v0.2.0
-git push origin main --tags
+pnpm run verify:version -- --tag v0.2.0-rc.1
 ```
 
-The `Publish to npm` workflow runs, builds, tests, verifies the tag version
-matches `package.json`, and publishes with npm provenance.
+The release asset verifier repeats the check against `release/manifest.json`.
+There are no component-specific product tags. Independent Dashboard updates use
+the Dashboard Supervisor generation/release protocol and retain the product
+version of the source release from which they were built.
 
-Requires repo secret `NPM_TOKEN` scoped to `@agent-kernel`.
+## npm packages
 
-## Local dry run
+The `Publish npm workspaces` workflow runs only on a matching `v*` tag. It runs
+privacy, license, build, type, and test gates, then publishes public workspace
+packages in dependency order with npm provenance. Existing exact versions are
+skipped, making a failed workflow resumable. Pre-release versions use the npm
+`next` dist-tag; stable versions use `latest`.
 
-```bash
-pnpm run publish:kernel    # publishes kernel only
-pnpm run publish:host      # publishes host (assumes shared+kernel already up)
-pnpm run publish:executor  # publishes executor
-pnpm run publish:all       # kernel → host → executor in order
-```
-
-Each calls the package's `publish:npm` script, which rebuilds first and then
-runs `pnpm publish --access public --no-git-checks`.
+The workflow requires the protected `npm` environment and `NPM_TOKEN`. A token
+does not replace npm provenance: GitHub OIDC permission remains required.
 
 ## GitHub Release assets
 
-Codex-style direct downloads are produced by the `GitHub Release Assets`
-workflow. It runs on aggregate tags matching `v*` and component tags matching
-`host-v*`, `executor-v*`, or `dashboard-v*`. It can also be run manually with a
-target tag and component. The workflow builds, tests, typechecks, bundles
-release assets, verifies executable bits / checksums / CLI smoke behavior, and
-uploads them to the GitHub Release for that tag.
+The `GitHub Release Assets` workflow also accepts only the unified `v*` tag. Its
+native matrix builds matching-runner Node SEA assets for Linux, macOS, and
+Windows on x64 and arm64. Node SEA assets are never cross-compiled or relabeled.
+The CJS job builds portable fallbacks, the Dashboard archive, Dedicated operator
+assets, release notes, manifest, and checksums. The final job merges exact
+artifacts and regenerates all metadata before publication.
 
-Current assets:
+Important assets include:
 
-| Asset                                  | Description                                      |
-| -------------------------------------- | ------------------------------------------------ |
-| `agent-kernel-host-<os>-<arch>`        | OS-native host binary. Current release workflow builds Linux x64, macOS x64, and Windows x64. |
-| `agent-kernel-executor-<os>-<arch>`    | OS-native executor binary. Current release workflow builds Linux x64, macOS x64, and Windows x64. |
-| `bundle-dashboard-with-runtime.cjs`    | Node.js 22 fallback asset with host runtime and embedded dashboard. |
-| `agent-kernel-executor.cjs`            | Node.js 22 fallback asset for the executor.      |
-| `agent-kernel-dashboard-dist.tar.gz`   | Static dashboard bundle served by the host.      |
-| `run.sh`                               | Wget-only bash bootstrap that downloads checksums, uses compact `.cjs` assets when Node.js 22+ is available, and falls back to native binaries otherwise. |
-| `RELEASE_NOTES.md`                     | Generated GitHub Release body with quick-start commands, port configuration, runtime selection, checksum verification, and asset list. |
-| `manifest.json`                        | Asset manifest and runtime notes.                |
-| `SHA256SUMS`                           | Checksums for release verification.              |
+| Asset | Purpose |
+|---|---|
+| `bundle-dashboard-with-runtime.cjs` | Portable Runtime with embedded Dashboard |
+| `agent-kernel-host-<os>-<arch>` | Native Portable Runtime |
+| `agent-kernel-executor.cjs` | Node.js Executor fallback |
+| `runlab-executor-<os>-<arch>` | Native Executor |
+| `agent-runlab-runtime.cjs` | Platform Runtime without embedded Dashboard |
+| `agent-kernel-dashboard-dist.tar.gz` | Independent Platform Dashboard |
+| `run.sh` | Checksum-verifying Portable bootstrap |
+| `manifest.json` and `SHA256SUMS` | Release identity and integrity |
 
-Tag behavior:
+The `.cjs` assets require Node.js 22+. `run.sh` prefers them when Node 22 is
+available and otherwise selects a matching native binary. Manual downloads must
+verify `SHA256SUMS` before execution.
 
-| Tag pattern       | Uploaded assets                                      |
-| ----------------- | ---------------------------------------------------- |
-| `v*`              | Host, executor, dashboard tarball, unified bootstrap, release notes, manifest, sums. |
-| `host-v*`         | Host, dashboard tarball, unified bootstrap defaulting to host, release notes, manifest, sums. |
-| `executor-v*`     | Executor, unified bootstrap defaulting to executor, release notes, manifest, sums. |
-| `dashboard-v*`    | Dashboard tarball, release notes, manifest, sums.    |
+## Release sequence
 
-Host and executor releases use automatic runtime selection. The default path is
-the compact `.cjs` asset when Node.js 22+ is already installed; the native binary
-is the zero-prerequisite fallback when Node is missing or too old. The workflow
-is two-phase for speed. The `cjs-release` job builds, verifies, and publishes the
-Node.js fallback assets plus dashboard bundle as soon as the normal build / test
-gate passes. In parallel, the `native-assets` matrix builds native Node SEA
-binaries on matching platform runners. Node SEA assets are not cross-compiled:
-the build script rejects a requested native target that does not match the
-current runner platform / architecture, so the release cannot accidentally
-publish a mislabeled binary. After both phases are available, `native-release`
-merges the current fallback artifact and current native artifacts, regenerates
-the manifest / release notes / checksums, and uploads the refreshed release
-assets. This makes the release usable before the slow native matrix has finished
-while still ending in one coherent GitHub Release.
+1. Update `CHANGELOG.md` and set the intended root/workspace version.
+2. Run `verify:version`, privacy history, licenses, build/typecheck/tests, and
+   clean-environment acceptance from the public release readiness runbook.
+3. Commit from a clean worktree and create the matching annotated `v*` tag.
+4. Let npm and GitHub workflows build from the tag; do not upload local binaries.
+5. Keep the GitHub Release as a draft until signatures, provenance, SBOMs, all
+   native targets, clean installs, upgrades, rollbacks, and restore evidence pass.
+6. Publish the draft and move the npm stable dist-tag only for a stable release.
 
-The `.cjs` files remain as fallback assets for unsupported platforms or manual
-debugging; they require Node.js 22 or newer. Help/version output uses Agent
-RunLab product naming. Internal npm/bin names remain `agent-kernel-host` and
-`agent-kernel-executor`; public Node.js release examples should use
-`bundle-dashboard-with-runtime.cjs` and `agent-kernel-executor.cjs`.
-
-The recommended release entrypoint is the bash bootstrap, not piping an asset
-directly into `node`. The bootstrap downloads `SHA256SUMS`, detects the current
-OS / architecture, and selects a runtime:
-
-- `AGENT_KERNEL_RUNTIME=auto` (default): use `.cjs` when Node.js 22+ is present;
-  otherwise use a matching native binary when available.
-- `AGENT_KERNEL_RUNTIME=cjs`: require the compact `.cjs` asset and Node.js 22+.
-- `AGENT_KERNEL_RUNTIME=native`: require the matching native binary.
-
-Example one-line commands for a full release tag:
-
-```bash
-wget -nv -O - "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh" | COMPONENT=host-frontend bash
-wget -nv -O - "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh" | HOST_URL=http://localhost:3000 COMPONENT=executor bash
-```
-
-The host also accepts `--port <port>` directly when launching an unpacked or
-downloaded host asset. If the selected port is already occupied, startup fails
-with a clear message telling the operator to stop the existing process or choose
-a free port with `HOST_PORT=<free-port>` or `--port <free-port>`.
-
-Verify downloaded assets before manual execution:
-
-```bash
-wget -q https://github.com/<owner>/<repo>/releases/download/v0.2.0/SHA256SUMS
-wget -q https://github.com/<owner>/<repo>/releases/download/v0.2.0/agent-kernel-executor-linux-x64
-sha256sum -c SHA256SUMS --ignore-missing
-```
-
-The dashboard's Connect Workspace dialog does not hard-code a GitHub repository.
-It reads `release.bootstrapBaseUrl` from `GET /settings`. Released hosts get a
-GitHub Release URL from `AGENT_KERNEL_RELEASE_BASE_URL` or
-`AGENT_KERNEL_UPDATE_REPO` / `AGENT_KERNEL_RELEASE_TAG`; local development falls
-back to `http://localhost:<HOST_PORT>/release-assets`, served from the local
-`release/` directory.
-
-To serve the dashboard manually with the host asset, unpack the dashboard
-tarball and set `DASHBOARD_DIR`:
-
-```bash
-tar -xzf agent-kernel-dashboard-dist.tar.gz -C /tmp/agent-kernel-dashboard
-DASHBOARD_DIR=/tmp/agent-kernel-dashboard ./agent-kernel-host-linux-x64
-HOST_URL=http://localhost:3000 ./agent-kernel-executor-linux-x64
-```
-
-Executors launched from `run.sh` receive `AGENT_KERNEL_RELEASE_TAG` and
-`AGENT_KERNEL_UPDATE_REPO`. The executor checks the latest GitHub Release at
-startup and logs a reminder when a newer release is available. Automatic update
-is opt-in:
-
-```bash
-wget -nv -O - "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh" | HOST_URL=http://localhost:3000 COMPONENT=executor AGENT_KERNEL_AUTO_UPDATE=1 bash
-```
-
-`--auto-update` is equivalent when launching a downloaded executor asset
-directly. `--no-update-check` or `AGENT_KERNEL_NO_UPDATE_CHECK=1` disables the
-startup reminder.
-
-The release workflow uploads all generated assets and uses `RELEASE_NOTES.md`
-as the GitHub Release body. Updating an existing release also replaces its
-notes before uploading assets with `--clobber`.
-
-Local dry run:
-
-```bash
-pnpm run build:release-assets
-pnpm run verify:release-assets
-pnpm run build:release-assets -- --component all --no-native
-pnpm run build:release-assets -- --component executor --native-only --native-target linux-x64
-pnpm run build:release-assets -- --component host
-pnpm run verify:release-assets
-ls -lh release/
-(cd release && sha256sum -c SHA256SUMS --ignore-missing)
-```
-
-The CI workflow also builds and verifies the default release asset set on every
-push / pull request, so broken executable bundles are caught before a tag is
-pushed. The release workflow uses `GITHUB_TOKEN` with `contents: write`; no
-extra GitHub secret is required for uploading GitHub Release assets.
+The complete go/no-go criteria are in
+[`../operations/public-release-readiness.md`](../operations/public-release-readiness.md).

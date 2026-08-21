@@ -1,5 +1,6 @@
 {
-  "name": "@agent-kernel/eval-benchmark-memory-planning", "version": "0.1.10", "type": "module",
+  "license": "MIT",
+  "name": "@agent-kernel/eval-benchmark-memory-planning", "version": "0.2.0-rc.1", "type": "module",
   "main": "./dist/index.js", "types": "./dist/index.d.ts", "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": { "@agent-kernel/eval-benchmark-common": "workspace:*", "@agent-kernel/eval-protocol": "workspace:*", "@agent-kernel/eval-sdk": "workspace:*" },

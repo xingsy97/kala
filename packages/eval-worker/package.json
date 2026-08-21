@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-worker",
-  "version": "0.0.0",
+  "version": "0.2.0-rc.1",
   "description": "Independent Worker process for isolated Agent evaluation trials.",
   "type": "module",
   "main": "./dist/src/index.js",

@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-agent-certification",
-  "version": "0.1.10",
+  "version": "0.2.0-rc.1",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",

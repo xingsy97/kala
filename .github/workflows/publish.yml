@@ -1,106 +1,35 @@
-name: Publish to npm
-
-# Publish is tag-driven. Push a tag like `kernel-v0.1.0`, `host-v0.1.0`, or
-# `executor-v0.1.0` and the matching package (plus its non-published workspace
-# dependencies) gets published. `@agent-kernel/shared` is not user-facing but
-# is a transitive dep of host + executor, so publishing host/executor also
-# publishes a fresh shared if its version has been bumped.
-#
-# Prereqs:
-#   - repo secret `NPM_TOKEN` with publish rights on the @agent-kernel scope.
-#   - the target package.json `version` matches the tag's version.
+name: Publish npm workspaces
 
 on:
   push:
-    tags:
-      - 'kernel-v*'
-      - 'host-v*'
-      - 'executor-v*'
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write  # for npm provenance
+    environment: npm
     steps:
       - uses: actions/checkout@v5
-
-      - name: Parse tag
-        id: tag
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          PKG="${TAG%%-v*}"
-          VER="${TAG#${PKG}-v}"
-          echo "package=$PKG" >> "$GITHUB_OUTPUT"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           package-manager-cache: false
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Enable pnpm via Corepack
-        run: |
-          corepack enable
-          corepack prepare pnpm@11.3.0 --activate
-
+          registry-url: https://registry.npmjs.org
+      - name: Enable pnpm through Corepack
+        run: corepack enable && corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm run build
-      - run: pnpm run test
+      - run: pnpm run verify:version -- --tag "${GITHUB_REF_NAME}"
+      - run: pnpm run privacy:history
+      - run: pnpm run verify:licenses
       - run: pnpm run typecheck
-
-      # Verify the tag version matches the package.json version, so we don't
-      # publish a lie.
-      - name: Verify version match
-        run: |
-          FILE_VER=$(node -p "require('./packages/${{ steps.tag.outputs.package }}/package.json').version")
-          if [ "$FILE_VER" != "${{ steps.tag.outputs.version }}" ]; then
-            echo "tag version ${{ steps.tag.outputs.version }} != package.json version $FILE_VER"
-            exit 1
-          fi
-
-      # If publishing host/executor, publish shared first (transitive dep).
-      # Only an exact version already present in the registry is skipped.
-      - name: Publish shared (transitive)
-        if: steps.tag.outputs.package != 'kernel'
-        run: |
-          set -euo pipefail
-          pnpm --filter @agent-kernel/shared run build
-          VERSION=$(node -p "require('./packages/shared/package.json').version")
-          if LOOKUP=$(npm view "@agent-kernel/shared@$VERSION" version 2>&1); then
-            echo "@agent-kernel/shared@$VERSION already exists; skipping"
-          elif grep -q 'E404' <<<"$LOOKUP"; then
-            pnpm --filter @agent-kernel/shared publish --access public --no-git-checks
-          else
-            printf '%s\n' "$LOOKUP" >&2
-            exit 1
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      # Kernel is a dep of shared/host/executor, so always publish first when
-      # not the target itself. Registry presence is the only skip condition.
-      - name: Publish kernel (transitive)
-        if: steps.tag.outputs.package != 'kernel'
-        run: |
-          set -euo pipefail
-          pnpm --filter @agent-kernel/kernel run build
-          VERSION=$(node -p "require('./packages/kernel/package.json').version")
-          if LOOKUP=$(npm view "@agent-kernel/kernel@$VERSION" version 2>&1); then
-            echo "@agent-kernel/kernel@$VERSION already exists; skipping"
-          elif grep -q 'E404' <<<"$LOOKUP"; then
-            pnpm --filter @agent-kernel/kernel publish --access public --no-git-checks
-          else
-            printf '%s\n' "$LOOKUP" >&2
-            exit 1
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish target package
-        run: pnpm --filter @agent-kernel/${{ steps.tag.outputs.package }} run publish:npm
+      - run: pnpm run test:fast
+      - name: Publish public workspaces in dependency order
+        run: node scripts/release/publish-workspaces.mjs --tag "${GITHUB_REF_NAME}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

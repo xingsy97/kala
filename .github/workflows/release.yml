@@ -4,29 +4,15 @@ on:
   push:
     tags:
       - 'v*'
-      - 'host-v*'
-      - 'executor-v*'
-      - 'dashboard-v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to publish assets to, for example v0.1.0 or host-v0.1.0'
+        description: 'Product release tag, for example v0.2.0-rc.1'
         required: true
-      component:
-        description: 'Asset group to publish: all, host, executor, or dashboard'
-        type: choice
-        options:
-          - ''
-          - all
-          - host
-          - executor
-          - dashboard
-        required: false
-        default: ''
       native_targets:
-        description: 'Comma-separated native targets to build: any of linux-x64, darwin-x64, win32-x64. Empty builds all supported desktop x64 targets.'
+        description: 'Comma-separated native targets. Empty builds Linux, macOS, and Windows on x64 and arm64.'
         required: false
-        default: 'linux-x64,darwin-x64,win32-x64'
+        default: 'linux-x64,linux-arm64,darwin-x64,darwin-arm64,win32-x64,win32-arm64'
 
 jobs:
   resolve:
@@ -38,50 +24,33 @@ jobs:
       native_matrix: ${{ steps.release.outputs.native_matrix }}
       has_native: ${{ steps.release.outputs.has_native }}
     steps:
+      - uses: actions/checkout@v5
       - name: Resolve release target
         id: release
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
-            COMPONENT="${{ inputs.component }}"
             NATIVE_TARGETS="${{ inputs.native_targets }}"
           else
             TAG="${GITHUB_REF#refs/tags/}"
-            COMPONENT=""
             NATIVE_TARGETS=""
           fi
-
-          if [ -z "$COMPONENT" ]; then
-            case "$TAG" in
-              host-v*) COMPONENT="host" ;;
-              executor-v*) COMPONENT="executor" ;;
-              dashboard-v*) COMPONENT="dashboard" ;;
-              v*) COMPONENT="all" ;;
-              *)
-                echo "Cannot infer release component from tag $TAG" >&2
-                exit 1
-                ;;
-            esac
-          fi
-
-          case "$COMPONENT" in
-            all|host|executor|dashboard) ;;
-            *)
-              echo "Unknown component $COMPONENT" >&2
-              exit 1
-              ;;
-          esac
+          COMPONENT="all"
+          node scripts/release/version-policy.mjs --tag "$TAG"
 
           if [ -z "$NATIVE_TARGETS" ]; then
-            NATIVE_TARGETS="linux-x64,darwin-x64,win32-x64"
+            NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64,win32-x64,win32-arm64"
           fi
           MATRIX_ENTRIES=""
           for t in $(echo "$NATIVE_TARGETS" | tr ',' ' '); do
             case "$t" in
-              linux-x64) OS="ubuntu-latest" ;;
-              darwin-x64) OS="macos-13" ;;
-              win32-x64) OS="windows-latest" ;;
-              *) echo "Unsupported native target: $t (allowed: linux-x64, darwin-x64, win32-x64)" >&2; exit 1 ;;
+              linux-x64) OS="ubuntu-24.04" ;;
+              linux-arm64) OS="ubuntu-24.04-arm" ;;
+              darwin-x64) OS="macos-15-intel" ;;
+              darwin-arm64) OS="macos-15" ;;
+              win32-x64) OS="windows-2025" ;;
+              win32-arm64) OS="windows-11-arm" ;;
+              *) echo "Unsupported native target: $t" >&2; exit 1 ;;
             esac
             ENTRY="{\"os\":\"$OS\",\"target\":\"$t\"}"
             if [ -z "$MATRIX_ENTRIES" ]; then
@@ -105,7 +74,7 @@ jobs:
 
   native-assets:
     needs: resolve
-    if: needs.resolve.outputs.component != 'dashboard' && needs.resolve.outputs.has_native == 'true'
+    if: needs.resolve.outputs.has_native == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve.outputs.native_matrix) }}
@@ -121,17 +90,18 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
       - run: pnpm run build
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
       - name: Build and verify real Windows Terminal release path
-        if: matrix.target == 'win32-x64' && (needs.resolve.outputs.component == 'all' || needs.resolve.outputs.component == 'executor')
+        if: startsWith(matrix.target, 'win32-')
         shell: pwsh
         run: |
           pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }}
           pnpm run verify:release-assets
-          tar -xzf release/node-pty-win32-x64.tar.gz -C release
+          tar -xzf release/node-pty-${{ matrix.target }}.tar.gz -C release
           New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null
-          Move-Item release/win32-x64 release/prebuilds/win32-x64 -Force
+          Move-Item release/${{ matrix.target }} release/prebuilds/${{ matrix.target }} -Force
           node scripts/product-e2e/verify-windows-terminal.mjs
       - uses: actions/upload-artifact@v5
         with:
@@ -160,6 +130,7 @@ jobs:
           corepack prepare pnpm@11.3.0 --activate
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test:extended
@@ -167,8 +138,8 @@ jobs:
       - run: pnpm run verify:licenses
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --no-native
       - run: pnpm run verify:release-assets
-      - name: Install-time smoke on release assets (host + dashboard bundle)
-        if: needs.resolve.outputs.component == 'all' || needs.resolve.outputs.component == 'host'
+      - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }} --manifest release/manifest.json
+      - name: Install-time smoke on release assets
         run: pnpm run verify:release-install
       - uses: actions/upload-artifact@v5
         with:
@@ -180,7 +151,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
-          COMPONENT: ${{ needs.resolve.outputs.component }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --draft --notes-file release/RELEASE_NOTES.md
@@ -199,16 +169,15 @@ jobs:
               --title "$TAG" \
               --notes-file release/RELEASE_NOTES.md
           fi
-          if [ "$COMPONENT" = "dashboard" ]; then
-            gh release edit "$TAG" --draft=false
-          fi
 
   native-release:
     needs: [resolve, cjs-release, native-assets]
-    if: always() && needs.resolve.result == 'success' && needs.cjs-release.result == 'success' && needs.native-assets.result == 'success' && needs.resolve.outputs.component != 'dashboard' && needs.resolve.outputs.has_native == 'true'
+    if: always() && needs.resolve.result == 'success' && needs.cjs-release.result == 'success' && needs.native-assets.result == 'success' && needs.resolve.outputs.has_native == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v5
 
@@ -223,6 +192,7 @@ jobs:
           corepack prepare pnpm@11.3.0 --activate
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
       - uses: actions/download-artifact@v5
         with:
           name: cjs-release-assets
@@ -238,13 +208,29 @@ jobs:
             | xargs -0 -r chmod +x
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --finalize-only
       - name: Require installable desktop Executor assets
-        if: needs.resolve.outputs.component == 'all' || needs.resolve.outputs.component == 'executor'
         run: |
           test -f release/runlab-executor-linux-x64
+          test -f release/runlab-executor-linux-arm64
           test -f release/runlab-executor-darwin-x64
+          test -f release/runlab-executor-darwin-arm64
           test -f release/runlab-executor-win32-x64.exe
+          test -f release/runlab-executor-win32-arm64.exe
           grep -q 'runlab-executor-win32-x64.exe' release/SHA256SUMS
       - run: pnpm run verify:release-assets
+      - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }} --manifest release/manifest.json
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign the checksum index with Sigstore keyless identity
+        run: cosign sign-blob --yes --bundle release/SHA256SUMS.sigstore.json release/SHA256SUMS
+      - name: Attest final release assets
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            release/manifest.json
+            release/SHA256SUMS
+            release/sbom.cdx.json
+            release/bundle-dashboard-with-runtime.cjs
+            release/agent-kernel-host-*
+            release/runlab-executor-*
       - name: Upload native assets and refreshed metadata
         env:
           GH_TOKEN: ${{ github.token }}
@@ -252,4 +238,3 @@ jobs:
         run: |
           gh release edit "$TAG" --draft --notes-file release/RELEASE_NOTES.md
           gh release upload "$TAG" release/* --clobber
-          gh release edit "$TAG" --draft=false

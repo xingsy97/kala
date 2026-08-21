@@ -211,6 +211,7 @@ function finalizeRelease() {
     return { ...entry, cjs: exists(cjs) ? cjs : undefined, natives }
   })
   const executorProductNatives = nativeTargets.map(executorNativeAssetName).filter((asset) => exists(asset))
+  writeDependencyMetadata()
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
     .concat(executorProductNatives)
     .concat(includeDashboard && exists('agent-kernel-dashboard-dist.tar.gz') ? ['agent-kernel-dashboard-dist.tar.gz'] : [])
@@ -218,6 +219,7 @@ function finalizeRelease() {
     .concat(includeDashboard && exists('agent-runlab-docs.tar.gz') ? ['agent-runlab-docs.tar.gz'] : [])
     .concat(includeDashboard && exists('agent-runlab-model-catalog-seed.json') ? ['agent-runlab-model-catalog-seed.json'] : [])
     .concat(bootstrapAssets)
+    .concat(['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt'])
     .concat(entries.some((entry) => entry.name === 'agent-kernel-executor') && exists('executor-update-manifest.json') ? ['executor-update-manifest.json', 'executor-update-public-key.pem'] : [])
   const hasNativeAssets = builtEntries.some((entry) => entry.natives.length > 0)
   const manifest = {
@@ -248,6 +250,50 @@ function finalizeRelease() {
   writeFileSync(join(outDir, 'RELEASE_NOTES.md'), releaseNotes(manifest))
 
   writeSha256Sums(releaseFiles())
+}
+
+function writeDependencyMetadata() {
+  const inventory = spawnSync('pnpm', ['licenses', 'list', '--prod', '--json'], { cwd: root, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 })
+  if (inventory.status !== 0) throw new Error('production dependency license inventory failed')
+  const classes = JSON.parse(inventory.stdout)
+  const components = []
+  for (const [reportedLicense, packages] of Object.entries(classes)) {
+    for (const dependency of packages) {
+      const license = reportedLicense === 'Unknown' && dependency.name === 'khroma' ? 'MIT' : reportedLicense
+      if (license === 'Unknown') throw new Error(`unreviewed dependency license: ${dependency.name}`)
+      for (const version of dependency.versions) {
+        const encodedName = dependency.name.startsWith('@')
+          ? dependency.name.split('/').map(encodeURIComponent).join('/')
+          : encodeURIComponent(dependency.name)
+        components.push({ type: 'library', name: dependency.name, version, purl: `pkg:npm/${encodedName}@${encodeURIComponent(version)}`, licenses: [{ license: { id: license } }] })
+      }
+    }
+  }
+  components.sort((left, right) => `${left.name}@${left.version}`.localeCompare(`${right.name}@${right.version}`))
+  const sbom = {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.6',
+    version: 1,
+    metadata: {
+      component: { type: 'application', name: 'agent-runlab', version: packageJson.version },
+      properties: [
+        { name: 'agent-runlab:source-revision', value: sourceIdentity.revision },
+        { name: 'agent-runlab:source-snapshot-sha256', value: sourceIdentity.snapshotSha256 },
+      ],
+    },
+    components,
+  }
+  writeFileSync(join(outDir, 'sbom.cdx.json'), `${JSON.stringify(sbom, null, 2)}\n`)
+  const notices = [
+    `Agent RunLab ${packageJson.version} third-party dependency inventory`,
+    '',
+    'The packages below retain their own copyright and license terms.',
+    'Consult each upstream package for the complete license text and notices.',
+    '',
+    ...components.map((item) => `${item.name}@${item.version} — ${item.licenses[0].license.id}`),
+    '',
+  ]
+  writeFileSync(join(outDir, 'THIRD_PARTY_NOTICES.txt'), notices.join('\n'))
 }
 
 function prepareBootstrapAssets() {

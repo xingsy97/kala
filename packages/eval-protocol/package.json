@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-protocol",
-  "version": "0.0.0",
+  "version": "0.2.0-rc.1",
   "description": "Browser-safe contracts for the standalone Agent Evaluation Platform.",
   "type": "module",
   "main": "./dist/index.js",

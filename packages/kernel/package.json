@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/kernel",
-  "version": "0.0.0",
+  "version": "0.2.0-rc.1",
   "description": "Pure-function reducer kernel for coding agents. Zero dependencies. < 500 lines.",
   "type": "module",
   "main": "./dist/index.js",

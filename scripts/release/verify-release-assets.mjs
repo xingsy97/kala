@@ -22,6 +22,16 @@ if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) {
 if (new Set(manifest.assets).size !== manifest.assets.length) {
   fail('manifest.assets must not contain duplicates')
 }
+for (const asset of ['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt']) {
+  if (!manifest.assets.includes(asset)) fail(`manifest missing supply-chain asset ${asset}`)
+}
+const sbom = JSON.parse(readFileSync(join(releaseDir, 'sbom.cdx.json'), 'utf8'))
+if (sbom.bomFormat !== 'CycloneDX' || sbom.specVersion !== '1.6' || sbom.metadata?.component?.version !== manifest.version || !Array.isArray(sbom.components) || sbom.components.length === 0) {
+  fail('release CycloneDX SBOM is invalid or version-mismatched')
+}
+if (sbom.components.some((component) => component.licenses?.some((entry) => entry.license?.id === 'Unknown'))) fail('release SBOM contains an unknown license')
+const notices = readFileSync(join(releaseDir, 'THIRD_PARTY_NOTICES.txt'), 'utf8')
+if (!notices.includes(`Agent RunLab ${manifest.version}`) || !notices.includes('third-party dependency inventory')) fail('release third-party notices are invalid')
 const expectedReleaseFiles = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort()
 const actualReleaseEntries = readdirSync(releaseDir, { withFileTypes: true })
 if (actualReleaseEntries.some((entry) => !entry.isFile())

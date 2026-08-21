@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-analyzer",
-  "version": "0.0.0",
+  "version": "0.2.0-rc.1",
   "description": "Deterministic defect detection, trace alignment, clustering, and reproduction minimization for the standalone evaluation platform.",
   "type": "module",
   "main": "./dist/src/index.js",

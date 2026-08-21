@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-sdk",
-  "version": "0.0.0",
+  "version": "0.2.0-rc.1",
   "description": "Public client and plugin SDK for the standalone Agent Evaluation Platform.",
   "type": "module",
   "main": "./dist/index.js",

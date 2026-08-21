@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/host",
-  "version": "0.0.0",
+  "version": "0.2.0-rc.1",
   "description": "Host runtime for the agent-kernel: LLM adapters, session store, Socket.IO server.",
   "type": "module",
   "main": "./dist/index.js",
