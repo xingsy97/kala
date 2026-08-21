@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createLinuxServicePlan, executeLinuxServicePlan, renderLinuxServiceFiles } from './linux-service.js'
 import { createMacosLaunchdService, executeLaunchdPlan } from './macos-launchd.js'
-import { createWindowsServicePlan, executeWindowsServicePlan } from './windows-service.js'
+import { assertManagedWindowsInstallation, createWindowsServicePlan, executeWindowsServicePlan } from './windows-service.js'
 import type { InstallerSession } from './installer-session.js'
 
 const session: InstallerSession = {
@@ -137,5 +137,11 @@ describe('Windows service adapter', () => {
     const runner = vi.fn(async () => ({ exitCode: 0, stdout: 'ok', stderr: '' }))
     await executeWindowsServicePlan(plan, ['create', 'recovery', 'start'], { platform: 'win32', runner })
     expect(runner).toHaveBeenCalledTimes(3)
+  })
+
+  it('binds uninstall to a recognized installation identity', () => {
+    expect(assertManagedWindowsInstallation({ installationSource: 'dashboard-native', installationId: 'install-1' }).installationId).toBe('install-1')
+    expect(() => assertManagedWindowsInstallation({ installationSource: 'manual', installationId: 'install-1' })).toThrow('Refusing')
+    expect(() => assertManagedWindowsInstallation({ installationSource: 'dashboard-native', installationId: '' })).toThrow('Refusing')
   })
 })

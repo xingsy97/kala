@@ -2,13 +2,16 @@
   "name": "@agent-kernel/host",
   "version": "0.2.0-rc.1",
   "description": "Host runtime for the agent-kernel: LLM adapters, session store, Socket.IO server.",
+  "repository": { "type": "git", "url": "git+https://github.com/xingsy97/akernel.git" },
+  "homepage": "https://github.com/xingsy97/akernel#readme",
+  "bugs": { "url": "https://github.com/xingsy97/akernel/issues" },
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
     }
   },
   "bin": {

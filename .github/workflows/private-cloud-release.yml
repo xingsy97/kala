@@ -131,6 +131,42 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
+  image-vulnerability-scan:
+    needs: [runtime-image, ingress-image, dashboard-image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
+      - name: Install pinned vulnerability scanners
+        env: { GRYPE_VERSION: v0.99.1, TRIVY_VERSION: v0.74.0 }
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin "${GRYPE_VERSION}"
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+      - name: Scan each immutable image digest
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/image-vulnerability-reports"
+          scan() {
+            component="$1"; image="$2"
+            grype "$image" -o json > "${{ runner.temp }}/image-vulnerability-reports/$component-grype.json"
+            trivy image --scanners vuln --format json --output "${{ runner.temp }}/image-vulnerability-reports/$component-trivy.json" "$image"
+            node scripts/security/check-vulnerabilities.mjs \
+              --grype "${{ runner.temp }}/image-vulnerability-reports/$component-grype.json" \
+              --trivy "${{ runner.temp }}/image-vulnerability-reports/$component-trivy.json" \
+              --output "${{ runner.temp }}/image-vulnerability-reports/$component-normalized.json"
+          }
+          scan runtime "ghcr.io/${{ github.repository }}-private-cloud-runtime@${{ needs.runtime-image.outputs.digest }}"
+          scan ingress "ghcr.io/${{ github.repository }}-private-cloud-ingress@${{ needs.ingress-image.outputs.digest }}"
+          scan dashboard "ghcr.io/${{ github.repository }}-private-cloud-dashboard@${{ needs.dashboard-image.outputs.digest }}"
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: private-cloud-image-vulnerability-reports-${{ github.run_id }}
+          path: ${{ runner.temp }}/image-vulnerability-reports
+          if-no-files-found: error
+          retention-days: 30
+
   operator:
     needs: resolve
     strategy:
@@ -153,7 +189,7 @@ jobs:
           if-no-files-found: error
 
   bundle:
-    needs: [resolve, runtime-image, ingress-image, dashboard-image, operator]
+    needs: [resolve, runtime-image, ingress-image, dashboard-image, image-vulnerability-scan, operator]
     strategy:
       matrix:
         target: [linux-x64, linux-arm64]

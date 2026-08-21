@@ -1,7 +1,7 @@
 {
   "license": "MIT",
-  "name": "@agent-kernel/eval-environment-docker", "version": "0.2.0-rc.1", "type": "module",
-  "main": "./dist/index.js", "types": "./dist/index.d.ts", "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "name": "@agent-kernel/eval-environment-docker", "version": "0.2.0-rc.1", "description": "Docker sandbox-provider plugin for the Agent Evaluation Platform.", "repository": { "type": "git", "url": "git+https://github.com/xingsy97/akernel.git" }, "homepage": "https://github.com/xingsy97/akernel#readme", "bugs": { "url": "https://github.com/xingsy97/akernel/issues" }, "type": "module",
+  "main": "./dist/index.js", "types": "./dist/index.d.ts", "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } }, "files": ["dist", "README.md"],
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": { "@agent-kernel/eval-environment-common": "workspace:*", "@agent-kernel/eval-protocol": "workspace:*", "@agent-kernel/eval-sdk": "workspace:*" },
   "devDependencies": { "@types/node": "^22.9.0", "typescript": "^5.6.3", "vitest": "^2.1.5" }, "sideEffects": false

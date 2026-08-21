@@ -41,8 +41,9 @@ Cloud is the same Platform architecture with `multi-tenant`.
   CODEOWNERS, and changelog.
 - [x] Snapshot and complete-history privacy scanning.
 - [x] Production dependency license allowlist with exact review for non-SPDX metadata.
-- [ ] Public API/package documentation matches shipped package contents.
-- [ ] Repository metadata, package links, and release support policy are finalized.
+- [x] Public API/package documentation matches shipped package contents and is
+  verified against every npm dry-run tarball.
+- [x] Repository metadata, package links, and release support policy are finalized.
 
 ### Version and supply chain
 
@@ -50,11 +51,13 @@ Cloud is the same Platform architecture with `multi-tenant`.
 - [x] Linux, macOS, and Windows x64/arm64 Portable build jobs exist on matching
   runners where the
   runtime toolchain supports them.
-- [ ] Windows installer and uninstall path are verified.
+- [x] Windows native Executor installer, SCM service lifecycle, Terminal path, and
+  installation-bound uninstall are enforced by matching x64/arm64 Release jobs;
+  publication still requires those jobs to pass.
 - [x] GitHub release assets have a keyless checksum signature and GitHub build
-  provenance workflow; container signing remains pending.
+  provenance; container digests have keyless signatures, OCI provenance, and SBOMs.
 - [x] CycloneDX SBOMs and third-party notices ship with GitHub release assets.
-- [ ] Vulnerability scanning uses an explicit severity/exception policy.
+- [x] Vulnerability scanning uses an explicit severity/exception policy.
 
 ### Operator experience
 

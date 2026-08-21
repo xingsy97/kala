@@ -55,10 +55,14 @@ test('security, publish, and release workflows fail closed', async () => {
   const security = await workflow('browser-security.yml')
   for (const scanner of ['SYFT_VERSION', 'GRYPE_VERSION', 'TRIVY_VERSION', 'COSIGN_VERSION']) assert.match(security, new RegExp(`${scanner}: v\\d`, 'u'))
   assert.match(security, /pnpm run ci:security/u)
+  assert.match(security, /grype sbom:/u)
+  assert.match(security, /trivy fs --scanners vuln/u)
+  assert.match(security, /check-vulnerabilities\.mjs/u)
 
   const publish = await workflow('publish.yml')
   assert.doesNotMatch(publish, /publish[^\n]*\|\|\s*echo/u)
   assert.match(publish, /scripts\/release\/publish-workspaces\.mjs/u)
+  assert.match(publish, /verify:public-packages/u)
   const publisher = await readFile(resolve(root, 'scripts/release/publish-workspaces.mjs'), 'utf8')
   assert.match(publisher, /['view', identity, 'version', '--json']/u)
   assert.match(publisher, /E404|is not in this registry/u)
@@ -68,6 +72,9 @@ test('security, publish, and release workflows fail closed', async () => {
   assert.match(release, /gh release create[\s\S]*?--draft/u)
   assert.doesNotMatch(release, /gh release edit "\$TAG" --draft=false/u)
   assert.match(release, /gh release edit "\$TAG" --draft/u)
+  assert.match(release, /verify:public-packages/u)
+  assert.match(release, /PRODUCT_E2E_WINDOWS_SERVICE: '1'/u)
+  assert.match(release, /verify-windows-terminal\.mjs/u)
 })
 
 test('Private Cloud release builds signed multi-architecture images and native bundles', async () => {
@@ -82,6 +89,9 @@ test('Private Cloud release builds signed multi-architecture images and native b
   assert.match(release, /linux-x64, linux-arm64/u)
   assert.match(release, /build-private-cloud-bundle\.mjs/u)
   assert.match(release, /verify-private-cloud-bundle\.mjs/u)
+  assert.match(release, /trivy image --scanners vuln/u)
+  assert.match(release, /check-vulnerabilities\.mjs/u)
+  assert.match(release, /image-vulnerability-scan/u)
   assert.doesNotMatch(release, /--draft=false/u)
 })
 

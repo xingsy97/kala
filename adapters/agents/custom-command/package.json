@@ -3,10 +3,12 @@
   "name": "@agent-kernel/eval-agent-custom-command",
   "version": "0.2.0-rc.1",
   "description": "Non-ranked deterministic command Agent backend for standalone evaluation development and deployment acceptance.",
+  "repository": { "type": "git", "url": "git+https://github.com/xingsy97/akernel.git" }, "homepage": "https://github.com/xingsy97/akernel#readme", "bugs": { "url": "https://github.com/xingsy97/akernel/issues" },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {
     "@agent-kernel/eval-protocol": "workspace:*",

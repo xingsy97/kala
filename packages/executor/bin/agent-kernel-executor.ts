@@ -28,8 +28,8 @@
  * `workspaceId` matches this executor's stored workspace id.
  */
 
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { resolve, join } from 'node:path'
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { basename, dirname, resolve, join, sep } from 'node:path'
 import process from 'node:process'
 
 import lockfile from 'proper-lockfile'
@@ -48,10 +48,11 @@ import { parseSandboxRootsEnv } from '../src/sandbox-roots-env.js'
 import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile } from '../src/workspace-id.js'
 import { bootstrapEnvironment, defaultManagedRoot, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
+import { assertManagedWindowsInstallation, createWindowsServicePlan, executeWindowsServicePlan, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
 import { spawn } from 'node:child_process'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 
 const logger = createRuntimeLogger('agent-kernel-executor')
 
@@ -282,6 +283,7 @@ async function runInternalInstaller(): Promise<void> {
   const workspaceRoot = env.EXECUTOR_INSTALL_ROOT === '__RUNLAB_CURRENT_DIRECTORY__' ? resolve(process.cwd()) : resolve(env.EXECUTOR_INSTALL_ROOT)
   process.stdout.write(`Agent RunLab workspace root: ${workspaceRoot}\n`)
   const service = env.EXECUTOR_INSTALL_MODE === 'service'
+  if (service && process.platform === 'win32') return await installWindowsService(env, workspaceRoot, redeemed.token)
   const managedRoot = defaultManagedRoot(homedir(), service && process.getuid?.() === 0)
   const executable = service ? join(managedRoot, 'current', 'runlab-executor') : process.execPath
   const installerSession: InstallerSession = {
@@ -329,6 +331,47 @@ async function runInternalInstaller(): Promise<void> {
   printServiceCommands(installerSession.mode, executable)
 }
 
+async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment>, workspaceRoot: string, token: string): Promise<void> {
+  const serviceName = 'RunLabExecutor'
+  const plan = createWindowsServicePlan({
+    serviceName, displayName: 'Agent RunLab Executor',
+    programFiles: process.env.ProgramFiles, programData: process.env.ProgramData,
+  })
+  if (basename(process.execPath).toLowerCase() === 'node.exe') throw new Error('Windows service mode requires the native runlab-executor asset')
+  mkdirSync(plan.layout.installDir, { recursive: true, mode: 0o700 })
+  mkdirSync(plan.layout.dataDir, { recursive: true, mode: 0o700 })
+  const credentialPath = join(plan.layout.dataDir, 'credential')
+  const config = {
+    version: 1, host: env.HOST_URL, ...(env.EXECUTOR_INSTALL_LABEL ? { name: env.EXECUTOR_INSTALL_LABEL } : {}),
+    sandboxRoots: [workspaceRoot], credentialFile: credentialPath, installationId: env.EXECUTOR_INSTALL_ID,
+    installationSource: 'dashboard-native', managedRoot: plan.layout.dataDir, serviceMode: 'system',
+  }
+  try {
+    copyFileSync(process.execPath, plan.layout.executablePath)
+    const prebuilds = join(dirname(process.execPath), 'prebuilds')
+    if (existsSync(prebuilds)) cpSync(prebuilds, join(plan.layout.installDir, 'prebuilds'), { recursive: true, force: true })
+    writePrivateAtomic(credentialPath, `${token}\n`)
+    writePrivateAtomic(plan.layout.configPath, `${JSON.stringify(config, null, 2)}\n`)
+    await reportInstallation(env, 'service_installing')
+    await reportInstallation(env, 'starting')
+    await executeWindowsServicePlan(plan, ['create', 'recovery', 'start'])
+    process.stdout.write('[4/4] Windows service started and connected.\n')
+    process.stdout.write(`  Status ${JSON.stringify(plan.layout.executablePath)} service status\n`)
+    process.stdout.write(`  Uninstall ${JSON.stringify(plan.layout.executablePath)} service uninstall\n`)
+  } catch (error) {
+    await executeWindowsServicePlan(plan, ['stop']).catch(() => undefined)
+    await executeWindowsServicePlan(plan, ['delete']).catch(() => undefined)
+    rmSync(plan.layout.installDir, { recursive: true, force: true }); rmSync(plan.layout.dataDir, { recursive: true, force: true })
+    throw error
+  }
+}
+
+function writePrivateAtomic(path: string, contents: string): void {
+  const temporary = `${path}.tmp-${process.pid}`
+  try { writeFileSync(temporary, contents, { mode: 0o600, flag: 'wx' }); renameSync(temporary, path) }
+  finally { rmSync(temporary, { force: true }) }
+}
+
 function writeTemporaryConfig(session: InstallerSession): string {
   const root = defaultManagedRoot(homedir(), false)
   const credential = join(root, 'temporary-credential')
@@ -366,7 +409,8 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   if (args.command === 'service') {
-    if (process.platform !== 'linux') throw new Error('Executor service management is currently available on Linux only')
+    if (process.platform === 'win32') { await manageWindowsService(args.serviceAction!); return }
+    if (process.platform !== 'linux') throw new Error('Executor service management is currently available on Linux and Windows only')
     const systemPaths = linuxServicePaths('system', homedir())
     const userPaths = linuxServicePaths('user', homedir())
     const mode = args.serviceMode ?? (existsSync(systemPaths.config) ? 'system' : existsSync(userPaths.config) ? 'user' : undefined)
@@ -540,6 +584,35 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
       `See message above for instructions.`,
   )
   process.exit(code)
+}
+
+async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): Promise<void> {
+  if (action === 'logs') throw new Error('Windows service logs are available through Windows Event Viewer and are not streamed by this command')
+  const plan = createWindowsServicePlan({ serviceName: 'RunLabExecutor', displayName: 'Agent RunLab Executor', programFiles: process.env.ProgramFiles, programData: process.env.ProgramData })
+  const actions: readonly WindowsServiceAction[] = action === 'status' ? ['query'] : action === 'start' ? ['start'] : action === 'stop' ? ['stop'] : action === 'restart' ? ['stop', 'start'] : ['stop', 'delete']
+  if (action === 'uninstall') {
+    if (!existsSync(plan.layout.configPath)) throw new Error('No managed Windows Executor service configuration was found')
+    assertManagedWindowsInstallation(JSON.parse(readFileSync(plan.layout.configPath, 'utf8')))
+  }
+  let results
+  if (action === 'uninstall' || action === 'restart') {
+    await executeWindowsServicePlan(plan, ['stop']).catch(() => undefined)
+    results = await executeWindowsServicePlan(plan, actions.slice(1))
+  } else results = await executeWindowsServicePlan(plan, actions)
+  for (const result of results) { if (result.stdout) process.stdout.write(result.stdout); if (result.stderr) process.stderr.write(result.stderr) }
+  if (action === 'uninstall') {
+    rmSync(plan.layout.dataDir, { recursive: true, force: true })
+    if (resolve(process.execPath).startsWith(`${resolve(plan.layout.installDir)}${sep}`)) scheduleWindowsSelfRemoval(plan.layout.installDir)
+    else rmSync(plan.layout.installDir, { recursive: true, force: true })
+    process.stdout.write('\nAgent RunLab Executor Windows service and credentials were removed.\n')
+  }
+}
+
+function scheduleWindowsSelfRemoval(installDir: string): void {
+  const script = join(tmpdir(), `runlab-executor-uninstall-${process.pid}.ps1`)
+  writeFileSync(script, `param([string]$Target,[int]$OwnerPid,[string]$Script)\n+$ErrorActionPreference='SilentlyContinue'\n+Wait-Process -Id $OwnerPid -Timeout 60\n+Remove-Item -LiteralPath $Target -Recurse -Force\n+Remove-Item -LiteralPath $Script -Force\n+`, { mode: 0o600 })
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installDir, String(process.pid), script], { detached: true, windowsHide: true, stdio: 'ignore' })
+  child.unref()
 }
 
 main().catch((err) => {

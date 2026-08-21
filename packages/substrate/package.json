@@ -2,13 +2,16 @@
   "name": "@agent-kernel/substrate",
   "version": "0.2.0-rc.1",
   "description": "Self-improvement substrate: run a meta-agent auto-evolve loop over an agent's harness, judged by an out-of-loop evaluator. Sits entirely above the host's public API.",
+  "repository": { "type": "git", "url": "git+https://github.com/xingsy97/akernel.git" },
+  "homepage": "https://github.com/xingsy97/akernel#readme",
+  "bugs": { "url": "https://github.com/xingsy97/akernel/issues" },
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/substrate/src/index.js",
+  "types": "./dist/substrate/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/substrate/src/index.d.ts",
+      "import": "./dist/substrate/src/index.js"
     }
   },
   "files": [

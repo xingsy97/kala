@@ -13,6 +13,8 @@ Versioning while pre-1.0 and uses one product version across release artifacts.
   continuation, and Supervisor-owned rollback for Dedicated.
 - Digest-pinned multi-architecture Private Cloud images, native Linux operator
   bundles, independent Dashboard upgrades, and state-machine lifecycle receipts.
+- Public npm tarball metadata/content verification, explicit vulnerability policy,
+  and managed Windows Executor service install/uninstall lifecycle.
 
 ### Changed
 

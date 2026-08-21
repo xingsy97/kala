@@ -119,6 +119,8 @@ as an implicit data source.
 
 Start with the [documentation index](docs/README.md),
 [contribution guide](CONTRIBUTING.md), and [security policy](SECURITY.md).
+Published release support and compatibility boundaries are defined in the
+[release support policy](docs/operations/release-support-policy.md).
 
 ## Development gates
 

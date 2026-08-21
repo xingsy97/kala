@@ -52,6 +52,11 @@ export interface WindowsServiceExecutorOptions {
   platform?: NodeJS.Platform
 }
 
+export interface ManagedWindowsInstallation {
+  installationSource: 'dashboard-native'
+  installationId: string
+}
+
 const DEFAULT_VENDOR = 'Agent RunLab'
 const DEFAULT_PRODUCT = 'Executor'
 
@@ -80,6 +85,13 @@ export function windowsServiceLayout(options: WindowsServicePlanOptions): Window
     executablePath: win32.join(installDir, executableName),
     configPath: win32.join(dataDir, 'config.json'),
   }
+}
+
+export function assertManagedWindowsInstallation(value: unknown): ManagedWindowsInstallation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Refusing to uninstall an unrecognized Windows Executor installation')
+  const input = value as Record<string, unknown>
+  if (input.installationSource !== 'dashboard-native' || typeof input.installationId !== 'string' || !input.installationId || input.installationId.includes('\0')) throw new Error('Refusing to uninstall an unrecognized Windows Executor installation')
+  return { installationSource: 'dashboard-native', installationId: input.installationId }
 }
 
 /**

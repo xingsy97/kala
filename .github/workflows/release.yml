@@ -96,6 +96,8 @@ jobs:
       - name: Build and verify real Windows Terminal release path
         if: startsWith(matrix.target, 'win32-')
         shell: pwsh
+        env:
+          PRODUCT_E2E_WINDOWS_SERVICE: '1'
         run: |
           pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }}
           pnpm run verify:release-assets
@@ -136,6 +138,7 @@ jobs:
       - run: pnpm run test:extended
       - run: pnpm run privacy:history
       - run: pnpm run verify:licenses
+      - run: pnpm run verify:public-packages
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --no-native
       - run: pnpm run verify:release-assets
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }} --manifest release/manifest.json

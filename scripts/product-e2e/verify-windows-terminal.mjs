@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,13 +9,16 @@ import { io } from 'socket.io-client'
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const release = join(root, 'release')
 const hostBundle = join(release, 'bundle-dashboard-with-runtime.cjs')
-const executor = join(release, 'runlab-executor-win32-x64.exe')
+const windowsTarget = process.arch === 'arm64' ? 'win32-arm64' : process.arch === 'x64' ? 'win32-x64' : ''
+if (!windowsTarget) throw new Error(`unsupported Windows architecture ${process.arch}`)
+const executor = join(release, `runlab-executor-${windowsTarget}.exe`)
 const stateRoot = mkdtempSync(join(tmpdir(), 'runlab-windows-terminal-'))
 const port = Number(process.env.PRODUCT_E2E_WINDOWS_TERMINAL_PORT ?? 3325)
 const origin = `http://127.0.0.1:${port}`
 const sessionId = 'windows-terminal-e2e'
 const marker = `RUNLAB_CONPTY_${Date.now()}`
 const logs = []
+const serviceMode = process.env.PRODUCT_E2E_WINDOWS_SERVICE === '1'
 let host
 let executorProcess
 let dashboard
@@ -29,7 +32,7 @@ try {
   await waitForHttp(`${origin}/models`)
   const created = await fetch(`${origin}/api/executor-installs`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ platform: 'windows', mode: 'temporary', workspaceRoot: stateRoot, label: 'windows-terminal-e2e' }),
+    body: JSON.stringify({ platform: 'windows', mode: serviceMode ? 'service' : 'temporary', workspaceRoot: stateRoot, label: 'windows-terminal-e2e' }),
   }).then(async (response) => response.ok ? response.json() : Promise.reject(new Error(`create install failed: ${response.status}`)))
   const claim = await fetch(`${origin}/install/session`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }),
@@ -66,6 +69,17 @@ try {
   const killed = await emitAck(dashboard, 'terminal:kill', { requestId: `kill-${Date.now()}`, workspaceId, sessionId, terminalId: createdTerminal.terminalId })
   if (!killed.killed) throw new Error(`terminal kill failed: ${killed.error ?? 'unknown'}`)
   if (logs.join('').includes('Failed to load native module: conpty.node')) throw new Error(`ConPTY native load failed:\n${logs.join('')}`)
+  if (serviceMode) {
+    const installDir = join(process.env.ProgramFiles, 'Agent RunLab', 'Executor')
+    const dataDir = join(process.env.ProgramData, 'Agent RunLab', 'Executor')
+    const installedExecutor = join(installDir, 'runlab-executor.exe')
+    if (!existsSync(installedExecutor) || !existsSync(join(installDir, 'prebuilds', windowsTarget, 'conpty.node'))) throw new Error('Windows service installation omitted the executable or ConPTY companion')
+    const uninstall = await run(installedExecutor, ['service', 'uninstall'])
+    if (uninstall.code !== 0 || !uninstall.stdout.includes('Windows service and credentials were removed')) throw new Error(`Windows service uninstall failed: ${uninstall.stderr}`)
+    const uninstallDeadline = Date.now() + 30_000
+    while (Date.now() < uninstallDeadline && (existsSync(installDir) || existsSync(dataDir))) await sleep(100)
+    if (existsSync(installDir) || existsSync(dataDir)) throw new Error('Windows service uninstall left managed installation data')
+  }
   console.log('PASS Windows Executor ConPTY Terminal create/input/resize/kill E2E')
 } catch (error) {
   console.error(error)
@@ -84,6 +98,7 @@ function start(file, args, env) {
   child.stderr.on('data', (chunk) => logs.push(chunk.toString()))
   return child
 }
+function run(file, args) { return new Promise((resolve, reject) => { const child = spawn(file, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', (chunk) => { stdout += chunk }); child.stderr.on('data', (chunk) => { stderr += chunk }); child.once('error', reject); child.once('exit', (code) => resolve({ code, stdout, stderr })) }) }
 async function waitForHttp(url) { const deadline = Date.now() + 30_000; while (Date.now() < deadline) { try { if ((await fetch(url)).ok) return } catch {} await sleep(100) } throw new Error(`Host unavailable: ${url}`) }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }
 function once(socket, event) { return new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`${event} timed out`)), 15_000); socket.once(event, (payload) => { clearTimeout(timer); resolve(payload) }) }) }

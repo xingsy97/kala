@@ -45,3 +45,21 @@ jobs:
         run: pnpm run ci:browser
       - if: matrix.layer == 'security'
         run: pnpm run ci:security
+      - name: Scan release filesystem with Grype and Trivy
+        if: matrix.layer == 'security'
+        run: |
+          mkdir -p "${{ runner.temp }}/vulnerability-reports"
+          syft dir:. -o cyclonedx-json="${{ runner.temp }}/vulnerability-reports/source.cdx.json"
+          grype sbom:"${{ runner.temp }}/vulnerability-reports/source.cdx.json" -o json > "${{ runner.temp }}/vulnerability-reports/grype.json"
+          trivy fs --scanners vuln --format json --output "${{ runner.temp }}/vulnerability-reports/trivy.json" .
+          node scripts/security/check-vulnerabilities.mjs \
+            --grype "${{ runner.temp }}/vulnerability-reports/grype.json" \
+            --trivy "${{ runner.temp }}/vulnerability-reports/trivy.json" \
+            --output "${{ runner.temp }}/vulnerability-reports/normalized.json"
+      - uses: actions/upload-artifact@v5
+        if: always() && matrix.layer == 'security'
+        with:
+          name: vulnerability-reports-${{ github.run_id }}
+          path: ${{ runner.temp }}/vulnerability-reports
+          if-no-files-found: error
+          retention-days: 30
