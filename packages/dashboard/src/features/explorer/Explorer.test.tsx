@@ -12,6 +12,7 @@ import { Explorer } from './Explorer.js'
 import { canDropWorkspacesAtRoot, reorderWorkspaceIds } from './tree-model.js'
 import { createSessionViewCache } from '../../session-view-cache.js'
 import { HIDDEN_WORKSPACES_STORAGE_KEY } from './hidden-workspaces.js'
+import { PREF_AUTO_HIDE_OFFLINE_WORKSPACES, PREF_HIDE_SUB_AGENT_SESSIONS } from '../../lib/prefs.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 
 const executor: AttachedExecutor = {
@@ -92,6 +93,51 @@ describe('Explorer', () => {
     )
     expect(screen.getByText(/no daemons attached/i)).toBeTruthy()
     expect(screen.getByText(/pnpm executor:dev/i)).toBeTruthy()
+  })
+
+  it('hides offline workspaces by default and reveals them when the preference is disabled', () => {
+    const offline = { ...sessionSummary, workspaceId: 'ws-offline', workspaceName: 'offline box' }
+    const props = {
+      executors: [],
+      sessions: [offline],
+      selectedSessionId: null,
+      onSelect: () => {},
+      onNewSession: () => {},
+      onConnectWorkspace: () => {},
+      onDelete: () => {},
+      onRename: () => {},
+    }
+    const { rerender } = render(<Explorer {...props} />)
+    expect(screen.queryByTestId('workspace-row')).toBeNull()
+
+    localStorage.setItem(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, '0')
+    fireEvent(window, new StorageEvent('storage', { key: PREF_AUTO_HIDE_OFFLINE_WORKSPACES, newValue: '0' }))
+    rerender(<Explorer {...props} />)
+    expect(screen.getByTestId('workspace-row').textContent).toContain('offline box')
+  })
+
+  it('hides sub-agent sessions by default while keeping the selected child reachable', () => {
+    const child = { ...sessionSummary, sessionId: 'child-session', parentSessionId: sessionSummary.sessionId, firstUserMessage: 'child task' }
+    const props = {
+      executors: [executor],
+      sessions: [sessionSummary, child],
+      onSelect: () => {},
+      onNewSession: () => {},
+      onConnectWorkspace: () => {},
+      onDelete: () => {},
+      onRename: () => {},
+    }
+    const { rerender } = render(<Explorer {...props} selectedSessionId={null} />)
+    expect(screen.getAllByTestId('session-row')).toHaveLength(1)
+    expect(screen.queryByText('child task')).toBeNull()
+
+    rerender(<Explorer {...props} selectedSessionId="child-session" />)
+    expect(screen.getAllByTestId('session-row').some((row) => row.getAttribute('data-session-id') === 'child-session')).toBe(true)
+
+    localStorage.setItem(PREF_HIDE_SUB_AGENT_SESSIONS, '0')
+    fireEvent(window, new StorageEvent('storage', { key: PREF_HIDE_SUB_AGENT_SESSIONS, newValue: '0' }))
+    rerender(<Explorer {...props} selectedSessionId={null} />)
+    expect(screen.getAllByTestId('session-row')).toHaveLength(2)
   })
 
   it('opens workspace connection help from the header button', () => {
@@ -730,6 +776,7 @@ describe('Explorer', () => {
 
   it('does not allow renaming sessions under an offline workspace', () => {
     const onRename = vi.fn()
+    localStorage.setItem(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, '0')
     render(
       <Explorer
         executors={[]}

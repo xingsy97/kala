@@ -50,6 +50,15 @@ describe('WorkbenchToolbar', () => {
     expect(surface.className).toContain('min-h-9')
   })
 
+  it('uses an upward arrow to expand a collapsed Topbar', () => {
+    renderToolbar({ topbarAvailable: true })
+
+    const toggle = screen.getByTestId('topbar-toggle')
+    expect(toggle.getAttribute('aria-label')).toBe('Expand top bar')
+    expect(toggle.querySelector('.lucide-chevron-up')).toBeTruthy()
+    expect(toggle.querySelector('.lucide-chevron-down')).toBeNull()
+  })
+
   it('uses one sidebar opener and does not duplicate it with a terminal shortcut', () => {
     const onOpenSidebar = vi.fn()
     renderToolbar({ sessionSelected: true, onOpenSidebar, sidebarAvailable: true })

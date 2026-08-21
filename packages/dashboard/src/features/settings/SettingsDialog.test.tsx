@@ -696,6 +696,23 @@ describe('SettingsDialog', () => {
     expect(localStorage.getItem('ak-tool-activity-icon-scale')).toBe('175')
   })
 
+  it('defaults navigation cleanup preferences on and persists opt-out choices', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+
+    const offline = await screen.findByTestId('settings-toggle-auto-hide-offline-workspaces')
+    const subAgents = screen.getByTestId('settings-toggle-hide-sub-agent-sessions')
+    expect(offline.getAttribute('aria-checked')).toBe('true')
+    expect(subAgents.getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.click(offline)
+    fireEvent.click(subAgents)
+    expect(localStorage.getItem('ak-auto-hide-offline-workspaces')).toBe('0')
+    expect(localStorage.getItem('ak-hide-sub-agent-sessions')).toBe('0')
+  })
+
   it('stores the session view cache memory limit preference', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)

@@ -8,6 +8,8 @@ import {
   PREF_CHAT_FONT_SIZE,
   PREF_FILE_VIEW_FONT_SIZE,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  PREF_AUTO_HIDE_OFFLINE_WORKSPACES,
+  PREF_HIDE_SUB_AGENT_SESSIONS,
   dashboardPreferenceDefinitions,
   numberPreferenceOptions,
 } from './prefs.js'
@@ -33,6 +35,10 @@ describe('dashboard preference registry', () => {
     expect(DEFAULT_CHAT_FONT_SIZE).toBe(DASHBOARD_PREFERENCES.chatFontSize.defaultValue)
     expect(PREF_FILE_VIEW_FONT_SIZE).toBe(DASHBOARD_PREFERENCES.fileViewFontSize.key)
     expect(DEFAULT_FILE_VIEW_FONT_SIZE).toBe(DASHBOARD_PREFERENCES.fileViewFontSize.defaultValue)
+    expect(PREF_AUTO_HIDE_OFFLINE_WORKSPACES).toBe(DASHBOARD_PREFERENCES.autoHideOfflineWorkspaces.key)
+    expect(PREF_HIDE_SUB_AGENT_SESSIONS).toBe(DASHBOARD_PREFERENCES.hideSubAgentSessions.key)
+    expect(DASHBOARD_PREFERENCES.autoHideOfflineWorkspaces.defaultValue).toBe(true)
+    expect(DASHBOARD_PREFERENCES.hideSubAgentSessions.defaultValue).toBe(true)
   })
 
   it('derives number hook bounds from number definitions', () => {

@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, ChevronRight, Eraser, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
+import { Archive, Boxes, ChevronRight, ChevronUp, Eraser, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -2649,7 +2649,7 @@ export function WorkbenchToolbar({
             data-testid="topbar-toggle"
             className="h-8 w-8 flex-none"
           >
-            <ChevronDown className="h-4 w-4" />
+            <ChevronUp className="h-4 w-4" />
           </Button>
         ) : null}
         {explorerAvailable ? (

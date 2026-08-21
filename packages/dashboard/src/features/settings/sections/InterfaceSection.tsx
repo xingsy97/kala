@@ -19,6 +19,7 @@ import {
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   DEFAULT_TOOL_ACTIVITY_ICON_SCALE,
   DEFAULT_SESSION_EXPLORER_FONT_SIZE,
+  PREF_AUTO_HIDE_OFFLINE_WORKSPACES,
   PREF_CHAT_CONTENT_WIDTH,
   PREF_CHAT_FONT_SIZE,
   PREF_CHAT_LINE_HEIGHT,
@@ -29,6 +30,7 @@ import {
   PREF_FILE_EXPLORER_FONT_SIZE,
   PREF_FILE_VIEW_FONT_SIZE,
   PREF_INSPECTOR_OPEN,
+  PREF_HIDE_SUB_AGENT_SESSIONS,
   PREF_KEEP_SCREEN_AWAKE,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   PREF_TOOL_ACTIVITY_ICON_SCALE,
@@ -83,6 +85,8 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
   const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
   const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
+  const [autoHideOfflineWorkspaces, setAutoHideOfflineWorkspaces] = useBooleanPref(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, true)
+  const [hideSubAgentSessions, setHideSubAgentSessions] = useBooleanPref(PREF_HIDE_SUB_AGENT_SESSIONS, true)
   const [liveToolActivityTail, setLiveToolActivityTail] = useNumberPref(
     PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -335,6 +339,20 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
           checked={topbarOpen}
           onChange={setTopbarOpen}
           testId="settings-toggle-topbar-open"
+        />
+        <InterfaceToggle
+          label={t('settings.interface.autoHideOfflineWorkspaces')}
+          description={t('settings.interface.autoHideOfflineWorkspacesDesc')}
+          checked={autoHideOfflineWorkspaces}
+          onChange={setAutoHideOfflineWorkspaces}
+          testId="settings-toggle-auto-hide-offline-workspaces"
+        />
+        <InterfaceToggle
+          label={t('settings.interface.hideSubAgentSessions')}
+          description={t('settings.interface.hideSubAgentSessionsDesc')}
+          checked={hideSubAgentSessions}
+          onChange={setHideSubAgentSessions}
+          testId="settings-toggle-hide-sub-agent-sessions"
         />
         <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">

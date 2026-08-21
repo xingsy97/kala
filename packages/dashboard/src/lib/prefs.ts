@@ -49,6 +49,8 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   sessionExplorerSectionOpen: { key: 'ak-session-explorer-section-open', type: 'boolean', defaultValue: true },
   inspectorOpen: { key: 'ak-inspector-open', type: 'boolean', defaultValue: true },
   topbarOpen: { key: 'ak-topbar-open', type: 'boolean', defaultValue: true },
+  autoHideOfflineWorkspaces: { key: 'ak-auto-hide-offline-workspaces', type: 'boolean', defaultValue: true },
+  hideSubAgentSessions: { key: 'ak-hide-sub-agent-sessions', type: 'boolean', defaultValue: true },
   chatFontSize: { key: 'ak-chat-font-size', type: 'number', defaultValue: 3, min: 0, max: 6 },
   sessionExplorerFontSize: { key: 'ak-session-explorer-font-size', type: 'number', defaultValue: 2, min: 0, max: 4 },
   fileExplorerFontSize: { key: 'ak-file-explorer-font-size', type: 'number', defaultValue: 1, min: 0, max: 4 },
@@ -223,6 +225,8 @@ export const PREF_EXPLORER_OPEN = DASHBOARD_PREFERENCES.explorerOpen.key
 export const PREF_SESSION_EXPLORER_SECTION_OPEN = DASHBOARD_PREFERENCES.sessionExplorerSectionOpen.key
 export const PREF_INSPECTOR_OPEN = DASHBOARD_PREFERENCES.inspectorOpen.key
 export const PREF_TOPBAR_OPEN = DASHBOARD_PREFERENCES.topbarOpen.key
+export const PREF_AUTO_HIDE_OFFLINE_WORKSPACES = DASHBOARD_PREFERENCES.autoHideOfflineWorkspaces.key
+export const PREF_HIDE_SUB_AGENT_SESSIONS = DASHBOARD_PREFERENCES.hideSubAgentSessions.key
 export const PREF_CHAT_FONT_SIZE = DASHBOARD_PREFERENCES.chatFontSize.key
 export const PREF_SESSION_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.sessionExplorerFontSize.key
 export const PREF_FILE_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.fileExplorerFontSize.key

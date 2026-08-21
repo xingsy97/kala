@@ -51,10 +51,13 @@ import {
 } from '../../components/ui/alert-dialog.js'
 import { Button } from '../../components/ui/button.js'
 import {
+  PREF_AUTO_HIDE_OFFLINE_WORKSPACES,
+  PREF_HIDE_SUB_AGENT_SESSIONS,
   PREF_SESSION_CHILDREN_OPEN,
   PREF_SESSION_ORDER,
   PREF_WORKSPACE_OPEN,
   PREF_WORKSPACE_ORDER,
+  useBooleanPref,
 } from '../../lib/prefs.js'
 import { cn } from '../../lib/utils.js'
 import { useMinuteClock } from '../../lib/minute-clock.js'
@@ -63,7 +66,6 @@ import {
   applyManualWorkspaceOrder,
   buildInitialOpenState,
   buildTree,
-  countSessionDescendants,
   filterTree,
   isRootDropParent,
   reorderSessionIds,
@@ -152,6 +154,8 @@ function ExplorerImpl({
   const previewHoveringRef = useRef(false)
   const pointerActivatedSessionRef = useRef<string | null>(null)
   const hiddenWorkspaces = useHiddenWorkspaces()
+  const [autoHideOfflineWorkspaces] = useBooleanPref(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, true)
+  const [hideSubAgentSessions] = useBooleanPref(PREF_HIDE_SUB_AGENT_SESSIONS, true)
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
   const [manualSessionOrder, setManualSessionOrder] = useState<readonly string[]>(() =>
@@ -183,8 +187,11 @@ function ExplorerImpl({
   // like hidden workspaces). Forked children of a hidden session re-parent to
   // the workspace root via buildTree's missing-parent handling.
   const visibleOrderedSessions = useMemo(
-    () => orderedSessions.filter((s) => !hiddenSessions.isHidden(s.sessionId)),
-    [orderedSessions, hiddenSessions],
+    () => orderedSessions.filter((s) =>
+      !hiddenSessions.isHidden(s.sessionId) &&
+      (!hideSubAgentSessions || !s.parentSessionId || s.sessionId === selectedSessionId),
+    ),
+    [orderedSessions, hiddenSessions, hideSubAgentSessions, selectedSessionId],
   )
   // Hidden session id → display label, for the "hidden sessions" unhide bar.
   const hiddenSessionEntries = useMemo(
@@ -220,8 +227,12 @@ function ExplorerImpl({
     [data, hiddenWorkspaces],
   )
   const visibleWorkspaceData = useMemo(
-    () => data.filter((workspace) => workspace.workspaceId === null || !hiddenWorkspaces.isHidden(workspace.workspaceId)),
-    [data, hiddenWorkspaces],
+    () => data.filter((workspace) =>
+      workspace.workspaceId === null ||
+      (!hiddenWorkspaces.isHidden(workspace.workspaceId) &&
+        (!autoHideOfflineWorkspaces || workspace.online || workspaceContainsSession(workspace, selectedSessionId))),
+    ),
+    [data, hiddenWorkspaces, autoHideOfflineWorkspaces, selectedSessionId],
   )
   const deferredQuery = useDeferredValue(query)
   const visibleData = useMemo(() => filterTree(visibleWorkspaceData, deferredQuery), [visibleWorkspaceData, deferredQuery])
@@ -229,7 +240,9 @@ function ExplorerImpl({
     () => buildInitialOpenState(visibleData, workspaceOpenState, sessionChildrenOpenState),
     [visibleData, workspaceOpenState, sessionChildrenOpenState],
   )
-  const pendingDeleteDescendantCount = pendingDelete ? countSessionDescendants(pendingDelete) : 0
+  const pendingDeleteDescendantCount = pendingDelete
+    ? countSessionSummaryDescendants(sessions, pendingDelete.sessionId)
+    : 0
 
   const empty = executors.length === 0 && sessions.length === 0
   const filteredEmpty = !empty && query.trim().length > 0 && visibleData.length === 0
@@ -498,6 +511,23 @@ function ExplorerImpl({
 }
 
 export const Explorer = memo(ExplorerImpl, areExplorerPropsEqual)
+
+function workspaceContainsSession(workspace: WorkspaceNode, sessionId: string | null): boolean {
+  if (!sessionId) return false
+  const contains = (sessions: readonly SessionNode[]): boolean =>
+    sessions.some((session) => session.sessionId === sessionId || contains(session.children))
+  return contains(workspace.children)
+}
+
+function countSessionSummaryDescendants(sessions: readonly SessionSummary[], sessionId: string): number {
+  const childIds = sessions
+    .filter((session) => session.parentSessionId === sessionId)
+    .map((session) => session.sessionId)
+  return childIds.reduce(
+    (count, childId) => count + 1 + countSessionSummaryDescendants(sessions, childId),
+    0,
+  )
+}
 
 /**
  * Returns true when the event originated inside an interactive control (button,
