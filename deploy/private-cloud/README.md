@@ -1,4 +1,12 @@
-# Agent RunLab deployment profiles
+# Agent RunLab Private Cloud
+
+Public installations use the versioned release bundle and its `runlab-private-cloud`
+operator. See `docs/operations/private-cloud-release.md`. No source checkout or
+local application build is part of the supported production workflow.
+
+The commands below are repository development and acceptance workflows only. They
+add `compose.dev.yaml`, which supplies local source builds over the production
+topology.
 
 The RunLab application and shared Identity service have independent Compose projects.
 No credential values belong in Git; only `*.env.example` metadata files are tracked.

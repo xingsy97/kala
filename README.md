@@ -82,10 +82,14 @@ Its contract is documented in the
 and must perform cutover from a control process independent of the Runtime being
 replaced.
 
-Private Cloud currently uses the versioned Compose topology under
-[`deploy/private-cloud`](deploy/private-cloud/README.md). The no-source, signed,
-multi-architecture image bundle is also a release-candidate gate; the current
-developer workflow is not yet advertised as a turnkey public installation.
+Private Cloud releases use digest-pinned multi-architecture Runtime, Ingress, and
+Dashboard images plus Linux x64/arm64 Compose bundles. The native
+`runlab-private-cloud` operator provides install, status, full or Dashboard-only
+upgrade, rollback, consistent backup/restore, and data-preserving uninstall without
+a source checkout or Node.js. Its normative contract is the
+[Private Cloud release runbook](docs/operations/private-cloud-release.md); the
+repository-local workflow under [`deploy/private-cloud`](deploy/private-cloud/README.md)
+is for development and acceptance.
 
 ## Architecture
 

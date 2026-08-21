@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { buildIdentity, cleanupReceipt, loadCanonicalPackInventory } from './benchmark-contracts.mjs'
 
 test('build identity combines package version with an injected commit revision', async () => {
+  const { version: packageVersion } = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'))
   assert.deepEqual(await buildIdentity({ AGENT_EVAL_BUILD_REVISION: 'c9b86ed39153f0ce57fca905337a55c72aaf2b5e' }), {
-    packageVersion: '0.1.10',
+    packageVersion,
     buildRevision: 'c9b86ed39153f0ce57fca905337a55c72aaf2b5e',
-    version: '0.1.10+c9b86ed39153',
+    version: `${packageVersion}+c9b86ed39153`,
   })
   await assert.rejects(buildIdentity({}), /AGENT_EVAL_BUILD_REVISION/u)
 })

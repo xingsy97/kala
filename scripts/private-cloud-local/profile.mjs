@@ -11,12 +11,15 @@ if (existsSync(deploymentEnv)) {
   }
 }
 const profiles = {
-  local: ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.storage-nfs.yaml', 'deploy/private-cloud/compose.local.yaml'],
-  cloudflare: ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.storage-nfs.yaml', 'deploy/private-cloud/compose.cloudflare.yaml'],
-  acceptance: ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.storage-nfs.yaml', 'deploy/private-cloud/compose.local.yaml', 'deploy/private-cloud/local/compose.acceptance.yaml'],
-  'local-volume': ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.storage-local.yaml', 'deploy/private-cloud/compose.local.yaml'],
-  'external-nfs': ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.storage-external-nfs.yaml', 'deploy/private-cloud/compose.cloudflare.yaml'],
+  local: ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.dev.yaml', 'deploy/private-cloud/compose.storage-nfs.yaml', 'deploy/private-cloud/compose.local.yaml'],
+  cloudflare: ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.dev.yaml', 'deploy/private-cloud/compose.storage-nfs.yaml', 'deploy/private-cloud/compose.cloudflare.yaml'],
+  acceptance: ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.dev.yaml', 'deploy/private-cloud/compose.storage-nfs.yaml', 'deploy/private-cloud/compose.local.yaml', 'deploy/private-cloud/local/compose.acceptance.yaml'],
+  'local-volume': ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.dev.yaml', 'deploy/private-cloud/compose.storage-local.yaml', 'deploy/private-cloud/compose.local.yaml'],
+  'external-nfs': ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.dev.yaml', 'deploy/private-cloud/compose.storage-external-nfs.yaml', 'deploy/private-cloud/compose.cloudflare.yaml'],
 }
+process.env.RUNLAB_RUNTIME_IMAGE ??= 'agent-runlab-private-cloud-runtime:dev'
+process.env.RUNLAB_INGRESS_IMAGE ??= 'agent-runlab-private-cloud-ingress:dev'
+process.env.RUNLAB_DASHBOARD_IMAGE ??= 'agent-runlab-private-cloud-dashboard:dev'
 
 export function selectedProfile() { return process.env.RUNLAB_PROFILE ?? 'local' }
 export function composeFiles(profile = selectedProfile()) {

@@ -13,6 +13,12 @@ const validationEnv={
 const rendered=spawnSync('docker',['compose',...composeArgs(profile),'config'],{cwd:root,encoding:'utf8',env:validationEnv})
 if(rendered.status!==0)failures.push(`compose config failed: ${rendered.stderr.trim()}`)
 const text=rendered.stdout
+const production=await readFile('deploy/private-cloud/compose.yaml','utf8')
+if(/^\s+build:/mu.test(production))failures.push('Production Compose must not build application source')
+for(const match of production.matchAll(/^\s+image:\s+([^$\s][^\s]*)/gmu))if(!/@sha256:[0-9a-f]{64}$/u.test(match[1]))failures.push(`Production image is not digest pinned: ${match[1]}`)
+for(const variable of ['RUNLAB_RUNTIME_IMAGE','RUNLAB_INGRESS_IMAGE','RUNLAB_DASHBOARD_IMAGE'])if(!production.includes(variable))failures.push(`Production Compose is missing ${variable}`)
+const development=await readFile('deploy/private-cloud/compose.dev.yaml','utf8')
+for(const service of ['runtime-host','runtime-ingress','dashboard'])if(!new RegExp(String.raw`^  ${service}:\n(?:(?!^  [a-z]).)*?^    build:`,'msu').test(development))failures.push(`Development Compose is missing ${service} source build`)
 for(const forbidden of ['privileged: true','network_mode: host','/var/run/docker.sock','0.0.0.0:13001'])if(text.includes(forbidden))failures.push(`forbidden compose setting: ${forbidden}`)
 if(!/host_ip: 127\.0\.0\.1[\s\S]*?target: 13001[\s\S]*?published: "13001"/u.test(text))failures.push('Gateway must bind only to loopback port 13001')
 for(const service of ['init-volumes','init-app-secrets','control-postgres','control-plane-init','runtime-host','dashboard','runtime-ingress']){

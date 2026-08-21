@@ -1,0 +1,194 @@
+name: Private Cloud Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Product release tag
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          node scripts/release/version-policy.mjs --tag "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  runtime-image:
+    needs: resolve
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/private-cloud/images/Dockerfile.runtime-service
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}-private-cloud-runtime:${{ needs.resolve.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign --yes ghcr.io/${{ github.repository }}-private-cloud-runtime@${{ steps.build.outputs.digest }}
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-private-cloud-runtime
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  ingress-image:
+    needs: resolve
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/private-cloud/images/Dockerfile.runtime-ingress-gateway
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}-private-cloud-ingress:${{ needs.resolve.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign --yes ghcr.io/${{ github.repository }}-private-cloud-ingress@${{ steps.build.outputs.digest }}
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-private-cloud-ingress
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  dashboard-image:
+    needs: resolve
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/private-cloud/images/Dockerfile.dashboard
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}-private-cloud-dashboard:${{ needs.resolve.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign --yes ghcr.io/${{ github.repository }}-private-cloud-dashboard@${{ steps.build.outputs.digest }}
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-private-cloud-dashboard
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  operator:
+    needs: resolve
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, target: linux-x64 }
+          - { runner: ubuntu-24.04-arm, target: linux-arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/release/build-private-cloud-operator.mjs --target ${{ matrix.target }} --output release/runlab-private-cloud-${{ matrix.target }}
+      - uses: actions/upload-artifact@v5
+        with:
+          name: private-cloud-operator-${{ matrix.target }}
+          path: release/runlab-private-cloud-${{ matrix.target }}
+          if-no-files-found: error
+
+  bundle:
+    needs: [resolve, runtime-image, ingress-image, dashboard-image, operator]
+    strategy:
+      matrix:
+        target: [linux-x64, linux-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: private-cloud-operator-${{ matrix.target }}
+          path: release/operator
+      - name: Build immutable Compose bundle
+        run: |
+          node scripts/release/build-private-cloud-bundle.mjs \
+            --runtime-image "ghcr.io/${{ github.repository }}-private-cloud-runtime@${{ needs.runtime-image.outputs.digest }}" \
+            --ingress-image "ghcr.io/${{ github.repository }}-private-cloud-ingress@${{ needs.ingress-image.outputs.digest }}" \
+            --dashboard-image "ghcr.io/${{ github.repository }}-private-cloud-dashboard@${{ needs.dashboard-image.outputs.digest }}" \
+            --revision "${{ github.sha }}" \
+            --operator "release/operator/runlab-private-cloud-${{ matrix.target }}" \
+            --archive "release/agent-runlab-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz"
+          node scripts/release/verify-private-cloud-bundle.mjs release/private-cloud
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign-blob --yes --bundle release/private-cloud-${{ matrix.target }}.sigstore.json release/agent-runlab-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release/agent-runlab-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz
+      - name: Add bundle to draft release
+        env: { GH_TOKEN: '${{ github.token }}', TAG: '${{ needs.resolve.outputs.tag }}' }
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "$TAG" --notes "Release candidate assets are still being assembled." || gh release view "$TAG" >/dev/null
+          fi
+          gh release upload "$TAG" \
+            "release/agent-runlab-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz" \
+            "release/private-cloud-${{ matrix.target }}.sigstore.json" --clobber

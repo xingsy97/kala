@@ -58,13 +58,31 @@ test('security, publish, and release workflows fail closed', async () => {
 
   const publish = await workflow('publish.yml')
   assert.doesNotMatch(publish, /publish[^\n]*\|\|\s*echo/u)
-  assert.match(publish, /npm view/u)
-  assert.match(publish, /elif grep -q 'E404'/u)
+  assert.match(publish, /scripts\/release\/publish-workspaces\.mjs/u)
+  const publisher = await readFile(resolve(root, 'scripts/release/publish-workspaces.mjs'), 'utf8')
+  assert.match(publisher, /['view', identity, 'version', '--json']/u)
+  assert.match(publisher, /E404|is not in this registry/u)
+  assert.match(publisher, /registry lookup failed/u)
 
   const release = await workflow('release.yml')
   assert.match(release, /gh release create[\s\S]*?--draft/u)
-  assert.match(release, /gh release edit "\$TAG" --draft=false/u)
-  assert.ok(release.indexOf('gh release upload "$TAG" release/* --clobber') < release.lastIndexOf('gh release edit "$TAG" --draft=false'))
+  assert.doesNotMatch(release, /gh release edit "\$TAG" --draft=false/u)
+  assert.match(release, /gh release edit "\$TAG" --draft/u)
+})
+
+test('Private Cloud release builds signed multi-architecture images and native bundles', async () => {
+  const release = await workflow('private-cloud-release.yml')
+  for (const dockerfile of ['Dockerfile.runtime-service', 'Dockerfile.runtime-ingress-gateway', 'Dockerfile.dashboard']) assert.match(release, new RegExp(dockerfile.replace('.', '\\.'), 'u'))
+  assert.match(release, /platforms: linux\/amd64,linux\/arm64/u)
+  assert.match(release, /provenance: mode=max/u)
+  assert.match(release, /sbom: true/u)
+  assert.match(release, /cosign sign --yes/u)
+  assert.match(release, /cosign sign-blob --yes/u)
+  assert.match(release, /actions\/attest-build-provenance@v3/u)
+  assert.match(release, /linux-x64, linux-arm64/u)
+  assert.match(release, /build-private-cloud-bundle\.mjs/u)
+  assert.match(release, /verify-private-cloud-bundle\.mjs/u)
+  assert.doesNotMatch(release, /--draft=false/u)
 })
 
 test('test discovery and release gates cannot silently omit task packs', async () => {

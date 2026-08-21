@@ -11,6 +11,8 @@ Versioning while pre-1.0 and uses one product version across release artifacts.
 - Independent Platform Dashboard releases.
 - Stable Ingress, blue/green Runtime slots, durable admission, planned Session
   continuation, and Supervisor-owned rollback for Dedicated.
+- Digest-pinned multi-architecture Private Cloud images, native Linux operator
+  bundles, independent Dashboard upgrades, and state-machine lifecycle receipts.
 
 ### Changed
 

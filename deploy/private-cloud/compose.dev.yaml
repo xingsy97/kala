@@ -1,0 +1,26 @@
+# Source-build override. This file is for repository development and acceptance only.
+# Public release bundles never contain it.
+services:
+  control-plane-init:
+    image: agent-runlab-private-cloud-ingress:dev
+    build:
+      context: ../..
+      dockerfile: deploy/private-cloud/images/Dockerfile.runtime-ingress-gateway
+
+  runtime-host:
+    image: agent-runlab-private-cloud-runtime:dev
+    build:
+      context: ../..
+      dockerfile: deploy/private-cloud/images/Dockerfile.runtime-service
+
+  dashboard:
+    image: agent-runlab-private-cloud-dashboard:dev
+    build:
+      context: ../..
+      dockerfile: deploy/private-cloud/images/Dockerfile.dashboard
+
+  runtime-ingress:
+    image: agent-runlab-private-cloud-ingress:dev
+    build:
+      context: ../..
+      dockerfile: deploy/private-cloud/images/Dockerfile.runtime-ingress-gateway

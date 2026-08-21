@@ -2,7 +2,7 @@ name: agent-runlab-private-cloud
 
 services:
   init-volumes:
-    image: alpine:3.22.2
+    image: alpine@sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412
     user: "0:0"
     command: [/bin/sh, -ec, "mkdir -p /tenant /control && chown -R 10001:10001 /tenant /control && chmod 700 /tenant /control"]
     volumes:
@@ -15,7 +15,7 @@ services:
     read_only: true
 
   init-app-secrets:
-    image: alpine:3.22.2
+    image: alpine@sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412
     user: "0:0"
     command:
       - /bin/sh
@@ -43,7 +43,7 @@ services:
     read_only: true
 
   control-postgres:
-    image: postgres:17.10-alpine
+    image: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     restart: unless-stopped
     logging:
       driver: json-file
@@ -69,9 +69,7 @@ services:
     cpus: 0.5
 
   control-plane-init:
-    build:
-      context: ../..
-      dockerfile: deploy/private-cloud/images/Dockerfile.runtime-ingress-gateway
+    image: ${RUNLAB_INGRESS_IMAGE:?RUNLAB_INGRESS_IMAGE must be an immutable name@sha256 digest}
     user: "0:0"
     command:
       - /bin/sh
@@ -107,9 +105,7 @@ services:
     cpus: 0.5
 
   runtime-host:
-    build:
-      context: ../..
-      dockerfile: deploy/private-cloud/images/Dockerfile.runtime-service
+    image: ${RUNLAB_RUNTIME_IMAGE:?RUNLAB_RUNTIME_IMAGE must be an immutable name@sha256 digest}
     restart: unless-stopped
     logging:
       driver: json-file
@@ -130,7 +126,7 @@ services:
       - tenant-data:/var/lib/agent-runlab
       - host-secrets:/run/agent-runlab-secrets:ro
       - ${RUNLAB_PROVIDER_CATALOG_FILE:-./local/runtime-provider-catalog.json}:/etc/agent-runlab/runtime-provider-catalog.json:ro
-      - ./deployment.json:/etc/agent-runlab/deployment.json:ro
+      - ${RUNLAB_DEPLOYMENT_CONFIG_FILE:-./deployment.json}:/etc/agent-runlab/deployment.json:ro
     networks: [runtime, egress]
     depends_on:
       init-volumes: { condition: service_completed_successfully }
@@ -150,9 +146,7 @@ services:
     cpus: 2.0
 
   dashboard:
-    build:
-      context: ../..
-      dockerfile: deploy/private-cloud/images/Dockerfile.dashboard
+    image: ${RUNLAB_DASHBOARD_IMAGE:?RUNLAB_DASHBOARD_IMAGE must be an immutable name@sha256 digest}
     restart: unless-stopped
     logging:
       driver: json-file
@@ -173,9 +167,7 @@ services:
     cpus: 0.25
 
   runtime-ingress:
-    build:
-      context: ../..
-      dockerfile: deploy/private-cloud/images/Dockerfile.runtime-ingress-gateway
+    image: ${RUNLAB_INGRESS_IMAGE:?RUNLAB_INGRESS_IMAGE must be an immutable name@sha256 digest}
     restart: unless-stopped
     logging:
       driver: json-file
