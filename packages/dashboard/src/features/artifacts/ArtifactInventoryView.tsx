@@ -4,7 +4,7 @@ import { ArtifactContentDialog, ArtifactInventory, type ArtifactDetailRequest } 
 import { useArtifactManifest } from './useArtifactManifest.js'
 
 export function ArtifactInventoryView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
-  const { manifest, loading, error } = useArtifactManifest()
+  const { manifest, loading, loadingMore, error, hasMore, loadMore } = useArtifactManifest()
   const [artifactDetail, setArtifactDetail] = useState<ArtifactDetailRequest | null>(null)
   const kindRows = useMemo(() => {
     if (!manifest || !manifest.summary) return [] as [string, number][]
@@ -13,7 +13,7 @@ export function ArtifactInventoryView({ onOpenSession }: { onOpenSession?(sessio
   return (
     <>
       <div className="flex h-full min-h-0 flex-col" data-testid="artifact-inline-panel-artifacts">
-        <ArtifactInventory manifest={manifest} kindRows={kindRows} error={error} loading={loading} onOpenArtifact={setArtifactDetail} />
+        <ArtifactInventory manifest={manifest} kindRows={kindRows} error={error} loading={loading} loadingMore={loadingMore} hasMore={hasMore} onLoadMore={loadMore} onOpenArtifact={setArtifactDetail} />
       </div>
       <ArtifactContentDialog request={artifactDetail} onOpenChange={(open) => !open && setArtifactDetail(null)} onOpenSession={onOpenSession} />
     </>

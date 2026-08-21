@@ -1947,7 +1947,11 @@ describe('wire protocol', () => {
     await server.close()
     const artifactRootDir = join(dir, 'artifacts')
     await mkdir(join(artifactRootDir, 'llm/s1'), { recursive: true })
+    await mkdir(join(artifactRootDir, 'traces'), { recursive: true })
+    await mkdir(join(artifactRootDir, 'profiles/s1'), { recursive: true })
     await writeFile(join(artifactRootDir, 'llm/s1/1.request.json'), JSON.stringify({ ok: true }), 'utf8')
+    await writeFile(join(artifactRootDir, 'traces/s1.openinference.json'), JSON.stringify({ spans: [] }), 'utf8')
+    await writeFile(join(artifactRootDir, 'profiles/s1/profile.json'), JSON.stringify({ sessionId: 's1' }), 'utf8')
 
     const http = createServer()
     await new Promise<void>((resolve) => http.listen(0, resolve))
@@ -1966,9 +1970,31 @@ describe('wire protocol', () => {
       summary: { entryCount: number; kinds: Record<string, number> }
       entries: Array<{ path: string; kind: string }>
     }>)
-    expect(manifest.summary.entryCount).toBe(1)
+    expect(manifest.summary.entryCount).toBe(3)
     expect(manifest.summary.kinds.llm_request).toBe(1)
     expect(manifest.entries[0]).toMatchObject({ path: 'llm/s1/1.request.json', kind: 'llm_request' })
+
+    const firstPage = await fetch(`${url}/artifacts/manifest?limit=1&kind=trace&kind=profile`).then((r) => r.json() as Promise<{
+      entries: Array<{ path: string; kind: string }>
+      page: { returnedEntries: number; totalEntries: number; hasMore: boolean; nextCursor?: string; snapshotId: string }
+    }>)
+    expect(firstPage.entries).toHaveLength(1)
+    expect(firstPage.page).toMatchObject({ returnedEntries: 1, totalEntries: 2, hasMore: true })
+    expect(firstPage.page.nextCursor).toBeTruthy()
+
+    await writeFile(join(artifactRootDir, 'traces/new.openinference.json'), JSON.stringify({ spans: ['new'] }), 'utf8')
+    const secondPage = await fetch(`${url}/artifacts/manifest?limit=1&kind=trace,profile&cursor=${encodeURIComponent(firstPage.page.nextCursor!)}`).then((r) => r.json() as Promise<{
+      entries: Array<{ path: string; kind: string }>
+      page: { returnedEntries: number; totalEntries: number; hasMore: boolean; snapshotId: string }
+    }>)
+    expect(secondPage.entries).toHaveLength(1)
+    expect(secondPage.page).toMatchObject({ returnedEntries: 1, totalEntries: 2, hasMore: false, snapshotId: firstPage.page.snapshotId })
+    expect([...firstPage.entries, ...secondPage.entries].map((entry) => entry.kind).sort()).toEqual(['profile', 'trace'])
+
+    const mismatchedCursor = await fetch(`${url}/artifacts/manifest?limit=1&kind=profile&cursor=${encodeURIComponent(firstPage.page.nextCursor!)}`)
+    expect(mismatchedCursor.status).toBe(400)
+    const invalidLimit = await fetch(`${url}/artifacts/manifest?limit=501`)
+    expect(invalidLimit.status).toBe(400)
 
     const content = await fetch(`${url}/artifacts/content?path=${encodeURIComponent('llm/s1/1.request.json')}`).then((r) => r.json() as Promise<{
       path: string

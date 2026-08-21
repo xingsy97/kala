@@ -1764,21 +1764,11 @@ export function App(): JSX.Element {
                 else setExplorerDrawerOpen(true)
               }}
               explorerAvailable={runtimeCapabilities.workspace && (!wideLayout || !explorerOpen)}
-              onOpenInspector={() => {
-                setRightPanelTab('inspector')
+              onOpenSidebar={() => {
                 if (wideLayout) setInspectorOpen(true)
                 else setInspectorDrawerOpen(true)
               }}
-              inspectorAvailable={hasSelectedSession && (!wideLayout || !inspectorOpen)}
-              onOpenTerminal={() => {
-                setRightPanelTab('terminal')
-                if (wideLayout) setInspectorOpen(true)
-                else setInspectorDrawerOpen(true)
-              }}
-              // On phones the Inspector drawer already exposes Terminal as a
-              // tab. Keep one Tools entry instead of two adjacent 44px icons so
-              // the Session title remains readable.
-              terminalAvailable={hasSelectedSession && !isMobile}
+              sidebarAvailable={hasSelectedSession && (!wideLayout || !inspectorOpen)}
               onChangeCwd={runtimeCapabilities.workspace ? openCwdDialog : undefined}
               sessionSelected={hasSelectedSession}
               sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
@@ -2611,10 +2601,8 @@ export function WorkbenchToolbar({
   topbarAvailable,
   onOpenExplorer,
   explorerAvailable,
-  onOpenInspector,
-  inspectorAvailable,
-  onOpenTerminal,
-  terminalAvailable,
+  onOpenSidebar,
+  sidebarAvailable,
   onChangeCwd,
   sessionSelected,
   sessionDirectoryLoading = false,
@@ -2627,10 +2615,8 @@ export function WorkbenchToolbar({
   topbarAvailable: boolean
   onOpenExplorer(): void
   explorerAvailable: boolean
-  onOpenInspector(): void
-  inspectorAvailable: boolean
-  onOpenTerminal(): void
-  terminalAvailable: boolean
+  onOpenSidebar(): void
+  sidebarAvailable: boolean
   onChangeCwd?: () => void
   sessionSelected: boolean
   sessionDirectoryLoading?: boolean
@@ -2702,27 +2688,14 @@ export function WorkbenchToolbar({
       </Button>
       ) : null}
       {sessionTabs ? <div className="ml-2 min-w-0 flex-1 overflow-hidden">{sessionTabs}</div> : <span className="min-w-0 flex-1" />}
-      {terminalAvailable ? (
+      {sidebarAvailable ? (
         <Button
           variant="ghost"
           size="icon"
-          onClick={onOpenTerminal}
-          title={t('terminal.open')}
-          aria-label={t('terminal.open')}
-          data-testid="terminal-toggle"
-          className="h-9 w-9 flex-none sm:h-8 sm:w-8"
-        >
-          <SquareTerminal className="h-4 w-4" />
-        </Button>
-      ) : null}
-      {inspectorAvailable ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenInspector}
-          title={t('app.openInspector')}
-          aria-label={t('app.openInspector')}
-          data-testid="inspector-toggle"
+          onClick={onOpenSidebar}
+          title={t('app.openSidebar')}
+          aria-label={t('app.openSidebar')}
+          data-testid="sidebar-toggle"
           className="h-9 w-9 flex-none sm:h-8 sm:w-8"
         >
           <PanelRight className="h-4 w-4" />

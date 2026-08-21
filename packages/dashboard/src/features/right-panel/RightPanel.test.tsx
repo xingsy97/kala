@@ -11,10 +11,13 @@ describe('RightPanel', () => {
 
     const tablist = screen.getByRole('tablist', { name: 'Workspace tools' })
     expect(tablist.className).toContain('bg-muted/20')
+    expect(tablist.className).toContain('overflow-hidden')
+    expect(screen.getByTestId('right-panel-tabs').className).toContain('min-w-0')
     const inspectorTab = screen.getByTestId('right-panel-inspector-tab')
     expect(inspectorTab.getAttribute('aria-selected')).toBe('true')
     expect(inspectorTab.className).toContain('bg-accent')
     expect(inspectorTab.className).not.toContain('border-b-2')
+    expect(inspectorTab.className).toContain('w-full')
     expect(screen.getByTestId('right-panel-collapse').className).toContain('h-10')
     expect(screen.getByText('terminal body')).toBeTruthy()
     expect(screen.getByTestId('right-panel-terminal-content').classList.contains('hidden')).toBe(true)

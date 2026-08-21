@@ -38,6 +38,14 @@ export type ArtifactManifest = {
     hashSkippedCount: number
     kinds: Record<string, number>
   }
+  page?: {
+    limit: number
+    returnedEntries: number
+    totalEntries: number
+    hasMore: boolean
+    nextCursor?: string
+    snapshotId: string
+  }
 }
 
 type ArtifactContentResponse = {
@@ -191,12 +199,18 @@ export function ArtifactInventory({
   kindRows,
   error,
   loading,
+  loadingMore,
+  hasMore,
+  onLoadMore,
   onOpenArtifact,
 }: {
   manifest: ArtifactManifest | null
   kindRows: readonly [string, number][]
   error: string | null
   loading: boolean
+  loadingMore: boolean
+  hasMore: boolean
+  onLoadMore(): void
   onOpenArtifact(request: ArtifactDetailRequest): void
 }): JSX.Element {
   const { t } = useTranslation()
@@ -272,10 +286,22 @@ export function ArtifactInventory({
                   ))}
                 </div>
               </ScrollArea>
+              <PaginationFooter manifest={manifest} loadingMore={loadingMore} hasMore={hasMore} onLoadMore={onLoadMore} />
               </>
             ) : null}
           </div>
         </div>
+  )
+}
+
+export function PaginationFooter({ manifest, loadingMore, hasMore, onLoadMore }: { manifest: ArtifactManifest; loadingMore: boolean; hasMore: boolean; onLoadMore(): void }): JSX.Element {
+  const { t } = useTranslation()
+  const total = manifest.page?.totalEntries ?? manifest.entries.length
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground" data-testid="artifact-pagination">
+      <span>{t('artifacts.inventory.loaded', { loaded: manifest.entries.length, total })}</span>
+      {hasMore ? <Button type="button" variant="outline" size="sm" disabled={loadingMore} onClick={onLoadMore}>{loadingMore ? t('artifacts.inventory.loadingMore') : t('artifacts.inventory.loadMore')}</Button> : null}
+    </div>
   )
 }
 
@@ -667,6 +693,9 @@ export function ProfilesView({
   rows,
   error,
   loading,
+  loadingMore,
+  hasMore,
+  onLoadMore,
   onArtifactActionComplete,
   onOpenSession,
 }: {
@@ -674,6 +703,9 @@ export function ProfilesView({
   rows: readonly ProfileRow[]
   error: string | null
   loading: boolean
+  loadingMore: boolean
+  hasMore: boolean
+  onLoadMore(): void
   onArtifactActionComplete(): void
   onOpenSession?(sessionId: string): void
 }): JSX.Element {
@@ -705,9 +737,9 @@ export function ProfilesView({
             {error}
           </div>
         ) : null}
-        {loading && !manifest ? <div className="text-xs text-muted-foreground">{t('artifacts.inventory.loadingManifest')}</div> : null}
+        {loading ? <div className="mb-3 text-xs text-muted-foreground">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</div> : null}
         <EnhancementActionPanel title={t('artifacts.profiles.actions')} actions={profileActionConfigs} onComplete={onArtifactActionComplete} />
-        {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">{t('artifacts.profiles.none')}</div> : null}
+        {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.profiles.none')}</div> : null}
         {rows.length > 0 ? (
           <>
           <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="profiles-mobile-list">
@@ -752,6 +784,7 @@ export function ProfilesView({
           </ScrollArea>
           </>
         ) : null}
+        {manifest ? <PaginationFooter manifest={manifest} loadingMore={loadingMore} hasMore={hasMore} onLoadMore={onLoadMore} /> : null}
       </div>
     </div>
   )
@@ -762,6 +795,9 @@ export function MemoryView({
   rows,
   error,
   loading,
+  loadingMore,
+  hasMore,
+  onLoadMore,
   onArtifactActionComplete,
   onOpenSession,
 }: {
@@ -769,6 +805,9 @@ export function MemoryView({
   rows: readonly MemoryIndexRow[]
   error: string | null
   loading: boolean
+  loadingMore: boolean
+  hasMore: boolean
+  onLoadMore(): void
   onArtifactActionComplete(): void
   onOpenSession?(sessionId: string): void
 }): JSX.Element {
@@ -805,9 +844,9 @@ export function MemoryView({
             {error}
           </div>
         ) : null}
-        {loading && !manifest ? <div className="text-xs text-muted-foreground">{t('artifacts.inventory.loadingManifest')}</div> : null}
+        {loading ? <div className="mb-3 text-xs text-muted-foreground">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</div> : null}
         <EnhancementActionPanel title={t('artifacts.memory.actions')} actions={memoryActionConfigs} onComplete={onArtifactActionComplete} />
-        {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">{t('artifacts.memory.none')}</div> : null}
+        {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.memory.none')}</div> : null}
         {entries.length > 0 ? (
           <>
           <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="memory-mobile-list">
@@ -854,6 +893,7 @@ export function MemoryView({
           </ScrollArea>
           </>
         ) : null}
+        {manifest ? <PaginationFooter manifest={manifest} loadingMore={loadingMore} hasMore={hasMore} onLoadMore={onLoadMore} /> : null}
       </div>
     </div>
   )
@@ -871,6 +911,9 @@ export function OpsView({
   rows,
   error,
   loading,
+  loadingMore,
+  hasMore,
+  onLoadMore,
   onOpenArtifact,
   onArtifactActionComplete,
 }: {
@@ -878,6 +921,9 @@ export function OpsView({
   rows: readonly OpsArtifactRow[]
   error: string | null
   loading: boolean
+  loadingMore: boolean
+  hasMore: boolean
+  onLoadMore(): void
   onOpenArtifact(request: ArtifactDetailRequest): void
   onArtifactActionComplete(): void
 }): JSX.Element {
@@ -907,9 +953,9 @@ export function OpsView({
             {error}
           </div>
         ) : null}
-        {loading && !manifest ? <div className="text-xs text-muted-foreground">{t('artifacts.inventory.loadingManifest')}</div> : null}
+        {loading ? <div className="mb-3 text-xs text-muted-foreground">{manifest ? t('artifacts.inventory.loadingContent') : t('artifacts.inventory.loadingManifest')}</div> : null}
         <EnhancementActionPanel title={t('artifacts.ops.actions')} actions={opsActionConfigs} onComplete={onArtifactActionComplete} />
-        {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">{t('artifacts.ops.none')}</div> : null}
+        {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.ops.none')}</div> : null}
         {rows.length > 0 ? (
           <ScrollArea className="h-full rounded-md border border-border">
             <div className="divide-y divide-border/50 text-xs">
@@ -947,6 +993,7 @@ export function OpsView({
             </div>
           </ScrollArea>
         ) : null}
+        {manifest ? <PaginationFooter manifest={manifest} loadingMore={loadingMore} hasMore={hasMore} onLoadMore={onLoadMore} /> : null}
       </div>
     </div>
   )

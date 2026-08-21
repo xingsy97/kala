@@ -546,7 +546,7 @@ export function Composer({
     <form
       onSubmit={handleSubmit}
       className={cn(
-        'bg-card px-3 sm:px-6 lg:px-8',
+        'bg-transparent px-2 sm:px-3 lg:px-4',
         // Split the difference between the original full iOS safe-area shelf
         // and the too-tight fixed padding: half the safe area plus half the
         // compact baseline (2px simple / 4px full).
@@ -558,7 +558,7 @@ export function Composer({
       data-testid="composer"
       data-composer-mode={mode}
     >
-      <motion.div layout transition={{ type: 'spring', stiffness: 320, damping: 30 }} className="ak-chat-container relative mx-auto w-full">
+      <motion.div layout transition={{ type: 'spring', stiffness: 320, damping: 30 }} className="ak-composer-container relative mx-auto w-full">
         <QueuedMessagesDock
           items={queuedMessages}
           onReorder={onQueuedReorder}
@@ -579,7 +579,7 @@ export function Composer({
               compactDisabled={disabled}
             />
             <div
-              className="relative flex min-h-11 items-center gap-0.5 rounded-2xl border border-border/60 bg-background/70 px-1 py-0.5 shadow-[0_6px_18px_hsl(var(--foreground)/0.05)] transition-[border-color,background-color,box-shadow] focus-within:border-ring/45 focus-within:bg-background focus-within:shadow-[0_8px_22px_hsl(var(--foreground)/0.07)] sm:min-h-10 sm:px-0.5"
+              className="relative flex min-h-11 items-center gap-0.5 rounded-2xl border border-border/70 bg-card/95 px-1 py-0.5 shadow-[0_10px_32px_hsl(var(--foreground)/0.12),0_2px_8px_hsl(var(--foreground)/0.06)] backdrop-blur-xl transition-[border-color,background-color,box-shadow] focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_14px_38px_hsl(var(--foreground)/0.15),0_3px_10px_hsl(var(--foreground)/0.07)] sm:min-h-10 sm:px-0.5"
               data-testid="composer-simple-shell"
             >
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
@@ -632,8 +632,8 @@ export function Composer({
         <div className="flex items-stretch" data-testid="composer-full-shell">
         <div
           className={cn(
-            'relative min-w-0 flex-1 rounded-2xl border border-border/60 bg-background/70 shadow-[0_8px_24px_hsl(var(--foreground)/0.06)] transition-[border-color,background-color,box-shadow]',
-            'focus-within:border-ring/45 focus-within:bg-background focus-within:shadow-[0_10px_28px_hsl(var(--foreground)/0.09)]',
+            'relative min-w-0 flex-1 rounded-2xl border border-border/70 bg-card/95 shadow-[0_12px_36px_hsl(var(--foreground)/0.13),0_2px_8px_hsl(var(--foreground)/0.06)] backdrop-blur-xl transition-[border-color,background-color,box-shadow]',
+            'focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_16px_42px_hsl(var(--foreground)/0.16),0_3px_10px_hsl(var(--foreground)/0.07)]',
           )}
         >
           {pastedImages.length > 0 ? (

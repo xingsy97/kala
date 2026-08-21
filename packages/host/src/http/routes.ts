@@ -14,6 +14,7 @@
  */
 
 import { createReadStream, existsSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
 import { dirname, extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
@@ -40,7 +41,7 @@ import type {
 import { PORTABLE_DEPLOYMENT, effectiveTenancy, productVariant, schema, validateClientMessagePayload, validateInlineMessageImages } from '@agent-kernel/shared'
 import { parseWire } from '../wire-validation.js'
 
-import { buildArtifactManifest, pruneArtifacts } from '../artifact-manifest.js'
+import { buildArtifactManifest, decodeManifestCursor, pageArtifactManifest, pruneArtifacts, type ArtifactManifest } from '../artifact-manifest.js'
 import {
   exportRolloutFrameworkAdapter,
   exportRolloutSegments,
@@ -107,6 +108,18 @@ const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
 
 const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024
 const MAX_DOC_CONTENT_BYTES = 1024 * 1024
+const DEFAULT_ARTIFACT_MANIFEST_PAGE_SIZE = 100
+const MAX_ARTIFACT_MANIFEST_PAGE_SIZE = 500
+const ARTIFACT_MANIFEST_SNAPSHOT_FRESH_MS = 10 * 60_000
+const ARTIFACT_MANIFEST_SNAPSHOT_RETENTION_MS = 10 * 60_000
+
+function parseArtifactKinds(values: readonly string[]): Set<string> {
+  const kinds = values.flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean)
+  if (kinds.length > 50 || kinds.some((kind) => kind.length > 80 || !/^[a-z0-9_]+$/.test(kind))) {
+    throw new HttpRouteError(400, 'invalid artifact kind filter')
+  }
+  return new Set(kinds)
+}
 
 type EnhancementActionRequest = {
   action?: string
@@ -245,6 +258,34 @@ export function attachJsonRoutes(
     }
   },
 ): void {
+  type ManifestSnapshot = { id: string; createdAt: number; manifest: ArtifactManifest }
+  const manifestSnapshots = new Map<string, ManifestSnapshot>()
+  let currentManifestSnapshot: ManifestSnapshot | undefined
+  let manifestBuild: Promise<ManifestSnapshot> | undefined
+
+  const artifactManifestSnapshot = async (forceRefresh: boolean): Promise<ManifestSnapshot> => {
+    const now = Date.now()
+    if (!forceRefresh && currentManifestSnapshot && now - currentManifestSnapshot.createdAt < ARTIFACT_MANIFEST_SNAPSHOT_FRESH_MS) return currentManifestSnapshot
+    if (manifestBuild) return manifestBuild
+    manifestBuild = buildArtifactManifest({ rootDir: payloads.artifactRootDir as string }).then(({ manifest }) => {
+      const snapshot = { id: randomUUID(), createdAt: Date.now(), manifest }
+      currentManifestSnapshot = snapshot
+      manifestSnapshots.set(snapshot.id, snapshot)
+      for (const [id, candidate] of manifestSnapshots) {
+        if (id !== snapshot.id && snapshot.createdAt - candidate.createdAt > ARTIFACT_MANIFEST_SNAPSHOT_RETENTION_MS) manifestSnapshots.delete(id)
+      }
+      while (manifestSnapshots.size > 2) {
+        const oldest = [...manifestSnapshots.values()].sort((a, b) => a.createdAt - b.createdAt)[0]
+        if (!oldest || oldest.id === snapshot.id) break
+        manifestSnapshots.delete(oldest.id)
+      }
+      return snapshot
+    }).finally(() => {
+      manifestBuild = undefined
+    })
+    return manifestBuild
+  }
+
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/'
     // Engine.IO exclusively owns this path and may already have committed the
@@ -903,9 +944,34 @@ export function attachJsonRoutes(
         sendError(res, 404, 'artifact capture is not configured')
         return
       }
-      void buildArtifactManifest({ rootDir: payloads.artifactRootDir })
-        .then((result) => sendJson(req, res, result.manifest))
-        .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
+      void (async () => {
+        const requestUrl = new URL(url, 'http://localhost')
+        const limitValue = requestUrl.searchParams.get('limit')
+        const limit = limitValue === null ? DEFAULT_ARTIFACT_MANIFEST_PAGE_SIZE : Number(limitValue)
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ARTIFACT_MANIFEST_PAGE_SIZE) throw new HttpRouteError(400, `limit must be an integer between 1 and ${MAX_ARTIFACT_MANIFEST_PAGE_SIZE}`)
+        const kinds = parseArtifactKinds(requestUrl.searchParams.getAll('kind'))
+        const cursorValue = requestUrl.searchParams.get('cursor')
+        let snapshot: ManifestSnapshot
+        let offset = 0
+        if (cursorValue) {
+          let cursor: { snapshotId: string; offset: number; filterKey: string }
+          try {
+            cursor = decodeManifestCursor(cursorValue)
+          } catch (error) {
+            throw new HttpRouteError(400, error instanceof Error ? error.message : String(error))
+          }
+          const retained = manifestSnapshots.get(cursor.snapshotId)
+          if (!retained) throw new HttpRouteError(409, 'artifact manifest cursor expired; reload the first page')
+          if (cursor.filterKey !== [...kinds].sort().join(',')) throw new HttpRouteError(400, 'artifact manifest cursor does not match kind filters')
+          snapshot = retained
+          offset = cursor.offset
+        } else {
+          snapshot = await artifactManifestSnapshot(requestUrl.searchParams.has('refresh'))
+        }
+        return pageArtifactManifest({ manifest: snapshot.manifest, snapshotId: snapshot.id, offset, limit, ...(kinds.size > 0 ? { kinds } : {}) })
+      })()
+        .then((manifest) => sendJson(req, res, manifest))
+        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
       return
     }
     if (path === '/artifacts/content') {

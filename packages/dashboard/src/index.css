@@ -9,6 +9,12 @@
     padding-right: var(--ak-chat-side-space, 1rem);
   }
 
+  .ak-composer-container {
+    max-width: min(calc(var(--ak-chat-content-width, 84rem) + 12rem), 100%);
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
+
   .ak-chat-item,
   .ak-chat-item .ak-chat-text {
     font-size: var(--ak-chat-font-size, 15px);
@@ -72,12 +78,22 @@
       padding-left: var(--ak-chat-side-space-sm, 2rem);
       padding-right: var(--ak-chat-side-space-sm, 2rem);
     }
+
+    .ak-composer-container {
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+    }
   }
 
   @media (min-width: 1024px) {
     .ak-chat-container {
       padding-left: var(--ak-chat-side-space-lg, 3rem);
       padding-right: var(--ak-chat-side-space-lg, 3rem);
+    }
+
+    .ak-composer-container {
+      padding-left: 0.75rem;
+      padding-right: 0.75rem;
     }
   }
 }

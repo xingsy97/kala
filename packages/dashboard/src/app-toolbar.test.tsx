@@ -13,8 +13,8 @@ function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]
       topbarAvailable={false}
       onOpenExplorer={() => {}}
       explorerAvailable={false}
-      onOpenInspector={() => {}}
-      inspectorAvailable={false}
+      onOpenSidebar={() => {}}
+      sidebarAvailable={false}
       onChangeCwd={() => {}}
       sessionSelected={false}
       {...overrides}
@@ -38,6 +38,17 @@ describe('session directory loading', () => {
 })
 
 describe('WorkbenchToolbar', () => {
+  it('uses one sidebar opener and does not duplicate it with a terminal shortcut', () => {
+    const onOpenSidebar = vi.fn()
+    renderToolbar({ sessionSelected: true, onOpenSidebar, sidebarAvailable: true })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }))
+    expect(onOpenSidebar).toHaveBeenCalledOnce()
+    expect(screen.getByTestId('sidebar-toggle')).toBeTruthy()
+    expect(screen.queryByTestId('terminal-toggle')).toBeNull()
+    expect(screen.queryByTestId('inspector-toggle')).toBeNull()
+  })
+
   it('keeps a stable Sessions title while the directory is loading', () => {
     renderToolbar({ sessionDirectoryLoading: true })
 
@@ -83,8 +94,8 @@ describe('WorkbenchToolbar', () => {
         topbarAvailable={false}
         onOpenExplorer={() => {}}
         explorerAvailable={false}
-        onOpenInspector={() => {}}
-        inspectorAvailable={false}
+        onOpenSidebar={() => {}}
+        sidebarAvailable={false}
         onChangeCwd={() => {}}
         sessionSelected
         sessionActivityStatus="loading"
@@ -99,8 +110,8 @@ describe('WorkbenchToolbar', () => {
         topbarAvailable={false}
         onOpenExplorer={() => {}}
         explorerAvailable={false}
-        onOpenInspector={() => {}}
-        inspectorAvailable={false}
+        onOpenSidebar={() => {}}
+        sidebarAvailable={false}
         onChangeCwd={() => {}}
         sessionSelected
         sessionActivityStatus="loading"

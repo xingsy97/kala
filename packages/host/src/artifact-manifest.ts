@@ -33,6 +33,61 @@ export type ArtifactManifest = {
   }
 }
 
+export type ArtifactManifestPage = ArtifactManifest & {
+  page: {
+    limit: number
+    returnedEntries: number
+    totalEntries: number
+    hasMore: boolean
+    nextCursor?: string
+    snapshotId: string
+  }
+}
+
+export function pageArtifactManifest(input: {
+  manifest: ArtifactManifest
+  snapshotId: string
+  offset: number
+  limit: number
+  kinds?: ReadonlySet<string>
+}): ArtifactManifestPage {
+  const entries = input.kinds && input.kinds.size > 0
+    ? input.manifest.entries.filter((entry) => input.kinds!.has(entry.kind))
+    : input.manifest.entries
+  const offset = Math.min(input.offset, entries.length)
+  const end = Math.min(offset + input.limit, entries.length)
+  const hasMore = end < entries.length
+  const filterKey = [...(input.kinds ?? [])].sort().join(',')
+  return {
+    ...input.manifest,
+    entries: entries.slice(offset, end),
+    page: {
+      limit: input.limit,
+      returnedEntries: end - offset,
+      totalEntries: entries.length,
+      hasMore,
+      ...(hasMore ? { nextCursor: encodeManifestCursor(input.snapshotId, end, filterKey) } : {}),
+      snapshotId: input.snapshotId,
+    },
+  }
+}
+
+export function encodeManifestCursor(snapshotId: string, offset: number, filterKey = ''): string {
+  return Buffer.from(JSON.stringify({ snapshotId, offset, filterKey }), 'utf8').toString('base64url')
+}
+
+export function decodeManifestCursor(cursor: string): { snapshotId: string; offset: number; filterKey: string } {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { snapshotId?: unknown; offset?: unknown; filterKey?: unknown }
+    if (typeof parsed.snapshotId !== 'string' || parsed.snapshotId.length < 1 || parsed.snapshotId.length > 128) throw new Error('invalid snapshot')
+    if (!Number.isSafeInteger(parsed.offset) || Number(parsed.offset) < 0) throw new Error('invalid offset')
+    if (typeof parsed.filterKey !== 'string' || parsed.filterKey.length > 4096) throw new Error('invalid filter')
+    return { snapshotId: parsed.snapshotId, offset: Number(parsed.offset), filterKey: parsed.filterKey }
+  } catch {
+    throw new Error('invalid artifact manifest cursor')
+  }
+}
+
 const DEFAULT_MAX_HASH_BYTES = 25 * 1024 * 1024
 
 export async function buildArtifactManifest(

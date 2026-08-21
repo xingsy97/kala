@@ -5,12 +5,14 @@ import type {
   OpsArtifactKind,
 } from './product-artifact-views.js'
 
+export const OPS_ARTIFACT_KINDS: readonly OpsArtifactKind[] = ['reliability_audit', 'reliability_chaos', 'rl_rollout_sidecar', 'rl_token_segments', 'rl_adapter', 'subagent_graph', 'trace', 'message_assembly', 'router_decision', 'tool_catalog']
+
 export function isOpsArtifactKind(kind: string): kind is OpsArtifactKind {
   return kind === 'reliability_audit' || kind === 'reliability_chaos' || kind === 'rl_rollout_sidecar' || kind === 'rl_token_segments' || kind === 'rl_adapter' || kind === 'subagent_graph' || kind === 'trace' || kind === 'message_assembly' || kind === 'router_decision' || kind === 'tool_catalog'
 }
 
 export function opsKindOrder(kind: OpsArtifactKind): number {
-  return ['reliability_audit', 'reliability_chaos', 'rl_rollout_sidecar', 'rl_token_segments', 'rl_adapter', 'subagent_graph', 'trace', 'message_assembly', 'router_decision', 'tool_catalog'].indexOf(kind)
+  return OPS_ARTIFACT_KINDS.indexOf(kind)
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {

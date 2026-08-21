@@ -104,7 +104,9 @@ describe('Composer', () => {
 
     const composer = screen.getByTestId('composer')
     expect(composer.style.getPropertyValue('--ak-chat-content-width')).toBe('104rem')
-    expect(composer.querySelector('.ak-chat-container')).toBeTruthy()
+    expect(composer.querySelector('.ak-composer-container')).toBeTruthy()
+    expect(composer.className).toContain('bg-transparent')
+    expect(composer.className).not.toContain('bg-card')
   })
 
   it('shows slash command suggestions for /compact', () => {

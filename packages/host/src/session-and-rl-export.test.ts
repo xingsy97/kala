@@ -8,7 +8,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from './store/log.js'
-import { buildArtifactManifest } from './artifact-manifest.js'
+import { buildArtifactManifest, decodeManifestCursor, pageArtifactManifest } from './artifact-manifest.js'
 import { exportRolloutFrameworkAdapter, exportRolloutSegments, exportRolloutSidecar } from './rl-export.js'
 import { exportSessionTraceArtifacts } from './session-export.js'
 import { exportTraceOtlp } from './trace-otlp-export.js'
@@ -435,6 +435,21 @@ describe('enhancement artifact export', () => {
     expect(result.manifest.entries.find((entry) => entry.path === 'large.log')?.hashSkippedReason).toContain('maxHashBytes')
     expect(JSON.stringify(result.manifest.entries)).not.toContain('secret prompt')
     expect(await readFile(result.manifestPath, 'utf8')).toContain('llm_request')
+  })
+
+  it('pages a stable manifest with an opaque filter-bound cursor', async () => {
+    await writeFile(join(dir, 'a.json'), '{}', 'utf8')
+    await writeFile(join(dir, 'b.log'), 'b', 'utf8')
+    await writeFile(join(dir, 'c.json'), '{}', 'utf8')
+    const { manifest } = await buildArtifactManifest({ rootDir: dir })
+    const first = pageArtifactManifest({ manifest, snapshotId: 'snapshot-1', offset: 0, limit: 1, kinds: new Set(['json']) })
+    expect(first.entries.map((entry) => entry.path)).toEqual(['a.json'])
+    expect(first.page).toMatchObject({ totalEntries: 2, returnedEntries: 1, hasMore: true, snapshotId: 'snapshot-1' })
+    const cursor = decodeManifestCursor(first.page.nextCursor!)
+    expect(cursor).toEqual({ snapshotId: 'snapshot-1', offset: 1, filterKey: 'json' })
+    const second = pageArtifactManifest({ manifest, snapshotId: cursor.snapshotId, offset: cursor.offset, limit: 1, kinds: new Set(['json']) })
+    expect(second.entries.map((entry) => entry.path)).toEqual(['c.json'])
+    expect(second.page.hasMore).toBe(false)
   })
 
   it('exports an OTLP bundle from a session log to disk', async () => {

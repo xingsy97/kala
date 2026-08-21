@@ -12,16 +12,17 @@ import { mapWithConcurrency } from './concurrency.js'
 const ARTIFACT_FETCH_CONCURRENCY = 6
 
 export function ProfilesView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
-  const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()
+  const { manifest, loading, loadingMore, error, reload, reloadToken, hasMore, loadMore } = useArtifactManifest({ kinds: ['profile'], pageSize: 50 })
   const [rows, setRows] = useState<readonly ProfileRow[]>([])
   const [rowsError, setRowsError] = useState<string | null>(null)
+  const [rowsLoading, setRowsLoading] = useState(false)
 
   useEffect(() => {
     if (!manifest) return
     const profiles = manifest.entries.filter((entry) => entry.kind === 'profile' || entry.path.endsWith('/profile.json'))
     let cancelled = false
     setRowsError(null)
-    setRows([])
+    setRowsLoading(true)
     void mapWithConcurrency(profiles, ARTIFACT_FETCH_CONCURRENCY, async (entry): Promise<ProfileRow> => {
       const content = await fetchArtifactContent(entry.path)
       return { path: entry.path, profile: content.body as SessionProfile }
@@ -31,6 +32,8 @@ export function ProfilesView({ onOpenSession }: { onOpenSession?(sessionId: stri
       })
       .catch((err: unknown) => {
         if (!cancelled) setRowsError(err instanceof Error ? err.message : String(err))
+      }).finally(() => {
+        if (!cancelled) setRowsLoading(false)
       })
     return () => {
       cancelled = true
@@ -43,7 +46,10 @@ export function ProfilesView({ onOpenSession }: { onOpenSession?(sessionId: stri
         manifest={manifest}
         rows={rows}
         error={error ?? rowsError}
-        loading={loading}
+        loading={loading || rowsLoading}
+        loadingMore={loadingMore}
+        hasMore={hasMore}
+        onLoadMore={loadMore}
         onArtifactActionComplete={reload}
         onOpenSession={onOpenSession}
       />

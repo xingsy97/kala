@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import {
   OpsView as OpsViewInternal,
@@ -8,16 +9,18 @@ import {
   type OpsArtifactKind,
   type OpsArtifactRow,
 } from './product-artifact-views.js'
-import { asRecord, isOpsArtifactKind, opsKindOrder } from './artifact-model.js'
+import { asRecord, isOpsArtifactKind, OPS_ARTIFACT_KINDS, opsKindOrder } from './artifact-model.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
 import { mapWithConcurrency } from './concurrency.js'
 
 const ARTIFACT_FETCH_CONCURRENCY = 6
 
 export function OpsView({ onOpenSession }: { onOpenSession?(sessionId: string): void } = {}): JSX.Element {
-  const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()
+  const { t } = useTranslation()
+  const { manifest, loading, loadingMore, error, reload, reloadToken, hasMore, loadMore } = useArtifactManifest({ kinds: OPS_ARTIFACT_KINDS, pageSize: 25 })
   const [rows, setRows] = useState<readonly OpsArtifactRow[]>([])
   const [rowsError, setRowsError] = useState<string | null>(null)
+  const [rowsLoading, setRowsLoading] = useState(false)
   const [artifactDetail, setArtifactDetail] = useState<ArtifactDetailRequest | null>(null)
 
   useEffect(() => {
@@ -25,21 +28,32 @@ export function OpsView({ onOpenSession }: { onOpenSession?(sessionId: string): 
     const entries = manifest.entries.filter((entry) => isOpsArtifactKind(entry.kind))
     let cancelled = false
     setRowsError(null)
-    setRows([])
-    void mapWithConcurrency(entries, ARTIFACT_FETCH_CONCURRENCY, async (entry): Promise<OpsArtifactRow> => {
-      const content = await fetchArtifactContent(entry.path)
-      return { path: entry.path, kind: entry.kind as OpsArtifactKind, body: asRecord(content.body) }
+    setRowsLoading(true)
+    void mapWithConcurrency(entries, ARTIFACT_FETCH_CONCURRENCY, async (entry): Promise<{ row?: OpsArtifactRow; error?: string }> => {
+      try {
+        const content = await fetchArtifactContent(entry.path)
+        return { row: { path: entry.path, kind: entry.kind as OpsArtifactKind, body: asRecord(content.body) } }
+      } catch (err: unknown) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
     })
-      .then((next) => {
-        if (!cancelled) setRows(next.sort((a, b) => opsKindOrder(a.kind) - opsKindOrder(b.kind) || a.path.localeCompare(b.path)))
+      .then((results) => {
+        if (cancelled) return
+        const next = results.flatMap((result) => result.row ? [result.row] : [])
+        const failures = results.filter((result) => result.error).length
+        setRows(next.sort((a, b) => opsKindOrder(a.kind) - opsKindOrder(b.kind) || a.path.localeCompare(b.path)))
+        if (failures > 0) setRowsError(t('artifacts.ops.partialLoadFailed', { count: failures }))
       })
       .catch((err: unknown) => {
         if (!cancelled) setRowsError(err instanceof Error ? err.message : String(err))
       })
+      .finally(() => {
+        if (!cancelled) setRowsLoading(false)
+      })
     return () => {
       cancelled = true
     }
-  }, [manifest, reloadToken])
+  }, [manifest, reloadToken, t])
 
   return (
     <>
@@ -48,7 +62,10 @@ export function OpsView({ onOpenSession }: { onOpenSession?(sessionId: string): 
           manifest={manifest}
           rows={rows}
           error={error ?? rowsError}
-          loading={loading}
+          loading={loading || rowsLoading}
+          loadingMore={loadingMore}
+          hasMore={hasMore}
+          onLoadMore={loadMore}
           onOpenArtifact={setArtifactDetail}
           onArtifactActionComplete={reload}
         />
