@@ -267,7 +267,7 @@ export function InspectorPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar text-foreground">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card/75 text-foreground">
       <DebuggerHeader
         state={state}
         config={config}
@@ -384,8 +384,8 @@ function InspectorTabs({
   options.push(['status', t('inspector.tabs.status'), Activity])
   const cols = options.length
   return (
-    <div className="flex-none bg-card px-3 pb-3" data-testid="inspector-sidebar-tabs">
-      <div className="flex items-center gap-1 rounded bg-sidebar p-0.5 text-xs">
+    <div className="flex-none bg-card/75 px-3 pb-3" data-testid="inspector-sidebar-tabs">
+      <div className="ak-segmented-control flex items-center gap-1 text-xs">
         <div
           className="grid min-w-0 flex-1"
           style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
@@ -395,7 +395,7 @@ function InspectorTabs({
               key={view}
               type="button"
               onClick={() => onChange(view)}
-              className={cn('inline-flex min-w-0 items-center justify-center gap-1 rounded px-1 py-1.5 font-medium transition-colors sm:px-1.5', value === view ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
+              className={cn('inline-flex min-w-0 items-center justify-center gap-1 rounded-lg px-1 py-1.5 font-medium transition-all sm:px-1.5', value === view ? 'bg-card text-foreground shadow-sm ring-1 ring-border/40' : 'text-muted-foreground hover:bg-card/55 hover:text-foreground')}
               data-testid={`inspector-sidebar-tab-${view}`}
               aria-pressed={value === view}
             >

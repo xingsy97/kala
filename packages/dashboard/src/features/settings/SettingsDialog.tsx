@@ -110,10 +110,10 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={cn(dialogMobileSheetClassName, 'h-auto grid-rows-[auto_minmax(0,1fr)] border-x-0 border-border bg-background text-foreground shadow-2xl sm:h-[min(90dvh,44rem)] sm:max-w-4xl sm:border-x [&_input]:border-border [&_input]:bg-background [&_input]:text-foreground [&_select]:border-border [&_select]:bg-background [&_select]:text-foreground [&_table]:bg-muted/20 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-background [&_textarea]:text-foreground [&_th]:bg-muted/50 [&_th]:text-foreground')}
+        className={cn(dialogMobileSheetClassName, 'h-auto grid-rows-[auto_minmax(0,1fr)] border-x-0 border-border/60 bg-background text-foreground shadow-2xl sm:h-[min(90dvh,46rem)] sm:max-w-5xl sm:overflow-hidden sm:rounded-2xl sm:border-x [&_input]:border-border [&_input]:bg-card/70 [&_input]:text-foreground [&_select]:border-border [&_select]:bg-card/70 [&_select]:text-foreground [&_table]:bg-muted/10 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-card/70 [&_textarea]:text-foreground [&_th]:bg-muted/30 [&_th]:text-foreground')}
         data-testid="settings-dialog"
       >
-        <DialogHeader className="relative min-h-[4.5rem] justify-center border-b border-border bg-card px-4 py-2 pr-14 md:min-h-0 md:px-5 md:py-3 md:pr-14">
+        <DialogHeader className="relative min-h-[4.5rem] justify-center border-b border-border/40 bg-card/75 px-4 py-2 pr-14 backdrop-blur md:min-h-0 md:px-6 md:py-4 md:pr-14">
           <div className="md:hidden">
             <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('settings.title')}</div>
             <label className="relative mt-0.5 inline-flex max-w-[calc(100vw-5rem)] items-center gap-2 pr-6" data-testid="settings-mobile-section-picker">
@@ -146,12 +146,12 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
             <X className="h-5 w-5" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
-        <div className="grid min-h-0 min-w-0 md:grid-cols-[200px_minmax(0,1fr)]">
-          <aside className="hidden min-h-0 min-w-0 border-border bg-sidebar md:!block md:border-r">
-            <nav className="h-full space-y-1 overflow-x-hidden overflow-y-auto p-3" aria-label={t('settings.sectionsLabel')}>
+        <div className="grid min-h-0 min-w-0 md:grid-cols-[232px_minmax(0,1fr)]">
+          <aside className="hidden min-h-0 min-w-0 border-border/35 bg-muted/15 md:!block md:border-r">
+            <nav className="h-full space-y-1 overflow-x-hidden overflow-y-auto px-3 py-4" aria-label={t('settings.sectionsLabel')}>
               {SECTION_GROUPS.map((group) => (
                 <div key={group} className="space-y-1" data-testid={`settings-group-${group}`}>
-                  <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/45 first:pt-0">
+                  <div className="px-3 pb-1.5 pt-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/75 first:pt-0">
                     {t(`settings.groups.${group}`)}
                   </div>
                   {SECTIONS.filter((item) => item.group === group).map((item) => (
@@ -162,10 +162,10 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
             </nav>
           </aside>
           <ScrollArea
-            className="min-h-0 min-w-0 max-w-full overflow-x-hidden bg-background"
+            className="ak-workspace-canvas min-h-0 min-w-0 max-w-full overflow-x-hidden"
             viewportClassName="[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0 [&>div]:!max-w-full"
           >
-            <div className="mx-auto min-w-0 max-w-2xl overflow-x-hidden px-4 py-5 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-foreground md:max-w-full md:p-7" data-testid="settings-responsive-content">
+            <div className="mx-auto min-w-0 max-w-full overflow-x-hidden px-4 py-5 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-foreground md:max-w-3xl md:p-8" data-testid="settings-responsive-content">
               {loadError ? (
                 <div className="rounded-md border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
                   <p>{t('settings.loadFailed', { error: loadError })}</p>

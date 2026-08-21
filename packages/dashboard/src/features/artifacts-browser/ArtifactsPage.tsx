@@ -14,22 +14,25 @@ export function ArtifactsPage({ onOpenSession }: {
   const [section, setSection] = useState<ArtifactSection>('artifacts')
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background" data-testid="artifacts-page">
-      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/95 px-4 py-2 backdrop-blur">
-        <h1 className="text-sm font-semibold" data-testid="artifacts-page-title">{t('artifactsPage.pageTitle')}</h1>
-        <p className="text-xs text-muted-foreground">{t('artifactsPage.pageSubtitle')}</p>
-        <div className="mt-2 grid grid-cols-2 rounded-lg bg-muted p-1 md:hidden" role="group" aria-label={t('artifactsPage.pageTitle')}>
+    <div className="ak-workspace-canvas flex h-full min-h-0 flex-col overflow-auto" data-testid="artifacts-page">
+      <header className="mx-auto flex w-full max-w-[96rem] flex-none flex-col gap-4 px-4 pb-4 pt-6 sm:px-6 lg:flex-row lg:items-end lg:justify-between lg:px-8">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary/80">Agent RunLab</div>
+          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em]" data-testid="artifacts-page-title">{t('artifactsPage.pageTitle')}</h1>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{t('artifactsPage.pageSubtitle')}</p>
+        </div>
+        <div className="ak-segmented-control grid w-full grid-cols-2 sm:w-auto sm:min-w-80" role="group" aria-label={t('artifactsPage.pageTitle')}>
           <SectionButton active={section === 'artifacts'} onClick={() => setSection('artifacts')} testId="artifacts-mobile-inventory">{t('artifactsPage.artifactsTitle')}</SectionButton>
           <SectionButton active={section === 'memory'} onClick={() => setSection('memory')} testId="artifacts-mobile-memory">{t('artifactsPage.memoryTitle')}</SectionButton>
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto md:grid md:grid-rows-2">
-        <section className={cn('min-h-0', section !== 'artifacts' && 'hidden md:block')} data-testid="artifacts-main-panel">
-          <div className="border-b border-border/60 px-4 py-2"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('artifactsPage.artifactsTitle')}</h2></div>
+      <div className="mx-auto min-h-[32rem] w-full max-w-[96rem] flex-1 px-3 pb-6 sm:px-6 lg:px-8">
+        <section className={cn('ak-workspace-surface flex h-full min-h-0 flex-col overflow-hidden', section !== 'artifacts' && 'hidden')} data-testid="artifacts-main-panel">
+          <div className="flex-none border-b border-border/35 px-5 py-4 sm:px-6"><h2 className="text-base font-semibold tracking-[-0.01em]">{t('artifactsPage.artifactsTitle')}</h2></div>
           <ArtifactInventoryView onOpenSession={onOpenSession} />
         </section>
-        <section className={cn('min-h-0 border-t border-border/60', section !== 'memory' && 'hidden md:block')} data-testid="artifacts-memory-panel">
-          <div className="border-b border-border/60 px-4 py-2"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('artifactsPage.memoryTitle')}</h2><p className="text-[11px] text-muted-foreground">{t('artifactsPage.memorySubtitle')}</p></div>
+        <section className={cn('ak-workspace-surface flex h-full min-h-0 flex-col overflow-hidden', section !== 'memory' && 'hidden')} data-testid="artifacts-memory-panel">
+          <div className="flex-none border-b border-border/35 px-5 py-4 sm:px-6"><h2 className="text-base font-semibold tracking-[-0.01em]">{t('artifactsPage.memoryTitle')}</h2><p className="mt-0.5 text-xs leading-5 text-muted-foreground">{t('artifactsPage.memorySubtitle')}</p></div>
           <MemoryView onOpenSession={onOpenSession} />
         </section>
       </div>
@@ -38,5 +41,5 @@ export function ArtifactsPage({ onOpenSession }: {
 }
 
 function SectionButton({ active, onClick, testId, children }: { active: boolean; onClick(): void; testId: string; children: React.ReactNode }): JSX.Element {
-  return <button type="button" aria-pressed={active} onClick={onClick} data-testid={testId} className={cn('h-10 rounded-md px-3 text-sm', active ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground')}>{children}</button>
+  return <button type="button" aria-pressed={active} onClick={onClick} data-testid={testId} className={cn('h-10 rounded-lg px-4 text-sm font-medium transition-all', active ? 'bg-card text-foreground shadow-sm ring-1 ring-border/40' : 'text-muted-foreground hover:bg-card/50 hover:text-foreground')}>{children}</button>
 }

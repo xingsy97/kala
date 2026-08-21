@@ -215,16 +215,16 @@ export function ArtifactInventory({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
-          <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
+    <div className="flex min-h-0 flex-1 flex-col">
+          <aside className="flex-none border-b border-border/30 bg-muted/10 p-3 sm:p-4">
             {manifest ? (
-              <div className="grid gap-2 text-xs">
+              <div className="ak-metric-strip text-xs">
                 <Stat label={t('artifacts.inventory.files')} value={String(manifest.summary.entryCount)} />
                 <Stat label={t('artifacts.inventory.bytes')} value={formatBytes(manifest.summary.totalBytes)} />
                 <Stat label={t('artifacts.inventory.hashed')} value={`${manifest.summary.hashedCount}/${manifest.summary.entryCount}`} />
-                <div className="mt-2 rounded-md border border-border bg-background/70 p-2">
-                  <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('artifacts.inventory.kinds')}</div>
-                  <div className="grid gap-1">
+                <details className="rounded-xl bg-card/70 px-3 py-2 ring-1 ring-border/35">
+                  <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">{t('artifacts.inventory.kinds')}</summary>
+                  <div className="mt-2 grid gap-1">
                     {kindRows.map(([kind, count]) => (
                       <div key={kind} className="flex items-center justify-between gap-2 font-mono text-[11px]">
                         <span className="truncate">{kind}</span>
@@ -232,13 +232,13 @@ export function ArtifactInventory({
                       </div>
                     ))}
                   </div>
-                </div>
+                </details>
               </div>
             ) : (
               <div className="text-xs text-muted-foreground">{t('artifacts.inventory.noManifest')}</div>
             )}
           </aside>
-          <div className="min-h-0 p-3">
+          <div className="min-h-0 flex-1 p-3 sm:p-4">
             {error ? (
               <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
                 {error}
@@ -249,7 +249,7 @@ export function ArtifactInventory({
             ) : null}
             {manifest ? (
               <>
-              <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="artifact-inventory-mobile-list">
+              <div className="divide-y divide-border/35 overflow-hidden rounded-xl bg-card/70 ring-1 ring-border/40 md:hidden" data-testid="artifact-inventory-mobile-list">
                 {manifest.entries.map((entry) => (
                   <button key={entry.path} type="button" onClick={() => onOpenArtifact({ path: entry.path, label: entry.path })} className="block w-full min-w-0 px-3 py-2 text-left hover:bg-muted/40">
                     <div className="truncate font-mono text-xs" title={entry.path}>{entry.path}</div>
@@ -259,7 +259,7 @@ export function ArtifactInventory({
                   </button>
                 ))}
               </div>
-              <ScrollArea className="hidden h-full rounded-md border border-border/50 md:block">
+              <ScrollArea className="hidden h-full overflow-hidden rounded-xl bg-card/55 ring-1 ring-border/40 md:block">
                 <div className="min-w-[720px] divide-y divide-border text-xs">
                   <div className="grid grid-cols-[1.4fr_150px_100px_170px] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                     <div>{t('artifacts.inventory.path')}</div>
@@ -719,9 +719,9 @@ export function ProfilesView({
     return acc
   }, { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyCalls: 0 })
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
-      <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
-        <div className="grid gap-2 text-xs">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <aside className="flex-none border-b border-border/30 bg-muted/10 p-3 sm:p-4">
+        <div className="ak-metric-strip text-xs">
           <Stat label={t('artifacts.profiles.profiles')} value={String(rows.length)} />
           <Stat label={t('artifacts.stats.llmCalls')} value={String(totals.llmCalls)} />
           <Stat label={t('artifacts.stats.toolCalls')} value={String(totals.toolCalls)} />
@@ -731,7 +731,7 @@ export function ProfilesView({
           <Stat label={t('artifacts.stats.artifacts')} value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
-      <div className="min-h-0 p-3">
+      <div className="min-h-0 flex-1 p-3 sm:p-4">
         {error ? (
           <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
@@ -742,7 +742,7 @@ export function ProfilesView({
         {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.profiles.none')}</div> : null}
         {rows.length > 0 ? (
           <>
-          <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="profiles-mobile-list">
+          <div className="divide-y divide-border/35 overflow-hidden rounded-xl bg-card/70 ring-1 ring-border/40 md:hidden" data-testid="profiles-mobile-list">
             {rows.map((row) => (
               <div key={row.path} className="min-w-0 px-3 py-2" role={row.profile.sessionId && onOpenSession ? 'button' : undefined} tabIndex={row.profile.sessionId && onOpenSession ? 0 : undefined} onClick={() => row.profile.sessionId && onOpenSession?.(row.profile.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && row.profile.sessionId) onOpenSession?.(row.profile.sessionId) }}>
                 <div className="truncate font-mono text-xs">{row.profile.sessionId ?? row.path}</div>
@@ -751,7 +751,7 @@ export function ProfilesView({
               </div>
             ))}
           </div>
-          <ScrollArea className="hidden h-full rounded-md border border-border/50 md:block">
+          <ScrollArea className="hidden h-full overflow-hidden rounded-xl bg-card/55 ring-1 ring-border/40 md:block">
             <div className="min-w-[980px] divide-y divide-border text-xs">
               <div className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                 <div>{t('artifacts.profiles.columns.profile')}</div>
@@ -824,9 +824,9 @@ export function MemoryView({
   const staleCount = rows.reduce((sum, row) => sum + (row.index.staleWarnings?.length ?? 0), 0)
   const conflictCount = rows.reduce((sum, row) => sum + (row.index.conflictWarnings?.length ?? 0), 0)
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
-      <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
-        <div className="grid gap-2 text-xs">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <aside className="flex-none border-b border-border/30 bg-muted/10 p-3 sm:p-4">
+        <div className="ak-metric-strip text-xs">
           <Stat label={t('artifacts.stats.indexes')} value={String(rows.length)} />
           <Stat label={t('artifacts.stats.active')} value={String(totals.active)} />
           <Stat label={t('artifacts.stats.tombstoned')} value={String(totals.tombstoned)} />
@@ -838,7 +838,7 @@ export function MemoryView({
           <Stat label={t('artifacts.stats.artifacts')} value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
-      <div className="min-h-0 p-3">
+      <div className="min-h-0 flex-1 p-3 sm:p-4">
         {error ? (
           <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
@@ -849,7 +849,7 @@ export function MemoryView({
         {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.memory.none')}</div> : null}
         {entries.length > 0 ? (
           <>
-          <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="memory-mobile-list">
+          <div className="divide-y divide-border/35 overflow-hidden rounded-xl bg-card/70 ring-1 ring-border/40 md:hidden" data-testid="memory-mobile-list">
             {entries.map(({ row, entry }, index) => (
               <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="min-w-0 px-3 py-2" role={entry.sessionId && onOpenSession ? 'button' : undefined} tabIndex={entry.sessionId && onOpenSession ? 0 : undefined} onClick={() => entry.sessionId && onOpenSession?.(entry.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && entry.sessionId) onOpenSession?.(entry.sessionId) }}>
                 <div className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.key ?? t('artifacts.fallback.unknown')}</span><MemoryStatus status={entry.status} /></div>
@@ -858,7 +858,7 @@ export function MemoryView({
               </div>
             ))}
           </div>
-          <ScrollArea className="hidden h-full rounded-md border border-border/50 md:block">
+          <ScrollArea className="hidden h-full overflow-hidden rounded-xl bg-card/55 ring-1 ring-border/40 md:block">
             <div className="min-w-[980px] divide-y divide-border text-xs">
               <div className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                 <div>{t('artifacts.memory.columns.scope')}</div>
@@ -935,9 +935,9 @@ export function OpsView({
   const traceCount = rows.filter((row) => row.kind === 'trace' || row.kind === 'message_assembly').length
   const routerCount = rows.filter((row) => row.kind === 'router_decision' || row.kind === 'tool_catalog').length
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
-      <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
-        <div className="grid gap-2 text-xs">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <aside className="flex-none border-b border-border/30 bg-muted/10 p-3 sm:p-4">
+        <div className="ak-metric-strip text-xs">
           <Stat label={t('artifacts.ops.artifacts')} value={String(rows.length)} />
           <Stat label={t('artifacts.ops.stats.reliabilityIssues')} value={String(reliabilityIssues)} />
           <Stat label={t('artifacts.ops.stats.rolloutReady')} value={String(rolloutReady)} />
@@ -947,7 +947,7 @@ export function OpsView({
           <Stat label={t('artifacts.ops.stats.artifacts')} value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
-      <div className="min-h-0 p-3">
+      <div className="min-h-0 flex-1 p-3 sm:p-4">
         {error ? (
           <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
@@ -957,7 +957,7 @@ export function OpsView({
         <EnhancementActionPanel title={t('artifacts.ops.actions')} actions={opsActionConfigs} onComplete={onArtifactActionComplete} />
         {manifest && rows.length === 0 && !error && !loading ? <div className="text-xs text-muted-foreground">{t('artifacts.ops.none')}</div> : null}
         {rows.length > 0 ? (
-          <ScrollArea className="h-full rounded-md border border-border">
+          <ScrollArea className="h-full overflow-hidden rounded-xl bg-card/55 ring-1 ring-border/40">
             <div className="divide-y divide-border/50 text-xs">
               {groups.map((group) => (
                 <div key={group.label} className="grid gap-2 p-3">
@@ -971,7 +971,7 @@ export function OpsView({
                         key={row.path}
                         type="button"
                         onClick={() => onOpenArtifact({ path: row.path, label: row.path })}
-                        className="grid min-w-0 gap-1 rounded border border-border/50 bg-background/70 px-2 py-2 text-left transition-colors hover:bg-muted/40 md:grid-cols-[170px_minmax(0,1fr)_minmax(220px,0.8fr)] md:gap-3"
+                        className="grid min-w-0 gap-1 rounded-xl bg-background/55 px-3 py-2.5 text-left ring-1 ring-border/35 transition-all hover:bg-muted/40 hover:ring-border/60 md:grid-cols-[170px_minmax(0,1fr)_minmax(220px,0.8fr)] md:gap-3"
                       >
                         <div className="min-w-0">
                           <div className="truncate font-mono text-[11px]">{opsKindLabel(row.kind)}</div>
@@ -1088,9 +1088,9 @@ function opsIssueCount(row: OpsArtifactRow): number {
 
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-background/70 px-2 py-1.5">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono">{value}</span>
+    <div className="flex min-h-14 flex-col justify-center rounded-xl bg-card/70 px-3 py-2 ring-1 ring-border/35">
+      <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{label}</span>
+      <span className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-foreground">{value}</span>
     </div>
   )
 }

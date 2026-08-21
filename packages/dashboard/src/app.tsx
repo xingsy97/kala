@@ -1671,7 +1671,7 @@ export function App(): JSX.Element {
 
   return (
     <PwaLifecycleHost>
-    <div className="ak-app-shell flex flex-col bg-background text-foreground">
+    <div className="ak-app-shell ak-workspace-canvas flex flex-col text-foreground">
       <AppShellNav
         section={section}
         onSelect={handleSectionSelect}
@@ -1731,7 +1731,7 @@ export function App(): JSX.Element {
                   data-testid="explorer-panel"
                 >
                   <div className="ak-motion-slide-left flex h-full min-h-0 flex-col">
-                    <div className="flex h-10 flex-none items-center border-b border-sidebar-border px-2">
+                    <div className="flex h-11 flex-none items-center border-b border-sidebar-border/50 bg-sidebar/80 px-2 backdrop-blur">
                       <Menu className="h-3.5 w-3.5 flex-none" />
                       <span className="min-w-0 flex-1 truncate text-xs font-medium">{t('app.sessionsTitle')}</span>
                       <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
@@ -2630,7 +2630,7 @@ export function WorkbenchToolbar({
       : t('app.noSessionSelected')
   return (
     <div
-      className="flex min-h-9 flex-none items-center gap-1.5 bg-card px-2 py-1 text-sm text-card-foreground sm:gap-2 sm:px-3"
+      className="flex min-h-11 flex-none items-center gap-1.5 border-b border-border/30 bg-card/65 px-2 py-1.5 text-sm text-card-foreground backdrop-blur sm:gap-2 sm:px-4"
       data-testid="workbench-toolbar"
     >
       {topbarAvailable ? (
@@ -2667,7 +2667,7 @@ export function WorkbenchToolbar({
         {sessionSelected ? (
           <SessionStatusIndicator status={sessionActivityStatus} selected />
         ) : null}
-        <span className="min-w-0 truncate font-medium" data-testid="session-label">
+        <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" data-testid="session-label">
           {displayLabel}
         </span>
       </span>

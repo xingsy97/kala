@@ -104,7 +104,7 @@ export function AppShellNav({
       aria-label={t('appShell.nav.aria')}
       data-testid="app-shell-nav"
       data-collapsed="false"
-      className="sticky top-0 z-30 flex h-11 items-center gap-1 border-b border-border/60 bg-background/95 px-2 backdrop-blur sm:px-3"
+      className="sticky top-0 z-30 flex h-12 items-center gap-1 border-b border-border/45 bg-background/80 px-2 shadow-[0_1px_0_hsl(var(--card)/0.45)] backdrop-blur-xl sm:px-4"
     >
       <span
         aria-label="Agent Kernel"
@@ -128,7 +128,7 @@ export function AppShellNav({
           <circle cx="12" cy="20.25" r="1.35" className="fill-foreground/70" />
           <circle cx="3.75" cy="12" r="1.35" className="fill-foreground/70" />
         </svg>
-        <span className="text-[13px] font-medium tracking-[-0.025em] text-foreground/90">
+          <span className="text-[13px] font-semibold tracking-[-0.025em] text-foreground/90">
           Agent Kernel
         </span>
       </span>
@@ -138,7 +138,7 @@ export function AppShellNav({
       >
         {activePill ? (
           <span
-            className="pointer-events-none absolute z-0 rounded-lg bg-accent shadow-[inset_0_0_0_1px_hsl(var(--border)/0.4)] transition-[transform,width,height,opacity] duration-200 ease-out motion-reduce:transition-none"
+            className="pointer-events-none absolute z-0 rounded-xl bg-card shadow-[0_1px_2px_hsl(220_30%_10%/0.08),inset_0_0_0_1px_hsl(var(--border)/0.55)] transition-[transform,width,height,opacity] duration-200 ease-out motion-reduce:transition-none"
             style={{
               width: activePill.width,
               height: activePill.height,

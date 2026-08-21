@@ -199,7 +199,7 @@ describe('SettingsDialog', () => {
     expect(dialog.className).toContain('max-h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem)]')
     expect(dialog.className).toContain('w-screen')
     expect(dialog.className).toContain('rounded-t-2xl')
-    expect(dialog.className).toContain('sm:max-w-4xl')
+    expect(dialog.className).toContain('sm:max-w-5xl')
     expect(screen.getByTestId('settings-dialog-close').className).toContain('h-11')
     const mobileSelect = screen.getByTestId('settings-mobile-section-select') as HTMLSelectElement
     expect(mobileSelect.className).toContain('opacity-0')

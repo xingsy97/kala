@@ -145,7 +145,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
     const explorer = document.querySelector('[data-testid="explorer-panel"]')
     const inspector = document.querySelector('[data-testid="inspector-panel"]')
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
-    const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
+    const sidebarToggle = document.querySelector('[data-testid="sidebar-toggle"]')
     const selectedSession = document.querySelector(`[data-testid="session-row"][data-session-id="${document.location.search.match(/sessionId=([^&]+)/)?.[1] ?? ''}"]`)
       ?? document.querySelector('[data-testid="session-row"][data-selected="true"]')
       ?? document.querySelector('[data-testid="session-row"]')
@@ -163,7 +163,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
       explorer: rectFor(explorer),
       inspector: rectFor(inspector),
       toolbar: rectFor(toolbar),
-      inspectorTogglePresent: Boolean(inspectorToggle),
+      sidebarTogglePresent: Boolean(sidebarToggle),
       sessionCwdText: sessionLabel?.getAttribute('title') || '',
       sessionCwd: rectFor(sessionLabel),
       selectedSession: rectFor(selectedSession),
@@ -176,7 +176,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
     check(`narrow layout removes inspector rail at ${viewportWidth}px`, metrics.inspector === null, JSON.stringify(metrics))
     check(`narrow layout keeps main panel readable at ${viewportWidth}px`, metrics.main?.width >= viewportWidth - 24, JSON.stringify(metrics))
     check(`narrow layout keeps chat panel readable at ${viewportWidth}px`, metrics.chat?.width >= viewportWidth - 24, JSON.stringify(metrics))
-    check(`narrow layout exposes inspector drawer trigger at ${viewportWidth}px`, metrics.inspectorTogglePresent === true, JSON.stringify(metrics))
+    check(`narrow layout exposes the unified sidebar trigger at ${viewportWidth}px`, metrics.sidebarTogglePresent === true, JSON.stringify(metrics))
     return
   }
   const minMainWidth = viewportWidth === 1200 ? 660 : 820
@@ -189,7 +189,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
   check(`wide layout keeps explorer rail compact at ${viewportWidth}px`, metrics.explorer?.width <= viewportWidth * 0.29, JSON.stringify(metrics))
   check(`wide layout keeps inspector rail compact at ${viewportWidth}px`, metrics.inspector?.width <= viewportWidth * 0.31, JSON.stringify(metrics))
   check(`wide layout keeps main panel usable at ${viewportWidth}px`, metrics.main?.width >= minMainWidth, JSON.stringify(metrics))
-  check(`wide layout does not duplicate inspector toggle while panel is open at ${viewportWidth}px`, metrics.inspectorTogglePresent === false, JSON.stringify(metrics))
+  check(`wide layout does not duplicate the sidebar trigger while panel is open at ${viewportWidth}px`, metrics.sidebarTogglePresent === false, JSON.stringify(metrics))
 }
 
 async function verifyChatContentLayout(page, viewportWidth) {
@@ -224,7 +224,8 @@ async function verifyChatContentLayout(page, viewportWidth) {
       const scrolls = /(auto|scroll)/.test(`${style.overflow}${style.overflowX}${style.overflowY}`)
       const isRadixViewport = el.hasAttribute('data-radix-scroll-area-viewport')
       const isControlledVirtualTree = Boolean(el.closest('[data-scroll-owner="react-arborist"]'))
-      const isControlledTranscript = Boolean(el.closest('[data-scroll-owner="virtuoso"]'))
+      const isControlledTranscript = el.hasAttribute('data-virtuoso-scroller')
+        || Boolean(el.closest('[data-scroll-owner="virtuoso"]'))
       const isAppShellNavScroller = el.closest('[data-testid="app-shell-nav"]') && style.scrollbarWidth === 'none'
       if (isRadixViewport) return false
       if (isControlledVirtualTree) return false
@@ -391,12 +392,12 @@ async function verifyNavigationSurface(page, viewportWidth) {
   const metrics = await page.evaluate(() => {
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
     const explorerToggle = document.querySelector('[data-testid="explorer-toggle"]')
-    const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
+    const sidebarToggle = document.querySelector('[data-testid="sidebar-toggle"]')
     const rect = toolbar?.getBoundingClientRect()
     return {
       text: toolbar?.textContent || '',
       explorerToggle: Boolean(explorerToggle),
-      inspectorToggle: Boolean(inspectorToggle),
+      sidebarToggle: Boolean(sidebarToggle),
       width: rect?.width ?? 0,
       scrollWidth: toolbar?.scrollWidth ?? 0,
       height: rect?.height ?? 0,
@@ -423,21 +424,21 @@ async function verifyNavigationSurface(page, viewportWidth) {
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => !document.querySelector('[data-testid="explorer-drawer"]'))
   } else {
-    check(`wide layout does not duplicate inspector toggle while panel is open at ${viewportWidth}px`, metrics.inspectorToggle === false, JSON.stringify(metrics))
+    check(`wide layout does not duplicate sidebar toggle while panel is open at ${viewportWidth}px`, metrics.sidebarToggle === false, JSON.stringify(metrics))
   }
 }
 
 async function verifyModalSizing(page, viewportWidth) {
   if (viewportWidth < 1180) return
+  const maxWorkspaceModalWidth = Math.min(1024, viewportWidth - 16)
   const maxWideModalWidth = Math.min(896, viewportWidth - 16)
-  const maxMediumModalWidth = Math.min(672, viewportWidth - 16)
   await verifyOpenedModalSize(
     page,
     viewportWidth,
     'settings modal',
     '[data-testid="app-shell-nav-settings-icon"]',
     '[data-testid="settings-dialog"]',
-    maxWideModalWidth,
+    maxWorkspaceModalWidth,
   )
   // Verify session-bound actions before opening the create-session flow. Closing
   // Connect Workspace intentionally returns to a no-selection state, so running
@@ -461,7 +462,7 @@ async function verifyModalSizing(page, viewportWidth) {
     'connect workspace modal',
     '[data-testid="connect-workspace-button"]',
     '[data-testid="connect-workspace-dialog"]',
-    maxMediumModalWidth,
+    maxWideModalWidth,
   )
 }
 
@@ -563,7 +564,7 @@ async function ensureFixtureSessionSelected(page) {
   await page.waitForFunction(
     (id) => {
       const row = document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`)
-      return Boolean(row?.querySelector('[data-testid="session-selected-marker"]'))
+      return row?.getAttribute('data-selected') === 'true'
         && document.querySelectorAll('[data-message-index]').length > 0
     },
     { timeout: 10_000 },
@@ -571,7 +572,7 @@ async function ensureFixtureSessionSelected(page) {
   ).catch(async (error) => {
     const diagnostic = await page.evaluate((id) => ({
       url: location.href,
-      selected: Boolean(document.querySelector(`[data-testid="session-row"][data-session-id="${id}"] [data-testid="session-selected-marker"]`)),
+      selected: document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`)?.getAttribute('data-selected') === 'true',
       rows: document.querySelectorAll('[data-message-index]').length,
       body: document.body.innerText.slice(0, 1000),
       socketResources: performance.getEntriesByType('resource').map((entry) => entry.name).filter((name) => name.includes('socket.io')).slice(-10),
@@ -674,8 +675,8 @@ async function verifyToolRegistry(page, viewportWidth) {
   // fixture-only tool name: populated registry, explanatory copy + policy, and
   // rendered schema fields from whichever current tool is selected.
   check(`inspector shows current tool registry at ${viewportWidth}px`, metrics.itemCount >= 1 && metrics.text.includes('skill'), JSON.stringify(metrics))
-  check(`tool registry shows descriptions and approval mode at ${viewportWidth}px`, metrics.text.includes('Load one reusable agent skill by name') && metrics.text.includes('auto allowed'), JSON.stringify(metrics))
-  check(`tool registry shows input schema parameters at ${viewportWidth}px`, metrics.text.includes('required') && metrics.text.includes('name'), JSON.stringify(metrics))
+  check(`tool registry shows descriptions and approval mode at ${viewportWidth}px`, metrics.text.includes('Recent calls') && metrics.text.includes('auto allowed'), JSON.stringify(metrics))
+  check(`tool registry shows input schema parameters at ${viewportWidth}px`, metrics.text.includes('required') && metrics.text.includes('properties'), JSON.stringify(metrics))
   check(`tool registry schema uses JSON block Radix scroll area at ${viewportWidth}px`, metrics.hasRadixSchemaScroll === true, JSON.stringify(metrics))
   await page.click('[data-testid="runtime-view-switch-state"]')
 }

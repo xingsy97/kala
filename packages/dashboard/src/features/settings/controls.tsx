@@ -34,17 +34,17 @@ export function SettingsSectionButton({
       onClick={onClick}
       data-testid={`settings-tab-${section.key}`}
       className={cn(
-        'w-32 flex-none rounded-md px-3 py-2 text-left text-sm transition-colors sm:w-36 md:w-full',
+        'w-32 flex-none rounded-xl px-3 py-2.5 text-left text-sm transition-all sm:w-36 md:w-full',
         active
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm ring-1 ring-sidebar-border'
-          : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground',
+          ? 'bg-card text-foreground shadow-sm ring-1 ring-border/45'
+          : 'text-muted-foreground hover:bg-card/60 hover:text-foreground',
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <Icon className={cn('h-4 w-4 flex-none', active ? 'text-sidebar-accent-foreground' : 'text-sidebar-foreground/60')} aria-hidden="true" />
+        <Icon className={cn('h-4 w-4 flex-none', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden="true" />
         <div className="min-w-0 truncate font-medium">{label}</div>
       </div>
-      <div className="mt-1 hidden truncate pl-6 text-[11px] text-sidebar-foreground/50 md:block">{hint}</div>
+      <div className="mt-1 hidden truncate pl-6 text-[11px] text-muted-foreground/80 md:block">{hint}</div>
     </button>
   )
 }
@@ -57,8 +57,8 @@ export function SectionHeader({
   subtitle?: string
 }): JSX.Element {
   return (
-    <div className="mb-5 min-w-0 md:mb-6 md:border-b md:border-border md:pb-5">
-      <h3 className="sr-only text-xl font-semibold text-foreground md:not-sr-only md:text-2xl">{title}</h3>
+    <div className="mb-5 min-w-0 md:mb-7">
+      <h3 className="sr-only text-xl font-semibold tracking-[-0.02em] text-foreground md:not-sr-only md:text-2xl">{title}</h3>
       {subtitle ? (
         <p className="max-w-3xl break-words text-sm leading-5 text-muted-foreground md:mt-2 md:leading-6">{subtitle}</p>
       ) : null}
@@ -82,7 +82,7 @@ export function InterfaceToggle({
   disabled?: boolean
 }): JSX.Element {
   return (
-    <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+    <li className="flex flex-col gap-4 rounded-xl bg-card/70 px-4 py-3.5 ring-1 ring-border/40 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
         <div className="font-medium">{label}</div>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
@@ -134,7 +134,7 @@ export function Toggle({
 
 export function EmptyRow({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <div className="rounded-md border border-dashed border-white/15 bg-black/20 px-4 py-6 text-sm text-zinc-400">
+    <div className="rounded-xl border border-dashed border-border/70 bg-muted/15 px-4 py-6 text-sm text-muted-foreground">
       {children}
     </div>
   )
@@ -148,7 +148,7 @@ export function SettingsKeyValueList({
   testId?: string
 }): JSX.Element {
   return (
-    <dl className="overflow-hidden rounded-md ring-1 ring-border/50" data-testid={testId}>
+    <dl className="overflow-hidden rounded-xl bg-card/65 ring-1 ring-border/40" data-testid={testId}>
       {rows.map((row, index) => (
         <div
           key={row.label}
@@ -191,7 +191,7 @@ export function SettingsRecord({
   children: React.ReactNode
 }): JSX.Element {
   return (
-    <div className="min-w-0 rounded-md bg-muted/20 p-3 ring-1 ring-border/50">
+    <div className="min-w-0 rounded-xl bg-card/65 p-4 ring-1 ring-border/40">
       <div className="min-w-0 border-b border-border/40 pb-2">
         <div className="break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]">{title}</div>
         {detail ? <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{detail}</div> : null}

@@ -310,7 +310,7 @@ function ExplorerImpl({
   }, [data])
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/30">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-sidebar/75">
       <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} />
       <div
         ref={ref}
@@ -1151,6 +1151,8 @@ function SessionRow({
       style={style}
       data-testid="session-row"
       data-session-id={s.sessionId}
+      data-selected={selected ? 'true' : 'false'}
+      aria-current={selected ? 'page' : undefined}
       className={cn(
         'group relative min-w-0 cursor-pointer overflow-hidden rounded-xl px-3 py-1.5 transition-colors',
         'hover:bg-accent/50',
