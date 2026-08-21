@@ -1,0 +1,199 @@
+name: RC Clean-environment Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft release tag to verify
+        required: true
+      predecessor_tag:
+        description: Last supported release used for upgrade and rollback proof
+        required: true
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: rc-acceptance-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      revision: ${{ steps.release.outputs.revision }}
+      predecessor_revision: ${{ steps.release.outputs.predecessor_revision }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: '${{ inputs.tag }}', fetch-depth: 0 }
+      - id: release
+        env: { TAG: '${{ inputs.tag }}', PREDECESSOR_TAG: '${{ inputs.predecessor_tag }}' }
+        run: |
+          set -euo pipefail
+          node scripts/release/version-policy.mjs --tag "$TAG"
+          test "$TAG" != "$PREDECESSOR_TAG"
+          git rev-parse --verify "refs/tags/$PREDECESSOR_TAG^{commit}" >/dev/null
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "predecessor_revision=$(git rev-parse "refs/tags/$PREDECESSOR_TAG^{commit}")" >> "$GITHUB_OUTPUT"
+
+  portable:
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: linux-x64, asset: agent-kernel-host-linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64, asset: agent-kernel-host-linux-arm64 }
+          - { os: macos-15-intel, target: darwin-x64, asset: agent-kernel-host-darwin-x64 }
+          - { os: macos-15, target: darwin-arm64, asset: agent-kernel-host-darwin-arm64 }
+          - { os: windows-2025, target: win32-x64, asset: agent-kernel-host-win32-x64.exe }
+          - { os: windows-11-arm, target: win32-arm64, asset: agent-kernel-host-win32-arm64.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: '${{ inputs.tag }}', fetch-depth: 0 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Download exact candidate and predecessor Portable assets
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}', ASSET: '${{ matrix.asset }}' }
+        run: |
+          set -euo pipefail
+          mkdir -p acceptance/candidate acceptance/predecessor acceptance/evidence
+          gh release download '${{ inputs.tag }}' --pattern "$ASSET" --dir acceptance/candidate
+          gh release download '${{ inputs.tag }}' --pattern SHA256SUMS --dir acceptance/candidate
+          gh release download '${{ inputs.tag }}' --pattern manifest.json --dir acceptance/candidate
+          gh release download '${{ inputs.predecessor_tag }}' --pattern "$ASSET" --dir acceptance/predecessor
+          gh release download '${{ inputs.predecessor_tag }}' --pattern SHA256SUMS --dir acceptance/predecessor
+          gh release download '${{ inputs.predecessor_tag }}' --pattern manifest.json --dir acceptance/predecessor
+          gh attestation verify "acceptance/candidate/$ASSET" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/candidate/manifest.json --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/candidate/SHA256SUMS --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "acceptance/predecessor/$ASSET" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/predecessor/manifest.json --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/predecessor/SHA256SUMS --repo "$GITHUB_REPOSITORY"
+          node scripts/release/verify-checksum-index.mjs --index acceptance/candidate/SHA256SUMS --asset "acceptance/candidate/$ASSET" --manifest acceptance/candidate/manifest.json --revision '${{ needs.resolve.outputs.revision }}'
+          node scripts/release/verify-checksum-index.mjs --index acceptance/predecessor/SHA256SUMS --asset "acceptance/predecessor/$ASSET" --manifest acceptance/predecessor/manifest.json --revision '${{ needs.resolve.outputs.predecessor_revision }}'
+      - name: Prove clean install, state continuity, and binary upgrade
+        shell: bash
+        run: |
+          node scripts/release/verify-portable-native.mjs \
+            --asset 'acceptance/candidate/${{ matrix.asset }}' \
+            --predecessor-asset 'acceptance/predecessor/${{ matrix.asset }}' \
+            --target '${{ matrix.target }}' --tag '${{ inputs.tag }}' \
+            --revision '${{ needs.resolve.outputs.revision }}' \
+            --output 'acceptance/evidence/portable-${{ matrix.target }}.rc-evidence.json'
+      - uses: actions/upload-artifact@v5
+        with:
+          name: rc-evidence-portable-${{ matrix.target }}
+          path: acceptance/evidence/*.rc-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+  dedicated:
+    needs: resolve
+    runs-on: [self-hosted, linux, x64, lxd-container]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: '${{ inputs.tag }}', fetch-depth: 0 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Download exact source-free release directories
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail
+          mkdir -p acceptance/dedicated/candidate acceptance/dedicated/predecessor acceptance/evidence
+          gh release download '${{ inputs.tag }}' --dir acceptance/dedicated/candidate
+          gh release download '${{ inputs.predecessor_tag }}' --dir acceptance/dedicated/predecessor
+          test -f acceptance/dedicated/candidate/manifest.json
+          test -f acceptance/dedicated/predecessor/manifest.json
+          test -f acceptance/dedicated/predecessor/runlab-executor-linux-x64
+          gh attestation verify acceptance/dedicated/candidate/manifest.json --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/dedicated/candidate/agent-runlab-runtime.cjs --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/dedicated/candidate/SHA256SUMS --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/dedicated/predecessor/manifest.json --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/dedicated/predecessor/agent-runlab-runtime.cjs --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/dedicated/predecessor/SHA256SUMS --repo "$GITHUB_REPOSITORY"
+      - name: Run clean systemd lifecycle from the independent LXD control plane
+        run: |
+          node scripts/release/verify-dedicated-clean-systemd.mjs \
+            --candidate acceptance/dedicated/candidate \
+            --predecessor acceptance/dedicated/predecessor \
+            --tag '${{ inputs.tag }}' --revision '${{ needs.resolve.outputs.revision }}' \
+            --predecessor-revision '${{ needs.resolve.outputs.predecessor_revision }}' \
+            --output acceptance/evidence/dedicated-linux-x64-systemd.rc-evidence.json
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: rc-evidence-dedicated-linux-x64-systemd
+          path: acceptance/evidence/*.rc-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+  private-cloud:
+    needs: resolve
+    runs-on: [self-hosted, linux, x64, private-cloud-clean]
+    timeout-minutes: 120
+    env:
+      PRIVATE_CLOUD_TEST_ALICE_EMAIL: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_EMAIL }}
+      PRIVATE_CLOUD_TEST_ALICE_PASSWORD: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_PASSWORD }}
+      PRIVATE_CLOUD_TEST_BOB_EMAIL: ${{ secrets.PRIVATE_CLOUD_TEST_BOB_EMAIL }}
+      PRIVATE_CLOUD_TEST_BOB_PASSWORD: ${{ secrets.PRIVATE_CLOUD_TEST_BOB_PASSWORD }}
+      RUNLAB_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE: ${{ runner.temp }}/runlab-private-cloud-config
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: '${{ inputs.tag }}', fetch-depth: 0 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Materialize the access-controlled acceptance configuration
+        env:
+          RUNLAB_RC_PRIVATE_CLOUD_CONFIG_ARCHIVE_B64: ${{ secrets.RUNLAB_RC_PRIVATE_CLOUD_CONFIG_ARCHIVE_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$RUNLAB_RC_PRIVATE_CLOUD_CONFIG_ARCHIVE_B64"
+          mkdir -m 0700 -p "$RUNLAB_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE"
+          printf '%s' "$RUNLAB_RC_PRIVATE_CLOUD_CONFIG_ARCHIVE_B64" | base64 --decode | tar -xzf - -C "$RUNLAB_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE"
+          chmod -R go-rwx "$RUNLAB_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE"
+      - name: Download exact candidate and predecessor bundles
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail
+          mkdir -p acceptance/private-cloud/candidate acceptance/private-cloud/predecessor acceptance/evidence
+          gh release download '${{ inputs.tag }}' --pattern 'agent-runlab-private-cloud-*-linux-x64.tar.gz' --dir acceptance/private-cloud/candidate
+          gh release download '${{ inputs.tag }}' --pattern runlab-executor-linux-x64 --dir acceptance/private-cloud/candidate
+          gh release download '${{ inputs.tag }}' --pattern SHA256SUMS --dir acceptance/private-cloud/candidate
+          gh release download '${{ inputs.predecessor_tag }}' --pattern 'agent-runlab-private-cloud-*-linux-x64.tar.gz' --dir acceptance/private-cloud/predecessor
+          gh attestation verify "$(find acceptance/private-cloud/candidate -type f -name '*.tar.gz' -print -quit)" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "$(find acceptance/private-cloud/predecessor -type f -name '*.tar.gz' -print -quit)" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify acceptance/private-cloud/candidate/SHA256SUMS --repo "$GITHUB_REPOSITORY"
+          node scripts/release/verify-checksum-index.mjs --index acceptance/private-cloud/candidate/SHA256SUMS --asset acceptance/private-cloud/candidate/runlab-executor-linux-x64
+          test "$(find acceptance/private-cloud/candidate -type f -name '*.tar.gz' | wc -l)" -eq 1
+          test "$(find acceptance/private-cloud/predecessor -type f -name '*.tar.gz' | wc -l)" -eq 1
+          CANDIDATE_BUNDLE=$(find acceptance/private-cloud/candidate -type f -name '*.tar.gz' -printf '%f\n')
+          test -n "$CANDIDATE_BUNDLE"
+      - name: Run clean source-free Compose lifecycle
+        run: |
+          node scripts/release/verify-private-cloud-clean-compose.mjs \
+            --candidate-archive "$(find acceptance/private-cloud/candidate -type f -name '*.tar.gz' -print -quit)" \
+            --predecessor-archive "$(find acceptance/private-cloud/predecessor -type f -name '*.tar.gz' -print -quit)" \
+            --executor acceptance/private-cloud/candidate/runlab-executor-linux-x64 \
+            --tag '${{ inputs.tag }}' --revision '${{ needs.resolve.outputs.revision }}' \
+            --predecessor-revision '${{ needs.resolve.outputs.predecessor_revision }}' \
+            --output acceptance/evidence/private-cloud-linux-x64-compose.rc-evidence.json
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: rc-evidence-private-cloud-linux-x64-compose
+          path: acceptance/evidence/*.rc-evidence.json
+          if-no-files-found: error
+          retention-days: 90

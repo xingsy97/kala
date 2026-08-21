@@ -81,7 +81,9 @@ The normative Private Cloud bundle and lifecycle contract is
   backup/restore, Browser, Executor, and self-deployment checks.
 - [ ] Private Cloud passes clean Compose install, tenant isolation, image upgrade,
   Dashboard-only update, rollback, backup/restore, and Executor checks.
-- [ ] Release candidates are drafts until all required evidence is attached.
+- [x] Release candidates are drafts until all required evidence is attached;
+  the promotion workflow fails closed on the exact matrix, tag, version, and
+  revision before it can clear the draft bit.
 
 ## 4. Evidence and privacy
 
@@ -90,6 +92,11 @@ platform, operation phase, and rollback result. It must not contain real domains
 IPs, credentials, private filesystem paths, Session content, receipts from a private
 installation, or screenshots with private data. Generated local evidence stays
 outside Git unless it is deterministic, redacted, reviewed, and explicitly approved.
+
+The normative machine-readable contract and promotion sequence are documented in
+[`release-evidence-contract.md`](release-evidence-contract.md). Workflow existence
+is not acceptance evidence. The first three acceptance boxes remain open until the
+matching runners have produced successful evidence for the exact draft revision.
 
 ## 5. Stop conditions
 

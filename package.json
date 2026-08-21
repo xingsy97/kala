@@ -28,6 +28,7 @@
     "privacy:check:staged": "node scripts/security/privacy-check.mjs --staged",
     "hooks:install": "node scripts/security/install-git-hooks.mjs",
     "verify:release-install": "node scripts/release/verify-release-install.mjs",
+    "verify:rc-evidence": "node scripts/release/verify-rc-evidence.mjs",
     "test": "pnpm run test:fast",
     "test:fast": "pnpm run test:workspace && pnpm run test:scripts",
     "test:extended": "pnpm run test:fast && pnpm run test:task-packs && pnpm run test:python",

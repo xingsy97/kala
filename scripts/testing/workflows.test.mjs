@@ -95,6 +95,29 @@ test('Private Cloud release builds signed multi-architecture images and native b
   assert.doesNotMatch(release, /--draft=false/u)
 })
 
+test('RC promotion requires the complete clean-environment evidence matrix', async () => {
+  const acceptance = await workflow('rc-acceptance.yml')
+  for (const target of ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']) assert.match(acceptance, new RegExp('target: ' + target, 'u'))
+  assert.match(acceptance, /verify-portable-native\.mjs/u)
+  assert.match(acceptance, /verify-dedicated-clean-systemd\.mjs/u)
+  assert.match(acceptance, /verify-private-cloud-clean-compose\.mjs/u)
+  assert.match(acceptance, /verify-checksum-index\.mjs/u)
+  assert.doesNotMatch(acceptance, /sha256sum/u)
+  assert.match(acceptance, /predecessor_tag:/u)
+  assert.match(acceptance, /predecessor_revision/u)
+  assert.match(acceptance, /gh attestation verify/u)
+  assert.match(acceptance, /runs-on: \[self-hosted, linux, x64, lxd-container\]/u)
+  assert.match(acceptance, /runs-on: \[self-hosted, linux, x64, private-cloud-clean\]/u)
+
+  const promotion = await workflow('promote-rc.yml')
+  assert.match(promotion, /RC Clean-environment Acceptance/u)
+  assert.match(promotion, /\.github\/workflows\/rc-acceptance\.yml/u)
+  assert.match(promotion, /verify-rc-evidence\.mjs/u)
+  assert.match(promotion, /\.head_sha/u)
+  assert.match(promotion, /gh release edit "\$TAG" --draft=false/u)
+  assert.ok(promotion.indexOf('verify-rc-evidence.mjs') < promotion.indexOf('--draft=false'))
+})
+
 test('test discovery and release gates cannot silently omit task packs', async () => {
   const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
   assert.match(rootPackage.scripts['test:extended'], /test:task-packs/u)
