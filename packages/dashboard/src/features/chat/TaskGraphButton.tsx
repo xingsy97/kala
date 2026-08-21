@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Circle, CircleDashed, GitBranch, LockKeyhole, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 
 import { cn } from '../../lib/utils.js'
 import type { TaskGraphNode, TaskGraphSnapshot, TaskGraphStatus } from './task-graph-from-timeline.js'
@@ -8,6 +9,7 @@ import type { TaskGraphNode, TaskGraphSnapshot, TaskGraphStatus } from './task-g
 type Props = { graph: TaskGraphSnapshot | null }
 
 export function TaskGraphButton({ graph }: Props): JSX.Element | null {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [graphView, setGraphView] = useState(true)
   const root = useRef<HTMLDivElement | null>(null)
@@ -29,16 +31,16 @@ export function TaskGraphButton({ graph }: Props): JSX.Element | null {
   const allBlocked = summary.blocked > 0 && summary.active === 0 && summary.ready === 0
   return <div className="relative flex-none" ref={root}>
     <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-haspopup="dialog" data-testid="task-graph-trigger"
-      title={`${summary.completed} completed · ${summary.active} active · ${summary.ready} ready · ${summary.blocked} blocked`}
+      title={t('taskGraph.summary', summary)}
       className={cn('inline-flex h-9 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent sm:h-7', open && 'bg-accent text-foreground', allDone && 'text-emerald-700 dark:text-emerald-300', allBlocked && 'text-amber-700 dark:text-amber-300')}>
       <GitBranch className="h-3.5 w-3.5" /><span>{done}/{summary.total}</span>
-      <span className="hidden sm:inline">· {summary.ready} ready</span>
+      <span className="hidden sm:inline">· {t('taskGraph.readyCount', { count: summary.ready })}</span>
       {summary.active > 0 ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" /> : null}
     </button>
-    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label="Task graph" data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-30 flex max-h-[76dvh] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-xl md:inset-x-4 md:bottom-4 md:top-16 md:max-h-none lg:left-1/2 lg:right-auto lg:top-auto lg:bottom-20 lg:max-h-[76dvh] lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
+    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label={t('taskGraph.aria')} data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-30 flex max-h-[76dvh] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-xl md:inset-x-4 md:bottom-4 md:top-16 md:max-h-none lg:left-1/2 lg:right-auto lg:top-auto lg:bottom-20 lg:max-h-[76dvh] lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
       <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
-        <GitBranch className="h-4 w-4" /><span className="text-sm font-medium">Task Graph</span><span className="text-xs text-muted-foreground">rev {graph.revision}</span>
-        <button className="ml-auto rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => setGraphView((value) => !value)}>{graphView ? 'List view' : 'Graph view'}</button>
+        <GitBranch className="h-4 w-4" /><span className="text-sm font-medium">{t('taskGraph.title')}</span><span className="text-xs text-muted-foreground">{t('taskGraph.revision', { revision: graph.revision })}</span>
+        <button className="ml-auto rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => setGraphView((value) => !value)}>{graphView ? t('taskGraph.listView') : t('taskGraph.graphView')}</button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {graphView ? <GraphView graph={graph} /> : <GroupedList graph={graph} />}
@@ -48,12 +50,13 @@ export function TaskGraphButton({ graph }: Props): JSX.Element | null {
 }
 
 function GroupedList({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
+  const { t } = useTranslation()
   const blocked = new Map(graph.blocked.map((item) => [item.id, item.waitingOn]))
   const groups = [
-    ['Active', graph.nodes.filter((node) => node.status === 'in_progress')],
-    ['Ready', graph.nodes.filter((node) => graph.ready.includes(node.id))],
-    ['Blocked', graph.nodes.filter((node) => blocked.has(node.id))],
-    ['Done', graph.nodes.filter((node) => node.status === 'completed' || node.status === 'cancelled')],
+    [t('taskGraph.active'), graph.nodes.filter((node) => node.status === 'in_progress')],
+    [t('taskGraph.ready'), graph.nodes.filter((node) => graph.ready.includes(node.id))],
+    [t('taskGraph.blocked'), graph.nodes.filter((node) => blocked.has(node.id))],
+    [t('taskGraph.done'), graph.nodes.filter((node) => node.status === 'completed' || node.status === 'cancelled')],
   ] as const
   return <div className="space-y-3">{groups.map(([label, nodes]) => nodes.length ? <section key={label}>
     <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label} ({nodes.length})</h3>
@@ -62,10 +65,11 @@ function GroupedList({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
 }
 
 function NodeRow({ node, waitingOn }: { node: TaskGraphNode; waitingOn?: readonly string[] }): JSX.Element {
+  const { t } = useTranslation()
   return <div className="flex gap-2 rounded-md bg-muted/35 px-2.5 py-2 text-sm">
     <StatusIcon status={node.status} blocked={Boolean(waitingOn?.length)} />
     <div className="min-w-0"><div className={cn('break-words', (node.status === 'completed' || node.status === 'cancelled') && 'text-muted-foreground line-through')}>{node.content}</div>
-      <div className="mt-0.5 text-[11px] text-muted-foreground"><code>{node.id}</code>{node.priority ? ` · ${node.priority}` : ''}{waitingOn?.length ? ` · waiting on ${waitingOn.join(', ')}` : ''}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground"><code>{node.id}</code>{node.priority ? ` · ${node.priority}` : ''}{waitingOn?.length ? ` · ${t('taskGraph.waitingOn', { ids: waitingOn.join(', ') })}` : ''}</div>
     </div>
   </div>
 }

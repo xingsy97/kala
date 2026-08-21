@@ -1654,15 +1654,15 @@ export function App(): JSX.Element {
     return <PageLoadingFallback compact />
   }
   if (runtimeDeployment.error || authSession.error || runtimeDeployment.unauthorized || (privateCloudMode && authSession.session?.authenticated !== true)) {
-    const detail = runtimeDeployment.error ?? authSession.error ?? 'Your sign-in session is missing or has expired.'
+    const detail = runtimeDeployment.error ?? authSession.error ?? t('app.accessErrorDefault')
     return (
       <main className="fixed inset-0 grid place-items-center bg-background p-4 text-foreground" data-testid="product-access-error">
         <section className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-xl" role="alert">
-          <h1 className="text-xl font-semibold">Unable to open Agent RunLab</h1>
+          <h1 className="text-xl font-semibold">{t('app.accessErrorTitle')}</h1>
           <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button onClick={() => { window.location.href = '/auth/login?prompt=login' }}>Sign in again</Button>
-            <Button variant="outline" onClick={() => window.location.reload()}>Retry</Button>
+            <Button onClick={() => { window.location.href = '/auth/login?prompt=login' }}>{t('app.signInAgain')}</Button>
+            <Button variant="outline" onClick={() => window.location.reload()}>{t('common.retry')}</Button>
           </div>
         </section>
       </main>
@@ -1700,11 +1700,11 @@ export function App(): JSX.Element {
       {section === 'operations' ? (
         runtimeCapabilities.operations ? <Suspense fallback={<PageLoadingFallback />}>
           <OperationsPage onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }} />
-        </Suspense> : <CapabilityUnavailable title="Operations unavailable" />
+        </Suspense> : <CapabilityUnavailable title={t('app.operationsUnavailable')} />
       ) : section === 'artifacts' ? (
         runtimeCapabilities.artifacts ? <Suspense fallback={<PageLoadingFallback />}>
           <ArtifactsPage onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }} />
-        </Suspense> : <CapabilityUnavailable title="Product outputs unavailable" />
+        </Suspense> : <CapabilityUnavailable title={t('app.artifactsUnavailable')} />
       ) : section === 'docs' ? (
         <Suspense fallback={<PageLoadingFallback />}>
           <DocsPage />
@@ -1712,7 +1712,7 @@ export function App(): JSX.Element {
       ) : section === 'pipeline' ? (
         runtimeCapabilities.pipeline ? <Suspense fallback={<PageLoadingFallback />}>
           <PipelinePage />
-        </Suspense> : <CapabilityUnavailable title="Pipeline unavailable" />
+        </Suspense> : <CapabilityUnavailable title={t('app.pipelineUnavailable')} />
       ) : section === 'memo' ? (
         <Suspense fallback={<PageLoadingFallback />}>
           <MemoPage />
@@ -1733,7 +1733,7 @@ export function App(): JSX.Element {
                   <div className="ak-motion-slide-left flex h-full min-h-0 flex-col">
                     <div className="flex h-10 flex-none items-center border-b border-sidebar-border px-2">
                       <Menu className="h-3.5 w-3.5 flex-none" />
-                      <span className="min-w-0 flex-1 truncate text-xs font-medium">Sessions</span>
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium">{t('app.sessionsTitle')}</span>
                       <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
                     </div>
                     <div className="min-h-0 flex-1 overflow-hidden">
@@ -2153,14 +2153,14 @@ export function App(): JSX.Element {
           </DialogHeader>
           <div className="flex h-full min-h-0 flex-col bg-sidebar pb-[env(safe-area-inset-bottom)] text-sidebar-foreground">
             <div className="flex h-11 flex-none items-center gap-2 border-b border-sidebar-border px-3">
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">Sessions</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{t('app.sessionsTitle')}</span>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 flex-none text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                title="Close explorer"
-                aria-label="Close explorer"
+                title={t('app.closeExplorer')}
+                aria-label={t('app.closeExplorer')}
                 onClick={() => setExplorerDrawerOpen(false)}
               >
                 <PanelLeftClose className="h-4 w-4" />
@@ -2503,7 +2503,7 @@ export function NoSessionArea({
         <div className="flex flex-wrap justify-center gap-2">
           {!hasWorkspace && onConnectWorkspace ? (
             <Button type="button" onClick={onConnectWorkspace} data-testid="no-session-connect-workspace">
-              Connect your first workspace
+              {t('app.connectFirstWorkspace')}
             </Button>
           ) : (
             <Button type="button" onClick={() => onNewSession()} data-testid="no-session-new-button">
@@ -2511,7 +2511,7 @@ export function NoSessionArea({
             </Button>
           )}
           <Button type="button" variant="outline" asChild>
-            <a href="#/docs">View setup guide</a>
+            <a href="#/docs">{t('app.viewSetupGuide')}</a>
           </Button>
         </div>
       </div>
@@ -2521,14 +2521,15 @@ export function NoSessionArea({
 
 
 function SidebarCollapseButton({ onCollapse }: { onCollapse(): void }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon"
       className="h-7 w-7 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-      title="Hide sidebar"
-      aria-label="Hide sidebar"
+      title={t('app.hideSidebar')}
+      aria-label={t('app.hideSidebar')}
       data-testid="sidebar-collapse-button"
       onClick={(event) => {
         event.stopPropagation()
@@ -2541,6 +2542,7 @@ function SidebarCollapseButton({ onCollapse }: { onCollapse(): void }): JSX.Elem
 }
 
 function SessionErrorBanner({ error }: { error: SessionErrorEvent | null }): JSX.Element | null {
+  const { t } = useTranslation()
   const shouldShow = Boolean(error)
   // Signature identifies a distinct error occurrence, so a fresh error after a
   // dismissed one still surfaces.
@@ -2567,8 +2569,8 @@ function SessionErrorBanner({ error }: { error: SessionErrorEvent | null }): JSX
         <button
           type="button"
           onClick={() => setDismissedSignature(signature)}
-          aria-label="Dismiss error"
-          title="Dismiss"
+          aria-label={t('app.dismissError')}
+          title={t('app.dismiss')}
           data-testid="session-error-dismiss"
           className="flex-none rounded p-0.5 text-rose-600/80 transition-colors hover:bg-rose-100 hover:text-rose-800 dark:text-rose-300/80 dark:hover:bg-rose-900/60 dark:hover:text-rose-100"
         >
@@ -2746,8 +2748,8 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
     if (!socket?.connected) {
       setHostRtt(null)
       setExecutorRtt(null)
-      setHostError('Disconnected')
-      setExecutorError(executorConnected ? 'Unavailable' : 'Offline')
+      setHostError(t('common.disconnected'))
+      setExecutorError(t(executorConnected ? 'connectionHealth.unavailable' : 'connectionHealth.offline'))
       setChecking(false)
       return
     }
@@ -2760,25 +2762,25 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
     const hostStart = performance.now()
     socket.timeout(3000).emit('client:connection_ping', Date.now(), (err: unknown) => {
       setHostRtt(err ? null : Math.round(performance.now() - hostStart))
-      setHostError(err ? 'Timed out' : null)
+      setHostError(err ? t('connectionHealth.timedOut') : null)
       finish()
     })
     if (workspaceId && executorConnected) {
       socket.timeout(3500).emit('client:executor_ping', workspaceId, (err: unknown, result?: { rttMs?: number; error?: string }) => {
         if (err || result?.error) {
           setExecutorRtt(null)
-          setExecutorError(result?.error ? 'Unavailable' : 'Timed out')
+          setExecutorError(t(result?.error ? 'connectionHealth.unavailable' : 'connectionHealth.timedOut'))
         } else {
           setExecutorRtt(result?.rttMs ?? null)
-          setExecutorError(result?.rttMs === undefined ? 'Not measured' : null)
+          setExecutorError(result?.rttMs === undefined ? t('connectionHealth.notMeasured') : null)
         }
         finish()
       })
     } else {
       setExecutorRtt(null)
-      setExecutorError(executorConnected ? 'Not measured' : 'Offline')
+      setExecutorError(t(executorConnected ? 'connectionHealth.notMeasured' : 'connectionHealth.offline'))
     }
-  }, [executorConnected, socket, workspaceId])
+  }, [executorConnected, socket, t, workspaceId])
 
   useEffect(() => {
     measure()
@@ -2796,31 +2798,29 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
       <button type="button" onClick={() => setOpen((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8" data-testid="connection-status" data-status={status} aria-expanded={open}>
         <span className={cn('h-2 w-2 rounded-full', statusDot(status))} />
         <span className="hidden sm:inline">{label}</span>
-        <span className="hidden font-mono text-[10px] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineLatency !== null ? `${headlineLatency} ms` : checking ? 'Measuring…' : '—'}</span>
+        <span className="hidden font-mono text-[10px] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineLatency !== null ? `${headlineLatency} ms` : checking ? t('connectionHealth.measuring') : '—'}</span>
       </button>
       {open ? (
         <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-sm rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96" data-testid="connection-status-popover">
           <div className="flex items-start justify-between gap-3 pb-3">
-            <div><h3 className="text-sm font-semibold">Connection health</h3><p className="mt-0.5 text-[11px] text-muted-foreground">Reachability and round-trip latency</p></div>
-            <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : 'bg-amber-500')} />{healthy ? 'Healthy' : 'Check connection'}</span>
+            <div><h3 className="text-sm font-semibold">{t('connectionHealth.title')}</h3><p className="mt-0.5 text-[11px] text-muted-foreground">{t('connectionHealth.subtitle')}</p></div>
+            <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : 'connectionHealth.check')}</span>
           </div>
           <div className="divide-y divide-border/30 rounded-2xl bg-muted/20 px-3">
-            <HealthRow label="Device → Host" state={status === 'ready' ? hostError ?? 'Connected' : label} latency={hostRtt} measuring={checking && hostRtt === null && !hostError} />
-            <HealthRow label="Host → Executor" state={!executorConnected ? 'Offline' : executorError ?? 'Connected'} latency={executorRtt} measuring={checking && executorConnected && executorRtt === null && !executorError} />
-            <HealthRow label="Session sync" state={status === 'ready' ? 'Synchronized' : label} />
+            <HealthRow label={t('connectionHealth.deviceHost')} state={status === 'ready' ? hostError ?? t('common.connected') : label} tone={status === 'ready' && !hostError ? 'healthy' : status === 'disconnected' || status === 'error' ? 'failed' : 'pending'} latency={hostRtt} measuring={checking && hostRtt === null && !hostError} measuringLabel={t('connectionHealth.measuring')} />
+            <HealthRow label={t('connectionHealth.hostExecutor')} state={!executorConnected ? t('connectionHealth.offline') : executorError ?? t('common.connected')} tone={!executorConnected || executorError ? 'failed' : 'healthy'} latency={executorRtt} measuring={checking && executorConnected && executorRtt === null && !executorError} measuringLabel={t('connectionHealth.measuring')} />
+            <HealthRow label={t('connectionHealth.sessionSync')} state={status === 'ready' ? t('connectionHealth.synchronized') : label} tone={status === 'ready' ? 'healthy' : status === 'disconnected' || status === 'error' ? 'failed' : 'pending'} measuringLabel={t('connectionHealth.measuring')} />
           </div>
-          <div className="mt-3 flex items-center gap-2"><Button size="sm" variant="outline" className="h-8" disabled={checking || !socket?.connected} onClick={measure}>{checking ? 'Measuring…' : 'Measure again'}</Button><Button size="sm" variant="ghost" className="h-8" onClick={onResync}>Resync</Button></div>
-          <details className="mt-2 text-xs"><summary className="cursor-pointer select-none rounded-lg px-2 py-2 font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground">Diagnostics</summary><div className="mt-1 flex items-center justify-between gap-3 rounded-lg bg-muted/20 px-3 py-2"><p className="min-w-0 truncate text-[11px] text-muted-foreground">Transport · {transport ?? 'unknown'}</p><Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button></div></details>
+          <div className="mt-3 flex items-center gap-2"><Button size="sm" variant="outline" className="h-8" disabled={checking || !socket?.connected} onClick={measure}>{t(checking ? 'connectionHealth.measuring' : 'connectionHealth.measureAgain')}</Button><Button size="sm" variant="ghost" className="h-8" onClick={onResync}>{t('connectionHealth.resync')}</Button></div>
+          <details className="mt-2 text-xs"><summary className="cursor-pointer select-none rounded-lg px-2 py-2 font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground">{t('connectionHealth.diagnostics')}</summary><div className="mt-1 flex items-center justify-between gap-3 rounded-lg bg-muted/20 px-3 py-2"><p className="min-w-0 truncate text-[11px] text-muted-foreground">{t('connectionHealth.transport')} · {transport ?? t('connectionHealth.unknown')}</p><Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy}>{t(copied ? 'common.copied' : 'common.copy')}</Button></div></details>
         </div>
       ) : null}
     </div>
   )
 })
 
-function HealthRow({ label, state, latency, measuring = false }: { label: string; state: string; latency?: number | null; measuring?: boolean }): JSX.Element {
-  const healthy = state === 'Connected' || state === 'Synchronized'
-  const failed = state === 'Offline' || state === 'Measurement timed out'
-  return <div className="flex min-h-12 items-center gap-3 py-2.5"><span className={cn('h-2 w-2 flex-none rounded-full', healthy ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-amber-500')} /><div className="min-w-0 flex-1"><p className="font-medium text-foreground">{label}</p><p className="truncate text-[11px] text-muted-foreground">{measuring ? 'Measuring…' : state}</p></div>{latency !== null && latency !== undefined ? <span className="font-mono text-xs tabular-nums text-foreground">{latency} ms</span> : null}</div>
+function HealthRow({ label, state, tone, latency, measuring = false, measuringLabel }: { label: string; state: string; tone: 'healthy' | 'failed' | 'pending'; latency?: number | null; measuring?: boolean; measuringLabel: string }): JSX.Element {
+  return <div className="flex min-h-12 items-center gap-3 py-2.5"><span className={cn('h-2 w-2 flex-none rounded-full', tone === 'healthy' ? 'bg-emerald-500' : tone === 'failed' ? 'bg-rose-500' : 'bg-amber-500')} /><div className="min-w-0 flex-1"><p className="font-medium text-foreground">{label}</p><p className="truncate text-[11px] text-muted-foreground">{measuring ? measuringLabel : state}</p></div>{latency !== null && latency !== undefined ? <span className="font-mono text-xs tabular-nums text-foreground">{latency} ms</span> : null}</div>
 }
 
 function hostStatusLabel(status: string, t: ReturnType<typeof useTranslation>['t']): string {

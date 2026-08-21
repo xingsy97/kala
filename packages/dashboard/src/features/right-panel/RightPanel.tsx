@@ -27,9 +27,9 @@ export function RightPanel({
   const { t } = useTranslation()
   return (
     <div className="flex h-full min-h-0 flex-col bg-card text-card-foreground" data-testid="right-panel">
-      <div className="flex h-14 flex-none items-center gap-1 border-b border-border/40 bg-muted/20 px-2 sm:h-11" role="tablist" aria-label="Workspace tools">
-        <TabButton active={activeTab === 'files'} onClick={() => onTabChange('files')} icon={<Files className="h-3.5 w-3.5" />} label="Files" testId="right-panel-files-tab" />
-        <TabButton active={activeTab === 'git'} onClick={() => onTabChange('git')} icon={<GitBranch className="h-3.5 w-3.5" />} label="Git" testId="right-panel-git-tab" />
+      <div className="flex h-14 flex-none items-center gap-1 border-b border-border/40 bg-muted/20 px-2 sm:h-11" role="tablist" aria-label={t('rightPanel.tools')}>
+        <TabButton active={activeTab === 'files'} onClick={() => onTabChange('files')} icon={<Files className="h-3.5 w-3.5" />} label={t('rightPanel.files')} testId="right-panel-files-tab" />
+        <TabButton active={activeTab === 'git'} onClick={() => onTabChange('git')} icon={<GitBranch className="h-3.5 w-3.5" />} label={t('rightPanel.git')} testId="right-panel-git-tab" />
         <TabButton active={activeTab === 'terminal'} onClick={() => onTabChange('terminal')} icon={<SquareTerminal className="h-3.5 w-3.5" />} label={t('rightPanel.terminal')} testId="right-panel-terminal-tab" />
         <TabButton active={activeTab === 'inspector'} onClick={() => onTabChange('inspector')} icon={<Bug className="h-3.5 w-3.5" />} label={t('rightPanel.inspector')} testId="right-panel-inspector-tab" />
         <span className="ml-auto h-5 w-px flex-none bg-border/50" aria-hidden="true" />

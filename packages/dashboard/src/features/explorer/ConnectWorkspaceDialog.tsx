@@ -217,7 +217,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
         </DialogHeader>
         <div className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto p-5 sm:p-7">
           <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)] lg:gap-8">
-            <section className="min-w-0 space-y-5" aria-label="Installation options">
+            <section className="min-w-0 space-y-5" aria-label={t('executorPairing.installationOptions')}>
               <SectionLabel index="1" label={t('explorer.connectDialog.platform')} />
               <PlatformGroup label={t('explorer.connectDialog.platform')} selected={form.platform} labelFor={(value) => t(`explorer.connectDialog.platforms.${value}`)} onChange={(platform) => updateForm({ platform })} />
               <ChoiceGroup label={t('explorer.connectDialog.runMode')} values={MODES} selected={form.mode} labelFor={(value) => t(`explorer.connectDialog.modes.${value}`)} onChange={(mode) => updateForm({ mode })} />

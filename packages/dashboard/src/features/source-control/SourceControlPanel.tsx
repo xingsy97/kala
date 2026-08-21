@@ -22,6 +22,7 @@ import {
 } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
 import { gitDiff, gitStatus } from '../../lib/git-client.js'
+import { useTranslation } from 'react-i18next'
 
 type DashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 
@@ -63,6 +64,7 @@ const GIT_STATUS_LABEL: Record<GitFileChange['status'], string> = {
 }
 
 function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizePx = 12 }: SourceControlPanelProps): JSX.Element {
+  const { t } = useTranslation()
   const resourceKey = `${workspaceId ?? 'offline'}\0${cwd ?? ''}`
   const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -90,7 +92,7 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
   }, [online, resourceKey])
   useEffect(() => { setViewMode(readGitViewMode(viewModeKey)) }, [viewModeKey])
 
-  const groups = useMemo(() => groupGitFiles(status?.files ?? []), [status])
+  const groups = useMemo(() => groupGitFiles(status?.files ?? [], t), [status, t])
   const fileCount = status?.files.length ?? 0
   const toggleDir = useCallback((path: string) => {
     setCollapsedDirs((prev) => {
@@ -113,7 +115,7 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
       <div className="flex h-10 flex-none items-center gap-2 border-b border-sidebar-border/40 bg-muted/15 px-3" data-testid="source-control-toolbar">
         <GitBranch className="h-3.5 w-3.5 flex-none text-sidebar-foreground/70" />
         <div className="min-w-0 flex-1 truncate text-xs text-sidebar-foreground/75">
-          {status?.repo?.branch ?? status?.repo?.head ?? 'Repository'}
+          {status?.repo?.branch ?? status?.repo?.head ?? t('sourceControl.repository')}
         </div>
         {fileCount > 0 ? <span className="font-mono text-[10px] tabular-nums text-sidebar-foreground/55">{fileCount}</span> : null}
         <Button
@@ -122,30 +124,30 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
           className={cn('h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground', fileCount > 0 && 'text-sidebar-foreground')}
           disabled={fileCount === 0}
           onClick={toggleViewMode}
-          title={viewMode === 'tree' ? 'Show as list' : 'Show as tree'}
-          aria-label={viewMode === 'tree' ? 'Show as list' : 'Show as tree'}
+          title={viewMode === 'tree' ? t('sourceControl.showList') : t('sourceControl.showTree')}
+          aria-label={viewMode === 'tree' ? t('sourceControl.showList') : t('sourceControl.showTree')}
           aria-pressed={viewMode === 'tree'}
           data-testid="source-control-view-mode-toggle"
           data-view-mode={viewMode}
         >
           {viewMode === 'tree' ? <List className="h-3.5 w-3.5" /> : <ListTree className="h-3.5 w-3.5" />}
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" disabled={!online || loading} onClick={() => void refresh()} title="Refresh source control" aria-label="Refresh source control">
+        <Button variant="ghost" size="icon" className="h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" disabled={!online || loading} onClick={() => void refresh()} title={t('sourceControl.refresh')} aria-label={t('sourceControl.refresh')}>
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-1.5" style={{ fontSize: fontSizePx }}>
         {!online ? (
-          <EmptyState message="Workspace executor is offline." />
+          <EmptyState message={t('sourceControl.offline')} />
         ) : loading && !status ? (
-          <div className="flex min-h-28 items-center justify-center gap-2 p-3 text-xs text-sidebar-foreground/60"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading changes</div>
+          <div className="flex min-h-28 items-center justify-center gap-2 p-3 text-xs text-sidebar-foreground/60"><Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('sourceControl.loadingChanges')}</div>
         ) : status?.error ? (
           <ErrorState message={status.error.message} />
         ) : fileCount === 0 ? (
-          <EmptyState message="No changes." />
+          <EmptyState message={t('sourceControl.noChanges')} />
         ) : (
           <div className="space-y-2">
-            {status?.truncated ? <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-200">Showing first {status.truncated.limit} changed files.</div> : null}
+            {status?.truncated ? <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-200">{t('sourceControl.truncatedFiles', { count: status.truncated.limit })}</div> : null}
             {groups.map((group) => (
               <div key={group.id}>
                 <div className="px-1.5 py-1 text-[11px] font-medium uppercase tracking-normal text-sidebar-foreground/55">{group.label}</div>
@@ -269,6 +271,7 @@ function GitFileRow({ file, depth, label, onOpen }: { file: GitFileChange; depth
 }
 
 function GitDiffDialog({ open, onOpenChange, socket, workspaceId, sessionId, cwd, target }: { open: boolean; onOpenChange: (open: boolean) => void; socket: DashboardSocket | null; workspaceId?: string; sessionId?: string; cwd?: string; target: { file: GitFileChange; staged: boolean } | null }): JSX.Element {
+  const { t } = useTranslation()
   const [diff, setDiff] = useState<GitDiffResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [renderSideBySide, setRenderSideBySide] = useState(true)
@@ -298,10 +301,10 @@ function GitDiffDialog({ open, onOpenChange, socket, workspaceId, sessionId, cwd
         <DialogHeader className="border-b border-border px-3 py-2.5 pr-10 sm:px-4">
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
             <div className="min-w-0 flex-1">
-              <DialogTitle className="truncate font-mono text-sm font-medium">{path ?? 'Git diff'}</DialogTitle>
-              <DialogDescription className="text-xs">Read-only source control diff.</DialogDescription>
+              <DialogTitle className="truncate font-mono text-sm font-medium">{path ?? t('sourceControl.gitDiff')}</DialogTitle>
+              <DialogDescription className="text-xs">{t('sourceControl.diffDescription')}</DialogDescription>
             </div>
-            <div className="grid w-fit flex-none grid-cols-2 rounded-md border border-border bg-muted/40 p-0.5" aria-label="Diff layout">
+            <div className="grid w-fit flex-none grid-cols-2 rounded-md border border-border bg-muted/40 p-0.5" aria-label={t('sourceControl.diffLayout')}>
               <button
                 type="button"
                 className={cn('flex h-7 items-center justify-center gap-1.5 rounded px-2 text-xs font-medium', renderSideBySide ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}
@@ -310,7 +313,7 @@ function GitDiffDialog({ open, onOpenChange, socket, workspaceId, sessionId, cwd
                 data-testid="source-control-diff-side-by-side"
               >
                 <Columns2 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Side by side</span>
+                <span className="hidden sm:inline">{t('sourceControl.sideBySide')}</span>
               </button>
               <button
                 type="button"
@@ -320,19 +323,19 @@ function GitDiffDialog({ open, onOpenChange, socket, workspaceId, sessionId, cwd
                 data-testid="source-control-diff-inline"
               >
                 <Rows3 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Inline</span>
+                <span className="hidden sm:inline">{t('sourceControl.inline')}</span>
               </button>
             </div>
           </div>
         </DialogHeader>
         <div className="h-[min(68dvh,760px)] min-h-0 sm:h-[min(74dvh,760px)]">
           {loading ? (
-            <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading diff</div>
+            <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> {t('sourceControl.loadingDiff')}</div>
           ) : diff?.error ? (
             <DiffError message={diff.error.message} />
           ) : diff ? (
             <div className="flex h-full min-h-0 flex-col">
-              {diff.truncated ? <div className="border-b border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Large diff side was capped at {formatBytes(diff.truncated.maxBytes)}.</div> : null}
+              {diff.truncated ? <div className="border-b border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{t('sourceControl.truncatedDiff', { size: formatBytes(diff.truncated.maxBytes) })}</div> : null}
               <div className="min-h-0 flex-1">
                 <DiffEditor
                   original={diff.oldText ?? ''}
@@ -344,7 +347,7 @@ function GitDiffDialog({ open, onOpenChange, socket, workspaceId, sessionId, cwd
               </div>
             </div>
           ) : (
-            <div className="p-4 text-sm text-muted-foreground">Select a changed file.</div>
+            <div className="p-4 text-sm text-muted-foreground">{t('sourceControl.selectFile')}</div>
           )}
         </div>
       </DialogContent>
@@ -352,16 +355,16 @@ function GitDiffDialog({ open, onOpenChange, socket, workspaceId, sessionId, cwd
   )
 }
 
-function groupGitFiles(files: readonly GitFileChange[]): GitGroup[] {
+function groupGitFiles(files: readonly GitFileChange[], t: ReturnType<typeof useTranslation>['t']): GitGroup[] {
   const conflicts = files.filter((file) => file.status === 'conflicted')
   const staged = files.filter((file) => file.staged && file.status !== 'conflicted')
   const untracked = files.filter((file) => file.status === 'untracked')
   const changes = files.filter((file) => file.unstaged && file.status !== 'untracked' && file.status !== 'conflicted')
   return [
-    { id: 'staged', label: 'Staged Changes', files: staged },
-    { id: 'changes', label: 'Changes', files: changes },
-    { id: 'untracked', label: 'Untracked', files: untracked },
-    { id: 'conflicts', label: 'Conflicts', files: conflicts },
+    { id: 'staged', label: t('sourceControl.groups.staged'), files: staged },
+    { id: 'changes', label: t('sourceControl.groups.changes'), files: changes },
+    { id: 'untracked', label: t('sourceControl.groups.untracked'), files: untracked },
+    { id: 'conflicts', label: t('sourceControl.groups.conflicts'), files: conflicts },
   ].filter((group) => group.files.length > 0)
 }
 

@@ -78,7 +78,7 @@ export function AgentSection({
           </div>
           {agentPrompt.selectedPreset === 'custom' ? (
             <div className="space-y-2">
-              <label htmlFor="settings-agent-custom-prompt" className="text-sm font-medium text-foreground">Custom system prompt</label>
+              <label htmlFor="settings-agent-custom-prompt" className="text-sm font-medium text-foreground">{t('settings.agent.customPrompt')}</label>
               <textarea
                 id="settings-agent-custom-prompt"
                 data-testid="settings-agent-custom-prompt"
@@ -98,7 +98,7 @@ export function AgentSection({
                   }}
                   data-testid="settings-agent-custom-prompt-save"
                 >
-                  {updatePreset.isPending ? 'Saving…' : 'Save prompt'}
+                  {updatePreset.isPending ? t('settings.agent.saving') : t('settings.agent.savePrompt')}
                 </button>
               </div>
             </div>

@@ -172,12 +172,12 @@ export function SessionMetadataDialog({
 
         <div className="border-t border-border/50 pt-3" />
 
-        <section className="grid gap-2 text-sm" aria-label="Evaluation integration">
-          <span className="text-xs uppercase tracking-wider text-muted-foreground">Evaluation integration</span>
-          <p className="text-xs text-muted-foreground">Exports a private, reference-only task candidate. Session content and workspace paths are excluded; public use still requires explicit review, redaction, and provenance approval.</p>
+        <section className="grid gap-2 text-sm" aria-label={t('sessionMetadata.evaluation')}>
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">{t('sessionMetadata.evaluation')}</span>
+          <p className="text-xs text-muted-foreground">{t('sessionMetadata.evaluationDescription')}</p>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" data-testid="session-export-task-candidate" onClick={() => void exportTaskCandidate()}>Export governed task candidate</Button>
-            {evaluationReference ? <Button type="button" variant="outline" size="sm" asChild><a data-testid="session-open-evaluation-reference" href={evaluationReferenceUrl(evaluationReference)} target="_blank" rel="noreferrer">Open linked evaluation evidence</a></Button> : null}
+            <Button type="button" variant="outline" size="sm" data-testid="session-export-task-candidate" onClick={() => void exportTaskCandidate()}>{t('sessionMetadata.exportCandidate')}</Button>
+            {evaluationReference ? <Button type="button" variant="outline" size="sm" asChild><a data-testid="session-open-evaluation-reference" href={evaluationReferenceUrl(evaluationReference)} target="_blank" rel="noreferrer">{t('sessionMetadata.openEvidence')}</a></Button> : null}
           </div>
         </section>
 

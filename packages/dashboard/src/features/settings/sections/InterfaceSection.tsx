@@ -55,22 +55,23 @@ import { InterfaceToggle, SectionHeader, Toggle } from '../controls.js'
 import { formatBytes, responseError } from '../section-utils.js'
 
 function LanguageSetting(): JSX.Element {
+  const { t } = useTranslation()
   const language: DashboardLanguage = i18n.resolvedLanguage === 'zh' ? 'zh' : 'en'
   return (
     <li className="flex items-start justify-between gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50">
       <div className="min-w-0">
-        <div className="font-medium">Language</div>
-        <p className="mt-0.5 text-xs text-muted-foreground">Choose the language used throughout the dashboard.</p>
+        <div className="font-medium">{t('common.language')}</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('language.description')}</p>
       </div>
       <select
         value={language}
         onChange={(event) => { void i18n.changeLanguage(event.target.value as DashboardLanguage) }}
         data-testid="settings-language"
-        aria-label="Language"
+        aria-label={t('common.language')}
         className="h-9 rounded-md border border-border bg-background px-3 text-sm"
       >
-        <option value="en">English</option>
-        <option value="zh">简体中文</option>
+        <option value="en">{t('language.english')}</option>
+        <option value="zh">{t('language.chinese')}</option>
       </select>
     </li>
   )
@@ -666,6 +667,7 @@ function SegmentedNumberPref({
 }
 
 function SessionCacheManagement({ cache, enabled }: { cache?: DurableSessionViewCache; enabled: boolean }): JSX.Element {
+  const { t } = useTranslation()
   const [stats, setStats] = useState<{ sessions: number; estimatedBytes: number; maxBytes: number } | null>(null)
   const [persistent, setPersistent] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
@@ -694,12 +696,12 @@ function SessionCacheManagement({ cache, enabled }: { cache?: DurableSessionView
     <li className="rounded-md border border-border/50 bg-card/60 px-4 py-3" data-testid="settings-session-cache-management">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 text-xs text-muted-foreground">
-          <div>{enabled ? `${stats?.sessions ?? 0} cached sessions - ${formatBytes(stats?.estimatedBytes ?? 0)}` : 'Durable cache disabled'}</div>
-          <div className="mt-0.5">Browser storage: {persistent === null ? 'unknown' : persistent ? 'persistent' : 'evictable'}</div>
+          <div>{enabled ? t('settings.interface.cache.cachedSessions', { count: stats?.sessions ?? 0, size: formatBytes(stats?.estimatedBytes ?? 0) }) : t('settings.interface.cache.disabled')}</div>
+          <div className="mt-0.5">{t('settings.interface.cache.browserStorage', { state: t(persistent === null ? 'settings.interface.cache.unknown' : persistent ? 'settings.interface.cache.persistent' : 'settings.interface.cache.evictable') })}</div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" className="h-8" disabled={busy || !navigator.storage?.persist} onClick={() => void requestPersistence()}>Keep cache</Button>
-          <Button type="button" size="sm" variant="outline" className="h-8" disabled={busy || !cache} onClick={() => void clear()}>Clear cache</Button>
+          <Button type="button" size="sm" variant="outline" className="h-8" disabled={busy || !navigator.storage?.persist} onClick={() => void requestPersistence()}>{t('settings.interface.cache.keep')}</Button>
+          <Button type="button" size="sm" variant="outline" className="h-8" disabled={busy || !cache} onClick={() => void clear()}>{t('settings.interface.cache.clear')}</Button>
         </div>
       </div>
     </li>

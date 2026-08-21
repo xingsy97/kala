@@ -502,6 +502,7 @@ function NestedToolResult({ result }: { result: ToolResultContent }): JSX.Elemen
 const NESTED_PREVIEW_TEXT_LIMIT = 1_200
 
 function NestedPreviewText({ text, compact }: { text: string; compact: boolean }): JSX.Element {
+  const { t } = useTranslation()
   const parts = useMemo(() => lightweightPreviewParts(text), [text])
   return (
     <div className={cn('min-w-0 max-w-full space-y-1 break-words leading-snug text-foreground [overflow-wrap:anywhere]', compact ? 'text-[11px]' : 'text-[12px]')}>
@@ -510,7 +511,7 @@ function NestedPreviewText({ text, compact }: { text: string; compact: boolean }
       ) : (
         <div key={index} className="flex items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/40 px-2 py-1.5 text-[10px] text-muted-foreground" data-testid="nested-complex-content-omitted">
           <span className="rounded bg-background/80 px-1.5 py-0.5 font-medium uppercase tracking-wider">{part.label}</span>
-          <span>Complex content omitted from session preview</span>
+          <span>{t('chatCommon.complexContentOmitted')}</span>
         </div>
       ))}
     </div>

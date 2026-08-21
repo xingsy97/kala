@@ -47,6 +47,7 @@ import {
 import { cn } from '../../lib/utils.js'
 import { downloadFilename, fileResultDownloadBlob } from './file-download.js'
 import { saveFile } from '../../lib/save-file.js'
+import { useTranslation } from 'react-i18next'
 
 type DashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 
@@ -83,6 +84,7 @@ export function WorkspaceFileViewDialog({
   path?: string | null
   target?: WorkspaceFileTarget | null
 }): JSX.Element {
+  const { t } = useTranslation()
   const [viewer, setViewer] = useState<FileViewState>({ kind: 'empty' })
   const [wordWrap, setWordWrap] = useState(true)
   const [markdownMode, setMarkdownMode] = useState<'preview' | 'source'>('preview')
@@ -137,7 +139,7 @@ export function WorkspaceFileViewDialog({
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1.5">
-                <Button variant="ghost" size="icon" className="h-6 w-6 flex-none" disabled={!viewPath && !viewerPath(viewer)} onClick={() => void copyView('path')} title="Copy path" aria-label="Copy path">
+                <Button variant="ghost" size="icon" className="h-6 w-6 flex-none" disabled={!viewPath && !viewerPath(viewer)} onClick={() => void copyView('path')} title={t('sessionFiles.copyPath')} aria-label={t('sessionFiles.copyPath')}>
                   {copied === 'path' ? <Check className="h-3.5 w-3.5" /> : <File className="h-3.5 w-3.5" />}
                 </Button>
                 <DialogTitle className="min-w-0 truncate font-mono text-xs font-medium leading-5">{viewerTitle(viewer, viewPath)}</DialogTitle>
@@ -148,41 +150,41 @@ export function WorkspaceFileViewDialog({
             </div>
             <div className="flex w-full min-w-0 max-w-full flex-none items-center gap-1 overflow-x-auto overscroll-x-contain pb-0.5 sm:w-auto sm:flex-nowrap sm:justify-end sm:overflow-visible sm:pb-0" data-testid="session-file-view-actions">
               <div className="flex flex-wrap items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!copyableViewerContent(viewer)} onClick={() => void copyView('content')} title="Copy visible content" aria-label="Copy visible content">
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!copyableViewerContent(viewer)} onClick={() => void copyView('content')} title={t('sessionFiles.copyContent')} aria-label={t('sessionFiles.copyContent')}>
                   {copied === 'content' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!viewPath || viewer.kind === 'loading' || downloading} onClick={() => void downloadView()} title="Download file" aria-label="Download file">
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!viewPath || viewer.kind === 'loading' || downloading} onClick={() => void downloadView()} title={t('sessionFiles.download')} aria-label={t('sessionFiles.download')}>
                   {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                 </Button>
-                <Button variant={wordWrap ? 'outline' : 'ghost'} size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text'} onClick={() => setWordWrap((value) => !value)} title="Toggle word wrap" aria-label="Toggle word wrap">
+                <Button variant={wordWrap ? 'outline' : 'ghost'} size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text'} onClick={() => setWordWrap((value) => !value)} title={t('sessionFiles.wordWrap')} aria-label={t('sessionFiles.wordWrap')}>
                   <WrapText className="h-3.5 w-3.5" />
                 </Button>
                 {hasRichPreview(viewer) ? (
-                  <Button variant={markdownMode === 'preview' ? 'outline' : 'ghost'} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setMarkdownMode((value) => value === 'preview' ? 'source' : 'preview')} title={markdownMode === 'preview' ? 'Show source' : 'Show structured preview'} aria-label={markdownMode === 'preview' ? 'Show source' : 'Show structured preview'}>
-                    {markdownMode === 'preview' ? 'Source' : 'Preview'}
+                  <Button variant={markdownMode === 'preview' ? 'outline' : 'ghost'} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setMarkdownMode((value) => value === 'preview' ? 'source' : 'preview')} title={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')} aria-label={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')}>
+                    {t(markdownMode === 'preview' ? 'sessionFiles.source' : 'sessionFiles.preview')}
                   </Button>
                 ) : null}
               </div>
               <div className="flex items-center gap-1 sm:border-l sm:border-border sm:pl-2">
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta <= -2} onClick={() => setFontSizeDelta((value) => Math.max(-2, value - 1))} title="Decrease file view font size" aria-label="Decrease file view font size">
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta <= -2} onClick={() => setFontSizeDelta((value) => Math.max(-2, value - 1))} title={t('sessionFiles.decreaseFont')} aria-label={t('sessionFiles.decreaseFont')}>
                   <Minus className="h-3.5 w-3.5" />
                 </Button>
-                <div className="flex h-7 min-w-9 items-center justify-center rounded border border-border px-1.5 font-mono text-[11px] text-muted-foreground" title={`Current modal font size: ${effectiveFontSize}px`} aria-label={`Current modal font size: ${effectiveFontSize}px`} data-testid="session-file-view-font-size">
+                <div className="flex h-7 min-w-9 items-center justify-center rounded border border-border px-1.5 font-mono text-[11px] text-muted-foreground" title={t('sessionFiles.currentFont', { size: effectiveFontSize })} aria-label={t('sessionFiles.currentFont', { size: effectiveFontSize })} data-testid="session-file-view-font-size">
                   {effectiveFontSize}px
                 </div>
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta >= 2} onClick={() => setFontSizeDelta((value) => Math.min(2, value + 1))} title="Increase file view font size" aria-label="Increase file view font size">
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta >= 2} onClick={() => setFontSizeDelta((value) => Math.min(2, value + 1))} title={t('sessionFiles.increaseFont')} aria-label={t('sessionFiles.increaseFont')}>
                   <Plus className="h-3.5 w-3.5" />
                 </Button>
               </div>
               <div className="sm:border-l sm:border-border sm:pl-2">
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!viewPath || viewer.kind === 'loading'} onClick={() => void viewFile()} title="Refresh file" aria-label="Refresh file">
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!viewPath || viewer.kind === 'loading'} onClick={() => void viewFile()} title={t('sessionFiles.refreshFile')} aria-label={t('sessionFiles.refreshFile')}>
                   <RefreshCw className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
           </div>
-          <DialogDescription className="sr-only">Read-only file view.</DialogDescription>
-          <DialogClose className="absolute right-1.5 top-1.5 inline-flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Close file view" data-testid="session-file-view-close">
+          <DialogDescription className="sr-only">{t('sessionFiles.readOnly')}</DialogDescription>
+          <DialogClose className="absolute right-1.5 top-1.5 inline-flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t('sessionFiles.close')} data-testid="session-file-view-close">
             <X className="h-5 w-5" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
@@ -209,6 +211,7 @@ function SessionFilesPanelImpl({
   mode?: 'dialog' | 'sidebar'
   fontSizePx?: number
 }): JSX.Element {
+  const { t } = useTranslation()
   const resourceKey = `${workspaceId ?? 'offline'}\0${cwd ?? ''}`
   const [nodes, setNodes] = useState<FileNode[]>([])
   const [loadingPath, setLoadingPath] = useState<string | null>(null)
@@ -277,18 +280,18 @@ function SessionFilesPanelImpl({
     return (
       <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="session-files-panel">
         <div className="flex h-10 flex-none items-center gap-2 border-b border-sidebar-border/40 bg-muted/15 px-3" data-testid="session-files-toolbar">
-          <span className="min-w-0 flex-1 truncate text-[11px] text-sidebar-foreground/60">{cwd || 'Workspace files'}</span>
-          <Button variant="ghost" size="icon" className="h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title="Refresh files" aria-label="Refresh files">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-sidebar-foreground/60">{cwd || t('sessionFiles.workspaceFiles')}</span>
+          <Button variant="ghost" size="icon" className="h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title={t('sessionFiles.refresh')} aria-label={t('sessionFiles.refresh')}>
             {loadingPath ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
         </div>
         <div ref={treeHostRef} className="min-h-0 flex-1 overflow-hidden p-1.5">
           {!online ? (
-            <WorkspaceToolState tone="offline" message="Workspace executor is offline." />
+            <WorkspaceToolState tone="offline" message={t('sessionFiles.offline')} />
           ) : nodes.length === 0 && loadingPath ? (
-            <div className="flex items-center gap-2 p-3 text-xs text-sidebar-foreground/60"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading files</div>
+            <div className="flex items-center gap-2 p-3 text-xs text-sidebar-foreground/60"><Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('sessionFiles.loadingFiles')}</div>
           ) : nodes.length === 0 ? (
-            <WorkspaceToolState tone="empty" message="No files in this workspace." />
+            <WorkspaceToolState tone="empty" message={t('sessionFiles.noFiles')} />
           ) : (
             <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={14} rowHeight={28} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
               {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} onDownload={downloadNode} downloadingPath={downloadingPath} surface="sidebar" />}
@@ -312,16 +315,16 @@ function SessionFilesPanelImpl({
     <div className="grid h-[min(82dvh,760px)] min-h-0 grid-cols-1 grid-rows-[minmax(160px,0.75fr)_minmax(220px,1fr)_180px] overflow-hidden rounded-md border border-border bg-background md:h-[min(78vh,760px)] md:grid-cols-[280px_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_220px]" data-testid="session-files-panel">
       <div className="flex min-h-0 flex-col border-b border-border bg-muted/20 md:border-b-0 md:border-r">
         <div className="flex h-10 items-center justify-between border-b border-border px-2">
-          <div className="min-w-0 truncate text-xs font-medium">Files</div>
-          <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title="Refresh files" aria-label="Refresh files">
+          <div className="min-w-0 truncate text-xs font-medium">{t('sessionFiles.files')}</div>
+          <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title={t('sessionFiles.refresh')} aria-label={t('sessionFiles.refresh')}>
             {loadingPath ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
         </div>
         <div ref={treeHostRef} className="min-h-0 flex-1 overflow-hidden p-1">
           {!online ? (
-            <div className="p-3 text-xs text-muted-foreground">Workspace executor is offline.</div>
+            <div className="p-3 text-xs text-muted-foreground">{t('sessionFiles.offline')}</div>
           ) : nodes.length === 0 && loadingPath ? (
-            <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading files</div>
+            <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('sessionFiles.loadingFiles')}</div>
           ) : (
             <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={16} rowHeight={30} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
               {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} onDownload={downloadNode} downloadingPath={downloadingPath} />}
@@ -379,6 +382,7 @@ function FileTreeRow({
   downloadingPath?: string | null
   surface?: 'default' | 'sidebar'
 }): JSX.Element {
+  const { t } = useTranslation()
   const item = node.data
   const downloading = downloadingPath === item.path
   const sidebar = surface === 'sidebar'
@@ -410,8 +414,8 @@ function FileTreeRow({
         <button
           type="button"
           className={cn('ml-1 flex h-6 w-6 flex-none items-center justify-center rounded', sidebar ? 'text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}
-          title="Download file"
-          aria-label={`Download ${item.name}`}
+          title={t('sessionFiles.download')}
+          aria-label={t('sessionFiles.downloadNamed', { name: item.name })}
           onClick={(event) => {
             event.stopPropagation()
             void onDownload?.(item)
@@ -434,12 +438,13 @@ type FileViewState =
   | { kind: 'too_large' | 'not_found' | 'error'; path?: string; size?: number; message?: string }
 
 function FileView({ viewer, selected, path, target, chrome = true, wordWrap = true, fontSizeDelta = 0, markdownMode = 'preview' }: { viewer: FileViewState; selected?: FileNode | null; path?: string; target?: WorkspaceFileTarget; chrome?: boolean; wordWrap?: boolean; fontSizeDelta?: number; markdownMode?: 'preview' | 'source' }): JSX.Element {
+  const { t } = useTranslation()
   const activePath = selected?.path ?? path ?? viewerPath(viewer)
   const language = useMemo(() => activePath ? languageForPath(activePath) : 'plaintext', [activePath])
   const fontSize = useFileViewFontSize(fontSizeDelta)
   const previewModel = useMemo(() => viewer.kind === 'text' && !viewer.truncated ? buildPreviewModel(viewer.path, viewer.content) : null, [viewer])
-  if (viewer.kind === 'empty') return <ViewerShell title="File view" chrome={chrome}><EmptyViewer /></ViewerShell>
-  if (viewer.kind === 'loading') return <ViewerShell title={viewer.path} chrome={chrome}><div className="flex items-center gap-2 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading file</div></ViewerShell>
+  if (viewer.kind === 'empty') return <ViewerShell title={t('sessionFiles.fileView')} chrome={chrome}><EmptyViewer /></ViewerShell>
+  if (viewer.kind === 'loading') return <ViewerShell title={viewer.path} chrome={chrome}><div className="flex items-center gap-2 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('sessionFiles.loadingFile')}</div></ViewerShell>
   if (viewer.kind === 'image') {
     return (
       <ViewerShell title={viewer.path} meta={viewerMeta(viewer).join(' · ')} chrome={chrome}>
@@ -454,11 +459,11 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
   }
   if (viewer.kind === 'pdf') return <PdfFileView viewer={viewer} chrome={chrome} />
   if (viewer.kind !== 'text') {
-    return <ViewerShell title={viewer.path ?? 'File view'} chrome={chrome}><FallbackViewer kind={viewer.kind} size={viewer.size} message={viewer.message} /></ViewerShell>
+    return <ViewerShell title={viewer.path ?? t('sessionFiles.fileView')} chrome={chrome}><FallbackViewer kind={viewer.kind} size={viewer.size} message={viewer.message} /></ViewerShell>
   }
   return (
     <ViewerShell title={viewer.path} meta={`${viewer.size !== undefined ? formatBytes(viewer.size) : ''}${viewer.truncated ? ' · view truncated' : ''}`} chrome={chrome}>
-      {viewer.truncated ? <div className="border-b border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Large file view is capped. Full content was not loaded.</div> : null}
+      {viewer.truncated ? <div className="border-b border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{t('sessionFiles.capped')}</div> : null}
       {markdownMode === 'preview' && previewModel?.kind === 'source' && previewModel.format === 'Markdown' ? (
         <MarkdownFileView content={viewer.content} fontSize={fontSize} />
       ) : markdownMode === 'preview' && previewModel && previewModel.kind !== 'source' ? (

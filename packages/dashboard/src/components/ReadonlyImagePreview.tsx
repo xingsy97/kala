@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Maximize2, Minus, Plus, Scan, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { cn } from '../lib/utils.js'
 import {
@@ -136,6 +137,7 @@ export function ReadonlyImagePreviewDialog({
   closeTestId?: string
   imageTestId?: string
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -145,7 +147,7 @@ export function ReadonlyImagePreviewDialog({
         <DialogHeader className="relative min-h-14 justify-center space-y-0 border-b border-white/10 bg-black/95 px-4 py-2 pr-14 text-white sm:px-5">
           <DialogTitle className="truncate text-sm font-medium sm:text-base" title={title}>{title}</DialogTitle>
           {description ? <DialogDescription className="hidden truncate text-xs text-white/55 sm:block">{description}</DialogDescription> : null}
-          <DialogClose className="absolute right-2 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70" aria-label="Close image preview" data-testid={closeTestId}>
+          <DialogClose className="absolute right-2 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70" aria-label={t('chatCommon.closeImagePreview')} data-testid={closeTestId}>
             <X className="h-5 w-5" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>

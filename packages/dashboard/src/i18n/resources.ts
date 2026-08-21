@@ -48,6 +48,7 @@ export const resources = {
           memo: 'Memo',
           evaluation: 'Open standalone evaluation platform',
         },
+        account: { trigger: 'Account: {{name}}', loading: 'Loading account', loadingLong: 'Loading account…', help: 'Help & documentation', details: 'Account details', administration: 'Organization administration', routing: 'Privacy-safe tenant routing', signOut: 'Sign out' },
       },
       docs: {
         page: {
@@ -89,6 +90,18 @@ export const resources = {
         noSessionSelected: 'no session selected',
         sessionsTitle: 'Sessions',
         loadingSessions: 'Loading sessions…',
+        connectFirstWorkspace: 'Connect your first workspace',
+        viewSetupGuide: 'View setup guide',
+        hideSidebar: 'Hide sidebar',
+        dismissError: 'Dismiss error',
+        dismiss: 'Dismiss',
+        closeExplorer: 'Close explorer',
+        accessErrorTitle: 'Unable to open Agent RunLab',
+        accessErrorDefault: 'Your sign-in session is missing or has expired.',
+        signInAgain: 'Sign in again',
+        operationsUnavailable: 'Operations unavailable',
+        artifactsUnavailable: 'Product outputs unavailable',
+        pipelineUnavailable: 'Pipeline unavailable',
         newSession: 'new session',
         noSessionTitle: 'No session selected',
         noSessionWithSessions: 'Pick a session from the sidebar, or start a new one.',
@@ -190,6 +203,7 @@ export const resources = {
       },
       language: {
         switcherLabel: 'Dashboard language',
+        description: 'Choose the language used throughout the dashboard.',
         english: 'English',
         chinese: 'Chinese',
       },
@@ -295,7 +309,11 @@ export const resources = {
           subtitle: 'Choose the system prompt preset used when new sessions are created. Existing sessions keep the prompt stored in their session header.',
           unavailable: 'This host does not expose agent prompt settings.',
           appliesToNewSessions: 'Applies to new sessions only.',
+          customPrompt: 'Custom system prompt',
+          saving: 'Saving…',
+          savePrompt: 'Save prompt',
         },
+        notifications: { subtitle: 'Choose when this device should alert you. System notifications are automatically paused while Agent RunLab is actively being used on any device.', appBadge: 'App badge', appBadgeAvailable: 'Show an actionable count on the installed app icon.', appBadgeUnavailable: 'App badging is unavailable in this browser.', system: 'System notifications', systemDescription: 'Alert this device when Agent RunLab needs attention, including while the app is in the background or closed.', enabledDevice: 'Enabled on this device.', enabledBrowser: 'Enabled while this browser is open.', permission: 'Permission: {{value}}', enable: 'Enable system notifications', kinds: 'Notify me about', devices: 'Devices', devicesDescription: 'Control system notifications on every registered browser or installed app.', noDevices: 'No devices are registered for background notifications yet.', thisDevice: 'On this device', currentDevice: 'This device', soundDescription: 'Play a short sound with notifications from this device.', sendTest: 'Send test notification', sendTestShort: 'Send test', remove: 'Remove', lastRegistered: 'Last registered {{value}}', deviceAria: 'System notifications for {{name}}', testFailed: 'Test could not be sent.', testSent: 'Test notification sent.', testNone: 'No registered device received the test.', testDeviceSent: 'Test sent to {{name}}.', testDeviceFailed: '{{name}} did not receive the test.', errors: { permissionDenied: 'Notifications are blocked in browser settings.', noVapid: 'Background delivery is not configured. Notifications will work while this browser is open.', subscribeFailed: 'Background delivery could not be enabled. Notifications will work while this browser is open.', serverRejected: 'The server could not register this device for background delivery.' }, prefs: { approval: { label: 'Approval required', description: 'A tool call is waiting for approve/reject.' }, waiting: { label: 'Waiting for you', description: 'The active turn finished and the session is ready for your next input.' }, error: { label: 'Session error', description: 'The active session reports an execution or protocol error.' }, connection: { label: 'Host disconnected', description: 'The dashboard loses its Host WebSocket connection.' }, workspace: { label: 'Workspace offline', description: 'The active session needs an Executor that is no longer attached.' } } },
         security: {
           subtitle: 'Host access control and executor identity are configured with environment variables. Secrets are not shown.',
           dashboardAuth: 'Dashboard auth',
@@ -403,6 +421,7 @@ export const resources = {
           deleteProvider: 'delete provider {{provider}}',
         },
         approvals: {
+          highRisk: 'HIGH RISK',
           subtitle: 'Approval mode is per-session, controlled from the composer. There is no global default here.',
           auto: 'non-destructive tools run immediately; destructive tools ask.',
           ask: 'every tool call waits for approval.',
@@ -419,6 +438,7 @@ export const resources = {
         },
         interface: {
           subtitle: 'Dashboard UI toggles. Stored per-browser in localStorage - no host restart required.',
+          cache: { cachedSessions: '{{count}} cached sessions - {{size}}', disabled: 'Durable cache disabled', browserStorage: 'Browser storage: {{state}}', unknown: 'unknown', persistent: 'persistent', evictable: 'evictable', keep: 'Keep cache', clear: 'Clear cache' },
           theme: {
             label: 'Theme',
             desc: 'Choose a color scheme or follow the operating system setting.',
@@ -523,9 +543,6 @@ export const resources = {
           notify: 'Notify: {{label}}',
           permissionDefault: 'not requested',
           permissionUnsupported: 'unsupported',
-        },
-        notifications: {
-          subtitle: 'Browser notifications and local sound for session events that need attention.',
         },
         webSearch: {
           subtitle: 'Configure the web search provider used by agents.',
@@ -1279,10 +1296,23 @@ export const resources = {
         },
       },
       rightPanel: {
+        tools: 'Workspace tools',
+        files: 'Files',
+        git: 'Git',
         inspector: 'Inspector',
         terminal: 'Terminal',
         collapse: 'Collapse right panel',
       },
+      memo: { title: 'Memo', subtitle: 'Private notes · autosaved', status: { loading: 'Loading', saved: 'Saved', saving: 'Saving', error: 'Save failed', conflict: 'Changed on another device — reload' }, reload: 'Reload', image: 'Image', editor: 'Memo editor' },
+      account: { title: 'Account', subtitle: 'Profile, sessions, security, and product information', profile: 'Profile', identityManaged: 'Password, MFA, Passkeys, and identity details are managed by your identity provider.', devices: 'Signed-in devices', devicesDescription: 'Revoke a browser session immediately.', loading: 'Loading sessions…', retry: 'Retry', currentDevice: 'This device', activity: 'Last active {{last}} · Expires {{expires}}', signOut: 'Sign out', productLegal: 'Product and legal', help: 'Help & documentation', privacy: 'Privacy', terms: 'Terms', signOutEverywhere: 'Sign out everywhere', signOutEverywhereDescription: 'Immediately revoke every Agent RunLab browser session for this account.', signOutAll: 'Sign out all devices', expired: 'Your session expired. Sign in again.', loadFailed: 'Signed-in devices could not be loaded.', revokeFailed: 'Unable to revoke session: HTTP {{status}}' },
+      executorPairing: { loadFailed: 'Unable to load Executor pairing requests (HTTP {{status}}). Verify this Dashboard and Executor use the same Host.', decisionFailed: 'Unable to {{action}} Executor (HTTP {{status}})', title: 'Approve new Executor?', description: 'A device is waiting to connect to this Agent RunLab Host. Confirm that the code below matches the code shown on that device.', reject: 'Reject', approve: 'Approve executor', installationOptions: 'Installation options' },
+      chatCommon: { closeImagePreview: 'Close image preview', mermaidDiagram: 'Mermaid diagram', complexContentOmitted: 'Complex content omitted from session preview', noOutput: '(no output)', result: 'Result', renderedResult: 'Rendered result', rawResult: 'Raw result', request: 'request', approvalNeeded: 'Approval needed', technicalDetails: 'Technical details', omittedTools: '{{count}} omitted tool calls', omittedToolsExpand: '{{count}} omitted tool calls; expand to inspect', expandToolActivity: 'Expand tool activity', closeToolDetails: 'Close tool details', turnTiming: { status: { completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted', running: 'Running' }, activeWork: 'Active work', approvalWait: 'Approval wait', model: 'Model', tools: 'Tools', compaction: 'Compaction', retry: 'Retry', recovery: 'Recovery', toolCalls: '{{count}} Tools', modelCalls: '{{count}} model calls', toolSummary: 'Tool wall {{wall}} · aggregate {{aggregate}} · peak concurrency {{concurrency}}', partialExecutor: 'partial Executor timing' } },
+      sourceControl: { repository: 'Repository', showList: 'Show as list', showTree: 'Show as tree', refresh: 'Refresh source control', offline: 'Workspace Executor is offline.', loadingChanges: 'Loading changes', noChanges: 'No changes.', truncatedFiles: 'Showing first {{count}} changed files.', gitDiff: 'Git diff', diffDescription: 'Read-only source control diff.', diffLayout: 'Diff layout', sideBySide: 'Side by side', inline: 'Inline', loadingDiff: 'Loading diff', truncatedDiff: 'Large diff side was capped at {{size}}.', selectFile: 'Select a changed file.', groups: { staged: 'Staged Changes', changes: 'Changes', untracked: 'Untracked', conflicts: 'Conflicts' } },
+      sessionFiles: { workspaceFiles: 'Workspace files', files: 'Files', refresh: 'Refresh files', refreshFile: 'Refresh file', offline: 'Workspace Executor is offline.', loadingFiles: 'Loading files', noFiles: 'No files in this workspace.', download: 'Download file', downloadNamed: 'Download {{name}}', copyPath: 'Copy path', copyContent: 'Copy visible content', wordWrap: 'Toggle word wrap', showSource: 'Show source', showPreview: 'Show structured preview', source: 'Source', preview: 'Preview', decreaseFont: 'Decrease file view font size', increaseFont: 'Increase file view font size', currentFont: 'Current file view font size: {{size}}px', close: 'Close file view', readOnly: 'Read-only file view.', fileView: 'File view', loadingFile: 'Loading file', viewTruncated: 'view truncated', text: 'text', tooLarge: 'too large', binary: 'binary', notFound: 'not found', capped: 'Large file view is capped. Full content was not loaded.' },
+      connectionHealth: { measuring: 'Measuring…', title: 'Connection health', subtitle: 'Reachability and round-trip latency', healthy: 'Healthy', check: 'Check connection', deviceHost: 'Device → Host', hostExecutor: 'Host → Executor', sessionSync: 'Session sync', offline: 'Offline', unavailable: 'Unavailable', timedOut: 'Timed out', notMeasured: 'Not measured', synchronized: 'Synchronized', measureAgain: 'Measure again', resync: 'Resync', diagnostics: 'Diagnostics', transport: 'Transport', unknown: 'unknown' },
+      taskGraph: { aria: 'Task graph', title: 'Task Graph', revision: 'rev {{revision}}', summary: '{{completed}} completed · {{active}} active · {{ready}} ready · {{blocked}} blocked', readyCount: '{{count}} ready', listView: 'List view', graphView: 'Graph view', active: 'Active', ready: 'Ready', blocked: 'Blocked', done: 'Done', waitingOn: 'waiting on {{ids}}' },
+      sessionMetadata: { evaluation: 'Evaluation integration', evaluationDescription: 'Exports a private, reference-only task candidate. Session content and workspace paths are excluded; public use still requires explicit review, redaction, and provenance approval.', exportCandidate: 'Export governed task candidate', openEvidence: 'Open linked evaluation evidence' },
+      admin: { title: 'Organization administration', subtitle: 'Members, workspaces, Executors, policy, usage, and security', unavailable: 'Administration unavailable', loadFailed: 'Organization administration is unavailable.', loading: 'Loading organization', resolving: 'Resolving administration data.', tabs: { overview: 'Overview', members: 'Members', workspaces: 'Workspaces', executors: 'Executors', policies: 'Policies', usage: 'Usage & security', integrations: 'Integrations' }, contract: 'Contract', currentMonth: 'Current month', addMember: 'Add member', remove: 'Remove', executorPools: 'Executor pool bindings', noWorkspaces: 'No registered workspaces. Add one from Agent.', noExecutors: 'No enrolled Executors.', pendingInvites: 'Pending invites', noInvites: 'No pending organization invites.', retention: 'Retention policy', edit: 'Edit', browserSessions: 'Browser sessions', serviceAccounts: 'Service accounts', noServiceAccounts: 'No service account tokens.', webhooks: 'Webhooks', noWebhooks: 'No webhook endpoints.', auditLog: 'Audit log', noAudit: 'No audit events.', adapters: 'Deployment adapters', adaptersDescription: 'Only configured adapters are reported as connected.', connected: 'Connected', notConfigured: 'Not configured', unlimited: 'Unlimited', never: 'never', revoked: 'revoked', enabled: 'enabled', disabled: 'disabled', lastSeen: 'last seen {{value}}', expires: 'expires {{value}}', lastActive: 'Last active {{value}}', labels: { status: 'Status', role: 'Role', runtimeUnit: 'Runtime Unit', reference: 'Reference', tier: 'Tier', ends: 'Ends', seats: 'Seats', concurrentSessions: 'Concurrent sessions', monthlyTokens: 'Monthly token limit', tokens: 'Tokens', sessions: 'Sessions', ledger: 'Ledger entries', sessionDays: 'Session days', artifactDays: 'Artifact days', auditDays: 'Audit days', deletedGrace: 'Deleted resource grace', version: 'Version', secrets: 'Secrets', artifacts: 'Artifacts', telemetry: 'Telemetry', errorReporting: 'Error reporting', ticketing: 'Ticketing' }, prompts: { issuer: 'OIDC issuer', subject: 'OIDC subject', email: 'Email', role: 'Role: admin, member, viewer' } },
       terminal: {
         open: 'Open Session terminal',
         start: 'Start',
@@ -1500,6 +1530,7 @@ export const resources = {
           memo: '备忘',
           evaluation: '打开独立评测平台',
         },
+        account: { trigger: '账户：{{name}}', loading: '正在加载账户', loadingLong: '正在加载账户…', help: '帮助与文档', details: '账户详情', administration: '组织管理', routing: '隐私安全的租户路由', signOut: '退出登录' },
       },
       docs: {
         page: {
@@ -1541,6 +1572,18 @@ export const resources = {
         noSessionSelected: '未选择会话',
         sessionsTitle: '会话',
         loadingSessions: '正在加载会话…',
+        connectFirstWorkspace: '连接第一个工作区',
+        viewSetupGuide: '查看设置指南',
+        hideSidebar: '隐藏侧边栏',
+        dismissError: '关闭错误提示',
+        dismiss: '关闭',
+        closeExplorer: '关闭浏览器',
+        accessErrorTitle: '无法打开 Agent RunLab',
+        accessErrorDefault: '登录会话不存在或已过期。',
+        signInAgain: '重新登录',
+        operationsUnavailable: '运维功能不可用',
+        artifactsUnavailable: '产品输出不可用',
+        pipelineUnavailable: '流程功能不可用',
         newSession: '新会话',
         noSessionTitle: '未选择会话',
         noSessionWithSessions: '从侧边栏选择一个会话，或创建新会话。',
@@ -1642,8 +1685,9 @@ export const resources = {
       },
       language: {
         switcherLabel: 'Dashboard 语言',
+        description: '选择整个 Dashboard 使用的语言。',
         english: 'English',
-        chinese: 'ZH',
+        chinese: '简体中文',
       },
       composer: {
         waitingForHost: '等待 host...',
@@ -1747,7 +1791,11 @@ export const resources = {
           subtitle: '选择创建新会话时使用的 system prompt preset。已有会话继续使用其 session header 中保存的 prompt。',
           unavailable: '当前 host 没有暴露 agent prompt 设置。',
           appliesToNewSessions: '只影响新会话。',
+          customPrompt: '自定义系统提示词',
+          saving: '保存中…',
+          savePrompt: '保存提示词',
         },
+        notifications: { subtitle: '选择此设备应在何时提醒你。当任意设备正在使用 Agent RunLab 时，系统通知会自动暂停。', appBadge: '应用角标', appBadgeAvailable: '在已安装应用的图标上显示待处理数量。', appBadgeUnavailable: '此浏览器不支持应用角标。', system: '系统通知', systemDescription: '当 Agent RunLab 需要你关注时提醒此设备，包括应用在后台或已经关闭时。', enabledDevice: '已在此设备启用。', enabledBrowser: '已启用，浏览器打开时有效。', permission: '权限：{{value}}', enable: '启用系统通知', kinds: '通知类型', devices: '设备', devicesDescription: '管理每个已注册浏览器或已安装应用的系统通知。', noDevices: '尚无设备注册后台通知。', thisDevice: '此设备', currentDevice: '当前设备', soundDescription: '此设备收到通知时播放短提示音。', sendTest: '发送测试通知', sendTestShort: '发送测试', remove: '移除', lastRegistered: '上次注册：{{value}}', deviceAria: '{{name}} 的系统通知', testFailed: '测试通知发送失败。', testSent: '测试通知已发送。', testNone: '没有已注册设备收到测试通知。', testDeviceSent: '测试通知已发送到 {{name}}。', testDeviceFailed: '{{name}} 未收到测试通知。', errors: { permissionDenied: '浏览器设置已阻止通知。', noVapid: '尚未配置后台推送；浏览器打开时仍可收到通知。', subscribeFailed: '无法启用后台推送；浏览器打开时仍可收到通知。', serverRejected: '服务器无法为此设备注册后台推送。' }, prefs: { approval: { label: '需要审批', description: '有工具调用正在等待批准或拒绝。' }, waiting: { label: '等待你的输入', description: '当前轮次已结束，会话正在等待你的下一条输入。' }, error: { label: '会话错误', description: '当前会话报告了执行或协议错误。' }, connection: { label: 'Host 已断开', description: 'Dashboard 与 Host 的 WebSocket 连接已断开。' }, workspace: { label: '工作区离线', description: '当前会话需要的 Executor 已不再连接。' } } },
         security: {
           subtitle: 'Host 访问控制和 executor 身份通过环境变量配置。这里不显示 secret。',
           dashboardAuth: 'Dashboard 鉴权',
@@ -1855,6 +1903,7 @@ export const resources = {
           deleteProvider: '删除 provider {{provider}}',
         },
         approvals: {
+          highRisk: '高风险',
           subtitle: '审批模式按会话控制，由 composer 设置。这里没有全局默认值。',
           auto: '非破坏性工具立即运行；破坏性工具需要询问。',
           ask: '每次工具调用都等待审批。',
@@ -1871,6 +1920,7 @@ export const resources = {
         },
         interface: {
           subtitle: 'Dashboard UI 开关。按浏览器存储在 localStorage 中 - 不需要重启 host。',
+          cache: { cachedSessions: '已缓存 {{count}} 个会话 - {{size}}', disabled: '持久缓存已禁用', browserStorage: '浏览器存储：{{state}}', unknown: '未知', persistent: '持久', evictable: '可被清理', keep: '保留缓存', clear: '清除缓存' },
           theme: {
             label: '主题',
             desc: '选择配色，或跟随系统设置。',
@@ -1975,9 +2025,6 @@ export const resources = {
           notify: '通知：{{label}}',
           permissionDefault: '未请求',
           permissionUnsupported: '不支持',
-        },
-        notifications: {
-          subtitle: '浏览器通知和本地提示音，用于需要关注的会话事件。',
         },
         webSearch: {
           subtitle: '配置 Agent 使用的网页搜索服务。',
@@ -2731,10 +2778,23 @@ export const resources = {
         },
       },
       rightPanel: {
+        tools: '工作区工具',
+        files: '文件',
+        git: 'Git',
         inspector: '检查器',
         terminal: '终端',
         collapse: '收起右侧面板',
       },
+      memo: { title: '备忘', subtitle: '私密笔记 · 自动保存', status: { loading: '加载中', saved: '已保存', saving: '保存中', error: '保存失败', conflict: '其他设备已修改，请重新加载' }, reload: '重新加载', image: '图片', editor: '备忘编辑器' },
+      account: { title: '账户', subtitle: '个人资料、登录会话、安全与产品信息', profile: '个人资料', identityManaged: '密码、MFA、Passkey 和身份信息由你的身份提供商管理。', devices: '已登录设备', devicesDescription: '立即撤销某个浏览器登录会话。', loading: '正在加载登录会话…', retry: '重试', currentDevice: '当前设备', activity: '上次活动 {{last}} · 到期时间 {{expires}}', signOut: '退出登录', productLegal: '产品与法律信息', help: '帮助与文档', privacy: '隐私', terms: '条款', signOutEverywhere: '退出所有设备', signOutEverywhereDescription: '立即撤销此账户的全部 Agent RunLab 浏览器会话。', signOutAll: '退出所有设备', expired: '登录会话已过期，请重新登录。', loadFailed: '无法加载已登录设备。', revokeFailed: '无法撤销登录会话：HTTP {{status}}' },
+      executorPairing: { loadFailed: '无法加载 Executor 配对请求（HTTP {{status}}）。请确认 Dashboard 与 Executor 使用同一个 Host。', decisionFailed: '无法{{action}} Executor（HTTP {{status}}）', title: '批准新的 Executor？', description: '有一台设备正在等待连接此 Agent RunLab Host。请确认下方代码与该设备上显示的代码一致。', reject: '拒绝', approve: '批准 Executor', installationOptions: '安装选项' },
+      chatCommon: { closeImagePreview: '关闭图片预览', mermaidDiagram: 'Mermaid 图表', complexContentOmitted: '会话预览中已省略复杂内容', noOutput: '（无输出）', result: '结果', renderedResult: '渲染结果', rawResult: '原始结果', request: '请求', approvalNeeded: '需要审批', technicalDetails: '技术详情', omittedTools: '已省略 {{count}} 个工具调用', omittedToolsExpand: '已省略 {{count}} 个工具调用；展开查看', expandToolActivity: '展开工具活动', closeToolDetails: '关闭工具详情', turnTiming: { status: { completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断', running: '运行中' }, activeWork: '实际工作', approvalWait: '等待审批', model: '模型', tools: '工具', compaction: '压缩', retry: '重试', recovery: '恢复', toolCalls: '{{count}} 个工具调用', modelCalls: '{{count}} 次模型调用', toolSummary: '工具耗时 {{wall}} · 累计 {{aggregate}} · 峰值并发 {{concurrency}}', partialExecutor: 'Executor 计时不完整' } },
+      sourceControl: { repository: '仓库', showList: '显示为列表', showTree: '显示为目录树', refresh: '刷新源代码管理', offline: '工作区 Executor 已离线。', loadingChanges: '正在加载更改', noChanges: '没有更改。', truncatedFiles: '仅显示前 {{count}} 个已更改文件。', gitDiff: 'Git 差异', diffDescription: '只读源代码差异。', diffLayout: '差异布局', sideBySide: '并排', inline: '行内', loadingDiff: '正在加载差异', truncatedDiff: '大型差异单侧已限制为 {{size}}。', selectFile: '选择一个已更改文件。', groups: { staged: '已暂存的更改', changes: '更改', untracked: '未跟踪', conflicts: '冲突' } },
+      sessionFiles: { workspaceFiles: '工作区文件', files: '文件', refresh: '刷新文件', refreshFile: '刷新文件内容', offline: '工作区 Executor 已离线。', loadingFiles: '正在加载文件', noFiles: '此工作区中没有文件。', download: '下载文件', downloadNamed: '下载 {{name}}', copyPath: '复制路径', copyContent: '复制可见内容', wordWrap: '切换自动换行', showSource: '显示源码', showPreview: '显示结构化预览', source: '源码', preview: '预览', decreaseFont: '减小文件字体', increaseFont: '增大文件字体', currentFont: '当前文件查看字号：{{size}}px', close: '关闭文件查看器', readOnly: '只读文件查看器。', fileView: '文件查看器', loadingFile: '正在加载文件', viewTruncated: '内容已截断', text: '文本', tooLarge: '文件过大', binary: '二进制', notFound: '未找到', capped: '大型文件预览已限制，未加载完整内容。' },
+      connectionHealth: { measuring: '测量中…', title: '连接状况', subtitle: '可达性和往返延迟', healthy: '正常', check: '检查连接', deviceHost: '设备 → Host', hostExecutor: 'Host → Executor', sessionSync: '会话同步', offline: '离线', unavailable: '不可用', timedOut: '请求超时', notMeasured: '尚未测量', synchronized: '已同步', measureAgain: '重新测量', resync: '重新同步', diagnostics: '诊断信息', transport: '传输协议', unknown: '未知' },
+      taskGraph: { aria: '任务图', title: '任务图', revision: '修订 {{revision}}', summary: '已完成 {{completed}} · 进行中 {{active}} · 就绪 {{ready}} · 阻塞 {{blocked}}', readyCount: '{{count}} 个就绪', listView: '列表视图', graphView: '图形视图', active: '进行中', ready: '就绪', blocked: '阻塞', done: '已完成', waitingOn: '等待 {{ids}}' },
+      sessionMetadata: { evaluation: '评测集成', evaluationDescription: '导出仅供引用的私有任务候选。导出内容不包含会话内容和工作区路径；公开使用仍需明确审核、脱敏和来源批准。', exportCandidate: '导出受治理的任务候选', openEvidence: '打开关联评测证据' },
+      admin: { title: '组织管理', subtitle: '成员、工作区、Executor、策略、用量和安全', unavailable: '管理功能不可用', loadFailed: '组织管理功能不可用。', loading: '正在加载组织', resolving: '正在读取组织管理数据。', tabs: { overview: '概览', members: '成员', workspaces: '工作区', executors: 'Executor', policies: '策略', usage: '用量与安全', integrations: '集成' }, contract: '合同', currentMonth: '本月', addMember: '添加成员', remove: '移除', executorPools: 'Executor 池绑定', noWorkspaces: '尚无已注册工作区。请从 Agent 页面添加。', noExecutors: '尚无已注册 Executor。', pendingInvites: '待处理邀请', noInvites: '没有待处理的组织邀请。', retention: '保留策略', edit: '编辑', browserSessions: '浏览器会话', serviceAccounts: '服务账户', noServiceAccounts: '没有服务账户 token。', webhooks: 'Webhook', noWebhooks: '没有 Webhook endpoint。', auditLog: '审计日志', noAudit: '没有审计事件。', adapters: '部署适配器', adaptersDescription: '只有已配置的适配器会显示为已连接。', connected: '已连接', notConfigured: '未配置', unlimited: '无限制', never: '从未', revoked: '已撤销', enabled: '已启用', disabled: '已禁用', lastSeen: '上次出现 {{value}}', expires: '到期时间 {{value}}', lastActive: '上次活动 {{value}}', labels: { status: '状态', role: '角色', runtimeUnit: 'Runtime Unit', reference: '编号', tier: '级别', ends: '结束时间', seats: '席位', concurrentSessions: '并发会话', monthlyTokens: '每月 token 上限', tokens: 'Token', sessions: '会话', ledger: '账本条目', sessionDays: '会话保留天数', artifactDays: '产物保留天数', auditDays: '审计保留天数', deletedGrace: '删除资源宽限期', version: '版本', secrets: 'Secret', artifacts: '产物', telemetry: '遥测', errorReporting: '错误报告', ticketing: '工单' }, prompts: { issuer: 'OIDC issuer', subject: 'OIDC subject', email: '邮箱', role: '角色：admin、member、viewer' } },
       terminal: {
         open: '打开会话终端',
         start: '启动',

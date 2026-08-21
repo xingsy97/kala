@@ -88,6 +88,26 @@ describe('dashboard i18n', () => {
       }
     }
   })
+
+  it('does not silently fall back to English on key Simplified Chinese surfaces', async () => {
+    const keys = [
+      'admin.title',
+      'connectionHealth.title',
+      'sessionFiles.copyPath',
+      'settings.notifications.system',
+      'settings.interface.cache.clear',
+      'chatCommon.approvalNeeded',
+      'memo.title',
+      'sourceControl.repository',
+    ]
+    await i18n.changeLanguage('zh')
+    for (const key of keys) {
+      const translated = i18n.t(key)
+      expect(translated, key).not.toBe(key)
+      expect(translated, key).not.toBe(i18n.getResource('en', 'translation', key))
+      expect(translated, key).toMatch(/[\u3400-\u9fff]/)
+    }
+  })
 })
 
 function collectReferencedKeys(root: string): Array<{ key: string; file: string }> {

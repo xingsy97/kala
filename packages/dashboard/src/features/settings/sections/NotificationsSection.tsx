@@ -28,13 +28,13 @@ export function NotificationsSection(): JSX.Element {
     <div>
       <SectionHeader
         title={t('settings.sections.notifications.label')}
-        subtitle="Choose when this device should alert you. System notifications are automatically paused while Agent RunLab is actively being used on any device."
+        subtitle={t('settings.notifications.subtitle')}
       />
       <ul className="space-y-3 text-sm">
         <SystemNotificationsSettings />
         <InterfaceToggle
-          label="App badge"
-          description={appBadgeSupported() ? 'Show an actionable count on the installed app icon.' : 'App badging is unavailable in this browser.'}
+          label={t('settings.notifications.appBadge')}
+          description={appBadgeSupported() ? t('settings.notifications.appBadgeAvailable') : t('settings.notifications.appBadgeUnavailable')}
           checked={appBadgeEnabled && appBadgeSupported()}
           onChange={setAppBadgeEnabled}
           testId="settings-toggle-app-badge"
@@ -100,7 +100,7 @@ function SystemNotificationsSettings(): JSX.Element {
       if (support.supported) {
         const result = await subscribeToPush(collectEnabledKinds())
         if (result.ok) setEndpoint(result.endpoint)
-        else setError(backgroundDeliveryFailure(result.reason))
+        else setError(backgroundDeliveryFailure(result.reason, t))
       }
     } finally {
       setBusy(false)
@@ -113,13 +113,13 @@ function SystemNotificationsSettings(): JSX.Element {
     setError(null)
     try {
       const res = await fetch('/push/test', { method: 'POST', credentials: 'same-origin' })
-      if (!res.ok) setTestResult('Test could not be sent.')
+      if (!res.ok) setTestResult(t('settings.notifications.testFailed'))
       else {
         const body = (await res.json()) as { delivered?: number }
-        setTestResult((body.delivered ?? 0) > 0 ? 'Test notification sent.' : 'No registered device received the test.')
+        setTestResult((body.delivered ?? 0) > 0 ? t('settings.notifications.testSent') : t('settings.notifications.testNone'))
       }
     } catch {
-      setTestResult('Test could not be sent.')
+      setTestResult(t('settings.notifications.testFailed'))
     } finally {
       setBusy(false)
     }
@@ -131,20 +131,20 @@ function SystemNotificationsSettings(): JSX.Element {
     <li className="rounded-lg border border-border bg-card/60 p-4" data-testid="settings-push-section">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="font-medium">System notifications</div>
+          <div className="font-medium">{t('settings.notifications.system')}</div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Alert this device when Agent RunLab needs attention, including while the app is in the background or closed.
+            {t('settings.notifications.systemDescription')}
           </p>
           <p className="mt-1 text-[11px] text-muted-foreground" data-testid="desktop-notification-permission">
             {active
-              ? endpoint ? 'Enabled on this device.' : 'Enabled while this browser is open.'
-              : `Permission: ${permissionLabel(permission, t)}`}
+              ? endpoint ? t('settings.notifications.enabledDevice') : t('settings.notifications.enabledBrowser')
+              : t('settings.notifications.permission', { value: permissionLabel(permission, t) })}
           </p>
         </div>
         <Toggle
           checked={active}
           onChange={(next) => { void setSystemNotifications(next) }}
-          ariaLabel="Enable system notifications"
+          ariaLabel={t('settings.notifications.enable')}
           testId="settings-toggle-desktop-notifications"
           disabled={busy || unavailable}
         />
@@ -159,14 +159,14 @@ function SystemNotificationsSettings(): JSX.Element {
       ) : null}
 
       <div className="mt-4 border-t border-border/60 pt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notify me about</div>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('settings.notifications.kinds')}</div>
         <div className="grid gap-2">
           {DESKTOP_NOTIFICATION_PREFS.map((pref) => (
             <NotificationKindToggle
               key={pref.kind}
               prefKey={pref.key}
-              label={pref.label}
-              description={pref.description}
+              label={t(`settings.notifications.prefs.${notificationKindKey(pref.kind)}.label`)}
+              description={t(`settings.notifications.prefs.${notificationKindKey(pref.kind)}.description`)}
               disabled={!active}
               onChanged={() => { void syncBackgroundDelivery() }}
             />
@@ -175,11 +175,11 @@ function SystemNotificationsSettings(): JSX.Element {
       </div>
 
       <div className="mt-4 border-t border-border/60 pt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Devices</div>
-        <p className="mb-3 text-[11px] leading-4 text-muted-foreground">Control system notifications on every registered browser or installed app.</p>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('settings.notifications.devices')}</div>
+        <p className="mb-3 text-[11px] leading-4 text-muted-foreground">{t('settings.notifications.devicesDescription')}</p>
         <div className="grid gap-2" data-testid="settings-notification-devices">
           {devices.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">No devices are registered for background notifications yet.</div>
+            <div className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">{t('settings.notifications.noDevices')}</div>
           ) : devices.map((device) => (
             <NotificationDeviceRow key={device.deviceId} device={device} busy={busy} onRefresh={refreshDevices} onTestResult={setTestResult} />
           ))}
@@ -187,11 +187,11 @@ function SystemNotificationsSettings(): JSX.Element {
       </div>
 
       <div className="mt-4 border-t border-border/60 pt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">On this device</div>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('settings.notifications.thisDevice')}</div>
         <NotificationKindToggle
           prefKey={PREF_DESKTOP_NOTIFICATION_SOUND}
           label={t('settings.interface.sound')}
-          description="Play a short sound with notifications from this device."
+          description={t('settings.notifications.soundDescription')}
           disabled={!active}
         />
         {endpoint ? (
@@ -203,7 +203,7 @@ function SystemNotificationsSettings(): JSX.Element {
               disabled={busy}
               className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
             >
-              Send test notification
+              {t('settings.notifications.sendTest')}
             </button>
             {testResult ? <span className="text-xs text-muted-foreground">{testResult}</span> : null}
           </div>
@@ -225,6 +225,7 @@ function NotificationDeviceRow({ device, busy, onRefresh, onTestResult }: {
   onRefresh(): Promise<void>
   onTestResult(value: string): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const update = async (enabled: boolean): Promise<void> => {
     await fetch('/push/device', {
       method: 'PATCH', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
@@ -245,20 +246,20 @@ function NotificationDeviceRow({ device, busy, onRefresh, onTestResult }: {
       body: JSON.stringify({ deviceId: device.deviceId }),
     })
     const body = res.ok ? await res.json() as { delivered?: number } : null
-    onTestResult((body?.delivered ?? 0) > 0 ? `Test sent to ${device.name}.` : `${device.name} did not receive the test.`)
+    onTestResult((body?.delivered ?? 0) > 0 ? t('settings.notifications.testDeviceSent', { name: device.name }) : t('settings.notifications.testDeviceFailed', { name: device.name }))
   }
   return (
     <div className="rounded-md bg-muted/30 p-3" data-testid={`settings-notification-device-${device.deviceId}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-medium text-foreground">{device.name}{device.current ? ' · This device' : ''}</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">Last registered {new Date(device.lastSeenAt).toLocaleString()}</div>
+          <div className="text-xs font-medium text-foreground">{device.name}{device.current ? ` · ${t('settings.notifications.currentDevice')}` : ''}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">{t('settings.notifications.lastRegistered', { value: new Date(device.lastSeenAt).toLocaleString() })}</div>
         </div>
-        <Toggle checked={device.enabled} onChange={(next) => { void update(next) }} ariaLabel={`System notifications for ${device.name}`} disabled={busy} />
+        <Toggle checked={device.enabled} onChange={(next) => { void update(next) }} ariaLabel={t('settings.notifications.deviceAria', { name: device.name })} disabled={busy} />
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
-        <button type="button" onClick={() => { void test() }} disabled={busy || !device.enabled} className="rounded border border-border px-2 py-1 text-[11px] hover:bg-muted disabled:opacity-50">Send test</button>
-        {!device.current ? <button type="button" onClick={() => { void remove() }} disabled={busy} className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50">Remove</button> : null}
+        <button type="button" onClick={() => { void test() }} disabled={busy || !device.enabled} className="rounded border border-border px-2 py-1 text-[11px] hover:bg-muted disabled:opacity-50">{t('settings.notifications.sendTestShort')}</button>
+        {!device.current ? <button type="button" onClick={() => { void remove() }} disabled={busy} className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50">{t('settings.notifications.remove')}</button> : null}
       </div>
     </div>
   )
@@ -309,13 +310,21 @@ function collectEnabledKinds(): readonly DesktopNotificationKind[] {
   return kinds
 }
 
-function backgroundDeliveryFailure(reason: 'permission_denied' | 'no_vapid' | 'subscribe_failed' | 'server_rejected'): string {
+function backgroundDeliveryFailure(reason: 'permission_denied' | 'no_vapid' | 'subscribe_failed' | 'server_rejected', t: ReturnType<typeof useTranslation>['t']): string {
   switch (reason) {
-    case 'permission_denied': return 'Notifications are blocked in browser settings.'
-    case 'no_vapid': return 'Background delivery is not configured. Notifications will work while this browser is open.'
-    case 'subscribe_failed': return 'Background delivery could not be enabled. Notifications will work while this browser is open.'
-    case 'server_rejected': return 'The server could not register this device for background delivery.'
+    case 'permission_denied': return t('settings.notifications.errors.permissionDenied')
+    case 'no_vapid': return t('settings.notifications.errors.noVapid')
+    case 'subscribe_failed': return t('settings.notifications.errors.subscribeFailed')
+    case 'server_rejected': return t('settings.notifications.errors.serverRejected')
   }
+}
+
+function notificationKindKey(kind: DesktopNotificationKind): 'approval' | 'waiting' | 'error' | 'connection' | 'workspace' {
+  if (kind === 'approval_required') return 'approval'
+  if (kind === 'waiting_for_user') return 'waiting'
+  if (kind === 'session_error') return 'error'
+  if (kind === 'connection_lost') return 'connection'
+  return 'workspace'
 }
 
 function permissionLabel(permission: NotificationPermission | 'unsupported', t: ReturnType<typeof useTranslation>['t']): string {

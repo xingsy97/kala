@@ -535,11 +535,12 @@ function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>
 }
 
 function ExplorerLoading(): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="space-y-3 p-3" data-testid="explorer-loading">
       <div className="flex items-center gap-2 rounded-lg bg-background/45 px-3 py-2 text-xs text-muted-foreground shadow-sm">
         <span className="ak-loading-spinner h-3.5 w-3.5" aria-hidden="true" />
-        <span>Loading workspaces and sessions</span>
+        <span>{t('app.loadingSessions')}</span>
       </div>
       {Array.from({ length: 5 }).map((_, i) => (
         <div

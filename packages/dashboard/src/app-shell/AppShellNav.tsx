@@ -209,6 +209,7 @@ export function AppShellNav({
 }
 
 function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin }: { account?: AccountProfile; loading: boolean; onSignOut?(): void | Promise<void>; onOpenAccount?(): void; onOpenAdmin?(): void }): JSX.Element {
+  const { t } = useTranslation()
   const detailsRef = useRef<HTMLDetailsElement | null>(null)
   const close = (): void => { if (detailsRef.current) detailsRef.current.open = false }
   const prepareNativeSignOut = (): void => {
@@ -219,19 +220,19 @@ function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin }
   }
   return (
     <details ref={detailsRef} className="relative" data-testid="account-menu">
-      <summary className="flex h-9 min-w-9 cursor-pointer list-none items-center justify-center gap-2 rounded-md px-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:h-8 [&::-webkit-details-marker]:hidden" aria-label={account ? `Account: ${account.displayName}` : 'Loading account'} data-testid="account-menu-trigger">
+      <summary className="flex h-9 min-w-9 cursor-pointer list-none items-center justify-center gap-2 rounded-md px-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground sm:h-8 [&::-webkit-details-marker]:hidden" aria-label={account ? t('appShell.account.trigger', { name: account.displayName }) : t('appShell.account.loading')} data-testid="account-menu-trigger">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-4 w-4" aria-hidden />}</span>
         {account ? <span className="hidden max-w-32 truncate lg:inline">{account.displayName}</span> : null}
       </summary>
       <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl" role="menu">
-        <div className="border-b border-border/60 px-4 py-3" data-testid="account-identity-summary"><div className="truncate text-sm font-semibold">{account?.displayName ?? 'Loading account…'}</div>{account?.email ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{account.email}</div> : null}</div>
+        <div className="border-b border-border/60 px-4 py-3" data-testid="account-identity-summary"><div className="truncate text-sm font-semibold">{account?.displayName ?? t('appShell.account.loadingLong')}</div>{account?.email ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{account.email}</div> : null}</div>
         <div className="p-1.5">
-          <a href="#/docs" role="menuitem" onClick={close} className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent"><CircleHelp className="h-4 w-4" aria-hidden />Help & documentation</a>
-          <button type="button" role="menuitem" onClick={() => { close(); onOpenAccount?.() }} data-testid="account-details" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><UserRound className="h-4 w-4" aria-hidden />Account details</button>
-          {onOpenAdmin ? <button type="button" role="menuitem" onClick={() => { close(); onOpenAdmin() }} data-testid="organization-admin" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><SettingsIcon className="h-4 w-4" aria-hidden />Organization administration</button> : null}
-          <div className="px-3 py-2 text-[11px] text-muted-foreground">Agent RunLab · Privacy-safe tenant routing</div>
+          <a href="#/docs" role="menuitem" onClick={close} className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent"><CircleHelp className="h-4 w-4" aria-hidden />{t('appShell.account.help')}</a>
+          <button type="button" role="menuitem" onClick={() => { close(); onOpenAccount?.() }} data-testid="account-details" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><UserRound className="h-4 w-4" aria-hidden />{t('appShell.account.details')}</button>
+          {onOpenAdmin ? <button type="button" role="menuitem" onClick={() => { close(); onOpenAdmin() }} data-testid="organization-admin" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><SettingsIcon className="h-4 w-4" aria-hidden />{t('appShell.account.administration')}</button> : null}
+          <div className="px-3 py-2 text-[11px] text-muted-foreground">Agent RunLab · {t('appShell.account.routing')}</div>
           <form method="post" action="/auth/logout" onSubmit={prepareNativeSignOut}>
-            <button type="submit" role="menuitem" data-testid="account-sign-out" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10"><LogOut className="h-4 w-4" aria-hidden />Sign out</button>
+            <button type="submit" role="menuitem" data-testid="account-sign-out" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10"><LogOut className="h-4 w-4" aria-hidden />{t('appShell.account.signOut')}</button>
           </form>
         </div>
       </div>

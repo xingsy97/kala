@@ -1,4 +1,5 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { CodeBlock } from './CodeBlock.js'
 
@@ -12,6 +13,7 @@ function loadMermaid(): Promise<(typeof import('mermaid'))['default']> {
 }
 
 export const MermaidBlock = memo(function MermaidBlock({ code, deferRender = false }: { code: string; deferRender?: boolean }): JSX.Element {
+  const { t } = useTranslation()
   const reactId = useId()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [nearViewport, setNearViewport] = useState(() => typeof IntersectionObserver === 'undefined')
@@ -70,7 +72,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code, deferRender = fal
         className="my-3 max-w-full overflow-x-auto rounded-lg border border-border/60 bg-card p-3 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
         data-testid="mermaid-diagram"
         role="img"
-        aria-label="Mermaid diagram"
+        aria-label={t('chatCommon.mermaidDiagram')}
         dangerouslySetInnerHTML={{ __html: result.svg }}
       />
     )

@@ -983,6 +983,7 @@ function ToolActivityTranscriptRow({
   activeToolCallIds: ReadonlySet<string> | null
   badgeIntentionCallId?: string
 }): JSX.Element {
+  const { t } = useTranslation()
   if (toolCardMode === 'dots') {
     return (
       <div
@@ -999,7 +1000,7 @@ function ToolActivityTranscriptRow({
           ) : (
             <div
               className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase tracking-wider text-foreground"
-              aria-label="Assistant"
+              aria-label={t('chat.transcript.searchCategories.assistant')}
             >
               AK
             </div>
@@ -1008,7 +1009,7 @@ function ToolActivityTranscriptRow({
         <div className="relative min-w-0 flex-1">
           {hideHeader ? null : (
             <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Assistant
+              {t('chat.transcript.searchCategories.assistant')}
             </div>
           )}
           <InlineTimestamp ts={item.ts} className="absolute right-0 top-0 text-muted-foreground" />
@@ -1043,7 +1044,7 @@ function ToolActivityTranscriptRow({
         ) : (
           <div
             className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase tracking-wider text-foreground"
-            aria-label="Assistant"
+            aria-label={t('chat.transcript.searchCategories.assistant')}
           >
             AK
           </div>
@@ -1052,7 +1053,7 @@ function ToolActivityTranscriptRow({
       <div className="relative min-w-0 flex-1">
         {hideHeader ? null : (
           <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Assistant
+            {t('chat.transcript.searchCategories.assistant')}
           </div>
         )}
         <InlineTimestamp ts={item.ts} className="absolute right-0 top-0 text-muted-foreground" />
@@ -1600,25 +1601,26 @@ function MessageRow({
 }
 
 function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared').TurnTimingSummary }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const statusLabel = summary.status === 'completed' ? 'Completed' : summary.status === 'failed' ? 'Failed' : summary.status === 'cancelled' ? 'Cancelled' : summary.status === 'interrupted' ? 'Interrupted' : 'Running'
+  const statusLabel = t(`chatCommon.turnTiming.status.${summary.status === 'completed' || summary.status === 'failed' || summary.status === 'cancelled' || summary.status === 'interrupted' ? summary.status : 'running'}`)
   const rows = [
-    ['Active work', summary.activeDurationMs], ['Approval wait', summary.approvalWaitMs],
-    ['Model', summary.llm.wallDurationMs], ['Tools', summary.tools.wallDurationMs],
-    ['Compaction', summary.compactionDurationMs], ['Retry', summary.retryDurationMs], ['Recovery', summary.recoveryDurationMs],
+    [t('chatCommon.turnTiming.activeWork'), summary.activeDurationMs], [t('chatCommon.turnTiming.approvalWait'), summary.approvalWaitMs],
+    [t('chatCommon.turnTiming.model'), summary.llm.wallDurationMs], [t('chatCommon.turnTiming.tools'), summary.tools.wallDurationMs],
+    [t('chatCommon.turnTiming.compaction'), summary.compactionDurationMs], [t('chatCommon.turnTiming.retry'), summary.retryDurationMs], [t('chatCommon.turnTiming.recovery'), summary.recoveryDurationMs],
   ].filter(([, value]) => Number(value) > 0)
   return (
     <div className="max-w-xl" data-testid={`turn-timing-${summary.turnId}`}>
       <button type="button" className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <span aria-hidden="true">{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
         <span>{statusLabel} · {formatTurnDuration(summary.wallDurationMs)}</span>
-        <span className="ml-auto truncate">{summary.tools.callCount > 0 ? `${summary.tools.callCount} Tools` : ''}{summary.tools.callCount > 0 && summary.llm.requestCount > 0 ? ' · ' : ''}{summary.llm.requestCount > 0 ? `${summary.llm.requestCount} model calls` : ''}</span>
+        <span className="ml-auto truncate">{summary.tools.callCount > 0 ? t('chatCommon.turnTiming.toolCalls', { count: summary.tools.callCount }) : ''}{summary.tools.callCount > 0 && summary.llm.requestCount > 0 ? ' · ' : ''}{summary.llm.requestCount > 0 ? t('chatCommon.turnTiming.modelCalls', { count: summary.llm.requestCount }) : ''}</span>
         {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
       </button>
       {open ? (
         <div className="grid gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 text-[11px] sm:grid-cols-2" data-testid={`turn-timing-details-${summary.turnId}`}>
           {rows.map(([label, value]) => <div key={String(label)} className="flex justify-between gap-4"><span className="text-muted-foreground">{label}</span><span className="font-medium text-foreground">{formatTurnDuration(Number(value))}</span></div>)}
-          {summary.tools.callCount > 0 ? <div className="col-span-full border-t border-border/50 pt-2 text-muted-foreground">Tool wall {formatTurnDuration(summary.tools.wallDurationMs)} · aggregate {formatTurnDuration(summary.tools.aggregateDurationMs)} · peak concurrency {summary.tools.peakConcurrency}{summary.tools.partial ? ' · partial Executor timing' : ''}</div> : null}
+          {summary.tools.callCount > 0 ? <div className="col-span-full border-t border-border/50 pt-2 text-muted-foreground">{t('chatCommon.turnTiming.toolSummary', { wall: formatTurnDuration(summary.tools.wallDurationMs), aggregate: formatTurnDuration(summary.tools.aggregateDurationMs), concurrency: summary.tools.peakConcurrency })}{summary.tools.partial ? ` · ${t('chatCommon.turnTiming.partialExecutor')}` : ''}</div> : null}
         </div>
       ) : null}
     </div>
@@ -2596,13 +2598,14 @@ function ToolResultContentView({
   fallback?: string
   rawClassName?: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const [raw, setRaw] = useState(false)
   const structuredResult = parseStructuredToolResult(content)
   if (!structuredResult) {
     return (
       <ScrollArea>
         <pre className={cn('min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]', rawClassName ?? 'px-2.5 py-2')}>
-          {fallback || content || '(no output)'}
+          {fallback || content || t('chatCommon.noOutput')}
         </pre>
       </ScrollArea>
     )
@@ -2610,19 +2613,19 @@ function ToolResultContentView({
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between gap-2 border-b border-border/30 px-2.5 py-1.5 text-[11px]">
-        <span className="text-muted-foreground">Result</span>
+        <span className="text-muted-foreground">{t('chatCommon.result')}</span>
         <button
           type="button"
           onClick={() => setRaw((value) => !value)}
           className="rounded bg-muted px-2 py-0.5 font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
         >
-          {raw ? 'Rendered result' : 'Raw result'}
+          {t(raw ? 'chatCommon.renderedResult' : 'chatCommon.rawResult')}
         </button>
       </div>
       {raw ? (
         <ScrollArea>
           <pre className={cn('min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]', rawClassName ?? 'px-2.5 py-2')}>
-            {content || '(no output)'}
+            {content || t('chatCommon.noOutput')}
           </pre>
         </ScrollArea>
       ) : (
@@ -2799,6 +2802,7 @@ function ToolCallInlineDetail({
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   compactNarrative?: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
   const hasDiffPreview = isPendingApproval && hasDiffPreviewForTool(call.name)
   const summary = summarizeToolCallInput(call)
@@ -2809,10 +2813,10 @@ function ToolCallInlineDetail({
     >
       {!compactNarrative ? (
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2.5 py-1.5 text-[11px]">
-          <ToolTextBadge>request</ToolTextBadge>
+          <ToolTextBadge>{t('chatCommon.request')}</ToolTextBadge>
           <span className="min-w-0 truncate font-mono text-foreground">{call.name}</span>
           {isPendingApproval ? (
-            <ToolTextBadge tone="warning">Approval needed</ToolTextBadge>
+            <ToolTextBadge tone="warning">{t('chatCommon.approvalNeeded')}</ToolTextBadge>
           ) : null}
         </div>
       ) : null}
@@ -2822,7 +2826,7 @@ function ToolCallInlineDetail({
         </p>
       ) : null}
       <details className="border-b border-border/30 text-[11px]" data-testid={`tool-call-technical-details-${call.callId}`}>
-        <summary className="cursor-pointer select-none px-2.5 py-1.5 font-medium text-muted-foreground hover:text-foreground">Technical details</summary>
+        <summary className="cursor-pointer select-none px-2.5 py-1.5 font-medium text-muted-foreground hover:text-foreground">{t('chatCommon.technicalDetails')}</summary>
         <div className="border-t border-border/30">
           {summary ? <div className="flex flex-wrap gap-1.5 px-2.5 py-2"><ToolCallInputFieldBadges fields={summary.fields} /></div> : null}
           {isPendingApproval && hasDiffPreview ? (
@@ -3113,6 +3117,7 @@ function ToolCallGroupBlock({
   activeToolCallIds: ReadonlySet<string> | null
   badgeIntentionCallId?: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null)
   const [hoveredCallId, setHoveredCallId] = useState<string | null>(null)
@@ -3300,7 +3305,7 @@ function ToolCallGroupBlock({
                   <ToolActivityGlyph dot={dot} size={iconPixels} />
                 </button>
                 {omittedDotCount > 0 && index === Math.ceil(visibleDots.length / 2) - 1 ? (
-                  <button type="button" onClick={toggleOpen} className="relative z-20 ml-2 flex h-6 min-w-9 flex-none items-center justify-center rounded-full bg-background px-1.5 font-mono text-[11px] font-bold tabular-nums text-foreground shadow-[0_0_0_4px_hsl(var(--background))] ring-1 ring-inset ring-foreground/30 hover:bg-muted" title={`${omittedDotCount} omitted tool calls`} aria-label={`${omittedDotCount} omitted tool calls; expand to inspect`} data-testid="tool-activity-omission">+{omittedDotCount}</button>
+                  <button type="button" onClick={toggleOpen} className="relative z-20 ml-2 flex h-6 min-w-9 flex-none items-center justify-center rounded-full bg-background px-1.5 font-mono text-[11px] font-bold tabular-nums text-foreground shadow-[0_0_0_4px_hsl(var(--background))] ring-1 ring-inset ring-foreground/30 hover:bg-muted" title={t('chatCommon.omittedTools', { count: omittedDotCount })} aria-label={t('chatCommon.omittedToolsExpand', { count: omittedDotCount })} data-testid="tool-activity-omission">+{omittedDotCount}</button>
                 ) : null}
               </div>
               ))}
@@ -3310,7 +3315,7 @@ function ToolCallGroupBlock({
             type="button"
             onClick={toggleOpen}
             className="col-start-3 row-start-1 flex h-6 w-6 flex-none items-center justify-center rounded text-muted-foreground/65 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-sm:col-start-2 sm:h-5"
-            aria-label="Expand tool activity"
+            aria-label={t('chatCommon.expandToolActivity')}
             data-testid="tool-activity-direction"
           >
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -3348,7 +3353,7 @@ function ToolCallGroupBlock({
                         {previewStatus}
                       </ToolTextBadge>
                       {pinnedCallId === previewCallId ? (
-                        <button type="button" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setPinnedCallId(null)} aria-label="Close tool details" data-testid="tool-card-preview-close">
+                        <button type="button" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setPinnedCallId(null)} aria-label={t('chatCommon.closeToolDetails')} data-testid="tool-card-preview-close">
                           <X className="h-4 w-4" aria-hidden="true" />
                         </button>
                       ) : null}
