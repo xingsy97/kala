@@ -627,9 +627,9 @@ export function configureDashboardNamespace(
           )
           return
         }
-        // A dashboard-triggered compact is an in-band user command: once the
-        // handoff is persisted, immediately let the agent continue from it.
-        await deps.loop.compact(p.sessionId, 'manual', true)
+        // Manual compaction is transcript maintenance. Persist the handoff but
+        // leave the Session resting; only a later user message starts work.
+        await deps.loop.compact(p.sessionId, { trigger: 'manual', continuation: 'stay_resting' })
       } catch (err) {
         deps.broadcastError(
           p.sessionId,

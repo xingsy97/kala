@@ -90,6 +90,48 @@ The host may skip an attempt when the session has no compactable content, a
 runtime guard is active, the summarizer would be unsafe to call, or a circuit
 breaker is open. Skips are logged as `runtime_metadata`.
 
+## Continuation State Machine
+
+Compaction and continuation are separate state transitions. A successful
+compaction always commits the transcript replacement first; the trigger
+context determines whether execution was already in progress. Callers cannot
+override this decision with a boolean `resume` flag.
+
+| Trigger context | Allowed source state | State after replacement | Continuation |
+| --- | --- | --- | --- |
+| `manual` | `idle`, `done`, or `error` | unchanged/resting | Never starts an Agent turn |
+| `auto` | resting, while the Host is closing an existing dispatch | unchanged/resting | Does not independently start a turn; the enclosing dispatch state machine may continue work that was already active |
+| `preflight` | `thinking` | `thinking` | The existing call stack retries/continues the same LLM turn exactly once |
+| `tool_result` | `executing_tools` | `executing_tools` | The existing tool batch continues; it does not create a second LLM turn |
+
+The valid transition set is therefore represented as a discriminated request,
+not independent trigger and resume switches:
+
+```ts
+type CompactRequest =
+  | { trigger: 'manual' | 'auto'; continuation: 'stay_resting' }
+  | { trigger: 'preflight' | 'tool_result'; continuation: 'current_turn' }
+```
+
+`manual` is a maintenance action. Once its `messages_replaced` event is
+durable, the Session remains in its prior resting state even if a durable todo
+graph still contains unfinished nodes. The user must send a new message to
+start more Agent work. In particular, the Dashboard must not translate a
+manual Compact click into a recovery event.
+
+`preflight` and `tool_result` happen inside an already-running turn. They do
+not persist a synthetic no-op recovery event: the existing Host call stack is
+the continuation checkpoint and proceeds after the replacement. This prevents
+both a stranded turn and a duplicate model call/tool side effect. An `auto`
+maintenance call made outside an active dispatch likewise remains resting; an
+unfinished todo graph alone is not evidence that compaction may create a new
+turn.
+
+Planned restart recovery remains a separate protocol. It may persist an
+explicit `messages_replaced(reason='recovery', resume=true)` only from a
+validated restart checkpoint. Compaction trigger names and Dashboard intent
+must never be used as restart evidence.
+
 ## Replacement Rules
 
 The host must build a replacement that preserves provider protocol invariants:

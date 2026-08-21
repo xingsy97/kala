@@ -181,8 +181,8 @@ describe('host loop', () => {
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
     expect(parsed.events.filter((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toHaveLength(1)
 
-    // Simulate a fresh Host process auto-compacting the resting Session. Durable
-    // graph state must cause an immediate continuation after replacement.
+    // A fresh Host may compact a resting Session, but unfinished durable graph
+    // data alone is not permission to create a new Agent turn.
     let postCompactCalls = 0
     const afterRestart = runHostLoop({
       store,
@@ -198,11 +198,12 @@ describe('host loop', () => {
       },
       tools: nullTools(), broadcast: silentBroadcast(),
     })
-    await expect(afterRestart.compact(sessionId, 'auto')).resolves.toBe(true)
-    expect(postCompactCalls).toBe(2)
+    await expect(afterRestart.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })).resolves.toBe(true)
+    expect(postCompactCalls).toBe(1)
     const afterCompact = await readSessionLog(store.get(sessionId)!.logPath)
-    expect(afterCompact.events.at(-2)?.event).toMatchObject({ kind: 'messages_replaced', reason: 'recovery', resume: true })
-    expect(afterCompact.events.at(-1)?.event.kind).toBe('llm_response')
+    expect(afterCompact.events.at(-1)?.event).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
+    expect(afterCompact.events.filter((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toHaveLength(1)
+    expect(store.get(sessionId)!.state.status).toBe('done')
   })
 
   it('explicit Stop suppresses durable todo graph auto-continuation until a new user message', async () => {
@@ -1145,7 +1146,7 @@ describe('host loop', () => {
     const beforeCount = store.get(sessionId)!.state.messages.length
     expect(beforeCount).toBeGreaterThan(1)
 
-    await loop.compact(sessionId)
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     const rec = store.get(sessionId)!
     // Codex-style replacement: leading system prompt + anchored summary as a
@@ -1168,12 +1169,15 @@ describe('host loop', () => {
     expect((llmCalls[1]!.messages[0]!.content[0] as { text: string }).text).toContain('<transcript>')
     // Cumulative usage is preserved; current-window context is compacted.
     expect(rec.state.usage.inputTokens).toBe(10)
+    expect(rec.state.status).toBe('done')
     const parsed = await readSessionLog(rec.logPath)
     const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
     expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
     const metadata = parsed.runtimeMetadata.find((e) => e.action === 'compaction_applied')
     expect(metadata?.payload.trigger).toBe('manual')
     expect(metadata?.payload.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
+    expect(parsed.events.some((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toBe(false)
+    expect(llmCalls).toHaveLength(2)
   })
 
   it('manual compact() trims old oversized tool results before summarizing', async () => {
@@ -1227,7 +1231,7 @@ describe('host loop', () => {
     })
 
     await loop.dispatch(sid, { kind: 'user_message', text: 'read big log' })
-    await loop.compact(sid)
+    await loop.compact(sid, { trigger: 'manual', continuation: 'stay_resting' })
 
     // Codex-style summarizer receives one user message containing a serialised
     // transcript. The tool result is embedded as "[Tool result read-big]: <content>"
@@ -1263,7 +1267,7 @@ describe('host loop', () => {
       broadcast: silentBroadcast(),
     })
 
-    await expect(loop.compact(sessionId)).rejects.toThrow('nothing to compact yet')
+    await expect(loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })).rejects.toThrow('nothing to compact yet')
     expect(llmCalls).toBe(0)
   })
 
@@ -1301,7 +1305,7 @@ describe('host loop', () => {
       tick()
     })
 
-    await expect(loop.compact(sessionId)).rejects.toThrow(
+    await expect(loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })).rejects.toThrow(
       'cannot compact while the session is busy',
     )
     release?.()
@@ -1676,7 +1680,7 @@ describe('host loop', () => {
     })
 
     await loop.dispatch(sid, { kind: 'user_message', text: 'start' })
-    await loop.compact(sid)
+    await loop.compact(sid, { trigger: 'manual', continuation: 'stay_resting' })
     await loop.dispatch(sid, { kind: 'user_message', text: 'continue' })
 
     expect(executorCalls).toBe(2)

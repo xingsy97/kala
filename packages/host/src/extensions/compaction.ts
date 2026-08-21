@@ -44,7 +44,7 @@ import {
   type CompactionSummaryValidation,
 } from '@agent-kernel/shared/enhancement'
 
-import type { CompactStatusPayload, HostLoopDeps, LoopHandle } from '../loop-types.js'
+import type { CompactRequest, CompactStatusPayload, CompactTrigger, HostLoopDeps, LoopHandle } from '../loop-types.js'
 import { dispatchOne } from '../loop.js'
 import { appendRuntimeMetadataEntry } from '../store/log.js'
 import { contextSnapshot, shouldAutoCompact } from '../context/manager.js'
@@ -170,8 +170,6 @@ const MAX_CONSECUTIVE_COMPACT_FAILURES = 3
 // GPT-4o class) rather than a silent no-op. Never overrides real config.
 const FALLBACK_CONTEXT_LIMIT_TOKENS = 128_000
 
-type CompactTrigger = 'manual' | 'auto' | 'preflight' | 'tool_result'
-
 /**
  * Per-session runtime state that the compaction extension needs across calls.
  * Kept as a module-scope map (rather than plumbed through HostLoopDeps) so
@@ -214,17 +212,17 @@ export async function maybeAutoCompact(
   const s = record.state.status
   if (s !== 'idle' && s !== 'done' && s !== 'error') return
   if (inFlight.has(sessionId)) return
-  await handle.compact(sessionId, 'auto')
+  await handle.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
 }
 
 export async function runCompact(
   deps: HostLoopDeps,
   sessionId: string,
-  trigger: CompactTrigger,
+  request: CompactRequest,
   inFlight: Set<string>,
   aborts: Map<string, AbortController>,
-  resume = false,
 ): Promise<boolean> {
+  const { trigger } = request
   if (inFlight.has(sessionId)) {
     // Concurrent invocation. `manual` is the only one a human sees; the
     // others (auto/preflight/tool_result) are silent no-ops by design.
@@ -408,7 +406,6 @@ export async function runCompact(
         reason: 'compaction',
         replaceRange,
         replacementMessages,
-        ...(resume ? { resume: true } : {}),
       },
       aborts,
       compact.trace,

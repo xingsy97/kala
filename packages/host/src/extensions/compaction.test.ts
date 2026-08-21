@@ -147,10 +147,10 @@ describe('compaction extension', () => {
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
 
     // Three failed auto triggers (each is a no-op on error, not a throw).
-    for (let i = 0; i < 3; i++) await loop.compact(sessionId, 'auto')
+    for (let i = 0; i < 3; i++) await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
 
     // 4th auto trigger must be short-circuited by the breaker.
-    await loop.compact(sessionId, 'auto')
+    await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
 
     const rec = store.get(sessionId)!
     const skips = await readSkipEvents(rec.logPath)
@@ -172,13 +172,13 @@ describe('compaction extension', () => {
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
-    for (let i = 0; i < 3; i++) await loop.compact(sessionId, 'auto')
-    await loop.compact(sessionId, 'auto')
+    for (let i = 0; i < 3; i++) await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
+    await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
     const skipsBefore = await readSkipEvents(store.get(sessionId)!.logPath)
     expect(skipsBefore.some((entry) => entry.payload.reason === 'circuit_breaker_open')).toBe(true)
 
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'new generation' })
-    const applied = await loop.compact(sessionId, 'auto')
+    const applied = await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
     expect(applied).toBe(true)
     expect((await readReplacedEvents(store.get(sessionId)!.logPath).then((events) => events.length))).toBeGreaterThan(0)
   })
@@ -199,10 +199,10 @@ describe('compaction extension', () => {
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
 
     // Open the breaker with 3 auto failures.
-    for (let i = 0; i < 3; i++) await loop.compact(sessionId, 'auto')
+    for (let i = 0; i < 3; i++) await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
 
     // Confirm auto now short-circuits.
-    await loop.compact(sessionId, 'auto')
+    await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
     let rec = store.get(sessionId)!
     let skips = await readSkipEvents(rec.logPath)
     expect(skips.some((s) => s.payload.reason === 'circuit_breaker_open')).toBe(true)
@@ -212,7 +212,7 @@ describe('compaction extension', () => {
     // implementation detail; we only need one successful messages_replaced.)
     for (let i = 0; i < 5; i++) {
       try {
-        await loop.compact(sessionId, 'manual')
+        await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
       } catch {
         // fall through
       }
@@ -225,7 +225,7 @@ describe('compaction extension', () => {
     // Auto should no longer short-circuit with circuit_breaker_open.
     rec = store.get(sessionId)!
     const skipsBefore = (await readSkipEvents(rec.logPath)).length
-    await loop.compact(sessionId, 'auto')
+    await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
     skips = await readSkipEvents(rec.logPath)
     const newSkips = skips.slice(skipsBefore)
     expect(newSkips.every((s) => s.payload.reason !== 'circuit_breaker_open')).toBe(true)
@@ -248,7 +248,7 @@ describe('compaction extension', () => {
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
     const before = store.get(sessionId)!.state.messages.length
 
-    await expect(loop.compact(sessionId)).rejects.toThrow(/empty/i)
+    await expect(loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })).rejects.toThrow(/empty/i)
 
     const rec = store.get(sessionId)!
     expect(rec.state.messages.length).toBe(before)
@@ -271,7 +271,7 @@ describe('compaction extension', () => {
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'first turn' })
 
-    const compacting = loop.compact(sessionId, 'manual')
+    const compacting = loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
     await Promise.resolve()
     await loop.dispatch(sessionId, { kind: 'approval_mode_changed', mode: 'full' })
     summary.resolve(summaryReply())
@@ -296,7 +296,7 @@ describe('compaction extension', () => {
       },
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
-    await expect(loop.compact(sessionId)).rejects.toThrow(/nothing to compact/i)
+    await expect(loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })).rejects.toThrow(/nothing to compact/i)
   })
 
   it('manual compact can re-compact a prior compact summary', async () => {
@@ -312,7 +312,7 @@ describe('compaction extension', () => {
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
-    await loop.compact(sessionId)
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     // After the first compaction: leading system + anchored summary as a user
     // message + preserved recent user tail ("hi"). Codex-style: summary lands
@@ -325,7 +325,7 @@ describe('compaction extension', () => {
     ])
     expect(rec.state.messages[2]?.content).toEqual([{ type: 'text', text: 'hi' }])
 
-    await loop.compact(sessionId)
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     // Second compaction updates the anchored summary in place. Shape and tail
     // are unchanged; only the summary body changes.
@@ -367,7 +367,7 @@ describe('compaction extension', () => {
       ],
     }
 
-    await loop.compact(sessionId, 'manual')
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     const parsed = await readSessionLog(rec.logPath)
     const replaced = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
@@ -392,7 +392,7 @@ describe('compaction extension', () => {
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
-    await loop.compact(sessionId)
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     const rec = store.get(sessionId)!
     const parsed = await readSessionLog(rec.logPath)
@@ -423,7 +423,7 @@ describe('compaction extension', () => {
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
-    await loop.compact(sessionId)
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
     const compactEntry = parsed.events.find((e) => e.event.kind === 'messages_replaced')
@@ -445,7 +445,7 @@ describe('compaction extension', () => {
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
-    await loop.compact(sessionId)
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     // Second call is the summarizer.
     expect(seen[1]!.thinkingBudget).toBe(0)
@@ -469,7 +469,7 @@ describe('compaction extension', () => {
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
 
-    await loop.compact(sessionId) // must NOT throw despite 2 PTL failures
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' }) // must NOT throw despite 2 PTL failures
 
     expect(call).toBeGreaterThanOrEqual(4) // 1 turn + at least 3 summarizer attempts
     const rec = store.get(sessionId)!
@@ -490,7 +490,7 @@ describe('compaction extension', () => {
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
 
-    await loop.compact(sessionId, 'auto')
+    await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
 
     // One skip event, not one per rung. All ladder attempts are made, but the
     // failure counter gets a single increment.
@@ -514,7 +514,7 @@ describe('compaction extension', () => {
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
-    await loop.compact(sessionId)
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     const prompt = seen[1]!.systemPrompt ?? ''
     expect(prompt).toContain('Preserve opaque identifiers exactly as written')
@@ -554,7 +554,7 @@ describe('compaction extension', () => {
       ],
     }
 
-    await loop.compact(sessionId, 'manual')
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     const summarizerInput = seen[0]!.messages[0]!.content[0]
     expect(summarizerInput.type).toBe('text')
@@ -593,7 +593,7 @@ describe('compaction extension', () => {
       ],
     }
 
-    await loop.compact(sessionId, 'manual')
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     const messages = store.get(sessionId)!.state.messages
     expect(messages.map((m) => m.role)).toEqual(['system', 'user', 'user'])
@@ -635,7 +635,7 @@ describe('compaction extension', () => {
       ],
     }
 
-    await expect(loop.compact(sessionId, 'manual')).rejects.toThrow(/post_compaction_still_over_budget/)
+    await expect(loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })).rejects.toThrow(/post_compaction_still_over_budget/)
 
     const parsed = await readSessionLog(rec.logPath)
     expect(parsed.events.some((e) => e.event.kind === 'messages_replaced')).toBe(false)
@@ -655,7 +655,7 @@ describe('compaction extension', () => {
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
 
-    await loop.compact(sessionId, 'auto')
+    await loop.compact(sessionId, { trigger: 'auto', continuation: 'stay_resting' })
 
     // Only one summarizer call was made because the error was non-PTL.
     expect(call).toBe(2)
@@ -680,7 +680,7 @@ describe('compaction extension', () => {
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
     const before = store.get(sessionId)!.state.messages.length
 
-    await expect(loop.compact(sessionId)).rejects.toThrow(/invalid handoff/i)
+    await expect(loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })).rejects.toThrow(/invalid handoff/i)
 
     const rec = store.get(sessionId)!
     // No messages were replaced.
@@ -714,7 +714,7 @@ describe('compaction extension', () => {
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
     const before = store.get(sessionId)!.state.messages.length
 
-    await expect(loop.compact(sessionId)).rejects.toThrow(/invalid handoff/i)
+    await expect(loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })).rejects.toThrow(/invalid handoff/i)
 
     const rec = store.get(sessionId)!
     expect(rec.state.messages.length).toBe(before)
@@ -735,7 +735,7 @@ describe('compaction extension', () => {
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
-    await loop.compact(sessionId)
+    await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
 
     const rec = store.get(sessionId)!
     const parsed = await readSessionLog(rec.logPath)

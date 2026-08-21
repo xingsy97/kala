@@ -233,7 +233,7 @@ describe('planned restart durable handoff', () => {
     expect(JSON.stringify(parsed.events)).not.toContain('[interrupted]')
   })
 
-  it('settles active Compaction before handoff and continues from a monotonic cursor', async () => {
+  it('settles active manual Compaction before handoff and keeps the Session resting', async () => {
     const root = mkdtempSync(join(tmpdir(), 'restart-compaction-handoff-'))
     roots.push(root)
     const store = new SessionStore(join(root, 'sessions'))
@@ -261,14 +261,14 @@ describe('planned restart durable handoff', () => {
     })
     await oldLoop.dispatch(record.sessionId, { kind: 'user_message', text: 'continue after compaction' })
     const cursorBeforeCompaction = store.get(record.sessionId)!.state.cursor
-    const compacting = oldLoop.compact(record.sessionId, 'manual', true)
+    const compacting = oldLoop.compact(record.sessionId, { trigger: 'manual', continuation: 'stay_resting' })
     await started
     oldLoop.beginDrain('checkpoint')
     expect(oldLoop.drainSnapshot(record.sessionId)).toMatchObject({ safe: false, waiting: 'compaction' })
     releaseSummary()
     await expect(compacting).resolves.toBe(true)
     const checkpoint = oldLoop.drainSnapshot(record.sessionId)
-    expect(checkpoint).toMatchObject({ safe: true, checkpointKind: 'before_llm', status: 'thinking' })
+    expect(checkpoint).toMatchObject({ safe: true, checkpointKind: 'resting', status: 'done' })
     expect(checkpoint.cursor).toBeGreaterThan(cursorBeforeCompaction)
 
     const replacementStore = new SessionStore(join(root, 'sessions'))
@@ -280,12 +280,12 @@ describe('planned restart durable handoff', () => {
       tools,
       broadcast,
     })
-    await expect(replacementLoop.resumeSession(record.sessionId)).resolves.toBe(true)
+    await expect(replacementLoop.resumeSession(record.sessionId)).resolves.toBe(false)
     const parsed = await readSessionLog(replacementStore.get(record.sessionId)!.logPath)
     expect(parsed.events.map((entry) => entry.seq)).toEqual(parsed.events.map((_, index) => index + 1))
     expect(parsed.events.some((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'compaction')).toBe(true)
-    expect(parsed.events.some((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toBe(true)
-    expect(replacementStore.get(record.sessionId)!.state.cursor).toBe((checkpoint.cursor ?? 0) + 1)
+    expect(parsed.events.some((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toBe(false)
+    expect(replacementStore.get(record.sessionId)!.state.cursor).toBe(checkpoint.cursor)
     expect(JSON.stringify(parsed.events)).not.toContain('[interrupted]')
   })
 })

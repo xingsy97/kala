@@ -218,41 +218,15 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       sessionTails.set(sessionId, next)
       await next
     },
-    async compact(sessionId, trigger = 'manual', resume = false) {
+    async compact(sessionId, request) {
       if (drainMode !== 'none') return false
-      // Commit replacement first without inline continuation. runCompact owns
-      // metadata and its in-flight lock; resuming from inside it meant the next
-      // LLM/tools ran before the lock cleared and before loop guards were armed.
-      const replaced = await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts, false)
+      const replaced = await runCompact(deps, sessionId, request, compactionInFlight, inFlightAborts)
       notifyCheckpoint(sessionId)
-      if (replaced && trigger !== 'tool_result') {
+      if (replaced && request.trigger !== 'tool_result') {
         loopGuard.set(sessionId, {
           remainingCalls: POST_COMPACTION_GUARD_CALLS,
           seen: new Map(),
         })
-      }
-      let shouldResume = resume
-      if (replaced && trigger === 'auto' && !shouldResume) {
-        const graph = await todoGraphContinuationState(deps, sessionId)
-        shouldResume = graph.needsContinuation && graphContinuationRevision.get(sessionId) !== graph.revision
-        if (shouldResume) graphContinuationRevision.set(sessionId, graph.revision)
-      }
-      if (replaced && shouldResume) {
-        await dispatchOne(deps, sessionId, {
-          kind: 'messages_replaced',
-          reason: 'recovery',
-          replaceRange: { start: 0, end: 0 },
-          replacementMessages: [],
-          resume: true,
-        }, inFlightAborts, undefined, undefined, {
-          handle,
-          loopGuard,
-          drain: () => drainMode,
-          steerStop: () => steerStopSessions.has(sessionId),
-            stopRequested: () => explicitStopSessions.has(sessionId),
-          toolStarted: markToolStarted,
-          toolSettled: markToolSettled,
-        }, notifyCheckpoint)
       }
       return replaced
     },
@@ -705,7 +679,7 @@ async function performCallLlm(
       // huge user/tool item, recover this SAME turn once instead of persisting
       // llm_error and stranding the autonomous run.
       if (!runtime || controller.signal.aborted || !isContextOverflowError(err)) throw err
-      await runtime.handle.compact(sessionId, 'preflight', false)
+      await runtime.handle.compact(sessionId, { trigger: 'preflight', continuation: 'current_turn' })
       const current = deps.store.get(sessionId)?.state.messages ?? messages
       const retryMessages = emergencyTruncate(current, config, contextLimitForSession(deps, sessionId))
       res = await callLlmOnce(callInput, retryMessages)
@@ -714,7 +688,7 @@ async function performCallLlm(
     await maybeRecordTokenUsageObservation(deps, sessionId, res, messages, disclosedTools)
     if (shouldRecoverFromMaxTokens(res) && runtime && !controller.signal.aborted) {
       try {
-        await runtime.handle.compact(sessionId, 'preflight', false)
+        await runtime.handle.compact(sessionId, { trigger: 'preflight', continuation: 'current_turn' })
         const retryMessages = deps.store.get(sessionId)?.state.messages ?? messages
         res = await callLlmOnce({
           deps,
@@ -1199,7 +1173,7 @@ async function maybeCompactAfterToolResult(
   if (record.state.status !== 'executing_tools') return
   if (record.state.pendingCalls.length === 0) return
   if (!shouldPreflightCompact(record.config, record.state.messages, contextLimitForSession(deps, sessionId, record))) return
-  await runtime.handle.compact(sessionId, 'tool_result')
+  await runtime.handle.compact(sessionId, { trigger: 'tool_result', continuation: 'current_turn' })
 }
 
 const PREFLIGHT_RESERVE_FLOOR_TOKENS = 8_000
@@ -1221,7 +1195,7 @@ async function messagesForLlmCall(
   if (!runtime || !shouldPreflightCompact(config, messages, contextLimit)) return messages
   let applied = false
   try {
-    applied = await runtime.handle.compact(sessionId, 'preflight')
+    applied = await runtime.handle.compact(sessionId, { trigger: 'preflight', continuation: 'current_turn' })
   } catch {
     // Fall through to deterministic local recovery below.
   }

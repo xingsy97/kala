@@ -77,6 +77,17 @@ export type LoopBroadcast = {
 
 export type CompactStatusPayload = CompactStatusEvent
 
+export type CompactTrigger = 'manual' | 'auto' | 'preflight' | 'tool_result'
+
+/**
+ * The lifecycle context determines continuation. These are the only valid
+ * combinations: a resting maintenance request cannot be turned into a new
+ * Agent turn with an independent boolean flag.
+ */
+export type CompactRequest =
+  | { trigger: 'manual' | 'auto'; continuation: 'stay_resting' }
+  | { trigger: 'preflight' | 'tool_result'; continuation: 'current_turn' }
+
 /**
  * Optional broadcast-time enrichments that don't belong on the kernel event
  * itself. `dispatchOne` accepts these and forwards them to
@@ -154,7 +165,7 @@ export type HostLoopDeps = {
 
 export type LoopHandle = {
   dispatch(sessionId: string, event: AgentEvent, options?: DispatchOptions): Promise<void>
-  compact(sessionId: string, trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result', resume?: boolean): Promise<boolean>
+  compact(sessionId: string, request: CompactRequest): Promise<boolean>
   hasActiveLlmCall(sessionId: string): boolean
   /** True while any serialized turn work is still running, including the gaps between LLM and tool effects. */
   hasActiveTurn(sessionId: string): boolean

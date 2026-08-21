@@ -3629,6 +3629,66 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('client:compact persists a manual handoff without starting another Agent turn', async () => {
+    const sessionId = 'wire-manual-compact-rests'
+    let llmCalls = 0
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'manual-compact-rests',
+        async call(input) {
+          llmCalls += 1
+          if (!input.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) {
+            return { message: { role: 'assistant', content: [{ type: 'text', text: 'turn complete' }] } }
+          }
+          const detail = 'Preserve the completed turn and wait for an explicit user message before doing more work. '.repeat(8)
+          return {
+            message: {
+              role: 'assistant',
+              content: [{
+                type: 'text',
+                text: `## Objective\n- Keep the compacted session stable.\n\n## User Intent And Constraints\n- ${detail}\n\n## Repository And Runtime State\n- Session is resting.\n\n## Decisions\n- Manual compact does not resume.\n\n## Work Completed\n- Existing turn completed.\n\n## Open Work\n- Wait for the user.\n\n## Preserved Verbatim\n- Manual compact.`,
+              }],
+            },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    await server.loop.dispatch(sessionId, { kind: 'user_message', text: 'finish this turn' })
+    expect(server.store.get(sessionId)?.state.status).toBe('done')
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const compactDone = new Promise<void>((resolve) => {
+      dashboard.on('server:compact_status', (payload) => {
+        if (payload.kind === 'done') resolve()
+      })
+    })
+    dashboard.emit('client:compact', { sessionId })
+    await compactDone
+
+    expect(llmCalls).toBe(2)
+    expect(server.store.get(sessionId)?.state.status).toBe('done')
+    const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
+    expect(parsed.events.at(-1)?.event).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
+    expect(parsed.events.some((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toBe(false)
+    dashboard.close()
+  })
+
   it('queues user messages while a turn is running and dispatches them after rest', async () => {
     const sessionId = 'wire-message-queue'
     await server.close()
