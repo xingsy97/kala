@@ -70,13 +70,25 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
 
   const revokeInvite = useMutation({
     mutationFn: async (id: string): Promise<void> => {
-      const res = await fetch(`/auth/executor-invites/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const res = await fetch(`/auth/executor-invites/${encodeURIComponent(id)}/revoke`, { method: 'POST' })
       if (!res.ok) throw new Error(await responseError(res))
     },
     onSuccess: () => {
       setError(null)
       void queryClient.invalidateQueries({ queryKey: ['executor-invites'] })
       void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+
+  const deleteInvite = useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      const res = await fetch(`/auth/executor-invites/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await responseError(res))
+    },
+    onSuccess: () => {
+      setError(null)
+      void queryClient.invalidateQueries({ queryKey: ['executor-invites'] })
     },
     onError: (err) => setError(err instanceof Error ? err.message : String(err)),
   })
@@ -97,7 +109,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
     onError: (err) => setError(err instanceof Error ? err.message : String(err)),
   })
 
-  const busy = createInvite.isPending || patchInvite.isPending || revokeInvite.isPending || regenerateInvite.isPending
+  const busy = createInvite.isPending || patchInvite.isPending || revokeInvite.isPending || deleteInvite.isPending || regenerateInvite.isPending
   const invites = invitesQuery.data?.invites ?? []
   const inviteCopyValue = plainInvite
     ? copyMode === 'command'
@@ -178,6 +190,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
             const labelValue = meaningfulInviteLabel(invite.label) ?? ''
             const title = invite.workspaceId ?? (labelValue || t('settings.executorAccess.unboundInvite'))
             const expired = Date.parse(invite.expiresAt) <= Date.now()
+            const canDelete = !invite.workspaceId || invite.revoked || expired
             const subtitle = invite.workspaceId
               ? labelValue || t('settings.executorAccess.boundInvite')
               : t('settings.executorAccess.waitingForFirstUse')
@@ -222,9 +235,9 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
                       <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
                       {t('settings.executorAccess.regenerate')}
                     </Button>
-                    <Button type="button" variant="ghost" size="sm" className="h-8 text-muted-foreground hover:text-destructive" onClick={() => revokeInvite.mutate(invite.id)} disabled={busy || invite.revoked} aria-label={t('settings.executorAccess.revoke')}>
+                    <Button type="button" variant="ghost" size="sm" className="h-8 text-muted-foreground hover:text-destructive" onClick={() => canDelete ? deleteInvite.mutate(invite.id) : revokeInvite.mutate(invite.id)} disabled={busy} aria-label={canDelete ? t('settings.executorAccess.delete') : t('settings.executorAccess.revoke')}>
                       <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                      {t('settings.executorAccess.revoke')}
+                      {canDelete ? t('settings.executorAccess.delete') : t('settings.executorAccess.revoke')}
                     </Button>
                   </div>
                 </div>

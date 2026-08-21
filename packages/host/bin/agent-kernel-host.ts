@@ -288,11 +288,13 @@ async function main(): Promise<void> {
     release,
   })
 
+  const evaluationUrl = publicHttpUrl(process.env.AGENT_RUNLAB_EVALUATION_URL)
   const server = await startHostServer({
     port,
     ...(process.env.HOST_LISTEN_HOST?.trim() ? { listenHost: process.env.HOST_LISTEN_HOST.trim() } : {}),
     deployment,
     capabilities,
+    ...(evaluationUrl ? { evaluationUrl } : {}),
     sessionsDir,
     ...(expectedDeployment ? { expectedDeployment } : {}),
     ...(expectedDeployment ? { mutableReady: () => plannedDeploymentPubliclyRouted(expectedDeployment) } : {}),
@@ -452,6 +454,19 @@ async function main(): Promise<void> {
   }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+}
+
+function publicHttpUrl(value: string | undefined): string | undefined {
+  const candidate = value?.trim()
+  if (!candidate) return undefined
+  if (candidate.startsWith('/') && !candidate.startsWith('//')) return candidate.replace(/\/$/u, '') || '/'
+  try {
+    const url = new URL(candidate)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+    return url.toString().replace(/\/$/u, '')
+  } catch {
+    return undefined
+  }
 }
 
 function parseExpectedDeployment(raw: string | undefined): NonNullable<import('@agent-kernel/shared').HostRestartAttempt['deployment']> | undefined {

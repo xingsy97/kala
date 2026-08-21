@@ -790,6 +790,14 @@ describe('SettingsDialog', () => {
           },
         ],
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, id: 'invite-alpha-0001', deleted: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        invites: [{
+          id: 'invite-beta-0002', label: 'Connect Workspace', workspaceId: 'ws-bound',
+          createdAt: '2026-07-15T01:00:00.000Z', expiresAt: '2099-07-22T01:00:00.000Z',
+          lastUsedAt: '2026-07-15T02:00:00.000Z', revoked: false,
+        }],
+      }), { status: 200 }))
 
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
@@ -804,6 +812,10 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Waiting for the first executor connection')).toBeTruthy()
     expect(screen.getByText('ws-bound')).toBeTruthy()
     expect(screen.queryByDisplayValue('Connect Workspace')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete invite' }))
+    await waitFor(() => expect(screen.getAllByTestId('executor-invite-row')).toHaveLength(1))
+    expect(fetchMock).toHaveBeenCalledWith('/auth/executor-invites/invite-alpha-0001', { method: 'DELETE' })
+    expect(screen.getByRole('button', { name: 'Revoke invite' })).toBeTruthy()
   })
 
   it('shows deployment component inventory and executor build metadata', async () => {

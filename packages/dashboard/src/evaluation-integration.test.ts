@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 
@@ -10,22 +10,14 @@ import {
 } from './evaluation-integration.js'
 
 describe('evaluation integration', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs()
-  })
-
-  it('uses the standalone default URL and accepts an explicit HTTP URL', () => {
-    vi.stubEnv('VITE_AGENT_EVALUATION_URL', '')
-    expect(resolveEvaluationPlatformUrl()).toBe('http://127.0.0.1:13180')
-
-    vi.stubEnv('VITE_AGENT_EVALUATION_URL', 'https://evaluation.example.test/root/')
-    expect(resolveEvaluationPlatformUrl()).toBe('https://evaluation.example.test/root')
+  it('requires an explicit public URL', () => {
+    expect(resolveEvaluationPlatformUrl()).toBeUndefined()
+    expect(resolveEvaluationPlatformUrl('https://evaluation.example.test/root/')).toBe('https://evaluation.example.test/root')
   })
 
   it('rejects non-HTTP and malformed configured URLs', () => {
     for (const configured of ['javascript:alert(1)', 'file:///tmp/evaluation', 'not a URL']) {
-      vi.stubEnv('VITE_AGENT_EVALUATION_URL', configured)
-      expect(resolveEvaluationPlatformUrl()).toBe('http://127.0.0.1:13180')
+      expect(resolveEvaluationPlatformUrl(configured)).toBeUndefined()
     }
   })
 
@@ -35,8 +27,7 @@ describe('evaluation integration', () => {
     expect(explicitEvaluationReference(matching, 'session-2')).toBeUndefined()
     expect(explicitEvaluationReference({ search: '?evaluationSessionId=session-1&evaluationRunId=../unsafe' }, 'session-1')).toBeUndefined()
 
-    vi.stubEnv('VITE_AGENT_EVALUATION_URL', 'https://evaluation.example.test/')
-    expect(evaluationReferenceUrl({ runId: 'run-1', defectId: 'finding-1' })).toBe(
+    expect(evaluationReferenceUrl({ runId: 'run-1', defectId: 'finding-1' }, 'https://evaluation.example.test')).toBe(
       'https://evaluation.example.test/defects?runId=run-1&findingId=finding-1',
     )
   })

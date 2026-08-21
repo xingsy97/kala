@@ -574,7 +574,7 @@ export function ChatPanel({
                 // Align with the assistant-message content column: avatar (w-7) +
                 // gap-3 = 2.5rem left inset, so the running/status/approval rows sit
                 // flush under the message body above them instead of the full column.
-                <div className="pl-0 pt-1 sm:pl-10">{footerSlot}</div>
+                <div className="w-full pl-0 pt-1 sm:pl-10">{footerSlot}</div>
               ) : null
             }
             itemClassName="ak-chat-container ak-chat-item mx-auto w-full min-w-0 overflow-x-hidden py-2 sm:py-3"
@@ -1578,21 +1578,19 @@ function MessageRow({
               />
             )
           })}
-          {message.role === 'assistant' && !streaming && turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
-          {message.role === 'assistant' && !streaming && assistantActions ? (
-            <MessageActions
-              align="start"
-              copyText={assistantActions.copyText}
-              tryAgainAction={
-                !streaming && assistantRerunTarget && onEditAndRerun
-                  ? {
-                      label: t('chat.transcript.tryAgain'),
-                      onClick: () => onEditAndRerun(assistantRerunTarget.seq, assistantRerunTarget.text),
-                      testId: `try-again-message-${index}`,
-                    }
-                  : undefined
-              }
-            />
+          {message.role === 'assistant' && !streaming && (turnTiming || assistantActions) ? (
+            <div className="flex min-w-0 flex-wrap items-start gap-1" data-testid="assistant-message-footer">
+              {turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
+              {assistantActions ? <MessageActions
+                align="start"
+                copyText={assistantActions.copyText}
+                tryAgainAction={assistantRerunTarget && onEditAndRerun ? {
+                  label: t('chat.transcript.tryAgain'),
+                  onClick: () => onEditAndRerun(assistantRerunTarget.seq, assistantRerunTarget.text),
+                  testId: `try-again-message-${index}`,
+                } : undefined}
+              /> : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -1610,8 +1608,8 @@ function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared')
     [t('chatCommon.turnTiming.compaction'), summary.compactionDurationMs], [t('chatCommon.turnTiming.retry'), summary.retryDurationMs], [t('chatCommon.turnTiming.recovery'), summary.recoveryDurationMs],
   ].filter(([, value]) => Number(value) > 0)
   return (
-    <div className="max-w-xl" data-testid={`turn-timing-${summary.turnId}`}>
-      <button type="button" className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+    <div className="min-w-0 flex-1 basis-72" data-testid={`turn-timing-${summary.turnId}`}>
+      <button type="button" className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <span aria-hidden="true">{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
         <span>{statusLabel} · {formatTurnDuration(summary.wallDurationMs)}</span>
         <span className="ml-auto truncate">{summary.tools.callCount > 0 ? t('chatCommon.turnTiming.toolCalls', { count: summary.tools.callCount }) : ''}{summary.tools.callCount > 0 && summary.llm.requestCount > 0 ? ' · ' : ''}{summary.llm.requestCount > 0 ? t('chatCommon.turnTiming.modelCalls', { count: summary.llm.requestCount }) : ''}</span>

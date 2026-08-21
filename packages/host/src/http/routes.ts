@@ -234,6 +234,7 @@ export function attachJsonRoutes(
      */
     enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ committed: boolean; cursor?: number }>
     capabilities?: import('@agent-kernel/shared').RuntimeCapabilities
+    evaluationUrl?: string
     deployment?: import('@agent-kernel/shared').ProductDeploymentConfig
     metrics?: OperationalMetrics
     memoStore?: MemoStore
@@ -318,6 +319,7 @@ export function attachJsonRoutes(
         product: productVariant(deployment),
         deployment,
         capabilities: payloads.capabilities ?? { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true },
+        ...(payloads.evaluationUrl ? { integrations: { evaluation: { url: payloads.evaluationUrl } } } : {}),
       })
       return
     }
@@ -439,7 +441,7 @@ export function attachJsonRoutes(
         .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
       return
     }
-    const invitePathMatch = path.match(/^\/auth\/executor-invites\/([^/]+)(?:\/(regenerate))?$/u)
+    const invitePathMatch = path.match(/^\/auth\/executor-invites\/([^/]+)(?:\/(regenerate|revoke))?$/u)
     if (invitePathMatch && (req.method === 'PATCH' || req.method === 'DELETE' || req.method === 'POST')) {
       claimRoute(req)
       const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
@@ -473,9 +475,17 @@ export function attachJsonRoutes(
         return
       }
       if (req.method === 'DELETE' && !action) {
+        const deleted = payloads.auth?.executorIdentityStore?.deleteInvite(id) ?? false
+        payloads.audit?.log({ action: 'executor_invite.delete', actor: httpActor(req, payloads.auth), outcome: deleted ? 'ok' : 'denied', ...(deleted ? {} : { error: 'invite_not_found' }), metadata: { id } })
+        if (!deleted) { sendError(res, 404, 'invite not found'); return }
+        sendJson(req, res, { ok: true, id, deleted: true })
+        return
+      }
+      if (req.method === 'POST' && action === 'revoke') {
         const revoked = payloads.auth?.executorIdentityStore?.revokeInvite(id) ?? false
-        payloads.audit?.log({ action: 'executor_invite.revoke', actor: httpActor(req, payloads.auth), outcome: revoked ? 'ok' : 'denied', ...(revoked ? {} : { error: 'invite_not_found' }), metadata: { id } })
-        const body: ServerExecutorInviteRevokedPayload = { ok: true, id, revoked }
+        payloads.audit?.log({ action: 'executor_invite.revoke', actor: httpActor(req, payloads.auth), outcome: revoked ? 'ok' : 'denied', ...(revoked ? {} : { error: 'invite_not_found_or_revoked' }), metadata: { id } })
+        if (!revoked) { sendError(res, 404, 'invite not found or already revoked'); return }
+        const body: ServerExecutorInviteRevokedPayload = { ok: true, id, revoked: true }
         sendJson(req, res, body)
         return
       }

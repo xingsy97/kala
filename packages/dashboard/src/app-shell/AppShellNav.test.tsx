@@ -33,7 +33,12 @@ describe('AppShellNav', () => {
     expect(active.getAttribute('aria-current')).toBe('page')
     expect(active.className).toContain('text-foreground')
     expect(active.className).not.toContain('text-primary')
-    expect(screen.getByTestId('app-shell-open-evaluation').getAttribute('href')).toBe('http://127.0.0.1:13180')
+    expect(screen.queryByTestId('app-shell-open-evaluation')).toBeNull()
+  })
+
+  it('opens Evaluation only when the Runtime advertises a public URL', () => {
+    renderNav({ evaluationUrl: 'https://evaluation.example.test' })
+    expect(screen.getByTestId('app-shell-open-evaluation').getAttribute('href')).toBe('https://evaluation.example.test')
     expect(screen.getByTestId('app-shell-open-evaluation').getAttribute('target')).toBe('_blank')
   })
 

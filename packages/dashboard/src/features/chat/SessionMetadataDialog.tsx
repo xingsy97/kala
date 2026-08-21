@@ -48,6 +48,7 @@ type Props = {
   state: AgentState | null
   selectedModel: string | null
   executorHost?: string
+  evaluationUrl?: string
   onRename(label: string): void
   onOpenChangeCwdDialog(): void
   onChangeApprovalMode(mode: ApprovalMode): void
@@ -69,6 +70,7 @@ export function SessionMetadataDialog({
   state,
   selectedModel,
   executorHost,
+  evaluationUrl,
   onRename,
   onOpenChangeCwdDialog,
   onChangeApprovalMode,
@@ -177,7 +179,7 @@ export function SessionMetadataDialog({
           <p className="text-xs text-muted-foreground">{t('sessionMetadata.evaluationDescription')}</p>
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" data-testid="session-export-task-candidate" onClick={() => void exportTaskCandidate()}>{t('sessionMetadata.exportCandidate')}</Button>
-            {evaluationReference ? <Button type="button" variant="outline" size="sm" asChild><a data-testid="session-open-evaluation-reference" href={evaluationReferenceUrl(evaluationReference)} target="_blank" rel="noreferrer">{t('sessionMetadata.openEvidence')}</a></Button> : null}
+            {evaluationReference && evaluationUrl ? <Button type="button" variant="outline" size="sm" asChild><a data-testid="session-open-evaluation-reference" href={evaluationReferenceUrl(evaluationReference, evaluationUrl)} target="_blank" rel="noreferrer">{t('sessionMetadata.openEvidence')}</a></Button> : null}
           </div>
         </section>
 

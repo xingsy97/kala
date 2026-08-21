@@ -26,7 +26,7 @@ describe('independent Dedicated Dashboard release', () => {
     expect(isDedicatedDashboardRequest(request('/'))).toBe(true)
     expect(isDedicatedDashboardRequest(request('/session/one', 'text/html'))).toBe(true)
     expect(isDedicatedDashboardRequest(request('/assets/app.12345678.js'))).toBe(true)
-    for (const path of ['/socket.io/', '/models', '/settings', '/runtime/capabilities', '/docs/index', '/artifacts/manifest', '/api/executor-installs']) expect(isDedicatedDashboardRequest(request(path))).toBe(false)
+    for (const path of ['/socket.io/', '/admin/socket.io', '/admin/socket.io/assets/index.js', '/models', '/settings', '/runtime/capabilities', '/docs/index', '/artifacts/manifest', '/api/executor-installs']) expect(isDedicatedDashboardRequest(request(path))).toBe(false)
   })
 
   it('serves the active generation, SPA fallback, immutable chunks, and 404 for stale chunks', async () => {

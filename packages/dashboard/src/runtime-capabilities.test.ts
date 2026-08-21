@@ -8,10 +8,12 @@ describe('loadRuntimeDeployment', () => {
       product: 'private-cloud',
       deployment: { schemaVersion: 1, architecture: 'platform', tenancy: 'multi-tenant', runtimeProfile: 'agent' },
       capabilities: { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true },
+      integrations: { evaluation: { url: 'https://evaluation.example.test/' } },
     }), { status: 200 }))
     await expect(loadRuntimeDeployment('http://host', undefined, fetcher)).resolves.toEqual({
       product: 'private-cloud', deployment: { schemaVersion: 1, architecture: 'platform', tenancy: 'multi-tenant', runtimeProfile: 'agent' }, loaded: true,
       capabilities: { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true },
+      evaluationUrl: 'https://evaluation.example.test',
     })
   })
 

@@ -1,18 +1,19 @@
 import type { SessionSummary } from '@agent-kernel/shared'
 
-const DEFAULT_EVALUATION_URL = 'http://127.0.0.1:13180'
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
 
 export type ExplicitEvaluationReference = { runId?: string; defectId?: string }
 
-export function resolveEvaluationPlatformUrl(): string {
-  const configured = (import.meta.env?.VITE_AGENT_EVALUATION_URL as string | undefined)?.trim()
-  const candidate = configured || DEFAULT_EVALUATION_URL
+export function resolveEvaluationPlatformUrl(configured?: string): string | undefined {
+  const candidate = configured?.trim()
+  if (!candidate) return undefined
   try {
-    const url = new URL(candidate)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return DEFAULT_EVALUATION_URL
+    const url = candidate.startsWith('/') && !candidate.startsWith('//')
+      ? new URL(candidate, typeof window === 'undefined' ? 'http://localhost' : window.location.origin)
+      : new URL(candidate)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
     return url.toString().replace(/\/$/u, '')
-  } catch { return DEFAULT_EVALUATION_URL }
+  } catch { return undefined }
 }
 
 export function explicitEvaluationReference(location: Pick<Location, 'search'>, sessionId: string): ExplicitEvaluationReference | undefined {
@@ -23,8 +24,8 @@ export function explicitEvaluationReference(location: Pick<Location, 'search'>, 
   return runId || defectId ? { ...(runId ? { runId } : {}), ...(defectId ? { defectId } : {}) } : undefined
 }
 
-export function evaluationReferenceUrl(reference: ExplicitEvaluationReference): string {
-  const url = new URL(reference.defectId ? '/defects' : '/runs', resolveEvaluationPlatformUrl() + '/')
+export function evaluationReferenceUrl(reference: ExplicitEvaluationReference, platformUrl: string): string {
+  const url = new URL(reference.defectId ? '/defects' : '/runs', platformUrl + '/')
   if (reference.runId) url.searchParams.set('runId', reference.runId)
   if (reference.defectId) url.searchParams.set('findingId', reference.defectId)
   return url.toString()

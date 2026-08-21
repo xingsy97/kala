@@ -1453,6 +1453,9 @@ export type RuntimeCapabilitiesPayload = {
   product: import('./deployment.js').ProductVariant
   deployment: import('./deployment.js').ProductDeploymentConfig
   capabilities: RuntimeCapabilities
+  integrations?: {
+    evaluation?: { url: string }
+  }
 }
 
 export type DedicatedDeploymentStatus = {

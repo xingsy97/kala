@@ -149,6 +149,8 @@ export type HostServerOptions = {
   logger?: Pick<RuntimeLogger, 'warn'>
   deployment?: ProductDeploymentConfig
   capabilities?: RuntimeCapabilities
+  /** Public browser URL for an independently deployed Evaluation UI. */
+  evaluationUrl?: string
   /** Dedicated/Portable defaults to true; embedders may explicitly retain the guard. */
   allowAllApprovalMode?: boolean
   /** Exact Supervisor fence expected by a candidate slot during planned recovery. */
@@ -352,6 +354,7 @@ export async function startHostServer(
     audit,
     capabilities,
     deployment,
+    ...(options.evaluationUrl ? { evaluationUrl: options.evaluationUrl } : {}),
     metrics,
     memoStore,
     ...(options.webSearchCredentials && options.webSearchCredentialStatus && options.setWebSearchCredential && options.deleteWebSearchCredential ? {

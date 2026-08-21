@@ -83,7 +83,7 @@ describe('SessionMetadataDialog', () => {
 
   it('exports a governed private reference and links only an explicit evaluation reference', async () => {
     history.replaceState({}, '', '/?evaluationSessionId=' + baseSummary.sessionId + '&evaluationRunId=run-one&evaluationDefectId=finding-one')
-    render(<SessionMetadataDialog open onOpenChange={() => {}} sessionId={baseSummary.sessionId} summary={baseSummary} state={baseState} selectedModel="model-one" onRename={() => {}} onOpenChangeCwdDialog={() => {}} onChangeApprovalMode={() => {}} onChangeToolCardMode={() => {}} />)
+    render(<SessionMetadataDialog open onOpenChange={() => {}} sessionId={baseSummary.sessionId} summary={baseSummary} state={baseState} selectedModel="model-one" evaluationUrl="https://evaluation.example.test" onRename={() => {}} onOpenChangeCwdDialog={() => {}} onChangeApprovalMode={() => {}} onChangeToolCardMode={() => {}} />)
     fireEvent.click(screen.getByTestId('session-export-task-candidate'))
     expect(saveFile).toHaveBeenCalledOnce()
     const input = vi.mocked(saveFile).mock.calls[0]![0]

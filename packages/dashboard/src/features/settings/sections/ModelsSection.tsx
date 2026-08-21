@@ -169,7 +169,12 @@ export function ModelsSection({
         title={t('settings.sections.models.label')}
         subtitle={t('settings.models.subtitle')}
       />
-      <form onSubmit={submitProvider} className="mb-4 max-w-full min-w-0 overflow-hidden rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+      <details className="group mb-4 max-w-full min-w-0 overflow-hidden rounded-md bg-muted/20 ring-1 ring-border/50">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium text-foreground hover:bg-muted/40">
+          <span>{t('settings.models.addProvider')}</span>
+          <span className="text-xs font-normal text-muted-foreground">{t('settings.models.addProviderHint')}</span>
+        </summary>
+      <form onSubmit={submitProvider} className="border-t border-border/50 p-3">
         <div className="grid min-w-0 gap-3 lg:grid-cols-3">
           <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.providerId')}
@@ -238,7 +243,12 @@ export function ModelsSection({
           </Button>
         </div>
       </form>
+      </details>
       <form onSubmit={submit} className="mb-4 max-w-full min-w-0 overflow-hidden rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+        <div className="mb-3">
+          <div className="text-sm font-semibold text-foreground">{t('settings.models.addModel')}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.models.addModelHint')}</div>
+        </div>
         <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)]">
           <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.provider')}
@@ -328,6 +338,17 @@ export function ModelsSection({
                   </div>
                 </div>
                 <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProviderId(p.id)
+                      window.setTimeout(() => document.querySelector<HTMLInputElement>('[data-testid="settings-model-id-input"]')?.focus(), 0)
+                    }}
+                    className="inline-flex items-center rounded px-1.5 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
+                    aria-label={t('settings.models.addModelTo', { provider: p.label })}
+                  >
+                    <Plus className="mr-1 h-3 w-3" aria-hidden="true" />{t('settings.models.addModelShort')}
+                  </button>
                   {p.models.some((m) => modelKey(m) === payload.defaultModel || m.id === payload.defaultModel) ? (
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground ring-1 ring-primary/40">
                       {t('settings.models.defaultProvider')}

@@ -104,7 +104,6 @@ type Props = {
   parentCursor?: number | null
   onFork?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
-  onCollapse?(): void
 }
 
 type RuntimeView = 'state' | 'tools' | 'memory'
@@ -149,7 +148,6 @@ export function InspectorPanel({
   parentCursor,
   onFork,
   onJumpToMessage,
-  onCollapse,
 }: Props): JSX.Element {
   const [inspectorView, setInspectorView] = useState<InspectorView>('trace')
   const [runtimeView, setRuntimeView] = useState<RuntimeView>('state')
@@ -280,7 +278,6 @@ export function InspectorPanel({
         value={inspectorView}
         onChange={(next) => withViewTransition(() => setInspectorView(next))}
         showToolCallTab={showToolCallTab}
-        onCollapse={onCollapse}
       />
 
       {inspectorView === 'status' ? (
@@ -373,12 +370,10 @@ function InspectorTabs({
   value,
   onChange,
   showToolCallTab,
-  onCollapse,
 }: {
   value: InspectorView
   onChange(view: InspectorView): void
   showToolCallTab: boolean
-  onCollapse?: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   const options: Array<[InspectorView, string, typeof Activity]> = [
@@ -409,18 +404,6 @@ function InspectorTabs({
             </button>
           ))}
         </div>
-        {onCollapse ? (
-          <button
-            type="button"
-            onClick={onCollapse}
-            className="inline-flex h-7 w-7 flex-none items-center justify-center rounded text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-            data-testid="inspector-collapse-button"
-            title={t('inspector.collapsePanel')}
-            aria-label={t('inspector.collapsePanel')}
-          >
-            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        ) : null}
       </div>
     </div>
   )

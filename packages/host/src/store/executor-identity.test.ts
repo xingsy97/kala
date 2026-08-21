@@ -29,6 +29,18 @@ describe('ExecutorIdentityStore invite expiry', () => {
     expect(readFileSync(file, 'utf8')).not.toContain(invite.inviteToken)
   })
 
+  it('permanently deletes an invite without revoking an unrelated executor identity', () => {
+    const file = path(), store = new ExecutorIdentityStore(file)
+    const identity = store.provisionWorkspace('workspace', 'Executor')
+    const invite = store.createInvite({ label: 'unused' })
+    expect(store.deleteInvite(invite.id)).toBe(true)
+    expect(store.deleteInvite(invite.id)).toBe(false)
+    expect(store.inviteSnapshot()).toEqual([])
+    expect(store.resolveToken(identity)?.workspaceId).toBe('workspace')
+    const loaded = new ExecutorIdentityStore(file); loaded.load()
+    expect(loaded.inviteSnapshot()).toEqual([])
+  })
+
   it('rotates and revokes long-lived credentials without accepting old tokens', () => {
     const file = path(), store = new ExecutorIdentityStore(file)
     const first = store.provisionWorkspace('workspace', 'Executor')

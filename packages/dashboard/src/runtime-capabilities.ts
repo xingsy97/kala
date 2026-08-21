@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { resolveHostEndpoint } from './host-endpoint.js'
 
 const SAFE_CAPABILITIES: RuntimeCapabilities = { agent: true, workspace: true, operations: false, artifacts: false, pipeline: false }
-export type RuntimeDeploymentState = { capabilities: RuntimeCapabilities; product: ProductVariant | null; deployment: ProductDeploymentConfig | null; loaded: boolean; unauthorized?: boolean; error?: string }
+export type RuntimeDeploymentState = { capabilities: RuntimeCapabilities; product: ProductVariant | null; deployment: ProductDeploymentConfig | null; evaluationUrl?: string; loaded: boolean; unauthorized?: boolean; error?: string }
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -24,6 +24,22 @@ function isPayload(value: unknown): value is RuntimeCapabilitiesPayload {
   }
 }
 
+function evaluationUrl(payload: RuntimeCapabilitiesPayload): string | undefined {
+  return resolvePublicHttpUrl(payload.integrations?.evaluation?.url)
+}
+
+export function resolvePublicHttpUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  const candidate = value.trim()
+  try {
+    const url = candidate.startsWith('/') && !candidate.startsWith('//')
+      ? new URL(candidate, typeof window === 'undefined' ? 'http://localhost' : window.location.origin)
+      : new URL(candidate)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+    return url.toString().replace(/\/$/u, '')
+  } catch { return undefined }
+}
+
 export async function loadRuntimeDeployment(
   host: string,
   signal?: AbortSignal,
@@ -35,7 +51,7 @@ export async function loadRuntimeDeployment(
     if (!response.ok) return { capabilities: SAFE_CAPABILITIES, product: null, deployment: null, loaded: true, error: `Runtime capabilities request failed (${response.status})` }
     const payload: unknown = await response.json()
     return isPayload(payload)
-      ? { capabilities: payload.capabilities, product: payload.product, deployment: payload.deployment, loaded: true }
+      ? { capabilities: payload.capabilities, product: payload.product, deployment: payload.deployment, ...(evaluationUrl(payload) ? { evaluationUrl: evaluationUrl(payload) } : {}), loaded: true }
       : { capabilities: SAFE_CAPABILITIES, product: null, deployment: null, loaded: true }
   } catch (error) {
     if (signal?.aborted) return { capabilities: SAFE_CAPABILITIES, product: null, deployment: null, loaded: false }

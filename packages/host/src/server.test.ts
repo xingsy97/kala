@@ -1341,7 +1341,7 @@ describe('wire protocol', () => {
     executor.close()
     await expect(fetch(`${url}/auth/executor-identities`).then((res) => res.json())).resolves.toMatchObject({ identities: [expect.objectContaining({ workspaceId: 'ws-revoke-invite' })] })
 
-    const revokeRes = await fetch(`${url}/auth/executor-invites/${invite.id}`, { method: 'DELETE' })
+    const revokeRes = await fetch(`${url}/auth/executor-invites/${invite.id}/revoke`, { method: 'POST' })
     expect(revokeRes.ok).toBe(true)
     await expect(fetch(`${url}/auth/executor-identities`).then((res) => res.json())).resolves.toEqual({ identities: [] })
   })

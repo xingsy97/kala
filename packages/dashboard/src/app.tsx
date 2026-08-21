@@ -1681,7 +1681,7 @@ export function App(): JSX.Element {
         onCollapse={() => setTopbarOpen(false)}
         onExpand={() => setTopbarOpen(true)}
         account={account}
-        evaluationEnabled={runtimeCapabilities.pipeline}
+        evaluationUrl={runtimeCapabilities.pipeline ? runtimeDeployment.evaluationUrl : undefined}
         accountLoading={privateCloudMode && authSession.loading}
         onOpenAccount={privateCloudMode ? () => setAccountCenterOpen(true) : undefined}
         onOpenAdmin={authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined}
@@ -2126,7 +2126,6 @@ export function App(): JSX.Element {
                             setHighlightIndex((cur) => (cur === index ? null : cur))
                           }, 1400)
                         }}
-                        onCollapse={() => setInspectorOpen(false)}
                       />}
                         files={<Suspense fallback={<PageLoadingFallback compact />}><SessionFilesPanel mode="sidebar" socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} fontSizePx={fileExplorerFontSizePx} /></Suspense>}
                         git={<Suspense fallback={<PageLoadingFallback compact />}><SourceControlPanel socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} /></Suspense>}
@@ -2208,7 +2207,6 @@ export function App(): JSX.Element {
                 }, 1400)
                 setInspectorDrawerOpen(false)
               }}
-              onCollapse={() => setInspectorDrawerOpen(false)}
             />}
               files={<Suspense fallback={<PageLoadingFallback compact />}><SessionFilesPanel mode="sidebar" socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} fontSizePx={fileExplorerFontSizePx} /></Suspense>}
               git={<Suspense fallback={<PageLoadingFallback compact />}><SourceControlPanel socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} /></Suspense>}
@@ -2281,6 +2279,7 @@ export function App(): JSX.Element {
         </Suspense>
       ) : null}
       <SessionMetadataDialog
+        evaluationUrl={runtimeDeployment.evaluationUrl}
         open={metadataOpen}
         onOpenChange={(open) => {
           setMetadataOpen(open)

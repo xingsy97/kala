@@ -25,6 +25,7 @@ describe('ChatPanel', () => {
     const items = [{ kind: 'message' as const, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Done.' }] }, turnTiming: summary }]
     render(<DashboardChatPanel items={items} messages={[]} />)
     const footer = screen.getByTestId('turn-timing-turn-1')
+    expect(footer.parentElement?.getAttribute('data-testid')).toBe('assistant-message-footer')
     expect(footer.textContent).toContain('Completed · 1m 42s')
     expect(footer.textContent).toContain('12 Tools · 3 model calls')
     fireEvent.click(footer.querySelector('button')!)
@@ -50,6 +51,7 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+    expect(screen.getByTestId('inline-status-thinking').closest('.ak-chat-container')).toBeTruthy()
   })
 
   it('renders the thinking row from a fallback status while session state is loading', () => {

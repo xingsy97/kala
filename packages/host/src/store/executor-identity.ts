@@ -179,6 +179,12 @@ export class ExecutorIdentityStore {
     return true
   }
 
+  deleteInvite(id: string): boolean {
+    if (!this.invites.delete(id)) return false
+    this.save()
+    return true
+  }
+
   regenerateInvite(id: string): ExecutorInvite | undefined {
     const invite = this.invites.get(id)
     if (!invite) return undefined

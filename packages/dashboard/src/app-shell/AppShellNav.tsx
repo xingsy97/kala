@@ -6,7 +6,6 @@ import { Button } from '../components/ui/button.js'
 import { cn } from '../lib/utils.js'
 import type { AccountProfile } from '../auth-session.js'
 import type { AppSection } from './section.js'
-import { resolveEvaluationPlatformUrl } from '../evaluation-integration.js'
 
 type NavItem = {
   id: AppSection
@@ -43,7 +42,7 @@ export function AppShellNav({
   onSignOut,
   onOpenAccount,
   onOpenAdmin,
-  evaluationEnabled = true,
+  evaluationUrl,
 }: {
   section: AppSection
   onSelect(section: AppSection): void
@@ -57,7 +56,7 @@ export function AppShellNav({
   onSignOut?(): void | Promise<void>
   onOpenAccount?(): void
   onOpenAdmin?(): void
-  evaluationEnabled?: boolean
+  evaluationUrl?: string
 }): JSX.Element {
   const { t } = useTranslation()
   const navItemsRef = useRef<HTMLDivElement | null>(null)
@@ -174,9 +173,9 @@ export function AppShellNav({
         })}
       </div>
       <span className="ml-auto flex flex-none items-center gap-1">
-        {evaluationEnabled ? (
+        {evaluationUrl ? (
           <Button variant="ghost" size="icon" asChild className="h-9 w-9 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8">
-            <a href={resolveEvaluationPlatformUrl()} target="_blank" rel="noreferrer" data-testid="app-shell-open-evaluation" title={t('appShell.nav.evaluation')} aria-label={t('appShell.nav.evaluation')}><ExternalLink className="h-4 w-4" aria-hidden /></a>
+            <a href={evaluationUrl} target="_blank" rel="noreferrer" data-testid="app-shell-open-evaluation" title={t('appShell.nav.evaluation')} aria-label={t('appShell.nav.evaluation')}><ExternalLink className="h-4 w-4" aria-hidden /></a>
           </Button>
         ) : null}
         {account || accountLoading ? <AccountMenu account={account} loading={accountLoading} onSignOut={onSignOut} onOpenAccount={onOpenAccount} onOpenAdmin={onOpenAdmin} /> : null}
