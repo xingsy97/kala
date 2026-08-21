@@ -23,11 +23,11 @@ function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]
 }
 
 describe('session directory loading', () => {
-  it('does not wait for an executor snapshot when SaaS workspace support is disabled', () => {
+  it('does not wait for an executor snapshot when Private Cloud workspace support is disabled', () => {
     expect(sessionDirectoryIsLoading(false, true, false)).toBe(false)
   })
 
-  it('still waits for both snapshots in Standalone workspace mode', () => {
+  it('still waits for both snapshots in Dedicated workspace mode', () => {
     expect(sessionDirectoryIsLoading(true, true, false)).toBe(true)
     expect(sessionDirectoryIsLoading(true, true, true)).toBe(false)
   })
@@ -40,6 +40,9 @@ describe('WorkbenchToolbar', () => {
     expect(screen.getByTestId('session-title').getAttribute('data-loading')).toBe('true')
     expect(screen.getByTestId('session-label').textContent).toBe('Loading...')
     expect(screen.getByTestId('session-label').textContent).not.toBe('no session selected')
+    const title = screen.getByTestId('session-title')
+    expect(title.querySelector('.ak-loading-spinner')).not.toBeNull()
+    expect(title.querySelector('svg.animate-spin')).toBeNull()
   })
 
   it('shows no session selected only after loading has settled without a selected session', () => {

@@ -30,14 +30,17 @@ jobs:
         env:
           SYFT_VERSION: v1.30.0
           GRYPE_VERSION: v0.99.1
-          TRIVY_VERSION: v0.66.0
+          TRIVY_VERSION: v0.74.0
           COSIGN_VERSION: v2.6.0
         run: |
           set -euo pipefail
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin "${SYFT_VERSION}"
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin "${GRYPE_VERSION}"
           curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
-          curl -sSfL https://raw.githubusercontent.com/sigstore/cosign/${COSIGN_VERSION}/install.sh | sh -s -- -b /usr/local/bin "${COSIGN_VERSION}"
+          curl -sSfL -o /tmp/cosign-linux-amd64 "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          curl -sSfL -o /tmp/cosign_checksums.txt "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign_checksums.txt"
+          (cd /tmp && grep ' cosign-linux-amd64$' cosign_checksums.txt | sha256sum -c -)
+          install -m 0755 /tmp/cosign-linux-amd64 /usr/local/bin/cosign
       - if: matrix.layer == 'browser'
         run: pnpm run ci:browser
       - if: matrix.layer == 'security'

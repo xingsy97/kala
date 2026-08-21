@@ -15,7 +15,7 @@ import {
 } from './deploy-plan.mjs'
 
 const ROOT = '/repo'
-const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'agent-runlab-deploy-supervisor.cjs', 'agent-runlab-standalone-ingress.cjs', 'bundle-dashboard-with-runtime.cjs']
+const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'agent-runlab-dedicated-deploy-supervisor.cjs', 'agent-runlab-dedicated-ingress.cjs', 'bundle-dashboard-with-runtime.cjs']
 
 function fakeFs(names) {
   return {
@@ -60,13 +60,24 @@ describe('deploy plan', () => {
     expect(releaseFiles(`${ROOT}/release`, fs)).toEqual([
       'SHA256SUMS',
       'agent-kernel-executor.cjs',
-      'agent-runlab-deploy-supervisor.cjs',
+      'agent-runlab-dedicated-deploy-supervisor.cjs',
+      'agent-runlab-dedicated-ingress.cjs',
       'agent-runlab-model-catalog-seed.json',
-      'agent-runlab-standalone-ingress.cjs',
       'bundle-dashboard-with-runtime.cjs',
       'manifest.json',
       'run.sh',
     ])
+  })
+
+  it('includes the complete Dedicated control-plane update payload', () => {
+    const names = [
+      'agent-runlab-dedicated-control-updater.service',
+      'update-dedicated-control-plane.mjs',
+      'dedicated-data-migration.mjs',
+      'rollback-dedicated-systemd.mjs',
+    ]
+    const fs = fakeFs([...REQUIRED, ...names])
+    expect(releaseFiles(`${ROOT}/release`, fs)).toEqual(expect.arrayContaining(names))
   })
 
   it('builds a deploy plan from explicit options', () => {

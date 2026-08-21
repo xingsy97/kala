@@ -68,8 +68,8 @@ import { noopAuditLogger } from './audit-log.js'
 import { snapshotFromConfig, type ContextWindowOverride } from './context/manager.js'
 import { setWireValidationLogger } from './wire-validation.js'
 import type { RuntimeLogger } from './logger.js'
-import type { DeploymentMode, RuntimeCapabilities } from '@agent-kernel/shared'
-import { FULL_RUNTIME_CAPABILITIES, SOCKET_MAX_HTTP_BUFFER_BYTES } from '@agent-kernel/shared'
+import { AGENT_RUNTIME_CAPABILITIES, FULL_RUNTIME_CAPABILITIES, PORTABLE_DEPLOYMENT, effectiveTenancy, productVariant, type ProductDeploymentConfig, type RuntimeCapabilities } from '@agent-kernel/shared'
+import { SOCKET_MAX_HTTP_BUFFER_BYTES } from '@agent-kernel/shared'
 import type { SocketAdminConfig } from './socket-admin.js'
 import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinator.js'
 import { inspectUnitQuiescence } from './tenant-runtime/quiescence.js'
@@ -102,6 +102,7 @@ export type HostServerOptions = {
   httpServer?: HttpServer
   staticDir?: string
   embeddedStaticAssets?: readonly EmbeddedStaticAsset[]
+  embeddedDocs?: readonly EmbeddedStaticAsset[]
   embeddedSocketAdminAssets?: readonly EmbeddedStaticAsset[]
   embeddedReleaseAssets?: readonly EmbeddedStaticAsset[]
   dashboardHandler?: (req: IncomingMessage, res: ServerResponse) => void
@@ -146,10 +147,14 @@ export type HostServerOptions = {
   updateSocketAdminMode?: Parameters<typeof attachJsonRoutes>[1]['updateSocketAdminMode']
   routerHealth?: () => unknown
   logger?: Pick<RuntimeLogger, 'warn'>
-  deploymentMode?: DeploymentMode
+  deployment?: ProductDeploymentConfig
   capabilities?: RuntimeCapabilities
-  /** Standalone defaults to true; embedders may explicitly retain the guard. */
+  /** Dedicated/Portable defaults to true; embedders may explicitly retain the guard. */
   allowAllApprovalMode?: boolean
+  /** Exact Supervisor fence expected by a candidate slot during planned recovery. */
+  expectedDeployment?: NonNullable<import('@agent-kernel/shared').HostRestartAttempt['deployment']>
+  mutableReady?: () => boolean
+  onProcessReady?: (input: { pid: number; port: number; readyAt: string }) => void | Promise<void>
 }
 
 export type HostServer = {
@@ -158,6 +163,7 @@ export type HostServer = {
   readonly loop: LoopHandle
   readonly store: SessionStore
   readonly executorsSnapshot: () => readonly AttachedExecutor[]
+  readonly restartStatus: () => import('@agent-kernel/shared').HostRestartStatus
   readonly port: number
   close(): Promise<void>
 }
@@ -171,10 +177,12 @@ export async function startHostServer(
     })
   }
   const auth: AuthConfig | undefined = options.auth ?? (options.authToken ? { sharedToken: options.authToken } : undefined)
-  const deploymentMode = options.deploymentMode ?? 'standalone'
+  const deployment = options.deployment ?? PORTABLE_DEPLOYMENT
+  const product = productVariant(deployment)
+  const tenancy = effectiveTenancy(deployment)
   const metrics = new OperationalMetrics()
-  metrics.increment('agent_kernel_process_starts_total', 'Host process starts', { component: 'host', deployment_mode: deploymentMode })
-  const capabilities = options.capabilities ?? FULL_RUNTIME_CAPABILITIES
+  metrics.increment('agent_kernel_process_starts_total', 'Host process starts', { component: 'host', deployment_mode: product })
+  const capabilities = options.capabilities ?? (deployment.runtimeProfile === 'full' ? FULL_RUNTIME_CAPABILITIES : AGENT_RUNTIME_CAPABILITIES)
   const audit = options.audit ?? noopAuditLogger
   const http = options.httpServer ?? createServer()
   const allowedOrigins = parseAllowedOrigins(process.env.AGENT_KERNEL_ALLOWED_ORIGINS)
@@ -242,9 +250,13 @@ export async function startHostServer(
   const getDefaultConfig = (): AgentConfig => typeof options.defaultConfig === 'function'
     ? options.defaultConfig()
     : options.defaultConfig
-  const store = new SessionStore(options.sessionsDir, { runtimeConfig: getDefaultConfig })
   const sessionArtifacts = new SessionArtifactRegistry(join(options.sessionsDir, '..', 'session-artifacts'))
   await sessionArtifacts.load()
+  const store = new SessionStore(options.sessionsDir, {
+    runtimeConfig: getDefaultConfig,
+    artifactRootDir: options.artifactRootDir,
+    deleteRegisteredArtifacts: async (sessionId) => await sessionArtifacts.deleteSession(sessionId),
+  })
   const memoStore = new MemoStore(join(options.sessionsDir, '..', 'memos'))
   const defaultSkillRootsList = defaultSkillRoots()
   const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
@@ -256,7 +268,7 @@ export async function startHostServer(
     store: executorInstallations,
     ...(auth?.executorIdentityStore ? { identities: auth.executorIdentityStore } : {}),
     ...(auth ? { auth } : {}),
-    deploymentMode,
+    tenancy,
     audit,
   })
 
@@ -322,7 +334,7 @@ export async function startHostServer(
   attachJsonRoutes(http, {
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
-    ...(options.settings ? { settings: () => ({ ...settingsWithSkills(options.settings!)(), deployment: { mode: deploymentMode, capabilities } }) } : {}),
+    ...(options.settings ? { settings: () => ({ ...settingsWithSkills(options.settings!)(), deployment: { product, deployment, capabilities } }) } : {}),
     ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
     ...(options.addManualProvider ? { addManualProvider: options.addManualProvider } : {}),
@@ -333,12 +345,13 @@ export async function startHostServer(
     ...(options.updateSocketAdminMode ? { updateSocketAdminMode: options.updateSocketAdminMode } : {}),
     ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
     ...(options.docsRootDir ? { docsRootDir: options.docsRootDir } : {}),
+    ...(options.embeddedDocs ? { embeddedDocs: options.embeddedDocs } : {}),
     sessionArtifacts,
     ...(options.routerHealth ? { routerHealth: options.routerHealth } : {}),
     ...(auth ? { auth } : {}),
     audit,
     capabilities,
-    deploymentMode,
+    deployment,
     metrics,
     memoStore,
     ...(options.webSearchCredentials && options.webSearchCredentialStatus && options.setWebSearchCredential && options.deleteWebSearchCredential ? {
@@ -369,7 +382,7 @@ export async function startHostServer(
       return restart.request(input)
     },
     commitRestartActivation: (attemptId) => restart?.commitActivation(attemptId) ?? null,
-    abortRestart: () => restart?.abort() ?? null,
+    abortRestart: (attemptId) => restart?.abort('restart aborted', attemptId) ?? null,
     unitQuiescence: () => inspectUnitQuiescence({ loop, store }, messageQueues.isStable()),
     reserveCutover: async () => {
       loop.beginDrain('checkpoint')
@@ -381,18 +394,31 @@ export async function startHostServer(
       return snapshot
     },
     releaseCutover: () => loop.endDrain(),
-    enqueueUserMessage: async ({ sessionId, text }) => {
+    enqueueUserMessage: async ({ sessionId, text, operationId: requestedOperationId, mode = 'queue', content }) => {
       // Persist as a queued follow-up and drain immediately. Delivered as soon
       // as any in-flight turn finishes; no live socket required.
-      const operationId = ulid()
+      const operationId = requestedOperationId ?? ulid()
+      let record = store.get(sessionId)
+      if (!record) record = await store.load(sessionId, { recoverDangling: false })
+      const existingCursor = await sessionUserOperationCursor(store, sessionId, operationId)
+      if (existingCursor !== undefined) return { committed: true, cursor: existingCursor }
+      if (record.state.status === 'thinking' && !loop.hasActiveLlmCall(sessionId)) {
+        await loop.recoverInterruptedLlm(sessionId)
+        record = store.get(sessionId) ?? record
+      }
+      const effectiveMode = mode === 'queue' && isRestingStatus(record.state.status) ? 'steer' : mode
       await messageQueues.enqueue(sessionId, {
         id: operationId,
         operationId,
         text,
-        mode: 'queue',
+        mode: effectiveMode,
         createdAt: new Date().toISOString(),
-      })
+        ...(content ? { content } : {}),
+      }, effectiveMode === 'steer' ? 'front' : undefined)
+      if (effectiveMode === 'steer' && !isRestingStatus(record.state.status)) loop.requestStopAtBoundary(sessionId)
       void messageQueues.drain(sessionId)
+      const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
+      return committedCursor === undefined ? { committed: false } : { committed: true, cursor: committedCursor }
     },
   })
 
@@ -558,7 +584,7 @@ export async function startHostServer(
         // operationId survives ACK loss, reconnect and Host restart. A retry is
         // already accepted when it is still queued or has a durable user event.
         if (queue.some((item) => item.operationId === msg.operationId)) return
-        if (await sessionHasUserOperation(store, sessionId, msg.operationId)) return
+        if (await sessionUserOperationCursor(store, sessionId, msg.operationId) !== undefined) return
         if (priority === 'front') queue.unshift(msg)
         else queue.push(msg)
         await persistQueue(sessionId, queue)
@@ -678,7 +704,7 @@ export async function startHostServer(
             })
             if (changed && !closed) emitQueueUpdate(sessionId)
           }
-          const alreadyDispatched = await sessionHasUserOperation(store, sessionId, next.operationId)
+          const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, next.operationId) !== undefined
           // Stop may clear the persisted queue while this drain was waiting on
           // the active turn or log read. Re-check identity immediately before
           // dispatch so an item removed by Stop cannot start a new turn.
@@ -701,17 +727,17 @@ export async function startHostServer(
     },
   }
 
-  async function sessionHasUserOperation(
+  async function sessionUserOperationCursor(
     sessionStore: SessionStore,
     sessionId: string,
     operationId: string,
-  ): Promise<boolean> {
+  ): Promise<number | undefined> {
     const record = sessionStore.get(sessionId)
-    if (!record) return false
+    if (!record) return undefined
     const parsed = await readSessionLog(record.logPath)
-    return parsed.events.some((entry) =>
+    return parsed.events.find((entry) =>
       entry.event.kind === 'user_message' && entry.event.operationId === operationId,
-    )
+    )?.seq
   }
 
   // Coalesce `server:sessions` broadcasts. The loop's onEvent fires once per
@@ -921,6 +947,7 @@ export async function startHostServer(
     ...(options.hookRunner !== undefined ? { hookRunner: options.hookRunner } : {}),
     skills,
     ...(options.webSearchCredentials ? { webSearchCredentials: options.webSearchCredentials } : {}),
+    audit,
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
   }
   loop = runHostLoop(loopDeps)
@@ -935,6 +962,23 @@ export async function startHostServer(
       })
     },
     closeServer,
+    ...(options.expectedDeployment ? { expectedDeployment: options.expectedDeployment } : {}),
+    queuedMessages: (sessionId) => messageQueues.pending(sessionId),
+    hydrateQueue: async (sessionId) => await messageQueues.hydrate(sessionId),
+    drainQueue: async (sessionId) => await messageQueues.drain(sessionId),
+    waitForQueueStable: async () => await messageQueues.waitForStable(),
+    waitForContinuationDependencies: async (plan) => {
+      if (plan.checkpointKind !== 'before_tool_dispatch') return
+      const record = store.get(plan.sessionId)
+      const needsExecutor = record?.state.pendingCalls.some((call) => {
+        const tool = record.config.tools.find((candidate) => candidate.name === call.name)
+        return call.name !== 'websearch' && (tool?.executionKind ?? 'executor') === 'executor'
+      }) ?? false
+      if (!needsExecutor) return
+      if (!await executors.waitForSessionExecutor(plan.sessionId)) {
+        throw new Error(`planned continuation Executor reconnect deadline exceeded for ${plan.sessionId}`)
+      }
+    },
   })
 
   const fireLifecycleHook = async (
@@ -986,6 +1030,7 @@ export async function startHostServer(
       executors.renameWorkspace(workspaceId, applied)
       return applied
     },
+    ...(options.mutableReady ? { mutableReady: options.mutableReady } : {}),
     onSessionCreated: (record) => fireLifecycleHook('session_start', record),
     onSessionDeleted: (record) => fireLifecycleHook('session_end', record),
   })
@@ -1023,11 +1068,6 @@ export async function startHostServer(
     // Executor no longer subscribes to session:error — it's UI-only.
   }
 
-  // Planned continuation must finish before mutable traffic can race Session
-  // hydration or Queue drain. Crash recovery has already happened while loading
-  // records; this path consumes only a validated restart marker.
-  await restart.resumeMarkedSessions()
-
   await new Promise<void>((resolve, reject) => {
     if (http.listening) {
       resolve()
@@ -1052,6 +1092,13 @@ export async function startHostServer(
   const addr = http.address()
   const port =
     typeof addr === 'object' && addr && 'port' in addr ? addr.port : options.port
+  await options.onProcessReady?.({ pid: process.pid, port, readyAt: new Date().toISOString() })
+
+  // The private listener must exist before planned continuation: a checkpoint
+  // at before_tool_dispatch may need Executors to reconnect to this candidate.
+  // Dashboard mutation remains fenced by mutableReady until the Supervisor's
+  // final route commit, while the Executor namespace can settle continuation.
+  await restart.resumeMarkedSessions()
 
   return {
     io,
@@ -1059,6 +1106,7 @@ export async function startHostServer(
     loop,
     store,
     executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
+    restartStatus: () => restart!.status(),
     port,
     close: closeServer,
   }

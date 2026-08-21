@@ -7,7 +7,7 @@ export function useModels(
   scope: { host?: string; identity?: string } = {},
 ): { models: readonly ModelInfo[]; defaultModel: string; reload(): void } {
   const client = useQueryClient()
-  const queryKey = ['models', normalizeModelsHost(scope.host), scope.identity ?? 'standalone'] as const
+  const queryKey = ['models', normalizeModelsHost(scope.host), scope.identity ?? 'local-operator'] as const
   const query = useQuery({
     queryKey,
     queryFn: async (): Promise<ServerModelsPayload> => {

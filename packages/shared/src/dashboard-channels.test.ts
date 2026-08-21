@@ -7,4 +7,9 @@ describe('dashboard channel contracts', () => {
     expect(() => schema.ClientSubscribeChannelsSchema.parse({ requestId: 'r', generation: 2, channels: ['bad:x'] })).toThrow()
     expect(() => schema.ClientSubscribeChannelsSchema.parse({ requestId: 'r', generation: -1, channels: [] })).toThrow()
   })
+
+  it('defines deletion as one strict recursive operation', () => {
+    expect(schema.ClientDeleteSessionSchema.safeParse({ operationId: 'delete-op', sessionId: 'root-session' }).success).toBe(true)
+    expect(schema.ClientDeleteSessionSchema.safeParse({ operationId: 'delete-op', sessionId: 'root-session', cascade: false }).success).toBe(false)
+  })
 })

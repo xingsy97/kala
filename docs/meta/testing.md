@@ -39,7 +39,7 @@ Approximate implementation share (not an acceptance quota):
 - Host: 70% unit + 30% integration (mocked LLM & socket)
 - Executor: 80% unit + 20% integration (real fs, tmpdir)
 - Dashboard: component tests plus targeted Puppeteer verification scripts for real browser/layout checks
-- SaaS Gateway and Unit routing: identity/session and two-Unit integration tests
+- Private Cloud Gateway and Unit routing: identity/session and two-Unit integration tests
 - Full system: mode-specific task-chain acceptance for the critical action matrix
 
 Passing a percentage target cannot compensate for a missing critical-journey proof.
@@ -279,14 +279,14 @@ The repository CI workflow is the executable source for current jobs. Required r
 
 1. package typecheck, build, and unit/integration tests;
 2. release-asset and Compose security/config validation;
-3. Standalone production-bundle browser acceptance;
-4. SaaS Gateway/identity/two-Unit isolation acceptance;
+3. Portable production-bundle and Dedicated systemd browser acceptance;
+4. Private Cloud Gateway/identity/two-Unit isolation acceptance;
 5. mode-specific critical user task chains and screenshots;
 6. real provider and real-device checks when affected.
 
 Each critical-action row must link to an executable system-E2E scenario or carry an explicit gap/owner. Fast CI may omit slow system lanes, but release acceptance may not turn an omitted lane into a pass.
 
-If browser or SaaS lanes are not automated in the current GitHub workflow, they remain mandatory release evidence and must be reported as manual—not described as an existing CI job.
+If browser or Private Cloud lanes are not automated in the current GitHub workflow, they remain mandatory release evidence and must be reported as manual—not described as an existing CI job.
 
 ### 8.1 Test time budgets
 
@@ -295,7 +295,7 @@ If browser or SaaS lanes are not automated in the current GitHub workflow, they 
 - Executor: < 20s
 - Dashboard component: < 15s
 - Focused browser scenario: < 5 min
-- Full Standalone/SaaS release acceptance: separate long-running lane with explicit timeout per task; sub-agent or system verification must not use a blanket 120-second ceiling
+- Full Portable/Dedicated/Private Cloud release acceptance: separate long-running lane with explicit timeout per task; system verification must not use a blanket 120-second ceiling
 
 If a suite blows through its budget, the PR should split slow tests out into a dedicated slow-tests job or profile and optimize.
 

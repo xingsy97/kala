@@ -1,6 +1,7 @@
 import { startLocalStack, type AgentToolSchema } from './fixtures/index.js'
 import { openDashboard } from './probes/index.js'
 import type { ScenarioDefinition, ScenarioResult } from './scenarios/index.js'
+import { PRIVATE_CLOUD_DEPLOYMENT } from '@agent-kernel/shared'
 
 /**
  * Boot a fresh local stack + browser for a single scenario, run it, and tear
@@ -21,7 +22,7 @@ export async function runScenarioOnce(
 ): Promise<ScenarioResult> {
   const stack = await startLocalStack({
     llm: definition.makeLlm(), tools: options.extraTools,
-    ...(definition.name === 'saas-capabilities' ? { deploymentMode: 'saas' as const, capabilities: { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true } } : {}),
+    ...(definition.name === 'private-cloud-capabilities' ? { deployment: PRIVATE_CLOUD_DEPLOYMENT, capabilities: { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true } } : {}),
   })
   try {
     const session = await openDashboard({

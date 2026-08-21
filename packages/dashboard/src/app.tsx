@@ -122,6 +122,7 @@ import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
 import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { emitRpc } from './socket-rpc.js'
+import { admitUserMessage } from './admission-client.js'
 import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, type TranscriptItem } from './transcript.js'
 import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent } from './app-logic/compaction.js'
 import { mergeOptimisticQueuedMessages, nextSessionSelection, queuedMessageKey, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
@@ -190,8 +191,6 @@ const EMPTY_MESSAGES: readonly Message[] = []
 
 type SlashDeleteState = {
   sessionId: string
-  step: 'scope' | 'confirm'
-  cascade: boolean
 }
 
 const SESSION_EXPLORER_FONT_SIZE_PX = [11, 12, 13, 14, 15] as const
@@ -218,7 +217,7 @@ function PageLoadingFallback({ compact = false }: { compact?: boolean }): JSX.El
       aria-live="polite"
       data-testid="page-loading-fallback"
     >
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+      <span className="ak-loading-spinner mr-2 h-4 w-4" aria-hidden="true" />
       {t('common.loading')}
     </div>
   )
@@ -233,14 +232,14 @@ export function App(): JSX.Element {
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const runtimeDeployment = useRuntimeDeployment()
   const runtimeCapabilities = runtimeDeployment.capabilities
-  const saasMode = runtimeDeployment.mode === 'saas'
-  const authSession = useAuthSession(saasMode)
-  const productAccessReady = runtimeDeployment.loaded && !runtimeDeployment.error && (!saasMode || authSession.session?.authenticated === true)
+  const privateCloudMode = runtimeDeployment.product === 'private-cloud'
+  const authSession = useAuthSession(privateCloudMode)
+  const productAccessReady = runtimeDeployment.loaded && !runtimeDeployment.error && (!privateCloudMode || authSession.session?.authenticated === true)
   const account = authSession.session?.authenticated ? authSession.session.profile : undefined
   useEffect(() => {
-    if (!saasMode || !authSession.checked || authSession.session?.authenticated !== false) return
+    if (!privateCloudMode || !authSession.checked || authSession.session?.authenticated !== false) return
     window.location.replace('/signed-out')
-  }, [authSession.checked, authSession.session, saasMode])
+  }, [authSession.checked, authSession.session, privateCloudMode])
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
   const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
   const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
@@ -262,6 +261,7 @@ export function App(): JSX.Element {
   const [slashDelete, setSlashDelete] = useState<SlashDeleteState | null>(null)
   const [slashDeletePhrase, setSlashDeletePhrase] = useState('')
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [workspaceFileViewTarget, setWorkspaceFileViewTarget] = useState<WorkspaceFileTarget | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
@@ -315,19 +315,19 @@ export function App(): JSX.Element {
   const fileExplorerFontSizePx = FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? FILE_EXPLORER_FONT_SIZE_PX[DEFAULT_FILE_EXPLORER_FONT_SIZE]
   const cachedSessionIdsRef = useRef<ReadonlySet<string>>(new Set())
   const [hostEndpoint, setHostEndpoint] = useState<ResolvedHostEndpoint>(() => resolveHostEndpoint())
-  const identityCacheNamespace = saasMode
+  const identityCacheNamespace = privateCloudMode
     ? authSession.session?.authenticated ? authSession.session.cacheNamespace : 'signed-out'
-    : 'standalone'
+    : 'local-operator'
   const cacheNamespace = `${sessionCacheNamespace(hostEndpoint.url, PROTOCOL_VERSION)}:${identityCacheNamespace}`
   const sessionViewCache = useMemo(() => createDurableSessionViewCache({
     namespace: cacheNamespace,
     maxBytes: sessionViewCacheMaxBytesFromMb(sessionViewCacheMaxMb),
-    enabled: durableSessionCacheEnabled && (!saasMode || authSession.session?.authenticated === true),
+    enabled: durableSessionCacheEnabled && (!privateCloudMode || authSession.session?.authenticated === true),
   }), [cacheNamespace])
   useEffect(() => {
     sessionViewCache.setMaxBytes(sessionViewCacheMaxBytesFromMb(sessionViewCacheMaxMb))
-    sessionViewCache.setEnabled(durableSessionCacheEnabled && (!saasMode || authSession.session?.authenticated === true))
-  }, [authSession.session, durableSessionCacheEnabled, saasMode, sessionViewCache, sessionViewCacheMaxMb])
+    sessionViewCache.setEnabled(durableSessionCacheEnabled && (!privateCloudMode || authSession.session?.authenticated === true))
+  }, [authSession.session, durableSessionCacheEnabled, privateCloudMode, sessionViewCache, sessionViewCacheMaxMb])
   useDeferredDispose(sessionViewCache, (cache) => cache.close())
   const previewStore = useMemo(() => new SessionPreviewStore(), [cacheNamespace])
   const getCachedSessionView = useCallback((sessionId: string) => sessionViewCache.peek(sessionId), [sessionViewCache])
@@ -362,7 +362,17 @@ export function App(): JSX.Element {
   }, [storedModel, models, defaultModel])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLocaleLowerCase() !== 'k') return
+      const command = event.metaKey || event.ctrlKey
+      const key = event.key.toLocaleLowerCase()
+      if (command && key === 'f' && config.sessionId !== null && !settingsOpen && !commandPaletteOpen) {
+        const target = event.target as HTMLElement | null
+        if (!target || !isEditable(target) || transcriptSearchOpen) {
+          event.preventDefault()
+          setTranscriptSearchOpen(true)
+        }
+        return
+      }
+      if (!command || key !== 'k') return
       // Skip when the user is typing in an editable element. Cmd+K is a
       // browser-provided shortcut in some contexts (search bar) and we don't
       // want to hijack it when the composer already owns focus.
@@ -373,7 +383,7 @@ export function App(): JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [commandPaletteOpen])
+  }, [commandPaletteOpen, config.sessionId, settingsOpen, transcriptSearchOpen])
 
   useEffect(() => {
     if (!config.explicit) {
@@ -935,13 +945,13 @@ export function App(): JSX.Element {
       setWorkspacePickSubmitting(false)
     }
   }
-  const deleteSessionAt = useCallback((sessionId: string, options: { cascade?: boolean } = {}): void => {
+  const deleteSessionAt = useCallback((sessionId: string): void => {
     if (!controlSocket) {
       notify.error('Session could not be deleted', { description: 'Host is not connected.' })
       return
     }
-    void deleteSession(controlSocket, sessionId, options).then(() => {
-      for (const id of sessionIdsForCacheInvalidation(controlSessionsRef.current, sessionId, Boolean(options.cascade))) {
+    void deleteSession(controlSocket, sessionId).then(() => {
+      for (const id of sessionIdsForCacheInvalidation(controlSessionsRef.current, sessionId)) {
         sessionViewCache.delete(id)
         deleteSessionScrollState(id)
       }
@@ -985,7 +995,7 @@ export function App(): JSX.Element {
   }, [activeSessionId, openSessionInfoDialog, renameSessionAt])
   const requestSlashDeleteCurrentSession = useCallback((): void => {
     if (activeSessionId === null) return
-    setSlashDelete({ sessionId: activeSessionId, step: 'scope', cascade: false })
+    setSlashDelete({ sessionId: activeSessionId })
     setSlashDeletePhrase('')
   }, [activeSessionId])
   const resetSlashDelete = useCallback((): void => {
@@ -1024,12 +1034,12 @@ export function App(): JSX.Element {
   )
   const metadataIsCurrentSession = metadataTargetSessionId !== null && metadataTargetSessionId === activeSessionId
   const hasSelectedSession = currentSession !== undefined
-  // SaaS Simple Chat has no workspace executor by design. Do not block the
+  // Private Cloud Simple Chat has no workspace executor by design. Do not block the
   // empty-session entry point on an executor snapshot that is irrelevant there.
   const sessionListLoading = sessionDirectoryIsLoading(runtimeCapabilities.workspace, control.sessionsLoaded, control.executorsLoaded)
   const selectedHistorySessionLoading = Boolean(
     hasSelectedSession &&
-      !sessionHydrated &&
+      session.historyLoadedSessionId !== activeSessionId &&
       ((currentSession?.eventCount ?? 0) > 0 || Boolean(currentSession?.firstUserMessage)),
   )
   const currentWorkspaceExecutor = useMemo(() => {
@@ -1116,7 +1126,7 @@ export function App(): JSX.Element {
     ? control.sessions.find((s) => s.sessionId === slashDelete.sessionId)
     : undefined
   const slashDeleteDescendantCount = slashDelete
-    ? Math.max(0, sessionIdsForCacheInvalidation(control.sessions, slashDelete.sessionId, true).length - 1)
+    ? Math.max(0, sessionIdsForCacheInvalidation(control.sessions, slashDelete.sessionId).length - 1)
     : 0
   const slashDeleteShortId = slashDelete?.sessionId.slice(0, 8) ?? ''
   const slashDeleteRequiredPhrase = slashDelete ? `DELETE ${slashDeleteShortId}` : ''
@@ -1152,6 +1162,10 @@ export function App(): JSX.Element {
     transcriptProjectionRef.current = { sessionId: activeSessionId, stateMessages, includeStatePrefix, timeline: session.timeline, items }
     return items
   }, [activeSessionId, stateMessages, session.timeline, includeStatePrefix])
+  const visiblePendingUserMessages = useMemo(
+    () => reconcilePendingUserMessages(pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText),
+    [pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText],
+  )
   const chatItems = useMemo(
     () =>
       appendLiveTranscriptItems(
@@ -1159,10 +1173,10 @@ export function App(): JSX.Element {
         stateMessages,
         session.timeline,
         session.streamingText,
-        pendingUserMessages,
+        visiblePendingUserMessages,
         visibleQueuedMessages,
       ),
-    [transcriptBase, stateMessages, session.timeline, session.streamingText, pendingUserMessages, visibleQueuedMessages],
+    [transcriptBase, stateMessages, session.timeline, session.streamingText, visiblePendingUserMessages, visibleQueuedMessages],
   )
   // The header only needs the *count* of visible messages; derive it from the
   // already-built transcript instead of building a second full transcript.
@@ -1627,10 +1641,10 @@ export function App(): JSX.Element {
     [session.socket, activeSessionId],
   )
 
-  if (!runtimeDeployment.loaded || (saasMode && authSession.loading && !authSession.checked)) {
+  if (!runtimeDeployment.loaded || (privateCloudMode && authSession.loading && !authSession.checked)) {
     return <PageLoadingFallback compact />
   }
-  if (runtimeDeployment.error || authSession.error || runtimeDeployment.unauthorized || (saasMode && authSession.session?.authenticated !== true)) {
+  if (runtimeDeployment.error || authSession.error || runtimeDeployment.unauthorized || (privateCloudMode && authSession.session?.authenticated !== true)) {
     const detail = runtimeDeployment.error ?? authSession.error ?? 'Your sign-in session is missing or has expired.'
     return (
       <main className="fixed inset-0 grid place-items-center bg-background p-4 text-foreground" data-testid="product-access-error">
@@ -1659,10 +1673,10 @@ export function App(): JSX.Element {
         onExpand={() => setTopbarOpen(true)}
         account={account}
         evaluationEnabled={runtimeCapabilities.pipeline}
-        accountLoading={saasMode && authSession.loading}
-        onOpenAccount={saasMode ? () => setAccountCenterOpen(true) : undefined}
+        accountLoading={privateCloudMode && authSession.loading}
+        onOpenAccount={privateCloudMode ? () => setAccountCenterOpen(true) : undefined}
         onOpenAdmin={authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined}
-        onSignOut={saasMode ? () => {
+        onSignOut={privateCloudMode ? () => {
           authSession.announceLogout()
           void sessionViewCache.clearDurable()
           // Native form submission owns the authoritative POST + redirect. This
@@ -1818,6 +1832,8 @@ export function App(): JSX.Element {
                         badgeIntentionCallId={agentProgress.intention ? agentProgress.callId : undefined}
                         onReadOverflow={readOverflow}
                         onOpenWorkspaceFile={setWorkspaceFileViewTarget}
+                        searchOpen={transcriptSearchOpen}
+                        onSearchOpenChange={setTranscriptSearchOpen}
                         parentSessionId={activeSessionId ?? undefined}
                         socket={session.socket}
                         onApprovalDecision={(callId, decision) => {
@@ -1834,12 +1850,13 @@ export function App(): JSX.Element {
                           })
                         }}
                         onSuggest={(text) => {
-                          if (!session.socket?.connected || activeSessionId === null || sessionWorkspaceKnownOffline) return
+                          if (activeSessionId === null || sessionWorkspaceKnownOffline) return
+                          const pendingId = newPendingMessageId()
                           suppressNextWaitingNotification.current = true
                           setPendingUserMessages((prev) => [
                             ...prev,
                             {
-                              id: newPendingMessageId(),
+                              id: pendingId,
                               text,
                               mode: 'steer',
                               createdAt: new Date().toISOString(),
@@ -1847,15 +1864,21 @@ export function App(): JSX.Element {
                             },
                           ])
                           setAwaitingAck(true)
-                          session.socket.emit('client:user_message', {
+                          void admitUserMessage({
+                            host: hostEndpoint.url,
+                            ...(config.token ? { token: config.token } : {}),
                             sessionId: activeSessionId,
                             text,
                             mode: 'steer',
+                          }).then(() => setAwaitingAck(false)).catch((error) => {
+                            setPendingUserMessages((prev) => prev.filter((item) => item.id !== pendingId))
+                            setAwaitingAck(false)
+                            notify.error(error instanceof Error ? error.message : String(error))
                           })
                           if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
                         }}
                         footerSlot={
-                          <>
+                          selectedHistorySessionLoading ? null : <>
                             <InlineStatusRow
                               state={session.state}
                               fallbackStatus={currentSession?.status}
@@ -1977,7 +2000,7 @@ export function App(): JSX.Element {
                             </>
                           }
                           onSubmit={async (text, mode, images, extraBlocks) => {
-                            if (!session.socket || activeSessionId === null) return
+                            if (activeSessionId === null) return
                             const imageBlocks = images ?? []
                             const extras = extraBlocks ?? []
                             const hasStructured = imageBlocks.length > 0 || extras.length > 0
@@ -2025,7 +2048,9 @@ export function App(): JSX.Element {
                             }
                             setAwaitingAck(true)
                             try {
-                              await emitRpc(session.socket, 'client:user_message', {
+                              await admitUserMessage({
+                                host: hostEndpoint.url,
+                                ...(config.token ? { token: config.token } : {}),
                                 sessionId: activeSessionId,
                                 text,
                                 mode,
@@ -2190,105 +2215,39 @@ export function App(): JSX.Element {
         }}
       >
         <AlertDialogContent className="max-w-[min(92vw,34rem)]">
-          {slashDelete?.step === 'scope' ? (
-            <>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t('app.slashDelete.title')}</AlertDialogTitle>
-                <AlertDialogDescription asChild>
-                  <div className="space-y-3">
-                    <p>{t('app.slashDelete.description')}</p>
-                    <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground">
-                      <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {t('app.slashDelete.target')}
-                      </div>
-                      <div className="mt-1 truncate font-medium" title={sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}>
-                        {sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}
-                      </div>
-                      <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
-                        {slashDelete?.sessionId}
-                      </div>
-                    </div>
-                    {slashDeleteDescendantCount > 0 ? (
-                      <p className="text-amber-700 dark:text-amber-300">
-                        {t('app.slashDelete.children', { count: slashDeleteDescendantCount })}
-                      </p>
-                    ) : null}
-                    <p>{t('app.slashDelete.chooseScope')}</p>
-                  </div>
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter className="gap-2 sm:space-x-0">
-                <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                {slashDeleteDescendantCount > 0 ? (
-                  <button
-                    type="button"
-                    className={buttonVariants({ variant: 'destructive' })}
-                    onClick={() => {
-                      setSlashDelete((prev) => prev ? { ...prev, step: 'confirm', cascade: true } : prev)
-                      setSlashDeletePhrase('')
-                    }}
-                    data-testid="slash-delete-cascade-scope"
-                  >
-                    {t('app.slashDelete.deleteWithChildren', { count: slashDeleteDescendantCount })}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className={buttonVariants({ variant: 'destructive' })}
-                  onClick={() => {
-                    setSlashDelete((prev) => prev ? { ...prev, step: 'confirm', cascade: false } : prev)
-                    setSlashDeletePhrase('')
-                  }}
-                  data-testid="slash-delete-only-scope"
-                >
-                  {slashDeleteDescendantCount > 0 ? t('app.slashDelete.deleteOnly') : t('app.slashDelete.continue')}
-                </button>
-              </AlertDialogFooter>
-            </>
-          ) : (
-            <>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t('app.slashDelete.confirmTitle')}</AlertDialogTitle>
-                <AlertDialogDescription asChild>
-                  <div className="space-y-3">
-                    <p>
-                      {t('app.slashDelete.confirmDescription', {
-                        phrase: slashDeleteRequiredPhrase,
-                        label: sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? ''),
-                      })}
-                    </p>
-                    <label className="block text-xs font-medium text-muted-foreground">
-                      {t('app.slashDelete.phraseLabel')}
-                      <input
-                        className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
-                        value={slashDeletePhrase}
-                        onChange={(event) => setSlashDeletePhrase(event.target.value)}
-                        placeholder={slashDeleteRequiredPhrase}
-                        data-testid="slash-delete-confirm-input"
-                      />
-                    </label>
-                  </div>
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                <AlertDialogAction
-                  disabled={!slashDeleteConfirmed}
-                  onClick={(event) => {
-                    if (!slashDelete || !slashDeleteConfirmed) {
-                      event.preventDefault()
-                      return
-                    }
-                    deleteSessionAt(slashDelete.sessionId, { cascade: slashDelete.cascade })
-                    resetSlashDelete()
-                  }}
-                  data-testid="slash-delete-confirm-button"
-                >
-                  {t('app.slashDelete.confirmDelete')}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </>
-          )}
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('app.slashDelete.confirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>{t('app.slashDelete.description')}</p>
+                <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('app.slashDelete.target')}</div>
+                  <div className="mt-1 truncate font-medium" title={sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}>{sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}</div>
+                  <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{slashDelete?.sessionId}</div>
+                </div>
+                {slashDeleteDescendantCount > 0 ? <p className="text-amber-700 dark:text-amber-300">{t('app.slashDelete.children', { count: slashDeleteDescendantCount })}</p> : null}
+                <p>{t('app.slashDelete.confirmDescription', { phrase: slashDeleteRequiredPhrase, label: sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '') })}</p>
+                <label className="block text-xs font-medium text-muted-foreground">
+                  {t('app.slashDelete.phraseLabel')}
+                  <input className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground" value={slashDeletePhrase} onChange={(event) => setSlashDeletePhrase(event.target.value)} placeholder={slashDeleteRequiredPhrase} data-testid="slash-delete-confirm-input" />
+                </label>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!slashDeleteConfirmed}
+              onClick={(event) => {
+                if (!slashDelete || !slashDeleteConfirmed) { event.preventDefault(); return }
+                deleteSessionAt(slashDelete.sessionId)
+                resetSlashDelete()
+              }}
+              data-testid="slash-delete-confirm-button"
+            >
+              {t('app.slashDelete.confirmDelete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
       <ChangeCwdDialog
@@ -2307,6 +2266,8 @@ export function App(): JSX.Element {
             onModelsChanged={reloadModels}
             executors={control.executors}
             sessionCache={sessionViewCache}
+            host={hostEndpoint.url}
+            {...(config.token ? { token: config.token } : {})}
           />
         </Suspense>
       ) : null}
@@ -2593,7 +2554,7 @@ function SessionLoadingArea(): JSX.Element {
       data-testid="session-loading-placeholder"
     >
       <div className="inline-flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        <span className="ak-loading-spinner h-4 w-4" aria-hidden="true" />
         <span>{t('common.loading')}</span>
       </div>
     </div>
@@ -2675,7 +2636,7 @@ export function WorkbenchToolbar({
         {sessionSelected ? (
           <SessionStatusIndicator status={sessionActivityStatus} selected />
         ) : sessionLoading ? (
-          <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-muted-foreground" aria-hidden="true" />
+          <span className="ak-loading-spinner h-3.5 w-3.5 flex-none" aria-hidden="true" />
         ) : null}
         <span className="min-w-0 truncate font-medium" data-testid="session-label">
           {displayLabel}

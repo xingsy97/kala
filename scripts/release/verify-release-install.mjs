@@ -22,7 +22,7 @@ if (!existsSync(manifestPath)) fail('missing release/manifest.json — run build
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 if (!Array.isArray(manifest.assets)) fail('release manifest missing assets array')
 
-const requiredAssets = ['bundle-dashboard-with-runtime.cjs']
+const requiredAssets = ['bundle-dashboard-with-runtime.cjs', 'deployment.json']
 for (const asset of requiredAssets) {
   if (!existsSync(join(releaseDir, asset))) fail(`missing required asset: ${asset}`)
 }
@@ -47,6 +47,7 @@ const env = {
   AGENT_KERNEL_ARTIFACTS_DIR: artifactsDir,
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? 'smoke-key-not-used',
   AK_ALLOW_ALL_OK: '0',
+  AGENT_RUNLAB_DEPLOYMENT_CONFIG: join(installDir, 'deployment.json'),
 }
 delete env.HOME_INSTANCE
 delete env.HOST_AUTH_TOKEN
@@ -63,6 +64,11 @@ const exitPromise = new Promise((resolve) => child.on('exit', (code, signal) => 
 try {
   await waitForServer(port, 15_000)
   const url = `http://127.0.0.1:${port}`
+  const capabilitiesRes = await fetch(`${url}/runtime/capabilities`)
+  const capabilities = await capabilitiesRes.json()
+  if (capabilitiesRes.status !== 200 || capabilities.product !== 'dedicated' || capabilities.deployment?.tenancy !== 'single-tenant') {
+    fail(`release install did not load canonical Dedicated deployment config: ${JSON.stringify(capabilities).slice(0, 200)}`)
+  }
   const manifestRes = await fetch(`${url}/artifacts/manifest`)
   if (!manifestRes.ok) {
     fail(`GET /artifacts/manifest returned ${manifestRes.status}`)

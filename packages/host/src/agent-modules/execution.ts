@@ -3,7 +3,8 @@ import type { CallToolEffect } from '@agent-kernel/kernel'
 import { runAgentTool } from '../extensions/agent-tool.js'
 import { isSkillManager, runSkillTool } from '../extensions/skills.js'
 import { runTodoGraphTool } from '../extensions/todo-graph.js'
-import type { HostLoopDeps } from '../loop-types.js'
+import { runToolCatalogTool } from '../extensions/tool-catalog.js'
+import type { HostLoopDeps, LoopHandle } from '../loop-types.js'
 import { runWebSearch } from '../web-search/index.js'
 
 export type ToolExecutionResult = {
@@ -19,6 +20,8 @@ export async function dispatchConfiguredTool(
   effect: CallToolEffect,
   aborts: Map<string, AbortController>,
   turnId?: string,
+  loop?: LoopHandle,
+  plannedContinuation = false,
 ): Promise<ToolExecutionResult> {
   const record = deps.store.get(sessionId)
   const schema = record?.config.tools.find((tool) => tool.name === effect.name)
@@ -27,7 +30,10 @@ export async function dispatchConfiguredTool(
   const executionKind = effect.name === 'websearch' ? 'host' : (schema?.executionKind ?? 'executor')
   if (executionKind === 'executor') {
     const handler = schema?.executionHandler ?? effect.name
-    return await deps.tools.callTool(sessionId, handler === effect.name ? effect : { ...effect, name: handler }, turnId)
+    const call = plannedContinuation && deps.tools.callToolWhenAvailable
+      ? deps.tools.callToolWhenAvailable.bind(deps.tools)
+      : deps.tools.callTool.bind(deps.tools)
+    return await call(sessionId, handler === effect.name ? effect : { ...effect, name: handler }, turnId)
   }
 
   const handler = effect.name === 'websearch' ? 'websearch' : (schema?.executionHandler ?? effect.name)
@@ -36,11 +42,15 @@ export async function dispatchConfiguredTool(
       if (!deps.webSearchCredentials) {
         return { ok: false, content: 'web search credential store is not configured' }
       }
-      return await runWebSearch(effect.input, { credentials: deps.webSearchCredentials })
+      return await runWebSearch(effect.input, { credentials: deps.webSearchCredentials, sessionId, callId: effect.callId, audit: deps.audit })
     case 'agent':
-      return await runAgentTool(deps, sessionId, effect, aborts)
+      return await runAgentTool(deps, sessionId, effect, aborts, loop)
     case 'todo_graph':
       return await runTodoGraphTool(deps, sessionId, effect)
+    case 'tool_search':
+    case 'tool_describe':
+      if (!record) return { ok: false, content: 'Session is unavailable' }
+      return await runToolCatalogTool(record, handler, effect.input)
     case 'skill':
       if (!deps.skills) return { ok: false, content: 'skills are not configured on this host' }
       return await runSkillTool(

@@ -97,17 +97,13 @@ describe('session selection robustness', () => {
 })
 
 describe('session cache invalidation ids', () => {
-  it('returns only the root session without cascade', () => {
-    expect(sessionIdsForCacheInvalidation([session('root', 1), session('child', 1)], 'root', false)).toEqual(['root'])
-  })
-
-  it('returns descendants when cascade deletion is requested', () => {
+  it('always returns the complete descendant tree for deletion', () => {
     const root = session('root', 1)
     const child = { ...session('child', 1), parentSessionId: 'root' }
     const grandchild = { ...session('grandchild', 1), parentSessionId: 'child' }
     const sibling = { ...session('sibling', 1), parentSessionId: 'other' }
 
-    expect(sessionIdsForCacheInvalidation([root, child, grandchild, sibling], 'root', true)).toEqual(['root', 'child', 'grandchild'])
+    expect(sessionIdsForCacheInvalidation([root, child, grandchild, sibling], 'root')).toEqual(['root', 'child', 'grandchild'])
   })
 
   it('detects sessions removed by an external control-plane update', () => {

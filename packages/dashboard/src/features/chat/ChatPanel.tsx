@@ -34,6 +34,7 @@ import {
   Pencil,
   PenLine,
   RotateCcw,
+  Search,
   Sparkles,
   Terminal,
   Eye,
@@ -96,6 +97,7 @@ import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 import { transcriptItemKey } from './transcript-key.js'
 import { toolDotRailBudget, toolPreviewGeometry, visibleToolDots, type ToolPreviewGeometry } from './tool-dot-layout.js'
 import { useIsMobile } from '../../app-logic/use-viewport.js'
+import { nextSearchMatchIndex, searchMatchSnippet, searchTranscript, type TranscriptSearchCategory, type TranscriptSearchMatch } from './transcript-search.js'
 
 type Props = {
   messages?: readonly Message[]
@@ -140,6 +142,8 @@ type Props = {
   onDismissCompactStatus?: () => void
   loading?: boolean
   onOpenWorkspaceFile?: (target: WorkspaceFileTarget) => void
+  searchOpen?: boolean
+  onSearchOpenChange?: (open: boolean) => void
 }
 
 export type WorkspaceFileTarget = {
@@ -224,12 +228,31 @@ export function ChatPanel({
   onDismissCompactStatus,
   loading = false,
   onOpenWorkspaceFile,
+  searchOpen = false,
+  onSearchOpenChange,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const fallbackItems = useMemo<TranscriptItem[]>(() => (messages ?? [])
     .filter((message) => message.role !== 'system')
     .map((message) => ({ kind: 'message', message })), [messages])
   const rawItems = items ?? fallbackItems
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchCategory, setSearchCategory] = useState<TranscriptSearchCategory>('all')
+  const [activeSearchIndex, setActiveSearchIndex] = useState(-1)
+  const [searchNavigationToken, setSearchNavigationToken] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const searchMatches = useMemo(() => searchTranscript(rawItems, searchQuery, searchCategory), [rawItems, searchQuery, searchCategory])
+  useEffect(() => {
+    if (!searchOpen) return
+    requestAnimationFrame(() => searchInputRef.current?.focus())
+  }, [searchOpen])
+  useEffect(() => {
+    setActiveSearchIndex((current) => searchMatches.length === 0 ? -1 : Math.min(Math.max(current, 0), searchMatches.length - 1))
+  }, [searchMatches])
+  useEffect(() => {
+    setSearchQuery('')
+    setActiveSearchIndex(-1)
+  }, [sessionId])
   const { toolNameByCallId, allMessages, resultsByCallId, intraMessageGroupedCallIds } = useMemo(() => {
     const names = new Map<string, string>()
     const messageItems = rawItems
@@ -251,7 +274,7 @@ export function ChatPanel({
     return { toolNameByCallId: names, allMessages: messageItems, resultsByCallId: results, intraMessageGroupedCallIds: groupedIds }
   }, [rawItems])
   const approvalByCallId = useMemo(() => new Map((pendingApprovals ?? []).map((approval) => [approval.callId, approval])), [pendingApprovals])
-  // Null preserves the legacy standalone/demo fallback. The product App always
+  // Null preserves the isolated/demo fallback. The product App always
   // supplies the authoritative set so an unpaired historical call cannot be
   // mistaken for live work after compaction, interruption, or recovery.
   const activeToolCallIdSet = useMemo(() => activeToolCallIds === undefined ? null : new Set(activeToolCallIds), [activeToolCallIds])
@@ -369,6 +392,23 @@ export function ChatPanel({
     return null
   }, [highlightIndex, messageIndexByItem, transcriptItems])
 
+  const activeSearchMatch = activeSearchIndex >= 0 ? searchMatches[activeSearchIndex] ?? null : null
+  const searchItemIndex = useMemo(() => {
+    const match = activeSearchMatch
+    if (!match) return null
+    if (match.messageIndex >= 0) {
+      for (let index = 0; index < messageIndexByItem.length; index += 1) {
+        if (messageIndexByItem[index] === match.messageIndex) return index
+        const item = transcriptItems[index]
+        if (item?.kind === 'tool_activity' && match.messageIndex >= item.firstMessageIndex && match.messageIndex <= item.lastMessageIndex) return index
+      }
+    }
+    const raw = rawItems[match.rawItemIndex]
+    if (raw?.kind === 'pending_user_message') return transcriptItems.findIndex((item) => item.kind === 'pending_user_message' && item.id === raw.id)
+    if (raw?.kind === 'compact_boundary') return transcriptItems.findIndex((item) => item.kind === 'compact_boundary' && item.seq === raw.seq)
+    return null
+  }, [activeSearchMatch, messageIndexByItem, rawItems, transcriptItems])
+
   const isEmpty = transcriptItems.length === 0
 
   const renderItem = useCallback(
@@ -385,9 +425,9 @@ export function ChatPanel({
           <ToolActivityTranscriptRow
             item={item}
             highlighted={
-              highlightIndex != null &&
+              (highlightIndex != null &&
               highlightIndex >= item.firstMessageIndex &&
-              highlightIndex <= item.lastMessageIndex
+              highlightIndex <= item.lastMessageIndex) || searchItemIndex === itemIndex
             }
             hideHeader={hideHeader}
             approvalByCallId={approvalByCallId}
@@ -413,7 +453,7 @@ export function ChatPanel({
           index={currentMessageIndex}
           message={item.message}
           streaming={item.streaming === true}
-          highlighted={highlightIndex === currentMessageIndex}
+          highlighted={highlightIndex === currentMessageIndex || searchItemIndex === itemIndex}
           toolNameByCallId={toolNameByCallId}
           approvalByCallId={approvalByCallId}
           onApprovalDecision={onApprovalDecision}
@@ -452,6 +492,7 @@ export function ChatPanel({
       toolCardMode,
       activeToolCallIdSet,
       badgeIntentionCallId,
+      searchItemIndex,
     ],
   )
 
@@ -477,6 +518,15 @@ export function ChatPanel({
   const [localPinned, setLocalPinned] = useState(true)
   const effectivePinned = pinnedToBottom ?? localPinned
   const effectiveOnPinnedChange = onPinnedChange ?? setLocalPinned
+  useEffect(() => {
+    if (!searchOpen || searchItemIndex == null || searchItemIndex < 0) return
+    effectiveOnPinnedChange(false)
+    transcriptRef.current?.scrollToIndex(searchItemIndex, { behavior: 'auto' })
+  }, [effectiveOnPinnedChange, searchItemIndex, searchNavigationToken, searchOpen, transcriptRef])
+  const navigateSearch = useCallback((direction: 1 | -1) => {
+    setActiveSearchIndex((current) => nextSearchMatchIndex(current, searchMatches.length, direction))
+    setSearchNavigationToken((token) => token + 1)
+  }, [searchMatches.length])
   const scrollToBottom = useCallback(() => {
     transcriptRef.current?.scrollToBottom()
     effectiveOnPinnedChange(true)
@@ -488,10 +538,22 @@ export function ChatPanel({
     <WorkspaceFileLinkContext.Provider value={onOpenWorkspaceFile ?? null}>
       <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
       <div className="relative flex h-full w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden" style={displayStyle}>
+        {searchOpen ? (
+          <TranscriptSearchBar
+            inputRef={searchInputRef}
+            query={searchQuery}
+            category={searchCategory}
+            current={activeSearchIndex}
+            matches={searchMatches}
+            onQueryChange={setSearchQuery}
+            onCategoryChange={setSearchCategory}
+            onNavigate={navigateSearch}
+            onClose={() => onSearchOpenChange?.(false)}
+          />
+        ) : null}
         {loading ? (
           <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
             <TranscriptLoadingState />
-            {footerSlot ? <div className="pl-0 pt-2 sm:pl-10">{footerSlot}</div> : null}
           </div>
         ) : isEmpty ? (
           <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
@@ -538,6 +600,66 @@ export function ChatPanel({
       </OverflowReaderContext.Provider>
     </WorkspaceFileLinkContext.Provider>
     </ArtifactSessionContext.Provider>
+  )
+}
+
+function TranscriptSearchBar({
+  inputRef,
+  query,
+  category,
+  current,
+  matches,
+  onQueryChange,
+  onCategoryChange,
+  onNavigate,
+  onClose,
+}: {
+  inputRef: { current: HTMLInputElement | null }
+  query: string
+  category: TranscriptSearchCategory
+  current: number
+  matches: readonly TranscriptSearchMatch[]
+  onQueryChange(value: string): void
+  onCategoryChange(value: TranscriptSearchCategory): void
+  onNavigate(direction: 1 | -1): void
+  onClose(): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const active = current >= 0 ? matches[current] : undefined
+  const categories: readonly TranscriptSearchCategory[] = ['all', 'user', 'assistant', 'thinking', 'tools']
+  return (
+    <div className="z-20 flex flex-none flex-col gap-2 border-b bg-background/95 px-3 py-2 shadow-sm backdrop-blur" data-testid="transcript-search" role="search">
+      <div className="flex min-w-0 items-center gap-2">
+        <Search className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') { event.preventDefault(); onNavigate(event.shiftKey ? -1 : 1) }
+            if (event.key === 'Escape') { event.preventDefault(); onClose() }
+          }}
+          className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          placeholder={t('chat.transcript.searchPlaceholder')}
+          aria-label={t('chat.transcript.searchLabel')}
+          data-testid="transcript-search-input"
+        />
+        <span className="min-w-[4.5rem] text-center text-xs tabular-nums text-muted-foreground" aria-live="polite" data-testid="transcript-search-count">
+          {matches.length > 0 ? `${current + 1} / ${matches.length}` : t('chat.transcript.searchNoResults')}
+        </span>
+        <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={() => onNavigate(-1)} disabled={matches.length === 0} aria-label={t('chat.transcript.searchPrevious')}>↑</Button>
+        <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={() => onNavigate(1)} disabled={matches.length === 0} aria-label={t('chat.transcript.searchNext')}>↓</Button>
+        <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={onClose} aria-label={t('common.close')}><X className="h-4 w-4" /></Button>
+      </div>
+      <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+        {categories.map((value) => (
+          <button key={value} type="button" onClick={() => onCategoryChange(value)} aria-pressed={category === value} className={cn('rounded-full border px-2 py-0.5 text-[11px]', category === value ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground')}>
+            {t(`chat.transcript.searchCategories.${value}`)}
+          </button>
+        ))}
+        {active ? <span className="ml-2 min-w-0 truncate text-[11px] text-muted-foreground" title={active.text}>{searchMatchSnippet(active)}</span> : null}
+      </div>
+    </div>
   )
 }
 

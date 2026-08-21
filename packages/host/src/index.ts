@@ -1,7 +1,7 @@
 /**
  * @agent-kernel/host public API.
  *
- * Stable exports only. SaaS tenant-runtime registries, proxies, persistence,
+ * Stable exports only. Private Cloud tenant-runtime registries, proxies, persistence,
  * and loopback composition remain internal until their contracts mature.
  */
 

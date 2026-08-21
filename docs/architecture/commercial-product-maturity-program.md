@@ -4,7 +4,7 @@
 
 ## Scope
 
-This program matures Agent RunLab as a reliable Standalone product and a hosted multi-tenant product. It explicitly excludes:
+This program matures Agent RunLab Dedicated and Private Cloud as user-operated Platform configurations. It explicitly excludes:
 
 - stronger process/container execution isolation work;
 - integration with Stripe or any external billing system.
@@ -16,13 +16,13 @@ Internal usage metering, quotas, budgets, and plan-capability data remain in sco
 1. **Complete journeys over visible controls.** A button is not complete until its network request, backend side effect, durable state, reload behavior, failure recovery, and cleanup are verified.
 2. **Never disguise failure as loading.** Loading is bounded and must transition to ready, empty, actionable error, degraded, or offline.
 3. **Identity and authorization are separate.** ZITADEL authenticates. RuntimeIngressGateway and the product control plane authorize Organization resources. RuntimeHost remains identity-free.
-4. **Hosted retains the Agent workspace.** Hosted mode hides only Benchmark/Evaluation. Workspace, Executor, File, Git, Shell, Artifacts, and Operations remain product capabilities.
+4. **Private Cloud retains the Agent workspace.** Its `agent` runtime profile hides Operations/Pipeline only. Workspace, Executor, File, Git, Shell, Artifacts, Agent, and Session remain product capabilities.
 5. **Progress is factual.** Product-generated progress may expose stages, tools, elapsed time, recent progress, compaction, waits, and recovery, but never invent model reasoning.
 6. **Mobile is a first-class surface.** Every dialog, sheet, preview, input, keyboard transition, safe area, orientation, and touch target is accepted on mobile browser and installed PWA.
 7. **Errors preserve user work.** Drafts, queued messages, edits, and pending forms survive retryable failures. Destructive actions state scope and irreversibility.
-8. **Defaults are useful and safe for the deployment boundary.** Standalone and private hosted RuntimeUnits default to `allow_all`; explicit operator policy may disable it.
+8. **Defaults are useful and safe for the deployment boundary.** Dedicated and private Runtime Units default to `allow_all`; explicit operator policy may disable it.
 9. **Secrets stay server-side.** Catalogs carry credential references only. Secrets never enter Dashboard payloads, Session logs, tenant catalogs, images, or diagnostics.
-10. **Docker hosted acceptance precedes Standalone and LXD.** LXD remains the final release action.
+10. **Container Private Cloud acceptance precedes isolated Dedicated and production Dedicated acceptance.** Production remains the final release action.
 
 ## Information architecture
 
@@ -90,8 +90,8 @@ No external billing provider is introduced.
 2. Desktop Chromium visual/state matrix.
 3. Mobile Chromium browser/PWA/keyboard matrix.
 4. Two-user/two-Organization isolation and RBAC.
-5. Hosted real journey on Docker `13001/13002`.
-6. Standalone real journey on an isolated Box port.
+5. Private Cloud real journey on Docker `13001/13002`.
+6. Dedicated real journey on an isolated Box port.
 7. Full tests, typecheck, production/PWA build, Compose and release verification.
-8. Final hosted deployment.
-9. Final LXD `13000` deployment through graceful restart and continuation proof.
+8. Final Private Cloud deployment acceptance.
+9. Final Dedicated `13000` deployment through graceful restart and continuation proof.

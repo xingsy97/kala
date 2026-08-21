@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { formatFindings, loadPrivacyPolicy, loadPrivateDenylist, scanEntry } from './privacy-check-lib.mjs'
 
@@ -21,7 +21,7 @@ if (mode === '--staged') findings = scanStaged()
 else if (mode === '--message') findings = scanMessage(process.argv[3])
 else if (mode === '--range') findings = scanRange(process.argv[3])
 else if (mode === '--pre-push') findings = scanPushInput(readFileSync(0, 'utf8'), process.argv[3])
-else if (mode === '--repository') findings = scanTree('HEAD')
+else if (mode === '--repository') findings = scanWorktree()
 else usage()
 
 if (findings.length) {
@@ -81,6 +81,13 @@ function scanCommit(commit) {
 function scanTree(tree) {
   const paths = gitBuffer(['ls-tree', '-r', '-z', '--name-only', tree]).toString('utf8').split('\0').filter(Boolean)
   return scanPaths(paths, (path) => gitBuffer(['show', `${tree}:${path}`]))
+}
+
+function scanWorktree() {
+  const tracked = gitBuffer(['ls-files', '-z']).toString('utf8').split('\0').filter(Boolean)
+  const untracked = gitBuffer(['ls-files', '--others', '--exclude-standard', '-z']).toString('utf8').split('\0').filter(Boolean)
+  const paths = [...new Set([...tracked, ...untracked])].filter((path) => existsSync(resolve(root, path)))
+  return scanPaths(paths, (path) => readFileSync(resolve(root, path)))
 }
 
 function scanPaths(paths, read) {

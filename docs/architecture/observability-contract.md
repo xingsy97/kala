@@ -1,7 +1,7 @@
 # Runtime Observability Contract
 
 **Status:** accepted implementation contract
-**Scope:** Standalone and hosted RuntimeIngressGateway/RuntimeHost/TenantRuntimeUnit
+**Scope:** Dedicated and Private Cloud RuntimeIngressGateway/RuntimeHost/TenantRuntimeUnit
 
 ## Principles
 
@@ -28,7 +28,8 @@
 
 Allowed examples:
 
-- `deployment.mode`: `standalone` or `hosted`;
+- `product`: `dedicated` or `private-cloud`;
+- `deployment.tenancy`: `single-tenant` or `multi-tenant`;
 - `component`: fixed component enum;
 - `operation`: fixed operation enum;
 - `outcome`: `ok`, `error`, `timeout`, `cancelled`, `recovered`;
@@ -96,5 +97,5 @@ No alert may include prompt, file content, Provider body, token, cookie, email, 
 - metrics cardinality remains bounded with 1,000 temporary Units/Sessions;
 - deliberate Provider, Executor, storage, and identity failures produce normalized logs and actionable UI state;
 - redaction tests prove secrets and message content are absent;
-- hosted two-user tests prove no telemetry payload exposes one Unit to another;
+- Private Cloud two-user tests prove no telemetry payload exposes one Unit to another;
 - disposable dashboards/collector validate queryable counters and traces before release.

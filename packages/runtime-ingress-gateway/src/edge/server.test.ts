@@ -20,7 +20,7 @@ class MemoryLoginStates implements LoginStateStore {
 const running: Array<{ close(): Promise<void> }> = []
 afterEach(async () => { await Promise.all(running.splice(0).map((server) => server.close())) })
 
-describe('SaaS edge request path', () => {
+describe('Private Cloud edge request path', () => {
   it('proxies installer and release assets without browser authentication', async () => {
     const seen: string[] = []
     const upstream = createServer((request, response) => {
@@ -97,6 +97,34 @@ describe('SaaS edge request path', () => {
     expect(replay.status).toBe(400)
   })
 
+  it('serves authenticated Dashboard assets from the independent Dashboard service while APIs stay on Runtime', async () => {
+    const runtimePaths: string[] = []
+    const runtime = createServer((request, response) => { runtimePaths.push(request.url ?? ''); response.writeHead(200, { 'content-type': 'application/json' }); response.end('{"runtime":true}') })
+    const dashboardPaths: string[] = []
+    const dashboard = createServer((request, response) => { dashboardPaths.push(request.url ?? ''); response.writeHead(200, { 'content-type': request.url?.endsWith('.js') ? 'application/javascript' : 'text/html' }); response.end(request.url?.endsWith('.js') ? 'globalThis.dashboard=true' : '<title>independent dashboard</title>') })
+    await Promise.all([
+      new Promise<void>((resolve) => runtime.listen(0, '127.0.0.1', resolve)),
+      new Promise<void>((resolve) => dashboard.listen(0, '127.0.0.1', resolve)),
+    ])
+    running.push({ close: () => new Promise<void>((resolve) => runtime.close(() => resolve())) })
+    running.push({ close: () => new Promise<void>((resolve) => dashboard.close(() => resolve())) })
+    const runtimeAddress = runtime.address(); const dashboardAddress = dashboard.address()
+    const runtimePort = typeof runtimeAddress === 'object' && runtimeAddress ? runtimeAddress.port : 0
+    const dashboardPort = typeof dashboardAddress === 'object' && dashboardAddress ? dashboardAddress.port : 0
+    const gateway = await createGateway(`http://127.0.0.1:${runtimePort}`, undefined, { dashboardOrigin: `http://127.0.0.1:${dashboardPort}` })
+    const login = await fetch(`http://127.0.0.1:${gateway.port}/auth/login`, { redirect: 'manual' })
+    const nonce = cookieValue(login.headers.getSetCookie(), 'ak_login')
+    const callback = await fetch(`http://127.0.0.1:${gateway.port}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${nonce}` }, redirect: 'manual' })
+    const session = cookieValue(callback.headers.getSetCookie(), 'ak_session')
+    const headers = { cookie: `ak_session=${session}` }
+    const document = await fetch(`http://127.0.0.1:${gateway.port}/workspace`, { headers: { ...headers, accept: 'text/html' } })
+    expect(await document.text()).toContain('independent dashboard')
+    expect(await fetch(`http://127.0.0.1:${gateway.port}/assets/app.12345678.js`, { headers }).then((value) => value.text())).toContain('dashboard=true')
+    expect(await fetch(`http://127.0.0.1:${gateway.port}/runtime/capabilities`, { headers }).then((value) => value.json())).toEqual({ runtime: true })
+    expect(dashboardPaths).toEqual(['/workspace', '/assets/app.12345678.js'])
+    expect(runtimePaths).toEqual(['/runtime/capabilities'])
+  })
+
   it('directs enterprise login through a server-resolved IdP and rejects mismatched callbacks', async () => {
     let callbackProvider = 'idp_enterprise'
     const authorizationOptions: Array<{ idpHint?: string; loginHint?: string }> = []
@@ -163,6 +191,7 @@ async function createGateway(
     enterpriseSso?: MemoryEnterpriseSsoResolver
     authorizationOptions?: Array<{ idpHint?: string; loginHint?: string }>
     callbackIdentity?(): { issuer: string; subject: string; upstreamProviderId?: string }
+    dashboardOrigin?: string
   },
 ): Promise<RuntimeIngressGateway> {
   const dir = mkdtempSync(join(tmpdir(), 'gateway-sessions-'))
@@ -172,6 +201,7 @@ async function createGateway(
     port: 0,
     listenHost: '127.0.0.1',
     hostOrigin,
+    ...(auth?.dashboardOrigin ? { dashboardOrigin: auth.dashboardOrigin } : {}),
     publicOrigin: 'http://127.0.0.1:0',
     sessions,
     cacheNamespaceSecret: 'test-session-secret-with-sufficient-entropy',

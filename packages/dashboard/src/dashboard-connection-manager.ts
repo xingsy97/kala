@@ -31,7 +31,7 @@ export class DashboardConnectionManager {
       const record = this.channels.get(channel)
       if (!record || --record.refs > 0) return
       this.channels.delete(channel)
-      if (this.socket.connected) this.unsubscribe([channel], record.generation + 1)
+      if (this.socket.connected) this.unsubscribe([channel])
     }
   }
 
@@ -80,7 +80,8 @@ export class DashboardConnectionManager {
     }
   }
 
-  private unsubscribe(channels: DashboardChannel[], generation: number): void {
+  private unsubscribe(channels: DashboardChannel[]): void {
+    const generation = ++this.request
     this.socket.emit('client:unsubscribe_channels', { requestId: `unsubscribe-${generation}`, generation, channels }, () => {})
   }
 }

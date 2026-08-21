@@ -21,15 +21,14 @@ Before first start, provision Identity-owned secret files (do not commit them):
 
 ```bash
 mkdir -p deploy/identity/.secrets
-cp deploy/saas/.secrets/postgres_password deploy/identity/.secrets/postgres_password
-cp deploy/saas/.secrets/zitadel_masterkey deploy/identity/.secrets/zitadel_masterkey
+openssl rand -base64 48 > deploy/identity/.secrets/postgres_password
+openssl rand -hex 16 > deploy/identity/.secrets/zitadel_masterkey
 chmod 600 deploy/identity/.secrets/*
 ```
 
-The Compose project currently adopts the existing ZITADEL database, bootstrap and
-configuration volumes by explicit external names for a data-preserving migration. Do not
-run `down -v`; back up PostgreSQL before upgrades. Other applications should create their
-own OIDC application/client and use the configured canonical issuer.
+The Compose project owns its ZITADEL database, bootstrap, and configuration volumes under
+canonical Identity names. Do not run `down -v`; back up PostgreSQL before upgrades. Other
+applications should create their own OIDC application/client and use the configured issuer.
 
 Agent RunLab is only an OIDC client of this stack. Its callback is
 `https://<runlab-domain>/auth/callback`.

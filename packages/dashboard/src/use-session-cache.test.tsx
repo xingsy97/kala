@@ -101,6 +101,33 @@ describe('useSession session view cache', () => {
     expect(sockets).toHaveLength(1)
     expect(sockets[0]?.connected).toBe(true)
   })
+  it('keeps rapid A to B to A switching on one socket and completes loading only from current history', async () => {
+    const wrapper = ({ sessionId }: { sessionId: string }) => {
+      const socket = useDashboardControlSocket('http://host', undefined, true)
+      return useSession({ host: 'http://host', sessionId, socket })
+    }
+    const view = renderHook(({ sessionId }) => wrapper({ sessionId }), { initialProps: { sessionId: 'a' } })
+    await waitFor(() => expect(sockets).toHaveLength(1))
+    const socket = sockets[0]!
+    view.rerender({ sessionId: 'b' })
+    view.rerender({ sessionId: 'a' })
+    await waitFor(() => expect(socket.handlers.get('session:ready')).toHaveLength(1))
+
+    act(() => socket.serverEmit('session:ready', { sessionId: 'b', reason: 'load', cursor: 1, state: createInitialState({ sessionId: 'b' }), config: { tools: [] }, contextSnapshot: null }))
+    expect(view.result.current.hydratedSessionId).not.toBe('b')
+    act(() => socket.serverEmit('session:ready', { sessionId: 'a', reason: 'load', cursor: 1, state: createInitialState({ sessionId: 'a' }), config: { tools: [] }, contextSnapshot: null }))
+    expect(view.result.current.hydratedSessionId).toBe('a')
+    expect(view.result.current.historyLoadedSessionId).toBeNull()
+
+    act(() => socket.serverEmit('server:history', { sessionId: 'b', entries: [timelineEntry(1)] }))
+    expect(view.result.current.historyLoadedSessionId).toBeNull()
+    act(() => socket.serverEmit('server:history', { sessionId: 'a', entries: [timelineEntry(1)] }))
+    expect(view.result.current.historyLoadedSessionId).toBe('a')
+    expect(view.result.current.timeline.map((entry) => entry.seq)).toEqual([1])
+    expect(sockets).toHaveLength(1)
+    expect(socket.connected).toBe(true)
+  })
+
   it('removes session listeners when a shared socket is rebound', async () => {
     sockets.length = 0
     const wrapper = ({ sessionId }: { sessionId: string }) => {
@@ -253,6 +280,8 @@ describe('useSession session view cache', () => {
       }))
       expect(set).not.toHaveBeenCalled()
       rerender({ sessionId: 's2' })
+      expect(set).not.toHaveBeenCalled()
+      await act(async () => { await Promise.resolve() })
       expect(set).toHaveBeenCalledTimes(1)
       expect(set.mock.calls[0]?.[0]).toBe('s1')
     } finally {
@@ -295,6 +324,22 @@ describe('useSession session view cache', () => {
 
     expect(result.current.config?.systemPrompt).toBe('live')
     expect(result.current.timeline).toEqual([])
+  })
+
+  it('bounds a lost history response with retries and an actionable terminal error', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result } = renderHook(() => useSession({ host: 'http://host.test', sessionId: 's1' }))
+      await act(async () => {})
+      act(() => sockets[0]!.serverEmit('session:ready', {
+        sessionId: 's1', reason: 'load', cursor: 2, state: createInitialState({ sessionId: 's1' }), config: { tools: [] }, contextSnapshot: null,
+      }))
+      expect(result.current.historyLoadedSessionId).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(sockets[0]!.emitted.filter((entry) => entry.event === 'client:load_history')).toHaveLength(3)
+      expect(result.current.historyLoadedSessionId).toBe('s1')
+      expect(result.current.lastError?.message).toContain('Conversation history request timed out')
+    } finally { vi.useRealTimers() }
   })
 
   it('restores cached timeline immediately and refreshes history from the cached cursor', async () => {

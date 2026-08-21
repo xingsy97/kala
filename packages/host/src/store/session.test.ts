@@ -4,9 +4,9 @@
  * disk for the same sessionId; `ensure()` coalesces via a per-id promise map.
  */
 
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createConfig, step } from '@agent-kernel/kernel'
@@ -86,6 +86,48 @@ describe('SessionStore.ensure', () => {
     expect(again.record).toBe(first.record)
     expect(again.created).toBe(false)
     expect(readdirSync(dir).length).toBe(filesBefore)
+  })
+
+  it('deletes the exact Session log and every Session-partitioned artifact', async () => {
+    const artifactRootDir = join(dir, 'host-artifacts')
+    const deletedRegistered: string[] = []
+    const store = new SessionStore(dir, {
+      artifactRootDir,
+      deleteRegisteredArtifacts: async (sessionId) => { deletedRegistered.push(sessionId) },
+    })
+    const record = await store.create({ sessionId: 'session-delete-exact', config })
+    const logSlug = basename(record.logPath, '.jsonl')
+    const logArtifacts = join(dir, 'artifacts', logSlug)
+    const similarlyNamed = join(dir, 'artifacts', `${logSlug}-other`)
+    mkdirSync(logArtifacts, { recursive: true })
+    mkdirSync(similarlyNamed, { recursive: true })
+    writeFileSync(join(logArtifacts, 'request.json'), '{}')
+    for (const kind of ['message-assembly', 'router-decisions', 'tool-catalog', 'compaction-summaries', 'subagent-policies']) {
+      const partition = join(artifactRootDir, kind, record.sessionId)
+      mkdirSync(partition, { recursive: true })
+      writeFileSync(join(partition, '1.json'), '{}')
+    }
+
+    await store.delete(record.sessionId)
+
+    expect(existsSync(record.logPath)).toBe(false)
+    expect(existsSync(logArtifacts)).toBe(false)
+    expect(existsSync(similarlyNamed)).toBe(true)
+    for (const kind of ['message-assembly', 'router-decisions', 'tool-catalog', 'compaction-summaries', 'subagent-policies']) {
+      expect(existsSync(join(artifactRootDir, kind, record.sessionId))).toBe(false)
+    }
+    expect(deletedRegistered).toEqual([record.sessionId])
+  })
+
+  it('removes orphaned log artifacts after an earlier partial delete', async () => {
+    const sessionId = 'session-partially-deleted'
+    const orphan = join(dir, 'artifacts', `2026-08-20T00-00-00.000Z_${sessionId}`)
+    mkdirSync(orphan, { recursive: true })
+    writeFileSync(join(orphan, 'response.json'), '{}')
+
+    await new SessionStore(dir).delete(sessionId)
+
+    expect(existsSync(orphan)).toBe(false)
   })
 
   it('backfills missing workspace and initial cwd on an existing cached session', async () => {

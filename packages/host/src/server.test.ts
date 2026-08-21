@@ -5,7 +5,7 @@ import { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createConfig } from '@agent-kernel/kernel'
 import type { AgentConfig } from '@agent-kernel/kernel'
@@ -223,6 +223,37 @@ describe('wire protocol', () => {
     expect(handshake.maxPayload).toBe(8 * 1024 * 1024)
   })
 
+  it('fences stale unsubscribe operations and re-emits a fresh baseline on rapid resubscribe', async () => {
+    const sessionId = 'rapid-resubscribe-fence'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { clientId: 'rapid-switch-dashboard', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => dashboard.on('connect', () => resolve()))
+
+    const firstReady = new Promise<SessionReadyEvent>((resolve) => dashboard.once('session:ready', resolve))
+    const subscribed = await dashboard.timeout(1000).emitWithAck('client:subscribe_channels', {
+      requestId: 'subscribe-new', generation: 3, channels: [`session:${sessionId}`],
+    })
+    expect(subscribed.accepted).toContain(`session:${sessionId}`)
+    expect((await firstReady).sessionId).toBe(sessionId)
+
+    const stale = await dashboard.timeout(1000).emitWithAck('client:unsubscribe_channels', {
+      requestId: 'unsubscribe-old', generation: 2, channels: [`session:${sessionId}`],
+    })
+    expect(stale.rejected).toContainEqual({ channel: `session:${sessionId}`, code: 'stale_generation' })
+
+    const appended = new Promise<EventAppendedEvent>((resolve) => dashboard.once('event:appended', resolve))
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      sessionId, text: 'still subscribed', mode: 'queue', operationId: 'rapid-switch-message',
+    })
+    expect(ack).toMatchObject({ ok: true })
+    expect((await appended).sessionId).toBe(sessionId)
+    dashboard.close()
+  })
+
   it('acknowledges approval-mode changes and persists the authoritative mode', async () => {
     const sessionId = 'approval-mode-ack'
     await server.store.ensure({ sessionId, defaultConfig: config })
@@ -349,6 +380,78 @@ describe('wire protocol', () => {
     expect(settings.socketConnections?.namespaces.some((entry) => entry.namespace === '/executor')).toBe(true)
   })
 
+  it('protects the Supervisor origin-result barrier with the private handoff secret', async () => {
+    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'origin-barrier-test-secret'
+    try {
+      const path = `${url}/internal/runtime/tool-result/session-origin/call-origin`
+      expect((await fetch(path)).status).toBe(401)
+      const response = await fetch(path, { headers: { 'x-agent-runlab-ingress-handoff': 'origin-barrier-test-secret' } })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ persisted: false })
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+    }
+  })
+
+  it('protects internal planned-restart control with the handoff secret', async () => {
+    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'restart-control-test-secret'
+    try {
+      expect((await fetch(`${url}/internal/runtime/restart/status`)).status).toBe(401)
+      const authorized = await fetch(`${url}/internal/runtime/restart/status`, {
+        headers: { 'x-agent-runlab-ingress-handoff': 'restart-control-test-secret' },
+      })
+      expect(authorized.status).toBe(200)
+      expect(await authorized.json()).toMatchObject({ pid: process.pid, current: null })
+      const requested = await fetch(`${url}/internal/runtime/restart`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'restart-control-test-secret' },
+        body: JSON.stringify({ mode: 'checkpoint', reason: 'deploy', timeoutMs: 60_000 }),
+      })
+      expect(requested.status).toBe(200)
+      expect(await requested.json()).toMatchObject({ phase: 'draining', mode: 'checkpoint' })
+      await fetch(`${url}/runtime/restart/abort`, { method: 'POST' })
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+    }
+  })
+
+  it('acknowledges internal admission as committed only after the operation reaches Session JSONL', async () => {
+    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'admission-jsonl-test-secret'
+    try {
+      const sessionId = 'admission-jsonl-session'
+      await server.store.create({ sessionId, config })
+      const first = await fetch(`${url}/internal/runtime/admission/commit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'admission-jsonl-test-secret' },
+        body: JSON.stringify({ sessionId, operationId: 'operation-admission-jsonl', text: 'deliver exactly once', mode: 'queue' }),
+      })
+      expect(first.status).toBe(200)
+      const initial = await first.json() as { committed: boolean; cursor?: number }
+      expect(initial.committed).toBe(false)
+      await vi.waitFor(async () => {
+        const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
+        expect(parsed.events.some((entry) => entry.event.kind === 'user_message' && entry.event.operationId === 'operation-admission-jsonl')).toBe(true)
+      })
+      const retry = await fetch(`${url}/internal/runtime/admission/commit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'admission-jsonl-test-secret' },
+        body: JSON.stringify({ sessionId, operationId: 'operation-admission-jsonl', text: 'deliver exactly once', mode: 'queue' }),
+      })
+      const committed = await retry.json() as { committed: boolean; cursor: number }
+      expect(committed).toMatchObject({ committed: true, cursor: expect.any(Number) })
+      const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
+      expect(parsed.events.filter((entry) => entry.event.kind === 'user_message' && entry.event.operationId === 'operation-admission-jsonl')).toHaveLength(1)
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+    }
+  })
+
   it('handshake auth rejects role mismatch', async () => {
     const bad: ClientSocket<
       DashboardServerToClientEvents,
@@ -383,6 +486,112 @@ describe('wire protocol', () => {
       await new Promise<void>((resolve) => occupied.close(() => resolve()))
       rmSync(sessionsDir, { recursive: true, force: true })
     }
+  })
+
+  it('keeps candidate Dashboard mutations fenced until mutable runtime readiness while permitting reads', async () => {
+    await server.close()
+    let mutableReady = false
+    server = await startHostServer({ port: 0, sessionsDir: dir, llm: scriptedLlm(), defaultConfig: config, mutableReady: () => mutableReady })
+    url = `http://localhost:${server.port}`
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { clientId: 'readiness-fence-client', role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<void>((resolve) => dashboard.on('connect', () => resolve()))
+    const sessions = await new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.once('server:sessions', resolve)
+      dashboard.emit('client:list_sessions', {})
+    })
+    expect(Array.isArray(sessions.sessions)).toBe(true)
+    const rejected = await dashboard.timeout(1000).emitWithAck('client:create_session', { operationId: 'operation-before-ready', sessionId: 'candidate-mutation' })
+    expect(rejected).toMatchObject({ ok: false, error: 'runtime_not_ready' })
+    expect(server.store.get('candidate-mutation')).toBeUndefined()
+    mutableReady = true
+    await new Promise<void>((resolve, reject) => dashboard.emit('client:create_session', { operationId: 'operation-after-ready', sessionId: 'candidate-mutation' }, (ack) => ack.ok ? resolve() : reject(new Error(ack.error))))
+    expect(server.store.get('candidate-mutation')).toBeTruthy()
+    dashboard.close()
+  })
+
+  it('does not let candidate read subscriptions resume a dangling Session before route commit', async () => {
+    await server.close()
+    const seedLlm: LLMAdapter = {
+      name: 'seed',
+      async call() {
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'must be continued only by the planned restart owner' }] } }
+      },
+    }
+    server = await startHostServer({ port: 0, sessionsDir: dir, llm: seedLlm, defaultConfig: config })
+    const record = await server.store.create({ sessionId: 'candidate-dangling', config })
+    await server.store.record(
+      record.sessionId,
+      { kind: 'user_message', text: 'continue me after cutover' },
+      [{ kind: 'call_llm', messages: record.state.messages, tools: config.tools }],
+      { ...record.state, status: 'thinking', cursor: record.state.cursor + 1, messages: [...record.state.messages, { role: 'user', content: [{ type: 'text', text: 'continue me after cutover' }] }] },
+    )
+    const frozenCursor = server.store.get(record.sessionId)!.state.cursor
+    await server.close()
+
+    let llmCalls = 0
+    let mutableReady = false
+    server = await startHostServer({
+      port: 0, sessionsDir: dir, defaultConfig: config, mutableReady: () => mutableReady,
+      llm: { name: 'candidate', async call() { llmCalls += 1; return { message: { role: 'assistant', content: [{ type: 'text', text: 'continued' }] } } } },
+    })
+    url = `http://localhost:${server.port}`
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { clientId: 'candidate-reader', role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<void>((resolve) => dashboard.on('connect', () => resolve()))
+    await dashboard.timeout(1000).emitWithAck('client:subscribe_channels', {
+      requestId: 'candidate-read-subscribe', generation: 1, channels: [`session:${record.sessionId}`],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(llmCalls).toBe(0)
+    expect(server.store.get(record.sessionId)!.state).toMatchObject({ status: 'thinking', cursor: frozenCursor })
+
+    mutableReady = true
+    await dashboard.timeout(1000).emitWithAck('client:subscribe_channels', {
+      requestId: 'public-read-subscribe', generation: 2, channels: [`session:${record.sessionId}`],
+    })
+    await vi.waitFor(() => expect(llmCalls).toBe(1))
+    expect(server.store.get(record.sessionId)!.state.cursor).toBe(frozenCursor + 1)
+    dashboard.close()
+  })
+
+  it('keeps candidate overflow reads from recovering a dangling Session as interrupted', async () => {
+    await server.close()
+    server = await startHostServer({ port: 0, sessionsDir: dir, llm: scriptedLlm(), defaultConfig: config })
+    const record = await server.store.create({
+      sessionId: 'candidate-overflow-read',
+      workspaceId: 'workspace-overflow-read',
+      config,
+    })
+    await server.store.record(
+      record.sessionId,
+      { kind: 'user_message', text: 'continue only through planned restart' },
+      [{ kind: 'call_llm', messages: record.state.messages, tools: config.tools }],
+      { ...record.state, status: 'thinking', cursor: record.state.cursor + 1, messages: [...record.state.messages, { role: 'user', content: [{ type: 'text', text: 'continue only through planned restart' }] }] },
+    )
+    const frozenCursor = server.store.get(record.sessionId)!.state.cursor
+    await server.close()
+
+    server = await startHostServer({
+      port: 0, sessionsDir: dir, llm: scriptedLlm(), defaultConfig: config, mutableReady: () => false,
+    })
+    url = `http://localhost:${server.port}`
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { clientId: 'candidate-overflow-reader', role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<void>((resolve) => dashboard.on('connect', () => resolve()))
+    const result = new Promise<void>((resolve) => dashboard.once('server:overflow_contents', () => resolve()))
+    dashboard.emit('client:read_overflow', {
+      requestId: 'candidate-overflow-request', sessionId: record.sessionId, callId: 'candidate-overflow-call',
+    })
+    await result
+
+    expect(server.store.get(record.sessionId)!.state).toMatchObject({ status: 'thinking', cursor: frozenCursor })
+    const parsed = await readSessionLog(server.store.get(record.sessionId)!.logPath)
+    expect(parsed.events.some((entry) => JSON.stringify(entry).includes('[interrupted]'))).toBe(false)
+    dashboard.close()
   })
 
   it('returns 404 for stale static chunks instead of the SPA HTML shell', async () => {
@@ -1299,7 +1508,7 @@ describe('wire protocol', () => {
     expect(response.headers.get('content-type')).toContain('text/plain')
     const body = await response.text()
     expect(body).toContain('agent_kernel_process_starts_total')
-    expect(body).toContain('deployment_mode="standalone"')
+    expect(body).toContain('deployment_mode="portable"')
   })
 
   it('serves custom dashboard middleware after JSON routes', async () => {
@@ -1793,6 +2002,24 @@ describe('wire protocol', () => {
     expect(traversal.status).toBe(400)
   })
 
+  it('serves embedded release docs when no filesystem docs root is configured', async () => {
+    await server.close()
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      embeddedDocs: [{ path: 'operations/release.md', contentBase64: Buffer.from('# Release Operations\n\nEmbedded runbook.').toString('base64') }],
+    })
+    url = `http://localhost:${server.port}`
+
+    const index = await fetch(`${url}/docs/index`).then((response) => response.json() as Promise<{ docs: Array<{ path: string; title: string; size: number; updatedAt: string }> }>)
+    expect(index.docs).toEqual([{ path: 'operations/release.md', title: 'Release Operations', size: 39, updatedAt: new Date(0).toISOString() }])
+    const content = await fetch(`${url}/docs/content?path=${encodeURIComponent('operations/release.md')}`).then((response) => response.json() as Promise<{ body: string }>)
+    expect(content.body).toContain('Embedded runbook.')
+    expect((await fetch(`${url}/docs/content?path=${encodeURIComponent('operations/missing.md')}`)).status).toBe(404)
+  })
+
   it('runs product enhancement artifact actions from dashboard routes', async () => {
     await server.close()
     const artifactRootDir = join(dir, 'artifacts')
@@ -2045,7 +2272,7 @@ describe('wire protocol', () => {
     executor.close()
   })
 
-  it('cascades session deletion through descendant sessions when requested', async () => {
+  it('always cascades session deletion through descendant sessions', async () => {
     await server.store.create({ sessionId: 'delete-parent', config })
     await server.store.create({ sessionId: 'delete-child', config, parentSessionId: 'delete-parent' })
     await server.store.create({ sessionId: 'delete-grandchild', config, parentSessionId: 'delete-child' })
@@ -2062,13 +2289,45 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    await new Promise<void>((resolve, reject) => dashboard.emit('client:delete_session', { operationId: 'delete-cascade-op', sessionId: 'delete-parent', cascade: true }, (ack) => ack.ok ? resolve() : reject(new Error(ack.error))))
+    const deleteSpy = vi.spyOn(server.store, 'delete')
+    await new Promise<void>((resolve, reject) => dashboard.emit('client:delete_session', { operationId: 'delete-cascade-op', sessionId: 'delete-parent' }, (ack) => ack.ok ? resolve() : reject(new Error(ack.error))))
     let summaries = await server.store.listSummaries()
     for (let i = 0; i < 50 && summaries.length !== 1; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10))
       summaries = await server.store.listSummaries()
     }
     expect(summaries.map((s) => s.sessionId).sort()).toEqual(['delete-sibling'])
+    expect(deleteSpy.mock.calls.map(([sessionId]) => sessionId)).toEqual([
+      'delete-grandchild',
+      'delete-child',
+      'delete-parent',
+    ])
+    dashboard.close()
+  })
+
+  it('atomically rejects tree deletion when any descendant has an active turn', async () => {
+    await server.store.create({ sessionId: 'active-delete-parent', config })
+    await server.store.create({ sessionId: 'active-delete-child', config, parentSessionId: 'active-delete-parent' })
+    await server.store.create({ sessionId: 'active-delete-grandchild', config, parentSessionId: 'active-delete-child' })
+    vi.spyOn(server.loop, 'hasActiveTurn').mockImplementation((sessionId) => sessionId === 'active-delete-grandchild')
+    const deleteSpy = vi.spyOn(server.store, 'delete')
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'active-delete-parent', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const result = await dashboard.timeout(1000).emitWithAck('client:delete_session', {
+      operationId: 'active-delete-op',
+      sessionId: 'active-delete-parent',
+    })
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('active turn') })
+    expect(deleteSpy).not.toHaveBeenCalled()
+    expect((await server.store.listSummaries()).map((session) => session.sessionId)).toEqual(
+      expect.arrayContaining(['active-delete-parent', 'active-delete-child', 'active-delete-grandchild']),
+    )
     dashboard.close()
   })
 
@@ -3551,6 +3810,65 @@ describe('wire protocol', () => {
     expect(ack).toEqual({ ok: true })
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(queueEvents.every((event) => event.items.every((item) => item.text !== 'send immediately'))).toBe(true)
+    dashboard.close()
+  })
+
+  it('keeps an immediate post-ACK follow-up behind the accepted direct message', async () => {
+    const sessionId = 'wire-message-queue-post-ack-race'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const seenPrompts: string[] = []
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-post-ack-race-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((message) => message.role === 'user')
+            .map((message) => message.content.map((content) => ('text' in content ? content.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await firstRelease
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    let latestQueue: ServerMessageQueueEvent | undefined
+    dashboard.on('server:message_queue', (event) => { if (event.sessionId === sessionId) latestQueue = event })
+
+    await expect(dashboard.timeout(500).emitWithAck('client:user_message', {
+      sessionId, text: 'first', mode: 'steer', operationId: 'post-ack-first',
+    })).resolves.toEqual({ ok: true })
+    await expect(dashboard.timeout(500).emitWithAck('client:user_message', {
+      sessionId, text: 'second', mode: 'queue', operationId: 'post-ack-second',
+    })).resolves.toEqual({ ok: true })
+
+    const queuedDeadline = Date.now() + 2000
+    while (Date.now() < queuedDeadline && !latestQueue?.items.some((item) => item.text === 'second' && item.mode === 'queue')) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(latestQueue?.items).toEqual([expect.objectContaining({ text: 'second', mode: 'queue' })])
+    releaseFirst()
+    const finishedDeadline = Date.now() + 4000
+    while (Date.now() < finishedDeadline && seenPrompts.length < 2) await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(seenPrompts).toEqual(['first', 'first|second'])
+
+    const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
+    expect(parsed.events.filter((entry) => entry.event.kind === 'user_message').map((entry) => entry.event.operationId)).toEqual(['post-ack-first', 'post-ack-second'])
     dashboard.close()
   })
 

@@ -6,7 +6,7 @@ import { runStatusIndicatorJank, TOOL_LOOP_LLM } from './status-indicator-jank.j
 import { runInspectorOpenCost, INSPECTOR_LOAD_LLM } from './inspector-open-cost.js'
 import { runMobileInspectorOverflow, MOBILE_INSPECTOR_LLM } from './mobile-inspector-overflow.js'
 import { runStreamingScrollAnchor, STREAMING_SCROLL_ANCHOR_LLM } from './streaming-scroll-anchor.js'
-import { runSaasCapabilities, SAAS_CAPABILITIES_LLM } from './saas-capabilities.js'
+import { runPrivateCloudCapabilities, PRIVATE_CLOUD_CAPABILITIES_LLM } from './private-cloud-capabilities.js'
 
 export type { ScenarioContext, ScenarioResult } from './types.js'
 export * from './streaming-markdown-flicker.js'
@@ -14,7 +14,7 @@ export * from './status-indicator-jank.js'
 export * from './inspector-open-cost.js'
 export * from './mobile-inspector-overflow.js'
 export * from './streaming-scroll-anchor.js'
-export * from './saas-capabilities.js'
+export * from './private-cloud-capabilities.js'
 
 /**
  * A registry entry ties a scenario to the scripted LLM that drives it and the
@@ -36,12 +36,12 @@ export type ScenarioDefinition = {
 
 export const SCENARIOS: readonly ScenarioDefinition[] = [
   {
-    name: 'saas-capabilities',
-    reproduces: 'SaaS publishes only product capabilities and has no legacy evaluation route.',
-    makeLlm: () => SAAS_CAPABILITIES_LLM(),
+    name: 'private-cloud-capabilities',
+    reproduces: 'Private Cloud publishes only product capabilities and has no legacy evaluation route.',
+    makeLlm: () => PRIVATE_CLOUD_CAPABILITIES_LLM(),
     mobile: true,
     cpuThrottleRate: 1,
-    run: (ctx) => runSaasCapabilities(ctx),
+    run: (ctx) => runPrivateCloudCapabilities(ctx),
   },
   {
     name: 'streaming-scroll-anchor',

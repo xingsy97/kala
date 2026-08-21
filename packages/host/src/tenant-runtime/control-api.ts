@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from 'node:http'
 import { join } from 'node:path'
 
-import { SAAS_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
+import type { RuntimeCapabilities } from '@agent-kernel/shared'
 
 import { parseTenantRuntimeUnitId } from './unit.js'
 import type { RuntimeUnitMaterializationStore } from './materialization-store.js'
@@ -13,6 +13,7 @@ export function attachTenantRuntimeControlApi(options: {
   service: TenantRuntimeService
   store: RuntimeUnitMaterializationStore
   dataRoot: string
+  capabilities: RuntimeCapabilities
 }): void {
   options.http.prependListener('request', (request, response) => {
     if (!(request.url ?? '').startsWith('/internal/')) return
@@ -39,7 +40,7 @@ async function applyCommand(raw: string, oversized: boolean, options: Parameters
   if (action === 'delete') { await options.service.suspendUnit(unitId); await options.store.remove(unitId, input.operationId, input.generation) }
   else {
     const desiredState = action === 'suspend' ? 'suspended' : 'ready'
-    await options.store.apply({ schemaVersion: 1, unitId, routingKeyDigest: '', routingKeyVersion: 1, generation: input.generation, desiredState, dataRoot: join(options.dataRoot, 'tenant-runtime-units', unitId), capabilities: SAAS_RUNTIME_CAPABILITIES, lastOperationId: input.operationId, updatedAt: new Date().toISOString() })
+    await options.store.apply({ schemaVersion: 1, unitId, routingKeyDigest: '', routingKeyVersion: 1, generation: input.generation, desiredState, dataRoot: join(options.dataRoot, 'tenant-runtime-units', unitId), capabilities: options.capabilities, lastOperationId: input.operationId, updatedAt: new Date().toISOString() })
     if (desiredState === 'ready') options.service.markRoutable(unitId); else await options.service.suspendUnit(unitId)
   }
   return { ok: true, unitId, action }

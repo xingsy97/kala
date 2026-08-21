@@ -1,4 +1,4 @@
-# Dual-Deployment Feature Review Ledger
+# Platform Deployment Feature Review Ledger
 
 **Status:** current review record
 **Reviewed:** 2026-07-29
@@ -6,7 +6,7 @@
 
 This ledger records implementation evidence and remaining review work. It is not a replacement for task-chain acceptance.
 
-| Feature | Standalone | SaaS | Implementation evidence | Strongest existing proof | Remaining release proof |
+| Feature | Dedicated | Private Cloud | Implementation evidence | Strongest existing proof | Remaining release proof |
 |---|---|---|---|---|---|
 | Agent | Enabled | Enabled | Kernel core, Host loop, Dashboard chat | Kernel/Host suites; real Dashboard scripts | two-user real task chain through Gateway |
 | Session | Enabled | Enabled, Unit-scoped | SessionStore, queues, Socket.IO rooms inside Unit | same Session IDs across two Units | identity-to-Unit browser enumeration denial |
@@ -14,7 +14,7 @@ This ledger records implementation evidence and remaining review work. It is not
 | File | Enabled | Enabled | Executor FS handlers and SessionFilesPanel | sandbox and component tests | large/binary/path-denial transport chain |
 | Git | Enabled | Enabled | SourceControlPanel over workspace execution | component tests | real repositories, empty/error/unavailable states |
 | Executor | Enabled | Enabled, invite-bound | registry, identity store, Gateway invite route | Unit registry isolation | token rotation/revocation and multi-process reconnect |
-| Shell/terminal | Enabled | Enabled | Executor terminal/background handlers and Dashboard panels | handler/component tests | resize, cancellation, disconnect cleanup through SaaS |
+| Shell/terminal | Enabled | Enabled | Executor terminal/background handlers and Dashboard panels | handler/component tests | resize, cancellation, disconnect cleanup through Private Cloud |
 | General Artifacts | Enabled | Enabled, Unit-scoped | registries and Artifact pages | cross-Unit artifact test | download/retention and two-user browser denial |
 | Settings | Enabled | Enabled | Settings sections and Host projections | broad component suite and layout scripts | execute every visible mutation and recovery path |
 | Accounts | N/A | External IdP/Gateway | `/auth/login`, callback, `/auth/me`, logout | Gateway request-path tests and browser logout evidence | server revocation, global logout, expiry warnings, devices |
@@ -31,13 +31,13 @@ This ledger records implementation evidence and remaining review work. It is not
 ### P0/P1 fixed in this review
 
 - Added one normative deployment-mode contract and corrected the obsolete tenant-hostname runbook acceptance.
-- Changed Dashboard capability bootstrap to fail closed instead of inferring Standalone after fetch failure.
+- Changed Dashboard capability bootstrap to fail closed instead of inferring Dedicated after fetch failure.
 - Added Gateway request-path tests for callback state consumption, account projection, trusted routing-header overwrite, unauthenticated behavior, and logout origin/method enforcement.
 - Expanded critical user actions to mode-aware task chains and cleanup/evidence rules.
 
 ### P1 implementation/test work still required
 
-1. Enumerated SaaS Benchmark/Evaluation denial matrix rather than one representative endpoint.
+1. Enumerated Private Cloud Benchmark/Evaluation denial matrix rather than one representative endpoint.
 2. Two-authenticated-user browser flow for Session, Workspace, external Executor, File, Shell, Artifact, and notification-device isolation.
 3. Settings action automation beyond geometry/navigation.
 4. Real scrolling interaction while streaming and tool/sub-agent expansion.

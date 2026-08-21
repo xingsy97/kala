@@ -1,4 +1,5 @@
 import { createServer, get, type Server as HttpServer } from 'node:http'
+import { connect as connectTcp, type Socket as TcpSocket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Server as SocketIOServer } from 'socket.io'
 import { io as connect, type Socket } from 'socket.io-client'
@@ -15,6 +16,18 @@ async function listen(server: HttpServer): Promise<number> {
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('server has no port')
   return address.port
+}
+
+async function eventually(assertion: () => Promise<void>, deadlineMs = 3_000): Promise<void> {
+  const deadline = Date.now() + deadlineMs
+  let lastError: unknown
+  while (Date.now() < deadline) {
+    try { await assertion(); return } catch (error) {
+      lastError = error
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  }
+  throw lastError
 }
 
 async function unit(id: string): Promise<{ origin: string; io: SocketIOServer }> {
@@ -85,6 +98,39 @@ describe('RuntimeUnitIngress', () => {
     await expect(socketB.timeout(2_000).emitWithAck('identify')).resolves.toBe('b')
     expect(ingress.listening).toBe(true)
     router.close()
+  })
+
+  it('destroys the upstream WebSocket when its public client disconnects', async () => {
+    const upstreamSockets = new Set<TcpSocket>()
+    const upstream = createServer()
+    upstream.on('upgrade', (_request, socket) => {
+      upstreamSockets.add(socket)
+      socket.on('error', () => undefined)
+      socket.once('close', () => upstreamSockets.delete(socket))
+      socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
+    })
+    servers.push(upstream)
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    const ingress = createServer()
+    const router = createRuntimeUnitIngress({
+      resolve: () => ({ unitId: 'a', origin: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}` }),
+    })
+    router.attach(ingress)
+    const client = connectTcp(await listen(ingress), '127.0.0.1')
+    try {
+      await new Promise<void>((resolve, reject) => { client.once('connect', resolve); client.once('error', reject) })
+      const upgraded = new Promise<void>((resolve) => client.once('data', () => resolve()))
+      client.write('GET /socket.io/ HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
+      await upgraded
+      await eventually(async () => expect(upstreamSockets.size).toBe(1))
+
+      client.destroy()
+      await eventually(async () => expect(upstreamSockets.size).toBe(0))
+    } finally {
+      for (const socket of upstreamSockets) socket.destroy()
+      router.close()
+    }
   })
 
   it('fails unknown HTTP routes closed without reaching a Unit', async () => {

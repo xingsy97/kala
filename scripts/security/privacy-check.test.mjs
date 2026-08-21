@@ -11,7 +11,8 @@ const root = resolve(import.meta.dirname, '../..')
 const policy = loadPrivacyPolicy(root)
 
 test('allows public examples and registered runtime assets', () => {
-  assert.deepEqual(scan('docs/example.md', 'home=/home/example ip=192.0.2.10 email=user@example.com'), [])
+  assert.deepEqual(scan('docs/example.md', 'home=/home/example ip=192.0.2.10 email=user@example.com path=`/home/example`'), [])
+  assert.deepEqual(scan('docs/example.md', 'systemctl status agent-runlab-dedicated-unit@blue.service'), [])
   assert.deepEqual(scan('packages/dashboard/public/favicon.svg', readFileSync(join(root, 'packages/dashboard/public/favicon.svg'))), [])
 })
 

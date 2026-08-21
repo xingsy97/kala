@@ -2,14 +2,14 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { SAAS_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
+import { AGENT_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 
 import { RuntimeUnitMaterializationStore, type RuntimeUnitMaterialization } from './materialization-store.js'
 import { parseTenantRuntimeUnitId } from './unit.js'
 
 const roots: string[] = []
 function entry(generation: number, operation: string): RuntimeUnitMaterialization {
-  return { schemaVersion: 1, unitId: parseTenantRuntimeUnitId('a'), routingKeyDigest: 'sha256:test', routingKeyVersion: 1, generation, desiredState: 'ready', dataRoot: '/data/a', capabilities: SAAS_RUNTIME_CAPABILITIES, lastOperationId: operation, updatedAt: new Date(0).toISOString() }
+  return { schemaVersion: 1, unitId: parseTenantRuntimeUnitId('a'), routingKeyDigest: 'sha256:test', routingKeyVersion: 1, generation, desiredState: 'ready', dataRoot: '/data/a', capabilities: AGENT_RUNTIME_CAPABILITIES, lastOperationId: operation, updatedAt: new Date(0).toISOString() }
 }
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
 

@@ -1,0 +1,29 @@
+[Unit]
+Description=Agent RunLab Dedicated Control Plane Updater
+After=network-online.target agent-runlab-dedicated-ingress.service agent-runlab-dedicated-deploy-supervisor.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+Group=agent-runlab
+EnvironmentFile=-/etc/agent-runlab/supervisor.env
+Environment=AGENT_RUNLAB_CONTROL_CURRENT=/var/lib/agent-runlab/deploy/control-current
+Environment=AGENT_RUNLAB_CONTROL_UPDATER_CURRENT=/var/lib/agent-runlab/deploy/control-updater-current
+Environment=AGENT_RUNLAB_CONTROL_UPDATE_ROOT=/var/lib/agent-runlab/deploy/control-updates
+Environment=AGENT_RUNLAB_OPERATOR_STATUS=/var/lib/agent-runlab/deploy/operator-status.json
+Environment=AGENT_RUNLAB_INGRESS_READINESS=/run/agent-runlab/ingress-readiness.json
+ExecStart=/usr/bin/node /var/lib/agent-runlab/deploy/control-updater-current/update-dedicated-control-plane.mjs
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=0
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=-/run/agent-runlab/ingress-readiness.json
+ReadWritePaths=/var/lib/agent-runlab/deploy /etc/systemd/system /etc/agent-runlab
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077

@@ -2,7 +2,7 @@
 
 **Status:** accepted design for implementation
 **Owner:** Runtime ingress gateway
-**Scope:** hosted browser authentication only; Standalone remains identity-free
+**Scope:** Private Cloud browser authentication only; Dedicated remains identity-free
 
 ## 1. Problem
 

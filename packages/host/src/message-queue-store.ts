@@ -12,7 +12,12 @@ export async function loadPersistedMessageQueue(
   store: SessionStore,
   sessionId: string,
 ): Promise<QueuedUserMessage[]> {
-  const record = store.get(sessionId) ?? await store.load(sessionId)
+  // Queue hydration runs before RestartCoordinator cursor fencing on a
+  // replacement Runtime. It is an observational read of runtime metadata, not
+  // crash recovery ownership: using the Store default here would synthesize a
+  // failed Tool result for a valid before_tool_dispatch checkpoint and advance
+  // Session JSONL before planned continuation can verify its frozen cursor.
+  const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
   const parsed = await readSessionLog(record.logPath)
   for (let i = parsed.runtimeMetadata.length - 1; i >= 0; i--) {
     const entry = parsed.runtimeMetadata[i]
@@ -27,7 +32,9 @@ export async function persistMessageQueueSnapshot(
   sessionId: string,
   items: readonly QueuedUserMessage[],
 ): Promise<void> {
-  const record = store.get(sessionId) ?? await store.load(sessionId)
+  // Persisting host-owned queue metadata must likewise never claim recovery
+  // ownership for an unloaded planned-restart participant.
+  const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
   await appendRuntimeMetadataEntry(record.logPath, {
     sessionId,
     action: ACTION,

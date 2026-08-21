@@ -12,12 +12,12 @@ describe('executor installation routes', () => {
   const servers: ReturnType<typeof createServer>[] = []
   afterEach(async () => { await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))) })
 
-  async function start(mode: 'standalone' | 'saas' = 'standalone') {
+  async function start(tenancy: 'single-tenant' | 'multi-tenant' = 'single-tenant') {
     const dir = mkdtempSync(join(tmpdir(), 'executor-install-api-'))
     const store = new ExecutorInstallationStore(join(dir, 'installs.json'))
     const identities = new ExecutorIdentityStore(join(dir, 'identities.json'))
     const server = createServer(); servers.push(server)
-    attachExecutorInstallationRoutes(server, { store, identities, deploymentMode: mode })
+    attachExecutorInstallationRoutes(server, { store, identities, tenancy })
     await new Promise<void>((resolve) => server.listen(0, resolve))
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('missing address')
     return { url: `http://localhost:${address.port}`, dir }
@@ -74,12 +74,12 @@ describe('executor installation routes', () => {
     expect(events.events.every((event) => event.seq > 1)).toBe(true)
   })
 
-  it('requires ingress admin in SaaS while standalone no-auth remains explicitly usable', async () => {
-    const standalone = await start('standalone')
-    expect((await fetch(`${standalone.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' }) })).status).toBe(201)
-    const saas = await start('saas')
+  it('requires ingress admin for multi-tenant Platform while single-tenant no-auth remains explicitly usable', async () => {
+    const dedicated = await start('single-tenant')
+    expect((await fetch(`${dedicated.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' }) })).status).toBe(201)
+    const privateCloud = await start('multi-tenant')
     const body = JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' })
-    expect((await fetch(`${saas.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })).status).toBe(403)
-    expect((await fetch(`${saas.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'admin' }, body })).status).toBe(201)
+    expect((await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })).status).toBe(403)
+    expect((await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'admin' }, body })).status).toBe(201)
   })
 })

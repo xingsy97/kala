@@ -1,4 +1,4 @@
--- Agent RunLab Hosted/Hybrid control-plane schema.
+-- Agent RunLab Private Cloud control-plane schema.
 -- IDs are opaque application-generated values. Human-readable names are never routing keys.
 
 CREATE TABLE organizations (

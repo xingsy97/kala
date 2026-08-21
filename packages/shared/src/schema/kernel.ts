@@ -163,6 +163,7 @@ export const AgentModuleMetadataSchema: z.ZodType<AgentModuleMetadata> = z.objec
 
 export const AgentConfigSchema: z.ZodType<AgentConfig> = z.object({
   tools: z.array(ToolSchemaSchema),
+  toolDisclosureMode: z.enum(['legacy_full', 'progressive']).optional(),
   systemPrompt: z.string().optional(),
   agentModule: AgentModuleMetadataSchema.optional(),
   contextLimit: z.number().int().nonnegative().optional(),

@@ -32,13 +32,13 @@
  */
 
 import { homedir } from 'node:os'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
 import type { ManualModelInput, ManualProviderInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
-import { FULL_RUNTIME_CAPABILITIES, PROTOCOL_VERSION, SAAS_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
+import { AGENT_RUNTIME_CAPABILITIES, FULL_RUNTIME_CAPABILITIES, PROTOCOL_VERSION, productVariant } from '@agent-kernel/shared'
 import bcrypt from 'bcryptjs'
 
 import packageJson from '../package.json' with { type: 'json' }
@@ -69,6 +69,7 @@ import {
 import { startHostServer } from '../src/server.js'
 import type { EmbeddedStaticAsset } from '../src/http/routes.js'
 import { loadSocketAdminConfig, type EmbeddedSocketAdminAsset } from '../src/socket-admin.js'
+import { loadProductDeploymentConfig } from '../src/deployment-config.js'
 import { createSocketAdminStore } from '../src/socket-admin-store.js'
 import { authSettings, type AuthConfig } from '../src/auth-control.js'
 import { createAuditLogger } from '../src/audit-log.js'
@@ -78,6 +79,7 @@ import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 import { LocalWebSearchCredentialStore } from '../src/web-search/credential-store.js'
+import { createDedicatedRuntimeReadiness, writeDedicatedProcessReadiness, writeDedicatedRuntimeReadiness } from '../src/tenant-runtime/dedicated-runtime-readiness.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 const VERSION = packageJson.version
@@ -156,8 +158,11 @@ async function main(): Promise<void> {
     return
   }
 
-  const deploymentMode = process.env.AGENT_KERNEL_DEPLOYMENT_MODE === 'saas' ? 'saas' : 'standalone'
-  const capabilities = deploymentMode === 'saas' ? SAAS_RUNTIME_CAPABILITIES : FULL_RUNTIME_CAPABILITIES
+  const deployment = loadProductDeploymentConfig({
+    configPath: process.env.AGENT_RUNLAB_DEPLOYMENT_CONFIG,
+  })
+  const product = productVariant(deployment)
+  const capabilities = deployment.runtimeProfile === 'full' ? FULL_RUNTIME_CAPABILITIES : AGENT_RUNTIME_CAPABILITIES
   const enhancementCommand = parseEnhancementCli(argv)
   if (await runEnhancementCli(enhancementCommand)) return
 
@@ -171,6 +176,7 @@ async function main(): Promise<void> {
   const port = Number(argValue(process.argv.slice(2), '--port') ?? process.env.HOST_PORT ?? 3000)
   const sessionsDir =
     process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
+  const expectedDeployment = parseExpectedDeployment(process.env.AGENT_RUNLAB_EXPECTED_DEPLOYMENT)
   const webSearchCredentialStore = new LocalWebSearchCredentialStore(join(dirname(sessionsDir), 'credentials'))
   const artifactRootDir = process.env.AGENT_KERNEL_ARTIFACTS_DIR === '0'
     ? false
@@ -226,6 +232,7 @@ async function main(): Promise<void> {
   const dashboard = await createDashboardServing()
   const embeddedSocketAdminAssets = embeddedSocketAdminAssetsFromGlobal()
   const embeddedReleaseAssets = embeddedReleaseAssetsFromGlobal()
+  const embeddedDocs = embeddedDocsFromGlobal()
   const socketAdminStorePath = process.env.AGENT_KERNEL_SOCKET_ADMIN_CONFIG ?? join(homedir(), '.config', 'agent-kernel', 'socket-admin.json')
   const socketAdminStore = createSocketAdminStore(socketAdminStorePath)
   let socketAdminState = loadSocketAdminConfig({ currentModulePath: currentModulePath(), configPath: socketAdminStore.path, record: socketAdminStore.load(), embeddedAssets: embeddedSocketAdminAssets })
@@ -234,6 +241,7 @@ async function main(): Promise<void> {
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
   let release = releaseSettings(port)
+  const processReadinessPath = process.env.AGENT_RUNLAB_PROCESS_READINESS?.trim()
 
   const manualModelsPath = join(homedir(), '.config', 'agent-kernel', 'models.json')
   const hookSummaries = hooks.map((h) => ({
@@ -283,9 +291,14 @@ async function main(): Promise<void> {
   const server = await startHostServer({
     port,
     ...(process.env.HOST_LISTEN_HOST?.trim() ? { listenHost: process.env.HOST_LISTEN_HOST.trim() } : {}),
-    deploymentMode,
+    deployment,
     capabilities,
     sessionsDir,
+    ...(expectedDeployment ? { expectedDeployment } : {}),
+    ...(expectedDeployment ? { mutableReady: () => plannedDeploymentPubliclyRouted(expectedDeployment) } : {}),
+    ...(processReadinessPath ? { onProcessReady: async (ready) => {
+      await writeDedicatedProcessReadiness(processReadinessPath, { schemaVersion: 1, ...ready, ...(expectedDeployment ? { deployment: expectedDeployment } : {}) })
+    } } : {}),
     llm,
     logger,
     webSearchCredentials: webSearchCredentialStore,
@@ -377,6 +390,7 @@ async function main(): Promise<void> {
     ...(socketAdminState.runtime ? { socketAdmin: socketAdminState.runtime } : {}),
     ...(embeddedSocketAdminAssets.length > 0 ? { embeddedSocketAdminAssets } : {}),
     ...(embeddedReleaseAssets.length > 0 ? { embeddedReleaseAssets } : {}),
+    ...(embeddedDocs.length > 0 ? { embeddedDocs } : {}),
     ...(release.source === 'local' ? { releaseAssetsDir: releaseDir() } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
@@ -390,10 +404,20 @@ async function main(): Promise<void> {
     }),
   })
   release = releaseSettings(server.port)
+  const runtimeReadinessPath = process.env.AGENT_RUNLAB_RUNTIME_READINESS?.trim()
+  if (runtimeReadinessPath) {
+    const writeLeasePath = process.env.AGENT_RUNLAB_WRITE_LEASE?.trim()
+    if (!writeLeasePath) throw new Error('AGENT_RUNLAB_WRITE_LEASE is required with AGENT_RUNLAB_RUNTIME_READINESS')
+    const restartStatus = server.restartStatus()
+    await writeDedicatedRuntimeReadiness(runtimeReadinessPath, await createDedicatedRuntimeReadiness({
+      sessionsDir, writeLeasePath, capabilities, restart: restartStatus.last,
+      ...(expectedDeployment ? { deployment: expectedDeployment } : {}),
+    }))
+  }
 
   const startupDetails = {
     port: server.port,
-    deploymentMode,
+    product,
     capabilities,
     sessionsDir,
     llm: llm.name,
@@ -428,6 +452,25 @@ async function main(): Promise<void> {
   }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+}
+
+function parseExpectedDeployment(raw: string | undefined): NonNullable<import('@agent-kernel/shared').HostRestartAttempt['deployment']> | undefined {
+  if (!raw?.trim()) return undefined
+  const value = JSON.parse(raw) as Record<string, unknown>
+  if (typeof value.deploymentId !== 'string' || !value.deploymentId || typeof value.targetReleaseDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.targetReleaseDigest) || !Number.isSafeInteger(value.expectedRouteGeneration) || Number(value.expectedRouteGeneration) < 1 || typeof value.fencingToken !== 'string' || value.fencingToken.length < 16) throw new Error('invalid AGENT_RUNLAB_EXPECTED_DEPLOYMENT')
+  return { deploymentId: value.deploymentId, targetReleaseDigest: value.targetReleaseDigest, expectedRouteGeneration: Number(value.expectedRouteGeneration), fencingToken: value.fencingToken }
+}
+
+function plannedDeploymentPubliclyRouted(expected: NonNullable<import('@agent-kernel/shared').HostRestartAttempt['deployment']>): boolean {
+  const routePath = process.env.AGENT_RUNLAB_ROUTE_STATE?.trim()
+  const slot = process.env.AGENT_RUNLAB_SLOT?.trim()
+  if (!routePath || (slot !== 'blue' && slot !== 'green')) return false
+  try {
+    const route = JSON.parse(readFileSync(routePath, 'utf8')) as { generation?: unknown; activeSlot?: unknown }
+    return route.generation === expected.expectedRouteGeneration + 1 && route.activeSlot === slot
+  } catch {
+    return false
+  }
 }
 
 function hashSocketAdminPassword(password: string): string {
@@ -483,7 +526,7 @@ function createModelRegistry(
   }
 
   if (!primary) {
-    primary = legacyEnvAdapter(models)
+    primary = environmentProviderAdapter(models)
   }
 
   const routerArtifactDir = opts.artifactRootDir
@@ -699,14 +742,13 @@ function joinPath(base: string, tail: string): string {
 }
 
 /**
- * Backwards-compatibility path: if neither `~/.claude/settings.json` nor
- * `~/.codex/config.toml` produced a working provider, fall back to the classic
- * `LLM_PROVIDER=anthropic|openai` env vars so existing container deployments
- * keep working. `AGENT_KERNEL_PROVIDER=policy-gateway` is the training-mode
- * path for SGLang-backed live rollouts.
+ * Environment-configured provider path used when no settings-file or catalog
+ * provider is available. `AGENT_KERNEL_PROVIDER=policy-gateway` selects the
+ * training path for SGLang-backed live rollouts; direct Anthropic/OpenAI
+ * selection uses the same canonical variable.
  */
-function legacyEnvAdapter(models: ModelInfo[]): LLMAdapter {
-  const provider = (process.env.AGENT_KERNEL_PROVIDER ?? process.env.LLM_PROVIDER ?? 'anthropic').toLowerCase()
+function environmentProviderAdapter(models: ModelInfo[]): LLMAdapter {
+  const provider = (process.env.AGENT_KERNEL_PROVIDER ?? 'anthropic').toLowerCase()
   if (provider === 'policy-gateway') {
     const baseUrl = process.env.AGENT_KERNEL_POLICY_BASE_URL
     const model = process.env.AGENT_KERNEL_POLICY_MODEL ?? process.env.HOST_MODEL
@@ -834,6 +876,21 @@ function embeddedReleaseAssetsFromGlobal(): readonly EmbeddedStaticAsset[] {
     const record = item as Record<string, unknown>
     if (typeof record.path !== 'string') continue
     if (typeof record.contentBase64 !== 'string') continue
+    assets.push({ path: record.path, contentBase64: record.contentBase64 })
+  }
+  return assets
+}
+
+function embeddedDocsFromGlobal(): readonly EmbeddedStaticAsset[] {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_EMBEDDED_DOCS__?: unknown
+  }).__AGENT_KERNEL_EMBEDDED_DOCS__
+  if (!Array.isArray(globalValue)) return []
+  const assets: EmbeddedStaticAsset[] = []
+  for (const item of globalValue) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    if (typeof record.path !== 'string' || typeof record.contentBase64 !== 'string') continue
     assets.push({ path: record.path, contentBase64: record.contentBase64 })
   }
   return assets

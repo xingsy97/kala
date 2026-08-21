@@ -1,4 +1,6 @@
 import type { Tool } from './registry.js'
+import { decideNetworkPolicy, type NetworkPolicy } from '@agent-kernel/shared'
+import { ulid } from 'ulid'
 import { ToolError, throwIfAborted } from './registry.js'
 import { optionalPositiveInt, requireString } from './schema.js'
 
@@ -15,6 +17,12 @@ export const webfetchTool: Tool = {
     const maxChars = Math.min(optionalPositiveInt(input, 'maxChars') ?? DEFAULT_MAX_CHARS, MAX_CHARS)
 
     throwIfAborted(ctx)
+    const policy: NetworkPolicy = ctx.networkPolicy ?? { version: 1, policyId: 'executor-default', revision: '1', defaultAction: 'allow', rules: [] }
+    const decision = decideNetworkPolicy(policy, { toolName: 'webfetch', executionLocation: 'executor', url })
+    const decisionId = ulid()
+    const base = { schemaVersion: 1 as const, ts: new Date().toISOString(), sessionId: ctx.sessionId, callId: ctx.callId, toolName: 'webfetch', executionLocation: 'executor' as const, decisionId, policyId: policy.policyId, policyRevision: policy.revision, target: decision.target, enforcementMode: 'application' as const }
+    await ctx.emitNetworkAudit?.({ ...base, eventId: ulid(), event: 'network.policy_decision', action: decision.action, ...(decision.matchedRuleId ? { matchedRuleId: decision.matchedRuleId } : {}), evidenceLevel: 'declared' })
+    if (decision.action !== 'allow') throw new ToolError('ENETWORKPOLICY', `network target ${decision.action === 'ask' ? 'requires a target-bound grant' : 'is denied'} by policy ${policy.policyId}@${policy.revision}`)
 
     const controller = new AbortController()
     const onAbort = (): void => controller.abort()
@@ -22,6 +30,7 @@ export const webfetchTool: Tool = {
     const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
 
     try {
+      await ctx.emitNetworkAudit?.({ ...base, eventId: ulid(), event: 'network.request_observed', phase: 'started', evidenceLevel: 'application_observed' })
       const res = await fetch(url, {
         method: 'GET',
         headers: {
@@ -31,6 +40,7 @@ export const webfetchTool: Tool = {
         },
         signal: controller.signal,
       })
+      await ctx.emitNetworkAudit?.({ ...base, eventId: ulid(), event: 'network.request_observed', phase: 'response', statusCode: res.status, evidenceLevel: 'application_observed' })
       if (!res.ok) {
         throw new ToolError('EHTTP', `fetch returned HTTP ${res.status}`)
       }
@@ -52,6 +62,8 @@ export const webfetchTool: Tool = {
         : cleaned
       return `Fetched: ${url}\nContent-Type: ${contentType || 'unknown'}\n\n${truncated}`
     } catch (err) {
+      const auditError = err instanceof ToolError ? err.code : 'ENETWORK'
+      await ctx.emitNetworkAudit?.({ ...base, eventId: ulid(), event: 'network.request_observed', phase: 'failed', errorCode: auditError, evidenceLevel: 'application_observed' }).catch(() => undefined)
       if (controller.signal.aborted && !ctx.signal.aborted) {
         throw new ToolError('ETIMEDOUT', `fetch timed out after ${DEFAULT_TIMEOUT_MS}ms`)
       }

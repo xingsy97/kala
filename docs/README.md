@@ -82,9 +82,9 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | Three processes and one full turn end-to-end |
-| [architecture/deployment-mode-contract.md](architecture/deployment-mode-contract.md) | **Normative.** Standalone/SaaS capabilities, identity boundary, Unit isolation, and required release lanes |
+| [architecture/deployment-mode-contract.md](architecture/deployment-mode-contract.md) | **Normative.** Portable/Dedicated/Private Cloud configuration, capabilities, identity boundary, Unit isolation, and required release lanes |
 | [architecture/product-hardening-program.md](architecture/product-hardening-program.md) | Current gated implementation order: product foundation, refactors, Docker, Box, quality gate, then LXD |
-| [architecture/hosted-hybrid-enterprise-benchmark-matrix.md](architecture/hosted-hybrid-enterprise-benchmark-matrix.md) | Grafana/GitLab/GitHub/Sentry benchmark matrix and Hosted/Hybrid build-vs-integrate decisions |
+| [architecture/private-cloud-enterprise-benchmark-matrix.md](architecture/private-cloud-enterprise-benchmark-matrix.md) | Grafana/GitLab/GitHub/Sentry benchmark matrix and Private Cloud build-vs-integrate decisions |
 | [architecture/core-agent-invariants-and-fault-model.md](architecture/core-agent-invariants-and-fault-model.md) | Normative cross-component authority map, invariants, fault injections, proofs, and release blockers |
 | [architecture/browser-session-store.md](architecture/browser-session-store.md) | Accepted design for opaque, server-revocable browser Sessions, device lists, refresh, and logout-all |
 | [architecture/observability-contract.md](architecture/observability-contract.md) | Bounded metrics, structured errors, health, SLOs, redaction, alerting, and acceptance |
@@ -97,15 +97,15 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [testing/core-hardening-baseline-2026-07-31.md](testing/core-hardening-baseline-2026-07-31.md) | Frozen source/runtime/data baseline and evidence rules for the highest-strength core Agent regression program |
 | [testing/core-change-risk-and-coverage-matrix.md](testing/core-change-risk-and-coverage-matrix.md) | Changed-surface to invariant/test mapping, confirmed gaps, severity, and downstream audit ownership |
 | [testing/session-log-integrity-audit.md](testing/session-log-integrity-audit.md) | Session cursor/append/replay atomicity findings, legacy compatibility policy, fixes, and regression evidence |
-| [architecture/tenant-runtime-unit-saas.md](architecture/tenant-runtime-unit-saas.md) | **Accepted architecture and implementation record.** `TenantRuntimeUnit` logical isolation and SaaS composition |
-| [architecture/standalone-runtime-unit-refactor.md](architecture/standalone-runtime-unit-refactor.md) | **Normative.** Stable Ingress, Standalone `local` Unit, external deployment Supervisor, migration, rollback, and final cutover contract |
+| [architecture/private-cloud-runtime-units.md](architecture/private-cloud-runtime-units.md) | **Accepted architecture and implementation record.** `TenantRuntimeUnit` logical isolation and Private Cloud composition |
+| [architecture/dedicated-platform-runtime-unit.md](architecture/dedicated-platform-runtime-unit.md) | **Normative.** Stable Ingress, Dedicated `local` Unit, external deployment Supervisor, migration, rollback, and final cutover contract |
 
 ### Operations
 
 | File | Purpose |
 |---|---|
-| [operations/saas-local-runbook.md](operations/saas-local-runbook.md) | Single Docker SaaS stack with mandatory NFS Session storage, bootstrap, verification, backup, upgrade, and rollback |
-| [operations/standalone-runtime-unit-cutover.md](operations/standalone-runtime-unit-cutover.md) | External staging, preflight, bounded cutover, verification, observation, and rollback for Standalone Runtime Unit migration |
+| [operations/private-cloud-local-runbook.md](operations/private-cloud-local-runbook.md) | Single Docker Private Cloud stack with mandatory NFS Session storage, bootstrap, verification, backup, upgrade, and rollback |
+| [operations/dedicated-platform-runtime-unit-cutover.md](operations/dedicated-platform-runtime-unit-cutover.md) | External staging, preflight, bounded cutover, verification, observation, and rollback for Dedicated Runtime Unit migration |
 
 ### Design
 
@@ -113,9 +113,9 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 |---|---|
 | [design/human-attention-score.md](design/human-attention-score.md) | Session-scoped human attention indicator and draft risk-matched LLM evaluator |
 | [design/session-slash-commands.md](design/session-slash-commands.md) | Session slash command semantics for `/clear`, `/rename`, `/stop`, and `/delete` |
-| [design/authenticated-product-shell.md](design/authenticated-product-shell.md) | SaaS account identity, logout, cache partitioning, and authenticated product-shell behavior |
+| [design/authenticated-product-shell.md](design/authenticated-product-shell.md) | Private Cloud account identity, logout, cache partitioning, and authenticated product-shell behavior |
 | [design/logout-semantics.md](design/logout-semantics.md) | Product logout, logout-all, Provider-wide logout, forced-login, and cross-device behavior |
-| [design/account-center.md](design/account-center.md) | Hosted profile, login Sessions/devices, identity links, data/legal/support, and Settings grouping |
+| [design/account-center.md](design/account-center.md) | Private Cloud profile, login Sessions/devices, identity links, data/legal/support, and Settings grouping |
 
 ### Testing
 

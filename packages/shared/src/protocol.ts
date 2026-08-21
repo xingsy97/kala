@@ -186,6 +186,7 @@ export type HostRestartPhase =
   | 'draining'
   | 'checkpoint_reached'
   | 'restarting'
+  | 'recovering'
   | 'completed'
   | 'aborted'
   | 'failed'
@@ -207,14 +208,28 @@ export type HostRestartResumeAction =
 
 export type HostRestartSessionPlan = {
   sessionId: string
+  parentSessionId?: string
+  parentCallId?: string
   cursor: number
   initialStatus: AgentState['status']
   checkpointStatus: HostRestartSessionCheckpointStatus
   checkpointKind?: 'resting' | 'before_llm' | 'before_tool_dispatch' | 'waiting_for_approval'
   resumeAction: HostRestartResumeAction
+  continuationKey?: string
   label?: string
   workspaceId?: string
   workspaceName?: string
+  error?: string
+}
+
+export type HostRestartRecoveryReceipt = {
+  continuationKey: string
+  baselineCursor: number
+  state: 'pending' | 'running' | 'adopted' | 'settled' | 'failed'
+  observedCursor?: number
+  startedAt?: string
+  adoptedAt?: string
+  settledAt?: string
   error?: string
 }
 
@@ -227,10 +242,17 @@ export type HostRestartAttempt = {
   updatedAt: string
   oldPid: number
   newPid?: number
+  /** Slot-deployment ownership. A replacement must match every supplied fence. */
+  deployment?: {
+    deploymentId: string
+    targetReleaseDigest: string
+    expectedRouteGeneration: number
+    fencingToken: string
+  }
   timeoutMs?: number
   sessions: readonly HostRestartSessionPlan[]
-  /** Durable per-Session continuation receipts; completed entries are never replayed. */
-  recoveryReceipts?: Readonly<Record<string, 'pending' | 'running' | 'completed' | 'failed'>>
+  /** Durable per-Session continuation state. `adopted` fences ownership before effects run. */
+  recoveryReceipts?: Readonly<Record<string, HostRestartRecoveryReceipt>>
   command?: readonly string[]
   error?: string
 }
@@ -1235,8 +1257,6 @@ export type ClientLoadHistory = {
 export type ClientDeleteSession = {
   operationId?: string
   sessionId: string
-  /** Delete all descendant fork/sub-agent sessions whose parent chain starts here. */
-  cascade?: boolean
 }
 
 export type ServerSessionDeletedPayload = {
@@ -1405,8 +1425,6 @@ export type SocketConnectionAuditSnapshot = {
   updatedAt: string
 }
 
-export type DeploymentMode = 'standalone' | 'saas'
-
 export type RuntimeCapabilities = {
   agent: boolean
   workspace: boolean
@@ -1423,7 +1441,7 @@ export const FULL_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   pipeline: true,
 }
 
-export const SAAS_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
+export const AGENT_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   agent: true,
   workspace: true,
   operations: false,
@@ -1432,8 +1450,44 @@ export const SAAS_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
 }
 
 export type RuntimeCapabilitiesPayload = {
-  mode: DeploymentMode
+  product: import('./deployment.js').ProductVariant
+  deployment: import('./deployment.js').ProductDeploymentConfig
   capabilities: RuntimeCapabilities
+}
+
+export type DedicatedDeploymentStatus = {
+  schemaVersion: 1
+  generatedAt: string
+  topology: 'dedicated-slots'
+  services?: { supervisor: { pid: number } }
+  route: { generation: number; activeSlot: 'blue' | 'green'; activeReleaseId: string }
+  slots: {
+    blue: { pid: number; active: boolean; releaseId: string; releaseDigest?: string }
+    green: { pid: number; active: boolean; releaseId: string; releaseDigest?: string }
+  }
+  writeLeaseOwnerPid?: number
+  admission: { pending: number; leased: number; committed: number; expired: number; oldestAgeMs: number; capacity: number }
+  dashboard?: { schemaVersion: 1; generation: number; releaseId: string; releaseDigest: string; assetDigest: string; version: string; protocol: { min: string; max: string }; activatedAt: string }
+  deployment: null | {
+    deploymentId: string
+    operationId: string
+    phase: string
+    requestedAt: string
+    updatedAt: string
+    releaseDigest: string
+    sourceReleaseDigest: string
+    previousSlot?: 'blue' | 'green'
+    candidateSlot: 'blue' | 'green'
+    processReadyAt?: string
+    runtimeReadyAt?: string
+    controlPlane?: { previousSupervisorPid: number; previousIngressPid: number; ingressPid: number; supervisorPid?: number; activatedAt: string; readyAt?: string }
+    routeGeneration?: number
+    blockers?: readonly string[]
+    plannedRestart?: { attemptId: string; participants: number; checkpointed: number }
+    continuation?: { participants: number; completed: number; failed: number; sessions?: readonly { sessionId: string; cursor: number; checkpointKind?: string; resumeAction: string; outcome: 'pending' | 'running' | 'adopted' | 'settled' | 'failed' }[] }
+    rollback?: { predecessorReleaseId: string; outcome: 'pending' | 'completed' | 'failed'; pid?: number }
+    error?: { code: string; message: string; at: string }
+  }
 }
 
 export type ServerSettingsPayload = {
@@ -1671,6 +1725,7 @@ export type ExecutorClientToServerEvents = {
   'executor:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
   'executor:terminal_output': (payload: ServerTerminalOutput) => void
   'executor:terminal_exit': (payload: ServerTerminalExit) => void
+  'executor:network_audit': (payload: import('./network-audit.js').NetworkAuditEvent, ack: (result: { accepted: boolean }) => void) => void
 }
 
 /**

@@ -8,25 +8,25 @@ A visible control is not accepted because it renders or opens. Every critical co
 
 | Mode | User entry | Required end-to-end proof | Required automated proof |
 |---|---|---|---|
-| SaaS | Register/sign in | Branded IdP → callback → account identity visible → Unit loaded on shared product Origin | isolated temporary identity browser flow |
-| SaaS | Sign out | POST logout → cookie cleared → signed-out page → second tab exits → cache locked → API 401 | desktop and mobile multi-tab browser flow |
-| Both | Account/settings entry | Account identity in SaaS; Settings opens, body scrolls, actions have success/error/retry; Standalone has no false account requirement | Settings component tests plus desktop/mobile task chain |
-| Both | Add Workspace | UI opens → invite 200 → no placeholder token → release assets 200 → external Executor connects → invite consumed → Workspace appears → reconnect with long-term token | isolated Workspace and Executor process |
-| Both | New Workspace Session | Select online Workspace → validate cwd → create ACK/ready → composer ready → persisted after reload | real Socket.IO + persistence browser flow |
-| Both | Send direct message | Persisted queue acceptance ACK under 500 ms → input clears immediately → no timeout restore → Agent turn starts once | real Host/LLM flow; no synthetic UI-only ACK |
-| Both | Queue message | Queue dock appears → edit/reorder/delete ACK → drains after active turn → survives/reconciles reconnect | transport fault and reload flow |
-| Both | File | Unit-scoped list/read/write/download, binary and large-file behavior, actionable failure, no path escape | real Executor and sandbox |
-| Both | Git | Real repository status/diff/refresh including unavailable/empty/error states | real Executor repository |
-| Both | Shell | Foreground tool and interactive/background terminal run, stream, resize/cancel/close, reconnect cleanup | real Executor process and Socket.IO |
-| Both | Artifact preview | Register → thumbnail → preview → download → reload persistence → cross-Unit denial in SaaS | real artifact bytes and two-Unit denial |
-| Both | Agent tool chain | Agent invokes read/write/shell/test tools, observes durable result, and replies once | real LLM or controlled protocol provider with actual tools |
-| Both | Sub-agent | Running/success/failure/cancel states remain in parent transcript; no app-level notification; compact/dot interaction works | live child Session browser flow |
-| Both | Streaming scroll | User scrolls upward while tokens/tools append → viewport remains pinned to chosen history position → explicit return-to-bottom works | real browser input during active stream |
-| Both | Notifications | One System Notifications concept; enable/deny/error; per-kind preferences; current device registration; remote device toggle/test/remove; badge clears on entry | browser permission/service-worker lane and Unit-scoped device API |
-| Both | PWA | Manifest/SW load without auth redirect; update/offline banners; notification click navigation; cache identity partition and logout cleanup | production SW in Chromium plus real-device iOS release check |
-| Standalone | Benchmark/Evaluation | Navigation/actions visible; default wizard completes; progress and artifacts persist | Standalone benchmark smoke |
-| SaaS | Benchmark/Evaluation | Absent from nav/routes/commands/Settings; every raw HTTP and protocol action denied | enumerated deny matrix, not one representative route |
-| Both | Responsive surfaces | Settings, Session Settings, image preview, task panel, drawers and alerts fit; body scrolls; header/footer remain operable; keyboard/safe-area behavior | 320×568, 375×667, 390×844 PWA, 430×932, desktop |
+| Private Cloud | Register/sign in | Branded IdP → callback → account identity visible → Unit loaded on shared product Origin | isolated temporary identity browser flow |
+| Private Cloud | Sign out | POST logout → cookie cleared → signed-out page → second tab exits → cache locked → API 401 | desktop and mobile multi-tab browser flow |
+| Platform | Account/settings entry | Account identity in Private Cloud; Settings opens, body scrolls, actions have success/error/retry; Dedicated has no false account requirement | Settings component tests plus desktop/mobile task chain |
+| Platform | Add Workspace | UI opens → invite 200 → no placeholder token → release assets 200 → external Executor connects → invite consumed → Workspace appears → reconnect with long-term token | isolated Workspace and Executor process |
+| Platform | New Workspace Session | Select online Workspace → validate cwd → create ACK/ready → composer ready → persisted after reload | real Socket.IO + persistence browser flow |
+| Platform | Send direct message | Persisted queue acceptance ACK under 500 ms → input clears immediately → no timeout restore → Agent turn starts once | real Host/LLM flow; no synthetic UI-only ACK |
+| Platform | Queue message | Queue dock appears → edit/reorder/delete ACK → drains after active turn → survives/reconciles reconnect | transport fault and reload flow |
+| Platform | File | Unit-scoped list/read/write/download, binary and large-file behavior, actionable failure, no path escape | real Executor and sandbox |
+| Platform | Git | Real repository status/diff/refresh including unavailable/empty/error states | real Executor repository |
+| Platform | Shell | Foreground tool and interactive/background terminal run, stream, resize/cancel/close, reconnect cleanup | real Executor process and Socket.IO |
+| Platform | Artifact preview | Register → thumbnail → preview → download → reload persistence → cross-Unit denial in Private Cloud | real artifact bytes and two-Unit denial |
+| Platform | Agent tool chain | Agent invokes read/write/shell/test tools, observes durable result, and replies once | real LLM or controlled protocol provider with actual tools |
+| Platform | Sub-agent | Running/success/failure/cancel states remain in parent transcript; no app-level notification; compact/dot interaction works | live child Session browser flow |
+| Platform | Streaming scroll | User scrolls upward while tokens/tools append → viewport remains pinned to chosen history position → explicit return-to-bottom works | real browser input during active stream |
+| Platform | Notifications | One System Notifications concept; enable/deny/error; per-kind preferences; current device registration; remote device toggle/test/remove; badge clears on entry | browser permission/service-worker lane and Unit-scoped device API |
+| Platform | PWA | Manifest/SW load without auth redirect; update/offline banners; notification click navigation; cache identity partition and logout cleanup | production SW in Chromium plus real-device iOS release check |
+| Dedicated | Benchmark/Evaluation | Navigation/actions visible; default wizard completes; progress and artifacts persist | Dedicated benchmark smoke |
+| Private Cloud | Benchmark/Evaluation | Absent from nav/routes/commands/Settings; every raw HTTP and protocol action denied | enumerated deny matrix, not one representative route |
+| Platform | Responsive surfaces | Settings, Session Settings, image preview, task panel, drawers and alerts fit; body scrolls; header/footer remain operable; keyboard/safe-area behavior | 320×568, 375×667, 390×844 PWA, 430×932, desktop |
 
 ## Coverage status semantics
 

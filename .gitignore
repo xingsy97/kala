@@ -21,6 +21,10 @@ deploy/saas/.secrets/
 deploy/saas/**/.secrets/
 deploy/saas/.tls/
 deploy/saas/backups/
+deploy/private-cloud/.secrets/
+deploy/private-cloud/**/.secrets/
+deploy/private-cloud/.tls/
+deploy/private-cloud/backups/
 deploy/identity/.secrets/
 deploy/identity/backups/
 deploy/**/release-manifest.local.json

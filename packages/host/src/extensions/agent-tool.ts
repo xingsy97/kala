@@ -28,7 +28,7 @@ import {
 } from '@agent-kernel/shared/enhancement'
 
 import type { SessionRecord, SessionStore } from '../store/session.js'
-import type { HostLoopDeps, ModelResolver } from '../loop-types.js'
+import type { HostLoopDeps, LoopHandle, ModelResolver } from '../loop-types.js'
 import { dispatchOne } from '../loop.js'
 
 const DEFAULT_MAX_AGENT_DEPTH = 3
@@ -149,6 +149,7 @@ export async function runAgentTool(
   parentSessionId: string,
   effect: CallToolEffect,
   aborts: Map<string, AbortController>,
+  loop?: LoopHandle,
 ): Promise<{ ok: boolean; content: string }> {
   const parent = deps.store.get(parentSessionId)
   if (!parent) return { ok: false, content: 'parent session not found' }
@@ -305,12 +306,12 @@ export async function runAgentTool(
   try {
     try {
       if (!active.cancelled) {
-        await dispatchOne(
-          deps,
-          child.sessionId,
-          { kind: 'user_message', text: prompt },
-          aborts,
-        )
+        // Join the child to the same Loop actor when available. This preserves
+        // per-Session serialization and lets an idle restart drain observe the
+        // child's terminal transition. Direct dispatchOne() bypassed the Loop's
+        // checkpoint notification channel and could deadlock a deployment.
+        if (loop) await loop.dispatch(child.sessionId, { kind: 'user_message', text: prompt })
+        else await dispatchOne(deps, child.sessionId, { kind: 'user_message', text: prompt }, aborts)
       }
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err)

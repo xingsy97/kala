@@ -34,12 +34,11 @@ describe('deleteSession', () => {
       connect: vi.fn(),
     }
 
-    await deleteSession(socket as never, 'session-1', { cascade: true })
+    await deleteSession(socket as never, 'session-1')
 
     expect(emitWithAck).toHaveBeenCalledWith('client:delete_session', expect.objectContaining({
       operationId: expect.any(String),
       sessionId: 'session-1',
-      cascade: true,
     }))
   })
 

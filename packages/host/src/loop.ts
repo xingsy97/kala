@@ -30,6 +30,8 @@ import type {
 import { step } from '@agent-kernel/kernel'
 
 import { TOOL_INTENTION_SYSTEM_INSTRUCTION } from './builtin-tools.js'
+import { activeToolsFor } from './extensions/tool-catalog.js'
+import { toolCatalogRevision, visibleTools } from './tool-disclosure.js'
 import { TurnTimingTracker, timedSpan } from './turn-timing.js'
 import type { LLMAdapter } from './llm/adapter.js'
 import { redactLlmTrace, type LLMTrace } from '@agent-kernel/shared'
@@ -94,6 +96,9 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   // to race concurrent cancel clicks/reconnects: every reducer read the same
   // cursor and persisted duplicate sequence numbers.
   const pendingCancels = new Map<string, Promise<void>>()
+  // Explicit Stop fences every continuation/effect already produced by the
+  // cancelled turn until a later user_message intentionally starts new work.
+  const explicitStopSessions = new Set<string>()
   const loopGuard = new Map<string, PostCompactionLoopGuard>()
   // At most one recovery continuation per durable todo_graph revision. The
   // graph must advance before another terminal reply can be auto-resumed,
@@ -121,7 +126,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   }
 
   const maybeResumeDurableGraphWork = async (sessionId: string, cause: AgentEvent): Promise<void> => {
-    if (cause.kind === 'cancel' || cause.kind === 'clear') return
+    if (cause.kind === 'cancel' || cause.kind === 'clear' || explicitStopSessions.has(sessionId)) return
     // A durable graph means the user explicitly requested autonomous progress.
     // A plain assistant `stop` while work remains is therefore a recoverable
     // premature terminal boundary, including the boundary produced immediately
@@ -144,6 +149,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
         loopGuard,
         drain: () => drainMode,
         steerStop: () => steerStopSessions.has(sessionId),
+            stopRequested: () => explicitStopSessions.has(sessionId),
         toolStarted: markToolStarted,
         toolSettled: markToolSettled,
       }, notifyCheckpoint)
@@ -152,6 +158,8 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
 
   const handle: LoopHandle = {
     async dispatch(sessionId, event, options) {
+      if (event.kind === 'user_message' || event.kind === 'clear') explicitStopSessions.delete(sessionId)
+      if (event.kind === 'cancel' && !options?.internalBoundaryCancel) explicitStopSessions.add(sessionId)
       if (drainMode !== 'none' && event.kind !== 'cancel') {
         if (event.kind === 'user_message') {
           throw new Error('host restart is draining; new user messages are paused')
@@ -194,6 +202,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             ...(options?.onCommitted ? { onCommitted: options.onCommitted } : {}),
             drain: () => drainMode,
             steerStop: () => steerStopSessions.has(sessionId),
+            stopRequested: () => explicitStopSessions.has(sessionId),
             toolStarted: markToolStarted,
             toolSettled: markToolSettled,
           }, notifyCheckpoint)
@@ -240,6 +249,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
           loopGuard,
           drain: () => drainMode,
           steerStop: () => steerStopSessions.has(sessionId),
+            stopRequested: () => explicitStopSessions.has(sessionId),
           toolStarted: markToolStarted,
           toolSettled: markToolSettled,
         }, notifyCheckpoint)
@@ -274,7 +284,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       const existing = recoveries.get(sessionId)
       if (existing) return await existing
       const recovery = (async (): Promise<boolean> => {
-        if (drainMode !== 'none' || sessionTails.has(sessionId) || inFlightAborts.has(sessionId)) return false
+        if (explicitStopSessions.has(sessionId) || drainMode !== 'none' || sessionTails.has(sessionId) || inFlightAborts.has(sessionId)) return false
         const record = deps.store.get(sessionId) ?? await deps.store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
         if (!record) return false
         if (record.state.status === 'thinking' && record.state.pendingCalls.length === 0) {
@@ -283,6 +293,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             loopGuard,
             drain: () => drainMode,
             steerStop: () => steerStopSessions.has(sessionId),
+            stopRequested: () => explicitStopSessions.has(sessionId),
             toolStarted: markToolStarted,
             toolSettled: markToolSettled,
           }, notifyCheckpoint)
@@ -339,22 +350,25 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
         checkpointWaiters.set(sessionId, waiters)
       })
     },
-    async resumeSession(sessionId) {
+    async resumeSession(sessionId, options) {
       const existing = recoveries.get(sessionId)
       if (existing) return await existing
       const recovery = (async (): Promise<boolean> => {
-        if (drainMode !== 'none' || sessionTails.has(sessionId) || inFlightAborts.has(sessionId)) return false
+        if (explicitStopSessions.has(sessionId) || drainMode !== 'none' || sessionTails.has(sessionId) || inFlightAborts.has(sessionId)) return false
         const record = deps.store.get(sessionId) ?? await deps.store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
         if (!record) return false
         const runtime: LoopRuntime = {
           handle,
           loopGuard,
+          plannedContinuation: true,
           drain: () => drainMode,
           steerStop: () => steerStopSessions.has(sessionId),
+            stopRequested: () => explicitStopSessions.has(sessionId),
           toolStarted: markToolStarted,
           toolSettled: markToolSettled,
         }
         if (record.state.status === 'thinking' && record.state.pendingCalls.length === 0) {
+          await options?.onStarted?.()
           await performCallLlm(deps, sessionId, record.config, {
             kind: 'call_llm',
             messages: record.state.messages,
@@ -373,6 +387,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             ...(record.state.cwd !== undefined ? { cwd: record.state.cwd } : {}),
           }))
         if (effects.length === 0) return false
+        await options?.onStarted?.()
         const resultQueue = createSerialQueue()
         await Promise.all(effects.map((effect) => performCallTool(deps, sessionId, effect, inFlightAborts, runtime, resultQueue)))
         return true
@@ -542,6 +557,13 @@ export async function dispatchOne(
     if (inFlight) inFlight.abort()
   }
 
+  // Preserve a concurrently committed response/result as history, but do not
+  // fan out any new LLM or Tool effect after the user explicitly stopped.
+  if (event.kind !== 'cancel' && runtime?.stopRequested?.()) {
+    onCheckpoint?.(sessionId)
+    return
+  }
+
   if (shouldStopForDrain(event, effects, runtime)) {
     onCheckpoint?.(sessionId)
     // Steer's polite stop reaches this boundary with the in-flight response +
@@ -552,7 +574,7 @@ export async function dispatchOne(
     // turn. The restart checkpoint drain does NOT do this — it relies on respawn
     // + resumeSession to continue, so it must leave the state intact.
     if (runtime?.steerStop?.() && event.kind !== 'cancel') {
-      void runtime.handle.dispatch(sessionId, { kind: 'cancel' })
+      void runtime.handle.dispatch(sessionId, { kind: 'cancel' }, { internalBoundaryCancel: true })
     }
     return
   }
@@ -638,6 +660,7 @@ async function performCallLlm(
   aborts: Map<string, AbortController>,
   runtime?: LoopRuntime,
 ): Promise<void> {
+  if (runtime?.stopRequested?.()) return
   const model = runtime?.model ?? deps.models?.get(sessionId)
   const controller = new AbortController()
   const llmStartedAt = new Date().toISOString()
@@ -651,6 +674,9 @@ async function performCallLlm(
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
     return
   }
+  const activeTools = config.toolDisclosureMode === 'progressive' ? await activeToolsFor(live) : new Set<string>()
+  const disclosedTools = visibleTools(effect.tools, config.toolDisclosureMode ?? 'legacy_full', activeTools)
+  await maybeRecordToolDisclosure(deps, live, effect.tools, disclosedTools)
   // Only ask for token deltas when the broadcast wants them. If no consumer
   // is wired up, we skip streaming entirely — the adapter falls through to
   // the plain buffered path and no partial-message accounting is needed.
@@ -665,7 +691,7 @@ async function performCallLlm(
   try {
     const callInput = {
       deps,
-      tools: effect.tools,
+      tools: disclosedTools,
       signal: controller.signal,
       config,
       model,
@@ -684,20 +710,22 @@ async function performCallLlm(
       const retryMessages = emergencyTruncate(current, config, contextLimitForSession(deps, sessionId))
       res = await callLlmOnce(callInput, retryMessages)
     }
-    await maybeRecordTokenUsageObservation(deps, sessionId, res, messages, effect.tools)
+    assertOnlyDisclosedTools(res.message, disclosedTools)
+    await maybeRecordTokenUsageObservation(deps, sessionId, res, messages, disclosedTools)
     if (shouldRecoverFromMaxTokens(res) && runtime && !controller.signal.aborted) {
       try {
         await runtime.handle.compact(sessionId, 'preflight', false)
         const retryMessages = deps.store.get(sessionId)?.state.messages ?? messages
         res = await callLlmOnce({
           deps,
-          tools: effect.tools,
+          tools: disclosedTools,
           signal: controller.signal,
           config,
           model,
           onTextDelta,
         }, retryMessages)
-        await maybeRecordTokenUsageObservation(deps, sessionId, res, retryMessages, effect.tools, 'max_tokens_retry')
+        assertOnlyDisclosedTools(res.message, disclosedTools)
+        await maybeRecordTokenUsageObservation(deps, sessionId, res, retryMessages, disclosedTools, 'max_tokens_retry')
       } catch {
         // If recovery compaction or retry fails, persist the original provider
         // response. The finishReason still records that it was truncated.
@@ -766,6 +794,39 @@ function shouldRecoverFromMaxTokens(res: Awaited<ReturnType<typeof callLlmOnce>>
   const text = res.message.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
   const toolCalls = res.message.content.some((c) => c.type === 'tool_call')
   return !toolCalls && text.length < 512
+}
+
+function assertOnlyDisclosedTools(message: Message, tools: readonly import('@agent-kernel/kernel').ToolSchema[]): void {
+  const visible = new Set(tools.map((tool) => tool.name))
+  for (const content of message.content) {
+    if (content.type === 'tool_call' && !visible.has(content.name)) throw new Error(`model called a Tool that was not disclosed in this request: ${content.name}`)
+  }
+}
+
+async function maybeRecordToolDisclosure(
+  deps: HostLoopDeps,
+  record: SessionRecord,
+  full: readonly import('@agent-kernel/kernel').ToolSchema[],
+  visible: readonly import('@agent-kernel/kernel').ToolSchema[],
+): Promise<void> {
+  try {
+    const { appendRuntimeMetadataEntry } = await import('./store/log.js')
+    await appendRuntimeMetadataEntry(record.logPath, {
+      sessionId: record.sessionId,
+      action: 'tool_disclosure_snapshot',
+      payload: {
+        mode: record.config.toolDisclosureMode ?? 'legacy_full',
+        catalogRevision: toolCatalogRevision(full),
+        totalCount: full.length,
+        visibleCount: visible.length,
+        visibleNames: visible.map((tool) => tool.name),
+        fullSchemaTokens: estimateToolSchemaTokens(full),
+        visibleSchemaTokens: estimateToolSchemaTokens(visible),
+      },
+    })
+  } catch {
+    // Observability only; activation durability is handled separately.
+  }
 }
 
 async function maybeRecordTokenUsageObservation(
@@ -1004,6 +1065,7 @@ async function performCallTool(
 ): Promise<void> {
   const toolStartedAt = new Date().toISOString()
   const toolStartedMono = performance.now()
+  if (runtime?.stopRequested?.()) return
   runtime?.toolStarted?.(sessionId, effect.callId)
   try {
     const blockedByLoop = guardPostCompactionLoop(sessionId, effect, runtime?.loopGuard)
@@ -1055,7 +1117,7 @@ async function performCallTool(
       return
     }
     const tracker = timingTrackers.get(deps.store)
-    const res = await dispatchConfiguredTool(deps, sessionId, effect, aborts, tracker?.currentTurnId(sessionId))
+    const res = await dispatchConfiguredTool(deps, sessionId, effect, aborts, tracker?.currentTurnId(sessionId), runtime?.handle, runtime?.plannedContinuation === true)
     await runPostToolHooks(deps, sessionId, effect, res)
     await dispatchToolResult(
       deps,

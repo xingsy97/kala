@@ -148,6 +148,19 @@ export function configureExecutorNamespace(
         if (!completed) deps.broadcastError(payload.workspaceId, 'host', `Executor connected, but installation ${installId} could not be marked complete. Re-open Add Workspace or reinstall this Executor.`)
       }
     })
+    socket.on('executor:network_audit', async (payload, ack) => {
+      const announcement = executorAnnouncements.get(socket)
+      if (!announcement || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, undefined, payload.sessionId)) { ack({ accepted: false }); return }
+      deps.audit?.log({
+        action: payload.event,
+        actor: { kind: 'executor', executorId: announcement.executorId, workspaceId: announcement.workspaceId },
+        target: { sessionId: payload.sessionId, callId: payload.callId, toolName: payload.toolName, target: payload.target },
+        outcome: payload.action === 'deny' || payload.action === 'ask' ? 'denied' : payload.phase === 'failed' ? 'error' : 'ok',
+        refs: { eventId: payload.eventId, decisionId: payload.decisionId, policyId: payload.policyId, policyRevision: payload.policyRevision },
+        metadata: { evidenceLevel: payload.evidenceLevel, enforcementMode: payload.enforcementMode, phase: payload.phase, statusCode: payload.statusCode, matchedRuleId: payload.matchedRuleId },
+      })
+      ack({ accepted: true })
+    })
     socket.on('executor:bg_task_updated', async (rawPayload: ServerBgTaskUpdated) => {
       const payload = parseWire(schema.ServerBgTaskUpdatedSchema, rawPayload, {
         channel: 'executor:bg_task_updated',

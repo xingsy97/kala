@@ -58,6 +58,8 @@ type Props = {
   onModelsChanged?(): void
   executors?: readonly AttachedExecutor[]
   sessionCache?: DurableSessionViewCache
+  host?: string
+  token?: string
 }
 
 type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
@@ -81,7 +83,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint', icon: Blocks, group: 'administration' },
 ]
 
-export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache }: Props): JSX.Element {
+export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token }: Props): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [section, setSection] = useState<SectionKey>('connection')
@@ -200,7 +202,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
               ) : section === 'interface' ? (
                 <InterfaceSection sessionCache={sessionCache} />
               ) : section === 'deployment' ? (
-                <DeploymentSection payload={payload} executors={executors} />
+                <DeploymentSection payload={payload} executors={executors} host={host} token={token} />
               ) : section === 'notifications' ? (
                 <NotificationsSection />
               ) : (
@@ -223,4 +225,3 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
  * subscription state, and iOS-standalone gating are all specific to Push
  * and would clutter the foreground path.
  */
-

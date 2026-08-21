@@ -42,6 +42,13 @@ pnpm run build:release-assets -- --repo <owner>/<repo> --no-native --skip-dashbo
 
 The normative restart and deployment contract is [`../architecture/graceful-restart-and-deployment.md`](../architecture/graceful-restart-and-deployment.md). This runbook must not weaken that contract.
 
+Platform Dashboard releases are independent of Runtime releases. For Dedicated, use
+`pnpm run deploy:dashboard -- stage` followed by `wait`, `status`, or `inspect`; the
+Supervisor verifies the immutable archive and advances only Dashboard route state. For
+Private Cloud, use `pnpm private-cloud:deploy-dashboard`; it replaces only the Dashboard
+container and fails if Runtime or Ingress container identity changes. Portable continues to
+ship and update one combined executable.
+
 Use the single `deploy:remote` entry point for LXD and SSH. It builds and verifies release assets unless `--skip-build` is explicitly supplied. Inspect the supported command without selecting a target or causing side effects:
 
 ```bash
@@ -56,7 +63,7 @@ The standard local LXD deployment is:
 pnpm run deploy:remote -- --lxd <container>
 ```
 
-The conventional standalone defaults are `--host-url http://127.0.0.1:13000`, `--remote-bin /home/ubuntu/.bin`, and `--service agent-runlab-host`. Override them only when the target uses a different supervisor contract:
+The conventional legacy Portable-service defaults are `--host-url http://127.0.0.1:13000`, `--remote-bin /home/ubuntu/.bin`, and `--service agent-runlab-host`. Override them only when the target uses a different supervisor contract:
 
 ```bash
 pnpm run deploy:remote -- \
@@ -104,7 +111,7 @@ AK_DEPLOY_SERVICE=<systemd-unit>
 
 SSH and LXD are transport adapters for the same target-side transaction. The command stages an immutable generation, validates its manifest, hands finalization to a worker outside the Host cgroup, atomically activates `current` after checkpoint readiness, and requests restart through `/runtime/restart`. Never replace it with direct live-file copies or a direct service restart.
 
-### Self-deployment from a hosted Session
+### Self-deployment from a running Session
 
 A deployment started from a Session running on the target Host must use durable asynchronous handoff. The supported topology is:
 

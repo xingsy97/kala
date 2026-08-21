@@ -148,6 +148,8 @@ export type AgentModuleMetadata = {
 
 export type AgentConfig = {
   readonly tools: readonly ToolSchema[]
+  /** Host policy for model-visible Tool schemas. Missing keeps historical full disclosure. */
+  readonly toolDisclosureMode?: 'legacy_full' | 'progressive'
   readonly systemPrompt?: string
   readonly agentModule?: AgentModuleMetadata
   /** Model's total context window in tokens. Host context management owns pressure policy. */

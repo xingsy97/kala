@@ -37,7 +37,7 @@ import type {
   ServerModelsPayload,
   ServerSettingsPayload,
 } from '@agent-kernel/shared'
-import { schema } from '@agent-kernel/shared'
+import { PORTABLE_DEPLOYMENT, effectiveTenancy, productVariant, schema, validateClientMessagePayload, validateInlineMessageImages } from '@agent-kernel/shared'
 import { parseWire } from '../wire-validation.js'
 
 import { buildArtifactManifest, pruneArtifacts } from '../artifact-manifest.js'
@@ -211,6 +211,7 @@ export function attachJsonRoutes(
     updateSocketAdminMode?: (input: { mode: 'development' | 'production' }) => ServerSettingsPayload
     artifactRootDir?: string | false
     docsRootDir?: string
+    embeddedDocs?: readonly EmbeddedStaticAsset[]
     sessionArtifacts?: SessionArtifactRegistry
     sessions?: SessionStore
     routerHealth?: () => unknown
@@ -218,9 +219,9 @@ export function attachJsonRoutes(
     toolRegistry?: () => readonly import('@agent-kernel/kernel').ToolSchema[]
     toolResultPersisted?: (sessionId: string, callId: string) => Promise<boolean>
     restartStatus?: () => HostRestartStatus
-    requestRestart?: (input: { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number }) => Promise<HostRestartAttempt>
+    requestRestart?: (input: { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number; deployment?: NonNullable<HostRestartAttempt['deployment']> }) => Promise<HostRestartAttempt>
     commitRestartActivation?: (attemptId: string) => HostRestartAttempt | null
-    abortRestart?: () => HostRestartAttempt | null
+    abortRestart?: (attemptId?: string) => HostRestartAttempt | null
     unitQuiescence?: () => unknown
     reserveCutover?: () => Promise<unknown>
     releaseCutover?: () => void
@@ -231,9 +232,9 @@ export function attachJsonRoutes(
      * browser is closing" beacon path. Lets the HTTP layer enqueue+drain a
      * user message without a live socket.
      */
-    enqueueUserMessage?: (input: { sessionId: string; text: string }) => Promise<void>
+    enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ committed: boolean; cursor?: number }>
     capabilities?: import('@agent-kernel/shared').RuntimeCapabilities
-    deploymentMode?: import('@agent-kernel/shared').DeploymentMode
+    deployment?: import('@agent-kernel/shared').ProductDeploymentConfig
     metrics?: OperationalMetrics
     memoStore?: MemoStore
     webSearchCredentials?: WebSearchCredentialStore & {
@@ -312,8 +313,10 @@ export function attachJsonRoutes(
     }
     if (path === '/runtime/capabilities' && (req.method === 'GET' || req.method === 'HEAD')) {
       claimRoute(req)
+      const deployment = payloads.deployment ?? PORTABLE_DEPLOYMENT
       sendJson(req, res, {
-        mode: payloads.deploymentMode ?? 'standalone',
+        product: productVariant(deployment),
+        deployment,
         capabilities: payloads.capabilities ?? { agent: true, workspace: true, operations: true, artifacts: true, pipeline: true },
       })
       return
@@ -384,7 +387,7 @@ export function attachJsonRoutes(
     }
     if (path === '/auth/executor-invites' && req.method === 'GET') {
       claimRoute(req)
-      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_invite.list', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
         sendError(res, auth.status, auth.error)
@@ -405,17 +408,17 @@ export function attachJsonRoutes(
         sendJson(req,res,pairing)
       }).catch((e)=>sendError(res,400,e instanceof Error?e.message:String(e)));return
     }
-    if (path === '/auth/executor-pairings' && req.method === 'GET') { claimRoute(req);const auth=authorizeSensitiveManagement(req,payloads.deploymentMode??'standalone',payloads.auth);if(!auth.ok){sendError(res,auth.status,auth.error);return}sendJson(req,res,{pairings:payloads.auth?.executorIdentityStore?.pairingSnapshot()??[]});return }
+    if (path === '/auth/executor-pairings' && req.method === 'GET') { claimRoute(req);const auth=authorizeSensitiveManagement(req,effectiveTenancy(payloads.deployment??PORTABLE_DEPLOYMENT),payloads.auth);if(!auth.ok){sendError(res,auth.status,auth.error);return}sendJson(req,res,{pairings:payloads.auth?.executorIdentityStore?.pairingSnapshot()??[]});return }
     const pairingMatch=path.match(/^\/auth\/executor-pairings\/([^/]+)\/(approve|reject|claim)$/u)
     if(pairingMatch&&req.method==='POST'){
       claimRoute(req);const id=decodeURIComponent(pairingMatch[1]??''),action=pairingMatch[2]
       if(action==='claim'){void readJson(req).then((body)=>{const secret=cleanString((body as {claimSecret?:unknown}).claimSecret);const result=secret?payloads.auth?.executorIdentityStore?.claimPairing(id,secret):undefined;if(!result){sendError(res,404,'pairing not found');return}sendJson(req,res,result)});return}
-      const auth=authorizeSensitiveManagement(req,payloads.deploymentMode??'standalone',payloads.auth);if(!auth.ok){sendError(res,auth.status,auth.error);return}
+      const auth=authorizeSensitiveManagement(req,effectiveTenancy(payloads.deployment??PORTABLE_DEPLOYMENT),payloads.auth);if(!auth.ok){sendError(res,auth.status,auth.error);return}
       const result=payloads.auth?.executorIdentityStore?.decidePairing(id,action==='approve');if(!result){sendError(res,404,'pending pairing not found');return}payloads.audit?.log({action:`executor_pairing.${action}`,actor:auth.actor,target:{workspaceId:result.workspaceId},outcome:'ok',metadata:{id}});sendJson(req,res,result);return
     }
     if (path === '/auth/executor-invites' && req.method === 'POST') {
       claimRoute(req)
-      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_invite.create', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
         sendError(res, auth.status, auth.error)
@@ -439,7 +442,7 @@ export function attachJsonRoutes(
     const invitePathMatch = path.match(/^\/auth\/executor-invites\/([^/]+)(?:\/(regenerate))?$/u)
     if (invitePathMatch && (req.method === 'PATCH' || req.method === 'DELETE' || req.method === 'POST')) {
       claimRoute(req)
-      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_invite.manage', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
         sendError(res, auth.status, auth.error)
@@ -492,7 +495,7 @@ export function attachJsonRoutes(
     }
     if (path === '/auth/executor-identities' && req.method === 'GET') {
       claimRoute(req)
-      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_identity.list', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
         sendError(res, auth.status, auth.error)
@@ -512,7 +515,7 @@ export function attachJsonRoutes(
     }
     if (path === '/auth/executor-identities' && req.method === 'DELETE') {
       claimRoute(req)
-      const auth = authorizeSensitiveManagement(req, payloads.deploymentMode ?? 'standalone', payloads.auth)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
       if (!auth.ok) {
         payloads.audit?.log({ action: 'executor_identity.revoke', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
         sendError(res, auth.status, auth.error)
@@ -528,6 +531,15 @@ export function attachJsonRoutes(
       payloads.audit?.log({ action: 'executor_identity.revoke', actor: httpActor(req, payloads.auth), target: { workspaceId }, outcome: revoked ? 'ok' : 'denied', ...(revoked ? {} : { error: 'identity_not_found' }) })
       const body: ServerExecutorIdentityRevokedPayload = { ok: true, workspaceId, revoked }
       sendJson(req, res, body)
+      return
+    }
+    const internalToolBarrier = /^\/internal\/runtime\/tool-result\/([^/]+)\/([^/]+)$/u.exec(path)
+    if (internalToolBarrier && payloads.toolResultPersisted && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      if (!internalIngressAuthorized(req)) { sendError(res, 401, 'invalid ingress handoff'); return }
+      void payloads.toolResultPersisted(decodeURIComponent(internalToolBarrier[1]!), decodeURIComponent(internalToolBarrier[2]!))
+        .then((persisted) => sendJson(req, res, { persisted }))
+        .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
       return
     }
     if (payloads.auth?.github?.required && isProtectedJsonRoute(path)) {
@@ -590,6 +602,26 @@ export function attachJsonRoutes(
         .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
       return
     }
+    if (path === '/runtime/admission/messages' && payloads.enqueueUserMessage && req.method === 'POST') {
+      claimRoute(req)
+      const auth = authorizeDashboardHttp(req, payloads.auth)
+      if (!auth.ok) { sendError(res, 401, auth.reason); return }
+      void readJson(req).then(async (body) => {
+        const payloadError = validateClientMessagePayload(body)
+        if (payloadError) throw new HttpRouteError(413, `${payloadError.code}: ${payloadError.message}`)
+        const input = schema.ClientUserMessageSchema.safeParse(body)
+        if (!input.success || !input.data.operationId) throw new HttpRouteError(400, 'invalid admission message')
+        const imageValidation = validateInlineMessageImages(input.data.content)
+        if (!imageValidation.ok) throw new HttpRouteError(400, `${imageValidation.error.code}: ${imageValidation.error.message}`)
+        if (!input.data.text.trim() && !input.data.content?.length) throw new HttpRouteError(400, 'message content is required')
+        const outcome = await payloads.enqueueUserMessage!({
+          sessionId: input.data.sessionId, operationId: input.data.operationId, text: input.data.text,
+          mode: input.data.mode ?? 'steer', ...(input.data.content ? { content: input.data.content } : {}),
+        })
+        sendJsonStatus(req, res, 202, { accepted: true, duplicate: false, operationId: input.data.operationId, sequence: 0, state: outcome.committed ? 'committed' : 'pending', routeGeneration: 0, ...(outcome.cursor !== undefined ? { cursor: outcome.cursor } : {}) })
+      }).catch((error) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
+      return
+    }
     if (path === '/internal/runtime/quiescence' && payloads.unitQuiescence && (req.method === 'GET' || req.method === 'HEAD')) {
       claimRoute(req)
       sendJson(req, res, payloads.unitQuiescence())
@@ -606,12 +638,34 @@ export function attachJsonRoutes(
       sendJson(req, res, { ok: true })
       return
     }
-    if (path === '/runtime/restart/status' && payloads.restartStatus && (req.method === 'GET' || req.method === 'HEAD')) {
+    if (path === '/internal/runtime/admission/commit' && payloads.enqueueUserMessage && req.method === 'POST') {
+      claimRoute(req)
+      if (!internalIngressAuthorized(req)) { sendError(res, 401, 'invalid ingress handoff'); return }
+      void readJson(req).then(async (body) => {
+        const input = body as Record<string, unknown>
+        const sessionId = requiredString(input.sessionId, 'sessionId')
+        const operationId = requiredString(input.operationId, 'operationId')
+        const text = typeof input.text === 'string' ? input.text : ''
+        const mode = input.mode === 'steer' ? 'steer' : 'queue'
+        const content = Array.isArray(input.content) ? input.content as readonly import('@agent-kernel/kernel').MessageContent[] : undefined
+        if (!text.trim() && !content?.length) throw new Error('message content is required')
+        const outcome = await payloads.enqueueUserMessage!({ sessionId, operationId, text, mode, ...(content ? { content } : {}) })
+        sendJson(req, res, { committed: outcome.committed, operationId, ...(outcome.cursor !== undefined ? { cursor: outcome.cursor } : {}) })
+      }).catch((error) => sendError(res, 400, error instanceof Error ? error.message : String(error)))
+      return
+    }
+    const internalRestartPath = path.startsWith('/internal/runtime/restart')
+    if (internalRestartPath && !internalIngressAuthorized(req)) {
+      claimRoute(req)
+      sendError(res, 401, 'invalid runtime handoff')
+      return
+    }
+    if ((path === '/runtime/restart/status' || path === '/internal/runtime/restart/status') && payloads.restartStatus && (req.method === 'GET' || req.method === 'HEAD')) {
       claimRoute(req)
       sendJson(req, res, payloads.restartStatus())
       return
     }
-    if (path === '/runtime/restart' && payloads.requestRestart && req.method === 'POST') {
+    if ((path === '/runtime/restart' || path === '/internal/runtime/restart') && payloads.requestRestart && req.method === 'POST') {
       claimRoute(req)
       void readJson(req)
         .then(async (body) => {
@@ -623,7 +677,7 @@ export function attachJsonRoutes(
         .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
       return
     }
-    if (path === '/runtime/restart/commit' && payloads.commitRestartActivation && req.method === 'POST') {
+    if ((path === '/runtime/restart/commit' || path === '/internal/runtime/restart/commit') && payloads.commitRestartActivation && req.method === 'POST') {
       claimRoute(req)
       void readJson(req).then((body) => {
         const attemptId = typeof (body as { attemptId?: unknown })?.attemptId === 'string' ? (body as { attemptId: string }).attemptId : ''
@@ -633,11 +687,14 @@ export function attachJsonRoutes(
       }).catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
       return
     }
-    if (path === '/runtime/restart/abort' && payloads.abortRestart && req.method === 'POST') {
+    if ((path === '/runtime/restart/abort' || path === '/internal/runtime/restart/abort') && payloads.abortRestart && req.method === 'POST') {
       claimRoute(req)
-      const result = payloads.abortRestart()
-      payloads.audit?.log({ action: 'runtime.restart_abort', actor: httpActor(req, payloads.auth), outcome: result ? 'ok' : 'denied' })
-      sendJson(req, res, result ?? { ok: false })
+      void readJson(req).catch(() => ({})).then((body) => {
+        const attemptId = typeof (body as { attemptId?: unknown })?.attemptId === 'string' ? (body as { attemptId: string }).attemptId : undefined
+        const result = payloads.abortRestart!(attemptId)
+        payloads.audit?.log({ action: 'runtime.restart_abort', actor: httpActor(req, payloads.auth), outcome: result ? 'ok' : 'denied' })
+        sendJson(req, res, result ?? { ok: false })
+      })
       return
     }
     if (path === '/settings/models' && req.method === 'POST' && payloads.addManualModel) {
@@ -874,14 +931,14 @@ export function attachJsonRoutes(
     }
     if (path === '/docs/index') {
       claimRoute(req)
-      void listDocsIndex(payloads.docsRootDir)
+      void listDocsIndex(payloads.docsRootDir, payloads.embeddedDocs)
         .then((result) => sendJson(req, res, result))
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
       return
     }
     if (path === '/docs/content') {
       claimRoute(req)
-      void readDocContent(url, payloads.docsRootDir)
+      void readDocContent(url, payloads.docsRootDir, payloads.embeddedDocs)
         .then((content) => sendJson(req, res, content))
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
       return
@@ -935,13 +992,25 @@ function isProtectedJsonRoute(path: string): boolean {
     path.startsWith('/router/')
 }
 
-function authorizeSensitiveManagement(req: IncomingMessage, deploymentMode: import('@agent-kernel/shared').DeploymentMode, auth: AuthConfig | undefined): { ok: true; actor: AuditActor } | { ok: false; status: number; error: string; reason: string } {
+function authorizeSensitiveManagement(req: IncomingMessage, tenancy: import('@agent-kernel/shared').PlatformTenancy, auth: AuthConfig | undefined): { ok: true; actor: AuditActor } | { ok: false; status: number; error: string; reason: string } {
   const authorization = req.headers.authorization
   const token = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined
   const result = authenticateDashboardHandshake({ role: 'dashboard', clientVersion: 'http', ...(token ? { token } : {}) }, req, auth)
   if (!result.ok) return { ok: false, status: 401, error: result.reason, reason: result.reason }
-  if (deploymentMode === 'saas' && (result.actor.kind !== 'ingress' || !['owner', 'admin'].includes(result.actor.role))) return { ok: false, status: 403, error: 'admin_required', reason: 'admin_required' }
+  if (tenancy === 'multi-tenant' && (result.actor.kind !== 'ingress' || !['owner', 'admin'].includes(result.actor.role))) return { ok: false, status: 403, error: 'admin_required', reason: 'admin_required' }
   return { ok: true, actor: result.actor }
+}
+
+function authorizeDashboardHttp(req: IncomingMessage, auth: AuthConfig | undefined): ReturnType<typeof authenticateDashboardHandshake> {
+  const authorization = req.headers.authorization
+  const token = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined
+  return authenticateDashboardHandshake({ role: 'dashboard', clientVersion: 'http', ...(token ? { token } : {}) }, req, auth)
+}
+
+function internalIngressAuthorized(req: IncomingMessage): boolean {
+  const expected = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+  const supplied = req.headers['x-agent-runlab-ingress-handoff']
+  return Boolean(expected && typeof supplied === 'string' && supplied.length === expected.length && supplied === expected)
 }
 
 function httpActor(req: IncomingMessage, auth: AuthConfig | undefined): AuditActor {
@@ -959,7 +1028,7 @@ async function runEnhancementAction(
     artifactRootDir?: string | false
     sessions?: SessionStore
     executorsSnapshot?: () => readonly AttachedExecutor[]
-    enqueueUserMessage?: (input: { sessionId: string; text: string }) => Promise<void>
+    enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ committed: boolean; cursor?: number }>
   },
 ): Promise<unknown> {
   const action = requiredString(body.action, 'action')
@@ -1388,7 +1457,19 @@ type DocsIndexEntry = {
   updatedAt: string
 }
 
-async function listDocsIndex(configuredRoot?: string): Promise<{ root: 'docs'; docs: DocsIndexEntry[] }> {
+async function listDocsIndex(configuredRoot?: string, embeddedDocs?: readonly EmbeddedStaticAsset[]): Promise<{ root: 'docs'; docs: DocsIndexEntry[] }> {
+  if (!configuredRoot && embeddedDocs) {
+    const docs = embeddedDocs.map((asset) => {
+      const body = Buffer.from(asset.contentBase64, 'base64').toString('utf8')
+      return {
+        path: asset.path,
+        title: titleFromMarkdown(body) ?? titleFromDocPath(asset.path),
+        size: Buffer.byteLength(body),
+        updatedAt: new Date(0).toISOString(),
+      }
+    }).sort((a, b) => a.path.localeCompare(b.path))
+    return { root: 'docs', docs }
+  }
   const root = docsRoot(configuredRoot)
   const docs: DocsIndexEntry[] = []
   await collectDocs(root, '', docs)
@@ -1421,11 +1502,20 @@ async function collectDocs(root: string, relativeDir: string, out: DocsIndexEntr
   }
 }
 
-async function readDocContent(url: string, configuredRoot?: string): Promise<{ path: string; title: string; body: string; updatedAt: string }> {
+async function readDocContent(url: string, configuredRoot?: string, embeddedDocs?: readonly EmbeddedStaticAsset[]): Promise<{ path: string; title: string; body: string; updatedAt: string }> {
   const parsed = new URL(url, 'http://x')
   const requested = parsed.searchParams.get('path') ?? ''
   if (!requested || requested.includes('\0')) throw new HttpRouteError(400, 'missing doc path')
   if (extname(requested).toLowerCase() !== '.md') throw new HttpRouteError(400, 'doc path must be a markdown file')
+  if (!configuredRoot && embeddedDocs) {
+    const rel = normalize(requested).replace(/^[/\\]+/, '').split(sep).join('/')
+    if (rel.startsWith('../') || rel === '..') throw new HttpRouteError(403, 'doc path escapes docs root')
+    const asset = embeddedDocs.find((candidate) => candidate.path === rel)
+    if (!asset) throw new HttpRouteError(404, 'doc not found')
+    const body = Buffer.from(asset.contentBase64, 'base64').toString('utf8')
+    if (Buffer.byteLength(body) > MAX_DOC_CONTENT_BYTES) throw new HttpRouteError(413, 'doc is too large to read inline')
+    return { path: rel, title: titleFromMarkdown(body) ?? titleFromDocPath(rel), body, updatedAt: new Date(0).toISOString() }
+  }
   const root = docsRoot(configuredRoot)
   const rel = normalize(requested).replace(/^[/\\]+/, '')
   const abs = join(root, rel)
@@ -1481,8 +1571,8 @@ function titleFromDocPath(path: string): string {
 function memoOwner(req: IncomingMessage): string | undefined {
   const principal = req.headers['x-agent-runlab-principal']
   if (typeof principal === 'string' && principal.length > 0) return `ingress:${principal}`
-  // Standalone has no user identity provider; one local owner is intentional.
-  if (!req.headers['x-agent-runlab-organization-id']) return 'standalone:local-user'
+  // Portable and Dedicated may have no identity provider; one local owner is intentional.
+  if (!req.headers['x-agent-runlab-organization-id']) return 'local:owner'
   return undefined
 }
 
@@ -1497,6 +1587,10 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 }
 
 function sendJson(req: IncomingMessage, res: ServerResponse, body: unknown): void {
+  sendJsonStatus(req, res, 200, body)
+}
+
+function sendJsonStatus(req: IncomingMessage, res: ServerResponse, status: number, body: unknown): void {
   const json = JSON.stringify(body)
   const headers: Record<string, string> = {
     'content-type': 'application/json; charset=utf-8',
@@ -1504,7 +1598,7 @@ function sendJson(req: IncomingMessage, res: ServerResponse, body: unknown): voi
     'content-length': Buffer.byteLength(json).toString(),
   }
   applyCorsHeaders(req, headers)
-  res.writeHead(200, headers)
+  res.writeHead(status, headers)
   if (req.method === 'HEAD') {
     res.end()
     return
@@ -1796,10 +1890,10 @@ function normalizeStaticAssetPath(path: string): string {
   return rel.replace(/\\/g, '/')
 }
 
-function parseRestartRequest(body: unknown): { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number } {
+function parseRestartRequest(body: unknown): { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number; deployment?: NonNullable<HostRestartAttempt['deployment']> } {
   if (body === null || typeof body !== 'object') return {}
   const input = body as Record<string, unknown>
-  const out: { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number } = {}
+  const out: { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number; deployment?: NonNullable<HostRestartAttempt['deployment']> } = {}
   if (input.mode !== undefined) {
     if (input.mode !== 'checkpoint' && input.mode !== 'when_idle' && input.mode !== 'force') throw new Error('invalid restart mode')
     out.mode = input.mode
@@ -1812,6 +1906,17 @@ function parseRestartRequest(body: unknown): { mode?: 'checkpoint' | 'when_idle'
     const n = Number(input.timeoutMs)
     if (!Number.isFinite(n) || n <= 0) throw new Error('invalid restart timeoutMs')
     out.timeoutMs = Math.floor(n)
+  }
+  if (input.deployment !== undefined) {
+    if (!input.deployment || typeof input.deployment !== 'object' || Array.isArray(input.deployment)) throw new Error('invalid deployment restart ownership')
+    const deployment = input.deployment as Record<string, unknown>
+    if (typeof deployment.deploymentId !== 'string' || !deployment.deploymentId || typeof deployment.targetReleaseDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(deployment.targetReleaseDigest) || !Number.isSafeInteger(deployment.expectedRouteGeneration) || Number(deployment.expectedRouteGeneration) < 1 || typeof deployment.fencingToken !== 'string' || deployment.fencingToken.length < 16) throw new Error('invalid deployment restart ownership')
+    out.deployment = {
+      deploymentId: deployment.deploymentId,
+      targetReleaseDigest: deployment.targetReleaseDigest,
+      expectedRouteGeneration: Number(deployment.expectedRouteGeneration),
+      fencingToken: deployment.fencingToken,
+    }
   }
   return out
 }

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { bashTool } from './bash.js'
+import { bashTool, shellTool } from './bash.js'
 import { bashOutputTool } from './bash-output.js'
 import { killShellTool } from './kill-shell.js'
 import { makeCtx, makeCtxWithCwd, makeTempWorkspace, normalizePath } from './_test-helpers.js'
@@ -53,6 +53,21 @@ describe('bash', () => {
     )
 
     expect(normalizePath(out.split('\n')[0]!)).toBe(normalizePath(root))
+    expect(out).toContain('--- exit code: 0')
+  })
+
+  it('injects immutable Session and call identities into deployment shell processes', async () => {
+    const out = await shellTool.run(
+      { command: 'printf "%s\n%s\n" "$AGENT_RUNLAB_SESSION_ID" "$AGENT_RUNLAB_CALL_ID"' },
+      {
+        ...makeCtx(root),
+        sessionId: 'session-origin-shell',
+        callId: 'call-origin-shell',
+        env: { ...process.env, AGENT_RUNLAB_SESSION_ID: 'forged-session', AGENT_RUNLAB_CALL_ID: 'forged-call' },
+      },
+    )
+
+    expect(out.split('\n').slice(0, 2)).toEqual(['session-origin-shell', 'call-origin-shell'])
     expect(out).toContain('--- exit code: 0')
   })
 

@@ -38,6 +38,7 @@ export type SessionProjection = {
   parentCursor: number | null
   selectedModel: string | null
   hydratedSessionId: string | null
+  historyLoadedSessionId: string | null
 }
 
 type Scoped = { generation: number; sessionId: string }
@@ -59,7 +60,7 @@ export const EMPTY_SESSION_PROJECTION: SessionProjection = {
   generation: 0, sessionId: null, status: 'idle', state: null, config: null,
   contextSnapshot: null, compactStatus: null, timeline: [], queuedMessages: [],
   lastError: null, parentSessionId: null, parentCursor: null, selectedModel: null,
-  hydratedSessionId: null,
+  hydratedSessionId: null, historyLoadedSessionId: null,
 }
 
 export function reduceSessionProjectionBatch(
@@ -105,6 +106,7 @@ export function reduceSessionProjection(
         timeline: event.reset
           ? authoritativeTimeline(event.entries)
           : mergeBySeq(current.timeline, event.entries),
+        historyLoadedSessionId: event.sessionId,
       }
     case 'authoritative':
       return { ...current, state: event.payload.state, contextSnapshot: event.payload.contextSnapshot ?? null }
@@ -128,7 +130,7 @@ export function reduceSessionProjection(
     case 'status': return { ...current, status: event.status }
     case 'compact': return { ...current, compactStatus: event.compactStatus }
     case 'model': return { ...current, selectedModel: event.selectedModel }
-    case 'reset_timeline': return { ...current, timeline: [] }
+    case 'reset_timeline': return { ...current, timeline: [], historyLoadedSessionId: null }
   }
 }
 
@@ -141,7 +143,7 @@ function projectionFromCache(cached: CachedSessionView): Partial<SessionProjecti
     // baseline. Only session:ready may mark the current selection hydrated;
     // otherwise a stale cached running state can override a terminal Host
     // summary while switching Sessions and make a completed row flash running.
-    selectedModel: cached.selectedModel, hydratedSessionId: null,
+    selectedModel: cached.selectedModel, hydratedSessionId: null, historyLoadedSessionId: cached.sessionId,
   }
 }
 

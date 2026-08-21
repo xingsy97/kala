@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
 
-import { schema, type DeploymentMode, type ExecutorInstallStatus } from '@agent-kernel/shared'
+import { schema, type ExecutorInstallStatus, type PlatformTenancy } from '@agent-kernel/shared'
 
 import { authenticateDashboardHandshake, type AuthConfig, type DashboardActor } from '../auth-control.js'
 import type { AuditLogger } from '../audit-log.js'
@@ -12,7 +12,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
   store: ExecutorInstallationStore
   identities?: ExecutorIdentityStore
   auth?: AuthConfig
-  deploymentMode: DeploymentMode
+  tenancy: PlatformTenancy
   audit?: AuditLogger
 }): void {
   const claimAttempts = new Map<string, { count: number; resetAt: number }>()
@@ -75,7 +75,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
       return
     }
 
-    const authorization = authorizeManagement(req, options.deploymentMode, options.auth)
+    const authorization = authorizeManagement(req, options.tenancy, options.auth)
     if (!authorization.ok) { sendError(res, authorization.status, authorization.error); return }
 
     try {
@@ -147,15 +147,15 @@ async function handleRedeem(req: IncomingMessage, res: ServerResponse, store: Ex
   } catch (error) { handleError(res, error) }
 }
 
-export function authorizeSensitiveExecutorManagement(req: IncomingMessage, deploymentMode: DeploymentMode, auth: AuthConfig | undefined): { ok: true; actor: DashboardActor } | { ok: false; status: number; error: string } {
-  return authorizeManagement(req, deploymentMode, auth)
+export function authorizeSensitiveExecutorManagement(req: IncomingMessage, tenancy: PlatformTenancy, auth: AuthConfig | undefined): { ok: true; actor: DashboardActor } | { ok: false; status: number; error: string } {
+  return authorizeManagement(req, tenancy, auth)
 }
 
-function authorizeManagement(req: IncomingMessage, deploymentMode: DeploymentMode, auth: AuthConfig | undefined): { ok: true; actor: DashboardActor } | { ok: false; status: number; error: string } {
+function authorizeManagement(req: IncomingMessage, tenancy: PlatformTenancy, auth: AuthConfig | undefined): { ok: true; actor: DashboardActor } | { ok: false; status: number; error: string } {
   const result = authenticateDashboardHandshake({ role: 'dashboard', clientVersion: 'http', ...(bearer(req) ? { token: bearer(req) } : {}) }, req, auth)
   if (!result.ok) return { ok: false, status: 401, error: result.reason }
-  if (deploymentMode === 'saas' && (result.actor.kind !== 'ingress' || !['owner', 'admin'].includes(result.actor.role))) return { ok: false, status: 403, error: 'admin_required' }
-  if (deploymentMode === 'standalone' && result.actor.kind === 'anonymous' && (auth?.github?.required || auth?.sharedToken)) return { ok: false, status: 401, error: 'operator_authentication_required' }
+  if (tenancy === 'multi-tenant' && (result.actor.kind !== 'ingress' || !['owner', 'admin'].includes(result.actor.role))) return { ok: false, status: 403, error: 'admin_required' }
+  if (tenancy === 'single-tenant' && result.actor.kind === 'anonymous' && (auth?.github?.required || auth?.sharedToken)) return { ok: false, status: 401, error: 'operator_authentication_required' }
   return result
 }
 

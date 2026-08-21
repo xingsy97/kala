@@ -2,7 +2,7 @@
 
 **Status:** normative for the highest-strength hardening program
 **Extends:** [`../kernel/spec.md`](../kernel/spec.md)
-**Deployment rule:** Standalone and Hosted must satisfy the same core invariants.
+**Deployment rule:** Dedicated and Private Cloud must satisfy the same core invariants.
 
 ## Authority map
 
@@ -15,14 +15,14 @@
 | Current context size | Host `ContextUsageSnapshot` assembled from current model-visible messages | cumulative provider `state.usage` |
 | Lifetime model usage | `AgentState.usage` / usage ledger | context indicator |
 | Executor execution receipt | Host operation ledger + Executor receipt keyed by scoped operation ID | socket connection state alone |
-| Organization authorization | Hosted control plane before Unit routing | RuntimeHost, browser-selected tenant IDs |
+| Organization authorization | Private Cloud control plane before Unit routing | RuntimeHost, browser-selected tenant IDs |
 | Transcript history | authoritative history replay by event sequence | stale live cache conflicts |
 | Browser identity | server-revocable browser Session | local storage/profile display |
 | Restart plan | persisted restart attempt and durable Session state | pre-restart in-memory flags |
 
 ## System invariants
 
-Kernel invariants I1–I8 remain mandatory. The following cross-component invariants add Host, Executor, Dashboard and Hosted requirements.
+Kernel invariants I1–I8 remain mandatory. The following cross-component invariants add Host, Executor, Dashboard and Private Cloud requirements.
 
 ### S1 — Durable event uniqueness
 
@@ -90,7 +90,7 @@ A historical call lacking a visible result is not considered running unless its 
 
 ### S17 — Deployment-mode equivalence
 
-Hosted wrapping may authenticate, authorize and route, but cannot fork Kernel/Queue/Compact/Tool semantics. The same event sequence and scoped Executor behavior produce equivalent Agent state in Standalone and Hosted. Hosted hides only explicitly unsupported product areas, not core Workspace/File/Git/Shell/Executor capabilities.
+Private Cloud wrapping may authenticate, authorize and route, but cannot fork Kernel/Queue/Compact/Tool semantics. The same event sequence and scoped Executor behavior produce equivalent Agent state in Dedicated and Private Cloud. A runtime profile hides only explicitly unsupported product areas, not core Workspace/File/Git/Shell/Executor capabilities.
 
 ### S18 — Tenant non-interference
 
@@ -132,13 +132,13 @@ A graph node closes only with all applicable proofs:
 3. Integration tests crossing the actual persistence/socket boundary.
 4. Fault-injection seed and resulting integrity report.
 5. Real-browser evidence for user-visible behavior.
-6. Mode-equivalence evidence for Standalone and Hosted.
+6. Deployment-equivalence evidence for Dedicated and Private Cloud.
 7. No new duplicate sequences in generated Session logs.
 8. Cleanup evidence for all temporary tenant resources.
 
 ## Release blockers
 
-Any of the following blocks LXD and Hosted release:
+Any of the following blocks Dedicated and Private Cloud release:
 
 - duplicate/regressing sequence in a newly generated log;
 - accepted message lost or executed more than once;

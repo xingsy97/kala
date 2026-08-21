@@ -113,7 +113,7 @@ Every transition has a monotonically increasing `seq`, timestamp, safe error cod
 
 ### 4.2 API
 
-Management endpoints require an authorized Dashboard administrator/owner in SaaS and authenticated operator access in Standalone.
+Management endpoints require an authorized Dashboard administrator/owner in Private Cloud and authenticated operator access in Dedicated.
 
 ```text
 POST   /api/executor-installs

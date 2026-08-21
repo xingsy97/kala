@@ -1,31 +1,23 @@
 # Runtime Component Naming Migration
 
-## Inventory
+## Canonical names
 
-Technical names to remove:
+Agent RunLab exposes three user-facing variants: Portable, Dedicated, and Private Cloud. Dedicated and Private Cloud share the Platform architecture and differ by `tenancy`, not by node count or ownership. Every variant is self-hosted by its user.
 
-- package `packages/runtime-ingress-gateway` / `@agent-kernel/runtime-ingress-gateway`;
-- symbols `RuntimeIngressGateway`, `startRuntimeIngressGateway`;
-- binary `agent-runlab-runtime-ingress`;
-- technical environment prefixes `SAAS_GATEWAY_*`, `SAAS_HOST_*`, `SAAS_INGRESS_*`;
-- Compose technical services/images containing `saas`.
-
-Commercial/deployment terms allowed to remain:
-
-- deployment mode value `saas` where externally persisted compatibility requires it;
-- `deploy/saas/`, `scripts/saas-local/`, SaaS runbook/product prose;
-- tests explicitly comparing Standalone and SaaS product capability modes.
-
-## Target
+Technical names describe their responsibility rather than a removed product mode:
 
 - package: `packages/runtime-ingress-gateway`, `@agent-kernel/runtime-ingress-gateway`;
 - symbols: `RuntimeIngressGateway`, `startRuntimeIngressGateway`;
 - binary: `agent-runlab-runtime-ingress`;
-- Host: `RuntimeHost`;
-- in-process trusted selector: `RuntimeUnitIngress`;
-- isolated service object: `TenantRuntimeUnit`;
-- environment: `RUNTIME_INGRESS_*`, `RUNTIME_HOST_*`, `INGRESS_PUBLIC_ORIGIN`.
+- Platform runtime: `RuntimeHost`;
+- trusted selector: `RuntimeUnitIngress`;
+- isolated runtime: `TenantRuntimeUnit`;
+- Private Cloud environment: `RUNTIME_INGRESS_*`, `RUNTIME_HOST_*`, and `INGRESS_PUBLIC_ORIGIN`;
+- Dedicated services and assets: `agent-runlab-dedicated-*`, `deploy/dedicated-systemd/`, and `deploy:dedicated`;
+- Private Cloud stack: `deploy/private-cloud/`, `scripts/private-cloud-local/`, and `private-cloud:*`.
 
-## Compatibility
+## Clean cutover
 
-Environment variables use one release of explicit fallback from new name to old name with startup warning; deployment docs and generated examples emit only new names. Public stored deployment mode remains compatible. Package, binary, symbol, service and image names have no compatibility alias after all workspace references migrate atomically.
+Removed product-mode environment values, aliases, parsers, paths, commands, service names, protocol values, metrics, logs, and receipts are not retained. Direct execution defaults to Portable; every Platform deployment supplies the versioned deployment configuration.
+
+Historical evidence files remain immutable and may retain their original terminology. Browser PWA `display-mode: standalone` and the independently deployable Evaluation platform are unrelated concepts and are not renamed by this migration.

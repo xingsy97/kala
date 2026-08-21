@@ -1,0 +1,26 @@
+[Unit]
+Description=Agent RunLab Dedicated Deploy Supervisor
+After=network-online.target agent-runlab-dedicated-ingress.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+Group=agent-runlab
+EnvironmentFile=-/etc/agent-runlab/supervisor.env
+EnvironmentFile=-/etc/agent-runlab/handoff.env
+ExecStart=/usr/bin/flock --exclusive --nonblock --no-fork /var/lib/agent-runlab/deploy/supervisor.lock /usr/bin/node /var/lib/agent-runlab/deploy/control-current/agent-runlab-dedicated-deploy-supervisor.cjs
+Restart=always
+RestartSec=2s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agent-runlab/deploy /run/systemd/system
+ReadOnlyPaths=/var/lib/agent-runlab/admission /var/lib/agent-runlab/units/local/write.lock
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

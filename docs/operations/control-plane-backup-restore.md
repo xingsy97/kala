@@ -16,7 +16,7 @@ Pilot objective: **RPO 15 minutes, RTO 4 hours**. Contracted production targets 
 ```bash
 export RUNTIME_INGRESS_DATABASE_URL='postgresql://...'
 export RUNLAB_BACKUP_DIR=/secure/backup/control-plane
-node scripts/saas-local/backup-control-plane-postgres.mjs
+node scripts/private-cloud-local/backup-control-plane-postgres.mjs
 ```
 
 The command requires PostgreSQL client tools matching or newer than the server major version. Never place credentials in command history; production resolves them from a protected file/service environment.
@@ -26,7 +26,7 @@ The command requires PostgreSQL client tools matching or newer than the server m
 Create an empty disposable database, point `RUNTIME_INGRESS_DATABASE_URL` at it, then run:
 
 ```bash
-node scripts/saas-local/verify-control-plane-restore.mjs /secure/backup/control-plane/control-plane-TIMESTAMP.dump
+node scripts/private-cloud-local/verify-control-plane-restore.mjs /secure/backup/control-plane/control-plane-TIMESTAMP.dump
 ```
 
 The verifier checks the manifest, restores with `--exit-on-error`, and reports schema, Organization, membership, browser-session, Audit and Usage counts. Follow with application-level checks for login, authorization, Unit placement and one restored Session.

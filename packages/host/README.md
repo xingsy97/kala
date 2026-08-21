@@ -58,7 +58,7 @@ const server = await startHostServer({
 })
 ```
 
-Or run standalone:
+Or run the Portable bundle directly:
 
 ```bash
 node packages/host/bin/agent-kernel-host.js

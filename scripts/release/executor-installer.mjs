@@ -39,6 +39,7 @@ set -euo pipefail
 BASE_URL="\${RUNLAB_RELEASE_ASSETS_URL:-${base}}"
 MAX_METADATA_BYTES="\${RUNLAB_INSTALLER_MAX_METADATA_BYTES:-1048576}"
 WORK_DIR="\${RUNLAB_INSTALLER_WORK_DIR:-$(mktemp -d)}"
+mkdir -p "$WORK_DIR"
 trap 'rm -rf "$WORK_DIR"' EXIT
 fail() { printf 'Agent RunLab installer: %s\\n' "$*" >&2; exit 1; }
 [ "\${RUNLAB_INSTALLER_ALLOW_UNSIGNED:-0}" = 1 ] || fail "release signatures are not available; refusing unsigned install (set RUNLAB_INSTALLER_ALLOW_UNSIGNED=1 only for development)"
@@ -56,10 +57,20 @@ download_metadata() {
 }
 download_metadata SHA256SUMS
 expected=$(awk -v file="$asset" '$2 == file && $1 ~ /^[0-9a-fA-F]{64}$/ {print tolower($1)}' "$WORK_DIR/SHA256SUMS")
-[ -n "$expected" ] || fail "SHA256SUMS has no valid entry for $asset"
+use_node=0
+if [ -z "$expected" ]; then
+  asset="agent-kernel-executor.cjs"
+  expected=$(awk -v file="$asset" '$2 == file && $1 ~ /^[0-9a-fA-F]{64}$/ {print tolower($1)}' "$WORK_DIR/SHA256SUMS")
+  [ -n "$expected" ] || fail "SHA256SUMS has no valid entry for the native Executor or Node.js fallback"
+  command -v node >/dev/null 2>&1 || fail "No native Executor is published for $target. Install Node.js 22+ and retry."
+  node_major=$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf 0)
+  [ "$node_major" -ge 22 ] || fail "Node.js 22+ is required for the Executor fallback (found $(node --version 2>/dev/null || printf unknown))"
+  use_node=1
+fi
 wget -q --https-only --tries=3 --timeout=30 -O "$WORK_DIR/$asset" "$BASE_URL/$asset" || fail "failed to download $asset"
 if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$WORK_DIR/$asset" | awk '{print $1}'); elif command -v shasum >/dev/null 2>&1; then actual=$(shasum -a 256 "$WORK_DIR/$asset" | awk '{print $1}'); else fail "sha256sum or shasum is required"; fi
 [ "$actual" = "$expected" ] || fail "checksum mismatch for $asset"
+if [ "$use_node" = 1 ]; then exec node "$WORK_DIR/$asset" --internal-installer "$@"; fi
 chmod +x "$WORK_DIR/$asset"
 exec "$WORK_DIR/$asset" --internal-installer "$@"
 `

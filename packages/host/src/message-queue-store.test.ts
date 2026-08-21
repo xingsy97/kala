@@ -1,0 +1,48 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { createConfig, step } from '@agent-kernel/kernel'
+import { loadPersistedMessageQueue, persistMessageQueueSnapshot } from './message-queue-store.js'
+import { readSessionLog } from './store/log.js'
+import { SessionStore } from './store/session.js'
+
+const roots: string[] = []
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+
+describe('durable message queue metadata', () => {
+  it('does not run dangling Tool recovery before planned continuation owns the checkpoint', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'message-queue-planned-handoff-'))
+    roots.push(root)
+    const config = createConfig({
+      tools: [{ name: 'write', description: 'write', inputSchema: { type: 'object' }, requiresApproval: false }],
+    })
+    const predecessor = new SessionStore(root)
+    const record = await predecessor.create({ sessionId: 'planned-tool-session', config })
+    const user = { kind: 'user_message', text: 'write once' } as const
+    const afterUser = step(record.state, user, config)
+    await predecessor.record(record.sessionId, user, afterUser.effects, afterUser.next)
+    const response = {
+      kind: 'llm_response',
+      message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'write-once', name: 'write', input: {} }] },
+    } as const
+    const beforeTool = step(record.state, response, config)
+    await predecessor.record(record.sessionId, response, beforeTool.effects, beforeTool.next)
+    expect(record.state).toMatchObject({ cursor: 2, status: 'executing_tools' })
+
+    const replacement = new SessionStore(root)
+    await expect(loadPersistedMessageQueue(replacement, record.sessionId)).resolves.toEqual([])
+    expect(replacement.get(record.sessionId)?.state).toMatchObject({ cursor: 2, status: 'executing_tools' })
+    let parsed = await readSessionLog(record.logPath)
+    expect(parsed.events).toHaveLength(2)
+    expect(JSON.stringify(parsed.events)).not.toContain('host restarted while call was pending')
+
+    await persistMessageQueueSnapshot(new SessionStore(root), record.sessionId, [{
+      id: 'queue-1', operationId: 'operation-queue-1', text: 'after handoff', mode: 'queue', createdAt: new Date().toISOString(),
+    }])
+    parsed = await readSessionLog(record.logPath)
+    expect(parsed.events).toHaveLength(2)
+    expect(parsed.runtimeMetadata.at(-1)).toMatchObject({ action: 'message_queue_snapshot', payload: { items: [{ operationId: 'operation-queue-1' }] } })
+  })
+})

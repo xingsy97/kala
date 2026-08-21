@@ -4,7 +4,7 @@
 
 ## Ownership
 
-- Hosted data belongs to one `TenantRuntimeUnit`; Standalone data belongs to the local operator.
+- Platform data belongs to one `TenantRuntimeUnit`; Dedicated data belongs to the local operator, while Private Cloud data belongs to the assigned tenant.
 - Browser identity/session data stays in RuntimeIngressGateway storage.
 - Agent Sessions, queues, artifacts, push state, Workspace aliases, and Executor identities stay in the Unit root.
 - Workspace files remain on the Executor machine unless explicitly uploaded as an Artifact.

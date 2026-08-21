@@ -202,8 +202,7 @@ export const ClientLoadLogArtifactSchema = z.object({
 export const ClientDeleteSessionSchema = z.object({
   operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
-  cascade: z.boolean().optional(),
-}) satisfies z.ZodType<ClientDeleteSession>
+}).strict() satisfies z.ZodType<ClientDeleteSession>
 
 // The wire form of a `Record<string, never>` payload is `undefined` or `{}` —
 // socket.io emits `undefined` when the client calls `socket.emit(evt)` with no

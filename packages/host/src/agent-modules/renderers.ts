@@ -34,6 +34,7 @@ export function resolveAgentModule(
   }
   const config = createConfig({
     tools,
+    toolDisclosureMode: 'progressive',
     systemPrompt,
     agentModule: metadata,
     ...(ctx.contextLimit !== undefined ? { contextLimit: ctx.contextLimit } : {}),

@@ -2,7 +2,7 @@
 import { copyFileSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,6 +23,7 @@ const modelCatalogSeed = join(root, 'resources', 'model-catalog', 'models-dev-se
 const socketAdminDist = resolveSocketAdminDist()
 const options = parseOptions(process.argv.slice(2))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+const sourceIdentity = readSourceIdentity()
 const { component, tag, nativeOnly, finalizeOnly, noNative, skipDashboardBuild, skipPackageBuild } = options
 const repo = options.repo ?? repoFromPackageJson(packageJson)
 if (!repo && component !== 'dashboard') {
@@ -32,6 +33,7 @@ const wantsNativeBuild = !finalizeOnly && (nativeOnly || !noNative)
 const currentNativeTarget = wantsNativeBuild ? detectNativeTarget() : undefined
 const nativeTarget = wantsNativeBuild ? options.nativeTarget ?? currentNativeTarget : undefined
 
+if (!finalizeOnly) rmSync(outDir, { recursive: true, force: true })
 mkdirSync(outDir, { recursive: true })
 
 const allEntries = [
@@ -42,52 +44,30 @@ const allEntries = [
     entry: join(root, 'packages/host/bin/agent-kernel-host.ts'),
   },
   {
+    name: 'agent-runlab-runtime',
+    component: 'host',
+    entry: join(root, 'packages/host/bin/agent-kernel-host.ts'),
+    platformOnly: true,
+  },
+  {
     name: 'agent-kernel-executor',
     component: 'executor',
     entry: join(root, 'packages/executor/bin/agent-kernel-executor.ts'),
   },
   {
-    name: 'agent-runlab-standalone-ingress',
+    name: 'agent-runlab-dedicated-ingress',
     component: 'host',
-    entry: join(root, 'packages/host/bin/agent-runlab-standalone-ingress.ts'),
+    entry: join(root, 'packages/host/bin/agent-runlab-dedicated-ingress.ts'),
   },
   {
-    name: 'agent-runlab-deploy-supervisor',
+    name: 'agent-runlab-dedicated-deploy-supervisor',
     component: 'host',
-    entry: join(root, 'packages/host/bin/agent-runlab-deploy-supervisor.ts'),
+    entry: join(root, 'packages/host/bin/agent-runlab-dedicated-deploy-supervisor.ts'),
   },
 ]
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
 const nativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']
-const expectedAssets = [
-  ...allEntries.map((entry) => cjsAssetName(entry)),
-  ...allEntries.flatMap((entry) => nativeTargets.map((target) => nativeAssetName(entry.name, target))),
-  ...nativeTargets.map(executorNativeAssetName),
-  'agent-kernel-dashboard-dist.tar.gz',
-  'agent-runlab-model-catalog-seed.json',
-  'run.sh',
-  'install-executor.sh',
-  'install-executor.ps1',
-  'node-pty-win32-x64.tar.gz',
-  'node-pty-win32-arm64.tar.gz',
-  'RELEASE_NOTES.md',
-  'manifest.json',
-  'SHA256SUMS',
-  'executor-update-manifest.json',
-  'executor-update-public-key.pem',
-]
-const legacyAssets = [
-  'run-host.sh',
-  'run-executor.sh',
-  'agent-kernel-host.cjs',
-  'agent-runlab-swebench-runner.cjs',
-  'claude-code-swebench-runner.cjs',
-]
-for (const asset of !nativeOnly && !finalizeOnly ? [...expectedAssets, ...legacyAssets] : []) {
-  rmSync(join(outDir, asset), { force: true })
-}
-
 if (finalizeOnly) {
   finalizeRelease()
   process.exit(0)
@@ -126,17 +106,21 @@ const buildEntries = [...entries].sort((a, b) => {
 })
 
 for (const item of buildEntries) {
-  const embedsHostRuntime = item.name === 'agent-kernel-host'
+  const embedsHostRuntime = item.name === 'agent-kernel-host' || item.name === 'agent-runlab-runtime'
+  const embedsDashboard = item.name === 'agent-kernel-host' && includeDashboard
   const embeddedReleaseAssets = embedsHostRuntime
     ? prepareEmbeddedReleaseAssetsForHost()
     : ''
-  const embeddedDashboard = embedsHostRuntime && includeDashboard
+  const embeddedDashboard = embedsDashboard
     ? embeddedDashboardBanner(dashboardDist)
+    : ''
+  const embeddedDocs = embedsHostRuntime && includeDashboard
+    ? embeddedDocsBanner(docsDir)
     : ''
   const embeddedSocketAdmin = embedsHostRuntime
     ? embeddedSocketAdminBanner(socketAdminDist)
     : ''
-  const buildInfo = buildInfoBanner({ artifactKind: nativeOnly ? 'native' : 'cjs', dashboardMode: embedsHostRuntime && includeDashboard ? 'embedded' : 'none', socketAdminMode: embedsHostRuntime ? 'embedded' : 'missing' })
+  const buildInfo = buildInfoBanner({ artifactKind: nativeOnly ? 'native' : 'cjs', dashboardMode: embedsDashboard ? 'embedded' : 'none', socketAdminMode: embedsHostRuntime ? 'embedded' : 'missing' })
   const outfile = nativeOnly
     ? join(outDir, '.sea', `${item.name}-${nativeTarget}`, `${item.name}.cjs`)
     : join(outDir, cjsAssetName(item))
@@ -149,7 +133,7 @@ for (const item of buildEntries) {
     target: 'node22',
     format: 'cjs',
     mainFields: ['module', 'main'],
-    banner: { js: `#!/usr/bin/env node\n${buildInfo}${embeddedDashboard}${embeddedSocketAdmin}${embeddedReleaseAssets}` },
+    banner: { js: `#!/usr/bin/env node\n${buildInfo}${embeddedDashboard}${embeddedDocs}${embeddedSocketAdmin}${embeddedReleaseAssets}` },
     sourcemap: false,
     legalComments: 'none',
     logLevel: 'info',
@@ -157,7 +141,7 @@ for (const item of buildEntries) {
   const bundled = readFileSync(outfile, 'utf8')
   writeFileSync(outfile, keepSingleShebang(bundled))
   if (!nativeOnly) chmodSync(outfile, 0o755)
-  if (nativeOnly || !noNative) {
+  if (!item.platformOnly && (nativeOnly || !noNative)) {
     await buildNativeSea(item.name, outfile, nativeTarget)
     if (item.name === 'agent-kernel-executor') {
       copyFileSync(join(outDir, legacyExecutorNativeAssetName(nativeTarget)), join(outDir, executorNativeAssetName(nativeTarget)))
@@ -167,6 +151,7 @@ for (const item of buildEntries) {
 }
 
 if (nativeOnly) {
+  removeNativeBuildWorkspace()
   console.log(`native release assets written to ${outDir} for ${nativeTarget}`)
   for (const item of entries) console.log(` - ${basename(nativeAssetName(item.name, nativeTarget))}`)
   process.exit(0)
@@ -174,6 +159,7 @@ if (nativeOnly) {
 
 if (includeDashboard) {
   await run('tar', ['-czf', join(outDir, 'agent-kernel-dashboard-dist.tar.gz'), '-C', dashboardDist, '.'])
+  writeDashboardReleaseManifest(dashboardDist)
   await run('tar', ['-czf', join(outDir, 'agent-runlab-docs.tar.gz'), '-C', docsDir, '.'])
 }
 
@@ -185,6 +171,8 @@ for (const file of [...releaseFiles(), 'SHA256SUMS']) {
 }
 
 function finalizeRelease() {
+  assertSourceIdentityUnchanged()
+  removeNativeBuildWorkspace()
   const bootstrapAssets = prepareBootstrapAssets()
   if (entries.some((entry) => entry.name === 'agent-kernel-executor') && currentNativeTarget && exists(executorNativeAssetName(currentNativeTarget))) writeExecutorUpdateManifest()
   if (includeDashboard && existsSync(modelCatalogSeed)) {
@@ -193,14 +181,20 @@ function finalizeRelease() {
   if (component !== 'dashboard') {
     if (component === 'all' || component === 'host') {
       for (const asset of [
-        'deploy/standalone-systemd/agent-runlab-ingress.service',
-        'deploy/standalone-systemd/agent-runlab-unit@.service',
-        'deploy/standalone-systemd/agent-runlab-deploy-supervisor.service',
-        'deploy/standalone-systemd/agent-runlab-migration-finalizer.service',
-        'scripts/deploy/install-standalone-systemd.mjs',
-        'scripts/deploy/cutover-standalone-systemd.mjs',
-        'scripts/deploy/standalone-data-migration.mjs',
-        'scripts/deploy/rollback-standalone-systemd.mjs',
+        'deploy/dedicated-systemd/agent-runlab-dedicated-ingress.service',
+        'deploy/dedicated-systemd/agent-runlab-dedicated-unit@.service',
+        'deploy/dedicated-systemd/agent-runlab-dedicated-deploy-supervisor.service',
+        'deploy/dedicated-systemd/agent-runlab-dedicated-control-updater.service',
+        'deploy/dedicated-systemd/agent-runlab-dedicated-migration-finalizer.service',
+        'deploy/dedicated-systemd/deployment.json',
+        'scripts/deploy/install-dedicated-systemd.mjs',
+        'scripts/deploy/deploy-dedicated.mjs',
+        'scripts/deploy/deploy-dashboard.mjs',
+        'scripts/deploy/cutover-dedicated-systemd.mjs',
+        'scripts/deploy/dedicated-data-migration.mjs',
+        'scripts/deploy/dedicated-settings-fingerprint.mjs',
+        'scripts/deploy/update-dedicated-control-plane.mjs',
+        'scripts/deploy/rollback-dedicated-systemd.mjs',
       ]) {
         const target = join(outDir, basename(asset))
         copyFileSync(join(root, asset), target)
@@ -220,6 +214,7 @@ function finalizeRelease() {
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
     .concat(executorProductNatives)
     .concat(includeDashboard && exists('agent-kernel-dashboard-dist.tar.gz') ? ['agent-kernel-dashboard-dist.tar.gz'] : [])
+    .concat(includeDashboard && exists('dashboard-release.json') ? ['dashboard-release.json'] : [])
     .concat(includeDashboard && exists('agent-runlab-docs.tar.gz') ? ['agent-runlab-docs.tar.gz'] : [])
     .concat(includeDashboard && exists('agent-runlab-model-catalog-seed.json') ? ['agent-runlab-model-catalog-seed.json'] : [])
     .concat(bootstrapAssets)
@@ -228,6 +223,7 @@ function finalizeRelease() {
   const manifest = {
     name: packageJson.name,
     version: packageJson.version,
+    source: sourceIdentity,
     component,
     repo: repo ?? '',
     tag,
@@ -245,7 +241,7 @@ function finalizeRelease() {
         : 'runtime releases include Node.js .cjs fallback assets; native binaries are added by the native release job',
       'run.sh is a wget-only bash bootstrap that uses compact .cjs assets when Node.js 22+ is available and falls back to native binaries otherwise',
       'install-executor.sh and install-executor.ps1 install only checksum-verified runlab-executor native assets; unsigned mode is development-only',
-      'bundle-dashboard-with-runtime.cjs embeds the host runtime and dashboard dist; DASHBOARD_DIR remains an explicit override',
+      'Portable uses bundle-dashboard-with-runtime.cjs with embedded dashboard assets; Self-hosted Platform uses agent-runlab-runtime.cjs plus an independently activated dashboard release',
     ],
   }
   writeFileSync(join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
@@ -314,6 +310,10 @@ function releaseFiles() {
   return [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md']
 }
 
+function removeNativeBuildWorkspace() {
+  rmSync(join(outDir, '.sea'), { recursive: true, force: true })
+}
+
 function exists(asset) {
   return existsSync(join(outDir, asset))
 }
@@ -362,6 +362,36 @@ function embeddedDashboardBanner(dir) {
     assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
   }
   return `globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=${JSON.stringify(assets)};\n`
+}
+
+function writeDashboardReleaseManifest(dir) {
+  assertDashboardDistReady(dir)
+  const files = [...walkFiles(dir)].map((file) => {
+    const path = relative(dir, file).replace(/\\/g, '/')
+    const bytes = readFileSync(file)
+    return { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
+  }).sort((a, b) => a.path.localeCompare(b.path))
+  const assetDigest = createHash('sha256').update(JSON.stringify(files)).digest('hex')
+  writeFileSync(join(outDir, 'dashboard-release.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    product: 'agent-runlab-dashboard',
+    version: packageJson.version,
+    builtAt: new Date().toISOString(),
+    source: sourceIdentity,
+    protocol: { min: '1.0.0', max: '1.0.0' },
+    assetDigest,
+    files,
+  }, null, 2)}\n`)
+}
+
+function embeddedDocsBanner(dir) {
+  const assets = []
+  for (const file of walkFiles(dir)) {
+    if (!file.toLowerCase().endsWith('.md')) continue
+    const rel = relative(dir, file).replace(/\\/g, '/')
+    assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
+  }
+  return `globalThis.__AGENT_KERNEL_EMBEDDED_DOCS__=${JSON.stringify(assets)};\n`
 }
 
 function assertDashboardDistReady(dir) {
@@ -431,7 +461,8 @@ function embeddedReleaseAssetsBanner(dir, names) {
 function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
   const info = {
     releaseTag: tag,
-    gitCommit: gitCommit(),
+    gitCommit: sourceIdentity.revision.slice(0, 12),
+    sourceSnapshotSha256: sourceIdentity.snapshotSha256,
     builtAt: new Date().toISOString(),
     artifactKind,
     dashboardMode,
@@ -440,12 +471,45 @@ function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
   return `globalThis.__AGENT_KERNEL_BUILD_INFO__=${JSON.stringify(info)};\n`
 }
 
-function gitCommit() {
-  try {
-    const result = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: root, encoding: 'utf8' })
-    if (result.status === 0) return result.stdout.trim() || 'unknown'
-  } catch {}
-  return 'unknown'
+function readSourceIdentity() {
+  const revision = gitText(['rev-parse', 'HEAD']).trim()
+  if (!/^[0-9a-f]{40}$/u.test(revision)) throw new Error('release source revision is unavailable')
+  return {
+    revision,
+    snapshotSha256: sourceSnapshotSha256(),
+    dirty: gitText(['status', '--porcelain=v1', '--untracked-files=all']).trim().length > 0,
+  }
+}
+
+function assertSourceIdentityUnchanged() {
+  if (sourceSnapshotSha256() !== sourceIdentity.snapshotSha256) {
+    throw new Error('release source changed while assets were being built')
+  }
+}
+
+function sourceSnapshotSha256() {
+  const paths = gitBuffer(['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
+    .toString('utf8').split('\0').filter(Boolean).filter((path) => existsSync(join(root, path))).sort()
+  const hash = createHash('sha256')
+  for (const path of paths) {
+    const absolute = join(root, path)
+    const stat = lstatSync(absolute)
+    const content = stat.isSymbolicLink() ? Buffer.from(readlinkSync(absolute)) : readFileSync(absolute)
+    hash.update(`${stat.mode & 0o7777}\0${path}\0${content.length}\0`)
+    hash.update(content)
+    hash.update('\0')
+  }
+  return hash.digest('hex')
+}
+
+function gitText(args) {
+  return gitBuffer(args).toString('utf8')
+}
+
+function gitBuffer(args) {
+  const result = spawnSync('git', args, { cwd: root, encoding: null, maxBuffer: 128 * 1024 * 1024 })
+  if (result.status !== 0) throw new Error(result.stderr?.toString('utf8') || `git ${args[0]} failed`)
+  return result.stdout
 }
 
 function* walkFiles(dir) {
@@ -811,8 +875,8 @@ function releaseNotes(manifest) {
     `# Agent RunLab ${manifest.tag}`,
     '',
     hasNativeAssets
-      ? 'Agent RunLab ships a self-contained host + dashboard bundle, a standalone executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component. By default, `run.sh` uses Node.js 22 `.cjs` assets when Node.js 22+ is available and falls back to native binaries when Node is missing or too old.'
-      : 'Agent RunLab ships a self-contained host + dashboard bundle, a standalone executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component.',
+      ? 'Agent RunLab ships a self-contained host + dashboard bundle, a separately deployable Executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component. By default, `run.sh` uses Node.js 22 `.cjs` assets when Node.js 22+ is available and falls back to native binaries when Node is missing or too old.'
+      : 'Agent RunLab ships a self-contained host + dashboard bundle, a separately deployable Executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component.',
     '',
     '## Quick Start',
     '',

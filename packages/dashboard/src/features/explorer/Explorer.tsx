@@ -97,7 +97,7 @@ type Props = {
   onClearSelection?(): void
   onNewSession(workspaceId?: string): void
   onConnectWorkspace(): void
-  onDelete(sessionId: string, options?: { cascade?: boolean }): void
+  onDelete(sessionId: string): void
   onRename(sessionId: string, label: string): void
   onRenameWorkspace?(workspaceId: string, workspaceName: string): void
   onOpenSessionInfo?(sessionId: string): void
@@ -481,17 +481,6 @@ function ExplorerImpl({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            {pendingDeleteDescendantCount > 0 ? (
-              <AlertDialogAction
-                data-testid="confirm-delete-cascade-button"
-                onClick={() => {
-                  if (pendingDelete) onDelete(pendingDelete.sessionId, { cascade: true })
-                  setPendingDelete(null)
-                }}
-              >
-                {t('explorer.deleteWithChildren', { count: pendingDeleteDescendantCount })}
-              </AlertDialogAction>
-            ) : null}
             <AlertDialogAction
               data-testid="confirm-delete-button"
               onClick={() => {
@@ -549,7 +538,7 @@ function ExplorerLoading(): JSX.Element {
   return (
     <div className="space-y-3 p-3" data-testid="explorer-loading">
       <div className="flex items-center gap-2 rounded-lg bg-background/45 px-3 py-2 text-xs text-muted-foreground shadow-sm">
-        <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden />
+        <span className="ak-loading-spinner h-3.5 w-3.5" aria-hidden="true" />
         <span>Loading workspaces and sessions</span>
       </div>
       {Array.from({ length: 5 }).map((_, i) => (
@@ -1184,10 +1173,14 @@ function SessionRow({
         // mousedown and click and swallows the activation, so the session only
         // loads on the *second* click. Preview teardown is handled by an effect
         // that watches the selected session id instead (see ExplorerImpl).
-        if (e.detail >= 2) e.preventDefault()
-      }}
-      onPointerDown={(e) => {
-        if (e.button > 0 || editing) return
+        if (e.detail >= 2) {
+          e.preventDefault()
+          return
+        }
+        // `mousedown` is the intentional eager desktop path. A touch/pen
+        // gesture first reaches pointer events and is committed only by the
+        // eventual click, after the browser has ruled out scrolling.
+        if (e.button > 0 || editing || isRowActionTarget(e.target)) return
         onPointerActivateSession(s.sessionId)
       }}
       onDoubleClick={(e) => {
@@ -1232,6 +1225,7 @@ function SessionRow({
         ) : !s.parentSessionId ? (
           <div
             ref={dragHandle}
+            data-row-action
             className="flex h-4 w-3.5 flex-none cursor-grab items-center justify-center text-muted-foreground/45 opacity-70 active:cursor-grabbing group-hover:text-muted-foreground/80"
             title={t('explorer.dragSession')}
             aria-label={t('explorer.dragSession')}

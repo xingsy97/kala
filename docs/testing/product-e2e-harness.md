@@ -53,8 +53,8 @@ Every system E2E report includes:
 ## Isolation
 
 - Every run creates a unique evidence directory under `/tmp`.
-- Hosted tests use temporary identity-provider users and distinct browser contexts.
-- Standalone tests use an unused Box port and temporary HOME/data/workspace roots.
+- Private Cloud tests use temporary identity-provider users and distinct browser contexts.
+- Portable and Dedicated tests use unused ports and temporary HOME/data/workspace roots.
 - Tests never target LXD `13000` until the final release node.
 - System installers run in a disposable LXD instance (or equivalent clean system), never on the developer host.
 - Cleanup runs in reverse resource-creation order and is part of the pass/fail report.

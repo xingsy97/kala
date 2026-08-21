@@ -500,6 +500,53 @@ describe('ExecutorRegistry', () => {
     })
   })
 
+  it('waits event-first for a planned-continuation Executor reconnect', async () => {
+    vi.useFakeTimers()
+    try {
+      const reg = createExecutorRegistry(fakeIo() as never, makeResolver({ 'sess-recovery': 'ws-recovery' }), 5_000)
+      const waiting = reg.waitForSessionExecutor('sess-recovery', 1_000)
+      let settled = false
+      void waiting.then(() => { settled = true })
+      await vi.advanceTimersByTimeAsync(500)
+      expect(settled).toBe(false)
+
+      reg.attach(makeFakeSocket('recovered') as never, announceOf('e-recovered', 'ws-recovery'))
+      await expect(waiting).resolves.toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not commit workspace_offline while a planned continuation waits for its Executor', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-continuation': 'ws-continuation' }),
+      5_000,
+    )
+
+    const pending = reg.callToolWhenAvailable!('sess-continuation', callEffect('continuation-call'))
+    await Promise.resolve()
+
+    const executor = makeFakeSocket('continuation-executor')
+    reg.attach(executor as never, announceOf('e-continuation', 'ws-continuation'))
+    await vi.waitFor(() => expect(executor.emitted).toHaveLength(1))
+    executor.emitted[0]!.ack!({ callId: 'continuation-call', ok: true, content: 'continued' })
+
+    await expect(pending).resolves.toEqual({ ok: true, content: 'continued' })
+  })
+
+  it('bounds a planned-continuation Executor reconnect wait', async () => {
+    vi.useFakeTimers()
+    try {
+      const reg = createExecutorRegistry(fakeIo() as never, makeResolver({ 'sess-timeout': 'ws-timeout' }), 5_000)
+      const waiting = reg.waitForSessionExecutor('sess-timeout', 100)
+      await vi.advanceTimersByTimeAsync(100)
+      await expect(waiting).resolves.toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('routes a call to the executor announcing the matching workspaceId', async () => {
     const reg = createExecutorRegistry(
       fakeIo() as never,

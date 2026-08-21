@@ -56,6 +56,27 @@ describe('Explorer', () => {
     })
   })
 
+  it('uses a compositor-only loader without SVG spin or full-row sweep', () => {
+    render(
+      <Explorer
+        executors={[]}
+        sessions={[]}
+        loading
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+    const loading = screen.getByTestId('explorer-loading')
+    const spinner = loading.querySelector('.ak-loading-spinner')
+    expect(spinner).not.toBeNull()
+    expect(loading.querySelector('svg.animate-spin')).toBeNull()
+    expect(loading.querySelectorAll('.ak-explorer-loading-row')).toHaveLength(5)
+  })
+
   it('shows empty state when there are no daemons and no sessions', () => {
     render(
       <Explorer
@@ -531,10 +552,55 @@ describe('Explorer', () => {
     )
 
     const targetRow = screen.getAllByTestId('session-row').find((row) => row.getAttribute('data-session-id') === target.sessionId)!
-    fireEvent.pointerDown(targetRow, { button: 0, pointerType: 'mouse' })
+    fireEvent.mouseDown(targetRow, { button: 0 })
 
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onSelect).toHaveBeenCalledWith(target.sessionId)
+  })
+
+  it('does not activate a session on mobile pointerdown before the tap target is known', () => {
+    const onSelect = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={null}
+        onSelect={onSelect}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const row = screen.getByTestId('session-row')
+    fireEvent.pointerDown(row, { button: 0, pointerType: 'touch' })
+    expect(onSelect).not.toHaveBeenCalled()
+
+    fireEvent.click(row)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith(sessionSummary.sessionId)
+  })
+
+  it('does not activate a session when a pointer starts on its drag rail', () => {
+    const onSelect = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={null}
+        onSelect={onSelect}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const handle = screen.getByTestId('session-drag-handle')
+    fireEvent.pointerDown(handle, { button: 0, pointerType: 'touch' })
+    fireEvent.click(handle)
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   it('keeps click as a fallback when Tree activation is lost after pointerdown', () => {
@@ -584,7 +650,7 @@ describe('Explorer', () => {
     expect(onClearSelection).toHaveBeenCalledTimes(1)
   })
 
-  it('opens a confirmation dialog and calls onDelete on confirm', () => {
+  it('opens a confirmation dialog and always requests tree deletion', () => {
     const onDelete = vi.fn()
     render(
       <Explorer
@@ -603,7 +669,7 @@ describe('Explorer', () => {
     expect(onDelete).toHaveBeenCalledWith(sessionSummary.sessionId)
   })
 
-  it('offers cascade delete when the session has descendants', () => {
+  it('warns about descendants and deletes the complete tree', () => {
     const onDelete = vi.fn()
     const child: SessionSummary = {
       ...sessionSummary,
@@ -633,9 +699,9 @@ describe('Explorer', () => {
     const parentRow = screen.getAllByTestId('session-row').find((row) => row.getAttribute('data-session-id') === sessionSummary.sessionId)
     expect(parentRow).toBeTruthy()
     fireEvent.click(parentRow!.querySelector('[data-testid="session-delete-button"]')!)
-    expect(screen.getByText(/2 child sessions/i)).toBeTruthy()
-    fireEvent.click(screen.getByTestId('confirm-delete-cascade-button'))
-    expect(onDelete).toHaveBeenCalledWith(sessionSummary.sessionId, { cascade: true })
+    expect(screen.getByText(/2 descendant sessions/i)).toBeTruthy()
+    fireEvent.click(screen.getByTestId('confirm-delete-button'))
+    expect(onDelete).toHaveBeenCalledWith(sessionSummary.sessionId)
   })
 
   it('double-clicking a session enters rename mode; Enter fires onRename', () => {

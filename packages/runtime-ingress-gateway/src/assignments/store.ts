@@ -21,7 +21,7 @@ export interface RuntimeAssignmentStore {
   findUnitByExecutorInvite(inviteToken: string): Promise<string | undefined>
 }
 
-/** Deterministic one-user/one-runtime assignment store for the first SaaS release. */
+/** Deterministic one-user/one-runtime assignment store for the first Private Cloud release. */
 export class MemoryRuntimeAssignmentStore implements RuntimeAssignmentStore {
   private readonly byIdentity = new Map<string, RuntimeAssignment>()
   private readonly executorInviteUnits = new Map<string, string>()

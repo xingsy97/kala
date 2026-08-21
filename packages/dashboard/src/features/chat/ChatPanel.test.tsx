@@ -69,7 +69,7 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
   })
 
-  it('keeps the thinking row visible beside the compact history loading indicator', () => {
+  it('suppresses planning status until authoritative conversation history is loaded', () => {
     render(
       <ChatPanel
         loading
@@ -83,7 +83,7 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+    expect(screen.queryByTestId('inline-status-thinking')).toBeNull()
     expect(screen.getByTestId('transcript-history-loading-indicator').textContent).toContain('Loading conversation history')
     expect(screen.getByTestId('transcript-loading-state').querySelectorAll('.rounded-full')).toHaveLength(1)
     expect(screen.getByTestId('transcript-loading-state').querySelectorAll('.h-16')).toHaveLength(0)

@@ -1,208 +1,77 @@
-import type { AttachedExecutor, BuildMetadata, ServerSettingsPayload } from '@agent-kernel/shared'
+import type { AttachedExecutor, BuildMetadata, DedicatedDeploymentStatus, ServerSettingsPayload } from '@agent-kernel/shared'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { useTranslation } from 'react-i18next'
+import { useQuery } from '@tanstack/react-query'
+import { CheckCircle2, ChevronRight, CircleAlert, CloudCog, MonitorUp, Server, Workflow } from 'lucide-react'
 
 import { EmptyRow, SectionHeader, SettingsRecord, SettingsRecordField, SettingsRecordList } from '../controls.js'
-import { executorSetupCommand } from '../section-utils.js'
 import packageJson from '../../../../package.json'
 
 const DASHBOARD_VERSION = packageJson.version
 
-export function DeploymentSection({
-  payload,
-  executors,
-}: {
-  payload: ServerSettingsPayload
-  executors: readonly AttachedExecutor[]
-}): JSX.Element {
+export function DeploymentSection({ payload, executors, host, token }: { payload: ServerSettingsPayload; executors: readonly AttachedExecutor[]; host: string; token?: string }): JSX.Element {
   const { t } = useTranslation()
+  const statusQuery = useQuery({
+    queryKey: ['dedicated-deployment-status', host],
+    queryFn: async (): Promise<DedicatedDeploymentStatus | null> => {
+      const response = await fetch(`${host.replace(/\/$/u, '')}/runtime/deployment/status`, { cache: 'no-store', credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : undefined })
+      if (response.status === 404) return null
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return await response.json() as DedicatedDeploymentStatus
+    },
+    refetchInterval: 2_000,
+  })
+  const status = statusQuery.data
   const build = payload.versions?.build
-  const rows: Array<{
-    component: string
-    detail?: string
-    version: string
-    commit: string
-    builtAt: string
-    instance: string
-    health: string
-  }> = [
-    {
-      component: t('settings.deployment.hostRuntime'),
-      detail: hostDeliveryLabel(build),
-      version: build?.releaseTag ?? payload.versions?.host ?? '—',
-      commit: build?.gitCommit ?? 'unknown',
-      builtAt: build?.builtAt ?? 'unknown',
-      instance: typeof window === 'undefined' ? t('settings.deployment.sameOriginHost') : window.location.host,
-      health: t('settings.deployment.running'),
-    },
-    {
-      component: t('settings.deployment.dashboardComponent'),
-      detail: dashboardDeliveryLabel(build),
-      version: build?.releaseTag ?? DASHBOARD_VERSION,
-      commit: build?.gitCommit ?? 'unknown',
-      builtAt: build?.builtAt ?? 'unknown',
-      instance: t('settings.deployment.embeddedInHost'),
-      health: build?.dashboardMode ? `${t('settings.deployment.loaded')} · ${build.dashboardMode}` : t('settings.deployment.loaded'),
-    },
-    {
-      component: t('settings.deployment.protocolComponent'),
-      detail: t('settings.deployment.wireContract'),
-      version: payload.versions?.protocol ?? PROTOCOL_VERSION,
-      commit: '—',
-      builtAt: '—',
-      instance: t('settings.deployment.sharedByComponents'),
-      health: t('settings.deployment.compatible'),
-    },
-    ...executors.map((executor) => ({
-      component: `${t('settings.deployment.executorComponent')}: ${executor.workspaceName}`,
-      detail: executor.build ? executorDeliveryLabel(executor.build) : t('settings.deployment.legacyExecutor'),
-      version: executor.executorVersion ?? t('settings.deployment.notReported'),
-      commit: executor.build?.gitCommit ?? t('settings.deployment.notReported'),
-      builtAt: executor.build?.builtAt ?? t('settings.deployment.notReported'),
-      instance: executorInstanceLabel(executor),
-      health: `${executorHealthLabel(executor, t('settings.deployment.connected'), t('settings.deployment.legacyMetadataMissing'))} · attached ${formatTimestamp(executor.attachedAt)}`,
-    })),
-  ]
+  const deploymentHealthy = !status?.deployment || status.deployment.phase === 'completed' && !status.deployment.error && !(status.deployment.blockers?.length)
+  const dashboardCompatible = !status?.dashboard || protocolCompatible(PROTOCOL_VERSION, status.dashboard.protocol)
+  const overallHealthy = !statusQuery.isError && deploymentHealthy && dashboardCompatible
   return (
     <div>
       <SectionHeader title={t('settings.sections.deployment.label')} subtitle={t('settings.deployment.subtitle')} />
-      {payload.socketConnections ? (
-        <div className="mb-4 rounded-md border border-border bg-card/60 px-4 py-3 text-sm" data-testid="settings-socket-connections">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="font-medium text-foreground">{t('settings.deployment.socketConnections')}</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {t('settings.deployment.socketConnectionsDesc', {
-                  total: payload.socketConnections.total,
-                  dashboard: payload.socketConnections.dashboard,
-                  executor: payload.socketConnections.executor,
-                  other: payload.socketConnections.other,
-                })}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground sm:justify-end">
-              {payload.socketConnections.namespaces.map((entry) => (
-                <span key={entry.namespace} className="rounded border border-border bg-background/70 px-2 py-1 font-mono">
-                  {t('settings.deployment.namespaceConnections', { namespace: entry.namespace, sockets: entry.sockets })}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
-      <h4 className="mb-2 text-sm font-semibold text-foreground">{t('settings.deployment.componentInventory')}</h4>
-      <SettingsRecordList testId="settings-component-inventory">
-        {rows.map((row) => (
-          <SettingsRecord key={row.component} title={row.component} detail={row.detail}>
-            <SettingsRecordField label={t('settings.deployment.version')} mono>{row.version}</SettingsRecordField>
-            <SettingsRecordField label={t('settings.deployment.commit')} mono>{row.commit}</SettingsRecordField>
-            <SettingsRecordField label={t('settings.deployment.buildTime')} mono>{row.builtAt}</SettingsRecordField>
-            <SettingsRecordField label={t('settings.deployment.instance')} mono>{row.instance}</SettingsRecordField>
-            <SettingsRecordField label={t('settings.deployment.health')}>{row.health}</SettingsRecordField>
-          </SettingsRecord>
-        ))}
-      </SettingsRecordList>
-      {payload.agentModule ? (
-        <div className="mt-5 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
-          <div className="flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <h4 className="text-sm font-semibold text-foreground">Agent module</h4>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={`${payload.agentModule.id}@${payload.agentModule.version}`}>
-                {payload.agentModule.label} · {payload.agentModule.id}@{payload.agentModule.version}
-              </div>
-            </div>
-            <div className="w-full min-w-0 text-left font-mono text-[11px] text-muted-foreground sm:w-auto sm:flex-none sm:text-right">
-              <div>prompt {payload.agentModule.systemPromptHash.slice(0, 12)}</div>
-              <div>tools {payload.agentModule.toolRegistryHash.slice(0, 12)}</div>
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {payload.agentModule.toolsets.map((toolset) => (
-              <span key={toolset.id} className="inline-flex h-5 items-center rounded bg-background/80 px-1.5 font-mono text-[11px] leading-none text-muted-foreground ring-1 ring-border/40" title={`${toolset.id}@${toolset.version}`}>
-                {toolset.label} · {toolset.toolCount}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      <div className="mt-5">
-        <h4 className="text-sm font-semibold text-foreground">{t('settings.deployment.connectedExecutors')}</h4>
-        <p className="mt-1 text-xs text-muted-foreground">{t('settings.deployment.connectedExecutorsDesc')}</p>
-        {executors.length === 0 ? (
-          <EmptyRow>{t('settings.deployment.noExecutors')}</EmptyRow>
-        ) : (
-          <SettingsRecordList testId="settings-connected-executors" className="mt-3">
-            {executors.map((executor) => (
-              <SettingsRecord key={executor.executorId} title={executor.workspaceName} detail={executor.workspaceId}>
-                <SettingsRecordField label={t('settings.deployment.executor')} mono>{executor.executorId}</SettingsRecordField>
-                <SettingsRecordField label={t('settings.deployment.executorVersion')} mono>{executor.executorVersion ?? '—'}</SettingsRecordField>
-                <SettingsRecordField label={t('settings.deployment.executorProtocol')} mono>{executor.clientVersion ?? '—'}</SettingsRecordField>
-                <SettingsRecordField label={t('settings.deployment.runtime')} mono>{executor.runtime} {executor.runtimeVersion}</SettingsRecordField>
-                <SettingsRecordField label={t('settings.deployment.features')}>{executorCapabilitiesLabel(executor, t)}</SettingsRecordField>
-                <SettingsRecordField label="Tool implementations" mono>{executor.toolImplementations ? Object.entries(executor.toolImplementations).map(([name, value]) => `${name}@${value.version}`).join(', ') : 'not reported'}</SettingsRecordField>
-              </SettingsRecord>
-            ))}
-          </SettingsRecordList>
-        )}
+      <div className="grid gap-2 sm:grid-cols-2" data-testid="settings-deployment-overview">
+        <OverviewCard icon={overallHealthy ? CheckCircle2 : CircleAlert} label={t('settings.deployment.overallStatus')} value={overallHealthy ? t('settings.deployment.healthy') : t('settings.deployment.needsAttention')} tone={overallHealthy ? 'good' : 'warn'} />
+        <OverviewCard icon={MonitorUp} label={t('settings.deployment.dashboardRelease')} value={status?.dashboard?.version ?? build?.releaseTag ?? DASHBOARD_VERSION} detail={status?.dashboard ? t('settings.deployment.generationValue', { generation: status.dashboard.generation }) : dashboardDeliveryLabel(build)} />
+        <OverviewCard icon={Server} label={t('settings.deployment.runtimeRelease')} value={status?.route.activeReleaseId ?? build?.releaseTag ?? payload.versions?.host ?? '—'} detail={status ? t('settings.deployment.activeSlotValue', { slot: status.route.activeSlot }) : hostDeliveryLabel(build)} />
+        <OverviewCard icon={Workflow} label={t('settings.deployment.connectedExecutors')} value={String(executors.length)} detail={t('settings.deployment.executorCountDetail', { count: executors.length })} />
       </div>
+      {status ? <CurrentDeployment status={status} compatible={dashboardCompatible} /> : statusQuery.isError ? <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">{t('settings.deployment.statusUnavailable')}</div> : null}
+      <section className="mt-5" aria-labelledby="connected-executors-heading">
+        <h4 id="connected-executors-heading" className="text-sm font-semibold text-foreground">{t('settings.deployment.connectedExecutors')}</h4>
+        <p className="mt-1 text-xs text-muted-foreground">{t('settings.deployment.connectedExecutorsDesc')}</p>
+        {executors.length === 0 ? <EmptyRow>{t('settings.deployment.noExecutors')}</EmptyRow> : <div className="mt-3 space-y-2" data-testid="settings-connected-executors">{executors.map((executor) => <ExecutorCard key={executor.executorId} executor={executor} />)}</div>}
+      </section>
+      <details className="mt-5 rounded-lg border border-border bg-card/40" data-testid="settings-deployment-diagnostics">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden"><ChevronRight className="h-4 w-4" /><CloudCog className="h-4 w-4 text-muted-foreground" />{t('settings.deployment.versionDiagnostics')}</summary>
+        <div className="border-t border-border px-4 py-4">
+          <SettingsRecordList testId="settings-component-inventory">
+            <SettingsRecord title={t('settings.deployment.hostRuntime')} detail={hostDeliveryLabel(build)}><SettingsRecordField label={t('settings.deployment.version')} mono>{build?.releaseTag ?? payload.versions?.host ?? '—'}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.commit')} mono>{build?.gitCommit ?? '—'}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.buildTime')} mono>{build?.builtAt ?? '—'}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.instance')} mono>{typeof window === 'undefined' ? t('settings.deployment.sameOriginHost') : window.location.host}</SettingsRecordField></SettingsRecord>
+            <SettingsRecord title={t('settings.deployment.dashboardComponent')} detail={status?.dashboard ? t('settings.deployment.independentStaticRelease') : dashboardDeliveryLabel(build)}><SettingsRecordField label={t('settings.deployment.version')} mono>{status?.dashboard?.version ?? DASHBOARD_VERSION}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.releaseDigest')} mono>{shortDigest(status?.dashboard?.releaseDigest)}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.assetDigest')} mono>{shortDigest(status?.dashboard?.assetDigest)}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.protocolRange')} mono>{status?.dashboard ? `${status.dashboard.protocol.min} – ${status.dashboard.protocol.max}` : PROTOCOL_VERSION}</SettingsRecordField></SettingsRecord>
+            <SettingsRecord title={t('settings.deployment.protocolComponent')} detail={t('settings.deployment.wireContract')}><SettingsRecordField label={t('settings.deployment.version')} mono>{payload.versions?.protocol ?? PROTOCOL_VERSION}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.health')}>{dashboardCompatible ? t('settings.deployment.compatible') : t('settings.deployment.incompatible')}</SettingsRecordField></SettingsRecord>
+          </SettingsRecordList>
+          {payload.socketConnections ? <DiagnosticBlock title={t('settings.deployment.socketConnections')} testId="settings-socket-connections"><p>{t('settings.deployment.socketConnectionsDesc', payload.socketConnections)}</p><div className="mt-2 flex flex-wrap gap-1.5">{payload.socketConnections.namespaces.map((entry) => <code key={entry.namespace} className="rounded border border-border bg-background px-2 py-1">{t('settings.deployment.namespaceConnections', { namespace: entry.namespace, sockets: entry.sockets })}</code>)}</div></DiagnosticBlock> : null}
+          {payload.agentModule ? <DiagnosticBlock title={t('settings.deployment.agentModule')}><p className="font-mono">{payload.agentModule.label} · {payload.agentModule.id}@{payload.agentModule.version}</p><p className="mt-1 font-mono">prompt {payload.agentModule.systemPromptHash.slice(0, 12)} · tools {payload.agentModule.toolRegistryHash.slice(0, 12)}</p></DiagnosticBlock> : null}
+        </div>
+      </details>
     </div>
   )
 }
 
-function dashboardDeliveryLabel(build: BuildMetadata | undefined): string {
-  if (!build) return 'unknown'
-  const files = typeof build.embeddedDashboardFiles === 'number' ? `, ${build.embeddedDashboardFiles} files` : ''
-  if (build.dashboardMode === 'embedded') return `embedded in host bundle${files}`
-  if (build.dashboardMode === 'static') return 'static dashboard directory'
-  if (build.dashboardMode === 'vite') return 'Vite development server'
-  return `not bundled (${build.releaseTag})`
+function OverviewCard({ icon: Icon, label, value, detail, tone }: { icon: typeof Server; label: string; value: string; detail?: string; tone?: 'good' | 'warn' }): JSX.Element { return <div className="rounded-lg border border-border bg-card/60 p-3"><div className="flex items-center gap-2 text-xs text-muted-foreground"><Icon className={tone === 'good' ? 'h-4 w-4 text-emerald-500' : tone === 'warn' ? 'h-4 w-4 text-amber-500' : 'h-4 w-4'} />{label}</div><div className="mt-2 truncate text-sm font-semibold text-foreground" title={value}>{value}</div>{detail ? <div className="mt-1 truncate text-xs text-muted-foreground" title={detail}>{detail}</div> : null}</div> }
+function CurrentDeployment({ status, compatible }: { status: DedicatedDeploymentStatus; compatible: boolean }): JSX.Element {
+  const { t } = useTranslation(); const deployment = status.deployment; const admission = status.admission.pending + status.admission.leased; const continuation = deployment?.continuation; const healthy = (!deployment || deployment.phase === 'completed') && !deployment?.error && !(deployment?.blockers?.length) && admission === 0 && compatible
+  return <section className="mt-5 rounded-lg border border-border bg-card/40 p-4" data-testid="settings-dedicated-deployment"><div className="flex items-start justify-between gap-3"><div><h4 className="text-sm font-semibold text-foreground">{t('settings.deployment.currentDeployment')}</h4><p className="mt-1 text-xs text-muted-foreground">{t('settings.deployment.currentDeploymentDesc')}</p></div><span className={healthy ? 'rounded-full bg-emerald-500/10 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300' : 'rounded-full bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300'}>{healthy ? t('settings.deployment.ready') : t('settings.deployment.needsAttention')}</span></div><div className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4"><StatusFact label={t('settings.deployment.activeRuntime')} value={`${status.route.activeSlot} · ${status.route.activeReleaseId}`} /><StatusFact label={t('settings.deployment.deploymentPhase')} value={deployment?.phase ?? t('settings.deployment.idle')} /><StatusFact label={t('settings.deployment.sessionContinuation')} value={continuation ? `${continuation.completed}/${continuation.participants}` : '—'} /><StatusFact label={t('settings.deployment.admissionQueue')} value={admission === 0 ? t('settings.deployment.empty') : String(admission)} /></div>{!compatible ? <Notice>{t('settings.deployment.protocolIncompatible')}</Notice> : null}{deployment?.blockers?.length ? <Notice>{t('settings.deployment.blockersValue', { blockers: deployment.blockers.join(', ') })}</Notice> : null}{deployment?.error ? <Notice>{deployment.error.code}: {deployment.error.message}</Notice> : null}<details className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground"><summary className="cursor-pointer font-medium text-foreground">{t('settings.deployment.technicalDetails')}</summary><div className="mt-3 grid gap-2 sm:grid-cols-2"><StatusFact label={t('settings.deployment.routeGeneration')} value={String(status.route.generation)} mono /><StatusFact label={t('settings.deployment.runtimePid')} value={String(status.slots[status.route.activeSlot].pid || '—')} mono /><StatusFact label={t('settings.deployment.writeLeasePid')} value={String(status.writeLeaseOwnerPid || '—')} mono /><StatusFact label={t('settings.deployment.supervisorPid')} value={String(status.services?.supervisor.pid || '—')} mono /><StatusFact label={t('settings.deployment.runtimeDigest')} value={shortDigest(status.slots[status.route.activeSlot].releaseDigest)} mono /><StatusFact label={t('settings.deployment.deploymentId')} value={deployment?.deploymentId ?? '—'} mono /></div></details></section>
 }
-
-function hostDeliveryLabel(build: BuildMetadata | undefined): string {
-  if (!build) return 'local source checkout'
-  if (build.artifactKind === 'cjs') return 'bundle-dashboard-with-runtime.cjs'
-  if (build.artifactKind === 'native') return 'native host binary'
-  return 'source checkout'
-}
-
-function executorDeliveryLabel(build: BuildMetadata): string {
-  if (build.artifactKind === 'cjs') return 'agent-kernel-executor.cjs'
-  if (build.artifactKind === 'native') return 'native executor binary'
-  return 'source checkout'
-}
-
-function runtimeLabel(runtime: AttachedExecutor['runtime']): string {
-  if (runtime === 'node') return 'Node.js'
-  if (runtime === 'browser-webcontainer') return 'Browser WebContainer'
-  return runtime
-}
-
-function executorInstanceLabel(executor: AttachedExecutor): string {
-  const parts: string[] = []
-  if (executor.hostname) parts.push(executor.hostname)
-  parts.push(`${runtimeLabel(executor.runtime)} ${executor.runtimeVersion}`)
-  if (executor.pid !== undefined) parts.push(`pid ${executor.pid}`)
-  return parts.join(' | ')
-}
-
-function executorHealthLabel(executor: AttachedExecutor, connected: string, legacyMetadataMissing: string): string {
-  if (!executor.build) return legacyMetadataMissing
-  return connected
-}
-
-function formatTimestamp(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
-}
-
-function executorCapabilitiesLabel(executor: AttachedExecutor, t: ReturnType<typeof useTranslation>['t']): string {
-  const features = executor.capabilities?.features
-  if (!features) return t('settings.deployment.legacyMetadataMissing')
-  const labels = [
-    features.backgroundShell ? t('settings.deployment.featureBackgroundShell') : null,
-    features.filePicker ? t('settings.deployment.featureFilePicker') : null,
-    features.overflowFiles ? t('settings.deployment.featureOverflowFiles') : null,
-    features.workspaceSandbox ? t('settings.deployment.featureWorkspaceSandbox') : null,
-  ].filter((label): label is string => Boolean(label))
-  return labels.length > 0 ? labels.join(', ') : t('settings.deployment.noSpecialFeatures')
-}
+function ExecutorCard({ executor }: { executor: AttachedExecutor }): JSX.Element { const { t } = useTranslation(); return <details className="rounded-lg border border-border bg-card/40"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden"><div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500" /><span className="truncate text-sm font-medium text-foreground">{executor.workspaceName}</span></div><div className="mt-1 truncate text-xs text-muted-foreground">{executorInstanceLabel(executor)}</div></div><div className="flex flex-none items-center gap-2 text-xs text-muted-foreground"><span>{executor.executorVersion ?? t('settings.deployment.notReported')}</span><ChevronRight className="h-4 w-4" /></div></summary><div className="grid gap-2 border-t border-border px-4 py-3 text-xs sm:grid-cols-2"><StatusFact label={t('settings.deployment.workspace')} value={executor.workspaceId} mono /><StatusFact label={t('settings.deployment.executor')} value={executor.executorId} mono /><StatusFact label={t('settings.deployment.executorProtocol')} value={executor.clientVersion ?? '—'} mono /><StatusFact label={t('settings.deployment.attachedAt')} value={formatTimestamp(executor.attachedAt)} /><StatusFact label={t('settings.deployment.features')} value={executorCapabilitiesLabel(executor, t)} /><StatusFact label={t('settings.deployment.toolImplementations')} value={executor.toolImplementations ? Object.entries(executor.toolImplementations).map(([name, value]) => `${name}@${value.version}`).join(', ') : t('settings.deployment.notReported')} mono /></div></details> }
+function StatusFact({ label, value, mono }: { label: string; value: string; mono?: boolean }): JSX.Element { return <div className="min-w-0"><div className="text-muted-foreground">{label}</div><div className={`mt-0.5 break-words text-foreground ${mono ? 'font-mono' : ''}`} title={value}>{value}</div></div> }
+function Notice({ children }: { children: React.ReactNode }): JSX.Element { return <div className="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">{children}</div> }
+function DiagnosticBlock({ title, children, testId }: { title: string; children: React.ReactNode; testId?: string }): JSX.Element { return <div className="mt-4 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground" data-testid={testId}><div className="mb-2 font-medium text-foreground">{title}</div>{children}</div> }
+function shortDigest(value: string | undefined): string { return value ? value.slice(0, 12) : '—' }
+function dashboardDeliveryLabel(build: BuildMetadata | undefined): string { if (!build) return 'unknown'; if (build.dashboardMode === 'embedded') return 'embedded'; if (build.dashboardMode === 'static') return 'static'; return build.dashboardMode ?? 'none' }
+function hostDeliveryLabel(build: BuildMetadata | undefined): string { if (!build) return 'local source'; if (build.artifactKind === 'native') return 'native'; return build.dashboardMode === 'embedded' ? 'portable bundle' : 'runtime-only bundle' }
+function runtimeLabel(runtime: AttachedExecutor['runtime']): string { return runtime === 'node' ? 'Node.js' : runtime === 'browser-webcontainer' ? 'Browser WebContainer' : runtime }
+function executorInstanceLabel(executor: AttachedExecutor): string { return [executor.hostname, `${runtimeLabel(executor.runtime)} ${executor.runtimeVersion}`, executor.os].filter(Boolean).join(' · ') }
+function formatTimestamp(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString() }
+function protocolCompatible(current: string, range: { min: string; max: string }): boolean { return compareVersion(current, range.min) >= 0 && compareVersion(current, range.max) <= 0 }
+function compareVersion(left: string, right: string): number { const a = left.split('.').map(Number), b = right.split('.').map(Number); for (let i = 0; i < 3; i++) { const delta = (a[i] ?? 0) - (b[i] ?? 0); if (delta) return delta } return 0 }
+function executorCapabilitiesLabel(executor: AttachedExecutor, t: ReturnType<typeof useTranslation>['t']): string { const features = executor.capabilities?.features; if (!features) return t('settings.deployment.legacyMetadataMissing'); const labels = [features.backgroundShell ? t('settings.deployment.featureBackgroundShell') : null, features.filePicker ? t('settings.deployment.featureFilePicker') : null, features.overflowFiles ? t('settings.deployment.featureOverflowFiles') : null, features.workspaceSandbox ? t('settings.deployment.featureWorkspaceSandbox') : null].filter((label): label is string => Boolean(label)); return labels.length ? labels.join(', ') : t('settings.deployment.noSpecialFeatures') }

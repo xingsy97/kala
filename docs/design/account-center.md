@@ -1,7 +1,7 @@
 # Account Center Design
 
 **Status:** accepted design
-**Scope:** hosted deployment only
+**Scope:** Private Cloud deployment only
 
 ## Information architecture
 
@@ -42,7 +42,7 @@ The existing notification-device controls remain under Personal Settings but are
 - **Agent:** Model, approval, prompt/preset.
 - **Administration:** Provider/runtime/socket diagnostics, shown only when deployment mode and authorization permit.
 
-Hosted ordinary users must not see self-hosting controls they cannot use. Standalone retains operator controls without pretending an end-user account exists.
+Private Cloud ordinary users must not see operator controls they cannot use. Dedicated retains operator controls without pretending an end-user account exists.
 
 ## State requirements
 

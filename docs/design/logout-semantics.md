@@ -1,7 +1,7 @@
 # Logout Semantics
 
 **Status:** accepted product contract
-**Scope:** hosted deployment; Standalone has no end-user login
+**Scope:** Private Cloud deployment; Dedicated has no end-user login
 
 ## Product actions
 

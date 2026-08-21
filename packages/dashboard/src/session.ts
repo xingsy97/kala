@@ -89,6 +89,7 @@ export type SessionView = {
   selectedModel: string | null
   toolExecutionStartedAt: number | null
   hydratedSessionId: string | null
+  historyLoadedSessionId: string | null
   socket: DashboardSocket | null
 }
 
@@ -156,7 +157,7 @@ export function useSession({
       config: projection.config, contextSnapshot: projection.contextSnapshot, timeline: projection.timeline,
       queuedMessages: projection.queuedMessages, lastError: projection.lastError,
       parentSessionId: projection.parentSessionId, parentCursor: projection.parentCursor,
-      selectedModel: projection.selectedModel, hydratedSessionId: projection.hydratedSessionId,
+      selectedModel: projection.selectedModel, hydratedSessionId: projection.hydratedSessionId, historyLoadedSessionId: projection.historyLoadedSessionId,
     }
     pendingCacheCheckpointRef.current = { sessionId: projection.sessionId, view: checkpoint }
     const timer = window.setTimeout(() => {
@@ -169,7 +170,7 @@ export function useSession({
 
   useEffect(() => () => {
     const pending = pendingCacheCheckpointRef.current
-    if (cache && pending) cache.set(pending.sessionId, pending.view)
+    if (cache && pending) queueMicrotask(() => cache.set(pending.sessionId, pending.view))
     pendingCacheCheckpointRef.current = null
   }, [cache, sessionId])
 
@@ -192,6 +193,9 @@ export function useSession({
       streamRafRef.current = null
     }
     let resetHistoryBaseOnNextReplay = false
+    let historyRequestTimer: number | null = null
+    let historyRequestAttempts = 0
+    let latestHistoryRequest: { sessionId: string; sinceCursor?: number } | null = null
 
     // Coalesce the two high-frequency projection channels (`event:appended`
     // and `state:changed`) to at most one React commit per animation frame.
@@ -389,6 +393,20 @@ export function useSession({
       }
     }
 
+    const requestHistory = (socket: DashboardSocket, payload: { sessionId: string; sinceCursor?: number }): void => {
+      latestHistoryRequest = payload
+      historyRequestAttempts += 1
+      socket.emit('client:load_history', payload)
+      if (historyRequestTimer !== null) window.clearTimeout(historyRequestTimer)
+      historyRequestTimer = window.setTimeout(() => {
+        if (disposed || !latestHistoryRequest) return
+        if (historyRequestAttempts < 3) { requestHistory(socket, latestHistoryRequest); return }
+        latestHistoryRequest = null
+        dispatchProjectionEvent({ kind: 'history', generation, sessionId, entries: [] })
+        dispatchProjectionEvent({ kind: 'error', generation, sessionId, error: { sessionId, scope: 'host', message: 'Conversation history request timed out. Reconnect or retry this Session.' } })
+      }, 10_000)
+    }
+
     const bindSocket = (socket: DashboardSocket): void => {
       const listenerCleanups: Array<() => void> = []
       const bind = <EventName extends keyof DashboardServerToClientEvents | 'connect_error' | 'disconnect'>(
@@ -439,16 +457,16 @@ export function useSession({
           cache?.delete(p.sessionId)
           dispatchProjectionEvent({ kind: 'reset_timeline', generation, sessionId })
         }
-        socket.emit('client:load_history', { sessionId: p.sessionId })
+        requestHistory(socket, { sessionId: p.sessionId })
         return
       }
-      socket.emit('client:load_history', {
-        sessionId: p.sessionId,
-        sinceCursor: hydration.sinceCursor,
-      })
+      requestHistory(socket, { sessionId: p.sessionId, sinceCursor: hydration.sinceCursor })
     })
     bind('server:history', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
+      latestHistoryRequest = null
+      historyRequestAttempts = 0
+      if (historyRequestTimer !== null) { window.clearTimeout(historyRequestTimer); historyRequestTimer = null }
       const reset = resetHistoryBaseOnNextReplay
       resetHistoryBaseOnNextReplay = false
       flushProjectionQueue()
@@ -500,6 +518,11 @@ export function useSession({
     })
     bind('session:error', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
+      if (latestHistoryRequest) {
+        latestHistoryRequest = null
+        if (historyRequestTimer !== null) { window.clearTimeout(historyRequestTimer); historyRequestTimer = null }
+        dispatchProjectionEvent({ kind: 'history', generation, sessionId, entries: [] })
+      }
       resetStream()
       flushProjectionQueue()
       dispatchProjectionEvent({ kind: 'error', generation, sessionId, error: p })
@@ -564,6 +587,10 @@ export function useSession({
         cancelAnimationFrame(projectionRaf)
         projectionRaf = null
       }
+      if (historyRequestTimer !== null) {
+        window.clearTimeout(historyRequestTimer)
+        historyRequestTimer = null
+      }
       // Drop any buffered projection deltas: this socket/session is being torn
       // down (session switch or reconnect), and the fresh connection replays
       // an authoritative baseline via session:ready + history.
@@ -582,7 +609,7 @@ export function useSession({
 
   const {
     status, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
-    queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, hydratedSessionId,
+    queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, hydratedSessionId, historyLoadedSessionId,
   } = projection
 
   const pendingApprovals = useMemo<readonly ApprovalRequiredEvent[]>(() => {
@@ -637,7 +664,8 @@ export function useSession({
       selectedModel,
       toolExecutionStartedAt,
       hydratedSessionId,
-      socket: boundSocket?.sessionId === sessionId ? boundSocket.socket : null,
+      historyLoadedSessionId,
+      socket: sessionId && sharedSocket ? sharedSocket : boundSocket?.sessionId === sessionId ? boundSocket.socket : null,
     }),
     [
       status,
@@ -656,7 +684,9 @@ export function useSession({
       selectedModel,
       toolExecutionStartedAt,
       hydratedSessionId,
+      historyLoadedSessionId,
       boundSocket,
+      sharedSocket,
       sessionId,
     ],
   )
@@ -740,9 +770,8 @@ export function respondApproval(
 export function deleteSession(
   socket: DashboardSocket,
   sessionId: string,
-  options: { cascade?: boolean } = {},
 ): Promise<void> {
-  return emitRpc(socket, 'client:delete_session', { sessionId, ...(options.cascade ? { cascade: true } : {}) })
+  return emitRpc(socket, 'client:delete_session', { sessionId })
 }
 
 /**

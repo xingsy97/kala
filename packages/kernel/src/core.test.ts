@@ -432,6 +432,25 @@ describe('transition diagnostics', () => {
     })
   })
 
+  it('rejects reused Tool call identities without dispatching another side effect', () => {
+    const state: AgentState = {
+      ...initial(),
+      status: 'thinking',
+      messages: [
+        ...initial().messages,
+        asst({ type: 'tool_call', callId: 'already-used', name: 'read', input: { path: '/tmp/a' } }),
+        { role: 'tool', content: [{ type: 'tool_result', callId: 'already-used', ok: true, content: 'done' }] },
+      ],
+    }
+    const result = step(state, {
+      kind: 'llm_response',
+      message: asst({ type: 'tool_call', callId: 'already-used', name: 'read', input: { path: '/tmp/b' } }),
+    }, CONFIG)
+    expect(result.transition).toMatchObject({ outcome: 'rejected', reason: 'invalid_event_payload' })
+    expect(result.next).toEqual({ ...state, cursor: state.cursor + 1 })
+    expect(result.effects).toEqual([])
+  })
+
   it('describes every status and reports every absent transition cell as ignored', () => {
     const states: Record<AgentState['status'], AgentState> = {
       idle: initial(),

@@ -81,6 +81,21 @@ describe('configured tool execution', () => {
     expect(dispatched).toBe('bash')
   })
 
+  it('uses the reconnect-aware dispatcher only for planned continuation', async () => {
+    const record = await store.create({ sessionId: 'sess-continuation', config: createConfig({ tools: [{ name: 'shell', description: 'shell', inputSchema: { type: 'object' }, requiresApproval: false, executionKind: 'executor', executionHandler: 'bash' }] }) })
+    let ordinary = 0
+    let continuation = 0
+    const tools: ToolDispatcher = {
+      async callTool() { ordinary += 1; return { ok: false, content: 'offline' } },
+      async callToolWhenAvailable(_sessionId, dispatched) { continuation += 1; return { ok: true, content: dispatched.name } },
+      cancelPending() {},
+    }
+
+    await expect(dispatchConfiguredTool(deps(store, tools), record.sessionId, effect('shell'), new Map())).resolves.toEqual({ ok: false, content: 'offline' })
+    await expect(dispatchConfiguredTool(deps(store, tools), record.sessionId, effect('shell'), new Map(), undefined, undefined, true)).resolves.toEqual({ ok: true, content: 'bash' })
+    expect({ ordinary, continuation }).toEqual({ ordinary: 1, continuation: 1 })
+  })
+
   it('forces historical executor websearch schemas through the Host handler', async () => {
     const record = await store.create({
       sessionId: 'sess-legacy-websearch',

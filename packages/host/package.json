@@ -14,8 +14,8 @@
   "bin": {
     "agent-kernel-host": "./dist/bin/agent-kernel-host.js",
     "agent-runlab-runtime-service": "./dist/bin/agent-runlab-runtime-service.js",
-    "agent-runlab-standalone-ingress": "./dist/bin/agent-runlab-standalone-ingress.js",
-    "agent-runlab-deploy-supervisor": "./dist/bin/agent-runlab-deploy-supervisor.js"
+    "agent-runlab-dedicated-ingress": "./dist/bin/agent-runlab-dedicated-ingress.js",
+    "agent-runlab-dedicated-deploy-supervisor": "./dist/bin/agent-runlab-dedicated-deploy-supervisor.js"
   },
   "files": [
     "dist",

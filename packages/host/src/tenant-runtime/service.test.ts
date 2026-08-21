@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createConfig } from '@agent-kernel/kernel'
-import { PROTOCOL_VERSION, SAAS_RUNTIME_CAPABILITIES, type ServerSessionsPayload } from '@agent-kernel/shared'
+import { AGENT_RUNTIME_CAPABILITIES, PROTOCOL_VERSION, type ServerSessionsPayload } from '@agent-kernel/shared'
 import { io as connect, type Socket } from 'socket.io-client'
 
 import type { LLMAdapter } from '../llm/adapter.js'
@@ -38,7 +38,7 @@ describe('multi-tenant Host composition', () => {
         sessionsDir: join(root, id, 'sessions'),
         llm,
         defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }),
-        capabilities: SAAS_RUNTIME_CAPABILITIES,
+        capabilities: AGENT_RUNTIME_CAPABILITIES,
       }),
     })
     const origin = `http://127.0.0.1:${host.port}`
@@ -68,7 +68,7 @@ describe('multi-tenant Host composition', () => {
       resolveUnitId: (request) => String(request.headers['x-runtime-unit'] ?? ''),
       factory: async (id) => startLoopbackHostRuntimeUnit(id, {
         sessionsDir: join(root, id, 'sessions'), llm,
-        defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }), capabilities: SAAS_RUNTIME_CAPABILITIES,
+        defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }), capabilities: AGENT_RUNTIME_CAPABILITIES,
       }),
     })
     const origin = `http://127.0.0.1:${host.port}`
@@ -96,7 +96,7 @@ describe('multi-tenant Host composition', () => {
     const unit = await startLoopbackHostRuntimeUnit('workspace-unit', {
       sessionsDir: join(root, 'sessions'), workspaceDir, llm,
       defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }),
-      capabilities: SAAS_RUNTIME_CAPABILITIES,
+      capabilities: AGENT_RUNTIME_CAPABILITIES,
     })
     const attached = unit.server.executorsSnapshot()
     expect(attached).toHaveLength(1)
@@ -111,7 +111,7 @@ describe('multi-tenant Host composition', () => {
 
   it('isolates executor registries when tenants reuse workspace ids', async () => {
     const root = await mkdtemp(join(tmpdir(), 'multi-tenant-executors-')); roots.push(root)
-    host = await startTenantRuntimeService({ port: 0, resolveUnitId: (request) => String(request.headers['x-runtime-unit'] ?? ''), factory: async (id) => startLoopbackHostRuntimeUnit(id, { sessionsDir: join(root, id, 'sessions'), llm, defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }), capabilities: SAAS_RUNTIME_CAPABILITIES }) })
+    host = await startTenantRuntimeService({ port: 0, resolveUnitId: (request) => String(request.headers['x-runtime-unit'] ?? ''), factory: async (id) => startLoopbackHostRuntimeUnit(id, { sessionsDir: join(root, id, 'sessions'), llm, defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }), capabilities: AGENT_RUNTIME_CAPABILITIES }) })
     const origin = `http://127.0.0.1:${host.port}`
     for (const unit of ['a', 'b']) {
       const executor = connect(`${origin}/executor`, { transports: ['websocket'], extraHeaders: { 'x-runtime-unit': unit }, auth: { role: 'executor', clientVersion: PROTOCOL_VERSION } })

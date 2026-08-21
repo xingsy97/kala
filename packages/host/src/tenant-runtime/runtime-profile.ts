@@ -1,10 +1,10 @@
 import {
   FULL_RUNTIME_CAPABILITIES,
-  SAAS_RUNTIME_CAPABILITIES,
+  AGENT_RUNTIME_CAPABILITIES,
   type RuntimeCapabilities,
 } from '@agent-kernel/shared'
 
-export type RuntimeProfileName = 'standalone' | 'saas'
+export type RuntimeProfileName = 'full' | 'agent'
 export type RuntimeModuleId =
   | 'agent'
   | 'workspace'
@@ -40,12 +40,12 @@ export type RuntimeProfile = {
 const COMMON_MODULES: readonly RuntimeModuleId[] = ['agent', 'workspace', 'artifacts', 'notifications']
 
 export const RUNTIME_PROFILES: Readonly<Record<RuntimeProfileName, RuntimeProfile>> = Object.freeze({
-  standalone: Object.freeze({
-    name: 'standalone',
+  full: Object.freeze({
+    name: 'full',
     modules: Object.freeze<RuntimeModuleId[]>([...COMMON_MODULES, 'benchmark', 'evaluation']),
   }),
-  saas: Object.freeze({
-    name: 'saas',
+  agent: Object.freeze({
+    name: 'agent',
     modules: Object.freeze([...COMMON_MODULES]),
   }),
 })
@@ -125,7 +125,7 @@ export function deriveRuntimeCapabilities(modules: readonly RuntimeModule[]): Ru
 }
 
 export function assertProfileCapabilities(profile: RuntimeProfileName, actual: RuntimeCapabilities): void {
-  const expected = profile === 'standalone' ? FULL_RUNTIME_CAPABILITIES : SAAS_RUNTIME_CAPABILITIES
+  const expected = profile === 'full' ? FULL_RUNTIME_CAPABILITIES : AGENT_RUNTIME_CAPABILITIES
   for (const key of Object.keys(expected) as Array<keyof RuntimeCapabilities>) {
     if (actual[key] !== expected[key]) throw new Error(`Runtime profile ${profile} capability ${key} must be ${String(expected[key])}`)
   }

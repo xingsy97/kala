@@ -1,0 +1,44 @@
+[Unit]
+Description=Agent RunLab Dedicated Runtime Slot %i for logical Unit local
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=agent-runlab
+Group=agent-runlab
+EnvironmentFile=-/etc/agent-runlab/dedicated.env
+EnvironmentFile=/etc/agent-runlab/slots/%i.env
+EnvironmentFile=-/etc/agent-runlab/handoff.env
+EnvironmentFile=-/var/lib/agent-runlab/deploy/runtime.env
+Environment=HOME=/var/lib/agent-runlab
+Environment=AGENT_RUNLAB_DEPLOYMENT_CONFIG=/etc/agent-runlab/deployment.json
+Environment=HOST_LISTEN_HOST=127.0.0.1
+Environment=SESSIONS_DIR=/var/lib/agent-runlab/.agent-kernel/sessions
+Environment=AGENT_KERNEL_ARTIFACTS_DIR=/var/lib/agent-runlab/.agent-kernel/artifacts
+Environment=HOST_EXECUTOR_IDENTITIES=/var/lib/agent-runlab/.agent-kernel/executor-identities.json
+Environment=AGENT_RUNLAB_WRITE_LEASE=/var/lib/agent-runlab/units/local/write.lock
+Environment=AGENT_RUNLAB_RUNTIME_READINESS=/run/agent-runlab/unit-%i-readiness.json
+Environment=AGENT_RUNLAB_PROCESS_READINESS=/run/agent-runlab/unit-%i-process-ready.json
+Environment=AGENT_RUNLAB_ROUTE_STATE=/var/lib/agent-runlab/deploy/route-state.json
+Environment=AGENT_RUNLAB_SLOT=%i
+ExecStartPre=/usr/bin/rm -f /run/agent-runlab/unit-%i-readiness.json
+ExecStartPre=/usr/bin/rm -f /run/agent-runlab/unit-%i-process-ready.json
+ExecStart=/usr/bin/flock --exclusive --nonblock --no-fork /var/lib/agent-runlab/units/local/write.lock /usr/bin/node /var/lib/agent-runlab/deploy/slots/%i/agent-runlab-runtime.cjs --port ${HOST_PORT}
+ExecStopPost=/usr/bin/rm -f /run/agent-runlab/unit-%i-readiness.json /run/agent-runlab/unit-%i-process-ready.json
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=90s
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/agent-runlab/deploy
+ReadWritePaths=/var/lib/agent-runlab/units/local /var/lib/agent-runlab/.agent-kernel /var/lib/agent-runlab/.cache /var/lib/agent-runlab/deploy/requests /var/lib/agent-runlab/deploy/submissions /run/agent-runlab
+RuntimeDirectory=agent-runlab
+RuntimeDirectoryPreserve=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -5,8 +5,8 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
-import { unlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 
 import type {
   AgentConfig,
@@ -84,7 +84,19 @@ export type CreateSessionParams = {
 
 export type SessionStoreOptions = {
   runtimeConfig?: AgentConfig | (() => AgentConfig)
+  /** Root used by Host-side artifacts that partition data by Session ID. */
+  artifactRootDir?: string | false
+  /** Removes registry-backed Session artifacts that live outside artifactRootDir. */
+  deleteRegisteredArtifacts?(sessionId: string): Promise<void>
 }
+
+const SESSION_ARTIFACT_KINDS = [
+  'message-assembly',
+  'router-decisions',
+  'tool-catalog',
+  'compaction-summaries',
+  'subagent-policies',
+] as const
 
 export class SessionStore {
   private readonly records = new Map<string, SessionRecord>()
@@ -546,12 +558,30 @@ export class SessionStore {
   }
 
   async delete(sessionId: string): Promise<void> {
-    const cached = this.records.get(sessionId)
-    const path = cached?.logPath ?? this.findLogByPrefix(sessionId)
+    const paths = this.findLogsBySessionId(sessionId)
+    const artifactSlugs = new Set(paths.map((path) => basename(path, '.jsonl')))
+    const logArtifactRoot = join(this.sessionsDir, 'artifacts')
+    if (existsSync(logArtifactRoot)) {
+      for (const entry of readdirSync(logArtifactRoot)) {
+        if (entry.endsWith(`_${sessionId}`)) artifactSlugs.add(entry)
+      }
+    }
     this.records.delete(sessionId)
     this.inFlight.delete(sessionId)
-    if (path) this.summaryCache.delete(path)
-    if (path && existsSync(path)) await unlink(path)
+    this.recordTails.delete(sessionId)
+    for (const path of paths) {
+      this.summaryCache.delete(path)
+      await rm(path, { force: true })
+    }
+    for (const slug of artifactSlugs) {
+      await rm(safeDirectChild(logArtifactRoot, slug), { recursive: true, force: true })
+    }
+    if (this.options.artifactRootDir) {
+      for (const kind of SESSION_ARTIFACT_KINDS) {
+        await rm(safeDirectChild(join(this.options.artifactRootDir, kind), sessionId), { recursive: true, force: true })
+      }
+    }
+    await this.options.deleteRegisteredArtifacts?.(sessionId)
   }
 
   async listSummaries(): Promise<SessionSummary[]> {
@@ -602,10 +632,14 @@ export class SessionStore {
   }
 
   private findLogByPrefix(sessionId: string): string | undefined {
-    if (!existsSync(this.sessionsDir)) return undefined
-    const files = readdirSync(this.sessionsDir)
-    const match = files.find((f) => f.endsWith(`_${sessionId}.jsonl`))
-    return match ? join(this.sessionsDir, match) : undefined
+    return this.findLogsBySessionId(sessionId)[0]
+  }
+
+  private findLogsBySessionId(sessionId: string): string[] {
+    if (!existsSync(this.sessionsDir)) return []
+    return readdirSync(this.sessionsDir)
+      .filter((file) => file.endsWith(`_${sessionId}.jsonl`))
+      .map((file) => join(this.sessionsDir, file))
   }
 
   private async loadFromFile(
@@ -791,6 +825,13 @@ export class SessionStore {
     this.summaryCache.delete(record.logPath)
     return { event, effects }
   }
+}
+
+function safeDirectChild(parent: string, child: string): string {
+  const root = resolve(parent)
+  const target = resolve(root, child)
+  if (dirname(target) !== root) throw new Error('refusing to delete an unsafe Session artifact path')
+  return target
 }
 
 function interruptedLlmRecoveryEvent(): AgentEvent {

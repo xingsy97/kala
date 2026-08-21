@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from './session.js'
-import { appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, visibleMessages, visibleTranscript } from './transcript.js'
+import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, visibleMessages, visibleTranscript } from './transcript.js'
 
 const system: Message = {
   role: 'system',
@@ -38,6 +38,17 @@ describe('appendTranscriptBaseItems', () => {
     const first: TimelineEntry = { seq: 1, ts: '2026-01-01T00:00:00Z', event: { kind: 'user_message', text: 'one' }, effects: [] }
     const replacement: TimelineEntry = { ...first, event: { kind: 'user_message', text: 'changed' } }
     expect(appendTranscriptBaseItems(transcriptBaseItems([], [first]), [first], [replacement])).toBeNull()
+  })
+})
+
+describe('optimistic to durable message handoff', () => {
+  it('never renders the same accepted user message in both durable and optimistic rows', () => {
+    const timeline: TimelineEntry[] = [{ seq: 1, ts: '2026-01-01T00:00:00Z', event: { kind: 'user_message', text: 'send once' }, effects: [] }]
+    const pending = [{ id: 'pending-1', text: 'send once', mode: 'steer' as const, createdAt: '2026-01-01T00:00:00Z' }]
+    const visiblePending = reconcilePendingUserMessages(pending, timeline, [], 'thinking', '')
+    const rendered = appendLiveTranscriptItems(transcriptBaseItems([], timeline), [], timeline, '', visiblePending, [])
+    expect(rendered.filter((item) => item.kind === 'message' || item.kind === 'pending_user_message')).toHaveLength(1)
+    expect(rendered[0]).toMatchObject({ kind: 'message', message: { role: 'user' } })
   })
 })
 

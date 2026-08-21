@@ -35,6 +35,7 @@ export function transitionAgentState(
 
 export function createConfig(params: {
   tools: readonly ToolSchema[]
+  toolDisclosureMode?: 'legacy_full' | 'progressive'
   systemPrompt?: string
   agentModule?: AgentModuleMetadata
   contextLimit?: number
@@ -45,6 +46,7 @@ export function createConfig(params: {
 }): AgentConfig {
   return {
     tools: params.tools,
+    ...(params.toolDisclosureMode !== undefined ? { toolDisclosureMode: params.toolDisclosureMode } : {}),
     systemPrompt: params.systemPrompt,
     ...(params.agentModule !== undefined
       ? { agentModule: params.agentModule }

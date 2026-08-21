@@ -25,6 +25,27 @@ test('host build is clean and release verification rejects legacy evaluation con
   assert.match(verifier, /src\/eval\//)
 })
 
+test('release builders remove native scratch files and verification rejects undeclared files', () => {
+  const builder = read('scripts/release/build-release-assets.mjs')
+  const verifier = read('scripts/release/verify-release-assets.mjs')
+  assert.match(builder, /removeNativeBuildWorkspace\(\)/)
+  assert.match(builder, /rmSync\(join\(outDir, '\.sea'\), \{ recursive: true, force: true \}\)/)
+  assert.match(verifier, /release file set does not exactly match its manifest/)
+  assert.match(verifier, /actualReleaseEntries\.some\(\(entry\) => !entry\.isFile\(\)\)/)
+})
+
+test('Dashboard release manifest materializes the file iterator before mapping and sorting', () => {
+  const builder = read('scripts/release/build-release-assets.mjs')
+  assert.ok(builder.includes('const files = [...walkFiles(dir)].map'))
+  assert.ok(!builder.includes('const files = walkFiles(dir).map'))
+})
+
+test('release verification rejects embedded Dashboard assignment without rejecting runtime feature detection', () => {
+  const verifier = read('scripts/release/verify-release-assets.mjs')
+  assert.ok(verifier.includes("platformRuntime.includes('globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=')"))
+  assert.ok(!verifier.includes("platformRuntime.includes('__AGENT_KERNEL_EMBEDDED_DASHBOARD__')"))
+})
+
 test('root tests expose fast and extended aggregation without experiments', () => {
   const root = JSON.parse(read('package.json'))
   assert.equal(root.scripts.test, 'pnpm run test:fast')

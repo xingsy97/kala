@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import test from 'node:test'
 
@@ -29,7 +30,7 @@ test('uses product native names while retaining deterministic legacy names', () 
   assert.throws(() => executorNativeAssetName('freebsd-x64'))
 })
 
-test('generates fail-closed installers that require checksummed native executables', () => {
+test('generates fail-closed installers with checksummed native or Node.js fallback', () => {
   const sh = generateExecutorInstallerSh({ repo: 'owner/repo', tag: 'v1.2.3' })
   const ps1 = generateExecutorInstallerPs1({ repo: 'owner/repo', tag: 'latest' })
   for (const text of [sh, ps1]) {
@@ -38,7 +39,9 @@ test('generates fail-closed installers that require checksummed native executabl
     assert.match(text, /runlab-executor-/)
     assert.match(text, /--internal-installer/)
   }
-  assert.doesNotMatch(sh, /agent-kernel-executor\.cjs|manifest\.json/)
+  assert.match(sh, /agent-kernel-executor\.cjs/)
+  assert.match(sh, /Node\.js 22\+/)
+  assert.doesNotMatch(sh, /manifest\.json/)
   assert.match(ps1, /agent-kernel-executor\.cjs/)
   assert.match(ps1, /Get-Command node/)
   assert.match(ps1, /Get-FileHash -Algorithm SHA256/)
@@ -68,8 +71,37 @@ test('generates fail-closed installers that require checksummed native executabl
 
 test('release builder emits both installer assets and product manifest mapping', () => {
   const builder = readFileSync(new URL('./build-release-assets.mjs', import.meta.url), 'utf8')
+  assert.match(builder, /sourceSnapshotSha256/u)
+  assert.match(builder, /release source changed while assets were being built/u)
   assert.match(builder, /generateExecutorInstallerSh/)
   assert.match(builder, /generateExecutorInstallerPs1/)
   assert.match(builder, /'runlab-executor': executorProductNatives/)
   assert.match(builder, /legacyExecutorNativeAssetName/)
+})
+
+test('generated shell installer executes the checksummed Node fallback from a real release directory', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'runlab-installer-e2e-'))
+  const release = join(dir, 'release')
+  const bin = join(dir, 'bin')
+  const work = join(dir, 'work')
+  try {
+    mkdirSync(release, { recursive: true })
+    mkdirSync(bin, { recursive: true })
+    const cjs = 'console.log("fallback executor invoked")\n'
+    writeFileSync(join(release, 'agent-kernel-executor.cjs'), cjs)
+    const hash = createHash('sha256').update(cjs).digest('hex')
+    writeFileSync(join(release, 'SHA256SUMS'), `${hash}  agent-kernel-executor.cjs\n`)
+    writeFileSync(join(bin, 'uname'), '#!/bin/sh\n[ "$1" = -m ] && echo x86_64 || echo Linux\n', { mode: 0o755 })
+    writeFileSync(join(bin, 'wget'), '#!/bin/sh\nout=""; while [ $# -gt 0 ]; do [ "$1" = -O ] && { out="$2"; shift 2; continue; }; url="$1"; shift; done; cp "$FAKE_RELEASE_DIR/${url##*/}" "$out"\n', { mode: 0o755 })
+    writeFileSync(join(bin, 'node'), '#!/bin/sh\nif [ "$1" = -p ]; then echo 22; exit 0; fi\nprintf "%s\\n" "$@" > "$FAKE_NODE_ARGS"\n', { mode: 0o755 })
+    const installer = join(dir, 'install.sh')
+    writeFileSync(installer, generateExecutorInstallerSh({ repo: 'owner/repo', tag: 'latest' }), { mode: 0o755 })
+    const argsFile = join(dir, 'node-args')
+    const result = spawnSync('bash', [installer, '--host', 'https://host.invalid'], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNLAB_INSTALLER_ALLOW_UNSIGNED: '1', RUNLAB_RELEASE_ASSETS_URL: 'https://assets.invalid', RUNLAB_INSTALLER_WORK_DIR: work, FAKE_RELEASE_DIR: release, FAKE_NODE_ARGS: argsFile } })
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+    const invoked = readFileSync(argsFile, 'utf8')
+    assert.match(invoked, /agent-kernel-executor\.cjs/)
+    assert.match(invoked, /--internal-installer/)
+    assert.match(invoked, /--host/)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })

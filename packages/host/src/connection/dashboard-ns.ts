@@ -161,7 +161,15 @@ export type DashboardDeps = {
   onSessionCreated?(record: SessionRecord): void | Promise<void>
   onSessionDeleted?(record: SessionRecord): void | Promise<void>
   renameWorkspace?(workspaceId: string, workspaceName: string): Promise<string>
+  mutableReady?(): boolean
 }
+
+const READ_ONLY_DASHBOARD_EVENTS = new Set([
+  'client:connection_ping', 'client:executor_ping', 'client:list_executors', 'client:list_sessions',
+  'client:load_history', 'client:load_log_artifact', 'client:subscribe_channels', 'client:restore_subscriptions',
+  'client:unsubscribe_channels', 'subscribe', 'unsubscribe', 'client:list_dirs', 'client:list_files',
+  'workspace:read_binary', 'client:read_overflow', 'bg:list', 'bg:output', 'sub_agent:list', 'agent_types:list',
+])
 
 export function configureDashboardNamespace(
   ns: DashboardNs,
@@ -171,6 +179,7 @@ export function configureDashboardNamespace(
   const getDefaultConfig = (): AgentConfig => typeof deps.defaultConfig === 'function'
     ? deps.defaultConfig()
     : deps.defaultConfig
+  const mutableRuntimeReady = (): boolean => deps.mutableReady?.() !== false
   ns.use((socket, nextFn) => {
     const auth = socket.handshake.auth as HandshakeAuth | undefined
     if (!auth || auth.role !== 'dashboard') {
@@ -207,6 +216,15 @@ export function configureDashboardNamespace(
     const multiplexed = Boolean(auth.clientId)
     // Legacy clients bind transport to one Session; multiplexed clients use a control placeholder until subscribing.
     const sessionId = auth.sessionId ?? `control:${auth.clientId}`
+    socket.use(([event, ...args], next) => {
+      if (deps.mutableReady?.() === false && !READ_ONLY_DASHBOARD_EVENTS.has(String(event))) {
+        const ack = args.at(-1)
+        if (typeof ack === 'function') (ack as (value: RpcAck) => void)({ ok: false, error: 'runtime_not_ready' })
+        next(new Error('runtime_not_ready'))
+        return
+      }
+      next()
+    })
     socket.on('client:connection_ping', (_sentAt, ack) => ack(Date.now()))
 
     // Local `vparse` — closes over `socket.id` + the connected sessionId so
@@ -236,7 +254,7 @@ export function configureDashboardNamespace(
       }
       if (multiplexed && !subscribedWorkspaces.has(workspaceId)) return 'workspace is not subscribed'
 
-      const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId).catch(() => undefined))
+      const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId, { recoverDangling: false }).catch(() => undefined))
       if (!record) return 'unknown session'
       if (record.workspaceId !== workspaceId) return 'session does not belong to workspace'
       return undefined
@@ -284,7 +302,7 @@ export function configureDashboardNamespace(
         let target: SessionRecord | undefined = deps.store.get(p.sessionId)
         if (!target) {
           try {
-            target = await deps.store.load(p.sessionId)
+            target = await deps.store.load(p.sessionId, { recoverDangling: false })
           } catch {
             // Session hasn't been persisted yet — reply with an empty
             // history rather than broadcasting an error the dashboard would
@@ -338,7 +356,7 @@ export function configureDashboardNamespace(
       if (!p) return
       try {
         let target: SessionRecord | undefined = deps.store.get(p.sessionId)
-        if (!target) target = await deps.store.load(p.sessionId)
+        if (!target) target = await deps.store.load(p.sessionId, { recoverDangling: false })
         const parsed = await readSessionLog(target.logPath)
         const entry = parsed.events.find((e) => e.seq === p.seq)
         if (!entry) {
@@ -369,11 +387,17 @@ export function configureDashboardNamespace(
       }
     })
 
+    const channelTails = new Map<DashboardChannel, Promise<void>>()
+    const channelGenerations = new Map<DashboardChannel, number>()
+    const serializeChannel = async <T>(channel: DashboardChannel, operation: () => Promise<T>): Promise<T> => {
+      const previous = channelTails.get(channel) ?? Promise.resolve()
+      let result!: T
+      const current = previous.catch(() => undefined).then(async () => { result = await operation() })
+      channelTails.set(channel, current)
+      try { await current; return result } finally { if (channelTails.get(channel) === current) channelTails.delete(channel) }
+    }
+
     const subscribeSession = async (targetSessionId: string): Promise<number> => {
-      if (subscribedSessions.has(targetSessionId)) {
-        const existing = deps.store.get(targetSessionId) ?? await deps.store.load(targetSessionId, { recoverDangling: false }).catch(() => undefined)
-        return existing?.state.cursor ?? 0
-      }
       let target = deps.store.get(targetSessionId)
       if (!target) try { target = await deps.store.load(targetSessionId, { recoverDangling: false, runtimeConfig: getDefaultConfig() }) } catch { target = undefined }
       if (target) await refreshSessionSkillsIfNeeded(deps, target)
@@ -386,8 +410,14 @@ export function configureDashboardNamespace(
         : ephemeralReadyEventFor(targetSessionId, getDefaultConfig(), defaultModel, contextWindowForModelRef(deps, defaultModel))
       socket.emit('session:ready', payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(targetSessionId))
-      if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(targetSessionId)
-      void deps.messageQueues.drain(targetSessionId)
+      // Candidate sockets may inspect the authoritative state during private
+      // verification, but only the RestartCoordinator owns continuation before
+      // the route-generation fence is publicly committed. A read subscription
+      // must never become a second resume/drain path.
+      if (mutableRuntimeReady()) {
+        if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(targetSessionId)
+        void deps.messageQueues.drain(targetSessionId)
+      }
       return payload.cursor
     }
 
@@ -403,9 +433,18 @@ export function configureDashboardNamespace(
         if (channel === 'global') { accepted.push(channel); continue }
         const [kind, id] = channel.split(':', 2) as ['workspace' | 'session', string]
         if (!id) { rejected.push({ channel, code: 'invalid_channel' }); continue }
-        if (kind === 'workspace') { if (remove) subscribedWorkspaces.delete(id); else subscribedWorkspaces.add(id); accepted.push(channel); continue }
-        if (remove) { subscribedSessions.delete(id); await socket.leave(sessionRoom(id)); accepted.push(channel); continue }
-        cursors[channel] = await subscribeSession(id); accepted.push(channel)
+        await serializeChannel(channel, async () => {
+          const latestGeneration = channelGenerations.get(channel) ?? Number.NEGATIVE_INFINITY
+          if (parsed.generation < latestGeneration) { rejected.push({ channel, code: 'stale_generation' }); return }
+          channelGenerations.set(channel, parsed.generation)
+          if (kind === 'workspace') { if (remove) subscribedWorkspaces.delete(id); else subscribedWorkspaces.add(id); accepted.push(channel); return }
+          if (remove) { subscribedSessions.delete(id); await socket.leave(sessionRoom(id)); accepted.push(channel); return }
+          // Every successful subscribe emits a fresh baseline, even when this
+          // socket was already in the room. A new client-side selection
+          // generation must never wait on a one-shot ready event from an older
+          // binding.
+          cursors[channel] = await subscribeSession(id); accepted.push(channel)
+        })
       }
       return { requestId: parsed.requestId, generation: parsed.generation, accepted, rejected, cursors }
     }
@@ -449,8 +488,10 @@ export function configureDashboardNamespace(
     // A service-manager restart has no persisted RestartCoordinator marker for
     // the active turn. Resume any dangling LLM/tool state on first hydration;
     // resumeSession is idempotent while a live serialized turn exists.
-    if (record && !isRestingStatus(record.state.status)) void deps.loop.resumeSession(sessionId)
-    void deps.messageQueues.drain(sessionId)
+    if (mutableRuntimeReady()) {
+      if (record && !isRestingStatus(record.state.status)) void deps.loop.resumeSession(sessionId)
+      void deps.messageQueues.drain(sessionId)
+    }
 
     const desiredPreviewSessions = new Set<string>()
     socket.on('subscribe', async (raw: ClientSubscribe) => {
@@ -483,8 +524,10 @@ export function configureDashboardNamespace(
           )
       socket.emit('session:ready', payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
-      if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(sessionId)
-      void deps.messageQueues.drain(sessionId)
+      if (mutableRuntimeReady()) {
+        if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(sessionId)
+        void deps.messageQueues.drain(sessionId)
+      }
     })
 
     socket.on('unsubscribe', async (raw: ClientUnsubscribe) => {
@@ -606,7 +649,7 @@ export function configureDashboardNamespace(
     socket.on('client:set_approval_mode', async (raw: ClientSetApprovalMode, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientSetApprovalModeSchema, raw, 'client:set_approval_mode', (raw as ClientSetApprovalMode | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid approval mode request' }); return }
-      // Host-owned guard rail. Standalone product composition enables this by
+      // Host-owned guard rail. Portable and Dedicated composition enable this by
       // default; embedders may disable it explicitly. Executor installation and
       // environment never control Session approval policy.
       if (p.mode === 'allow_all' && deps.allowAllApprovalMode === false) {
@@ -797,7 +840,7 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientReadOverflowSchema, raw, 'client:read_overflow', (raw as ClientReadOverflow | undefined)?.sessionId)
       if (!p) return
       deps.audit?.log({ action: 'internal_tool.read_overflow', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok' })
-      const record = deps.store.get(p.sessionId) ?? (await deps.store.load(p.sessionId).catch(() => undefined))
+      const record = deps.store.get(p.sessionId) ?? (await deps.store.load(p.sessionId, { recoverDangling: false }).catch(() => undefined))
       const workspaceId = record?.workspaceId
       if (!workspaceId) {
         socket.emit('server:overflow_contents', {
@@ -1087,10 +1130,15 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientDeleteSessionSchema, raw, 'client:delete_session', (raw as ClientDeleteSession | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid delete session request' }); return }
       const result = await operations.run(p.operationId, async () => {
-        const targetIds = p.cascade
-          ? collectSessionDescendants(await deps.store.listSummaries(), p.sessionId)
-          : [p.sessionId]
+        // A child Session has no independent lifecycle: deleting its root while
+        // retaining descendants produces unreachable sub-agent records. Resolve
+        // the complete tree first, reject the whole operation if any member is
+        // active, then delete leaves before their parents.
+        const targetIds = collectSessionDescendants(await deps.store.listSummaries(), p.sessionId)
         for (const targetSessionId of targetIds) {
+          if (deps.loop.hasActiveTurn(targetSessionId)) throw new Error('session tree has an active turn; stop it before deleting')
+        }
+        for (const targetSessionId of targetIds.reverse()) {
           const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId).catch(() => undefined))
           if (record && deps.onSessionDeleted) {
             try {
@@ -1105,7 +1153,7 @@ export function configureDashboardNamespace(
           }
           await deps.store.delete(targetSessionId)
           resetCompactRuntime(targetSessionId)
-          deps.audit?.log({ action: 'dashboard.session_delete', actor: auditActor(socket), target: { sessionId: targetSessionId, workspaceId: record?.workspaceId }, outcome: 'ok', refs: p.cascade ? { rootSessionId: p.sessionId } : undefined })
+          deps.audit?.log({ action: 'dashboard.session_delete', actor: auditActor(socket), target: { sessionId: targetSessionId, workspaceId: record?.workspaceId }, outcome: 'ok', refs: { rootSessionId: p.sessionId } })
           ns.emit('server:session_deleted', { sessionId: targetSessionId })
         }
       })
@@ -1288,12 +1336,16 @@ async function handleUserMessage(
     if (!record) return
   }
   const requestedMode = p.mode ?? 'steer'
-  // Queue is a follow-up only while another turn is active. On an idle/done
-  // session it dispatches immediately, so keeping it as a visible queue item
-  // for the whole awaited Agent turn makes the dock claim that an already-sent
-  // message is still pending. Treat that internal handoff as a hidden steer;
-  // the durable user_message and external request semantics stay unchanged.
-  const mode = requestedMode === 'queue' && isRestingStatus(record.state.status)
+  // Queue is a follow-up while another accepted message or turn is active.
+  // The durable ACK for the first message can arrive before its background
+  // drain changes the kernel status, so status alone has a race: a second
+  // queue-mode send could be misclassified as a front-priority steer and move
+  // ahead of the item whose commit callback owns the dequeue fence. Include
+  // both host-owned queue and Loop activity in the admission state. Only a
+  // truly quiescent queue-mode send becomes a hidden immediate steer.
+  const messagePipelineIdle = deps.messageQueues.pending(p.sessionId) === 0
+    && !deps.loop.hasActiveTurn(p.sessionId)
+  const mode = requestedMode === 'queue' && isRestingStatus(record.state.status) && messagePipelineIdle
     ? 'steer'
     : requestedMode
   const queued: QueuedUserMessage = {

@@ -1,0 +1,62 @@
+name: Private Cloud Product E2E
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-cloud-product-e2e
+  cancel-in-progress: false
+
+jobs:
+  two-tenant-product:
+    name: local IdP / shared origin / two Units
+    runs-on: [self-hosted, linux, x64, private-cloud-local]
+    timeout-minutes: 60
+    env:
+      PRIVATE_CLOUD_TEST_ALICE_EMAIL: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_EMAIL }}
+      PRIVATE_CLOUD_TEST_ALICE_PASSWORD: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_PASSWORD }}
+      PRIVATE_CLOUD_TEST_BOB_EMAIL: ${{ secrets.PRIVATE_CLOUD_TEST_BOB_EMAIL }}
+      PRIVATE_CLOUD_TEST_BOB_PASSWORD: ${{ secrets.PRIVATE_CLOUD_TEST_BOB_PASSWORD }}
+      PRIVATE_CLOUD_TEST_EMAIL: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_EMAIL }}
+      PRIVATE_CLOUD_TEST_PASSWORD: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_PASSWORD }}
+      PRIVATE_CLOUD_WORKSPACE_MARKER: private-cloud-${{ github.run_id }}
+      PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/private-cloud
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Strict environment preflight
+        run: |
+          set -eu
+          for value in PRIVATE_CLOUD_TEST_ALICE_EMAIL PRIVATE_CLOUD_TEST_ALICE_PASSWORD PRIVATE_CLOUD_TEST_BOB_EMAIL PRIVATE_CLOUD_TEST_BOB_PASSWORD; do
+            test -n "$(printenv "$value")"
+          done
+          curl -fsS http://localhost:13001/runtime/capabilities >/dev/null
+          test -n "$(docker compose ps -q)"
+          mkdir -p "${{ runner.temp }}/evidence"
+      - name: Validate local Private Cloud deployment policy
+        run: pnpm run private-cloud:validate && pnpm run private-cloud:check
+      - name: Verify two-tenant isolation
+        run: node scripts/private-cloud-local/acceptance/verify-tenant-isolation.mjs | tee ${{ runner.temp }}/evidence/tenant-isolation.json
+      - name: Verify complete Workspace task chain
+        run: node scripts/private-cloud-local/acceptance/verify-full-workspace.mjs | tee ${{ runner.temp }}/evidence/full-workspace.json
+      - name: Verify raw tenant isolation contracts
+        run: pnpm run verify:evaluation-product-dashboard-integration && pnpm run verify:evaluation-control-plane-authority
+      - name: Upload Private Cloud evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-cloud-product-e2e-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 30

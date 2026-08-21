@@ -2,12 +2,12 @@
 
 ## Problem
 
-Authentication is not complete when OIDC returns successfully. A mature SaaS shell must make the active account visible and own the complete account-session lifecycle. Agent RunLab previously implemented identity provider integration and identity-to-`TenantRuntimeUnit` routing, but omitted this authenticated product layer.
+Authentication is not complete when OIDC returns successfully. A mature Private Cloud shell must make the active account visible and own the complete account-session lifecycle. Agent RunLab previously implemented identity provider integration and identity-to-`TenantRuntimeUnit` routing, but omitted this authenticated product layer.
 
 ## Boundaries
 
 - ZITADEL authenticates users and owns passwords, passkeys, MFA, registration, and recovery.
-- SaaS Edge Gateway owns browser login sessions, safe profile projection, logout, expiry, and identity-to-Unit assignment.
+- Private Cloud Gateway owns browser login sessions, safe profile projection, logout, expiry, and identity-to-Unit assignment.
 - Dashboard owns account presentation, logout interaction, expiry UX, cache cleanup, and cross-tab synchronization.
 - Host receives no user identity, email, profile, OIDC token, or Gateway cookie. It receives only trusted Unit routing headers.
 
@@ -102,4 +102,4 @@ Every receiving tab revalidates with `/auth/me`; broadcasts are hints, not autho
 - A different user on the same browser Origin cannot see prior-user durable session cache.
 - Expired sessions show `Session expired`, not a generic connection error.
 - Host requests do not contain `ak_session`, profile claims, email, or OIDC tokens.
-- Standalone remains identity-free and does not show a fake account menu.
+- Dedicated remains identity-free and does not show a fake account menu.

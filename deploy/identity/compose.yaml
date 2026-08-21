@@ -189,16 +189,12 @@ networks:
   edge: {}
 
 volumes:
-  # Preserve and adopt the volumes created by the former combined SaaS stack.
   postgres-data:
-    external: true
-    name: agent-runlab-saas_postgres-data
+    name: agent-runlab-identity-postgres-data
   zitadel-bootstrap:
-    external: true
-    name: agent-runlab-saas_zitadel-bootstrap
+    name: agent-runlab-identity-zitadel-bootstrap
   zitadel-config:
-    external: true
-    name: agent-runlab-saas_zitadel-config
+    name: agent-runlab-identity-zitadel-config
 
 secrets:
   postgres_password: { file: ./.secrets/postgres_password }

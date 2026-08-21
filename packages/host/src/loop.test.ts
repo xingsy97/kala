@@ -205,6 +205,66 @@ describe('host loop', () => {
     expect(afterCompact.events.at(-1)?.event.kind).toBe('llm_response')
   })
 
+  it('explicit Stop suppresses durable todo graph auto-continuation until a new user message', async () => {
+    const graph = JSON.stringify({
+      version: 1, revision: 1,
+      nodes: [{ id: 'work', content: 'finish work', status: 'in_progress', priority: 'high' }],
+      edges: [], summary: { total: 1, completed: 0, active: 1, ready: 0, blocked: 0, cancelled: 0 }, ready: [], blocked: [], changed: ['work'],
+    })
+    let calls = 0
+    let secondStarted!: () => void
+    const secondCall = new Promise<void>((resolve) => { secondStarted = resolve })
+    const llm: LLMAdapter = {
+      name: 'stop-graph-continuation',
+      async call(params) {
+        calls += 1
+        if (calls === 1) return { message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'graph-stop-1', name: 'todo_graph', input: { operations: [] } }] } }
+        if (calls === 2) {
+          secondStarted()
+          await new Promise<void>((_resolve, reject) => params.signal.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError' })), { once: true }))
+        }
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'new explicit turn' }] } }
+      },
+    }
+    const graphConfig = createConfig({ tools: [{ name: 'todo_graph', description: 'graph', inputSchema: { type: 'object' }, requiresApproval: false }], systemPrompt: 'sys' })
+    store.get(sessionId)!.config = graphConfig
+    const loop = runHostLoop({ store, llm, tools: nullTools({ callTool: async () => ({ ok: true, content: graph }) }), broadcast: silentBroadcast() })
+    const turn = loop.dispatch(sessionId, { kind: 'user_message', text: 'work until stopped' })
+    await secondCall
+    await loop.dispatch(sessionId, { kind: 'cancel' })
+    await turn
+    expect(calls).toBe(2)
+    expect(store.get(sessionId)!.state.status).toBe('done')
+    const afterStop = await readSessionLog(store.get(sessionId)!.logPath)
+    expect(afterStop.events.filter((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toHaveLength(0)
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'start again explicitly' })
+    expect(calls).toBe(4)
+  })
+
+  it('does not dispatch a Tool from a provider response that arrives after Stop', async () => {
+    let releaseLlm!: () => void
+    let started!: () => void
+    const llmStarted = new Promise<void>((resolve) => { started = resolve })
+    const toolsCalled: string[] = []
+    const llm: LLMAdapter = {
+      name: 'late-tool-after-stop',
+      async call() {
+        started()
+        await new Promise<void>((resolve) => { releaseLlm = resolve })
+        return { message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'late-call', name: 'read', input: { path: '/tmp/x' } }] } }
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools({ callTool: async (_sid, effect) => { toolsCalled.push(effect.callId); return { ok: true, content: 'late' } } }), broadcast: silentBroadcast() })
+    const turn = loop.dispatch(sessionId, { kind: 'user_message', text: 'start' })
+    await llmStarted
+    await loop.dispatch(sessionId, { kind: 'cancel' })
+    releaseLlm()
+    await turn
+    expect(toolsCalled).toEqual([])
+    expect(store.get(sessionId)!.state.status).toBe('done')
+  })
+
   it('does not resume terminal replies without durable graph work', async () => {
     const llm = scriptedLlm([{ message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] }, finishReason: 'stop' }])
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
@@ -1861,6 +1921,57 @@ describe('host loop', () => {
     expect(childLog.header.parentCallId).toBe('agent-1')
     expect(childLog.header.subAgentStartedAt).toMatch(/T/)
     expect(children[0]!.state.status).toBe('done')
+  })
+
+  it('releases an idle restart checkpoint after a running child Agent and its parent finish', async () => {
+    const parent = await store.create({
+      config: createConfig({ tools: [AGENT], systemPrompt: 'sys' }),
+      sessionId: 'sess-agent-idle-drain-parent',
+    })
+    let releaseChild!: () => void
+    const childGate = new Promise<void>((resolve) => { releaseChild = resolve })
+    let markChildStarted!: () => void
+    const childStarted = new Promise<void>((resolve) => { markChildStarted = resolve })
+    let calls = 0
+    const loop = runHostLoop({
+      store,
+      llm: {
+        name: 'agent-idle-drain',
+        async call() {
+          calls += 1
+          if (calls === 1) {
+            return { message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'agent-idle-1', name: 'agent', input: { prompt: 'finish child' } }] } }
+          }
+          if (calls === 2) {
+            markChildStarted()
+            await childGate
+            return { message: { role: 'assistant', content: [{ type: 'text', text: 'child done' }] } }
+          }
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'parent done' }] } }
+        },
+      },
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    const run = loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+    await childStarted
+    const child = store.list().find((record) => record.parentSessionId === parent.sessionId)!
+    loop.beginDrain('idle')
+    let parentReached = false
+    let childReached = false
+    const parentCheckpoint = loop.waitForCheckpoint(parent.sessionId).then(() => { parentReached = true })
+    const childCheckpoint = loop.waitForCheckpoint(child.sessionId).then(() => { childReached = true })
+    await Promise.resolve()
+    expect(parentReached).toBe(false)
+    expect(childReached).toBe(false)
+
+    releaseChild()
+    await Promise.all([run, parentCheckpoint, childCheckpoint])
+    expect(store.get(child.sessionId)?.state.status).toBe('done')
+    expect(store.get(parent.sessionId)?.state.status).toBe('done')
+    expect(parentReached).toBe(true)
+    expect(childReached).toBe(true)
   })
 
   it('starts sibling sub-agent tool calls concurrently', async () => {

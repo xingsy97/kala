@@ -263,16 +263,8 @@
 
   .ak-explorer-loading-row {
     position: relative;
-    animation: ak-loading-rise 260ms ease-out both;
-  }
-
-  .ak-explorer-loading-row::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.06), transparent);
-    animation: ak-loading-sweep 1.8s ease-in-out infinite;
+    animation: ak-loading-pulse 1.8s ease-in-out infinite;
+    contain: paint;
   }
 
   /**
@@ -352,14 +344,30 @@
   55%, 100% { transform: translateX(120%); }
 }
 
-@keyframes ak-loading-rise {
-  from { opacity: 0; transform: translateY(3px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes ak-loading-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.9; }
 }
 
-@keyframes ak-loading-sweep {
-  0% { transform: translateX(-100%); }
-  55%, 100% { transform: translateX(100%); }
+/* A CSS border spinner stays on one small compositor layer. Unlike a stroked
+ * SVG it does not need to be re-rasterized while the surrounding React tree
+ * commits Session/Workspace snapshots. */
+.ak-loading-spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  flex: none;
+  border: 2px solid hsl(var(--muted-foreground) / 0.22);
+  border-top-color: hsl(var(--muted-foreground) / 0.9);
+  border-radius: 9999px;
+  transform: translateZ(0) rotate(0deg);
+  transform-origin: center;
+  animation: ak-loading-spinner-spin 800ms linear infinite;
+  will-change: transform;
+  contain: strict;
+}
+
+@keyframes ak-loading-spinner-spin {
+  to { transform: translateZ(0) rotate(360deg); }
 }
 
 @keyframes ak-pending-pulse {
@@ -457,7 +465,7 @@
   .ak-thinking-dot,
   .ak-thinking-row::after,
   .ak-explorer-loading-row,
-  .ak-explorer-loading-row::after {
+  .ak-loading-spinner {
     animation: none !important;
   }
 

@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 
@@ -42,6 +42,13 @@ export class SessionArtifactRegistry {
 
   get(artifactId: string): SessionArtifactRecord | undefined { return this.records.get(artifactId) }
   contentPath(record: SessionArtifactRecord): string { return join(this.rootDir, 'content', record.fileName) }
+  async deleteSession(sessionId: string): Promise<void> {
+    const removed = [...this.records.values()].filter((record) => record.sessionId === sessionId)
+    if (removed.length === 0) return
+    for (const record of removed) this.records.delete(record.artifactId)
+    await Promise.all(removed.map(async (record) => await rm(this.contentPath(record), { force: true })))
+    await this.persist()
+  }
 
   private get registryPath(): string { return join(this.rootDir, 'registry.json') }
   private persist(): Promise<void> {

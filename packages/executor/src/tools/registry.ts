@@ -7,6 +7,7 @@
  */
 
 import type { Sandbox } from '../sandbox.js'
+import type { NetworkAuditEvent, NetworkPolicy } from '@agent-kernel/shared'
 
 export type ToolContext = {
   readonly sessionId: string
@@ -28,6 +29,8 @@ export type ToolContext = {
    * inherit from the executor process only when the tool chooses to merge them.
    */
   readonly env?: NodeJS.ProcessEnv
+  readonly networkPolicy?: NetworkPolicy
+  readonly emitNetworkAudit?: (event: NetworkAuditEvent) => Promise<void>
 }
 
 export type ToolRunner = (

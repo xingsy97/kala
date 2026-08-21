@@ -26,9 +26,9 @@ function factories(log: string[] = []): RuntimeModuleFactory[] {
 }
 
 describe('Runtime Profile composition', () => {
-  it('installs the Standalone capability superset in dependency order', async () => {
+  it('installs the full capability composition in dependency order', async () => {
     const log: string[] = []
-    const composition = await composeRuntimeModules({ profile: 'standalone', factories: factories(log) })
+    const composition = await composeRuntimeModules({ profile: 'full', factories: factories(log) })
     expect(composition.ordered.map((module) => module.id)).toEqual(['agent', 'workspace', 'artifacts', 'notifications', 'benchmark', 'evaluation'])
     expect(composition.capabilities).toMatchObject({ agent: true, workspace: true, artifacts: true, operations: true, pipeline: true })
     await composition.start()
@@ -38,8 +38,8 @@ describe('Runtime Profile composition', () => {
     expect(log.slice(-6)).toEqual([...composition.ordered].reverse().map((module) => `close:${module.id}`))
   })
 
-  it('keeps Workspace enabled while Benchmark and Evaluation are absent in SaaS', async () => {
-    const composition = await composeRuntimeModules({ profile: 'saas', factories: factories() })
+  it('keeps Workspace enabled while Benchmark and Evaluation are absent in the agent composition', async () => {
+    const composition = await composeRuntimeModules({ profile: 'agent', factories: factories() })
     expect(composition.modules.has('workspace')).toBe(true)
     expect(composition.modules.has('benchmark')).toBe(false)
     expect(composition.modules.has('evaluation')).toBe(false)
@@ -47,13 +47,13 @@ describe('Runtime Profile composition', () => {
   })
 
   it('rejects missing dependencies and closes modules after startup failure', async () => {
-    await expect(composeRuntimeModules({ profile: 'standalone', factories: factories().filter((factory) => factory.id !== 'benchmark') })).rejects.toThrow(/missing module benchmark/)
+    await expect(composeRuntimeModules({ profile: 'full', factories: factories().filter((factory) => factory.id !== 'benchmark') })).rejects.toThrow(/missing module benchmark/)
     const close = vi.fn(async () => {})
     const failing = factories().map((factory) => factory.id === 'workspace' ? {
       ...factory,
       create: () => ({ id: 'workspace' as const, capabilities: { workspace: true }, start: async () => { throw new Error('boom') }, close }),
     } : factory)
-    const composition = await composeRuntimeModules({ profile: 'saas', factories: failing })
+    const composition = await composeRuntimeModules({ profile: 'agent', factories: failing })
     await expect(composition.start()).rejects.toThrow('boom')
   })
 })

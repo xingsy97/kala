@@ -1,0 +1,22 @@
+services:
+  mock-llm:
+    image: node:22.16.0-bookworm-slim
+    profiles: [acceptance]
+    command: [node, /app/mock-openai-server.mjs]
+    volumes:
+      - ../../scripts/private-cloud-local/acceptance/mock-openai-server.mjs:/app/mock-openai-server.mjs:ro
+    networks: [egress]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=16m"
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.25
+
+  runtime-host:
+    volumes:
+      - ./local/runtime-provider-catalog.acceptance.json:/etc/agent-runlab/runtime-provider-catalog.json:ro
+    depends_on:
+      mock-llm: { condition: service_started }

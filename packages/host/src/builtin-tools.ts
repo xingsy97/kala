@@ -56,7 +56,7 @@ export function createBuiltinAgentModule(preset: AgentSystemPromptPreset = 'code
     version: '2026-07-15',
     label: preset === 'claude-code' ? 'Claude Code Prompt' : 'Codex Prompt',
     systemPrompt,
-    toolsets: [skillToolset, filesystemToolset, shellToolset, planningToolset, agentToolset, webToolset, memoryToolset],
+    toolsets: [catalogToolset, skillToolset, filesystemToolset, shellToolset, planningToolset, agentToolset, webToolset, memoryToolset],
   }
 }
 
@@ -117,6 +117,24 @@ const claudeCodeSystemPromptPlugin: SystemPromptPlugin = {
       TOOL_INTENTION_SYSTEM_INSTRUCTION,
       'Finish with a short report of changed files, verification, and any remaining risks.',
     ].join('\n\n')
+  },
+}
+
+const catalogToolset: ToolsetPlugin = {
+  id: 'tool-catalog', version: '2026-08-20', label: 'Tool catalog',
+  provideTools() {
+    return [
+      tool('tool_search', 'host', 'read', false, 'tool_search', {
+        purpose: 'Search the locked Session Tool catalog and activate relevant capabilities for the next model step.',
+        whenToUse: ['Find a Tool that is not currently visible.', 'Discover capabilities by task rather than guessing Tool names.'],
+        constraints: ['Use a focused capability query.', 'Results never expand the Session Tool allowlist.'],
+      }, { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 1, maxLength: 200 }, limit: { type: 'integer', minimum: 1, maximum: 20 }, activate: { type: 'boolean' } } }),
+      tool('tool_describe', 'host', 'read', false, 'tool_describe', {
+        purpose: 'Read complete schemas and version identities for explicitly named Tools in the locked Session catalog.',
+        whenToUse: ['Inspect exact Tool parameters before calling it.', 'Activate one or more known Tools.'],
+        constraints: ['Name only Tools present in the locked Session catalog.'],
+      }, { type: 'object', required: ['names'], properties: { names: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string' } }, activate: { type: 'boolean' } } }),
+    ]
   },
 }
 

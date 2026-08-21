@@ -72,9 +72,7 @@ export function sessionDisplayLabel(session: SessionSummary | undefined, fallbac
 export function sessionIdsForCacheInvalidation(
   sessions: readonly SessionSummary[],
   rootSessionId: string,
-  cascade: boolean,
 ): readonly string[] {
-  if (!cascade) return [rootSessionId]
   const childrenByParent = new Map<string, string[]>()
   for (const session of sessions) {
     if (!session.parentSessionId) continue

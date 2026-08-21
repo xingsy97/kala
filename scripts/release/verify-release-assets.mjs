@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -11,8 +11,62 @@ const manifestPath = join(releaseDir, 'manifest.json')
 if (!existsSync(manifestPath)) fail('missing release/manifest.json')
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+if (!/^[0-9a-f]{40}$/u.test(manifest.source?.revision ?? '')
+  || !/^[0-9a-f]{64}$/u.test(manifest.source?.snapshotSha256 ?? '')
+  || typeof manifest.source?.dirty !== 'boolean') {
+  fail('manifest.source must bind a revision, exact worktree snapshot SHA-256, and dirty flag')
+}
 if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) {
   fail('manifest.assets must be a non-empty array')
+}
+if (new Set(manifest.assets).size !== manifest.assets.length) {
+  fail('manifest.assets must not contain duplicates')
+}
+const expectedReleaseFiles = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort()
+const actualReleaseEntries = readdirSync(releaseDir, { withFileTypes: true })
+if (actualReleaseEntries.some((entry) => !entry.isFile())
+  || JSON.stringify(actualReleaseEntries.map((entry) => entry.name).sort()) !== JSON.stringify(expectedReleaseFiles)) {
+  fail('release file set does not exactly match its manifest')
+}
+const includesHost = manifest.component === 'all' || manifest.component === 'host'
+if (includesHost) {
+  for (const asset of [
+    'agent-runlab-dedicated-ingress.cjs',
+    'agent-runlab-runtime.cjs',
+    'agent-runlab-dedicated-deploy-supervisor.cjs',
+    'agent-runlab-dedicated-ingress.service',
+    'agent-runlab-dedicated-unit@.service',
+    'agent-runlab-dedicated-deploy-supervisor.service',
+    'agent-runlab-dedicated-control-updater.service',
+    'agent-runlab-dedicated-migration-finalizer.service',
+    'deployment.json',
+    'install-dedicated-systemd.mjs',
+    'deploy-dedicated.mjs',
+    'deploy-dashboard.mjs',
+    'cutover-dedicated-systemd.mjs',
+    'dedicated-data-migration.mjs',
+    'dedicated-settings-fingerprint.mjs',
+    'update-dedicated-control-plane.mjs',
+    'rollback-dedicated-systemd.mjs',
+  ]) {
+    if (!manifest.assets.includes(asset)) fail(`manifest missing Dedicated asset ${asset}`)
+  }
+  const dedicatedDeployment = JSON.parse(readFileSync(join(releaseDir, 'deployment.json'), 'utf8'))
+  if (dedicatedDeployment.schemaVersion !== 1
+    || dedicatedDeployment.architecture !== 'platform'
+    || dedicatedDeployment.tenancy !== 'single-tenant'
+    || dedicatedDeployment.runtimeProfile !== 'full') {
+    fail('release deployment.json is not the canonical Dedicated configuration')
+  }
+  const hostBundle = readFileSync(join(releaseDir, 'bundle-dashboard-with-runtime.cjs'), 'utf8')
+  if (!hostBundle.includes('__AGENT_KERNEL_EMBEDDED_DOCS__')
+    || !hostBundle.includes(Buffer.from('# Dedicated Platform Runtime Unit Refactor').toString('base64'))) {
+    fail('release Host bundle is missing embedded product documentation')
+  }
+  const platformRuntime = readFileSync(join(releaseDir, 'agent-runlab-runtime.cjs'), 'utf8')
+  if (platformRuntime.includes('globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=')) fail('Self-hosted Platform Runtime must not embed Dashboard assets')
+  const dashboardRelease = JSON.parse(readFileSync(join(releaseDir, 'dashboard-release.json'), 'utf8'))
+  if (dashboardRelease.schemaVersion !== 1 || dashboardRelease.product !== 'agent-runlab-dashboard' || !dashboardRelease.files?.some((entry) => entry.path === 'index.html')) fail('release Dashboard manifest is invalid')
 }
 
 const forbiddenLegacyEvaluationMarkers = [
@@ -107,7 +161,7 @@ for (const installer of ['install-executor.sh', 'install-executor.ps1']) {
     if (!text.includes(marker)) fail(`${installer} missing required installer marker: ${marker}`)
   }
   if (text.includes('manifest.json')) fail(`${installer} must use the Host-scoped checksum index without manifest fallback`)
-  if (installer === 'install-executor.sh' && text.includes('agent-kernel-executor.cjs')) fail(`${installer} must remain native-only`)
+  if (installer === 'install-executor.sh' && (!text.includes('agent-kernel-executor.cjs') || !text.includes('Node.js 22+'))) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
   if (installer === 'install-executor.ps1' && (!text.includes('agent-kernel-executor.cjs') || !text.includes('Get-Command node'))) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
 }
 for (const target of ['win32-x64', 'win32-arm64']) {

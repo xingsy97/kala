@@ -30,6 +30,20 @@ function isPublicInstallerPath(pathname: string): boolean {
   return pathname === '/install' || pathname === '/install.ps1' || pathname.startsWith('/release-assets/')
 }
 
+const DASHBOARD_API_EXACT = new Set(['/models', '/settings', '/memo', '/metrics', '/organization', '/install', '/install.ps1'])
+const DASHBOARD_API_PREFIXES = [
+  '/socket.io/', '/runtime/', '/internal/', '/settings/', '/auth/', '/push/', '/api/', '/user/', '/organization/',
+  '/artifacts/', '/session-artifacts/', '/router/', '/enhancement/', '/install/', '/release-assets/', '/themes/',
+]
+
+function isDashboardRequest(request: IncomingMessage, pathname: string): boolean {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false
+  if (DASHBOARD_API_EXACT.has(pathname) || DASHBOARD_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return false
+  if (pathname === '/docs/index' || pathname === '/docs/content') return false
+  if (pathname === '/' || request.headers.accept?.includes('text/html')) return true
+  return /\.[A-Za-z0-9]+$/u.test(pathname)
+}
+
 async function readRequestBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = []
   for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
@@ -54,6 +68,7 @@ export async function startRuntimeIngressGateway(options: {
   enterpriseSso?: EnterpriseSsoResolver
   loginStates: LoginStateStore
   hostOrigin: string
+  dashboardOrigin?: string
   sessions: BrowserSessionStore
   cacheNamespaceSecret: string
   secretBox: SessionSecretBox
@@ -63,7 +78,9 @@ export async function startRuntimeIngressGateway(options: {
   provision?(unitId: string): Promise<void>
 }): Promise<RuntimeIngressGateway> {
   const proxy = httpProxy.createProxyServer({ ws: true, target: options.hostOrigin })
+  const dashboardProxy = options.dashboardOrigin ? httpProxy.createProxyServer({ target: options.dashboardOrigin }) : undefined
   proxy.on('error', () => {})
+  dashboardProxy?.on('error', () => {})
   const authenticate = async (request: IncomingMessage): Promise<BrowserSession | undefined> => {
     const token = cookies(request).ak_session
     if (!token || token.length < 32 || token.length > 128) return undefined
@@ -281,6 +298,15 @@ export async function startRuntimeIngressGateway(options: {
       else { response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'authentication_required' })); return }
       response.end(); return
     }
+    if (dashboardProxy && options.dashboardOrigin && isDashboardRequest(request, url.pathname)) {
+      delete request.headers.cookie
+      delete request.headers.authorization
+      dashboardProxy.web(request, response, { target: options.dashboardOrigin }, () => {
+        if (!response.headersSent) response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+        response.end('dashboard upstream unavailable')
+      })
+      return
+    }
     const requiredRuntimePermission = request.method === 'GET' || request.method === 'HEAD' ? 'runtime:read' : 'runtime:write'
     if (organizationAccess && !permits(organizationAccess.membership.role, requiredRuntimePermission)) {
       response.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -360,5 +386,5 @@ export async function startRuntimeIngressGateway(options: {
   })().catch(() => socket.destroy()) })
   await new Promise<void>((resolve) => http.listen(options.port, options.listenHost ?? '127.0.0.1', resolve))
   const address = http.address(); const port = typeof address === 'object' && address ? address.port : options.port
-  return { http, port, async close() { proxy.close(); await new Promise<void>((resolve) => http.close(() => resolve())) } }
+  return { http, port, async close() { proxy.close(); dashboardProxy?.close(); await new Promise<void>((resolve) => http.close(() => resolve())) } }
 }

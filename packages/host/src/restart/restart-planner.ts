@@ -12,6 +12,8 @@ export type RestartPlanSessionRecord = {
   readonly label?: string
   readonly workspaceId?: string
   readonly workspaceName?: string
+  readonly parentSessionId?: string
+  readonly parentCallId?: string
   readonly state: {
     readonly status: AgentState['status']
     readonly cursor: number
@@ -38,11 +40,14 @@ export function planRestartSession(input: {
   const { record, snapshot, mode } = input
   return {
     sessionId: record.sessionId,
+    ...(record.parentSessionId ? { parentSessionId: record.parentSessionId } : {}),
+    ...(record.parentCallId ? { parentCallId: record.parentCallId } : {}),
     cursor: snapshot.cursor ?? record.state.cursor,
     initialStatus: record.state.status,
     checkpointStatus: checkpointStatusFor(snapshot),
     ...(snapshot.checkpointKind ? { checkpointKind: snapshot.checkpointKind } : {}),
     resumeAction: resumeActionFor(snapshot, mode),
+    ...(snapshot.checkpointKind ? { continuationKey: `${record.sessionId}:${snapshot.cursor ?? record.state.cursor}:${snapshot.checkpointKind}` } : {}),
     ...(record.label ? { label: record.label } : {}),
     ...(record.workspaceId ? { workspaceId: record.workspaceId } : {}),
     ...(record.workspaceName ? { workspaceName: record.workspaceName } : {}),

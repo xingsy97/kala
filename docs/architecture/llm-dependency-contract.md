@@ -1,6 +1,6 @@
 # LLM Dependency Architecture
 
-The Host loop depends only on `LLMAdapter` (the Port). OpenAI/Anthropic implementations are Adapters. Provider selection and construction belong to `LLMClientFactory`; environment/configuration is read only by Standalone and RuntimeHost composition roots.
+The Host loop depends only on `LLMAdapter` (the Port). OpenAI/Anthropic implementations are Adapters. Provider selection and construction belong to `LLMClientFactory`; environment/configuration is read only by Portable and Platform RuntimeHost composition roots.
 
 ## Scopes
 

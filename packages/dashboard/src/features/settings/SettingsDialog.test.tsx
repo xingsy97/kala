@@ -807,7 +807,18 @@ describe('SettingsDialog', () => {
   })
 
   it('shows deployment component inventory and executor build metadata', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input).endsWith('/runtime/deployment/status')) return new Response(JSON.stringify({
+        schemaVersion: 1, generatedAt: new Date().toISOString(), topology: 'dedicated-slots',
+        services: { supervisor: { pid: 52 } }, writeLeaseOwnerPid: 42,
+        route: { generation: 4, activeSlot: 'green', activeReleaseId: 'next' },
+        slots: { blue: { pid: 0, active: false, releaseId: 'old' }, green: { pid: 42, active: true, releaseId: 'next' } },
+        admission: { pending: 1, leased: 1, committed: 3, expired: 0, oldestAgeMs: 2500, capacity: 1000 },
+        dashboard: { schemaVersion: 1, generation: 3, releaseId: 'dashboard-r3', releaseDigest: 'c'.repeat(64), assetDigest: 'd'.repeat(64), version: '0.1.10', protocol: { min: '1.0.0', max: '1.0.0' }, activatedAt: new Date().toISOString() },
+        deployment: { deploymentId: 'deployment-0001', operationId: 'operation-0001', phase: 'completed', requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), releaseDigest: 'a'.repeat(64), sourceReleaseDigest: 'b'.repeat(64), candidateSlot: 'green', runtimeReadyAt: new Date().toISOString(), continuation: { participants: 2, completed: 2, failed: 0 }, controlPlane: { previousIngressPid: 31, ingressPid: 41, previousSupervisorPid: 32, supervisorPid: 52, activatedAt: new Date().toISOString(), readyAt: new Date().toISOString() } },
+      }), { status: 200 })
+      return new Response(JSON.stringify(payload), { status: 200 })
+    })
     const executors: AttachedExecutor[] = [
       {
         executorId: 'exec-1',
@@ -838,27 +849,21 @@ describe('SettingsDialog', () => {
         },
       },
     ]
-    render(<SettingsDialog open onOpenChange={() => {}} executors={executors} />)
+    render(<SettingsDialog open onOpenChange={() => {}} executors={executors} host="https://runlab.example" />)
     await waitForSettingsLoaded()
 
     fireEvent.click(screen.getByTestId('settings-tab-deployment'))
 
-    expect(screen.getByText('Component inventory')).toBeTruthy()
-    expect(screen.getByText('Host runtime')).toBeTruthy()
-    expect(screen.getByText('Dashboard')).toBeTruthy()
-    expect(screen.getByText('Protocol')).toBeTruthy()
-    expect(screen.getByText('Executor: example-executor')).toBeTruthy()
-    expect(screen.getByTestId('settings-component-inventory')).toBeTruthy()
-    expect(screen.getAllByText('Instance').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('Health').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('abc123').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('embedded in host bundle, 42 files')).toBeTruthy()
-    expect(screen.getByText('bundle-dashboard-with-runtime.cjs')).toBeTruthy()
-    expect(screen.getByText('agent-kernel-executor.cjs')).toBeTruthy()
-    expect(screen.getByText('def456')).toBeTruthy()
-    expect(screen.getByText('running')).toBeTruthy()
-    expect(screen.getByText('embedded in host')).toBeTruthy()
-    expect(screen.getByText('example-executor-host | Node.js v22.22.2 | pid 15372')).toBeTruthy()
+    expect(screen.getByTestId('settings-deployment-overview')).toBeTruthy()
+    expect(screen.getByText('Overall status')).toBeTruthy()
+    expect(screen.getByText('Dashboard release')).toBeTruthy()
+    expect(screen.getByText('Runtime release')).toBeTruthy()
+    expect(await screen.findByTestId('settings-dedicated-deployment')).toBeTruthy()
+    expect(screen.getByText('Current deployment')).toBeTruthy()
+    expect(screen.getByText('example-executor')).toBeTruthy()
+    expect(screen.getByText('example-executor-host · Node.js v22.22.2')).toBeTruthy()
     expect(screen.getByText('background shell, file picker, overflow files')).toBeTruthy()
+    expect(screen.getByTestId('settings-deployment-diagnostics')).toBeTruthy()
+    expect(screen.queryByText('Executor: example-executor')).toBeNull()
   })
 })

@@ -1,4 +1,5 @@
 import { startExecutor, type ExecutorHandle } from '@agent-kernel/executor'
+import { PRIVATE_CLOUD_DEPLOYMENT } from '@agent-kernel/shared'
 import { join } from 'node:path'
 import type { HostServer, HostServerOptions } from '../server.js'
 import { ExecutorIdentityStore } from '../store/executor-identity.js'
@@ -11,7 +12,7 @@ export type LoopbackHostRuntimeUnit = TenantRuntimeUnit & {
 }
 
 /**
- * Transitional composition: one complete existing Host runtime is hosted behind
+ * Platform composition: one complete Host runtime is mounted behind
  * a private loopback listener and exposed as one TenantRuntimeUnit. This keeps
  * all mature Agent behavior intact while the outer multi-tenant Host owns only
  * routing and lifecycle. Later extraction can lift immutable/static services
@@ -32,14 +33,14 @@ export async function startLoopbackHostRuntimeUnit(
     ...(executorIdentityStore ? { auth: { ...(serverOptions.auth ?? {}), executorIdentityStore } } : {}),
     port: 0,
     listenHost: '127.0.0.1',
-    deploymentMode: options.deploymentMode ?? 'saas',
+    deployment: options.deployment ?? PRIVATE_CLOUD_DEPLOYMENT,
   })
   const executor = workspaceDir ? startExecutor({
     host: `http://127.0.0.1:${server.port}`,
     workspaceId,
     workspaceName: 'Workspace',
     sandboxRoots: [workspaceDir],
-    // Hosted loopback execution still performs real filesystem mutations. Keep
+    // Platform loopback execution still performs real filesystem mutations. Keep
     // durable scoped receipts so Unit/Host restart cannot execute them twice.
     receiptStorePath: join(workspaceDir, '.agent-kernel', 'execution-receipts.json'),
     ...(executorToken ? { token: executorToken } : {}),

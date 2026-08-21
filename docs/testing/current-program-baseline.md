@@ -4,6 +4,8 @@
 **Source revision:** `1e01821a46f05b703db6fc97b6cd61cb6d179dc4`
 **Purpose:** freeze deployment boundaries and evidence locations before the product-hardening program starts.
 
+**Historical terminology:** this frozen 2026-07-30 record preserves the deployment names and runtime labels captured at that time. Current product names are Portable, Dedicated, and Private Cloud; see [`../architecture/deployment-mode-contract.md`](../architecture/deployment-mode-contract.md).
+
 ## Safety rule
 
 - The existing Standalone LXD service on `127.0.0.1:13000` is frozen.

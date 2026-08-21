@@ -4,8 +4,9 @@ import { resolve } from 'node:path'
 
 const IMAGE_EXTENSION = /\.(?:png|jpe?g|gif|webp|svg|ico|bmp|tiff?)$/i
 const PRIVATE_IPV4 = /(?<!\d)(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(?!\d)/g
-const HOME_PATH = /(?:\/home\/([^/:;\s"']+)|\/Users\/([^/:;\s"']+)|[A-Za-z]:\\Users\\([^\\:;\s"']+))/g
+const HOME_PATH = /(?:\/home\/([^/:;\s"'`]+)|\/Users\/([^/:;\s"'`]+)|[A-Za-z]:\\Users\\([^\\:;\s"'`]+))/g
 const EMAIL = /(?<![\w.-])([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w.-])/g
+const SYSTEMD_TEMPLATE_UNIT = /^[A-Za-z0-9_.:-]+@[A-Za-z0-9_.:-]+\.(?:service|socket|target|timer|path|mount|automount|slice|scope|device|swap)$/
 const UUID = /(?<![0-9a-f])([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?![0-9a-f])/gi
 const URL = /\b(?:https?|wss?):\/\/[^\s<>"'`]+/gi
 const SECRET_RULES = [
@@ -105,6 +106,7 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
     if (!template && user.length >= 3 && !policy.allowedHomeUsers.has(user.toLowerCase())) add('privacy.personal-home', match.index, 'Use a documented example home directory.')
   }
   for (const match of text.matchAll(EMAIL)) {
+    if (SYSTEMD_TEMPLATE_UNIT.test(match[0])) continue
     const domain = match[2].toLowerCase()
     const allowed = [...policy.allowedEmailDomains].some((item) => domain === item || domain.endsWith(`.${item}`))
       || domain.endsWith('.example') || domain.endsWith('.test') || domain.endsWith('.invalid')

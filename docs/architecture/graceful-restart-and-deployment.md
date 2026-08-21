@@ -167,7 +167,7 @@ Deployments must not overwrite live release files one by one. LXD must not call 
 
 ## Supervisor contract
 
-A supported standalone service must be preflighted for:
+A supported Dedicated service must be preflighted for:
 
 - one MainPID and one writable data owner;
 - `Restart=always` or equivalent replacement after exit code 0;

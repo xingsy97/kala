@@ -72,6 +72,7 @@ export const TERMINAL_ACK_TIMEOUT_MS = 5_000
  * and the UI doesn't flicker offline.
  */
 export const DETACH_GRACE_MS = 5_000
+export const PLANNED_CONTINUATION_EXECUTOR_WAIT_MS = 30_000
 
 type Pending = {
   sessionId: string
@@ -134,6 +135,8 @@ export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
   measureLatency(workspaceId: string): Promise<{ rttMs?: number; error?: string }>
   renameWorkspace(workspaceId: string, workspaceName: string): AttachedExecutor | undefined
   onChange(listener: ExecutorChangeListener): () => void
+  /** Wait at a planned pre-dispatch checkpoint until its bound Executor is online. */
+  waitForSessionExecutor(sessionId: string, timeoutMs?: number): Promise<boolean>
 }
 
 export function createExecutorRegistry(
@@ -157,6 +160,8 @@ export function createExecutorRegistry(
   const byExecutor = new Map<string, Bind>()
   const socketToExecutor = new Map<string, string>()
   const listeners = new Set<ExecutorChangeListener>()
+  type ExecutorWaiter = { resolve(online: boolean): void; timer: NodeJS.Timeout }
+  const executorWaiters = new Map<string, Set<ExecutorWaiter>>()
 
   /**
    * Workspaces whose executor socket just went away but where we're still
@@ -170,6 +175,18 @@ export function createExecutorRegistry(
 
   function emitChange(change: ServerExecutorChangedPayload): void {
     for (const l of listeners) l(change)
+  }
+
+  function resolveExecutorWaiters(workspaceId: string): void {
+    for (const key of [workspaceId, '*']) {
+      const waiters = executorWaiters.get(key)
+      if (!waiters) continue
+      executorWaiters.delete(key)
+      for (const waiter of waiters) {
+        clearTimeout(waiter.timer)
+        waiter.resolve(true)
+      }
+    }
   }
 
   function toAttached(bind: Bind): AttachedExecutor {
@@ -395,6 +412,7 @@ export function createExecutorRegistry(
           executorId,
           executor: toAttached(newBind),
         })
+        resolveExecutorWaiters(workspaceId)
         return
       }
 
@@ -416,6 +434,7 @@ export function createExecutorRegistry(
           executorId,
           executor: toAttached(newBind),
         })
+        resolveExecutorWaiters(workspaceId)
         return
       }
 
@@ -466,6 +485,7 @@ export function createExecutorRegistry(
         executorId,
         executor: toAttached(newBind),
       })
+      resolveExecutorWaiters(workspaceId)
     },
     detach(socket) {
       const executorId = socketToExecutor.get(socket.id)
@@ -545,6 +565,19 @@ export function createExecutorRegistry(
           },
         )
       })
+    },
+    async callToolWhenAvailable(sessionId, eff, turnId) {
+      const deadlineAt = Date.now() + PLANNED_CONTINUATION_EXECUTOR_WAIT_MS
+      while (true) {
+        const result = await this.callTool(sessionId, eff, turnId)
+        // `workspace_offline` is produced before tool:call is emitted, so this
+        // is the only failure that is safe to retry. Once a call was sent, the
+        // Executor receipt/idempotency protocol owns recovery and this method
+        // must not guess whether an external side effect occurred.
+        if (result.failure?.code !== 'workspace_offline') return result
+        const remainingMs = deadlineAt - Date.now()
+        if (remainingMs <= 0 || !await this.waitForSessionExecutor(sessionId, remainingMs)) return result
+      }
     },
     cancelPending(sessionId) {
       // Detached binds retain calls during the reconnect grace window. They
@@ -885,6 +918,33 @@ export function createExecutorRegistry(
       return () => {
         listeners.delete(listener)
       }
+    },
+    async waitForSessionExecutor(sessionId, timeoutMs = PLANNED_CONTINUATION_EXECUTOR_WAIT_MS) {
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new Error('Executor wait timeout must be a positive integer')
+      const workspaceId = resolver.workspaceIdFor(sessionId)
+      if (workspaceId === undefined ? pickAnyBind() !== undefined : findBindByWorkspace(workspaceId) !== undefined) return true
+      const key = workspaceId ?? '*'
+      return await new Promise<boolean>((resolve) => {
+        const waiter: ExecutorWaiter = {
+          resolve,
+          timer: setTimeout(() => {
+            const current = executorWaiters.get(key)
+            current?.delete(waiter)
+            if (current?.size === 0) executorWaiters.delete(key)
+            resolve(false)
+          }, timeoutMs),
+        }
+        const current = executorWaiters.get(key) ?? new Set<ExecutorWaiter>()
+        current.add(waiter)
+        executorWaiters.set(key, current)
+        // Close the attach-before-register race without polling.
+        if (workspaceId === undefined ? pickAnyBind() !== undefined : findBindByWorkspace(workspaceId) !== undefined) {
+          current.delete(waiter)
+          if (current.size === 0) executorWaiters.delete(key)
+          clearTimeout(waiter.timer)
+          resolve(true)
+        }
+      })
     },
   }
 }

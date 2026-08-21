@@ -1,4 +1,5 @@
-import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http'
+import type { ClientRequest, IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http'
+import { Socket } from 'node:net'
 import type { Duplex } from 'node:stream'
 
 import httpProxy from 'http-proxy'
@@ -24,11 +25,66 @@ export type RuntimeUnitIngress = {
  */
 export function createRuntimeUnitIngress(options: {
   resolve: ResolveRuntimeProxyTarget
+  resolveUpgrade?: ResolveRuntimeProxyTarget
   isRoutableRequest?: (request: IncomingMessage) => boolean
 }): RuntimeUnitIngress {
   const proxy = httpProxy.createProxyServer({ ws: true, xfwd: false, changeOrigin: false })
   const isRoutable = options.isRoutableRequest ?? (() => true)
   let attached: HttpServer | undefined
+  const upgradedClients = new Set<Duplex>()
+  const upgradeRequests = new Set<ClientRequest>()
+  const upgradedUpstreams = new Set<Duplex>()
+  const upgradePeers = new Map<Duplex, Duplex>()
+  const resetTransport = (socket: Duplex): void => {
+    // A normal FIN leaves a peer with buffered Socket.IO output in CLOSE_WAIT
+    // while it tries to flush bytes that can no longer be consumed. Resetting
+    // a TCP transport makes both ends discard that stale queue immediately.
+    if (socket instanceof Socket && !socket.destroyed) socket.resetAndDestroy()
+    else if (!socket.destroyed) socket.destroy()
+  }
+  const trackUpgrade = (set: Set<Duplex>, socket: Duplex): void => {
+    set.add(socket)
+    socket.once('close', () => set.delete(socket))
+  }
+  const closeUpgradePair = (socket: Duplex): void => {
+    const peer = upgradePeers.get(socket)
+    if (!peer) return
+    upgradePeers.delete(socket)
+    upgradePeers.delete(peer)
+    resetTransport(socket)
+    resetTransport(peer)
+  }
+  const pairUpgrades = (client: Duplex, upstream: Duplex): void => {
+    upgradePeers.set(client, upstream)
+    upgradePeers.set(upstream, client)
+    // http-proxy pipes both directions, but a TCP half-close does not
+    // necessarily close the opposite writable side. Socket.IO then keeps
+    // broadcasting into an orphaned upstream socket until its send buffer is
+    // full, delaying ping and Tool ACK traffic for healthy connections. A
+    // WebSocket transport is one lifecycle: either half ending closes both.
+    client.once('end', () => closeUpgradePair(client))
+    client.once('finish', () => closeUpgradePair(client))
+    client.once('error', () => closeUpgradePair(client))
+    client.once('close', () => closeUpgradePair(client))
+    upstream.once('end', () => closeUpgradePair(upstream))
+    upstream.once('finish', () => closeUpgradePair(upstream))
+    upstream.once('error', () => closeUpgradePair(upstream))
+    upstream.once('close', () => closeUpgradePair(upstream))
+  }
+  proxy.on('proxyReqWs', (request: ClientRequest, _incoming, client: Duplex) => {
+    upgradeRequests.add(request)
+    request.once('close', () => upgradeRequests.delete(request))
+    const abandonPendingUpgrade = (): void => {
+      if (!request.destroyed) request.destroy()
+      else if (request.socket) resetTransport(request.socket)
+    }
+    client.once('close', abandonPendingUpgrade)
+    request.once('upgrade', (_response, upstream) => {
+      upgradeRequests.delete(request)
+      trackUpgrade(upgradedUpstreams, upstream)
+      pairUpgrades(client, upstream)
+    })
+  })
 
   const rejectHttp = (response: ServerResponse, status: number, message: string): void => {
     if (response.headersSent) return
@@ -55,7 +111,8 @@ export function createRuntimeUnitIngress(options: {
 
   const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     if (!isRoutable(request)) return
-    void Promise.resolve(options.resolve(request)).then((target) => {
+    trackUpgrade(upgradedClients, socket)
+    void Promise.resolve((options.resolveUpgrade ?? options.resolve)(request)).then((target) => {
       if (!target) {
         rejectUpgrade(socket, 404, 'Not Found')
         return
@@ -81,6 +138,10 @@ export function createRuntimeUnitIngress(options: {
         attached.removeListener('upgrade', onUpgrade)
         attached = undefined
       }
+      for (const socket of upgradedClients) resetTransport(socket)
+      for (const request of upgradeRequests) { if (request.socket) resetTransport(request.socket); request.destroy() }
+      for (const socket of upgradedUpstreams) resetTransport(socket)
+      upgradePeers.clear()
       proxy.close()
     },
   }

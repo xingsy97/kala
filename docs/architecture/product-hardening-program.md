@@ -6,7 +6,7 @@
 
 ## 1. Ordering rule
 
-The program proceeds through explicit gates. Product reliability and recoverability are completed before broad naming or LLM dependency refactors. Hosted Docker validation precedes Box Standalone validation. LXD is the final release target only.
+The program proceeds through explicit gates. Product reliability and recoverability are completed before broad naming or LLM dependency refactors. Private Cloud Docker validation precedes isolated Dedicated validation. The production Dedicated target is the final release action only.
 
 ```mermaid
 flowchart TD
@@ -16,8 +16,8 @@ flowchart TD
   Product[Product foundation implementation]
   FoundationGate[Product foundation gate]
   Refactors[Naming and LLM dependency refactors]
-  Docker[Hosted Docker multi-user acceptance]
-  Box[Box Standalone acceptance]
+  Docker[Private Cloud Docker multi-tenant acceptance]
+  Box[Isolated Dedicated acceptance]
   Quality[Deployment quality gate]
   LXD[Final LXD deployment]
 
@@ -58,7 +58,7 @@ The product foundation gate requires all branches and task-chain evidence. A des
 
 Only after the product foundation gate:
 
-- technical `SaaS` component names migrate to RuntimeIngressGateway/RuntimeHost/RuntimeUnitIngress terminology;
+- legacy multi-tenant component names migrate to RuntimeIngressGateway/RuntimeHost/RuntimeUnitIngress terminology;
 - LLM dependencies migrate to explicit Port/Adapter/Factory/Composition Root boundaries with process, Unit, and Session scopes;
 - both branches complete focused tests before an integration gate.
 
@@ -66,8 +66,8 @@ This order avoids combining unresolved product failures with repository-wide sym
 
 ## 4. Deployment gates
 
-1. Build and validate the hosted Docker stack using isolated temporary users and resources.
-2. Run the same critical journeys against an isolated Box Standalone process on an unused port and temporary roots.
+1. Build and validate the Private Cloud Docker stack using isolated temporary users and resources.
+2. Run the same critical journeys against an isolated Dedicated process on an unused port and temporary roots.
 3. Run dual-mode LLM and browser acceptance.
 4. Run full tests, typecheck, production/PWA build, Compose validation, release assets, old-name audit, and risk report.
 5. Only then back up and deploy to LXD `13000`.

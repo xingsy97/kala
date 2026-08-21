@@ -1,0 +1,35 @@
+[Unit]
+Description=Agent RunLab Dedicated Stable Ingress
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=agent-runlab
+Group=agent-runlab
+EnvironmentFile=-/etc/agent-runlab/ingress.env
+Environment=AGENT_RUNLAB_ROUTE_STATE=/var/lib/agent-runlab/deploy/route-state.json
+Environment=AGENT_RUNLAB_ADMISSION_LEDGER=/var/lib/agent-runlab/admission/ledger.json
+Environment=AGENT_RUNLAB_CANDIDATE_STATE=/var/lib/agent-runlab/deploy/candidate-state.json
+Environment=AGENT_RUNLAB_OPERATOR_STATUS=/var/lib/agent-runlab/deploy/operator-status.json
+Environment=AGENT_RUNLAB_DASHBOARD_STATE=/var/lib/agent-runlab/deploy/dashboard/route-state.json
+Environment=AGENT_RUNLAB_DASHBOARD_RELEASES=/var/lib/agent-runlab/deploy/dashboard/releases
+Environment=AGENT_RUNLAB_INGRESS_READINESS=/run/agent-runlab/ingress-readiness.json
+EnvironmentFile=-/etc/agent-runlab/handoff.env
+ExecStartPre=/usr/bin/rm -f /run/agent-runlab/ingress-readiness.json
+ExecStart=/usr/bin/node /var/lib/agent-runlab/deploy/control-current/agent-runlab-dedicated-ingress.cjs
+Restart=always
+RestartSec=2s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/agent-runlab/deploy/route-state.json -/var/lib/agent-runlab/deploy/candidate-state.json -/var/lib/agent-runlab/deploy/operator-status.json /var/lib/agent-runlab/deploy/dashboard
+ReadWritePaths=/var/lib/agent-runlab/admission
+RuntimeDirectory=agent-runlab
+RuntimeDirectoryPreserve=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

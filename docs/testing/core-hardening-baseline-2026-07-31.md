@@ -3,7 +3,9 @@
 **Captured:** 2026-07-31T15:31:35Z
 **Repository HEAD/base:** `1e01821a46f05b703db6fc97b6cd61cb6d179dc4`
 **Program entry:** Task Graph `coreHardeningBaseline`
-**Benchmark input:** [`../architecture/hosted-hybrid-enterprise-benchmark-matrix.md`](../architecture/hosted-hybrid-enterprise-benchmark-matrix.md)
+**Benchmark input:** [`../architecture/private-cloud-enterprise-benchmark-matrix.md`](../architecture/private-cloud-enterprise-benchmark-matrix.md)
+
+**Historical terminology:** this frozen 2026-07-31 evidence record preserves the deployment labels used by that run. Current product names are Portable, Dedicated, and Private Cloud; see [`../architecture/deployment-mode-contract.md`](../architecture/deployment-mode-contract.md).
 
 ## Safety and evidence rules
 

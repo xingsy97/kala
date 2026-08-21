@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "architecture": "platform",
+  "tenancy": "multi-tenant",
+  "runtimeProfile": "agent"
+}

@@ -19,7 +19,7 @@ export async function startTenantRuntimeService(options: {
   port: number
   factory: TenantRuntimeUnitFactory
   resolveUnitId(request: IncomingMessage): string | undefined | Promise<string | undefined>
-  /** Required in SaaS: service credential shared only with the trusted Gateway. */
+  /** Required in Private Cloud: service credential shared only with the trusted Gateway. */
   ingressSecret?: string
   listenHost?: string
   requireProvisioning?: boolean

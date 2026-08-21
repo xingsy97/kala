@@ -119,6 +119,17 @@ export type ToolDispatcher = {
     failure?: import('@agent-kernel/kernel').ToolFailure
     durationMs?: number
   }>
+  /**
+   * Planned-continuation variant. It may wait and retry only when no Executor
+   * accepted the call (`workspace_offline`); an indeterminate dispatched call
+   * is never replayed here.
+   */
+  callToolWhenAvailable?(sessionId: string, eff: CallToolEffect, turnId?: string): Promise<{
+    ok: boolean
+    content: string
+    failure?: import('@agent-kernel/kernel').ToolFailure
+    durationMs?: number
+  }>
   cancelPending(sessionId: string): void
 }
 
@@ -137,6 +148,7 @@ export type HostLoopDeps = {
   hookRunner?: HookRunner
   skills?: SkillRegistry | SkillManager
   webSearchCredentials?: WebSearchCredentialStore
+  audit?: import('./audit-log.js').AuditLogger
   artifactRootDir?: string
 }
 
@@ -157,7 +169,7 @@ export type LoopHandle = {
   endDrain(): void
   drainSnapshot(sessionId: string): LoopDrainSessionSnapshot
   waitForCheckpoint(sessionId: string): Promise<LoopDrainSessionSnapshot>
-  resumeSession(sessionId: string): Promise<boolean>
+  resumeSession(sessionId: string, options?: ResumeSessionOptions): Promise<boolean>
   /**
    * Abort the in-flight LLM call for a session, if any. Any streamed text
    * so far becomes the final assistant message with a `[cancelled]` suffix,
@@ -191,8 +203,15 @@ export type LoopDrainSessionSnapshot = {
 
 export type DispatchOptions = {
   model?: string
+  /** Internal steer boundary settlement; not an explicit operator Stop latch. */
+  internalBoundaryCancel?: boolean
   /** Resolves at the durable event-commit boundary, before effect fan-out. */
   onCommitted?: (event: AgentEvent) => void | Promise<void>
+}
+
+export type ResumeSessionOptions = {
+  /** Runs after durable state validation and before the first resumed IO effect. */
+  onStarted?: () => void | Promise<void>
 }
 
 /**
@@ -208,8 +227,11 @@ export type LoopRuntime = {
   drain?: () => LoopDrainMode
   /** Per-session steer stop: halt the autonomous loop before the next think. */
   steerStop?: () => boolean
+  /** Explicit user Stop latch. Blocks all remaining effects from the cancelled turn. */
+  stopRequested?: () => boolean
   toolStarted?(sessionId: string, callId: string): void
   toolSettled?(sessionId: string, callId: string): void
+  plannedContinuation?: boolean
 }
 
 export type PostCompactionLoopGuard = {

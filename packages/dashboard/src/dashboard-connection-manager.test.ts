@@ -42,7 +42,10 @@ describe('DashboardConnectionManager', () => {
     releaseFirst()
     await vi.waitFor(() => expect(manager.snapshot().get('session:s2')?.state).toBe('active'))
     expect(manager.socket).toBe(socket)
-    expect(socket.emits.filter((entry) => entry.event === 'client:unsubscribe_channels').at(-1)?.payload.channels).toEqual(['session:s1'])
+    const unsubscribe = socket.emits.filter((entry) => entry.event === 'client:unsubscribe_channels').at(-1)
+    const subscribeSecond = socket.emits.filter((entry) => entry.event === 'client:subscribe_channels' && entry.payload.channels.includes('session:s2')).at(-1)
+    expect(unsubscribe?.payload.channels).toEqual(['session:s1'])
+    expect(unsubscribe?.payload.generation).toBeGreaterThan(subscribeSecond?.payload.generation)
 
     socket.connected = false; socket.fire('disconnect')
     socket.connected = true; socket.fire('connect')

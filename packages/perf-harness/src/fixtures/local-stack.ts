@@ -5,7 +5,7 @@ import { extname, join, normalize } from 'node:path'
 import { rm } from 'node:fs/promises'
 
 import { io as connectSocket } from 'socket.io-client'
-import { PROTOCOL_VERSION, type DeploymentMode, type RuntimeCapabilities } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION, type ProductDeploymentConfig, type RuntimeCapabilities } from '@agent-kernel/shared'
 import { startHostServer, type HostServer, type LLMAdapter } from '@agent-kernel/host'
 import { startExecutor } from '@agent-kernel/executor'
 
@@ -38,7 +38,7 @@ export type LocalStackOptions = {
   workspaceName?: string
   /** Tool execution timeout (ms). */
   toolTimeoutMs?: number
-  deploymentMode?: DeploymentMode
+  deployment?: ProductDeploymentConfig
   capabilities?: RuntimeCapabilities
 }
 
@@ -97,7 +97,7 @@ export async function startLocalStack(options: LocalStackOptions): Promise<Local
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AgentConfig is host-internal; the harness passes a minimal, valid config.
     defaultConfig: { tools: tools as any, systemPrompt: options.systemPrompt ?? 'perf-harness system prompt' } as any,
     toolTimeoutMs: options.toolTimeoutMs ?? 5000,
-    ...(options.deploymentMode ? { deploymentMode: options.deploymentMode } : {}),
+    ...(options.deployment ? { deployment: options.deployment } : {}),
     ...(options.capabilities ? { capabilities: options.capabilities } : {}),
     settings: {
       providers: [], defaultModel: '', hooks: [],

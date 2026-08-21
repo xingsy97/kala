@@ -132,6 +132,7 @@ export type ExecutorOptions = {
   /** Injectable Socket.IO factory — used by tests. */
   ioFactory?: typeof clientIO
   receiptStorePath?: string | false
+  networkPolicy?: import('@agent-kernel/shared').NetworkPolicy
 }
 
 export type PermanentError = {
@@ -348,7 +349,9 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     inFlightAcks.set(key, [ack])
     const started = performance.now()
     logger.info({ sessionId: payload.sessionId, callId: payload.callId, tool: payload.name, internal, input: safeToolInput(payload.input), ...(payload.cwd ? { cwd: payload.cwd } : {}) }, 'tool execution started')
-    const rawResult = await runOne(tools, sandbox, controller.signal, payload, overflowConfig)
+    const rawResult = await runOne(tools, sandbox, controller.signal, payload, overflowConfig, options.networkPolicy, async (event) => {
+      await new Promise<void>((resolve, reject) => socket.timeout(5_000).emit('executor:network_audit', event, (error, result) => error || !result?.accepted ? reject(error ?? new Error('network audit rejected')) : resolve()))
+    })
     const result = { ...rawResult, durationMs: Math.max(0, Math.round(performance.now() - started)) }
     let replyResult = result
     try {
@@ -515,6 +518,8 @@ async function runOne(
   signal: AbortSignal,
   payload: ToolCallMessage,
   overflowConfig: OverflowConfig,
+  networkPolicy?: import('@agent-kernel/shared').NetworkPolicy,
+  emitNetworkAudit?: (event: import('@agent-kernel/shared').NetworkAuditEvent) => Promise<void>,
 ): Promise<ToolResultAck> {
   const tool = tools.get(payload.name)
   if (!tool) {
@@ -531,6 +536,8 @@ async function runOne(
       sandbox,
       signal,
       ...(payload.cwd ? { cwd: payload.cwd } : {}),
+      ...(networkPolicy ? { networkPolicy } : {}),
+      ...(emitNetworkAudit ? { emitNetworkAudit } : {}),
     })
     if (OVERFLOW_EXEMPT_TOOLS.has(payload.name) || payload.name.startsWith('__')) {
       return { callId: payload.callId, ok: true, content }

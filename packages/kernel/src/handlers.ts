@@ -130,6 +130,21 @@ export function onLlmResponse(
     }
   }
 
+  // A Tool call identity is globally single-use within a Session transcript.
+  // Reusing one would make Executor receipts and Tool results ambiguous and
+  // could replay a side effect under an already-settled operation identity.
+  const priorCallIds = new Set<string>()
+  for (const priorMessage of state.messages) {
+    for (const content of priorMessage.content) {
+      if (content.type === 'tool_call') priorCallIds.add(content.callId)
+    }
+  }
+  const responseCallIds = new Set<string>()
+  for (const call of toolCalls) {
+    if (priorCallIds.has(call.callId) || responseCallIds.has(call.callId)) return rejectInvalidEvent(state)
+    responseCallIds.add(call.callId)
+  }
+
   // Approval decision per call. Mode overrides the tool schema's flag when
   // it wants to. `deny` short-circuits into a synthetic tool_result message
   // so the LLM can respond to the refusal on the next turn without the host

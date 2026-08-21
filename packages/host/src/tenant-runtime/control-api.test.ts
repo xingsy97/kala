@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AGENT_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 import { RuntimeUnitMaterializationStore } from './materialization-store.js'
 import { attachTenantRuntimeControlApi } from './control-api.js'
 import type { TenantRuntimeService } from './service.js'
@@ -11,7 +12,7 @@ afterEach(async () => { for (const server of servers.splice(0)) await new Promis
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'control-api-')); roots.push(root); const http = createServer(); servers.push(http)
   const service = { http, port: 0, units: {} as never, status: () => ({ state: 'ready' as const, units: [] }), drain: vi.fn(), markRoutable: vi.fn(), suspendUnit: vi.fn(), close: vi.fn() } satisfies TenantRuntimeService
-  const store = new RuntimeUnitMaterializationStore(join(root, 'catalog.json')); attachTenantRuntimeControlApi({ http, serviceSecret: 'secret', service, store, dataRoot: root })
+  const store = new RuntimeUnitMaterializationStore(join(root, 'catalog.json')); attachTenantRuntimeControlApi({ http, serviceSecret: 'secret', service, store, dataRoot: root, capabilities: AGENT_RUNTIME_CAPABILITIES })
   await new Promise<void>((r) => http.listen(0, '127.0.0.1', r)); const port = (http.address() as { port: number }).port
   return { root, port, service, store }
 }
