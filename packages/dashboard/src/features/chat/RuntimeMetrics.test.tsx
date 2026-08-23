@@ -195,6 +195,10 @@ describe('RuntimeMetrics', () => {
     expect(usage?.getAttribute('class')).not.toContain('border-')
     expect(usage?.getAttribute('stroke-linecap')).toBe('round')
     expect(usage?.getAttribute('stroke-dasharray')).toBe('30 70')
+    // Chromium repeats normalized dashes in device units when pathLength is
+    // combined with non-scaling-stroke, producing many visible breaks. The
+    // Composer SVG has a 1:1 viewBox, so vector-effect is unnecessary here.
+    expect(usage?.hasAttribute('vector-effect')).toBe(false)
     // No inline percentage number in the composer chrome...
     expect(indicator.textContent ?? '').not.toContain('%')
     // ...but the exact figure is still reachable via the tooltip and popover.

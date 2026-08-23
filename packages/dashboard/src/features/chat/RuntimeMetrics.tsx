@@ -152,8 +152,8 @@ export function RuntimeMetrics({
     <div className={cn('relative flex-none', isSimple && 'pointer-events-none absolute inset-0 z-10')} ref={ref} data-testid={isSimple ? 'context-usage-overlay' : undefined}>
       {isSimple ? (
         <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${simpleGeometry.width} ${simpleGeometry.height}`} aria-hidden="true" data-testid="context-usage-track">
-          <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-          <path d={contextBorderPath} pathLength="100" fill="none" className={cn('opacity-90 transition-[filter,opacity] duration-[240ms] ease-out', contextStrokeTone)} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${usedPercent} ${100 - usedPercent}`} vectorEffect="non-scaling-stroke" data-context-usage-tone={evaluation.tone} />
+          <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" />
+          <path d={contextBorderPath} pathLength="100" fill="none" className={cn('opacity-90 transition-[filter,opacity] duration-[240ms] ease-out', contextStrokeTone)} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${usedPercent} ${100 - usedPercent}`} data-context-usage-tone={evaluation.tone} />
         </svg>
       ) : null}
       <button

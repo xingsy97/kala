@@ -35,7 +35,8 @@ Activity and Composer presentation are fixed by these additional rules:
 - the Composer context outline is one open, continuous upper-cap path: left
   shoulder, top edge, and right shoulder only. It never draws the lower sides
   or bottom edge. Its neutral track and aggregate-pressure used portion share
-  that exact geometry; separate fragments must never be stitched together;
+  that exact geometry; separate fragments and periodically repeated dash
+  patterns must never be stitched together;
 - the transcript exposes compact previous/next user-message controls on its
   left edge. Navigation is relative to the real scroll viewport measured from
   rendered row geometry, never Virtuoso's overscan-inclusive range. It targets
