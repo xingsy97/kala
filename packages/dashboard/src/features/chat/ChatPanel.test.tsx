@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -882,6 +882,56 @@ describe('ChatPanel', () => {
     fireEvent.click(screen.getByTestId('scroll-to-bottom'))
     expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
     expect(onPinnedChange).toHaveBeenCalledWith(true)
+  })
+
+  it('jumps between user-message anchors from the current visible range', () => {
+    const bridge = globalThis as typeof globalThis & {
+      __virtuosoRangeChanged?: (range: { startIndex: number; endIndex: number }) => void
+      __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
+    }
+    bridge.__virtuosoScrollToIndexMock?.mockClear()
+    const onPinnedChange = vi.fn()
+    render(
+      <ChatPanel
+        pinnedToBottom={false}
+        onPinnedChange={onPinnedChange}
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'first question' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+          { role: 'user', content: [{ type: 'text', text: 'second question' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+          { role: 'user', content: [{ type: 'text', text: 'third question' }] },
+        ]}
+      />,
+    )
+
+    act(() => bridge.__virtuosoRangeChanged?.({ startIndex: 1, endIndex: 1 }))
+    fireEvent.click(screen.getByTestId('previous-user-message'))
+    expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 0, align: 'start', behavior: 'smooth' })
+    fireEvent.click(screen.getByTestId('next-user-message'))
+    expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 2, align: 'start', behavior: 'smooth' })
+    expect(onPinnedChange).toHaveBeenCalledWith(false)
+  })
+
+  it('disables user-message navigation at transcript boundaries', () => {
+    const bridge = globalThis as typeof globalThis & {
+      __virtuosoRangeChanged?: (range: { startIndex: number; endIndex: number }) => void
+    }
+    render(
+      <ChatPanel
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'first question' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+          { role: 'user', content: [{ type: 'text', text: 'last question' }] },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('previous-user-message').hasAttribute('disabled')).toBe(true)
+    expect(screen.getByTestId('next-user-message').hasAttribute('disabled')).toBe(false)
+    act(() => bridge.__virtuosoRangeChanged?.({ startIndex: 2, endIndex: 2 }))
+    expect(screen.getByTestId('previous-user-message').hasAttribute('disabled')).toBe(false)
+    expect(screen.getByTestId('next-user-message').hasAttribute('disabled')).toBe(true)
   })
 
   it('renders session artifacts as previewable images', () => {

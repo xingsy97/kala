@@ -99,6 +99,9 @@ vi.mock('react-virtuoso', async () => {
     ;(globalThis as typeof globalThis & {
       __virtuosoFollowOutput?: (isAtBottom: boolean) => boolean | 'auto' | 'smooth'
     }).__virtuosoFollowOutput = props.followOutput as ((isAtBottom: boolean) => boolean | 'auto' | 'smooth') | undefined
+    ;(globalThis as typeof globalThis & {
+      __virtuosoRangeChanged?: (range: { startIndex: number; endIndex: number }) => void
+    }).__virtuosoRangeChanged = props.rangeChanged as ((range: { startIndex: number; endIndex: number }) => void) | undefined
     const children: React.ReactNode[] = Array.from({ length: totalCount }, (_, index) =>
       React.createElement(
         'div',

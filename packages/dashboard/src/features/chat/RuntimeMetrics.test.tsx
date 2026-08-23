@@ -182,6 +182,8 @@ describe('RuntimeMetrics', () => {
     expect(track.getAttribute('class') ?? '').toContain('inset-0')
     expect(track.getAttribute('class') ?? '').toContain('pointer-events-none')
     expect(track.querySelector('path')?.getAttribute('d')).toContain('Q')
+    expect(track.querySelector('path')?.getAttribute('d')?.trim().endsWith('Z')).toBe(true)
+    expect(track.querySelectorAll('path')).toHaveLength(2)
     expect(track.querySelectorAll('[data-context-segment]')).toHaveLength(0)
     const usage = track.querySelector('[data-context-usage-tone]')
     expect(usage?.getAttribute('data-context-usage-tone')).toBe('ok')

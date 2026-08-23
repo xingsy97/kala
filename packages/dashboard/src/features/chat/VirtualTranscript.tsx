@@ -31,13 +31,14 @@ import {
   type TouchEvent,
   type WheelEvent,
 } from 'react'
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
+import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 
 import { cn } from '../../lib/utils.js'
 
 export type VirtualTranscriptHandle = {
-  scrollToIndex: (index: number, opts?: { behavior?: 'auto' | 'smooth' }) => void
+  scrollToIndex: (index: number, opts?: { behavior?: 'auto' | 'smooth'; align?: 'start' | 'center' | 'end' }) => void
   scrollToBottom: () => void
+  visibleRange: () => ListRange
 }
 
 function scrollVirtuosoToBottom(handle: VirtuosoHandle | null): void {
@@ -69,6 +70,7 @@ type Props<Item> = {
   defaultItemHeight?: number
   /** Test hook. */
   dataTestId?: string
+  onVisibleRangeChange?: (range: ListRange) => void
 }
 
 function VirtualTranscriptInner<Item>(
@@ -84,6 +86,7 @@ function VirtualTranscriptInner<Item>(
     itemClassName,
     defaultItemHeight = 80,
     dataTestId,
+    onVisibleRangeChange,
   }: Props<Item>,
   ref: React.ForwardedRef<VirtualTranscriptHandle>,
 ): JSX.Element {
@@ -98,6 +101,7 @@ function VirtualTranscriptInner<Item>(
   const footerObserver = useRef<ResizeObserver | null>(null)
   const footerSettleRafs = useRef<number[]>([])
   const footerSettleTimers = useRef<number[]>([])
+  const visibleRange = useRef<ListRange>({ startIndex: 0, endIndex: 0 })
   pinnedRef.current = pinnedToBottom
   if (!previousPinnedProp.current && pinnedToBottom) userUnpinnedRef.current = false
   previousPinnedProp.current = pinnedToBottom
@@ -108,7 +112,7 @@ function VirtualTranscriptInner<Item>(
       scrollToIndex: (index, opts) => {
         virtuoso.current?.scrollToIndex({
           index,
-          align: 'center',
+          align: opts?.align ?? 'center',
           behavior: opts?.behavior ?? 'smooth',
         })
       },
@@ -118,6 +122,7 @@ function VirtualTranscriptInner<Item>(
         onPinnedChange(true)
         scrollVirtuosoToBottom(virtuoso.current)
       },
+      visibleRange: () => visibleRange.current,
     }),
     [onPinnedChange],
   )
@@ -348,6 +353,10 @@ function VirtualTranscriptInner<Item>(
         components={components}
         context={footerContext}
         increaseViewportBy={{ top: 400, bottom: 400 }}
+        rangeChanged={(range) => {
+          visibleRange.current = range
+          onVisibleRangeChange?.(range)
+        }}
       />
     </div>
   )

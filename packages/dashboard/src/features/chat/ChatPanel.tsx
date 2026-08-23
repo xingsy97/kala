@@ -242,6 +242,7 @@ export function ChatPanel({
   const [searchCategory, setSearchCategory] = useState<TranscriptSearchCategory>('all')
   const [activeSearchIndex, setActiveSearchIndex] = useState(-1)
   const [searchNavigationToken, setSearchNavigationToken] = useState(0)
+  const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 })
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const searchMatches = useMemo(() => searchTranscript(rawItems, searchQuery, searchCategory), [rawItems, searchQuery, searchCategory])
   useEffect(() => {
@@ -412,6 +413,9 @@ export function ChatPanel({
   }, [activeSearchMatch, messageIndexByItem, rawItems, transcriptItems])
 
   const isEmpty = transcriptItems.length === 0
+  const userMessageAnchors = useMemo(() => transcriptItems.flatMap((item, index) =>
+    item.kind === 'message' && item.message.role === 'user' ? [index] : []
+  ), [transcriptItems])
 
   const renderItem = useCallback(
     (item: RenderTranscriptItem, itemIndex: number): JSX.Element => {
@@ -533,6 +537,15 @@ export function ChatPanel({
     transcriptRef.current?.scrollToBottom()
     effectiveOnPinnedChange(true)
   }, [effectiveOnPinnedChange, transcriptRef])
+  const visibleUserAnchor = userMessageAnchors.find((index) => index >= visibleRange.startIndex && index <= visibleRange.endIndex)
+  const navigationReference = visibleUserAnchor ?? visibleRange.startIndex
+  const previousUserAnchor = [...userMessageAnchors].reverse().find((index) => index < navigationReference)
+  const nextUserAnchor = userMessageAnchors.find((index) => index > navigationReference)
+  const navigateUserMessage = useCallback((target: number | undefined) => {
+    if (target === undefined) return
+    effectiveOnPinnedChange(false)
+    transcriptRef.current?.scrollToIndex(target, { behavior: 'smooth', align: 'start' })
+  }, [effectiveOnPinnedChange, transcriptRef])
   const displayStyle = chatDisplayStyle(displayPrefs)
 
   return (
@@ -581,8 +594,40 @@ export function ChatPanel({
             itemClassName="ak-chat-container ak-chat-item mx-auto w-full min-w-0 overflow-x-hidden py-2 sm:py-3"
             defaultItemHeight={80}
             dataTestId="virtual-transcript"
+            onVisibleRangeChange={setVisibleRange}
           />
         )}
+        {!isEmpty && userMessageAnchors.length > 1 ? (
+          <div className="absolute left-1 top-1/2 z-20 flex -translate-y-1/2 flex-col overflow-hidden rounded-full border border-border/70 bg-background/92 shadow-md backdrop-blur sm:left-3" data-testid="user-message-navigation">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              disabled={previousUserAnchor === undefined}
+              onClick={() => navigateUserMessage(previousUserAnchor)}
+              className="h-10 w-10 rounded-none text-muted-foreground hover:text-foreground disabled:opacity-30 sm:h-8 sm:w-8"
+              aria-label={t('chat.transcript.previousUserMessage')}
+              title={t('chat.transcript.previousUserMessage')}
+              data-testid="previous-user-message"
+            >
+              <ChevronUp className="h-4 w-4" aria-hidden="true" />
+            </Button>
+            <div className="h-px bg-border/60" aria-hidden="true" />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              disabled={nextUserAnchor === undefined}
+              onClick={() => navigateUserMessage(nextUserAnchor)}
+              className="h-10 w-10 rounded-none text-muted-foreground hover:text-foreground disabled:opacity-30 sm:h-8 sm:w-8"
+              aria-label={t('chat.transcript.nextUserMessage')}
+              title={t('chat.transcript.nextUserMessage')}
+              data-testid="next-user-message"
+            >
+              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        ) : null}
         {!isEmpty && !effectivePinned ? (
           <Button
             type="button"
