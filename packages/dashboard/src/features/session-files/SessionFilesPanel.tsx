@@ -1,6 +1,6 @@
 import { randomId } from '../../lib/random-id.js'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import Editor from '@monaco-editor/react'
+import Editor from '../../lib/monaco.js'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -91,19 +91,28 @@ export function WorkspaceFileViewDialog({
   const [copied, setCopied] = useState<'path' | 'content' | null>(null)
   const [fontSizeDelta, setFontSizeDelta] = useState(0)
   const [downloading, setDownloading] = useState(false)
+  const viewRequestGeneration = useRef(0)
   const viewTarget = target ?? (path ? { path } : null)
   const viewPath = viewTarget?.path
   const effectiveFontSize = useFileViewFontSize(fontSizeDelta)
 
   const viewFile = useCallback(async (): Promise<void> => {
     if (!open || !socket || !workspaceId || !viewPath) return
+    const generation = ++viewRequestGeneration.current
     setViewer({ kind: 'loading', path: viewPath })
-    const result = await requestFile(socket, workspaceId, sessionId, viewPath, { cwd })
-    setViewer(fileResultToViewState(result))
+    try {
+      const result = await requestFile(socket, workspaceId, sessionId, viewPath, { cwd })
+      if (generation === viewRequestGeneration.current) setViewer(fileResultToViewState(result))
+    } catch (error) {
+      if (generation === viewRequestGeneration.current) setViewer(fileRequestErrorState(viewPath, error))
+    }
   }, [cwd, open, sessionId, socket, viewPath, workspaceId])
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      viewRequestGeneration.current += 1
+      return
+    }
     setFontSizeDelta(0)
     setMarkdownMode('preview')
     if (!viewPath) {
@@ -219,6 +228,7 @@ function SessionFilesPanelImpl({
   const [viewer, setViewer] = useState<FileViewState>({ kind: 'empty' })
   const [viewOpen, setViewOpen] = useState(false)
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null)
+  const fileRequestGeneration = useRef(0)
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   const online = Boolean(socket && workspaceId)
@@ -246,6 +256,7 @@ function SessionFilesPanelImpl({
     setNodes([])
     setSelected(null)
     setViewer({ kind: 'empty' })
+    fileRequestGeneration.current += 1
     if (online) void loadDir()
   }, [online, resourceKey])
 
@@ -261,8 +272,13 @@ function SessionFilesPanelImpl({
       return
     }
     setViewer({ kind: 'loading', path: node.path })
-    const result = await requestFile(socket, workspaceId, sessionId ?? undefined, node.path, { cwd })
-    setViewer(fileResultToViewState(result))
+    const generation = ++fileRequestGeneration.current
+    try {
+      const result = await requestFile(socket, workspaceId, sessionId ?? undefined, node.path, { cwd })
+      if (generation === fileRequestGeneration.current) setViewer(fileResultToViewState(result))
+    } catch (error) {
+      if (generation === fileRequestGeneration.current) setViewer(fileRequestErrorState(node.path, error))
+    }
   }, [cwd, loadDir, mode, sessionId, socket, workspaceId])
 
   const downloadNode = useCallback(async (node: FileNode): Promise<void> => {
@@ -647,6 +663,10 @@ function fileResultToViewState(result: FileContentsResult): FileViewState {
   }
   const kind = result.kind === 'binary' || result.kind === 'too_large' || result.kind === 'not_found' ? result.kind : 'error'
   return { kind, path: result.path, size: result.size, message: result.error ?? 'file cannot be viewed' }
+}
+
+function fileRequestErrorState(path: string, error: unknown): FileViewState {
+  return { kind: 'error', path, message: error instanceof Error ? error.message : String(error) }
 }
 
 function SessionTerminal({ socket, workspaceId, sessionId, cwd }: { socket: DashboardSocket | null; workspaceId?: string; sessionId: string; cwd?: string }): JSX.Element {

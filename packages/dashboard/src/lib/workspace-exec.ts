@@ -53,6 +53,10 @@ async function ensureWorkspaceSubscription(socket: WorkspaceSocket, workspaceId:
   return release
 }
 
+function workspaceReadFailure(requestId: string, code: 'EACCES' | 'ENOENT' | 'EINVAL' | 'EIO', message: string): WorkspaceReadBinaryResponse {
+  return { requestId, base64: '', mime: 'application/octet-stream', size: 0, error: { code, message } }
+}
+
 export async function workspaceExec(
   socket: WorkspaceSocket,
   workspaceId: string,
@@ -103,8 +107,13 @@ export async function workspaceReadBinary(
   path: string,
   options: WorkspaceReadBinaryOptions = {},
 ): Promise<WorkspaceReadBinaryResponse> {
-  const releaseSubscription = await ensureWorkspaceSubscription(socket, workspaceId)
   const requestId = randomId()
+  let releaseSubscription: () => void = () => {}
+  try {
+    releaseSubscription = await ensureWorkspaceSubscription(socket, workspaceId)
+  } catch (error) {
+    return workspaceReadFailure(requestId, 'EIO', error instanceof Error ? error.message : String(error))
+  }
   const payload: WorkspaceReadBinaryRequest = {
     requestId,
     workspaceId,
@@ -114,20 +123,30 @@ export async function workspaceReadBinary(
   }
   const ackTimeout = options.ackTimeoutMs ?? 12_000
   return await new Promise<WorkspaceReadBinaryResponse>((resolve) => {
-    const timer = window.setTimeout(() => {
-      releaseSubscription()
-      resolve({
-        requestId,
-        base64: '',
-        mime: 'application/octet-stream',
-        size: 0,
-        error: { code: 'EACCES', message: `dashboard ack timeout after ${ackTimeout}ms` },
-      })
-    }, ackTimeout)
-    socket.emit('workspace:read_binary', payload, (result: WorkspaceReadBinaryResponse) => {
+    let settled = false
+    const finish = (result: WorkspaceReadBinaryResponse): void => {
+      if (settled) return
+      settled = true
       window.clearTimeout(timer)
+      if (typeof socket.off === 'function') socket.off('disconnect', onDisconnect)
       releaseSubscription()
       resolve(result)
-    })
+    }
+    const onDisconnect = (): void => finish(workspaceReadFailure(requestId, 'EIO', 'workspace connection closed while reading file'))
+    const timer = window.setTimeout(() => {
+      finish(workspaceReadFailure(requestId, 'EIO', `dashboard ack timeout after ${ackTimeout}ms`))
+    }, ackTimeout)
+    if (typeof socket.on === 'function') socket.on('disconnect', onDisconnect)
+    try {
+      socket.emit('workspace:read_binary', payload, (result: WorkspaceReadBinaryResponse) => {
+        if (!result || typeof result !== 'object' || typeof result.base64 !== 'string' || typeof result.mime !== 'string' || typeof result.size !== 'number') {
+          finish(workspaceReadFailure(requestId, 'EIO', 'invalid file response from host'))
+          return
+        }
+        finish(result)
+      })
+    } catch (error) {
+      finish(workspaceReadFailure(requestId, 'EIO', error instanceof Error ? error.message : String(error)))
+    }
   })
 }

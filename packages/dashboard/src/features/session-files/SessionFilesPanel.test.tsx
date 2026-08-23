@@ -8,7 +8,7 @@ import { SessionFilesPanel, WorkspaceFileViewDialog } from './SessionFilesPanel.
 const setPositionMock = vi.fn()
 const revealLineInCenterMock = vi.fn()
 
-vi.mock('@monaco-editor/react', () => ({
+vi.mock('../../lib/monaco.js', () => ({
   default: ({ value, language, options, onMount }: { value: string; language: string; options: { readOnly?: boolean; wordWrap?: string; fontSize?: number }; onMount?: (editor: { setPosition: typeof setPositionMock; revealLineInCenter: typeof revealLineInCenterMock }) => void }) => {
     onMount?.({ setPosition: setPositionMock, revealLineInCenter: revealLineInCenterMock })
     return <pre data-language={language} data-readonly={String(options.readOnly)} data-word-wrap={String(options.wordWrap)} data-font-size={String(options.fontSize)} data-testid="monaco-editor">{value}</pre>
@@ -160,6 +160,44 @@ describe('SessionFilesPanel', () => {
     expect(dialog.className).toContain('grid-rows-[auto_minmax(0,1fr)]')
     expect(screen.getByTestId('session-file-view-actions').className).toContain('overflow-x-auto')
     expect(screen.getByTestId('session-file-view-close').className).toContain('h-11 w-11')
+  })
+
+  it('leaves loading when the file request throws', async () => {
+    const socket = {
+      on: vi.fn(),
+      off: vi.fn(),
+      emit: vi.fn((event: string) => {
+        if (event === 'workspace:read_binary') throw new Error('socket transport failed')
+      }),
+    }
+
+    render(<WorkspaceFileViewDialog open onOpenChange={() => {}} socket={socket as never} workspaceId="ws-1" sessionId="sess-1" target={{ path: '/repo/broken.txt' }} />)
+
+    expect(await screen.findByText('View unavailable')).toBeTruthy()
+    expect(screen.getByText('socket transport failed')).toBeTruthy()
+    expect(screen.queryByText('Loading file')).toBeNull()
+  })
+
+  it('ignores an older file response after the target changes', async () => {
+    const acknowledgements = new Map<string, (result: unknown) => void>()
+    const socket = {
+      on: vi.fn(),
+      off: vi.fn(),
+      emit: vi.fn((event: string, payload: { path?: string }, ack?: (result: unknown) => void) => {
+        if (event === 'workspace:read_binary' && payload.path && ack) acknowledgements.set(payload.path, ack)
+      }),
+    }
+    const { rerender } = render(<WorkspaceFileViewDialog open onOpenChange={() => {}} socket={socket as never} workspaceId="ws-1" sessionId="sess-1" target={{ path: '/repo/first.txt' }} />)
+    await waitFor(() => expect(acknowledgements.has('/repo/first.txt')).toBe(true))
+
+    rerender(<WorkspaceFileViewDialog open onOpenChange={() => {}} socket={socket as never} workspaceId="ws-1" sessionId="sess-1" target={{ path: '/repo/second.txt' }} />)
+    await waitFor(() => expect(acknowledgements.has('/repo/second.txt')).toBe(true))
+    acknowledgements.get('/repo/second.txt')?.({ requestId: 'second', base64: btoa('second content'), mime: 'text/plain', size: 14 })
+    expect((await screen.findByTestId('monaco-editor')).textContent).toBe('second content')
+
+    acknowledgements.get('/repo/first.txt')?.({ requestId: 'first', base64: btoa('stale content'), mime: 'text/plain', size: 13 })
+    await Promise.resolve()
+    expect(screen.getByTestId('monaco-editor').textContent).toBe('second content')
   })
 
   it('renders image files in the sidebar file view modal and supports view actions', async () => {

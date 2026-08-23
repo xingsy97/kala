@@ -111,6 +111,13 @@ BgTerminalPanel        (uses existing bash / bash_output / kill_shell tools — 
 - Executor imports zero domain libraries beyond Node builtins. No `git-handlers.ts`, no `bg-handlers.ts`.
 - Adding a dashboard observation feature edits **one package** (dashboard). Host, shared, executor untouched.
 - Executor deployment cadence decouples from dashboard feature cadence. A dashboard version bump never causes `unknown tool` on a stable executor.
+- Every dashboard observation RPC reaches a visible terminal state. Subscription
+  failure, disconnect, malformed acknowledgement, thrown transport error, and
+  acknowledgement timeout must resolve as an error; a file viewer must never
+  remain in `Loading file` indefinitely. File-target changes use request
+  generations so a late response cannot replace the currently selected file.
+- File preview editors and language workers are release-owned Dashboard assets;
+  production must not depend on a public Monaco CDN.
 
 ### Trust and audit
 

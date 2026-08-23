@@ -1,6 +1,6 @@
 import { randomId } from '../../lib/random-id.js'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DiffEditor } from '@monaco-editor/react'
+import { DiffEditor } from '../../lib/monaco.js'
 import { AlertCircle, ChevronDown, ChevronRight, Columns2, FileCode2, Folder, GitBranch, List, ListTree, Loader2, RefreshCw, Rows3 } from 'lucide-react'
 import type { Socket } from 'socket.io-client'
 

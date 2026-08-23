@@ -5,7 +5,7 @@ import type { WorkspaceExecResponse } from '@agent-kernel/shared/workspace-exec'
 
 import { SourceControlPanel } from './SourceControlPanel.js'
 
-vi.mock('@monaco-editor/react', () => ({
+vi.mock('../../lib/monaco.js', () => ({
   DiffEditor: ({ original, modified, options }: { original?: string; modified?: string; options?: { renderSideBySide?: boolean } }) => (
     <div data-testid="mock-diff-editor" data-side-by-side={String(options?.renderSideBySide)}>{original}::{modified}</div>
   ),
