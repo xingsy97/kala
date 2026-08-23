@@ -31,15 +31,16 @@ import {
   type TouchEvent,
   type WheelEvent,
 } from 'react'
-import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 
 import { cn } from '../../lib/utils.js'
 
 export type VirtualTranscriptHandle = {
   scrollToIndex: (index: number, opts?: { behavior?: 'auto' | 'smooth'; align?: 'start' | 'center' | 'end' }) => void
   scrollToBottom: () => void
-  visibleRange: () => ListRange
 }
+
+export type TranscriptViewportAnchor = { firstVisibleIndex: number | null; firstVisibleAligned: boolean }
 
 function scrollVirtuosoToBottom(handle: VirtuosoHandle | null): void {
   if (!handle) return
@@ -70,7 +71,7 @@ type Props<Item> = {
   defaultItemHeight?: number
   /** Test hook. */
   dataTestId?: string
-  onVisibleRangeChange?: (range: ListRange) => void
+  onViewportAnchorChange?: (anchor: TranscriptViewportAnchor) => void
 }
 
 function VirtualTranscriptInner<Item>(
@@ -86,7 +87,7 @@ function VirtualTranscriptInner<Item>(
     itemClassName,
     defaultItemHeight = 80,
     dataTestId,
-    onVisibleRangeChange,
+    onViewportAnchorChange,
   }: Props<Item>,
   ref: React.ForwardedRef<VirtualTranscriptHandle>,
 ): JSX.Element {
@@ -101,20 +102,90 @@ function VirtualTranscriptInner<Item>(
   const footerObserver = useRef<ResizeObserver | null>(null)
   const footerSettleRafs = useRef<number[]>([])
   const footerSettleTimers = useRef<number[]>([])
-  const visibleRange = useRef<ListRange>({ startIndex: 0, endIndex: 0 })
+  const scrollerElement = useRef<HTMLDivElement | null>(null)
+  const viewportMeasureRaf = useRef<number | null>(null)
+  const indexAlignmentRaf = useRef<number | null>(null)
+  const indexAlignmentGeneration = useRef(0)
+  const lastViewportAnchor = useRef<TranscriptViewportAnchor>({ firstVisibleIndex: null, firstVisibleAligned: false })
   pinnedRef.current = pinnedToBottom
   if (!previousPinnedProp.current && pinnedToBottom) userUnpinnedRef.current = false
   previousPinnedProp.current = pinnedToBottom
+
+  const measureViewportAnchor = useCallback(() => {
+    viewportMeasureRaf.current = null
+    const scroller = scrollerElement.current
+    if (!scroller || !onViewportAnchorChange) return
+    const viewport = scroller.getBoundingClientRect()
+    const rows = Array.from(scroller.querySelectorAll<HTMLElement>('[data-virt-index]'))
+      .map((element) => ({ index: Number(element.dataset.virtIndex), rect: element.getBoundingClientRect() }))
+      .filter((row) => Number.isSafeInteger(row.index) && row.rect.bottom > viewport.top + 0.5 && row.rect.top < viewport.bottom - 0.5)
+      .sort((a, b) => a.rect.top - b.rect.top || a.index - b.index)
+    const first = rows[0]
+    const next = { firstVisibleIndex: first?.index ?? null, firstVisibleAligned: Boolean(first && Math.abs(first.rect.top - viewport.top) <= 2) }
+    const previous = lastViewportAnchor.current
+    if (previous.firstVisibleIndex === next.firstVisibleIndex && previous.firstVisibleAligned === next.firstVisibleAligned) return
+    lastViewportAnchor.current = next
+    onViewportAnchorChange(next)
+  }, [onViewportAnchorChange])
+
+  const scheduleViewportMeasure = useCallback(() => {
+    if (viewportMeasureRaf.current !== null) cancelAnimationFrame(viewportMeasureRaf.current)
+    viewportMeasureRaf.current = requestAnimationFrame(measureViewportAnchor)
+  }, [measureViewportAnchor])
+
+  const alignRenderedIndexAtStart = useCallback((index: number) => {
+    indexAlignmentGeneration.current += 1
+    const generation = indexAlignmentGeneration.current
+    if (indexAlignmentRaf.current !== null) cancelAnimationFrame(indexAlignmentRaf.current)
+    let frame = 0
+    let alignedFrames = 0
+    const align = (): void => {
+      if (generation !== indexAlignmentGeneration.current) return
+      const scroller = scrollerElement.current
+      const row = scroller?.querySelector<HTMLElement>(`[data-virt-index="${index}"]`)
+      if (scroller && row) {
+        const delta = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+        if (Math.abs(delta) <= 2) {
+          alignedFrames += 1
+          // Virtuoso can apply a delayed size correction after the requested
+          // row first reaches the top. Keep ownership of the target for a few
+          // frames so that correction cannot turn one click into a no-op that
+          // needs to be repeated.
+          if (alignedFrames >= 8) {
+            measureViewportAnchor()
+            indexAlignmentRaf.current = null
+            return
+          }
+        } else {
+          alignedFrames = 0
+          scroller.scrollTop += delta
+        }
+      } else if (frame === 4 || frame === 12 || frame === 24 || frame === 48) {
+        alignedFrames = 0
+        virtuoso.current?.scrollToIndex({ index, align: 'start', behavior: 'auto' })
+      }
+      frame += 1
+      if (frame < 90) indexAlignmentRaf.current = requestAnimationFrame(align)
+      else indexAlignmentRaf.current = null
+    }
+    indexAlignmentRaf.current = requestAnimationFrame(align)
+  }, [measureViewportAnchor])
 
   useImperativeHandle(
     ref,
     () => ({
       scrollToIndex: (index, opts) => {
-        virtuoso.current?.scrollToIndex({
-          index,
-          align: opts?.align ?? 'center',
-          behavior: opts?.behavior ?? 'smooth',
-        })
+        // Programmatic transcript navigation is explicit user intent too.
+        // Flip the synchronous pin refs before asking Virtuoso to move: the
+        // parent pin prop is committed on a later render, while a streaming
+        // tail/footer resize can otherwise observe the stale `true` value and
+        // immediately pull the viewport back to the bottom.
+        userUnpinnedRef.current = true
+        pinnedRef.current = false
+        userScrollingTowardBottom.current = false
+        const align = opts?.align ?? 'center'
+        virtuoso.current?.scrollToIndex({ index, align, behavior: opts?.behavior ?? 'smooth' })
+        if (align === 'start') alignRenderedIndexAtStart(index)
       },
       scrollToBottom: () => {
         userUnpinnedRef.current = false
@@ -122,10 +193,18 @@ function VirtualTranscriptInner<Item>(
         onPinnedChange(true)
         scrollVirtuosoToBottom(virtuoso.current)
       },
-      visibleRange: () => visibleRange.current,
     }),
-    [onPinnedChange],
+    [alignRenderedIndexAtStart, onPinnedChange],
   )
+
+  useEffect(() => {
+    scheduleViewportMeasure()
+    return () => {
+      if (viewportMeasureRaf.current !== null) cancelAnimationFrame(viewportMeasureRaf.current)
+      if (indexAlignmentRaf.current !== null) cancelAnimationFrame(indexAlignmentRaf.current)
+      indexAlignmentGeneration.current += 1
+    }
+  }, [items.length, scheduleViewportMeasure])
 
   // Two-way pin: virtuoso reports `atBottom`, we forward it. When the
   // external `pinnedToBottom` flag flips true we auto-follow, otherwise
@@ -185,7 +264,10 @@ function VirtualTranscriptInner<Item>(
       onPinnedChange(true)
     }
     lastScrollTop.current = next
-  }, [onPinnedChange, unpinFromUserScroll])
+    // Scroll input is the navigation reference. Measure synchronously so a
+    // click in the same frame cannot observe the previous viewport anchor.
+    measureViewportAnchor()
+  }, [measureViewportAnchor, onPinnedChange, unpinFromUserScroll])
 
   const followOutput = useCallback(
     (isAtBottom: boolean): 'auto' | false => {
@@ -283,10 +365,16 @@ function VirtualTranscriptInner<Item>(
   const components = useMemo(
     () => ({
       Scroller: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function TranscriptScroller(props, scrollerRef) {
+        const bindScroller = (element: HTMLDivElement | null): void => {
+          scrollerElement.current = element
+          if (typeof scrollerRef === 'function') scrollerRef(element)
+          else if (scrollerRef) scrollerRef.current = element
+          if (element) scheduleViewportMeasure()
+        }
         return (
           <div
             {...props}
-            ref={scrollerRef}
+            ref={bindScroller}
             className={cn(props.className, 'virtual-transcript-scroller overflow-x-hidden')}
             data-virtuoso-scroller="true"
             onPointerDown={(event) => {
@@ -326,7 +414,7 @@ function VirtualTranscriptInner<Item>(
         return slot ? <div ref={context?.bindFooterElement} className={footerClassName}>{slot}</div> : null
       },
     }),
-    [handleScroll, handleTouchMove, handleTouchStart, handleWheel],
+    [handleScroll, handleTouchMove, handleTouchStart, handleWheel, scheduleViewportMeasure],
   )
 
   const footerContext = useMemo(
@@ -353,10 +441,7 @@ function VirtualTranscriptInner<Item>(
         components={components}
         context={footerContext}
         increaseViewportBy={{ top: 400, bottom: 400 }}
-        rangeChanged={(range) => {
-          visibleRange.current = range
-          onVisibleRangeChange?.(range)
-        }}
+        rangeChanged={scheduleViewportMeasure}
       />
     </div>
   )

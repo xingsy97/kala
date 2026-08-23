@@ -884,9 +884,8 @@ describe('ChatPanel', () => {
     expect(onPinnedChange).toHaveBeenCalledWith(true)
   })
 
-  it('jumps between user-message anchors from the current visible range', () => {
+  it('jumps between user-message anchors from the real viewport and supports repeated clicks', () => {
     const bridge = globalThis as typeof globalThis & {
-      __virtuosoRangeChanged?: (range: { startIndex: number; endIndex: number }) => void
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
     }
     bridge.__virtuosoScrollToIndexMock?.mockClear()
@@ -905,18 +904,21 @@ describe('ChatPanel', () => {
       />,
     )
 
-    act(() => bridge.__virtuosoRangeChanged?.({ startIndex: 1, endIndex: 1 }))
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-virt-index]')]
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100, bottom: 500, left: 0, right: 800, width: 800, height: 400, x: 0, y: 100, toJSON() {} }) })
+    rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 20 + index * 100, bottom: 100 + index * 100, left: 0, right: 800, width: 800, height: 80, x: 0, y: 20 + index * 100, toJSON() {} }) }))
+    fireEvent.scroll(scroller)
     fireEvent.click(screen.getByTestId('previous-user-message'))
-    expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 0, align: 'start', behavior: 'smooth' })
+    expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 0, align: 'start', behavior: 'auto' })
     fireEvent.click(screen.getByTestId('next-user-message'))
-    expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 2, align: 'start', behavior: 'smooth' })
+    expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 2, align: 'start', behavior: 'auto' })
+    fireEvent.click(screen.getByTestId('next-user-message'))
+    expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 4, align: 'start', behavior: 'auto' })
     expect(onPinnedChange).toHaveBeenCalledWith(false)
   })
 
   it('disables user-message navigation at transcript boundaries', () => {
-    const bridge = globalThis as typeof globalThis & {
-      __virtuosoRangeChanged?: (range: { startIndex: number; endIndex: number }) => void
-    }
     render(
       <ChatPanel
         messages={[
@@ -927,9 +929,14 @@ describe('ChatPanel', () => {
       />,
     )
 
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-virt-index]')]
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100, bottom: 500, left: 0, right: 800, width: 800, height: 400, x: 0, y: 100, toJSON() {} }) })
+    rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100 + index * 100, bottom: 180 + index * 100, left: 0, right: 800, width: 800, height: 80, x: 0, y: 100 + index * 100, toJSON() {} }) }))
+    fireEvent.scroll(scroller)
     expect(screen.getByTestId('previous-user-message').hasAttribute('disabled')).toBe(true)
     expect(screen.getByTestId('next-user-message').hasAttribute('disabled')).toBe(false)
-    act(() => bridge.__virtuosoRangeChanged?.({ startIndex: 2, endIndex: 2 }))
+    fireEvent.click(screen.getByTestId('next-user-message'))
     expect(screen.getByTestId('previous-user-message').hasAttribute('disabled')).toBe(false)
     expect(screen.getByTestId('next-user-message').hasAttribute('disabled')).toBe(true)
   })

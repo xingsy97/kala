@@ -208,6 +208,31 @@ describe('VirtualTranscript', () => {
     expect(() => ref.current?.scrollToBottom()).not.toThrow()
   })
 
+  it('unpins synchronously before imperative message navigation', () => {
+    const ref = createRef<VirtualTranscriptHandle>()
+    const onPinnedChange = vi.fn()
+    const bridge = globalThis as typeof globalThis & {
+      __virtuosoAtBottomStateChange?: (atBottom: boolean) => void
+      __virtuosoFollowOutput?: (isAtBottom: boolean) => boolean | 'auto' | 'smooth'
+    }
+    render(
+      <VirtualTranscript<Item>
+        ref={ref}
+        items={makeItems(20)}
+        renderItem={(it) => <span>{it.label}</span>}
+        keyFor={(it) => it.id}
+        pinnedToBottom
+        onPinnedChange={onPinnedChange}
+      />,
+    )
+
+    ref.current?.scrollToIndex(4, { behavior: 'auto', align: 'start' })
+    bridge.__virtuosoAtBottomStateChange?.(true)
+
+    expect(bridge.__virtuosoFollowOutput?.(true)).toBe(false)
+    expect(onPinnedChange).not.toHaveBeenCalledWith(true)
+  })
+
   it('scrollToIndex is called when highlightIndex changes', () => {
     const ref = createRef<VirtualTranscriptHandle>()
     const { rerender } = render(

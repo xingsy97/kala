@@ -139,25 +139,14 @@ export function RuntimeMetrics({
   }, [contextSnapshot, t, userContextWindow])
   const borderInset = 1.5
   const borderRadius = Math.max(0, Math.min(21, simpleGeometry.height / 2 - borderInset, simpleGeometry.width / 2 - borderInset))
-  const left = borderInset
-  const top = borderInset
-  const right = simpleGeometry.width - borderInset
-  const bottom = simpleGeometry.height - borderInset
-  // One closed rounded-rectangle path owns both the neutral track and the
-  // pressure-colored progress. The previous open, top-only path was visually
-  // stitched to the Composer's CSS border and left large breaks at both sides.
-  const contextBorderPath = [
-    `M ${simpleGeometry.width / 2} ${bottom}`,
-    `H ${left + borderRadius}`,
-    `Q ${left} ${bottom} ${left} ${bottom - borderRadius}`,
-    `V ${top + borderRadius}`,
-    `Q ${left} ${top} ${left + borderRadius} ${top}`,
-    `H ${right - borderRadius}`,
-    `Q ${right} ${top} ${right} ${top + borderRadius}`,
-    `V ${bottom - borderRadius}`,
-    `Q ${right} ${bottom} ${right - borderRadius} ${bottom}`,
-    'Z',
-  ].join(' ')
+  // Intentionally open upper cap: left shoulder, top edge, right shoulder.
+  // Track and aggregate-pressure progress share this exact continuous path.
+  const contextBorderPath =
+    `M ${borderInset} ${borderRadius + borderInset} ` +
+    `Q ${borderInset} ${borderInset} ${borderRadius + borderInset} ${borderInset} ` +
+    `H ${simpleGeometry.width - borderRadius - borderInset} ` +
+    `Q ${simpleGeometry.width - borderInset} ${borderInset} ` +
+    `${simpleGeometry.width - borderInset} ${borderRadius + borderInset}`
 
   return (
     <div className={cn('relative flex-none', isSimple && 'pointer-events-none absolute inset-0 z-10')} ref={ref} data-testid={isSimple ? 'context-usage-overlay' : undefined}>

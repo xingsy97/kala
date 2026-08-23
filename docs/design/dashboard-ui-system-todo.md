@@ -32,13 +32,15 @@ Activity and Composer presentation are fixed by these additional rules:
 - the activity card and Dot Line never show the same Intention simultaneously;
 - the Composer context outline uses one color selected from the aggregate
   pressure level; contribution colors exist only inside the opened breakdown;
-- the Composer context outline is one closed, continuous rounded path. Its
-  neutral track and colored used portion share that exact geometry; separate
-  top, side, or bottom fragments must never be visually stitched together;
+- the Composer context outline is one open, continuous upper-cap path: left
+  shoulder, top edge, and right shoulder only. It never draws the lower sides
+  or bottom edge. Its neutral track and aggregate-pressure used portion share
+  that exact geometry; separate fragments must never be stitched together;
 - the transcript exposes compact previous/next user-message controls on its
-  left edge. Navigation is relative to the virtual list's current visible
-  range, targets top-level user messages only, aligns the target near the top
-  for downward reading, and disables the unavailable direction at boundaries;
+  left edge. Navigation is relative to the real scroll viewport measured from
+  rendered row geometry, never Virtuoso's overscan-inclusive range. It targets
+  top-level user messages only, aligns each target at the viewport top, supports
+  rapid repeated clicks, and disables the unavailable direction at boundaries;
 - activity and Composer elevation stays compact: motion and glow must not extend
   far beyond the owning surface.
 
