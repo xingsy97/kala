@@ -127,7 +127,10 @@ Units. A Dashboard-only activation changes no Runtime PID/container, Unit route 
 write lease, Session continuation marker, or Executor connection. Dedicated uses a
 versioned request/receipt protocol and atomic static-release route state; Private Cloud uses
 an independently replaceable Dashboard image. Portable alone embeds Dashboard assets in
-the CJS/native executable and upgrades them together.
+the CJS/native executable and upgrades them together. Long-lived browser tabs periodically
+check the Dashboard Service Worker, automatically activate a newly waiting generation, and
+perform one controlled reload; unsent Composer drafts survive that reload. A tab does not
+remain indefinitely on mixed assets merely because Socket.IO still reports connected.
 
 ### Portable
 

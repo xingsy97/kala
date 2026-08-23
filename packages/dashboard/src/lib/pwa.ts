@@ -9,11 +9,13 @@
  * Rules the callbacks encode (see docs/planning/roadmap-notes/pwa-mobile-
  * and-push.md §4.2):
  *
- * - `registerType: 'prompt'` means the new SW installs but stays "waiting".
- *   Nothing swaps until the user hits the reload banner. That preserves in-
- *   flight composer drafts, scroll position, and open approval prompts.
- * - We poll `update()` every 30 minutes so long-open tabs eventually see
- *   the new version instead of running on a stale bundle forever.
+ * - `registerType: 'prompt'` keeps activation under this controller's control.
+ *   A waiting worker is activated immediately because a mixed Dashboard
+ *   generation can keep a page connected while its actions no longer match
+ *   the served assets. Composer drafts are persisted per Session before this
+ *   controlled reload.
+ * - We poll `update()` frequently enough that long-open tabs converge on an
+ *   independently deployed Dashboard without operator intervention.
  * - We register only in production builds. In `vite dev` the plugin is
  *   disabled, so `virtual:pwa-register` synchronously returns a no-op —
  *   but we still guard on `import.meta.env.PROD` to be explicit.
@@ -38,7 +40,7 @@ const NOOP_CONTROLLER: PwaController = {
   checkForUpdate: async () => {},
 }
 
-const UPDATE_POLL_INTERVAL_MS = 30 * 60 * 1000
+export const UPDATE_POLL_INTERVAL_MS = 15_000
 const UPDATE_DEDUPE_MS = 5_000
 export const UPDATE_RELOAD_TIMEOUT_MS = 5_000
 

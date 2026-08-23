@@ -14,7 +14,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { RefreshCw, WifiOff, X } from 'lucide-react'
+import { RefreshCw, WifiOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { BannerSlot } from './BannerStack.js'
@@ -24,24 +24,26 @@ import { useOnlineStatus } from '../../lib/useOnlineStatus.js'
 type PwaState = {
   needRefresh: boolean
   offlineReady: boolean
-  dismissed: boolean
 }
 
-const PWA_INITIAL_STATE: PwaState = { needRefresh: false, offlineReady: false, dismissed: false }
+const PWA_INITIAL_STATE: PwaState = { needRefresh: false, offlineReady: false }
 
 type PwaLifecycleContextValue = {
   state: PwaState
   controller: PwaController | null
-  dismiss: () => void
 }
 
 const PwaLifecycleContext = createContext<PwaLifecycleContextValue>({
   state: PWA_INITIAL_STATE,
   controller: null,
-  dismiss: () => {},
 })
 
 let cachedController: PwaController | null = null
+const lifecycleSubscribers = new Set<(update: Partial<PwaState>) => void>()
+
+function publishLifecycle(update: Partial<PwaState>): void {
+  for (const subscriber of lifecycleSubscribers) subscriber(update)
+}
 
 /**
  * Mounts once near the app root and owns the SW registration lifecycle.
@@ -53,27 +55,32 @@ export function PwaLifecycleHost({ children }: { children: ReactNode }): JSX.Ele
   const [controller, setController] = useState<PwaController | null>(cachedController)
 
   useEffect(() => {
+    const subscriber = (update: Partial<PwaState>): void => {
+      setState((previous) => ({ ...previous, ...update }))
+    }
+    lifecycleSubscribers.add(subscriber)
     if (cachedController) {
       setController(cachedController)
-      return
+      return () => { lifecycleSubscribers.delete(subscriber) }
     }
     cachedController = initPwa({
-      onNeedRefresh: () => setState((prev) => ({ ...prev, needRefresh: true, dismissed: false })),
-      onOfflineReady: () => setState((prev) => ({ ...prev, offlineReady: true })),
+      // The controller outlives any one React mount. Publish to the currently
+      // mounted provider instead of capturing the first StrictMode mount's
+      // setState, which becomes stale immediately in development and can also
+      // become stale across root recovery.
+      onNeedRefresh: () => publishLifecycle({ needRefresh: true }),
+      onOfflineReady: () => publishLifecycle({ offlineReady: true }),
       onRegisterError: (error) => {
         // eslint-disable-next-line no-console -- surfaced for triage; toast noise unnecessary
         console.warn('[pwa] registration failed', error)
       },
     })
     setController(cachedController)
-  }, [])
-
-  const dismiss = useCallback(() => {
-    setState((prev) => ({ ...prev, dismissed: true }))
+    return () => { lifecycleSubscribers.delete(subscriber) }
   }, [])
 
   return (
-    <PwaLifecycleContext.Provider value={{ state, controller, dismiss }}>
+    <PwaLifecycleContext.Provider value={{ state, controller }}>
       {children}
     </PwaLifecycleContext.Provider>
   )
@@ -82,13 +89,12 @@ export function PwaLifecycleHost({ children }: { children: ReactNode }): JSX.Ele
 /**
  * Top-anchored PWA update banner. Displayed sticky under AppShellNav so a
  * new SW install can never be missed regardless of scroll position or chat
- * pane state. One tap on Reload activates the waiting worker (through
- * `applyUpdate`) which posts SKIP_WAITING to the SW, controls it, and
- * hard-reloads the page.
+ * pane state. A waiting generation activates automatically; the button is a
+ * manual retry if browser lifecycle events delay that controlled reload.
  */
 export function PwaUpdateGlobalBanner(): JSX.Element | null {
   const { t } = useTranslation()
-  const { state, controller, dismiss } = useContext(PwaLifecycleContext)
+  const { state, controller } = useContext(PwaLifecycleContext)
   const [reloading, setReloading] = useState(false)
 
   const onReload = useCallback(async () => {
@@ -101,7 +107,13 @@ export function PwaUpdateGlobalBanner(): JSX.Element | null {
     }
   }, [controller])
 
-  if (!state.needRefresh || state.dismissed) return null
+  useEffect(() => {
+    if (!state.needRefresh || !controller || reloading) return
+    setReloading(true)
+    void controller.applyUpdate().catch(() => setReloading(false))
+  }, [controller, reloading, state.needRefresh])
+
+  if (!state.needRefresh) return null
 
   return (
     <div
@@ -122,14 +134,6 @@ export function PwaUpdateGlobalBanner(): JSX.Element | null {
           data-testid="pwa-update-reload"
         >
           {reloading ? t('pwa.reloading') : t('common.reload')}
-        </button>
-        <button
-          type="button"
-          onClick={dismiss}
-          aria-label={t('pwa.dismissUpdate')}
-          className="rounded p-0.5 text-sky-800 hover:bg-sky-100 dark:text-sky-200 dark:hover:bg-sky-900"
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>
     </div>

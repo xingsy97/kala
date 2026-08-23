@@ -58,6 +58,14 @@ describe('admitUserMessage', () => {
       .rejects.toBeInstanceOf(AdmissionDeliveryFailedError)
   })
 
+  it('does not report an expired durable operation as delivered', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true, duplicate: false, operationId: 'operation-expired', sequence: 12, state: 'pending', routeGeneration: 5 }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ operationId: 'operation-expired', sessionId: 'session-1', sequence: 12, state: 'expired', acceptedAt: new Date().toISOString(), routeGeneration: 5, attempts: 4 }), { status: 200 })))
+    await expect(admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-expired', text: 'hello', mode: 'steer', deliveryTimeoutMs: 2_000 }))
+      .rejects.toMatchObject({ state: 'expired', durablyAccepted: true })
+  })
+
   it('validates the operation status response', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ operationId: 'wrong', state: 'committed', attempts: 1 }), { status: 200 })))
     await expect(admissionOperationStatus({ host: '', operationId: 'operation-0005' })).rejects.toThrow('invalid admission operation status')

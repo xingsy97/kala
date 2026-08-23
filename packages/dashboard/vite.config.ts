@@ -35,9 +35,10 @@ export default defineConfig({
   plugins: [
     react(),
     // Service worker for PWA installability + offline shell + Web Push handler.
-    // - registerType: 'prompt' + skipWaiting: false so update lands on user
-    //   confirmation (see initPwa in src/lib/pwa.ts). Auto-refresh mid-session
-    //   would drop the composer draft and reset scroll.
+    // - registerType: 'prompt' + skipWaiting: false keeps activation fenced by
+    //   initPwa. The app activates a waiting build automatically: drafts are
+    //   durable per Session, while keeping mixed generations alive can leave a
+    //   connected-looking Dashboard unable to submit actions.
     // - injectManifest strategy: our sw.js needs a hand-written push /
     //   notificationclick handler; workbox is loaded inside it for precache.
     //   generateSW cannot express both custom push and precache cleanly.

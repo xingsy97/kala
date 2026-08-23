@@ -39,8 +39,8 @@ export class AdmissionDeliveryPendingError extends Error {
 
 export class AdmissionDeliveryFailedError extends Error {
   readonly durablyAccepted = true
-  constructor(readonly operationId: string, readonly lastError?: string) {
-    super(lastError ?? 'message could not be delivered to the target Session')
+  constructor(readonly operationId: string, readonly lastError?: string, readonly state: 'failed' | 'expired' = 'failed') {
+    super(lastError ?? (state === 'expired' ? 'message delivery expired before reaching the target Session' : 'message could not be delivered to the target Session'))
   }
 }
 
@@ -124,8 +124,9 @@ async function waitForAdmissionDelivery(input: { host: string; token?: string; o
   while (Date.now() < deadline) {
     try {
       last = await admissionOperationStatus({ ...input, timeoutMs: Math.min(5_000, Math.max(1, deadline - Date.now())) })
-      if (last.state === 'committed' || last.state === 'expired') return last
+      if (last.state === 'committed') return last
       if (last.state === 'failed') throw new AdmissionDeliveryFailedError(last.operationId, last.lastError)
+      if (last.state === 'expired') throw new AdmissionDeliveryFailedError(last.operationId, last.lastError, 'expired')
     } catch (error) { lastError = error }
     if (lastError instanceof AdmissionDeliveryFailedError) throw lastError
     await new Promise((resolve) => setTimeout(resolve, Math.min(500, Math.max(0, deadline - Date.now()))))
