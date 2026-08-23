@@ -7,8 +7,41 @@ export type AdmissionAccepted = {
   duplicate: boolean
   operationId: string
   sequence: number
-  state: 'pending' | 'leased' | 'committed' | 'expired'
+  state: 'pending' | 'leased' | 'committed' | 'failed' | 'expired'
   routeGeneration: number
+}
+
+export type AdmissionOperationStatus = {
+  operationId: string
+  sessionId: string
+  sequence: number
+  state: 'pending' | 'leased' | 'committed' | 'failed' | 'expired'
+  acceptedAt: string
+  routeGeneration: number
+  attempts: number
+  lastAttemptAt?: string
+  lastError?: string
+  committedAt?: string
+  failedAt?: string
+  sessionCursor?: number
+}
+
+export class AdmissionDeliveryPendingError extends Error {
+  readonly durablyAccepted = true
+  constructor(
+    readonly operationId: string,
+    readonly attempts: number,
+    readonly lastError?: string,
+  ) {
+    super('message was durably accepted but has not reached the Session log yet')
+  }
+}
+
+export class AdmissionDeliveryFailedError extends Error {
+  readonly durablyAccepted = true
+  constructor(readonly operationId: string, readonly lastError?: string) {
+    super(lastError ?? 'message could not be delivered to the target Session')
+  }
 }
 
 export async function admitUserMessage(input: {
@@ -21,6 +54,7 @@ export async function admitUserMessage(input: {
   operationId?: string
   timeoutMs?: number
   attempts?: number
+  deliveryTimeoutMs?: number
 }): Promise<AdmissionAccepted> {
   const operationId = input.operationId ?? randomId()
   const attempts = input.attempts ?? 3
@@ -50,13 +84,57 @@ export async function admitUserMessage(input: {
       if (body.accepted !== true || body.operationId !== operationId || !Number.isSafeInteger(body.sequence)) {
         throw new Error('invalid admission acknowledgement')
       }
-      return body as AdmissionAccepted
+      const accepted = body as AdmissionAccepted
+      // Portable mode commits in-process and has no durable Ingress ledger.
+      // Platform mode returns a positive route generation and must prove the
+      // accepted operation reached Session JSONL before the UI calls it done.
+      if (accepted.state !== 'committed' && accepted.routeGeneration > 0) {
+        await waitForAdmissionDelivery({
+          host: input.host, token: input.token, operationId,
+          timeoutMs: input.deliveryTimeoutMs ?? 15_000,
+        })
+      }
+      return accepted
     } catch (error) {
-      if (error instanceof AdmissionBusinessError) throw error
+      if (error instanceof AdmissionBusinessError || error instanceof AdmissionDeliveryPendingError || error instanceof AdmissionDeliveryFailedError) throw error
       lastError = error
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'admission failed'))
+}
+
+export async function admissionOperationStatus(input: { host: string; token?: string; operationId: string; timeoutMs?: number }): Promise<AdmissionOperationStatus> {
+  const response = await fetch(`${input.host.replace(/\/$/u, '')}/runtime/admission/messages/${encodeURIComponent(input.operationId)}`, {
+    headers: { ...(input.token ? { authorization: `Bearer ${input.token}` } : {}) },
+    credentials: 'include',
+    signal: AbortSignal.timeout(input.timeoutMs ?? 10_000),
+  })
+  const body = await response.json().catch(() => ({})) as Partial<AdmissionOperationStatus> & { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `admission status returned ${response.status}`)
+  if (body.operationId !== input.operationId || !['pending', 'leased', 'committed', 'failed', 'expired'].includes(body.state ?? '') || !Number.isSafeInteger(body.attempts)) {
+    throw new Error('invalid admission operation status')
+  }
+  return body as AdmissionOperationStatus
+}
+
+async function waitForAdmissionDelivery(input: { host: string; token?: string; operationId: string; timeoutMs: number }): Promise<AdmissionOperationStatus> {
+  const deadline = Date.now() + input.timeoutMs
+  let last: AdmissionOperationStatus | undefined
+  let lastError: unknown
+  while (Date.now() < deadline) {
+    try {
+      last = await admissionOperationStatus({ ...input, timeoutMs: Math.min(5_000, Math.max(1, deadline - Date.now())) })
+      if (last.state === 'committed' || last.state === 'expired') return last
+      if (last.state === 'failed') throw new AdmissionDeliveryFailedError(last.operationId, last.lastError)
+    } catch (error) { lastError = error }
+    if (lastError instanceof AdmissionDeliveryFailedError) throw lastError
+    await new Promise((resolve) => setTimeout(resolve, Math.min(500, Math.max(0, deadline - Date.now()))))
+  }
+  throw new AdmissionDeliveryPendingError(
+    input.operationId,
+    last?.attempts ?? 0,
+    last?.lastError ?? (lastError instanceof Error ? lastError.message : undefined),
+  )
 }
 
 class AdmissionBusinessError extends Error {}

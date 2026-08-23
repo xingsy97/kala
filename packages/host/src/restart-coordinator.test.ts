@@ -187,6 +187,21 @@ describe('RestartCoordinator', () => {
     expect(coordinator.status().last?.phase).not.toBe('failed')
   })
 
+  it('invalidates readiness and force-exits when server close wedges', async () => {
+    vi.useFakeTimers()
+    const never = deferred<void>()
+    const invalidateReadiness = vi.fn()
+    const { coordinator, options } = harness({
+      invalidateReadiness,
+      closeServer: vi.fn(() => never.promise),
+      shutdownTimeoutMs: 50,
+    })
+    await coordinator.request({ mode: 'force' })
+    await vi.advanceTimersByTimeAsync(50)
+    expect(invalidateReadiness).toHaveBeenCalledOnce()
+    expect(options.exitProcess).toHaveBeenCalledWith(1)
+  })
+
   it('persists continuation receipts and does not resume a completed participant twice', async () => {
     const root = mkdtempSync(join(tmpdir(), 'restart-receipts-'))
     roots.push(root)

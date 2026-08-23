@@ -4,16 +4,45 @@ import { createHash } from 'node:crypto'
 export type ToolDisclosureMode = 'legacy_full' | 'progressive'
 export type ToolDisclosureSnapshot = { catalogRevision: string; active: readonly string[] }
 
+const WEB_SEARCH_INTENT = /(?:联网|上网|网络搜索|搜索(?:网页|网络|互联网)|网页检索|检索(?:资料|来源|新闻)|最新(?:信息|消息|资料)|来源链接|可点击(?:的)?链接|web\s*search|search\s+the\s+web|online\s+(?:search|research)|browse\s+the\s+web|current\s+(?:news|information))/iu
+
 const DISCOVERY = new Set(['tool_search', 'tool_describe'])
-const DEFAULT_CORE = new Set(['read_file', 'read_files', 'ls', 'glob', 'grep', 'multi_grep', 'shell', 'todowrite', 'todo_graph', 'agent'])
+const DEFAULT_CORE = new Set(['read_file', 'read_files', 'ls', 'glob', 'multi_grep', 'shell', 'todowrite', 'todo_graph', 'agent'])
 
 export function toolCatalogRevision(tools: readonly ToolSchema[]): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(tools.map(stableTool))).digest('hex')}`
 }
 
 export function visibleTools(tools: readonly ToolSchema[], mode: ToolDisclosureMode, active: ReadonlySet<string>): readonly ToolSchema[] {
-  if (mode === 'legacy_full') return tools
-  return tools.filter((tool) => DISCOVERY.has(tool.name) || DEFAULT_CORE.has(tool.name) || active.has(tool.name))
+  const visible = mode === 'legacy_full' ? tools : tools.filter((tool) => DISCOVERY.has(tool.name) || DEFAULT_CORE.has(tool.name) || active.has(tool.name))
+  return visible.map(withRequiredToolIntent)
+}
+
+export function withRequiredToolIntent(tool: ToolSchema): ToolSchema {
+  const properties = tool.inputSchema.properties && typeof tool.inputSchema.properties === 'object' && !Array.isArray(tool.inputSchema.properties) ? tool.inputSchema.properties as Record<string, unknown> : {}
+  const required = Array.isArray(tool.inputSchema.required) ? tool.inputSchema.required.filter((value): value is string => typeof value === 'string') : []
+  if (properties._intent && required.includes('_intent')) return tool
+  return {
+    ...tool,
+    inputSchema: {
+      ...tool.inputSchema,
+      type: 'object',
+      properties: {
+        ...properties,
+        _intent: { type: 'string', minLength: 12, maxLength: 240, description: 'State in the user’s current language the concrete user- or product-facing objective this tool call advances and why this step is needed. Do not merely name the operation, paraphrase parameters, or include secrets.' },
+      },
+      required: [...new Set([...required, '_intent'])],
+    },
+  }
+}
+
+
+
+export function intentActivatedTools(tools: readonly ToolSchema[], messages: readonly import('@agent-kernel/kernel').Message[]): Set<string> {
+  const latestUser = [...messages].reverse().find((message) => message.role === 'user')
+  const text = latestUser?.content.flatMap((part) => part.type === 'text' ? [part.text] : []).join(' ') ?? ''
+  const available = new Set(tools.map((tool) => tool.name))
+  return WEB_SEARCH_INTENT.test(text) && available.has('websearch') ? new Set(['websearch']) : new Set()
 }
 
 export function searchToolCatalog(tools: readonly ToolSchema[], query: string, limit = 8): readonly ToolSchema[] {

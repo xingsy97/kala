@@ -71,7 +71,7 @@ import type { OperationalMetrics } from '../operational-metrics.js'
 import type { MemoStore } from '../memo-store.js'
 import { diffToolCatalogs } from '../tool-catalog-diff.js'
 import { writeExecutorCapabilitySnapshot } from '../executor-capabilities.js'
-import type { SessionStore } from '../store/session.js'
+import { SessionNotFoundError, type SessionStore } from '../store/session.js'
 import { compareToolVersions } from '../tool-version.js'
 import { exportSubAgentGraph } from '../subagent-graph.js'
 import { runWebSearch, type WebSearchCredentialStore } from '../web-search/index.js'
@@ -700,7 +700,16 @@ export function attachJsonRoutes(
         const mode = input.mode === 'steer' ? 'steer' : 'queue'
         const content = Array.isArray(input.content) ? input.content as readonly import('@agent-kernel/kernel').MessageContent[] : undefined
         if (!text.trim() && !content?.length) throw new Error('message content is required')
-        const outcome = await payloads.enqueueUserMessage!({ sessionId, operationId, text, mode, ...(content ? { content } : {}) })
+        let outcome: { committed: boolean; cursor?: number }
+        try {
+          outcome = await payloads.enqueueUserMessage!({ sessionId, operationId, text, mode, ...(content ? { content } : {}) })
+        } catch (error) {
+          if (error instanceof SessionNotFoundError) {
+            sendJsonStatus(req, res, 404, { error: 'The target Session no longer exists', code: 'SESSION_NOT_FOUND' })
+            return
+          }
+          throw error
+        }
         sendJson(req, res, { committed: outcome.committed, operationId, ...(outcome.cursor !== undefined ? { cursor: outcome.cursor } : {}) })
       }).catch((error) => sendError(res, 400, error instanceof Error ? error.message : String(error)))
       return
@@ -709,6 +718,12 @@ export function attachJsonRoutes(
     if (internalRestartPath && !internalIngressAuthorized(req)) {
       claimRoute(req)
       sendError(res, 401, 'invalid runtime handoff')
+      return
+    }
+    const publicRestartPath = path.startsWith('/runtime/restart')
+    if (publicRestartPath && (payloads.deployment ?? PORTABLE_DEPLOYMENT).architecture === 'platform') {
+      claimRoute(req)
+      sendError(res, 409, 'legacy runtime restart is disabled for platform deployments; use the Deploy Supervisor protocol')
       return
     }
     if ((path === '/runtime/restart/status' || path === '/internal/runtime/restart/status') && payloads.restartStatus && (req.method === 'GET' || req.method === 'HEAD')) {

@@ -222,7 +222,9 @@ export function appendLiveTranscriptItems(
   const hasLiveTail = streamingText.length > 0 || pendingUserMessages.length > 0
   const out: TranscriptItem[] = hasLiveTail ? [...base] : (base as TranscriptItem[])
 
-  if (streamingText.length > 0) {
+  const baseTail = base.at(-1)
+  const authoritativeAssistantAtTail = baseTail?.kind === 'message' && baseTail.message.role === 'assistant'
+  if (streamingText.length > 0 && !authoritativeAssistantAtTail) {
     out.push({
       kind: 'message',
       streaming: true,

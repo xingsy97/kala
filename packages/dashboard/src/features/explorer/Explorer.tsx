@@ -27,6 +27,7 @@ import {
   GitFork,
   Info,
   LoaderCircle,
+  MessageCircle,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -1036,7 +1037,7 @@ function WorkspaceRow({
         />
       ) : (
         <div className="flex min-w-0 items-center gap-2">
-          <span className={cn('h-2 w-2 flex-none rounded-full', metaBadgeCls)} data-testid="workspace-status-badge" title={meta} aria-label={meta}><span className="sr-only">{meta}</span></span>
+          {w.workspaceId === null ? <span className="inline-flex flex-none items-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{meta}</span></span> : <span className={cn('h-2 w-2 flex-none rounded-full', metaBadgeCls)} data-testid="workspace-status-badge" title={meta} aria-label={meta}><span className="sr-only">{meta}</span></span>}
           <span
             className="min-w-0 truncate font-semibold leading-5 text-foreground"
             style={{ fontSize: fontSizePx }}
@@ -1255,6 +1256,8 @@ function SessionRow({
               <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
             )}
           </button>
+        ) : !s.parentSessionId && !s.workspaceId ? (
+          <MessageCircle className="h-3.5 w-3.5 flex-none text-primary/80" data-testid="chat-session-icon" aria-label={t('explorer.chat')} />
         ) : !s.parentSessionId ? (
           <div
             ref={dragHandle}

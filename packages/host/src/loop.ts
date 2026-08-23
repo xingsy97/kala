@@ -31,7 +31,7 @@ import { step } from '@agent-kernel/kernel'
 
 import { TOOL_INTENTION_SYSTEM_INSTRUCTION } from './builtin-tools.js'
 import { activeToolsFor } from './extensions/tool-catalog.js'
-import { toolCatalogRevision, visibleTools } from './tool-disclosure.js'
+import { intentActivatedTools, toolCatalogRevision, visibleTools } from './tool-disclosure.js'
 import { TurnTimingTracker, timedSpan } from './turn-timing.js'
 import type { LLMAdapter } from './llm/adapter.js'
 import { redactLlmTrace, type LLMTrace } from '@agent-kernel/shared'
@@ -463,10 +463,13 @@ async function commitTransition(
     if (!record) throw new Error(`Unknown session: ${sessionId}`)
     if (event.kind !== 'cancel' && isSkillManager(deps.skills)) await deps.skills.refreshConfig(record)
     const prior = record.state
-    const { next, effects } = step(prior, event, record.config)
-    const committedEvent: AgentEvent = event.kind === 'llm_response'
-      ? { ...event, message: next.messages.at(-1) ?? event.message }
+    const preparedEvent: AgentEvent = event.kind === 'llm_response' && deps.publishLocalImages
+      ? { ...event, message: await deps.publishLocalImages(sessionId, record, event.message) }
       : event
+    const { next, effects } = step(prior, preparedEvent, record.config)
+    const committedEvent: AgentEvent = preparedEvent.kind === 'llm_response'
+      ? { ...preparedEvent, message: next.messages.at(-1) ?? preparedEvent.message }
+      : preparedEvent
     const safeLlmTrace = llmTrace ? redactLlmTrace(llmTrace) : undefined
     let timingTracker = timingTrackers.get(deps.store)
     if (!timingTracker) { timingTracker = new TurnTimingTracker(); timingTrackers.set(deps.store, timingTracker) }
@@ -649,6 +652,7 @@ async function performCallLlm(
     return
   }
   const activeTools = config.toolDisclosureMode === 'progressive' ? await activeToolsFor(live) : new Set<string>()
+  for (const name of intentActivatedTools(effect.tools, messages)) activeTools.add(name)
   const disclosedTools = visibleTools(effect.tools, config.toolDisclosureMode ?? 'legacy_full', activeTools)
   await maybeRecordToolDisclosure(deps, live, effect.tools, disclosedTools)
   // Only ask for token deltas when the broadcast wants them. If no consumer

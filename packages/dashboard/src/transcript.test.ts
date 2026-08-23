@@ -175,6 +175,17 @@ describe('visibleMessages', () => {
     })
   })
 
+  it('does not duplicate the latest assistant message while Stop hands streaming text to the authoritative response', () => {
+    const response: Message = { role: 'assistant', content: [{ type: 'text', text: 'partial answer' }] }
+    const timeline: TimelineEntry[] = [
+      { seq: 1, ts: '2026-07-05T00:00:00.000Z', event: { kind: 'user_message', text: 'stop now' }, effects: [] },
+      { seq: 2, ts: '2026-07-05T00:00:01.000Z', event: { kind: 'llm_response', message: response }, effects: [] },
+    ]
+    const visible = visibleTranscript([system, response], timeline, 'partial answer')
+    expect(visible.filter((item) => item.kind === 'message' && item.message.role === 'assistant')).toHaveLength(1)
+    expect(visible.some((item) => item.kind === 'message' && item.streaming === true)).toBe(false)
+  })
+
   it('uses timeline messages even before the first assistant response lands', () => {
     const visible = visibleMessages(
       [system],

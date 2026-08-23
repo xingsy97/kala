@@ -272,6 +272,25 @@ describe('Dedicated Deploy Supervisor protocol', () => {
     expect(h.route()).toMatchObject({ generation: 2, activeSlot: 'green' })
   })
 
+  it('gracefully restarts onto the other slot without staging or updating the control plane', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-restart-')); roots.push(root)
+    const old = await release(root, 'old', 'old')
+    const h = harness(); const supervisor = new DedicatedDeploySupervisor(root, h.adapter)
+    const input: DedicatedDeployRequest = {
+      schemaVersion: 1, action: 'restart', operationId: 'operation-restart-0001', deploymentId: 'deployment-restart-0001',
+      topology: 'dedicated-slots', unitId: 'local', requestedAt: new Date().toISOString(), expectedRouteGeneration: 1,
+      fencingToken: 'fencing-token-restart-0001', sourceReleaseDigest: old.release, targetReleaseDigest: old.release,
+      predecessorReleaseId: 'old', candidateSlot: 'green',
+    }
+    const accepted = await supervisor.accept(input)
+    expect(accepted).toMatchObject({ action: 'restart', phase: 'control_ready', releaseId: 'old', releaseDigest: old.release })
+    const completed = await supervisor.reconcile(accepted.deploymentId)
+    expect(completed).toMatchObject({ action: 'restart', phase: 'completed', routeGeneration: 2, previousSlot: 'blue', candidateSlot: 'green' })
+    expect(h.adapter.startControlPlaneUpdate).not.toHaveBeenCalled()
+    expect(h.calls).not.toContain('control:start')
+    expect(h.calls).toContain('activate:green:old')
+  })
+
   it('clears the admission blocker and records reconciled handoff operations before completion', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-admission-')); roots.push(root)
     const old = await release(root, 'old', 'old'); const next = await submission(root, 'operation-deploy-0001', 'next')

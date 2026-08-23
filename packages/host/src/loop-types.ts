@@ -161,6 +161,7 @@ export type HostLoopDeps = {
   webSearchCredentials?: WebSearchCredentialStore
   audit?: import('./audit-log.js').AuditLogger
   artifactRootDir?: string
+  publishLocalImages?: (sessionId: string, record: import('./store/session.js').SessionRecord, message: import('@agent-kernel/kernel').Message) => Promise<import('@agent-kernel/kernel').Message>
 }
 
 export type LoopHandle = {

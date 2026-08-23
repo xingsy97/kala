@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 import type { TimelineEntry } from './session.js'
-import { deleteSession, deriveHumanAttentionTimeline, deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
+import { createSessionWithAck, deleteSession, deriveHumanAttentionTimeline, deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
 
 function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry {
   if (kind === 'llm_response') {
@@ -23,6 +23,16 @@ function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry
     effects: [{ kind: 'call_llm', messages: [], tools: [] }],
   }
 }
+
+
+describe('createSessionWithAck', () => {
+  it('completes from the idempotent RPC ack without waiting for session broadcasts', async () => {
+    const emitWithAck = vi.fn().mockResolvedValue({ ok: true })
+    const socket = { connected: true, active: true, timeout: vi.fn(() => ({ emitWithAck })), connect: vi.fn() }
+    await expect(createSessionWithAck(socket as never, { sessionId: 'chat-1', tools: ['websearch'] })).resolves.toBeUndefined()
+    expect(emitWithAck).toHaveBeenCalledWith('client:create_session', expect.objectContaining({ sessionId: 'chat-1', operationId: expect.any(String), tools: ['websearch'] }))
+  })
+})
 
 describe('deleteSession', () => {
   it('uses an acknowledged idempotent RPC payload', async () => {

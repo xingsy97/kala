@@ -249,8 +249,9 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
     encoding: 'utf8',
   })
   if (executorVersion.status !== 0) fail('executor --version smoke test should exit 0')
-  if (!/^Agent RunLab Executor \d+\.\d+\.\d+/m.test(executorVersion.stdout)) {
-    fail('executor --version smoke test did not print version')
+  const reportedVersion = executorVersion.stdout.match(/^Agent RunLab Executor (\S+)$/m)?.[1]
+  if (!reportedVersion || reportedVersion !== manifest.version) {
+    fail(`executor --version must equal the release product version ${manifest.version}`)
   }
 
   const executor = spawnSync('node', ['agent-kernel-executor.cjs'], {

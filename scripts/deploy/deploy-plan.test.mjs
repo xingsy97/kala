@@ -41,6 +41,8 @@ describe('deploy plan', () => {
     expect(source).toContain("['exec', container, '--', 'bash', '-lc', command]")
     expect(source).toContain('const files = releaseFiles(releaseDir)')
     expect(source).toContain('transactionJson')
+    expect(source).toContain('assertPortableTarget')
+    expect(source).toContain('LEGACY_DEPLOYMENT_FORBIDDEN')
     expect(source).toContain("rawArgs.includes('--dry-run')")
     expect(source).toContain("rawArgs.includes('--help')")
     expect(source).toContain('pnpm run deploy:remote -- --lxd <container>')

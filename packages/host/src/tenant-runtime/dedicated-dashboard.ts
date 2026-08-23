@@ -102,21 +102,30 @@ export async function serveDedicatedDashboard(options: {
   if (normalized === '..' || normalized.startsWith(`..${sep}`) || normalized.includes(`\0`)) { send(options.response, 400, 'bad request'); return true }
   let file = resolve(assetsRoot, normalized)
   if (!within(assetsRoot, file)) { send(options.response, 400, 'bad request'); return true }
+  let sourceReleaseId = state.releaseId
   try {
     const value = await stat(file)
     if (value.isDirectory()) file = join(file, 'index.html')
   } catch {
-    if (extname(file)) { send(options.response, 404, 'not found'); return true }
-    file = join(assetsRoot, 'index.html')
+    if (extname(file)) {
+      const retained = await readRetainedHashedAsset(options.releasesRoot, state.releaseId, normalized)
+      if (!retained) { send(options.response, 404, 'not found'); return true }
+      file = retained.file
+      sourceReleaseId = retained.releaseId
+    } else {
+      file = join(assetsRoot, 'index.html')
+    }
   }
-  if (!within(assetsRoot, file)) { send(options.response, 400, 'bad request'); return true }
+  const sourceAssetsRoot = join(resolveRelease(options.releasesRoot, sourceReleaseId), 'assets')
+  if (!within(sourceAssetsRoot, file)) { send(options.response, 400, 'bad request'); return true }
   let body: Buffer
   try {
     const value = await lstat(file)
     if (!value.isFile() || value.isSymbolicLink()) throw new Error('not a regular file')
     body = await readFile(file)
   } catch { send(options.response, 404, 'not found'); return true }
-  const name = file.slice(assetsRoot.length + 1).replaceAll(sep, '/')
+  const name = file.slice(sourceAssetsRoot.length + 1).replaceAll(sep, '/')
+  if (name === 'index.html') body = injectDashboardIdentity(body, state)
   const immutable = name !== 'index.html' && /(?:^|[._-])[a-f0-9]{8,}(?:[._-]|$)/iu.test(name)
   options.response.writeHead(200, {
     'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
@@ -125,9 +134,58 @@ export async function serveDedicatedDashboard(options: {
     'x-content-type-options': 'nosniff',
     'x-agent-runlab-dashboard-release': state.releaseId,
     'x-agent-runlab-dashboard-generation': String(state.generation),
+    'x-agent-runlab-dashboard-asset-release': sourceReleaseId,
   })
   options.response.end(options.request.method === 'HEAD' ? undefined : body)
   return true
+}
+
+/**
+ * A tab opened before a Dashboard activation may request one of its old lazy
+ * chunks afterwards. Releases are immutable and retained for rollback, so it
+ * is safe to serve that exact manifest-bound hash asset from a predecessor.
+ * Non-hashed paths and files absent from a signed release manifest never use
+ * this fallback.
+ */
+async function readRetainedHashedAsset(
+  releasesRoot: string,
+  activeReleaseId: string,
+  requestedPath: string,
+): Promise<{ file: string; releaseId: string } | undefined> {
+  if (!isHashedDashboardAssetPath(requestedPath)) return undefined
+  const matches: { file: string; releaseId: string; sha256: string }[] = []
+  for (const entry of await readdir(releasesRoot, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory() || entry.name === activeReleaseId || entry.name.startsWith('.')) continue
+    let manifest: DashboardReleaseManifest
+    try { manifest = parseDashboardManifest(JSON.parse(await readFile(join(releasesRoot, entry.name, 'manifest.json'), 'utf8'))) } catch { continue }
+    const declared = manifest.files.find((candidate) => candidate.path === requestedPath)
+    if (!declared) continue
+    const root = join(resolveRelease(releasesRoot, entry.name), 'assets')
+    const candidate = resolve(root, requestedPath)
+    if (!within(root, candidate)) continue
+    try {
+      const value = await lstat(candidate)
+      if (!value.isFile() || value.isSymbolicLink() || value.size !== declared.bytes) continue
+      const bytes = await readFile(candidate)
+      if (createHash('sha256').update(bytes).digest('hex') !== declared.sha256) continue
+    } catch { continue }
+    matches.push({ file: candidate, releaseId: entry.name, sha256: declared.sha256 })
+  }
+  if (new Set(matches.map((match) => match.sha256)).size > 1) throw new Error('conflicting retained dashboard asset')
+  return matches[0]
+}
+
+export function isHashedDashboardAssetPath(path: string): boolean {
+  return !path.startsWith('/')
+    && !path.split('/').some((part) => !part || part === '.' || part === '..')
+    && /(?:^|[._-])[a-f0-9]{8,}(?:[._-]|$)/iu.test(path)
+}
+
+function injectDashboardIdentity(body: Buffer, state: DashboardRouteState): Buffer {
+  const html = String(body)
+  const identity = `<meta name=\"agent-runlab-dashboard-release\" content=\"${state.releaseId}\"><meta name=\"agent-runlab-dashboard-generation\" content=\"${state.generation}\">`
+  const injected = /<\/head>/iu.test(html) ? html.replace(/<\/head>/iu, `${identity}</head>`) : `${identity}${html}`
+  return Buffer.from(injected)
 }
 
 export async function readDashboardRouteState(path: string): Promise<DashboardRouteState | undefined> {

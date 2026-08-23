@@ -7,7 +7,6 @@ export {
   readFilesTool,
   lsTool,
   globTool,
-  grepTool,
   multiGrepTool,
   writeFileTool,
   replaceInFileTool,

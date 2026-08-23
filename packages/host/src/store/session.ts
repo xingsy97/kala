@@ -90,6 +90,13 @@ export type SessionStoreOptions = {
   deleteRegisteredArtifacts?(sessionId: string): Promise<void>
 }
 
+export class SessionNotFoundError extends Error {
+  constructor(readonly sessionId: string) {
+    super(`Unknown session: ${sessionId}`)
+    this.name = 'SessionNotFoundError'
+  }
+}
+
 const SESSION_ARTIFACT_KINDS = [
   'message-assembly',
   'router-decisions',
@@ -282,7 +289,7 @@ export class SessionStore {
     const path = this.pathFor(sessionId)
     if (!existsSync(path)) {
       const found = this.findLogByPrefix(sessionId)
-      if (!found) throw new Error(`Unknown session: ${sessionId}`)
+      if (!found) throw new SessionNotFoundError(sessionId)
       return this.loadFromFile(sessionId, found, options)
     }
     return this.loadFromFile(sessionId, path, options)

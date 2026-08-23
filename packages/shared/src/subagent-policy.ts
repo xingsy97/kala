@@ -1,4 +1,4 @@
-export type SubAgentRole = 'research' | 'test' | 'review'
+export type SubAgentRole = 'research' | 'implementation' | 'test' | 'review'
 
 export type SubAgentPolicyReasonCode =
   | 'role_template_applied'
@@ -67,16 +67,25 @@ export type SubAgentRoleTemplate = {
 export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRoleTemplate>> = {
   research: {
     role: 'research', purpose: 'Read files and return a concise report with references.',
-    defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'websearch', 'webfetch', 'todowrite'],
+    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'websearch', 'webfetch', 'todowrite'],
     defaultMaxTurns: 60, minimumMaxTurns: 25, maximumMaxTurns: 120,
     defaultIdleTimeoutMs: 20 * 60_000, defaultToolIdleTimeoutMs: 40 * 60_000,
     defaultTimeoutMs: 90 * 60_000, minimumTimeoutMs: 30 * 60_000, maximumTimeoutMs: 240 * 60_000,
     defaultGracePeriodMs: 5 * 60_000,
     defaultExpectedOutput: 'Structured summary with file:line references.',
   },
+  implementation: {
+    role: 'implementation', purpose: 'Implement a bounded change in the shared workspace and verify it without reverting unrelated work.',
+    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'write_file', 'replace_in_file', 'replace_many_in_file', 'apply_file_patch', 'shell', 'bash_output', 'kill_shell', 'todowrite'],
+    defaultMaxTurns: 100, minimumMaxTurns: 40, maximumMaxTurns: 200,
+    defaultIdleTimeoutMs: 20 * 60_000, defaultToolIdleTimeoutMs: 60 * 60_000,
+    defaultTimeoutMs: 150 * 60_000, minimumTimeoutMs: 60 * 60_000, maximumTimeoutMs: 480 * 60_000,
+    defaultGracePeriodMs: 5 * 60_000,
+    defaultExpectedOutput: 'Implemented files, verification evidence, and remaining risks.',
+  },
   test: {
     role: 'test', purpose: 'Run focused tests and report failure causes.',
-    defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'bash', 'todowrite'],
+    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'shell', 'bash_output', 'kill_shell', 'todowrite'],
     defaultMaxTurns: 80, minimumMaxTurns: 30, maximumMaxTurns: 160,
     defaultIdleTimeoutMs: 20 * 60_000, defaultToolIdleTimeoutMs: 60 * 60_000,
     defaultTimeoutMs: 120 * 60_000, minimumTimeoutMs: 45 * 60_000, maximumTimeoutMs: 360 * 60_000,
@@ -85,7 +94,7 @@ export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRol
   },
   review: {
     role: 'review', purpose: 'Inspect the final diff and report risks before answer.',
-    defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'todowrite'],
+    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'todowrite'],
     defaultMaxTurns: 50, minimumMaxTurns: 20, maximumMaxTurns: 100,
     defaultIdleTimeoutMs: 15 * 60_000, defaultToolIdleTimeoutMs: 30 * 60_000,
     defaultTimeoutMs: 60 * 60_000, minimumTimeoutMs: 20 * 60_000, maximumTimeoutMs: 180 * 60_000,

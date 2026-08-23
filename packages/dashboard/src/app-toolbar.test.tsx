@@ -50,6 +50,12 @@ describe('WorkbenchToolbar', () => {
     expect(surface.className).toContain('min-h-9')
   })
 
+  it('labels a workspace-free conversation as Chat without exposing a cwd', () => {
+    renderToolbar({ sessionSelected: true, simpleChat: true, cwd: '', onChangeCwd: undefined })
+    expect(screen.getByTestId('simple-chat-badge').textContent).toBe('Chat')
+    expect(screen.queryByRole('button', { name: /working directory/i })).toBeNull()
+  })
+
   it('uses an upward arrow to expand a collapsed Topbar', () => {
     renderToolbar({ topbarAvailable: true })
 

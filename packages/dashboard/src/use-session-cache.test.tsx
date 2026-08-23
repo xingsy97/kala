@@ -264,8 +264,10 @@ describe('useSession session view cache', () => {
     }
   })
 
-  it('flushes the pending cache checkpoint when switching sessions', async () => {
+  it('paints the selected Session before checkpointing the previous large cache', async () => {
     vi.useFakeTimers()
+    let frame: FrameRequestCallback | null = null
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => { frame = callback; return 1 })
     try {
       const memory = createSessionViewCache({ maxBytes: 1024 * 1024 })
       const set = vi.fn(memory.set)
@@ -282,9 +284,15 @@ describe('useSession session view cache', () => {
       rerender({ sessionId: 's2' })
       expect(set).not.toHaveBeenCalled()
       await act(async () => { await Promise.resolve() })
+      expect(set).not.toHaveBeenCalled()
+      expect(frame).not.toBeNull()
+      await act(async () => { frame?.(performance.now()) })
+      expect(set).not.toHaveBeenCalled()
+      await act(async () => vi.runOnlyPendingTimers())
       expect(set).toHaveBeenCalledTimes(1)
       expect(set.mock.calls[0]?.[0]).toBe('s1')
     } finally {
+      raf.mockRestore()
       vi.useRealTimers()
     }
   })

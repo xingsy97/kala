@@ -236,4 +236,57 @@ describe('Stable Ingress admission', () => {
     })
     expect(attempts).toBeGreaterThanOrEqual(2)
   })
+
+  it('does not let one uncommitted Session block admission for another Session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dedicated-ingress-head-of-line-')); roots.push(root)
+    const ledgerPath = join(root, 'ledger.json')
+    const commits: string[] = []
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { sessionId: string }
+      commits.push(body.sessionId)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(body.sessionId === 'session-blocked' ? JSON.stringify({ committed: false }) : JSON.stringify({ committed: true, cursor: 41 }))
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    ingress = await startDedicatedIngress({ port: 0, unitOrigin: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
+    const origin = `http://127.0.0.1:${ingress.port}`
+    for (const [sessionId, operationId] of [['session-blocked', 'operation-blocked'], ['session-ready', 'operation-ready']] as const) {
+      expect((await fetch(`${origin}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, operationId, text: 'hello', mode: 'queue' }) })).status).toBe(202)
+    }
+    await eventually(async () => {
+      expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [
+        { operationId: 'operation-blocked', state: 'pending', attempts: expect.any(Number), error: expect.stringContaining('not committed') },
+        { operationId: 'operation-ready', state: 'committed', sessionCursor: 41 },
+      ] })
+    })
+    expect(commits).toContain('session-ready')
+    const status = await fetch(`${origin}/runtime/admission/messages/operation-blocked`).then((response) => response.json())
+    expect(status).toMatchObject({ operationId: 'operation-blocked', state: 'pending', attempts: expect.any(Number), lastError: expect.stringContaining('not committed') })
+  })
+
+  it('marks an explicitly missing target Session as failed instead of retrying forever', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dedicated-ingress-missing-session-')); roots.push(root)
+    const ledgerPath = join(root, 'ledger.json')
+    let attempts = 0
+    const server = createServer(async (request, response) => {
+      attempts += 1
+      response.writeHead(404, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ error: 'The target Session no longer exists', code: 'SESSION_NOT_FOUND' }))
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    ingress = await startDedicatedIngress({ port: 0, unitOrigin: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
+    const origin = `http://127.0.0.1:${ingress.port}`
+    expect((await fetch(`${origin}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'deleted-session', operationId: 'operation-missing-session', text: 'hello', mode: 'queue' }) })).status).toBe(202)
+    await eventually(async () => {
+      expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [{ state: 'failed', failedAt: expect.any(String), error: expect.stringContaining('no longer exists') }] })
+    })
+    expect(attempts).toBe(1)
+    await expect(fetch(`${origin}/runtime/admission/status`).then((response) => response.json())).resolves.toMatchObject({ pending: 0, leased: 0, failed: 1 })
+  })
 })

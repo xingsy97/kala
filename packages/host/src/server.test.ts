@@ -29,7 +29,7 @@ import type {
   ToolResultAck,
   ToolCallMessage,
 } from '@agent-kernel/shared'
-import { PROTOCOL_VERSION } from '@agent-kernel/shared'
+import { DEDICATED_DEPLOYMENT, PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { SESSION_ERROR_SCOPES } from '@agent-kernel/shared'
 import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 
@@ -419,6 +419,30 @@ describe('wire protocol', () => {
     }
   })
 
+  it('rejects public legacy restart control for a platform Runtime', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port, sessionsDir: dir, llm: scriptedLlm(), defaultConfig: config, httpServer: http,
+      deployment: DEDICATED_DEPLOYMENT,
+    })
+    url = `http://localhost:${server.port}`
+
+    for (const [path, method] of [
+      ['/runtime/restart/status', 'GET'],
+      ['/runtime/restart', 'POST'],
+      ['/runtime/restart/commit', 'POST'],
+      ['/runtime/restart/abort', 'POST'],
+    ] as const) {
+      const response = await fetch(`${url}${path}`, { method })
+      expect(response.status).toBe(409)
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('Deploy Supervisor') })
+    }
+    expect(server.restartStatus().current).toBeNull()
+  })
+
   it('acknowledges internal admission as committed only after the operation reaches Session JSONL', async () => {
     const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
     process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'admission-jsonl-test-secret'
@@ -446,6 +470,23 @@ describe('wire protocol', () => {
       expect(committed).toMatchObject({ committed: true, cursor: expect.any(Number) })
       const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
       expect(parsed.events.filter((entry) => entry.event.kind === 'user_message' && entry.event.operationId === 'operation-admission-jsonl')).toHaveLength(1)
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+    }
+  })
+
+  it('returns a stable machine-readable failure when internal admission targets a deleted Session', async () => {
+    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'admission-missing-session-secret'
+    try {
+      const response = await fetch(`${url}/internal/runtime/admission/commit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'admission-missing-session-secret' },
+        body: JSON.stringify({ sessionId: 'deleted-session', operationId: 'operation-deleted-session', text: 'cannot deliver', mode: 'queue' }),
+      })
+      expect(response.status).toBe(404)
+      await expect(response.json()).resolves.toMatchObject({ code: 'SESSION_NOT_FOUND', error: expect.stringContaining('no longer exists') })
     } finally {
       if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
       else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
@@ -3040,6 +3081,40 @@ describe('wire protocol', () => {
     await new Promise((r) => setTimeout(r, 100))
     expect(secondBroadcast).toBe(0)
 
+    dashboard.close()
+  })
+
+  it('acknowledges a durably created Session before slow advisory lifecycle hooks finish', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    let releaseHook!: () => void
+    const hookGate = new Promise<void>((resolve) => { releaseHook = resolve })
+    let hookStarted!: () => void
+    const started = new Promise<void>((resolve) => { hookStarted = resolve })
+    server = await startHostServer({
+      port, sessionsDir: dir, defaultConfig: config, httpServer: http, toolTimeoutMs: 2000, llm: scriptedLlm(),
+      hooks: [{ event: 'session_start', command: 'slow' }],
+      hookRunner: { async run() { hookStarted(); await hookGate; return { ok: true, exitCode: 0, stdout: '', stderr: '' } } },
+    })
+    url = `http://localhost:${server.port}`
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, { transports: ['websocket'], auth: { sessionId: 'control-slow-create', role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const ack = dashboard.timeout(1000).emitWithAck('client:create_session', { operationId: 'slow-create-op', sessionId: 'wire-slow-create', tools: ['websearch'] })
+    await expect(ack).resolves.toEqual({ ok: true })
+    expect(server.store.get('wire-slow-create')).toBeDefined()
+    await started
+    releaseHook()
+    dashboard.close()
+  })
+
+  it('returns unknown model creation failures through the RPC ack', async () => {
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, { transports: ['websocket'], auth: { sessionId: 'control-unknown-model', role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const ack = await dashboard.timeout(1000).emitWithAck('client:create_session', { operationId: 'unknown-model-op', sessionId: 'wire-unknown-model', selectedModel: 'definitely-missing-model' })
+    expect(ack).toMatchObject({ ok: false, error: expect.stringContaining('unknown or ambiguous model') })
+    expect(server.store.get('wire-unknown-model')).toBeUndefined()
     dashboard.close()
   })
 

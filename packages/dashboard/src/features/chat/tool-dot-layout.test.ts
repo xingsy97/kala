@@ -1,12 +1,33 @@
 import { describe, expect, it } from 'vitest'
 
-import { toolDotRailBudget, toolPreviewGeometry, visibleToolDots } from './tool-dot-layout.js'
+import { groupConsecutiveToolDots, toolDotNodeWidth, toolDotRailBudget, toolPreviewGeometry, visibleToolDots } from './tool-dot-layout.js'
 
 describe('tool dot responsive layout', () => {
+  it('budgets extra width for repeated-call count labels', () => {
+    expect(toolDotNodeWidth(31, 1)).toBe(31)
+    expect(toolDotNodeWidth(31, 2)).toBe(49)
+    expect(toolDotNodeWidth(31, 100)).toBe(61)
+  })
+
   it('reserves most desktop width for intention instead of the dot rail', () => {
     expect(toolDotRailBudget(1200)).toBe(408)
     expect(toolDotRailBudget(800)).toBe(272)
     expect(toolDotRailBudget(390)).toBe(338)
+  })
+
+  it('groups only consecutive same-name tool dots and preserves order', () => {
+    const groups = groupConsecutiveToolDots([
+      { callId: 'r1', toolName: 'read' },
+      { callId: 'r2', toolName: 'read' },
+      { callId: 'g1', toolName: 'grep' },
+      { callId: 'g2', toolName: 'grep' },
+      { callId: 'r3', toolName: 'read' },
+    ])
+    expect(groups.map((group) => [group.toolName, group.dots.map((dot) => dot.callId)])).toEqual([
+      ['read', ['r1', 'r2']],
+      ['grep', ['g1', 'g2']],
+      ['read', ['r3']],
+    ])
   })
 
   it('folds long rails while preserving the first, latest, running, and pinned dots', () => {
@@ -23,6 +44,14 @@ describe('tool dot responsive layout', () => {
     expect(geometry.left + geometry.width).toBeLessThanOrEqual(390 - 8)
     expect(geometry.top).toBeGreaterThanOrEqual(8)
     expect(geometry.top + geometry.maxHeight).toBeLessThanOrEqual(844 - 8)
+  })
+
+  it('keeps a short desktop preview adjacent to its Dot using measured height', () => {
+    const anchor = { left: 120, right: 148, top: 700, bottom: 728 }
+    const geometry = toolPreviewGeometry({ anchor, viewportWidth: 1200, viewportHeight: 800, contentHeight: 120 })
+    expect(geometry).toMatchObject({ mobile: false, horizontal: 'anchor', vertical: 'above', width: 384 })
+    expect(anchor.top - (geometry.top + 120)).toBe(10)
+    expect(Math.abs(geometry.left - anchor.left)).toBeLessThanOrEqual(16)
   })
 
   it('clamps desktop anchored details inside the viewport', () => {

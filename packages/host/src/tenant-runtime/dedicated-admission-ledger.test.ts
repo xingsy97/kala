@@ -88,4 +88,31 @@ describe('DedicatedAdmissionLedger', () => {
     await restarted.leaseNext('new-ingress', 2)
     await expect(restarted.committed('operation-0010', 2, 30)).resolves.toMatchObject({ state: 'committed', sessionCursor: 30 })
   })
+
+  it('records durable attempts, exposes redacted operation status, and excludes a blocked Session', async () => {
+    const { value } = await ledger()
+    await value.append(message('operation-0011', 'session-blocked'), 9)
+    await value.append(message('operation-0012', 'session-ready'), 9)
+    const first = await value.leaseNext('worker', 9)
+    expect(first).toMatchObject({ operationId: 'operation-0011', attempts: 1 })
+    await value.release('operation-0011', 'worker', '/private/root/token.txt failed')
+    expect(await value.operation('operation-0011', principal)).toMatchObject({
+      operationId: 'operation-0011', state: 'pending', attempts: 1, lastError: '<path> failed',
+    })
+    expect(await value.operation('operation-0011', 'b'.repeat(64))).toBeUndefined()
+    expect((await value.leaseNext('worker', 9, 30_000, new Set(['session-blocked'])))?.operationId).toBe('operation-0012')
+  })
+
+  it('terminates a permanently failed operation without blocking later messages for that Session', async () => {
+    const { value } = await ledger(1)
+    await value.append(message('operation-failed', 'session-deleted'), 11)
+    await value.leaseNext('worker', 11)
+    await expect(value.fail('operation-failed', 'worker', 11, '/private/session.json is missing')).resolves.toMatchObject({
+      state: 'failed', error: '<path> is missing', failedAt: expect.any(String),
+    })
+    expect(await value.operation('operation-failed', principal)).toMatchObject({ state: 'failed', lastError: '<path> is missing' })
+    await expect(value.append(message('operation-after-failure', 'session-deleted'), 11)).resolves.toMatchObject({ duplicate: false })
+    expect((await value.leaseNext('next-worker', 11))?.operationId).toBe('operation-after-failure')
+    expect(await value.snapshot()).toMatchObject({ pending: 0, leased: 1, failed: 1 })
+  })
 })

@@ -32,7 +32,7 @@
  */
 
 import { homedir } from 'node:os'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
@@ -86,6 +86,7 @@ const VERSION = packageJson.version
 
 type BuildInfo = {
   releaseTag: string
+  productVersion?: string
   gitCommit: string
   builtAt: string
   artifactKind: 'source' | 'cjs' | 'native'
@@ -297,6 +298,13 @@ async function main(): Promise<void> {
     ...(evaluationUrl ? { evaluationUrl } : {}),
     sessionsDir,
     ...(expectedDeployment ? { expectedDeployment } : {}),
+    ...((processReadinessPath || process.env.AGENT_RUNLAB_RUNTIME_READINESS?.trim()) ? {
+      invalidateReadiness: () => {
+        if (processReadinessPath) rmSync(processReadinessPath, { force: true })
+        const runtimeReadinessPath = process.env.AGENT_RUNLAB_RUNTIME_READINESS?.trim()
+        if (runtimeReadinessPath) rmSync(runtimeReadinessPath, { force: true })
+      },
+    } : {}),
     ...(expectedDeployment ? { mutableReady: () => plannedDeploymentPubliclyRouted(expectedDeployment) } : {}),
     ...(processReadinessPath ? { onProcessReady: async (ready) => {
       await writeDedicatedProcessReadiness(processReadinessPath, { schemaVersion: 1, ...ready, ...(expectedDeployment ? { deployment: expectedDeployment } : {}) })
@@ -917,6 +925,7 @@ function runtimeBuildInfo(dashboard: DashboardServing, socketAdminAssets: readon
   }).__AGENT_KERNEL_BUILD_INFO__
   const base = parseBuildInfo(globalValue) ?? {
     releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? 'local',
+    productVersion: VERSION,
     gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown',
     builtAt: process.env.AGENT_KERNEL_BUILT_AT ?? 'unknown',
     artifactKind: 'source' as const,
@@ -940,6 +949,7 @@ function parseBuildInfo(value: unknown): BuildInfo | null {
   if (dashboardMode !== 'vite' && dashboardMode !== 'static' && dashboardMode !== 'embedded' && dashboardMode !== 'none') return null
   return {
     releaseTag: typeof record.releaseTag === 'string' ? record.releaseTag : 'unknown',
+    ...(typeof record.productVersion === 'string' ? { productVersion: record.productVersion } : {}),
     gitCommit: typeof record.gitCommit === 'string' ? record.gitCommit : 'unknown',
     builtAt: typeof record.builtAt === 'string' ? record.builtAt : 'unknown',
     artifactKind,

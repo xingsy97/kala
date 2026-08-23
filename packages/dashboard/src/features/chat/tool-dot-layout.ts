@@ -6,14 +6,40 @@ export type ToolPreviewGeometry = {
   top: number
   width: number
   maxHeight: number
-  horizontal: 'right' | 'left' | 'viewport'
+  horizontal: 'anchor' | 'viewport'
   vertical: 'above' | 'below' | 'bottom'
+}
+
+export function toolDotNodeWidth(basePixels: number, consecutiveCount: number): number {
+  if (consecutiveCount <= 1) return basePixels
+  return basePixels + 12 + String(consecutiveCount).length * 6
 }
 
 export function toolDotRailBudget(containerWidth: number): number {
   if (containerWidth <= 0) return 0
   if (containerWidth < 640) return Math.max(112, containerWidth - 52)
   return Math.round(Math.max(144, Math.min(containerWidth * 0.34, 420)))
+}
+
+export type ConsecutiveToolDotGroup<T> = {
+  callId: string
+  toolName: string
+  dots: readonly T[]
+}
+
+export function groupConsecutiveToolDots<T extends DotIdentity & { toolName: string }>(
+  dots: readonly T[],
+): ConsecutiveToolDotGroup<T>[] {
+  const groups: ConsecutiveToolDotGroup<T>[] = []
+  for (const dot of dots) {
+    const previous = groups.at(-1)
+    if (previous?.toolName === dot.toolName) {
+      groups[groups.length - 1] = { ...previous, dots: [...previous.dots, dot] }
+    } else {
+      groups.push({ callId: dot.callId, toolName: dot.toolName, dots: [dot] })
+    }
+  }
+  return groups
 }
 
 export function visibleToolDots<T extends DotIdentity>(
@@ -38,8 +64,9 @@ export function toolPreviewGeometry(input: {
   anchor: { left: number; right: number; top: number; bottom: number }
   viewportWidth: number
   viewportHeight: number
+  contentHeight?: number
 }): ToolPreviewGeometry {
-  const { anchor, viewportWidth, viewportHeight } = input
+  const { anchor, viewportWidth, viewportHeight, contentHeight } = input
   const inset = 8
   if (viewportWidth < 640) {
     const width = Math.max(0, viewportWidth - inset * 2)
@@ -54,18 +81,18 @@ export function toolPreviewGeometry(input: {
       vertical: 'bottom',
     }
   }
-  const gap = 12
-  const width = Math.min(544, viewportWidth - inset * 2)
+  const gap = 10
+  const width = Math.min(384, viewportWidth - inset * 2)
   const maxHeight = Math.max(180, Math.min(448, viewportHeight - inset * 2))
-  const rightFits = anchor.right + gap + width <= viewportWidth - inset
-  const horizontal = rightFits ? 'right' : 'left'
-  const aboveFits = anchor.top - gap - maxHeight >= inset
-  const vertical = aboveFits ? 'above' : 'below'
-  const left = horizontal === 'right'
-    ? anchor.right + gap
-    : Math.max(inset, anchor.left - gap - width)
-  const top = vertical === 'above'
-    ? Math.max(inset, anchor.top - gap - maxHeight)
-    : Math.min(Math.max(inset, anchor.bottom + gap), Math.max(inset, viewportHeight - maxHeight - inset))
-  return { mobile: false, left, top, width, maxHeight, horizontal, vertical }
+  const measuredHeight = Math.max(1, Math.min(contentHeight ?? 240, maxHeight))
+  const belowFits = anchor.bottom + gap + measuredHeight <= viewportHeight - inset
+  const vertical = belowFits ? 'below' : 'above'
+  // Keep the preview's leading edge close to the Dot instead of moving a wide
+  // panel wholesale to the opposite side of the viewport.
+  const left = Math.min(Math.max(inset, anchor.left - 16), Math.max(inset, viewportWidth - width - inset))
+  const top = vertical === 'below'
+    ? anchor.bottom + gap
+    : Math.max(inset, anchor.top - gap - measuredHeight)
+  const positionedMaxHeight = Math.max(1, Math.min(maxHeight, viewportHeight - inset - top))
+  return { mobile: false, left, top, width, maxHeight: positionedMaxHeight, horizontal: 'anchor', vertical }
 }

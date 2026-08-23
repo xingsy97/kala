@@ -106,6 +106,11 @@ const READ = {
   requiresApproval: false,
 } as const
 
+const READ_FILE = {
+  ...READ,
+  name: 'read_file',
+} as const
+
 const AGENT = {
   name: 'agent',
   description: 'spawn agent',
@@ -266,6 +271,20 @@ describe('host loop', () => {
     expect(store.get(sessionId)!.state.status).toBe('done')
   })
 
+  it('discloses websearch on the first LLM call for explicit network research', async () => {
+    const seenTools: string[][] = []
+    const websearch = { name: 'websearch', description: 'Search the web', inputSchema: { type: 'object' }, requiresApproval: false, executionKind: 'host' as const, executionHandler: 'websearch' }
+    const progressive = createConfig({ tools: [websearch], systemPrompt: 'sys', toolDisclosureMode: 'progressive' })
+    store.get(sessionId)!.config = progressive
+    const loop = runHostLoop({
+      store,
+      llm: { name: 'network-disclosure', async call(params) { seenTools.push(params.tools.map((tool) => tool.name)); return { message: { role: 'assistant', content: [{ type: 'text', text: 'ready to search' }] } } } },
+      tools: nullTools(), broadcast: silentBroadcast(),
+    })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: '请联网检索最新资料并给出可点击来源链接' })
+    expect(seenTools).toEqual([['websearch']])
+  })
+
   it('does not resume terminal replies without durable graph work', async () => {
     const llm = scriptedLlm([{ message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] }, finishReason: 'stop' }])
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
@@ -304,6 +323,29 @@ describe('host loop', () => {
     expect(parsed.events[0]?.event.kind).toBe('user_message')
     expect(parsed.events[1]?.event.kind).toBe('llm_response')
     void state
+  })
+
+  it('persists locally published assistant images as durable artifact URIs', async () => {
+    const llm = scriptedLlm([{ message: { role: 'assistant', content: [{ type: 'text', text: 'Design:\n![preview](/tmp/design.png)' }] } }])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+      publishLocalImages: async (_sessionId, _record, message) => ({
+        ...message,
+        content: message.content.map((part) => part.type === 'text' ? { ...part, text: part.text.replace('/tmp/design.png', 'artifact://published-image') } : part),
+      }),
+    })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'show design' })
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    const response = parsed.events.find((entry) => entry.event.kind === 'llm_response')
+    expect(response?.event.kind).toBe('llm_response')
+    if (response?.event.kind === 'llm_response') {
+      expect(response.event.message.content).toContainEqual({ type: 'text', text: 'Design:\n![preview](artifact://published-image)' })
+      expect(response.event.message.content.some((part) => part.type === 'text' && part.text.includes('/tmp/'))).toBe(false)
+    }
+    expect(store.get(sessionId)!.state.messages.at(-1)?.content).toEqual(response?.event.kind === 'llm_response' ? response.event.message.content : [])
   })
 
   it('records an empty assistant response without hidden retry messages', async () => {
@@ -2036,7 +2078,7 @@ describe('host loop', () => {
   })
 
   it('persists a resolved sub-agent policy artifact when a role is requested', async () => {
-    const parentConfig = createConfig({ tools: [AGENT, READ], systemPrompt: 'sys' })
+    const parentConfig = createConfig({ tools: [AGENT, READ_FILE], systemPrompt: 'sys' })
     const parent = await store.create({
       config: parentConfig,
       sessionId: 'sess-agent-policy-parent',
@@ -2096,13 +2138,37 @@ describe('host loop', () => {
     expect(artifact.policy.role).toBe('research')
     expect(artifact.policy.objective).toBe('summarize repo layout')
     expect(artifact.policy.reasons).toContain('role_template_applied')
-    expect(artifact.policy.allowedTools).toContain('read')
+    expect(artifact.policy.allowedTools).toContain('read_file')
     expect(artifact.policy.maxTurns).toBe(60)
     expect(artifact.policy.idleTimeoutMs).toBe(20 * 60_000)
     expect(artifact.policy.toolIdleTimeoutMs).toBe(40 * 60_000)
     expect(artifact.policy.timeoutMs).toBe(90 * 60_000)
     expect(artifact.policy.gracePeriodMs).toBe(5 * 60_000)
     expect(artifact.policy.expectedOutput).toMatch(/summary/i)
+  })
+
+  it('maps implementation agent_type to the controlled write policy when role is omitted', async () => {
+    const write = { name: 'write_file', description: 'write', inputSchema: { type: 'object' }, requiresApproval: true, executionKind: 'executor' as const }
+    const parent = await store.create({
+      config: createConfig({ tools: [AGENT, READ_FILE, write], systemPrompt: 'sys' }),
+      sessionId: 'sess-agent-implementation-type-parent',
+      workspaceId: 'ws-agent-implementation-type',
+    })
+    const llm = scriptedLlm([
+      { message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'agent-implementation-type', name: 'agent', input: { prompt: 'make a bounded edit', agent_type: 'implementation' } }] } },
+      { message: { role: 'assistant', content: [{ type: 'text', text: 'child done' }] } },
+      { message: { role: 'assistant', content: [{ type: 'text', text: 'parent done' }] } },
+    ])
+    const artifactRootDir = join(dir, 'agent-implementation-type-artifacts')
+    const started: SubAgentStartedPayload[] = []
+    const loop = runHostLoop({ store, llm, tools: nullTools(), artifactRootDir, broadcast: { ...silentBroadcast(), onSubAgentStarted(payload) { started.push(payload) } } })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    const artifact = JSON.parse(await readFile(join(artifactRootDir, 'subagent-policies', parent.sessionId, 'agent-implementation-type.json'), 'utf8'))
+    expect(artifact.policy.role).toBe('implementation')
+    expect(artifact.policy.allowedTools).toContain('write_file')
+    expect(started[0]?.agentType).toBe('implementation')
   })
 
   it('emits sub_agent_started + sub_agent_finished around the child run', async () => {

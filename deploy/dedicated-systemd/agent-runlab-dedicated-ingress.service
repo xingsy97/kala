@@ -12,6 +12,7 @@ Environment=AGENT_RUNLAB_ROUTE_STATE=/var/lib/agent-runlab/deploy/route-state.js
 Environment=AGENT_RUNLAB_ADMISSION_LEDGER=/var/lib/agent-runlab/admission/ledger.json
 Environment=AGENT_RUNLAB_CANDIDATE_STATE=/var/lib/agent-runlab/deploy/candidate-state.json
 Environment=AGENT_RUNLAB_OPERATOR_STATUS=/var/lib/agent-runlab/deploy/operator-status.json
+Environment=AGENT_RUNLAB_DEPLOYMENT_REQUESTS=/var/lib/agent-runlab/deploy/requests
 Environment=AGENT_RUNLAB_DASHBOARD_STATE=/var/lib/agent-runlab/deploy/dashboard/route-state.json
 Environment=AGENT_RUNLAB_DASHBOARD_RELEASES=/var/lib/agent-runlab/deploy/dashboard/releases
 Environment=AGENT_RUNLAB_INGRESS_READINESS=/run/agent-runlab/ingress-readiness.json
@@ -26,7 +27,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/var/lib/agent-runlab/deploy/route-state.json -/var/lib/agent-runlab/deploy/candidate-state.json -/var/lib/agent-runlab/deploy/operator-status.json /var/lib/agent-runlab/deploy/dashboard
-ReadWritePaths=/var/lib/agent-runlab/admission
+ReadWritePaths=/var/lib/agent-runlab/admission /var/lib/agent-runlab/deploy/requests
 RuntimeDirectory=agent-runlab
 RuntimeDirectoryPreserve=yes
 UMask=0077

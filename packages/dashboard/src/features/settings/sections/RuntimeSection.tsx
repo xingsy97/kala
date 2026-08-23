@@ -1,7 +1,7 @@
 import type { ServerSettingsPayload } from '@agent-kernel/shared'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../../components/ui/button.js'
@@ -16,26 +16,29 @@ export function RuntimeSection({
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
+  const [operation, setOperation] = useState<{ operationId: string; deploymentId?: string; phase: string; blockers?: readonly string[] } | null>(null)
+  const platform = payload.deployment?.deployment.architecture === 'platform'
   const restart = useMutation({
     mutationFn: async (): Promise<unknown> => {
-      const res = await fetch('/runtime/restart', {
+      const res = await fetch(platform ? '/runtime/deployment/restart' : '/runtime/restart', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mode: 'checkpoint', reason: 'manual' }),
+        body: JSON.stringify(platform ? {} : { mode: 'checkpoint', reason: 'manual' }),
       })
       const body = await res.json() as unknown | { error?: string }
       if (!res.ok) throw new Error(errorMessageFromBody(body) ?? `HTTP ${res.status}`)
       return body
     },
-    onSuccess: () => {
+    onSuccess: (body) => {
       setError(null)
+      if (platform) setOperation(body as { operationId: string; deploymentId?: string; phase: string })
       void queryClient.invalidateQueries({ queryKey: ['settings'] })
     },
     onError: (err) => setError(err instanceof Error ? err.message : String(err)),
   })
   const abortRestart = useMutation({
     mutationFn: async (): Promise<unknown> => {
-      const res = await fetch('/runtime/restart/abort', { method: 'POST' })
+      const res = await fetch(platform && operation ? `/runtime/deployment/operations/${encodeURIComponent(operation.operationId)}/abort` : '/runtime/restart/abort', { method: 'POST' })
       const body = await res.json() as unknown
       if (!res.ok) throw new Error(errorMessageFromBody(body) ?? `HTTP ${res.status}`)
       return body
@@ -46,6 +49,24 @@ export function RuntimeSection({
     },
     onError: (err) => setError(err instanceof Error ? err.message : String(err)),
   })
+  useEffect(() => {
+    if (!platform || !operation || ['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed', 'rejected'].includes(operation.phase)) return
+    let cancelled = false
+    const poll = async (): Promise<void> => {
+      try {
+        const res = await fetch(`/runtime/deployment/operations/${encodeURIComponent(operation.operationId)}`, { cache: 'no-store' })
+        const body = await res.json() as { operationId?: string; deploymentId?: string; phase?: string; blockers?: readonly string[]; error?: { message?: string } }
+        if (!res.ok || !body.phase) throw new Error(body.error?.message ?? `HTTP ${res.status}`)
+        if (!cancelled) {
+          setOperation((current) => current?.operationId === operation.operationId ? { ...current, ...body, operationId: operation.operationId, phase: body.phase! } : current)
+          if (body.error?.message) setError(body.error.message)
+        }
+      } catch (err) { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) }
+    }
+    void poll()
+    const timer = window.setInterval(() => { void poll() }, 1_000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [operation?.operationId, operation?.phase, platform])
   const rows: Array<[string, string]> = [
     [t('settings.runtime.anthropicSettings'), payload.paths.claudeSettings],
     [t('settings.runtime.openaiProviders'), payload.paths.codexConfig],
@@ -55,6 +76,7 @@ export function RuntimeSection({
   ]
   const runtime = payload.runtime
   const currentAttempt = runtime?.current
+  const restartActive = platform ? Boolean(operation && !['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed', 'rejected'].includes(operation.phase)) : Boolean(currentAttempt)
   return (
     <div>
       <SectionHeader
@@ -68,15 +90,17 @@ export function RuntimeSection({
               <div className="font-medium text-foreground">{t('settings.runtime.hostRuntime')}</div>
               <div className="text-xs text-muted-foreground">PID {runtime.pid} - {t('settings.runtime.startedAt')}: {runtime.startedAt}</div>
               <div className="text-xs text-muted-foreground">
-                {t('settings.runtime.restartPhase')}: {currentAttempt?.phase ?? t('settings.runtime.restartIdle')}
-                {currentAttempt ? ` - ${currentAttempt.sessions.length} ${t('settings.runtime.restartSessions')}` : ''}
+                {t('settings.runtime.restartPhase')}: {platform ? operation?.phase ?? t('settings.runtime.restartIdle') : currentAttempt?.phase ?? t('settings.runtime.restartIdle')}
+                {!platform && currentAttempt ? ` - ${currentAttempt.sessions.length} ${t('settings.runtime.restartSessions')}` : ''}
               </div>
+              {operation?.blockers?.length ? <div className="text-xs text-amber-600">{t('settings.runtime.restartBlockers')}: {operation.blockers.join(', ')}</div> : null}
+              {operation?.operationId ? <div className="break-all font-mono text-[10px] text-muted-foreground">{operation.operationId}</div> : null}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button type="button" size="sm" className="h-9" disabled={restart.isPending || Boolean(currentAttempt)} onClick={() => restart.mutate()}>
+              <Button type="button" size="sm" className="h-9" disabled={restart.isPending || restartActive} onClick={() => restart.mutate()}>
                 <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.runtime.restartHost')}
               </Button>
-              {currentAttempt ? (
+              {restartActive ? (
                 <Button type="button" variant="outline" size="sm" className="h-9" disabled={abortRestart.isPending} onClick={() => abortRestart.mutate()}>
                   {t('settings.runtime.abortRestart')}
                 </Button>

@@ -142,7 +142,6 @@ export function SimpleComposerInput({
 }: Props): JSX.Element {
   const ref = useRef<HTMLDivElement | null>(null)
   const lastSerialized = useRef<{ text: string; imageIds: string[] }>({ text: '', imageIds: [] })
-  const suppressNextInput = useRef(false)
 
   const syncDomFromProps = useCallback((): void => {
     const el = ref.current
@@ -154,7 +153,6 @@ export function SimpleComposerInput({
       lastSerialized.current.imageIds.some((id, i) => currentIds[i] !== id)
     if (!domNeedsRebuild) return
     const hadFocus = document.activeElement === el
-    suppressNextInput.current = true
     buildDom(el, text, images)
     lastSerialized.current = { text, imageIds: currentIds }
     if (hadFocus) placeCaretAtEnd(el)
@@ -167,10 +165,6 @@ export function SimpleComposerInput({
   const handleInput = useCallback((): void => {
     const el = ref.current
     if (!el) return
-    if (suppressNextInput.current) {
-      suppressNextInput.current = false
-      return
-    }
     const { text: nextText, imageIds, caret } = serializeDom(el)
     const cleanText = nextText
     setEmptyAttr(el, cleanText.length === 0 && imageIds.length === 0)
@@ -237,9 +231,9 @@ export function SimpleComposerInput({
       data-placeholder={placeholder ?? ''}
       data-testid="composer-input-simple"
       className={cn(
-        'ak-composer-simple relative w-full whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-background/60 px-2.5 py-2 text-base leading-5 outline-none transition-colors sm:px-2 sm:py-1.5 sm:text-sm',
+        'ak-composer-simple relative w-full whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-background/60 px-3 py-3 text-[18px] leading-7 outline-none transition-colors',
         'focus-within:border-ring/45 focus-within:bg-background focus-within:ring-0',
-        'min-h-10 max-h-[calc(1.25rem*5+1rem)] overflow-y-auto sm:min-h-9',
+        'min-h-12 max-h-[min(240px,35vh)] overflow-y-auto',
         disabled ? 'cursor-not-allowed opacity-60' : '',
         className,
       )}

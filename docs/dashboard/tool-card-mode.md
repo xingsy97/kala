@@ -57,17 +57,20 @@ current merely because it is the newest one.
 
 | Runtime state | Badge behavior |
 |---|---|
-| Tool running | `In progress: {current full Intention}` |
-| Tool succeeded and the Agent is thinking before its next action | `Previous step completed: {previous full Intention}` |
-| Tool failed and the Agent is thinking before its next action | `Previous step did not complete: {previous full Intention}` |
-| Waiting for Tool approval | `Awaiting approval: {pending Tool Intention}` |
-| Thinking before any Tool Intention exists | A short lifecycle fallback such as `Planning the next step` |
+| Tool running | The current full Intention as primary copy; animated activity icon and live elapsed time express execution |
+| Tool succeeded and the Agent is thinking before its next action | The previous full Intention as primary copy; success icon and fixed Tool duration express the completed step |
+| Tool failed and the Agent is thinking before its next action | The previous full Intention as primary copy; failure icon and fixed Tool duration express the failed step |
+| Waiting for Tool approval | The pending full Intention as primary copy; amber approval icon expresses the gate |
+| Thinking or working before any Tool Intention exists | The short fallback `Thinking` or `Working` |
 | Assistant text streaming, idle, done, or error | No stale Tool Intention; the existing streaming, completion, or error surface owns feedback |
 
 The completion wording refers only to the preceding Tool step, not to completion
 of the user's whole task. When a new Tool starts, its current Intention replaces
 the previous-step projection immediately. Missing legacy Intention data may use
-a generic lifecycle fallback, but must never expose Tool arguments.
+a generic lifecycle fallback, but must never expose Tool arguments. The Badge
+must not render prose prefixes such as `In progress`, `Previous step completed`,
+`Previous step did not complete`, or `Awaiting approval`; lifecycle is visual
+state, not a second sentence competing with the Intention.
 
 ### Collapsed Dot Line text
 
@@ -82,7 +85,8 @@ priority and suppression policy:
 
 While the group contains a running Tool, its default text is hidden because the
 Badge already shows the current Intention. While the Agent is in the post-Tool
-thinking bridge and the Badge shows `Previous step ...`, the just-finished
+thinking bridge and the Badge shows the just-finished Intention, that
+just-finished
 group's default text is also hidden. Inspecting another historical Dot may show
 that Dot's Intention; inspecting the current/previous Dot must not render the
 same sentence twice.
@@ -111,10 +115,10 @@ shown in the rows; technical values stay in closed `Technical details`.
 The following sequence is normative:
 
 ```text
-thinking without Tool -> generic planning Badge
-Tool dispatched        -> In progress: current Intention
-Tool result persisted  -> Previous step completed/not completed: same Intention
-next Tool dispatched   -> In progress: next Intention
+thinking without Tool -> Thinking Badge
+Tool dispatched        -> current Intention + animated activity state
+Tool result persisted  -> same Intention + success/failure state and fixed duration
+next Tool dispatched   -> next Intention + animated activity state
 assistant text streams -> Badge hidden
 turn settles           -> Badge hidden; Dot Line becomes a historical summary
 ```

@@ -371,7 +371,7 @@ function sessionNode(s: SessionSummary): SessionNode {
     workspaceId: s.workspaceId,
     label: labelFor(s),
     status: s.status,
-    currentCwd: s.currentCwd,
+    currentCwd: s.workspaceId ? s.currentCwd : undefined,
     eventCount: s.eventCount,
     parentSessionId: s.parentSessionId,
     lastActivityIso: s.lastEventAt ?? s.createdAt,

@@ -61,6 +61,7 @@ import {
 import { sessionRoom } from './connection/rooms.js'
 import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, claimRoute, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount } from './http/routes.js'
 import { SessionArtifactRegistry } from './session-artifact-registry.js'
+import { createLocalImagePublisher } from './local-image-publisher.js'
 import { MemoStore } from './memo-store.js'
 import type { AuthConfig } from './auth-control.js'
 import type { AuditLogger } from './audit-log.js'
@@ -155,6 +156,9 @@ export type HostServerOptions = {
   allowAllApprovalMode?: boolean
   /** Exact Supervisor fence expected by a candidate slot during planned recovery. */
   expectedDeployment?: NonNullable<import('@agent-kernel/shared').HostRestartAttempt['deployment']>
+  /** Remove slot readiness before a planned restart closes its listener. */
+  invalidateReadiness?: () => void | Promise<void>
+  restartShutdownTimeoutMs?: number
   mutableReady?: () => boolean
   onProcessReady?: (input: { pid: number; port: number; readyAt: string }) => void | Promise<void>
 }
@@ -952,6 +956,10 @@ export async function startHostServer(
     ...(options.webSearchCredentials ? { webSearchCredentials: options.webSearchCredentials } : {}),
     audit,
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
+    publishLocalImages: createLocalImagePublisher({
+      artifacts: sessionArtifacts,
+      reader: async (input) => await executors.publishLocalImage(input),
+    }),
   }
   loop = runHostLoop(loopDeps)
   restart = new RestartCoordinator({
@@ -964,7 +972,9 @@ export async function startHostServer(
         ...event,
       })
     },
+    ...(options.invalidateReadiness ? { invalidateReadiness: options.invalidateReadiness } : {}),
     closeServer,
+    ...(options.restartShutdownTimeoutMs !== undefined ? { shutdownTimeoutMs: options.restartShutdownTimeoutMs } : {}),
     ...(options.expectedDeployment ? { expectedDeployment: options.expectedDeployment } : {}),
     queuedMessages: (sessionId) => messageQueues.pending(sessionId),
     hydrateQueue: async (sessionId) => await messageQueues.hydrate(sessionId),

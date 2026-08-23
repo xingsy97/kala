@@ -482,6 +482,7 @@ function executorBuildInfo(): BuildMetadata {
   }).__AGENT_KERNEL_BUILD_INFO__
   return parseBuildInfo(globalValue) ?? {
     releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? 'local',
+    productVersion: executorReleaseVersion(),
     gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown',
     builtAt: process.env.AGENT_KERNEL_BUILT_AT ?? 'unknown',
     artifactKind: 'source',
@@ -498,6 +499,7 @@ function parseBuildInfo(value: unknown): BuildMetadata | null {
   if (dashboardMode !== 'vite' && dashboardMode !== 'static' && dashboardMode !== 'embedded' && dashboardMode !== 'none') return null
   return {
     releaseTag: typeof record.releaseTag === 'string' ? record.releaseTag : 'unknown',
+    ...(typeof record.productVersion === 'string' ? { productVersion: record.productVersion } : {}),
     gitCommit: typeof record.gitCommit === 'string' ? record.gitCommit : 'unknown',
     builtAt: typeof record.builtAt === 'string' ? record.builtAt : 'unknown',
     artifactKind,

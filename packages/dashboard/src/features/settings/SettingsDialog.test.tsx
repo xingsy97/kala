@@ -90,7 +90,7 @@ const payload: ServerSettingsPayload = {
 }
 
 async function waitForSettingsLoaded(): Promise<void> {
-  await screen.findByText('Host endpoint')
+  await screen.findByText('Service endpoint')
 }
 
 describe('SettingsDialog', () => {
@@ -842,7 +842,7 @@ describe('SettingsDialog', () => {
         services: { supervisor: { pid: 52 } }, writeLeaseOwnerPid: 42,
         route: { generation: 4, activeSlot: 'green', activeReleaseId: 'next' },
         slots: { blue: { pid: 0, active: false, releaseId: 'old' }, green: { pid: 42, active: true, releaseId: 'next' } },
-        admission: { pending: 1, leased: 1, committed: 3, expired: 0, oldestAgeMs: 2500, capacity: 1000 },
+        admission: { pending: 1, leased: 1, committed: 3, failed: 0, expired: 0, oldestAgeMs: 2500, capacity: 1000 },
         dashboard: { schemaVersion: 1, generation: 3, releaseId: 'dashboard-r3', releaseDigest: 'c'.repeat(64), assetDigest: 'd'.repeat(64), version: '0.1.10', protocol: { min: '1.0.0', max: '1.0.0' }, activatedAt: new Date().toISOString() },
         deployment: { deploymentId: 'deployment-0001', operationId: 'operation-0001', phase: 'completed', requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), releaseDigest: 'a'.repeat(64), sourceReleaseDigest: 'b'.repeat(64), candidateSlot: 'green', runtimeReadyAt: new Date().toISOString(), continuation: { participants: 2, completed: 2, failed: 0 }, controlPlane: { previousIngressPid: 31, ingressPid: 41, previousSupervisorPid: 32, supervisorPid: 52, activatedAt: new Date().toISOString(), readyAt: new Date().toISOString() } },
       }), { status: 200 })

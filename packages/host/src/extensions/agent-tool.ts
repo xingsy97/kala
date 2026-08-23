@@ -162,9 +162,9 @@ export async function runAgentTool(
   const maxFanOut = parent.config.maxAgentFanOut ?? DEFAULT_MAX_AGENT_FANOUT
   const concurrentSiblingCount = activeSubAgentsForParent(parentSessionId).length
 
-  const agentType = agentTypeOf(effect)
-  const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
   const policyInput = readPolicyInput(effect, parent.config)
+  const agentType = agentTypeOf(effect) ?? policyInput?.role
+  const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
   const policy = resolveSubAgentPolicy({
     input: policyInput,
     parentTools: parent.config.tools.map((tool) => tool.name),
@@ -533,7 +533,8 @@ function isSettableModelResolver(
 function readPolicyInput(effect: CallToolEffect, _parentConfig: AgentConfig): SubAgentPolicyInput | undefined {
   const raw = effect.input as Record<string, unknown>
   const roleRaw = raw['role']
-  const role = isSubAgentRole(roleRaw) ? roleRaw : undefined
+  const typeRaw = raw['agent_type']
+  const role = isSubAgentRole(roleRaw) ? roleRaw : isSubAgentRole(typeRaw) ? typeRaw : undefined
   const explicitAllowed = Array.isArray(raw['tools']) ? (raw['tools'] as unknown[]).filter((tool): tool is string => typeof tool === 'string') : undefined
   const input: SubAgentPolicyInput = {
     ...(role ? { role } : {}),
@@ -543,7 +544,7 @@ function readPolicyInput(effect: CallToolEffect, _parentConfig: AgentConfig): Su
     ...(typeof raw['timeout_ms'] === 'number' && Number.isFinite(raw['timeout_ms']) ? { timeoutMs: Math.floor(raw['timeout_ms'] as number) } : {}),
     ...(typeof raw['expected_output'] === 'string' && raw['expected_output'].length > 0 ? { expectedOutput: raw['expected_output'] as string } : {}),
   }
-  if (Object.keys(input).length === 0 && roleRaw === undefined) return undefined
+  if (Object.keys(input).length === 0 && roleRaw === undefined && typeRaw === undefined) return undefined
   return input
 }
 

@@ -70,6 +70,7 @@ const ExecutorOsSchema = z.enum([
 
 export const BuildMetadataSchema = z.object({
   releaseTag: z.string(),
+  productVersion: z.string().optional(),
   gitCommit: z.string(),
   builtAt: z.string(),
   artifactKind: z.enum(['source', 'cjs', 'native']),

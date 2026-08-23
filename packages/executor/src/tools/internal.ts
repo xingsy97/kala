@@ -27,6 +27,7 @@ import {
 import { handleBgKill, handleBgList, handleBgOutput } from '../bg-handlers.js'
 import { workspaceExec } from '../workspace-exec.js'
 import { workspaceReadBinary } from '../workspace-read-binary.js'
+import { publishLocalImage } from '../publish-local-image.js'
 
 import type { Tool } from './registry.js'
 import { ToolError } from './registry.js'
@@ -136,6 +137,11 @@ export const workspaceReadBinaryTool: Tool = makeTool(
     workspaceReadBinary(input as Parameters<typeof workspaceReadBinary>[0], sandbox),
 )
 
+export const publishLocalImageTool: Tool = makeTool(
+  '__publish_local_image',
+  async (input, { sandbox }) => publishLocalImage(input as Parameters<typeof publishLocalImage>[0], sandbox),
+)
+
 export const internalDirectTools: readonly Tool[] = [
   fsListDirsTool,
   fsListFilesTool,
@@ -147,4 +153,5 @@ export const internalDirectTools: readonly Tool[] = [
   bgKillTool,
   workspaceExecTool,
   workspaceReadBinaryTool,
+  publishLocalImageTool,
 ]

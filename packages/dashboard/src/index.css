@@ -327,7 +327,7 @@
     position: absolute;
     inset: 0;
     transform: translateX(-120%);
-    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.08), transparent);
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.04), transparent);
     animation: ak-thinking-sheen 2.2s ease-in-out infinite;
   }
 
@@ -406,7 +406,7 @@
 
 @keyframes ak-thinking-dot {
   0%, 100% { opacity: 0.18; transform: scale(0.82); }
-  50% { opacity: 0.42; transform: scale(1.55); }
+  50% { opacity: 0.36; transform: scale(1.25); }
 }
 
 @keyframes ak-thinking-sheen {

@@ -555,6 +555,8 @@ describe('Explorer', () => {
     const wsRow = screen.getByTestId('workspace-row')
     expect(wsRow.getAttribute('data-workspace-id')).toBe('unassigned')
     expect(wsRow.textContent).toContain('Chats')
+    expect(screen.getByTestId('chats-icon')).toBeTruthy()
+    expect(screen.getByTestId('chat-session-icon')).toBeTruthy()
     expect(wsRow.textContent).toContain('personal conversations')
     expect(wsRow.textContent).not.toContain('no workspace')
     expect(screen.getByTestId('session-row').textContent).toContain(

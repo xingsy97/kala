@@ -32,8 +32,11 @@ export type RestartCoordinatorOptions = {
   startedAt?: string
   command?: readonly string[]
   emit(event: HostRestartEvent): void
+  /** Remove externally consumed readiness before the listener starts closing. */
+  invalidateReadiness?(): void | Promise<void>
   closeServer(): Promise<void>
   exitProcess?(code: number): void
+  shutdownTimeoutMs?: number
   expectedDeployment?: NonNullable<HostRestartAttempt['deployment']>
   queuedMessages?(sessionId: string): number
   hydrateQueue?(sessionId: string): Promise<void>
@@ -384,14 +387,25 @@ export class RestartCoordinator {
       return
     }
 
-    return this.options.closeServer().then(() => {
-      if (this.actor.snapshot().current?.attemptId !== command.attemptId) return
-      // The service supervisor owns process replacement. Spawning a detached
-      // copy here allowed old and new Hosts to overlap in the same systemd
-      // cgroup and append reused cursor values to one Session JSONL.
-      if (this.options.exitProcess) this.options.exitProcess(0)
-      else process.exit(0)
-    })
+    return this.shutdownForRestart(command.attemptId)
+  }
+
+  private async shutdownForRestart(attemptId: string): Promise<void> {
+    await this.options.invalidateReadiness?.()
+    const exit = (code: number): void => {
+      if (this.options.exitProcess) this.options.exitProcess(code)
+      else process.exit(code)
+    }
+    // Closing Socket.IO or a transport can wedge after the HTTP listener has
+    // disappeared. Keep a referenced watchdog so a service never remains
+    // systemd-active while permanently returning 502 through Stable Ingress.
+    const watchdog = setTimeout(() => exit(1), this.options.shutdownTimeoutMs ?? 30_000)
+    try {
+      await this.options.closeServer()
+      if (this.actor.snapshot().current?.attemptId === attemptId) exit(0)
+    } finally {
+      clearTimeout(watchdog)
+    }
   }
 }
 

@@ -196,16 +196,11 @@ const filesystemToolset: ToolsetPlugin = {
         whenToUse: ['Locate files by name or extension.', 'Find likely implementation or test files.'],
         constraints: ['Prefer precise patterns to broad workspace scans.'],
       }, { type: 'object', required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } }),
-      tool('grep', 'executor', 'read', false, 'grep', {
-        purpose: 'Ripgrep-like regex search with content, files_with_matches, or count output modes.',
-        whenToUse: ['Search code symbols, error strings, config keys, or behavior references.', 'Use before reading many files.'],
-        constraints: ['Scope by path or glob when possible.', 'Use case_insensitive only when needed.'],
-      }, { type: 'object', required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string', description: 'Filter files by glob.' }, output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'] }, case_insensitive: { type: 'boolean' } } }),
       tool('multi_grep', 'executor', 'read', false, 'multi_grep', {
-        purpose: 'Run multiple bounded regex searches in one ordered Tool call.',
+        purpose: 'Run multiple independent regex searches in one ordered Tool call, preserving every child result.',
         whenToUse: ['Investigate several related symbols or failure signatures together.', 'Reduce repeated grep calls while preserving per-search output sections.'],
-        constraints: ['Keep each search scoped where possible.', 'Use at most 20 searches; output is bounded by max_bytes.'],
-      }, { type: 'object', required: ['searches'], properties: { searches: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' }, output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'] }, case_insensitive: { type: 'boolean' } } } }, max_bytes: { type: 'integer', minimum: 1, maximum: 1000000 } } }),
+        constraints: ['Keep each search scoped where possible.', 'Use at most 20 searches; large aggregate output is preserved through the standard overflow channel.'],
+      }, { type: 'object', required: ['searches'], properties: { searches: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' }, output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'] }, case_insensitive: { type: 'boolean' } } } } } }),
       tool('write_file', 'executor', 'write', true, 'write_file', {
         purpose: 'Create or fully overwrite one UTF-8 text file, creating parent directories as needed.',
         whenToUse: ['Create new files or fully replace generated files.'],
@@ -282,9 +277,9 @@ const agentToolset: ToolsetPlugin = {
   provideTools() {
     return [tool('agent', 'host', 'agent', false, 'agent', {
       purpose: 'Spawn a sub-agent to handle a focused sub-task.',
-      whenToUse: ['Delegate bounded investigation, testing, or review.', 'Use when parallel or isolated work would reduce context pressure.'],
-      constraints: ['Give a specific objective and expected output.', 'Do not use for trivial single-step tasks.'],
-    }, { type: 'object', properties: { prompt: { type: 'string' }, model: { type: 'string' }, tools: { type: 'array', items: { type: 'string' } }, role: { type: 'string', enum: ['research', 'test', 'review'], description: 'Optional role template. Selects long-running defaults for allowed tools, turns, idle/tool-idle deadlines, absolute deadline, grace, and expected output. Omit timeout_ms for normal work.' }, objective: { type: 'string' }, max_turns: { type: 'integer', minimum: 1 }, timeout_ms: { type: 'integer', minimum: 1 }, expected_output: { type: 'string' } }, required: ['prompt'] })]
+      whenToUse: ['Delegate bounded research, implementation, testing, or review.', 'Use when parallel or isolated work would reduce context pressure.'],
+      constraints: ['Give a specific objective and expected output.', 'Use the implementation role when the child must edit files; research and review remain read-only.', 'Do not use for trivial single-step tasks.'],
+    }, { type: 'object', properties: { prompt: { type: 'string' }, model: { type: 'string' }, tools: { type: 'array', items: { type: 'string' } }, role: { type: 'string', enum: ['research', 'implementation', 'test', 'review'], description: 'Optional capability role. implementation includes controlled file mutation and shell tools; research/review are read-only and test runs verification without source edits. The role also selects turns and deadlines.' }, agent_type: { type: 'string', description: 'Optional child type shown in the Session graph. When role is omitted, research, implementation, test, or review also selects the matching least-privilege role.' }, objective: { type: 'string' }, max_turns: { type: 'integer', minimum: 1 }, timeout_ms: { type: 'integer', minimum: 1 }, expected_output: { type: 'string' } }, required: ['prompt'] })]
   },
 }
 

@@ -170,7 +170,12 @@ export function useSession({
 
   useEffect(() => () => {
     const pending = pendingCacheCheckpointRef.current
-    if (cache && pending) queueMicrotask(() => cache.set(pending.sessionId, pending.view))
+    // A large Session cache estimate walks the full timeline synchronously.
+    // Never put that work in a microtask: microtasks run before the browser can
+    // paint the newly selected Session and made the click look frozen. Yield one
+    // frame, then checkpoint in a task; durable persistence is already scheduled
+    // in the cache's background queue.
+    if (cache && pending) requestAnimationFrame(() => window.setTimeout(() => cache.set(pending.sessionId, pending.view), 0))
     pendingCacheCheckpointRef.current = null
   }, [cache, sessionId])
 
@@ -834,40 +839,14 @@ export function createSessionWithAck(
   },
   timeoutMs = 10_000,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const cleanup = (): void => {
-      window.clearTimeout(timer)
-      socket.off('session:ready', onReady)
-      socket.off('session:error', onError)
-    }
-    const onReady = (payload: SessionReadyEvent): void => {
-      if (payload.sessionId !== input.sessionId) return
-      cleanup()
-      resolve()
-    }
-    const onError = (payload: SessionErrorEvent): void => {
-      if (payload.sessionId !== input.sessionId) return
-      cleanup()
-      reject(new Error(payload.message))
-    }
-    const timer = window.setTimeout(() => {
-      cleanup()
-      reject(new Error('session creation timed out'))
-    }, timeoutMs)
-    socket.on('session:ready', onReady)
-    socket.on('session:error', onError)
-    void emitRpc(socket, 'client:create_session', {
-      sessionId: input.sessionId,
-      ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
-      ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
-      ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),
-      ...(input.tools !== undefined ? { tools: input.tools } : {}),
-      ...(input.selectedModel !== undefined && input.selectedModel.length > 0 ? { selectedModel: input.selectedModel } : {}),
-    }, { timeoutMs }).catch((error) => {
-      cleanup()
-      reject(error)
-    })
-  })
+  return emitRpc(socket, 'client:create_session', {
+    sessionId: input.sessionId,
+    ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+    ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
+    ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),
+    ...(input.tools !== undefined ? { tools: input.tools } : {}),
+    ...(input.selectedModel !== undefined && input.selectedModel.length > 0 ? { selectedModel: input.selectedModel } : {}),
+  }, { timeoutMs })
 }
 
 export function updateSessionPreferences(

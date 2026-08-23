@@ -1,5 +1,7 @@
 import { createServer, type Server as HttpServer } from 'node:http'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { access } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Socket } from 'node:net'
 
 import { schema, validateClientMessagePayload, validateInlineMessageImages } from '@agent-kernel/shared'
@@ -8,7 +10,7 @@ import { createRuntimeUnitIngress } from './runtime-unit-ingress.js'
 import { AdmissionBackpressureError, DedicatedAdmissionLedger, type AdmissionMessage } from './dedicated-admission-ledger.js'
 import { DEDICATED_RUNTIME_UNIT_ID } from './dedicated-unit.js'
 import { readDedicatedRouteState } from './dedicated-slot-state.js'
-import { readJsonFile } from './atomic-json-file.js'
+import { readJsonFile, writeAtomicFile } from './atomic-json-file.js'
 import { isDedicatedDashboardRequest, readDashboardRouteState, serveDedicatedDashboard } from './dedicated-dashboard.js'
 
 export type DedicatedIngress = {
@@ -30,13 +32,14 @@ export async function startDedicatedIngress(options: {
   ingressHandoffSecret?: string
   candidateStatePath?: string
   operatorStatusPath?: string
+  deploymentRequestsPath?: string
   dashboardStatePath?: string
   dashboardReleasesRoot?: string
   auth?: AuthConfig
 }): Promise<DedicatedIngress> {
   const ledger = options.admissionLedgerPath ? new DedicatedAdmissionLedger(options.admissionLedgerPath, options.admissionCapacity) : undefined
   const http = createServer((request, response) => {
-    const path = (request.url ?? '/').split('?')[0]
+    const path = (request.url ?? '/').split('?')[0] ?? '/'
     if (path === '/runtime/admission/messages' && request.method === 'POST' && ledger) {
       void acceptAdmission(request, options.auth, ledger, currentRoute).then((body) => {
         response.writeHead(202, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -54,6 +57,21 @@ export async function startDedicatedIngress(options: {
       void ledger.snapshot().then((snapshot) => { response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); response.end(JSON.stringify(snapshot)) })
       return
     }
+    const admissionOperation = /^\/runtime\/admission\/messages\/([^/]+)$/u.exec(path)
+    if (admissionOperation && request.method === 'GET' && ledger) {
+      const auth = ingressActor(request, options.auth)
+      if (!auth.ok) { response.writeHead(401).end(); return }
+      const operationId = decodeURIComponent(admissionOperation[1]!)
+      void ledger.operation(operationId, principalDigest(auth.actor)).then((status) => {
+        if (!status) { response.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'admission operation not found' })); return }
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify(status))
+      }).catch((error) => {
+        response.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+      })
+      return
+    }
     if (path === '/runtime/deployment/status' && request.method === 'GET' && options.operatorStatusPath) {
       const auth = ingressActor(request, options.auth)
       if (!auth.ok) { response.writeHead(401).end(); return }
@@ -62,6 +80,44 @@ export async function startDedicatedIngress(options: {
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         response.end(JSON.stringify({ ...status, ...(dashboard ? { dashboard } : {}) }))
       }).catch(() => response.writeHead(503).end())
+      return
+    }
+    if (path === '/runtime/deployment/restart' && request.method === 'POST' && options.operatorStatusPath && options.deploymentRequestsPath) {
+      const auth = ingressActor(request, options.auth)
+      if (!auth.ok) { response.writeHead(401).end(); return }
+      void submitRuntimeRestart(options.operatorStatusPath, options.deploymentRequestsPath).then((operation) => {
+        response.writeHead(202, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify(operation))
+      }).catch((error) => {
+        response.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+      })
+      return
+    }
+    const deploymentOperation = /^\/runtime\/deployment\/operations\/([^/]+)$/u.exec(path)
+    if (deploymentOperation && request.method === 'GET' && options.operatorStatusPath && options.deploymentRequestsPath) {
+      const auth = ingressActor(request, options.auth)
+      if (!auth.ok) { response.writeHead(401).end(); return }
+      void runtimeDeploymentOperation(options.operatorStatusPath, options.deploymentRequestsPath, decodeURIComponent(deploymentOperation[1]!)).then((operation) => {
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify(operation))
+      }).catch((error) => {
+        response.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+      })
+      return
+    }
+    const deploymentAbort = /^\/runtime\/deployment\/operations\/([^/]+)\/abort$/u.exec(path)
+    if (deploymentAbort && request.method === 'POST' && options.operatorStatusPath && options.deploymentRequestsPath) {
+      const auth = ingressActor(request, options.auth)
+      if (!auth.ok) { response.writeHead(401).end(); return }
+      void submitRuntimeAbort(options.operatorStatusPath, options.deploymentRequestsPath, decodeURIComponent(deploymentAbort[1]!)).then((operation) => {
+        response.writeHead(202, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify(operation))
+      }).catch((error) => {
+        response.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+      })
       return
     }
     if (path === '/runtime/dashboard/status' && request.method === 'GET' && options.dashboardStatePath) {
@@ -131,13 +187,14 @@ export async function startDedicatedIngress(options: {
     if (!ledger || reconciling || !options.ingressHandoffSecret) return
     reconciling = true
     const owner = `ingress-${process.pid}`
+    const blockedSessionIds = new Set<string>()
     try {
       while (true) {
         const route = await currentRoute()
         const handoff = options.candidateStatePath ? await readCandidateState(options.candidateStatePath, route.generation) : undefined
         if (handoff?.phase === 'paused' || handoff?.phase === 'candidate') return
         const handoffOrigin = handoff?.origin ?? route.origin
-        const record = await ledger.leaseNext(owner, route.generation)
+        const record = await ledger.leaseNext(owner, route.generation, 30_000, blockedSessionIds)
         if (!record) return
         try {
           const response = await fetch(`${handoffOrigin}/internal/runtime/admission/commit`, {
@@ -145,11 +202,19 @@ export async function startDedicatedIngress(options: {
             body: JSON.stringify({ sessionId: record.sessionId, operationId: record.operationId, text: record.text, mode: record.mode, ...(record.content ? { content: record.content } : {}) }),
             signal: AbortSignal.timeout(5000),
           })
-          if (!response.ok) throw new Error(`runtime admission commit returned ${response.status}`)
+          if (!response.ok) {
+            const failure = await response.json().catch(() => ({})) as { code?: string; error?: string }
+            if (response.status === 404 && failure.code === 'SESSION_NOT_FOUND') {
+              await ledger.fail(record.operationId, owner, route.generation, 'The target Session no longer exists')
+              continue
+            }
+            throw new Error(`runtime admission commit returned ${response.status}${failure.code ? ` (${failure.code})` : ''}`)
+          }
           const outcome = await response.json() as { committed?: boolean; cursor?: number }
           if (outcome.committed !== true || !Number.isSafeInteger(outcome.cursor) || (outcome.cursor ?? -1) < 1) {
-            await ledger.release(record.operationId, owner)
-            return
+            await ledger.release(record.operationId, owner, 'Runtime accepted the operation but has not committed it to the Session log')
+            blockedSessionIds.add(record.sessionId)
+            continue
           }
           // Runtime has durably deduplicated operationId before responding. If
           // an earlier Ingress process died after that response but before the
@@ -158,7 +223,8 @@ export async function startDedicatedIngress(options: {
           await ledger.committed(record.operationId, route.generation, outcome.cursor)
         } catch (error) {
           await ledger.release(record.operationId, owner, error instanceof Error ? error.message : String(error))
-          return
+          blockedSessionIds.add(record.sessionId)
+          continue
         }
       }
     } finally { reconciling = false }
@@ -255,6 +321,62 @@ function isLoopbackOrigin(origin: string): boolean {
   }
 }
 function required(value: unknown, name: string): string { if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`); return value.trim() }
+type OperatorDeploymentStatus = {
+  route: { generation: number; activeSlot: 'blue' | 'green'; activeReleaseId: string }
+  slots: Record<'blue' | 'green', { releaseDigest?: string }>
+  deployment?: null | { deploymentId: string; operationId: string; phase: string; releaseDigest: string; sourceReleaseDigest: string; candidateSlot: 'blue' | 'green'; blockers?: readonly string[]; error?: { message?: string } }
+}
+async function submitRuntimeRestart(statusPath: string, requestsPath: string): Promise<unknown> {
+  const status = await requiredOperatorStatus(statusPath)
+  if (status.deployment && !terminalDeploymentPhase(status.deployment.phase)) throw new Error(`deployment ${status.deployment.deploymentId} is already active in phase ${status.deployment.phase}`)
+  const releaseDigest = required(status.slots[status.route.activeSlot].releaseDigest, 'active release digest')
+  const operationId = `operation-restart-${randomUUID()}`
+  const deploymentId = `deployment-restart-${randomUUID()}`
+  const request = {
+    schemaVersion: 1, action: 'restart', operationId, deploymentId, topology: 'dedicated-slots', unitId: 'local',
+    requestedAt: new Date().toISOString(), expectedRouteGeneration: status.route.generation, fencingToken: randomBytes(24).toString('base64url'),
+    sourceReleaseDigest: releaseDigest, targetReleaseDigest: releaseDigest, predecessorReleaseId: status.route.activeReleaseId,
+    candidateSlot: status.route.activeSlot === 'blue' ? 'green' : 'blue',
+  }
+  await writeAtomicFile(join(requestsPath, `${operationId}.json`), `${JSON.stringify(request, null, 2)}\n`, 0o640)
+  return { accepted: true, action: 'restart', operationId, deploymentId, phase: 'submitted' }
+}
+async function submitRuntimeAbort(statusPath: string, requestsPath: string, targetOperationId: string): Promise<unknown> {
+  const status = await requiredOperatorStatus(statusPath)
+  const target = status.deployment
+  if (!target || target.operationId !== targetOperationId || terminalDeploymentPhase(target.phase)) throw new Error('restart operation is not active')
+  const operationId = `operation-abort-${randomUUID()}`
+  const request = {
+    schemaVersion: 1, action: 'abort', operationId, deploymentId: target.deploymentId, topology: 'dedicated-slots', unitId: 'local',
+    requestedAt: new Date().toISOString(), expectedRouteGeneration: status.route.generation, fencingToken: randomBytes(24).toString('base64url'),
+    sourceReleaseDigest: target.sourceReleaseDigest, targetReleaseDigest: target.releaseDigest, predecessorReleaseId: status.route.activeReleaseId,
+    candidateSlot: target.candidateSlot, targetDeploymentId: target.deploymentId,
+  }
+  await writeAtomicFile(join(requestsPath, `${operationId}.json`), `${JSON.stringify(request, null, 2)}\n`, 0o640)
+  return { accepted: true, action: 'abort', operationId, deploymentId: target.deploymentId, targetOperationId, phase: 'submitted' }
+}
+async function runtimeDeploymentOperation(statusPath: string, requestsPath: string, operationId: string): Promise<unknown> {
+  const status = await requiredOperatorStatus(statusPath)
+  if (status.deployment?.operationId === operationId) return { operationId, deploymentId: status.deployment.deploymentId, phase: status.deployment.phase, blockers: status.deployment.blockers ?? [], error: status.deployment.error }
+  const rejected = join(requestsPath, `${operationId}.json.rejected`)
+  try {
+    await access(rejected)
+    const detail = await readJsonFile<{ message?: string }>(`${rejected}.error`)
+    return { operationId, phase: 'rejected', error: { message: detail?.message ?? 'Supervisor rejected the restart request' } }
+  } catch {}
+  for (const suffix of ['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed']) {
+    try { await access(join(requestsPath, `${operationId}.json.accepted.${suffix}`)); return { operationId, phase: suffix } } catch {}
+  }
+  try { await access(join(requestsPath, `${operationId}.json`)); return { operationId, phase: 'submitted' } } catch {}
+  try { await access(join(requestsPath, `${operationId}.json.accepted`)); return { operationId, phase: 'accepted' } } catch {}
+  throw new Error('deployment operation not found')
+}
+async function requiredOperatorStatus(path: string): Promise<OperatorDeploymentStatus> {
+  const status = await readJsonFile<OperatorDeploymentStatus>(path)
+  if (!status || !Number.isSafeInteger(status.route?.generation) || !['blue', 'green'].includes(status.route?.activeSlot)) throw new Error('deployment status is unavailable')
+  return status
+}
+function terminalDeploymentPhase(phase: string): boolean { return ['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed'].includes(phase) }
 async function readRequestJson(request: import('node:http').IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []; let size = 0
   for await (const chunk of request) { const bytes = Buffer.from(chunk); size += bytes.length; if (size > 8 * 1024 * 1024) throw new AdmissionHttpError(413, 'admission payload too large'); chunks.push(bytes) }

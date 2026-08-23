@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,6 +20,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   ChevronsDown,
   Code2,
   Copy,
@@ -95,7 +97,7 @@ import { RevealCursor, RevealTail, canFadeRevealTail } from './text-reveal/index
 import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTranscript.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 import { transcriptItemKey } from './transcript-key.js'
-import { toolDotRailBudget, toolPreviewGeometry, visibleToolDots, type ToolPreviewGeometry } from './tool-dot-layout.js'
+import { groupConsecutiveToolDots, toolDotNodeWidth, toolDotRailBudget, toolPreviewGeometry, visibleToolDots, type ToolPreviewGeometry } from './tool-dot-layout.js'
 import { useIsMobile } from '../../app-logic/use-viewport.js'
 import { nextSearchMatchIndex, searchMatchSnippet, searchTranscript, type TranscriptSearchCategory, type TranscriptSearchMatch } from './transcript-search.js'
 
@@ -993,16 +995,7 @@ function ToolActivityTranscriptRow({
           highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
         )}
       >
-        {hideHeader ? null : (
-          <div className="hidden w-7 flex-none items-start justify-center pt-0.5 sm:flex" data-testid="message-avatar-rail">
-            <div
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase tracking-wider text-foreground"
-              aria-label={t('chat.transcript.searchCategories.assistant')}
-            >
-              AK
-            </div>
-          </div>
-        )}
+        <AssistantAvatarRail hidden={hideHeader} label={t('chat.transcript.searchCategories.assistant')} />
         <div className="relative min-w-0 flex-1">
           {hideHeader ? null : (
             <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -1035,16 +1028,7 @@ function ToolActivityTranscriptRow({
         highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
       )}
     >
-      {hideHeader ? null : (
-        <div className="hidden w-7 flex-none items-start justify-center pt-0.5 sm:flex" data-testid="message-avatar-rail">
-          <div
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase tracking-wider text-foreground"
-            aria-label={t('chat.transcript.searchCategories.assistant')}
-          >
-            AK
-          </div>
-        </div>
-      )}
+      <AssistantAvatarRail hidden={hideHeader} label={t('chat.transcript.searchCategories.assistant')} />
       <div className="relative min-w-0 flex-1">
         {hideHeader ? null : (
           <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -1063,6 +1047,22 @@ function ToolActivityTranscriptRow({
           activeToolCallIds={activeToolCallIds}
         />
       </div>
+    </div>
+  )
+}
+
+function AssistantAvatarRail({ hidden, label, tool = false }: { hidden: boolean; label: string; tool?: boolean }): JSX.Element {
+  return (
+    <div className="hidden w-7 flex-none items-start justify-center pt-0.5 sm:flex" data-testid="message-avatar-rail" data-avatar-visible={hidden ? 'false' : 'true'}>
+      {hidden ? null : tool ? (
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-950/40 dark:text-emerald-300" aria-label={label}>
+          <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+        </div>
+      ) : (
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500/20 via-violet-500/20 to-fuchsia-500/20 text-violet-600 ring-1 ring-violet-500/25 shadow-sm dark:text-violet-300" aria-label={label}>
+          <Sparkles className="h-4 w-4" aria-hidden="true" />
+        </div>
+      )}
     </div>
   )
 }
@@ -1498,21 +1498,7 @@ function MessageRow({
         highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
       )}
     >
-      {hideHeader ? null : (
-        <div className="hidden w-7 flex-none items-start justify-center pt-0.5 sm:flex" data-testid="message-avatar-rail">
-          <div
-            className={cn(
-              'flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold uppercase tracking-wider',
-              message.role === 'assistant'
-                ? 'bg-muted text-foreground'
-                : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
-            )}
-            aria-label={label}
-          >
-            {message.role === 'assistant' ? 'AK' : <Wrench className="h-3 w-3" aria-hidden="true" />}
-          </div>
-        </div>
-      )}
+      <AssistantAvatarRail hidden={hideHeader} label={label} tool={message.role === 'tool'} />
       <div className="relative min-w-0 max-w-full flex-1 overflow-hidden">
         {hideHeader ? null : (
           <div
@@ -1590,10 +1576,14 @@ function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared')
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const statusLabel = t(`chatCommon.turnTiming.status.${summary.status === 'completed' || summary.status === 'failed' || summary.status === 'cancelled' || summary.status === 'interrupted' ? summary.status : 'running'}`)
-  const rows = [
-    [t('chatCommon.turnTiming.activeWork'), summary.activeDurationMs], [t('chatCommon.turnTiming.approvalWait'), summary.approvalWaitMs],
-    [t('chatCommon.turnTiming.model'), summary.llm.wallDurationMs], [t('chatCommon.turnTiming.tools'), summary.tools.wallDurationMs],
-    [t('chatCommon.turnTiming.compaction'), summary.compactionDurationMs], [t('chatCommon.turnTiming.retry'), summary.retryDurationMs], [t('chatCommon.turnTiming.recovery'), summary.recoveryDurationMs],
+  const activityRows = [
+    [t('chatCommon.turnTiming.activeWork'), summary.activeDurationMs],
+    [t('chatCommon.turnTiming.modelTime'), summary.llm.wallDurationMs],
+    [t('chatCommon.turnTiming.toolTime'), summary.tools.wallDurationMs],
+    [t('chatCommon.turnTiming.approvalWait'), summary.approvalWaitMs],
+    [t('chatCommon.turnTiming.compaction'), summary.compactionDurationMs],
+    [t('chatCommon.turnTiming.retry'), summary.retryDurationMs],
+    [t('chatCommon.turnTiming.recovery'), summary.recoveryDurationMs],
   ].filter(([, value]) => Number(value) > 0)
   return (
     <div className="min-w-0 flex-1 basis-72" data-testid={`turn-timing-${summary.turnId}`}>
@@ -1604,11 +1594,32 @@ function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared')
         {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
       </button>
       {open ? (
-        <div className="grid gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 text-[11px] sm:grid-cols-2" data-testid={`turn-timing-details-${summary.turnId}`}>
-          {summary.tools.callCount > 0 ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.tools')}</span><span className="font-medium text-foreground">{t('chatCommon.turnTiming.toolCalls', { count: summary.tools.callCount })}</span></div> : null}
-          {summary.llm.requestCount > 0 ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.model')}</span><span className="font-medium text-foreground">{t('chatCommon.turnTiming.modelCalls', { count: summary.llm.requestCount })}</span></div> : null}
-          {rows.map(([label, value]) => <div key={String(label)} className="flex justify-between gap-4"><span className="text-muted-foreground">{label}</span><span className="font-medium text-foreground">{formatTurnDuration(Number(value))}</span></div>)}
-          {summary.tools.callCount > 0 ? <div className="col-span-full border-t border-border/50 pt-2 text-muted-foreground">{t('chatCommon.turnTiming.toolSummary', { wall: formatTurnDuration(summary.tools.wallDurationMs), aggregate: formatTurnDuration(summary.tools.aggregateDurationMs), concurrency: summary.tools.peakConcurrency })}{summary.tools.partial ? ` · ${t('chatCommon.turnTiming.partialExecutor')}` : ''}</div> : null}
+        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-[11px]" data-testid={`turn-timing-details-${summary.turnId}`}>
+          <section aria-labelledby={`turn-activity-${summary.turnId}`}>
+            <h4 id={`turn-activity-${summary.turnId}`} className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t('chatCommon.turnTiming.activity')}</h4>
+            <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+              {activityRows.map(([label, value]) => <div key={String(label)} className="flex justify-between gap-4"><span className="text-muted-foreground">{label}</span><span className="font-medium tabular-nums text-foreground">{formatTurnDuration(Number(value))}</span></div>)}
+            </div>
+          </section>
+          {(summary.tools.callCount > 0 || summary.llm.requestCount > 0) ? (
+            <section className="mt-3 border-t border-border/40 pt-2.5" aria-labelledby={`turn-calls-${summary.turnId}`}>
+              <h4 id={`turn-calls-${summary.turnId}`} className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t('chatCommon.turnTiming.calls')}</h4>
+              <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                {summary.llm.requestCount > 0 ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.modelCallsLabel')}</span><span className="font-medium tabular-nums text-foreground">{summary.llm.requestCount}</span></div> : null}
+                {summary.tools.callCount > 0 ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.toolCallsLabel')}</span><span className="font-medium tabular-nums text-foreground">{summary.tools.callCount}</span></div> : null}
+              </div>
+            </section>
+          ) : null}
+          {summary.tools.callCount > 0 ? (
+            <details className="mt-3 border-t border-border/40 pt-2.5" data-testid={`turn-timing-technical-${summary.turnId}`}>
+              <summary className="cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">{t('chatCommon.technicalDetails')}</summary>
+              <div className="mt-2 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.aggregateToolTime')}</span><span className="font-medium tabular-nums text-foreground">{formatTurnDuration(summary.tools.aggregateDurationMs)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.peakConcurrency')}</span><span className="font-medium tabular-nums text-foreground">{summary.tools.peakConcurrency}</span></div>
+                {summary.tools.partial ? <p className="sm:col-span-2 text-muted-foreground">{t('chatCommon.turnTiming.partialExecutor')}</p> : null}
+              </div>
+            </details>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -1951,6 +1962,15 @@ export function splitStableMarkdown(text: string): { stable: string; tail: strin
   return { stable: blocks.join(''), tail }
 }
 
+export function isLocalMarkdownImageSource(value: string): boolean {
+  return !/^(?:https?:|data:|blob:|artifact:)/i.test(value) && !value.startsWith('#')
+}
+
+function localImageFileName(value: string): string {
+  const normalized = value.replace(/\\/g, '/')
+  return normalized.split('/').at(-1) || 'image'
+}
+
 export const AssistantMarkdown = memo(function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
   const [smoothFade] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
   const { blocks, tail } = splitMarkdownBlocks(text)
@@ -2031,6 +2051,9 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
             if (match && artifactSessionId) {
               const resolved = `/session-artifacts/${encodeURIComponent(match[1]!)}?sessionId=${encodeURIComponent(artifactSessionId)}`
               return <ArtifactMarkdownImage src={resolved} alt={alt ?? 'artifact image'} />
+            }
+            if (typeof src === 'string' && isLocalMarkdownImageSource(src)) {
+              return <span className="inline-flex rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-muted-foreground" data-testid="local-image-unavailable">Image unavailable: {alt || localImageFileName(src)}</span>
             }
             return <img src={src} alt={alt ?? ''} />
           },
@@ -3156,6 +3179,7 @@ function ToolCallGroupBlock({
   const iconPixels = Math.round(14 * iconScale / 100)
   const nodePixels = iconPixels + 10
   const [dotBoundary, setDotBoundary] = useState<HTMLDivElement | null>(null)
+  const groupRootRef = useRef<HTMLDivElement | null>(null)
   const [dotBoundaryWidth, setDotBoundaryWidth] = useState(0)
   useEffect(() => {
     if (!dotBoundary) return
@@ -3169,13 +3193,20 @@ function ToolCallGroupBlock({
   const railBudget = toolDotRailBudget(dotBoundaryWidth)
   const gapWidth = 8
   const omissionWidth = 40
-  const limitWithoutOmission = railBudget > 0 ? Math.max(2, Math.floor((railBudget + gapWidth) / (nodePixels + gapWidth))) : 8
-  const visibleDotLimit = dots.length > limitWithoutOmission
-    ? Math.max(2, Math.floor((railBudget - omissionWidth + gapWidth) / (nodePixels + gapWidth)))
+  const dotGroups = groupConsecutiveToolDots(dots)
+  const widestDotGroup = Math.max(nodePixels, ...dotGroups.map((dotGroup) => toolDotNodeWidth(nodePixels, dotGroup.dots.length)))
+  const limitWithoutOmission = railBudget > 0 ? Math.max(2, Math.floor((railBudget + gapWidth) / (widestDotGroup + gapWidth))) : 8
+  const visibleDotLimit = dotGroups.length > limitWithoutOmission
+    ? Math.max(2, Math.floor((railBudget - omissionWidth + gapWidth) / (widestDotGroup + gapWidth)))
     : limitWithoutOmission
   const preferredDotIds = [pinnedCallId, ...dots.filter((dot) => dot.status === 'running').map((dot) => dot.callId)].filter((id): id is string => Boolean(id))
-  const visibleDots = visibleToolDots(dots, visibleDotLimit, preferredDotIds)
-  const omittedDotCount = Math.max(0, dots.length - visibleDots.length)
+  const preferredGroupIds = preferredDotIds.flatMap((callId) => {
+    const dotGroup = dotGroups.find((candidate) => candidate.dots.some((dot) => dot.callId === callId))
+    return dotGroup ? [dotGroup.callId] : []
+  })
+  const visibleDotGroups = visibleToolDots(dotGroups, visibleDotLimit, preferredGroupIds)
+  const visibleDotCallCount = visibleDotGroups.reduce((total, dotGroup) => total + dotGroup.dots.length, 0)
+  const omittedDotCount = Math.max(0, dots.length - visibleDotCallCount)
   const collapsedDots = toolCardMode === 'dots' && !open
   const showRows = open || anyPending || (!collapsedDots && autoRevealTail)
 
@@ -3204,6 +3235,17 @@ function ToolCallGroupBlock({
   const groupOwnsBadgeIntention = group.calls.some((call) => call.callId === badgeIntentionCallId)
   const displayedIntent = inspectedIntent || (!runningIntentCall && !groupOwnsBadgeIntention ? fallbackIntent : '')
   const [previewPosition, setPreviewPosition] = useState<ToolPreviewGeometry | null>(null)
+  const [previewElement, setPreviewElement] = useState<HTMLDivElement | null>(null)
+  const [previewHeight, setPreviewHeight] = useState<number | undefined>()
+  useLayoutEffect(() => {
+    if (!previewElement) { setPreviewHeight(undefined); return }
+    const update = (): void => setPreviewHeight(previewElement.getBoundingClientRect().height)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(update)
+    observer.observe(previewElement)
+    return () => observer.disconnect()
+  }, [previewElement, previewCallId])
   useEffect(() => {
     if (!collapsedDots || !previewCallId || !previewRow || !previewStatus || typeof document === 'undefined') {
       setPreviewPosition(null)
@@ -3220,6 +3262,7 @@ function ToolCallGroupBlock({
         anchor: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
         viewportWidth: window.innerWidth,
         viewportHeight: window.innerHeight,
+        ...(previewHeight !== undefined ? { contentHeight: previewHeight } : {}),
       }))
     }
     update()
@@ -3229,7 +3272,7 @@ function ToolCallGroupBlock({
       window.removeEventListener('resize', update)
       window.removeEventListener('orientationchange', update)
     }
-  }, [collapsedDots, previewCallId, previewStatus])
+  }, [collapsedDots, previewCallId, previewStatus, previewHeight])
 
   const toggleOpen = (): void => {
     setHoveredCallId(null)
@@ -3241,10 +3284,26 @@ function ToolCallGroupBlock({
     })
   }
 
+  const collapseFromBottom = (): void => {
+    setHoveredCallId(null)
+    setPinnedCallId(null)
+    setExpandedCallId(null)
+    setOpen(false)
+    requestAnimationFrame(() => {
+      const element = groupRootRef.current
+      if (!element) return
+      const rect = element.getBoundingClientRect()
+      if (rect.top < 0 || rect.bottom > window.innerHeight) element.scrollIntoView({ block: 'nearest' })
+    })
+  }
+
   return (
     <div
       id={`msg-${messageIndex}-group-${group.firstCallId}`}
-      ref={setDotBoundary}
+      ref={(element) => {
+        groupRootRef.current = element
+        setDotBoundary(element)
+      }}
       className={cn(
         'w-full min-w-0 max-w-full transition-colors',
         collapsedDots
@@ -3267,36 +3326,42 @@ function ToolCallGroupBlock({
         >
           <div className="min-w-0 flex-none overflow-hidden" style={{ width: railBudget || undefined, maxWidth: '100%' }} data-testid="tool-activity-rail">
             <div className="relative flex w-max min-w-0 items-center gap-2 py-1">
-              {visibleDots.length > 1 ? (
+              {visibleDotGroups.length > 1 ? (
                 <span className="pointer-events-none absolute top-1/2 z-0 h-0.5 -translate-y-1/2 rounded-full bg-muted-foreground/60 shadow-[0_0_4px_hsl(var(--muted-foreground)/0.28)]" style={{ left: nodePixels / 2, right: nodePixels / 2 }} data-testid="tool-activity-connector" aria-hidden="true" />
               ) : null}
-              {visibleDots.map((dot, index) => (
-              <div key={dot.callId} className="relative z-10 flex flex-none items-center">
+              {visibleDotGroups.map((dotGroup, index) => {
+                const dot = aggregateToolDotGroup(dotGroup.dots)
+                const repeated = dotGroup.dots.length > 1
+                return (
+              <div key={dotGroup.callId} className="relative z-10 flex flex-none items-center">
                 <button
                   type="button"
                   id={`tool-card-dot-anchor-${dot.callId}`}
-                  title={dot.title}
-                  aria-label={dot.title}
-                  aria-pressed={pinnedCallId === dot.callId}
-                  data-testid={`tool-card-dot-${dot.callId}`}
-                  onMouseEnter={() => setHoveredCallId(dot.callId)}
+                  title={repeated ? `${dotGroup.toolName} ×${dotGroup.dots.length}` : dot.title}
+                  aria-label={repeated ? `${dotGroup.toolName}, ${dotGroup.dots.length} consecutive calls` : dot.title}
+                  aria-pressed={!repeated && pinnedCallId === dot.callId}
+                  data-testid={repeated ? `tool-card-dot-group-${dot.callId}` : `tool-card-dot-${dot.callId}`}
+                  onMouseEnter={() => { if (!repeated) setHoveredCallId(dot.callId) }}
                   onMouseLeave={() => setHoveredCallId(null)}
-                  onFocus={() => setHoveredCallId(dot.callId)}
+                  onFocus={() => { if (!repeated) setHoveredCallId(dot.callId) }}
                   onBlur={() => setHoveredCallId(null)}
                   onClick={() => {
                     setHoveredCallId(null)
-                    setPinnedCallId((current) => current === dot.callId ? null : dot.callId)
+                    if (repeated) toggleOpen()
+                    else setPinnedCallId((current) => current === dot.callId ? null : dot.callId)
                   }}
-                  className="group/dot flex flex-none items-center justify-center rounded-full bg-background ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  style={{ width: nodePixels, height: nodePixels }}
+                  className={cn('group/dot flex h-full flex-none items-center justify-center bg-background ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', repeated ? 'gap-1 rounded-full px-1.5' : 'rounded-full')}
+                  style={repeated ? { height: nodePixels, minWidth: nodePixels } : { width: nodePixels, height: nodePixels }}
                 >
                   <ToolActivityGlyph dot={dot} size={iconPixels} />
+                  {repeated ? <span className="font-mono text-[10px] font-bold tabular-nums text-foreground" data-testid={`tool-card-dot-count-${dot.callId}`}>×{dotGroup.dots.length}</span> : null}
                 </button>
-                {omittedDotCount > 0 && index === Math.ceil(visibleDots.length / 2) - 1 ? (
+                {omittedDotCount > 0 && index === Math.ceil(visibleDotGroups.length / 2) - 1 ? (
                   <button type="button" onClick={toggleOpen} className="relative z-20 ml-2 flex h-6 min-w-9 flex-none items-center justify-center rounded-full bg-background px-1.5 font-mono text-[11px] font-bold tabular-nums text-foreground shadow-[0_0_0_4px_hsl(var(--background))] ring-1 ring-inset ring-foreground/30 hover:bg-muted" title={t('chatCommon.omittedTools', { count: omittedDotCount })} aria-label={t('chatCommon.omittedToolsExpand', { count: omittedDotCount })} data-testid="tool-activity-omission">+{omittedDotCount}</button>
                 ) : null}
               </div>
-              ))}
+                )
+              })}
             </div>
           </div>
           <button
@@ -3319,6 +3384,7 @@ function ToolCallGroupBlock({
           {previewCallId && previewCall && previewRow && previewStatus && previewPosition && typeof document !== 'undefined'
             ? createPortal(
                 <div
+                  ref={setPreviewElement}
                   className={cn(
                     'fixed z-[100] flex min-h-0 flex-col overflow-hidden border border-border/80 bg-popover p-2 text-popover-foreground shadow-2xl',
                     previewPosition.mobile ? 'rounded-t-2xl rounded-b-xl' : 'rounded-xl',
@@ -3532,6 +3598,18 @@ function ToolCallGroupBlock({
               </div>
             )
           })}
+          {open ? (
+            <button
+              type="button"
+              onClick={collapseFromBottom}
+              className="mt-2 flex min-h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background/70 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label={t('chatCommon.collapseToolActivity')}
+              data-testid="tool-activity-collapse-bottom"
+            >
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{t('chatCommon.collapse')}</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -3540,6 +3618,7 @@ function ToolCallGroupBlock({
 
 type ToolActivityDot = {
   callId: string
+  toolName: string
   status: 'succeeded' | 'failed' | 'approval' | 'running' | 'orphaned'
   kind: 'read' | 'search' | 'write' | 'shell' | 'web' | 'todo' | 'memory' | 'agent' | 'other'
   title: string
@@ -3561,11 +3640,20 @@ function toolActivityDots(
         : isActiveToolCall(call.callId, activeToolCallIds) ? 'running' : 'orphaned'
     return {
       callId: call.callId,
+      toolName: call.name,
       status,
       kind: toolActivityKind(call.name),
       title: call.intent?.trim() || `${call.name} · ${status}`,
     }
   })
+}
+
+
+function aggregateToolDotGroup(dots: readonly ToolActivityDot[]): ToolActivityDot {
+  const first = dots[0]!
+  const statusPriority: Record<ToolActivityDot['status'], number> = { succeeded: 0, orphaned: 1, running: 2, approval: 3, failed: 4 }
+  const status = dots.reduce<ToolActivityDot['status']>((current, dot) => statusPriority[dot.status] > statusPriority[current] ? dot.status : current, first.status)
+  return { ...first, status }
 }
 
 const READ_TOOLS = new Set(['read', 'read_file', 'read_files', 'ls', 'glob'])

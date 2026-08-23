@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolSchema } from '@agent-kernel/kernel'
-import { activateTools, searchToolCatalog, toolCatalogRevision, visibleTools } from './tool-disclosure.js'
+import { activateTools, intentActivatedTools, searchToolCatalog, toolCatalogRevision, visibleTools, withRequiredToolIntent } from './tool-disclosure.js'
 
 const tools: ToolSchema[] = [
   { name: 'tool_search', description: 'discover', inputSchema: {}, requiresApproval: false },
   { name: 'read_file', description: 'read source', inputSchema: {}, requiresApproval: false },
   { name: 'write_file', description: 'write source files', inputSchema: {}, requiresApproval: true, version: '1.0.0', schemaHash: 'sha256:w' },
   { name: 'webfetch', description: 'fetch a web page over network', inputSchema: {}, requiresApproval: false },
+  { name: 'websearch', description: 'search the web', inputSchema: {}, requiresApproval: false },
 ]
 
 describe('progressive Tool disclosure', () => {
@@ -18,7 +19,14 @@ describe('progressive Tool disclosure', () => {
   it('keeps core and discovery visible and adds activated Tools in catalog order', () => {
     expect(visibleTools(tools, 'progressive', new Set()).map((tool) => tool.name)).toEqual(['tool_search', 'read_file'])
     expect(visibleTools(tools, 'progressive', new Set(['webfetch'])).map((tool) => tool.name)).toEqual(['tool_search', 'read_file', 'webfetch'])
-    expect(visibleTools(tools, 'legacy_full', new Set())).toBe(tools)
+    expect(visibleTools(tools, 'legacy_full', new Set()).map((tool) => tool.name)).toEqual(tools.map((tool) => tool.name))
+  })
+
+  it('discloses websearch for explicit Chinese and English network research intent', () => {
+    const message = (text: string) => [{ role: 'user' as const, content: [{ type: 'text' as const, text }] }]
+    expect([...intentActivatedTools(tools, message('请联网检索最新资料并给出来源链接'))]).toEqual(['websearch'])
+    expect([...intentActivatedTools(tools, message('Search the web for current information'))]).toEqual(['websearch'])
+    expect([...intentActivatedTools(tools, message('Summarize this paragraph'))]).toEqual([])
   })
 
   it('searches purpose and activates only locked names', () => {
@@ -26,4 +34,13 @@ describe('progressive Tool disclosure', () => {
     expect([...activateTools(tools, new Set(), ['write_file'])]).toEqual(['write_file'])
     expect(() => activateTools(tools, new Set(), ['unknown'])).toThrow(/locked catalog/)
   })
+  it('upgrades old locked tool schemas with a required intention at disclosure time', () => {
+    const old = { name: 'read_file', description: 'read', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }, requiresApproval: false }
+    const upgraded = withRequiredToolIntent(old)
+    expect((upgraded.inputSchema.properties as Record<string, unknown>)._intent).toMatchObject({ type: 'string', minLength: 12, maxLength: 240 })
+    expect(upgraded.inputSchema.required).toEqual(['path', '_intent'])
+    expect(old.inputSchema).toEqual({ type: 'object', properties: { path: { type: 'string' } }, required: ['path'] })
+    expect(withRequiredToolIntent(upgraded)).toBe(upgraded)
+  })
+
 })

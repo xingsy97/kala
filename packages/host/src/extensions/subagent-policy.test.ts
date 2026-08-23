@@ -48,20 +48,29 @@ describe('resolveSubAgentPolicy', () => {
     const policy = resolveSubAgentPolicy({
       input: {
         role: 'research',
-        allowedTools: ['read', 'bash', 'unknown_tool'],
+        allowedTools: ['read_file', 'shell', 'unknown_tool'],
       },
     })
-    expect(policy.allowedTools).toEqual(['read'])
+    expect(policy.allowedTools).toEqual(['read_file'])
     expect(policy.reasons).toContain('policy_allowed_tools_intersected')
   })
 
   it('intersects allowedTools with parent-available tools', () => {
     const policy = resolveSubAgentPolicy({
       input: { role: 'test' },
-      parentTools: ['read', 'ls'],
+      parentTools: ['read_file', 'ls'],
     })
-    expect(policy.allowedTools).toEqual(['read', 'ls'])
+    expect(policy.allowedTools).toEqual(['read_file', 'ls'])
     expect(policy.reasons).toContain('policy_allowed_tools_intersected')
+  })
+
+  it('gives the implementation role controlled file mutation tools', () => {
+    const policy = resolveSubAgentPolicy({
+      input: { role: 'implementation' },
+      parentTools: ['read_file', 'write_file', 'replace_in_file', 'replace_many_in_file', 'apply_file_patch', 'shell', 'agent'],
+    })
+    expect(policy.allowedTools).toEqual(expect.arrayContaining(['read_file', 'write_file', 'replace_in_file', 'replace_many_in_file', 'apply_file_patch', 'shell']))
+    expect(policy.allowedTools).not.toContain('agent')
   })
 
   it('marks unknown roles', () => {
@@ -113,7 +122,7 @@ describe('resolveSubAgentPolicy', () => {
 
 describe('SubAgent role registry', () => {
   it('exposes deterministic templates for each role', () => {
-    for (const role of ['research', 'test', 'review'] as const) {
+    for (const role of ['research', 'implementation', 'test', 'review'] as const) {
       const template = getSubAgentRoleTemplate(role)
       expect(template).toBeDefined()
       expect(template?.role).toBe(role)

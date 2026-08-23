@@ -22,6 +22,10 @@ function toolResult(seq: number, callId: string, ok: boolean) {
   return { seq, ts: new Date(seq).toISOString(), effects: [], event: { kind: 'tool_result' as const, callId, ok, content: ok ? 'ok' : 'failed' } }
 }
 
+function dispatchedToolCall(seq: number, callId: string, intention: string) {
+  return { ...toolCall(seq, callId, intention), effects: [{ kind: 'call_tool' as const, callId, name: 'read', input: {} }] }
+}
+
 describe('deriveAgentProgress', () => {
   it('does not expose lifetime tool-call counts as user progress', () => {
     const timeline = Array.from({ length: 4_845 }, (_, i) => ({
@@ -35,7 +39,7 @@ describe('deriveAgentProgress', () => {
 
   it('does not infer a stalled state from elapsed time alone', () => {
     const timeline = [{ seq: 1, ts: new Date(0).toISOString(), event: { kind: 'cancel' as const }, effects: [] }]
-    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Planning the next step' })
+    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking' })
   })
 
   it('matches the running pending call instead of using the latest lifetime intention', () => {
@@ -45,7 +49,7 @@ describe('deriveAgentProgress', () => {
     ]
     expect(deriveAgentProgress(state('executing_tools', [{ callId: 'running', name: 'read', input: {}, status: 'dispatched' }]), timeline)).toEqual({
       phase: 'tools',
-      label: 'In progress: Identify why the activity surfaces duplicate the current business objective.',
+      label: 'Identify why the activity surfaces duplicate the current business objective.',
       intention: 'Identify why the activity surfaces duplicate the current business objective.',
       callId: 'running',
       outcome: 'running',
@@ -53,20 +57,21 @@ describe('deriveAgentProgress', () => {
   })
 
   it('shows a successful previous step while the agent plans what follows', () => {
-    const timeline = [toolCall(1, 'c1', 'Remove duplicate Intention copy while preserving historical Tool context.'), toolResult(2, 'c1', true)]
+    const timeline = [dispatchedToolCall(1, 'c1', 'Remove duplicate Intention copy while preserving historical Tool context.'), toolResult(2, 'c1', true)]
     expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({
       phase: 'thinking',
-      label: 'Previous step completed: Remove duplicate Intention copy while preserving historical Tool context.',
+      label: 'Remove duplicate Intention copy while preserving historical Tool context.',
       intention: 'Remove duplicate Intention copy while preserving historical Tool context.',
       callId: 'c1',
       outcome: 'succeeded',
+      durationMs: 1,
     })
   })
 
   it('distinguishes a failed previous step from completion', () => {
     const timeline = [toolCall(1, 'c1', 'Verify the responsive Tool activity layout against the production breakpoints.'), toolResult(2, 'c1', false)]
     expect(deriveAgentProgress(state('thinking'), timeline)).toMatchObject({
-      label: 'Previous step did not complete: Verify the responsive Tool activity layout against the production breakpoints.',
+      label: 'Verify the responsive Tool activity layout against the production breakpoints.',
       callId: 'c1',
       outcome: 'failed',
     })
@@ -75,9 +80,23 @@ describe('deriveAgentProgress', () => {
   it('projects the pending approval Intention', () => {
     const timeline = [toolCall(1, 'c1', 'Apply the approved presentation contract without changing Tool execution semantics.')]
     expect(deriveAgentProgress(state('awaiting_approval', [{ callId: 'c1', name: 'write', input: {}, status: 'awaiting_approval' }]), timeline)).toMatchObject({
-      label: 'Awaiting approval: Apply the approved presentation contract without changing Tool execution semantics.',
+      label: 'Apply the approved presentation contract without changing Tool execution semantics.',
       callId: 'c1',
       outcome: 'approval',
+    })
+  })
+
+  it('uses Working instead of lifecycle prose when approval has no Intention', () => {
+    expect(deriveAgentProgress(state('awaiting_approval', [{ callId: 'legacy', name: 'write', input: {}, status: 'awaiting_approval' }]), [])).toEqual({
+      phase: 'approval',
+      label: 'Working',
+    })
+  })
+
+  it('projects the actual dispatched timestamp for a running Tool', () => {
+    const timeline = [dispatchedToolCall(10, 'c1', 'Verify the active Tool without inventing a lifecycle sentence.')]
+    expect(deriveAgentProgress(state('executing_tools', [{ callId: 'c1', name: 'read', input: {}, status: 'dispatched' }]), timeline)).toMatchObject({
+      startedAt: Date.parse(new Date(10).toISOString()),
     })
   })
 
@@ -99,12 +118,12 @@ describe('deriveAgentProgress', () => {
       toolResult(2, 'old', true),
       { seq: 3, ts: new Date(3).toISOString(), effects: [], event: { kind: 'user_message' as const, text: 'start a different task' } },
     ]
-    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Planning the next step' })
+    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking' })
   })
 
   it('ignores a result that has no persisted model-authored Intention', () => {
     const timeline = [toolResult(1, 'legacy', true)]
-    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Planning the next step' })
+    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking' })
   })
 
   it.each(['idle', 'done', 'error'] as const)('does not project stale Tool Intention in %s state', (status) => {

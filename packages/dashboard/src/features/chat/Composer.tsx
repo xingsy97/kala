@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Pencil, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
+import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Pencil, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
@@ -46,6 +46,8 @@ import { prepareComposerImage } from './image-compression.js'
 
 type Props = {
   disabled?: boolean
+  serviceUnavailable?: boolean
+  onReconnectService?(): void
   onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void | Promise<void>
   onCompact(): void
   onCancel?(): void
@@ -176,6 +178,8 @@ function useIsNarrow(): boolean {
 
 export function Composer({
   disabled,
+  serviceUnavailable = false,
+  onReconnectService,
   onSubmit,
   onCompact,
   onCancel,
@@ -208,7 +212,7 @@ export function Composer({
   const isNarrow = useIsNarrow()
   const lowAttentionHint = shouldShowLowAttentionHint(humanAttention)
   const placeholderText = disabled
-    ? t('composer.waitingForHost')
+    ? t('composer.waitingForService')
     : lowAttentionHint
       ? isNarrow
         ? t('composer.placeholderLowAttentionShort')
@@ -487,8 +491,14 @@ export function Composer({
     } catch (error) {
       // Restore only into an untouched composer. Never overwrite text or images
       // the operator added while the acknowledgement was pending.
-      setText((current) => current.length === 0 ? submittedText : current)
-      setPastedImages((current) => current.length === 0 ? submittedImages : current)
+      // A platform delivery timeout is different from an acceptance failure:
+      // the durable ledger already owns the operationId, so restoring the
+      // draft would invite a second send with a different identity.
+      const durablyAccepted = typeof error === 'object' && error !== null && 'durablyAccepted' in error && error.durablyAccepted === true
+      if (!durablyAccepted) {
+        setText((current) => current.length === 0 ? submittedText : current)
+        setPastedImages((current) => current.length === 0 ? submittedImages : current)
+      }
       setPendingToast(error instanceof Error ? error.message : String(error))
     }
   }
@@ -542,6 +552,29 @@ export function Composer({
   const canStop = typeof onCancel === 'function' && (awaitingAck || isActiveTurnStatus(state?.status))
   const showStopButton = !canSubmit && canStop
 
+  if (serviceUnavailable) {
+    return (
+      <div
+        className="ak-composer-container mx-auto flex h-14 w-full items-center gap-3 rounded-2xl border border-border/60 bg-card/95 px-4 shadow-[0_5px_16px_hsl(var(--foreground)/0.08)] backdrop-blur-xl"
+        style={displayStyle}
+        data-testid="service-connection-state"
+        role="status"
+      >
+        <span className="relative flex h-7 w-7 flex-none items-center justify-center" aria-hidden="true">
+          <span className="absolute inset-0 rounded-full bg-primary/15 motion-safe:animate-ping" />
+          <Cloud className="relative h-4 w-4 text-primary" />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{t('composer.connectingToService')}…</span>
+        {onReconnectService ? (
+          <Button type="button" variant="ghost" size="sm" className="h-9 flex-none gap-1.5 rounded-xl px-3 text-muted-foreground hover:text-foreground" onClick={onReconnectService} data-testid="service-reconnect">
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            {t('composer.reconnectService')}
+          </Button>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
     <form
       onSubmit={handleSubmit}
@@ -567,6 +600,10 @@ export function Composer({
         />
         {mode === 'simple' ? (
           <div className="flex flex-col gap-1" data-testid="composer-simple-frame">
+            <div
+              className="relative flex min-h-14 items-center gap-1 rounded-[22px] border border-border/70 bg-card/95 px-1.5 py-1 shadow-[0_5px_16px_hsl(var(--foreground)/0.09),0_1px_4px_hsl(var(--foreground)/0.04)] backdrop-blur-xl transition-[border-color,background-color,box-shadow] focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_7px_19px_hsl(var(--foreground)/0.11),0_2px_5px_hsl(var(--foreground)/0.05)] sm:min-h-14 sm:px-1.5"
+              data-testid="composer-simple-shell"
+            >
             <RuntimeMetrics
               state={state}
               config={config}
@@ -578,10 +615,6 @@ export function Composer({
               onCompact={onCompact}
               compactDisabled={disabled}
             />
-            <div
-              className="relative flex min-h-11 items-center gap-0.5 rounded-2xl border border-border/70 bg-card/95 px-1 py-0.5 shadow-[0_10px_32px_hsl(var(--foreground)/0.12),0_2px_8px_hsl(var(--foreground)/0.06)] backdrop-blur-xl transition-[border-color,background-color,box-shadow] focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_14px_38px_hsl(var(--foreground)/0.15),0_3px_10px_hsl(var(--foreground)/0.07)] sm:min-h-10 sm:px-0.5"
-              data-testid="composer-simple-shell"
-            >
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
             <SlashCommandMenu
               commands={matchingCommands}
@@ -615,6 +648,8 @@ export function Composer({
               onApprovalModeChange={onApprovalModeChange}
               composerMode={mode}
               onComposerModeChange={toggleMode}
+              sendMode={sendMode}
+              onSendModeChange={updateSendMode}
             />
             <span className="hidden sm:inline-flex">
               <HumanAttentionIndicator timeline={humanAttention} density="simple" />
@@ -632,8 +667,8 @@ export function Composer({
         <div className="flex items-stretch" data-testid="composer-full-shell">
         <div
           className={cn(
-            'relative min-w-0 flex-1 rounded-2xl border border-border/70 bg-card/95 shadow-[0_12px_36px_hsl(var(--foreground)/0.13),0_2px_8px_hsl(var(--foreground)/0.06)] backdrop-blur-xl transition-[border-color,background-color,box-shadow]',
-            'focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_16px_42px_hsl(var(--foreground)/0.16),0_3px_10px_hsl(var(--foreground)/0.07)]',
+            'relative min-w-0 flex-1 rounded-2xl border border-border/70 bg-card/95 shadow-[0_6px_18px_hsl(var(--foreground)/0.09),0_1px_4px_hsl(var(--foreground)/0.04)] backdrop-blur-xl transition-[border-color,background-color,box-shadow]',
+            'focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_8px_21px_hsl(var(--foreground)/0.11),0_2px_5px_hsl(var(--foreground)/0.05)]',
           )}
         >
           {pastedImages.length > 0 ? (
@@ -677,7 +712,7 @@ export function Composer({
               rows={1}
               disabled={disabled}
               placeholder={placeholderText}
-              className="max-h-56 min-h-[40px] w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-2.5 text-base leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
+              className="max-h-[min(240px,35vh)] min-h-14 w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-3.5 text-[18px] leading-7 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
               data-testid="composer-input"
               onPaste={(e) => {
                 void handlePaste(e)
@@ -765,7 +800,7 @@ export function Composer({
             ) : null}
           </div>
           <div
-            className="flex min-w-0 flex-row flex-wrap items-center gap-x-1 gap-y-1 border-t border-border/40 px-2 py-1.5 sm:gap-x-0.5 sm:py-1"
+            className="flex min-w-0 flex-row flex-wrap items-center gap-x-1 gap-y-1 min-h-12 border-t border-border/40 px-2 py-1.5 sm:gap-x-1 sm:py-1.5"
             data-testid="composer-footer"
           >
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
@@ -778,6 +813,8 @@ export function Composer({
               onApprovalModeChange={onApprovalModeChange}
               composerMode={mode}
               onComposerModeChange={toggleMode}
+              sendMode={sendMode}
+              onSendModeChange={updateSendMode}
               className="flex sm:hidden"
             />
             <div className="hidden min-w-0 items-center gap-1.5 sm:flex" data-testid="composer-footer-config">
@@ -787,7 +824,7 @@ export function Composer({
               disabled={models.length === 0}
             >
               <SelectTrigger
-                className="h-7 w-10 flex-none gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent md:w-24 xl:w-36"
+                className="h-9 w-10 flex-none gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent md:w-24 xl:w-36"
                 data-testid="model-picker"
                 aria-label={t('common.model')}
               >
@@ -814,7 +851,7 @@ export function Composer({
             >
               <SelectTrigger
                 className={cn(
-                  'h-7 w-10 flex-none rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent md:w-16 xl:w-28',
+                  'h-9 w-10 flex-none rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent md:w-16 xl:w-28',
                   approvalMode === 'allow_all'
                     ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
                     : approvalMode === 'ask'
@@ -898,13 +935,13 @@ function ComposerModeToggle({ mode, onToggle }: { mode: 'simple' | 'full'; onTog
       data-testid="composer-mode-toggle"
       data-composer-mode={mode}
       className={cn(
-        'relative z-[1] flex h-10 w-8 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors sm:h-7 sm:w-7 sm:rounded-md',
+        'relative z-[1] flex h-11 w-10 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors sm:h-10 sm:w-10 sm:rounded-xl',
         'active:text-foreground sm:hover:bg-accent/70 sm:hover:text-foreground focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
       )}
     >
       {mode === 'simple'
-        ? <PanelTopClose className="h-3.5 w-3.5" aria-hidden="true" />
-        : <PanelTopOpen className="h-3.5 w-3.5" aria-hidden="true" />}
+        ? <PanelTopClose className="h-[18px] w-[18px]" aria-hidden="true" />
+        : <PanelTopOpen className="h-[18px] w-[18px]" aria-hidden="true" />}
     </button>
   )
 }
@@ -963,12 +1000,12 @@ function SendButton({
         data-testid="composer-stop"
         className={cn(
           'flex-none rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90',
-          isSimple ? 'h-9 w-9 p-0 shadow-[0_2px_8px_hsl(var(--destructive)/0.2)] sm:h-8 sm:w-8' : 'h-9 text-xs font-medium max-sm:px-3 sm:h-8 sm:px-3',
+          isSimple ? 'h-11 w-11 p-0 shadow-[0_2px_8px_hsl(var(--destructive)/0.2)]' : 'h-11 text-sm font-medium px-4',
         )}
         aria-label={t('chatStatus.stopTitle')}
         title={t('chatStatus.stopTitle')}
       >
-        <Square className={cn('h-3.5 w-3.5', !isSimple && 'sm:mr-1.5')} aria-hidden="true" />
+        <Square className={cn('h-3.5 w-3.5', !isSimple && 'sm:mr-0')} aria-hidden="true" />
         <span className={isSimple ? 'sr-only' : 'hidden sm:inline'}>{t('chatStatus.stop')}</span>
       </Button>
     )
@@ -986,22 +1023,22 @@ function SendButton({
         data-testid="composer-send"
         className={cn(
           isSimple
-            ? 'h-9 rounded-r-none rounded-l-xl text-xs font-medium shadow-sm max-sm:pl-3 max-sm:pr-2.5 sm:h-8 sm:pl-3 sm:pr-2.5'
-            : 'h-9 rounded-r-none rounded-l-xl text-xs font-medium max-sm:pl-3 max-sm:pr-2.5 sm:h-8 sm:pl-3 sm:pr-2.5',
+            ? 'h-11 min-w-11 rounded-xl p-0 text-sm font-medium shadow-sm'
+            : 'h-11 min-w-11 rounded-r-none rounded-l-xl p-0 text-sm font-medium',
           disabled ? 'opacity-50' : '',
         )}
         aria-label={t('composer.sendMessage', { mode: modeLabel })}
         title={modeHint}
       >
-        <ModeIcon className={cn('h-3.5 w-3.5', 'sm:mr-1.5')} aria-hidden="true" />
-        <span className="hidden sm:inline">{t('composer.send')}</span>
+        <ModeIcon className={cn('h-[18px] w-[18px]', 'sm:mr-1.5')} aria-hidden="true" />
+        <span className="sr-only">{t('composer.send')}</span>
       </Button>
-      <button
+      {!isSimple ? <button
         type="button"
         onClick={() => setMenuOpen((v) => !v)}
         className={cn(
           'flex flex-none items-center justify-center rounded-r-xl border-l border-primary-foreground/30 bg-primary text-primary-foreground transition-colors hover:bg-primary/90',
-          isSimple ? 'h-9 px-2 shadow-sm sm:h-8' : 'h-9 px-2 sm:h-8',
+          isSimple ? 'h-11 w-7 px-0 shadow-sm' : 'h-11 w-7 px-0',
         )}
         data-testid="send-mode-toggle"
         aria-label={t('chat.transcript.sendMode')}
@@ -1009,11 +1046,11 @@ function SendButton({
         aria-expanded={menuOpen}
       >
         {menuOpen ? (
-          <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+          <ChevronUp className="h-4 w-4" aria-hidden="true" />
         ) : (
-          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+          <ChevronDown className="h-4 w-4" aria-hidden="true" />
         )}
-      </button>
+      </button> : null}
       {menuOpen ? (
         <div
           className="absolute right-0 bottom-full z-20 mb-2 min-w-[15rem] w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden overflow-x-hidden rounded-lg border border-border/60 bg-popover text-xs shadow-lg"
@@ -1074,6 +1111,8 @@ function ComposerConfigButton({
   onApprovalModeChange,
   composerMode,
   onComposerModeChange,
+  sendMode,
+  onSendModeChange,
   className,
 }: {
   model: string
@@ -1084,6 +1123,8 @@ function ComposerConfigButton({
   onApprovalModeChange(next: ApprovalMode): void
   composerMode: 'simple' | 'full'
   onComposerModeChange(): void
+  sendMode: SendMode
+  onSendModeChange(value: SendMode): void
   className?: string
 }): JSX.Element {
   const { t } = useTranslation()
@@ -1094,7 +1135,9 @@ function ComposerConfigButton({
     if (!open) return
     const onDocClick = (event: MouseEvent): void => {
       if (!containerRef.current) return
-      if (!containerRef.current.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Element | null
+      if (containerRef.current.contains(target) || target?.closest('[data-composer-config-select]')) return
+      setOpen(false)
     }
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setOpen(false)
@@ -1126,12 +1169,12 @@ function ComposerConfigButton({
         aria-expanded={open}
         data-testid="composer-config-trigger"
         className={cn(
-          'relative inline-flex h-10 w-8 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors active:text-foreground sm:h-7 sm:w-7 sm:rounded-md sm:hover:bg-accent/70 sm:hover:text-foreground',
+          'relative inline-flex h-11 w-10 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors active:text-foreground sm:h-10 sm:w-10 sm:rounded-xl sm:hover:bg-accent/70 sm:hover:text-foreground',
           open && 'text-foreground sm:bg-accent/70',
           approvalTone,
         )}
       >
-        <SlidersHorizontal className="h-3.5 w-3.5 stroke-[1.75]" aria-hidden="true" />
+        <SlidersHorizontal className="h-[18px] w-[18px] stroke-[1.75]" aria-hidden="true" />
       </button>
       {open ? (
         <div
@@ -1158,7 +1201,7 @@ function ComposerConfigButton({
                 <SelectTrigger className="h-9 w-full" aria-label={t('common.model')}>
                   <SelectValue placeholder={models.length === 0 ? t('common.noModels') : t('common.model')} />
                 </SelectTrigger>
-                <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
+                <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]" data-composer-config-select="model">
                   {models.map((m) => {
                     const key = modelKey(m)
                     return (
@@ -1178,28 +1221,55 @@ function ComposerConfigButton({
                 {t('composer.approvalMode')}
                 <span className={cn('ml-auto truncate text-[10px]', approvalTone)}>{approvalModeLabel}</span>
               </span>
-              <Select
+              <select
                 value={approvalMode}
-                onValueChange={(v) => onApprovalModeChange(v as ApprovalMode)}
+                onChange={(event) => onApprovalModeChange(event.currentTarget.value as ApprovalMode)}
+                aria-label={t('composer.approvalMode')}
+                data-testid="composer-config-approval-native"
+                className="h-9 w-full rounded border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring sm:hidden"
               >
-                <SelectTrigger className="h-9 w-full" aria-label={t('composer.approvalMode')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
-                  {APPROVAL_MODES.map((m) => {
-                    const display = approvalModeDisplay(m.value, t)
-                    return (
-                      <SelectItem key={m.value} value={m.value} textValue={display.label}>
-                        <div className="flex flex-col">
-                          <span>{display.label}</span>
-                          <span className="text-[10px] text-muted-foreground">{display.hint}</span>
-                        </div>
-                      </SelectItem>
-                    )
-                  })}
-                </SelectContent>
-              </Select>
+                {APPROVAL_MODES.map((m) => (
+                  <option key={m.value} value={m.value}>{approvalModeDisplay(m.value, t).label}</option>
+                ))}
+              </select>
+              <div className="hidden sm:block">
+                <Select
+                  value={approvalMode}
+                  onValueChange={(v) => onApprovalModeChange(v as ApprovalMode)}
+                >
+                  <SelectTrigger className="h-9 w-full" aria-label={t('composer.approvalMode')}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]" data-composer-config-select="approval">
+                    {APPROVAL_MODES.map((m) => {
+                      const display = approvalModeDisplay(m.value, t)
+                      return (
+                        <SelectItem key={m.value} value={m.value} textValue={display.label}>
+                          <div className="flex flex-col">
+                            <span>{display.label}</span>
+                            <span className="text-[10px] text-muted-foreground">{display.hint}</span>
+                          </div>
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
             </label>
+
+            <fieldset className="flex flex-col gap-1" data-testid="composer-config-send-mode">
+              <legend className="flex w-full items-center gap-1.5 text-[11px] font-medium text-foreground">
+                <Navigation className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                {t('chat.transcript.sendMode')}
+              </legend>
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/50 p-1">
+                {(['steer', 'queue'] as const).map((value) => (
+                  <button key={value} type="button" onClick={() => onSendModeChange(value)} className={cn('min-h-9 rounded-md px-2 text-xs font-medium', sendMode === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} aria-pressed={sendMode === value} data-testid={`composer-config-send-${value}`}>
+                    {value === 'steer' ? t('composer.steerActiveTurn') : t('composer.queueFollowUp')}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
 
             <label className="flex flex-col gap-1" data-testid="composer-config-mode">
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">

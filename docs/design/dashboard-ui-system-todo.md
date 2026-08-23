@@ -23,6 +23,18 @@ Current implementation tranche:
 3. consistent loading, empty, offline, degraded, and error presentation;
 4. English/Chinese, keyboard, responsive, contrast, and real-browser acceptance.
 
+Activity and Composer presentation are fixed by these additional rules:
+
+- a persisted Tool Intention is the activity card's primary copy; run, success,
+  failure, and approval are conveyed by icon, color, motion, and compact timing,
+  never by lifecycle prose prefixed to the Intention;
+- `Thinking` and `Working` are fallbacks only when no persisted Intention exists;
+- the activity card and Dot Line never show the same Intention simultaneously;
+- the Composer context outline uses one color selected from the aggregate
+  pressure level; contribution colors exist only inside the opened breakdown;
+- activity and Composer elevation stays compact: motion and glow must not extend
+  far beyond the owning surface.
+
 Checkboxes below are acceptance inventory. An unchecked historical item is not evidence that an already implemented capability should be rebuilt; verify current behavior first.
 
 ## 1. Objective

@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Loader2, TriangleAlert } from 'lucide-react'
+import { Check, Loader2, TriangleAlert, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AgentState } from '@agent-kernel/kernel'
@@ -46,11 +46,11 @@ export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolEx
     switch (status) {
       case 'thinking':
         if (streamingActive) return null
-        return <ThinkingRow progress={progress} />
+        return <ThinkingRow key="thinking" progress={progress} />
       case 'executing_tools':
-        return <ThinkingRow progress={progress} />
+        return <ThinkingRow key="tools" progress={progress} startedAt={progress?.startedAt ?? toolExecutionStartedAt} />
       case 'awaiting_approval':
-        return progress?.intention ? <ThinkingRow progress={progress} /> : <AwaitingApprovalRow />
+        return <ThinkingRow key="approval" progress={progress} />
     }
   }
   // Bridge the socket round-trip between user submit and the kernel's first
@@ -59,35 +59,31 @@ export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolEx
   return null
 }
 
-function ThinkingRow({ progress }: { progress?: AgentProgress }): JSX.Element {
+function ThinkingRow({ progress, startedAt }: { progress?: AgentProgress; startedAt?: number | null }): JSX.Element {
   const { t } = useTranslation()
+  const running = progress?.outcome === 'running' || (!progress?.outcome && progress?.phase !== 'approval')
+  const elapsed = useElapsedSeconds(running, startedAt, progress?.durationMs)
+  const label = progress?.label ?? t('chatStatus.thinking')
+  const completed = progress?.outcome === 'succeeded'
+  const failed = progress?.outcome === 'failed'
+  const approval = progress?.outcome === 'approval'
   return (
     <div
-      className="ak-thinking-row mb-3 flex w-full min-w-0 items-start gap-2 rounded-lg border border-border/70 bg-white/90 px-3 py-2 text-xs text-foreground shadow-sm ring-1 ring-white/80 dark:bg-zinc-950/90 dark:ring-white/10"
+      className="ak-thinking-row mb-3 inline-grid overflow-hidden w-fit max-w-[calc(100%-2rem)] sm:max-w-[min(42rem,90%)] min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 rounded-xl border border-border/60 bg-card/90 px-3 py-2.5 text-xs text-foreground shadow-[0_4px_12px_hsl(var(--foreground)/0.06)] backdrop-blur-md dark:bg-zinc-950/80"
       data-testid="inline-status-thinking"
       role="status"
       aria-live="polite"
     >
-      <span className="relative z-[1] mt-0.5 flex h-3 w-3 flex-none items-center justify-center text-primary" aria-hidden="true">
-        <span className="absolute h-3 w-3 rounded-full bg-current opacity-20 ak-thinking-dot" />
-        <span className="relative h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_10px_hsl(var(--primary)/0.55)]" />
+      <span className="relative z-[1] mt-0.5 flex h-4 w-4 flex-none items-center justify-center text-primary">
+        {completed ? <Check className="h-3.5 w-3.5 text-emerald-500" aria-label={t('chatStatus.succeeded')} />
+          : failed ? <X className="h-3.5 w-3.5 text-rose-500" aria-label={t('chatStatus.failed')} />
+            : approval ? <TriangleAlert className="h-3.5 w-3.5 text-amber-500" aria-label={t('chatStatus.approvalNeeded')} />
+              : <span aria-hidden="true"><span className="absolute h-2 w-2 rounded-full bg-current opacity-15 ak-thinking-dot" /><span className="relative block h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_5px_hsl(var(--primary)/0.35)]" /></span>}
       </span>
-      <span className="relative z-[1] min-w-0 whitespace-pre-wrap break-words font-medium leading-relaxed" data-testid={progress?.intention ? 'inline-status-intention' : undefined}>{progress?.label ?? t('chatStatus.thinking')}</span>
-    </div>
-  )
-}
-
-function AwaitingApprovalRow(): JSX.Element {
-  const { t } = useTranslation()
-  return (
-    <div
-      className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
-      data-testid="inline-status-approval"
-      role="status"
-      aria-live="polite"
-    >
-      <TriangleAlert className="h-3.5 w-3.5 flex-none" />
-      <span className="font-medium">{t('chatStatus.awaitingApproval')}</span>
+      <span className="relative z-[1] flex min-w-0 items-center gap-2 font-semibold leading-5" data-testid="inline-status-label">
+        <span>{label}</span>
+        {(running || progress?.durationMs !== undefined) ? <span className="font-normal tabular-nums text-muted-foreground" data-testid="inline-status-elapsed">{Math.floor(elapsed)}s</span> : null}
+      </span>
     </div>
   )
 }
@@ -229,7 +225,7 @@ export function formatTokensShort(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(1)}m tokens`
 }
 
-export function useElapsedSeconds(active: boolean, startedAt?: number | null): number {
+export function useElapsedSeconds(active: boolean, startedAt?: number | null, fixedDurationMs?: number): number {
   const [fallbackStart] = useState(() => Date.now())
   const [now, setNow] = useState(fallbackStart)
   useEffect(() => {
@@ -237,6 +233,7 @@ export function useElapsedSeconds(active: boolean, startedAt?: number | null): n
     const t = window.setInterval(() => setNow(Date.now()), 100)
     return () => window.clearInterval(t)
   }, [active])
+  if (fixedDurationMs !== undefined) return Math.max(0, fixedDurationMs / 1000)
   return Math.max(0, (now - (startedAt ?? fallbackStart)) / 1000)
 }
 

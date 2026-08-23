@@ -41,7 +41,14 @@ async function main(): Promise<void> {
       )
       return result.persisted
     },
-    requestPlannedRestart: async (slot, ownership) => await postJson<HostRestartAttempt>(`${await slotOrigin(slot)}/internal/runtime/restart`, { mode: 'checkpoint', reason: 'deploy', deployment: ownership }, handoffHeaders()),
+    requestPlannedRestart: async (slot, ownership) => await postJson<HostRestartAttempt>(`${await slotOrigin(slot)}/internal/runtime/restart`, {
+      mode: 'checkpoint', reason: 'deploy', deployment: ownership,
+      // A provider connection may fail to settle forever. The Runtime owns
+      // the checkpoint deadline and aborts its drain before the Supervisor
+      // performs a safe pre-handoff rollback, so no deployment can leave
+      // message queues globally paused without a terminal receipt.
+      timeoutMs: positive(process.env.AGENT_RUNLAB_RESTART_CHECKPOINT_TIMEOUT_MS, 10 * 60_000),
+    }, handoffHeaders()),
     restartStatus: async (slot) => await fetchJson<HostRestartStatus>(`${await slotOrigin(slot)}/internal/runtime/restart/status`, handoffHeaders()),
     commitPlannedRestart: async (slot, attemptId) => await postJson<HostRestartAttempt>(`${await slotOrigin(slot)}/internal/runtime/restart/commit`, { attemptId }, handoffHeaders()),
     abortPlannedRestart: async (slot, attemptId) => { await postJson(`${await slotOrigin(slot)}/internal/runtime/restart/abort`, attemptId ? { attemptId } : {}, handoffHeaders()) },
@@ -82,6 +89,12 @@ async function main(): Promise<void> {
       if (forward && !['completed', 'rolled_back', 'rollback_failed'].includes(String(forward.phase))) return { phase: 'pending' as const }
       if (forward?.phase === 'rolled_back') return { phase: 'recovered' as const }
       if (forward?.phase === 'rollback_failed') return { phase: 'failed' as const, error: typeof forward.error === 'string' ? forward.error : 'control-plane rollback failed' }
+      // A completed control update may already have durably advanced Ingress
+      // protocol state before the Runtime candidate is verified. Keep that
+      // backward-compatible control plane while replacing the Runtime slot;
+      // downgrading it first can leave the predecessor Supervisor unable to
+      // parse the newly written ledger and deadlock rollback readiness.
+      if (forward?.phase === 'completed') return { phase: 'recovered' as const }
       if (!forward) {
         const activeControlReleaseId = await readlink(join(root, 'control-current')).then((path) => basename(path)).catch(() => undefined)
         if (activeControlReleaseId === receipt.predecessorReleaseId) return { phase: 'recovered' as const }
@@ -139,7 +152,8 @@ async function main(): Promise<void> {
     stopSlot: async (slot) => await systemctl('disable', '--now', unitService(slot)),
     verifySlot: async (slot, expected) => {
       const origin = await slotOrigin(slot)
-      const deadline = Date.now() + 60_000
+      const deadline = Date.now() + positive(process.env.AGENT_RUNLAB_SLOT_VERIFY_TIMEOUT_MS, 5 * 60_000)
+      let lastError: unknown
       while (Date.now() < deadline) {
         try {
           const capabilities = await fetchJson<RuntimeCapabilitiesPayload>(`${origin}/runtime/capabilities`)
@@ -172,9 +186,9 @@ async function main(): Promise<void> {
           if (readiness.continuation.failed > 0 || readiness.continuation.completed !== readiness.continuation.participants) throw new Error('planned continuation is incomplete')
           if (expected.deployment && !sameDeploymentFence(readiness.deployment, expected.deployment)) throw new Error('runtime readiness deployment fence mismatch')
           return { pid, processReadyAt: processReadiness.readyAt, runtimeReadyAt: readiness.readyAt, continuation: readiness.continuation }
-        } catch { await sleep(250) }
+        } catch (error) { lastError = error; await sleep(250) }
       }
-      throw new Error(`Unit slot ${slot} verification timed out`)
+      throw new Error(`Unit slot ${slot} verification timed out${lastError instanceof Error ? `: ${lastError.message}` : ''}`)
     },
     switchRoute: async (state) => { await writeDedicatedRouteState(routeStatePath, state) },
   })

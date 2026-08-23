@@ -40,9 +40,24 @@ describe('ChatPanel', () => {
     ])
     fireEvent.click(footer.querySelector('button')!)
     const details = screen.getByTestId('turn-timing-details-turn-1')
-    expect(details.textContent).toContain('12 Tools')
-    expect(details.textContent).toContain('3 model calls')
-    expect(details.textContent).toContain('peak concurrency 4')
+    expect(details.textContent).toContain('Activity')
+    expect(details.textContent).toContain('Model time31s')
+    expect(details.textContent).toContain('Tool time45s')
+    expect(details.textContent).toContain('Calls')
+    expect(details.textContent).toContain('Model calls3')
+    expect(details.textContent).toContain('Tool calls12')
+    expect(details.textContent).not.toContain('12 Tools')
+    expect(details.textContent).not.toContain('Tool wall')
+    const technical = screen.getByTestId('turn-timing-technical-turn-1')
+    expect(technical.hasAttribute('open')).toBe(false)
+    expect(technical.textContent).toContain('Aggregate tool time1m 27s')
+    expect(technical.textContent).toContain('Peak concurrency4')
+  })
+
+  it('shows a readable placeholder for legacy local markdown images instead of a broken browser image', () => {
+    render(<AssistantMarkdown text={'Design: ![activity card](/tmp/activity-card.png)'} />)
+    expect(screen.getByTestId('local-image-unavailable').textContent).toContain('Image unavailable: activity card')
+    expect(document.querySelector('img[src="/tmp/activity-card.png"]')).toBeNull()
   })
 
   it('renders empty state', () => {
@@ -109,10 +124,11 @@ describe('ChatPanel', () => {
       <InlineStatusRow
         state={{ ...createInitialState({}), status: 'executing_tools', pendingCalls: [{ callId: 'c1', name: 'read', input: {}, status: 'dispatched' }] }}
         streamingActive={false}
-        progress={{ phase: 'tools', label: 'In progress: Diagnose why Tool activity copy is duplicated across live surfaces.', intention: 'Diagnose why Tool activity copy is duplicated across live surfaces.', callId: 'c1', outcome: 'running' }}
+        progress={{ phase: 'tools', label: 'Diagnose why Tool activity copy is duplicated across live surfaces.', intention: 'Diagnose why Tool activity copy is duplicated across live surfaces.', callId: 'c1', outcome: 'running' }}
       />,
     )
-    expect(screen.getByTestId('inline-status-intention').textContent).toBe('In progress: Diagnose why Tool activity copy is duplicated across live surfaces.')
+    expect(screen.getByTestId('inline-status-label').textContent).toContain('Diagnose why Tool activity copy is duplicated across live surfaces.')
+    expect(screen.queryByTestId('inline-status-intention')).toBeNull()
   })
 
   it('shows a live elapsed timer on the running tool card alongside the intention badge', () => {
@@ -370,8 +386,8 @@ describe('ChatPanel', () => {
     const hoverCard = screen.getByTestId('tool-card-preview-layer-dot-1')
     expect(screen.getByTestId('tool-call-detail-intent-dot-1').textContent).toBe('Inspect the implementation before changing it.')
     expect(hoverCard.className).toContain('fixed')
-    expect(hoverCard.style.width).toBe('544px')
-    expect(hoverCard.getAttribute('data-placement')).toBe('right-below')
+    expect(hoverCard.style.width).toBe('384px')
+    expect(hoverCard.getAttribute('data-placement')).toMatch(/^anchor-(?:above|below)$/)
     expect(hoverCard.textContent).toContain('/repo/a.ts')
     expect(hoverCard.textContent).toContain('a')
     expect(screen.queryByTestId('tool-call-group-details-dot-1')).toBeNull()
@@ -422,7 +438,7 @@ describe('ChatPanel', () => {
   })
 
   it('uses a visible middle omission marker for long tool activity rails', () => {
-    const calls = Array.from({ length: 24 }, (_, index) => ({ type: 'tool_call' as const, callId: `many-${index}`, name: 'read', input: { path: `/repo/${index}.ts` } }))
+    const calls = Array.from({ length: 24 }, (_, index) => ({ type: 'tool_call' as const, callId: `many-${index}`, name: index % 2 === 0 ? 'read' : 'grep', input: index % 2 === 0 ? { path: `/repo/${index}.ts` } : { pattern: `${index}` } }))
     const results = calls.map((call) => ({ type: 'tool_result' as const, callId: call.callId, ok: true, content: 'ok' }))
     render(<DashboardChatPanel messages={[{ role: 'assistant', content: calls }, { role: 'tool', content: results }]} />)
 
@@ -717,7 +733,7 @@ describe('ChatPanel', () => {
     expect(contentWrapper?.className).toContain('mx-auto')
   })
 
-  it('does not reserve avatar or grip rails for headerless continuation messages', () => {
+  it('keeps assistant continuation text aligned while showing one branded avatar', () => {
     render(
       <ChatPanel
         messages={[
@@ -730,8 +746,10 @@ describe('ChatPanel', () => {
     )
 
     const rails = screen.getAllByTestId('message-avatar-rail')
-    expect(rails).toHaveLength(1)
-    expect(rails[0]?.className).toContain('sm:flex')
+    expect(rails).toHaveLength(2)
+    expect(rails.map((rail) => rail.getAttribute('data-avatar-visible'))).toEqual(['true', 'false'])
+    expect(rails[0]?.querySelector('.lucide-sparkles')).toBeTruthy()
+    expect(rails[0]?.textContent).not.toContain('AK')
     expect(screen.queryByTestId('message-grip-rail')).toBeNull()
   })
 
@@ -1587,6 +1605,73 @@ describe('ChatPanel', () => {
     expect(screen.getByText('1 Succeeded')).toBeTruthy()
   })
 
+  it('groups consecutive same-name tool dots with counts without crossing tool boundaries', () => {
+    render(
+      <DashboardChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'repeat-read-1', name: 'read', input: { path: '/repo/a.ts' } },
+              { type: 'tool_call', callId: 'repeat-read-2', name: 'read', input: { path: '/repo/b.ts' } },
+              { type: 'tool_call', callId: 'repeat-grep-1', name: 'grep', input: { pattern: 'x' } },
+              { type: 'tool_call', callId: 'repeat-grep-2', name: 'grep', input: { pattern: 'y' } },
+              { type: 'tool_call', callId: 'repeat-read-3', name: 'read', input: { path: '/repo/c.ts' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'repeat-read-1', ok: true, content: 'a' },
+              { type: 'tool_result', callId: 'repeat-read-2', ok: false, content: 'missing' },
+              { type: 'tool_result', callId: 'repeat-grep-1', ok: true, content: 'x' },
+              { type: 'tool_result', callId: 'repeat-grep-2', ok: true, content: 'y' },
+              { type: 'tool_result', callId: 'repeat-read-3', ok: true, content: 'c' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('tool-card-dot-count-repeat-read-1').textContent).toBe('×2')
+    expect(screen.getByTestId('tool-card-dot-count-repeat-grep-1').textContent).toBe('×2')
+    expect(screen.getByTestId('tool-card-dot-repeat-read-3')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dot-group-repeat-read-1').textContent).toContain('×2')
+    expect(screen.getByTestId('tool-card-dot-group-repeat-read-1').querySelector('.text-rose-600')).toBeTruthy()
+    expect(screen.queryByTestId('tool-card-dot-count-repeat-read-3')).toBeNull()
+  })
+
+  it('offers a bottom Collapse action after expanding long tool activity', async () => {
+    render(
+      <DashboardChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: Array.from({ length: 12 }, (_, index) => ({
+              type: 'tool_call' as const,
+              callId: `long-${index}`,
+              name: index % 2 === 0 ? 'read' : 'grep',
+              input: index % 2 === 0 ? { path: `/repo/${index}.ts` } : { pattern: `${index}` },
+            })),
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('tool-activity-direction'))
+    expect(screen.getByTestId('tool-call-group-details-long-0')).toBeTruthy()
+    const collapse = screen.getByTestId('tool-activity-collapse-bottom')
+    expect(collapse.textContent).toContain('Collapse')
+    const group = screen.getByTestId('tool-call-group-long-0')
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(group, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+    vi.spyOn(group, 'getBoundingClientRect').mockReturnValue({ top: -600, bottom: -40, left: 0, right: 320, width: 320, height: 560, x: 0, y: -600, toJSON: () => ({}) })
+    fireEvent.click(collapse)
+    expect(screen.queryByTestId('tool-call-group-details-long-0')).toBeNull()
+    expect(screen.getByTestId('tool-card-dots-long-0')).toBeTruthy()
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }))
+  })
+
   it('collapses a long mixed tool activity into one compact block', () => {
     render(
       <ChatPanel
@@ -1908,7 +1993,7 @@ describe('ChatPanel', () => {
 
     const { rerender } = render(<DashboardChatPanel messages={messages} />)
 
-    expect(screen.getAllByTestId(/tool-card-dot-reason-dot-/)).toHaveLength(2)
+    expect(screen.getByTestId('tool-card-dot-count-reason-dot-1').textContent).toBe('×2')
     expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
     expect(screen.queryByText('Tool activity')).toBeNull()
     expect(screen.queryByText('Thinking')).toBeNull()
@@ -1959,7 +2044,8 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
-    expect(screen.getAllByTestId(/tool-card-dot-rail-/)).toHaveLength(3)
+    expect(screen.getByTestId('tool-card-dot-count-rail-1').textContent).toBe('×2')
+    expect(screen.getByTestId('tool-card-dot-rail-3')).toBeTruthy()
     expect(screen.queryByText('Thinking')).toBeNull()
   })
 

@@ -14,6 +14,8 @@ describe('built-in tool intent schema',()=>{
     expect(tool).toMatchObject({executionKind:'executor',executionHandler:'multi_grep',requiresApproval:false})
     const searches=(tool.inputSchema.properties as Record<string,any>).searches
     expect(searches).toMatchObject({type:'array',minItems:1,maxItems:20})
+    expect(createBuiltinTools().some((candidate)=>candidate.name==='grep')).toBe(false)
+    expect((tool.inputSchema.properties as Record<string,any>).max_bytes).toBeUndefined()
   })
 
   it('requires a natural-language intent on every tool call',()=>{

@@ -290,6 +290,21 @@ flowchart TD
 
 The updater never overwrites the running executable. It keeps current and previous generations. Update/restart ownership belongs to a separate OS-managed updater job, not the main Executor process. On Linux, `runlab-executor-update.timer` activates a oneshot updater which coordinates with the main service through a local mode-`0600` control socket, waits for Tool and PTY quiescence, switches `current`, restarts `runlab-executor.service`, and verifies that the expected release and Workspace identity reconnect. A missed drain deadline resumes admission and postpones the update. Failed post-activation health switches `current` back to `previous`, restarts again, and verifies recovery. This avoids single-instance lock conflicts and prevents the update coordinator from disappearing with the process it restarts.
 
+### 9.4 Release identity
+
+Executor identity separates two values:
+
+- `build.releaseTag` is a delivery coordinate or display label and may be a
+  channel such as `latest`;
+- `build.productVersion` and `executorVersion` are the semantic product version
+  used for compatibility and managed-update comparison.
+
+Release bundling must inject the root product version explicitly. A bundled
+dependency's package version must never become the Executor version. When the
+release tag itself is semantic it may supply `executorVersion`; otherwise the
+injected product version is authoritative. An invalid product version fails the
+build/runtime identity check instead of announcing `0.0.0`.
+
 ## 10. Reliability and security invariants
 
 1. No unapproved stop/restart/replace of an active Executor.

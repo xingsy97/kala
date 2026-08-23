@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { activateGeneration, waitForOriginBarrier, waitForRestartPhase } from './deploy-finalize.mjs'
+import { activateGeneration, assertLegacyRestartTopology, waitForOriginBarrier, waitForRestartPhase } from './deploy-finalize.mjs'
 import { createGenerationPlan, launchFinalizeScript, prepareGenerationScript, systemdDropInScript, transactionJson, verifyGenerationScript } from './generation-plan.mjs'
 
 const roots = []
@@ -48,6 +48,23 @@ describe('transactional generation deployment', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ persisted: true }) })
     await waitForOriginBarrier({ hostUrl: 'http://host', sessionId: 's', callId: 'c', timeoutMs: 1000, pollMs: 1, fetchImpl })
     expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('refuses the legacy finalizer before mutating a platform deployment', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ product: 'dedicated', deployment: { schemaVersion: 1, architecture: 'platform', tenancy: 'single-tenant', runtimeProfile: 'full' } }),
+    }))
+    await expect(assertLegacyRestartTopology({ hostUrl: 'http://stable-ingress', fetchImpl })).rejects.toThrow('LEGACY_DEPLOYMENT_FORBIDDEN')
+    expect(fetchImpl).toHaveBeenCalledOnce()
+  })
+
+  it('allows a verified portable target through the legacy finalizer guard', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ product: 'portable', deployment: { schemaVersion: 1, architecture: 'portable', runtimeProfile: 'full' } }),
+    }))
+    await expect(assertLegacyRestartTopology({ hostUrl: 'http://portable', fetchImpl })).resolves.toBeUndefined()
   })
 
   it('matches only the exact restart attempt and tolerates the replacement outage', async () => {

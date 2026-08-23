@@ -17,19 +17,37 @@ export type AdmissionRecord = AdmissionMessage & {
   sequence: number
   bodyDigest: string
   acceptedAt: string
-  state: 'pending' | 'leased' | 'committed' | 'expired'
+  state: 'pending' | 'leased' | 'committed' | 'failed' | 'expired'
   routeGeneration: number
   leaseGeneration?: number
   leaseOwner?: string
   leaseExpiresAt?: string
   committedAt?: string
+  failedAt?: string
   sessionCursor?: number
+  attempts?: number
+  lastAttemptAt?: string
   error?: string
+}
+
+export type AdmissionOperationStatus = {
+  operationId: string
+  sessionId: string
+  sequence: number
+  state: AdmissionRecord['state']
+  acceptedAt: string
+  routeGeneration: number
+  attempts: number
+  lastAttemptAt?: string
+  lastError?: string
+  committedAt?: string
+  failedAt?: string
+  sessionCursor?: number
 }
 
 type LedgerState = { schemaVersion: 1; revision: number; nextSequence: number; capacity: number; records: AdmissionRecord[] }
 const messageFields = new Set(['schemaVersion', 'principalDigest', 'unitId', 'sessionId', 'operationId', 'mode', 'text', 'content'])
-const recordFields = new Set([...messageFields, 'sequence', 'bodyDigest', 'acceptedAt', 'state', 'routeGeneration', 'leaseGeneration', 'leaseOwner', 'leaseExpiresAt', 'committedAt', 'sessionCursor', 'error'])
+const recordFields = new Set([...messageFields, 'sequence', 'bodyDigest', 'acceptedAt', 'state', 'routeGeneration', 'leaseGeneration', 'leaseOwner', 'leaseExpiresAt', 'committedAt', 'failedAt', 'sessionCursor', 'attempts', 'lastAttemptAt', 'error'])
 
 export class DedicatedAdmissionLedger {
   private mutation = Promise.resolve()
@@ -48,7 +66,7 @@ export class DedicatedAdmissionLedger {
       if (!Number.isSafeInteger(routeGeneration) || routeGeneration < 0) throw new Error('invalid admission route generation')
       const normalized = parseAdmissionMessage(message)
       const state = await this.read()
-      expireCommitted(state, this.committedRetentionMs)
+      expireTerminal(state, this.committedRetentionMs)
       const bodyDigest = digest(normalized)
       const existing = state.records.find((record) => record.operationId === normalized.operationId)
       if (existing) {
@@ -69,7 +87,7 @@ export class DedicatedAdmissionLedger {
     })
   }
 
-  async leaseNext(owner: string, routeGeneration: number, leaseMs = 30_000): Promise<AdmissionRecord | undefined> {
+  async leaseNext(owner: string, routeGeneration: number, leaseMs = 30_000, excludedSessionIds: ReadonlySet<string> = new Set()): Promise<AdmissionRecord | undefined> {
     return await this.serialize(async () => {
       if (!owner || !Number.isSafeInteger(routeGeneration) || routeGeneration < 0 || !Number.isSafeInteger(leaseMs) || leaseMs < 1) {
         throw new Error('invalid admission lease request')
@@ -88,10 +106,12 @@ export class DedicatedAdmissionLedger {
       }
       const record = state.records.find((candidate) =>
         candidate.state === 'pending'
+        && !excludedSessionIds.has(candidate.sessionId)
         && !state.records.some((prior) =>
           prior.sessionId === candidate.sessionId
           && prior.sequence < candidate.sequence
           && prior.state !== 'committed'
+          && prior.state !== 'failed'
           && prior.state !== 'expired',
         ),
       )
@@ -103,6 +123,8 @@ export class DedicatedAdmissionLedger {
       record.leaseOwner = owner
       record.leaseGeneration = routeGeneration
       record.leaseExpiresAt = new Date(now + leaseMs).toISOString()
+      record.attempts = (record.attempts ?? 0) + 1
+      record.lastAttemptAt = new Date(now).toISOString()
       await this.persist(state)
       return { ...record }
     })
@@ -113,7 +135,7 @@ export class DedicatedAdmissionLedger {
       const state = await this.read()
       const record = state.records.find((item) => item.operationId === operationId)
       if (!record) throw new Error('admission record not found')
-      if (record.state === 'committed' || record.state === 'expired') return { ...record }
+      if (record.state === 'committed' || record.state === 'failed' || record.state === 'expired') return { ...record }
       if (record.state !== 'leased' || record.leaseOwner !== owner || record.leaseGeneration !== routeGeneration) {
         throw new Error('stale admission lease')
       }
@@ -134,7 +156,7 @@ export class DedicatedAdmissionLedger {
       const state = await this.read()
       const record = state.records.find((item) => item.operationId === operationId)
       if (!record) throw new Error('admission record not found')
-      if (record.state === 'committed' || record.state === 'expired') return { ...record }
+      if (record.state === 'committed' || record.state === 'failed' || record.state === 'expired') return { ...record }
       if (record.state !== 'leased' || record.leaseGeneration !== routeGeneration) throw new Error('stale admission lease')
       if (sessionCursor !== undefined && (!Number.isSafeInteger(sessionCursor) || sessionCursor < 0)) throw new Error('invalid Session cursor')
       record.state = 'committed'
@@ -162,7 +184,42 @@ export class DedicatedAdmissionLedger {
     })
   }
 
-  async snapshot(): Promise<{ revision: number; pending: number; leased: number; committed: number; expired: number; oldestAgeMs: number; capacity: number }> {
+  async fail(operationId: string, owner: string, routeGeneration: number, error: string): Promise<AdmissionRecord> {
+    return await this.serialize(async () => {
+      const state = await this.read()
+      const record = state.records.find((item) => item.operationId === operationId)
+      if (!record) throw new Error('admission record not found')
+      if (record.state === 'failed' || record.state === 'committed' || record.state === 'expired') return { ...record }
+      if (record.state !== 'leased' || record.leaseOwner !== owner || record.leaseGeneration !== routeGeneration) {
+        throw new Error('stale admission lease')
+      }
+      record.state = 'failed'
+      record.failedAt = new Date().toISOString()
+      record.error = redacted(error)
+      delete record.leaseOwner
+      delete record.leaseExpiresAt
+      delete record.leaseGeneration
+      await this.persist(state)
+      return { ...record }
+    })
+  }
+
+  async operation(operationId: string, principalDigest: string): Promise<AdmissionOperationStatus | undefined> {
+    const state = await this.read()
+    const record = state.records.find((item) => item.operationId === operationId && item.principalDigest === principalDigest)
+    if (!record) return undefined
+    return {
+      operationId: record.operationId, sessionId: record.sessionId, sequence: record.sequence, state: record.state,
+      acceptedAt: record.acceptedAt, routeGeneration: record.routeGeneration, attempts: record.attempts ?? 0,
+      ...(record.lastAttemptAt ? { lastAttemptAt: record.lastAttemptAt } : {}),
+      ...(record.error ? { lastError: record.error } : {}),
+      ...(record.committedAt ? { committedAt: record.committedAt } : {}),
+      ...(record.failedAt ? { failedAt: record.failedAt } : {}),
+      ...(record.sessionCursor !== undefined ? { sessionCursor: record.sessionCursor } : {}),
+    }
+  }
+
+  async snapshot(): Promise<{ revision: number; pending: number; leased: number; committed: number; failed: number; expired: number; oldestAgeMs: number; capacity: number }> {
     const state = await this.read()
     const now = Date.now()
     const active = state.records.filter((record) => record.state === 'pending' || record.state === 'leased')
@@ -171,6 +228,7 @@ export class DedicatedAdmissionLedger {
       pending: state.records.filter((record) => record.state === 'pending').length,
       leased: state.records.filter((record) => record.state === 'leased').length,
       committed: state.records.filter((record) => record.state === 'committed').length,
+      failed: state.records.filter((record) => record.state === 'failed').length,
       expired: state.records.filter((record) => record.state === 'expired').length,
       oldestAgeMs: active.length ? Math.max(0, now - Math.min(...active.map((record) => Date.parse(record.acceptedAt)))) : 0,
       capacity: state.capacity,
@@ -229,16 +287,24 @@ function parseLedgerState(value: unknown): LedgerState {
       || typeof record.operationId !== 'string' || typeof record.bodyDigest !== 'string'
       || !/^[a-f0-9]{64}$/u.test(record.bodyDigest) || !Number.isSafeInteger(record.sequence)
       || record.sequence <= previousSequence || operationIds.has(record.operationId)
-      || !['pending', 'leased', 'committed', 'expired'].includes(record.state)
+      || !['pending', 'leased', 'committed', 'failed', 'expired'].includes(record.state)
       || !Number.isFinite(Date.parse(record.acceptedAt))
+      || (record.attempts !== undefined && (!Number.isSafeInteger(record.attempts) || record.attempts < 0))
+      || (record.lastAttemptAt !== undefined && !Number.isFinite(Date.parse(record.lastAttemptAt)))
     ) throw new Error('invalid admission ledger record')
     rejectUnknownFields(record as unknown as Record<string, unknown>, recordFields, 'admission ledger record')
     if (record.state === 'leased' && (!record.leaseOwner || !Number.isSafeInteger(record.leaseGeneration) || !Number.isFinite(Date.parse(record.leaseExpiresAt ?? '')))) {
       throw new Error('invalid admission lease')
     }
     if (record.state !== 'leased' && (record.leaseOwner !== undefined || record.leaseGeneration !== undefined || record.leaseExpiresAt !== undefined)) throw new Error('inactive admission record retains a lease')
-    if ((record.state === 'committed' || record.state === 'expired') && !Number.isFinite(Date.parse(record.committedAt ?? ''))) throw new Error('committed admission record lacks a receipt timestamp')
-    if ((record.state === 'pending' || record.state === 'leased') && (record.committedAt !== undefined || record.sessionCursor !== undefined)) throw new Error('uncommitted admission record contains commit evidence')
+    if (record.state === 'committed' && !Number.isFinite(Date.parse(record.committedAt ?? ''))) throw new Error('committed admission record lacks a receipt timestamp')
+    if (record.state === 'failed' && !Number.isFinite(Date.parse(record.failedAt ?? ''))) throw new Error('failed admission record lacks a receipt timestamp')
+    if (record.state === 'expired' && !Number.isFinite(Date.parse(record.committedAt ?? record.failedAt ?? ''))) throw new Error('expired admission record lacks a receipt timestamp')
+    if (record.committedAt !== undefined && record.failedAt !== undefined) throw new Error('admission record contains conflicting terminal evidence')
+    if (record.state === 'committed' && record.failedAt !== undefined) throw new Error('committed admission record contains failure evidence')
+    if (record.state === 'failed' && record.committedAt !== undefined) throw new Error('failed admission record contains commit evidence')
+    if ((record.state === 'pending' || record.state === 'leased') && (record.committedAt !== undefined || record.failedAt !== undefined || record.sessionCursor !== undefined)) throw new Error('uncommitted admission record contains terminal evidence')
+    if ((record.state === 'failed' || (record.state === 'expired' && record.failedAt !== undefined)) && record.sessionCursor !== undefined) throw new Error('failed admission record contains a Session cursor')
     previousSequence = record.sequence
     operationIds.add(record.operationId)
   }
@@ -246,10 +312,11 @@ function parseLedgerState(value: unknown): LedgerState {
   return state as LedgerState
 }
 
-function expireCommitted(state: LedgerState, retentionMs: number): void {
+function expireTerminal(state: LedgerState, retentionMs: number): void {
   const cutoff = Date.now() - retentionMs
   for (const record of state.records) {
     if (record.state === 'committed' && Date.parse(record.committedAt ?? record.acceptedAt) < cutoff) record.state = 'expired'
+    if (record.state === 'failed' && Date.parse(record.failedAt ?? record.acceptedAt) < cutoff) record.state = 'expired'
   }
 }
 

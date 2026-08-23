@@ -8,7 +8,7 @@ import type { DedicatedSlot } from './dedicated-slot-state.js'
 export const DEDICATED_DEPLOY_SCHEMA_VERSION = 1 as const
 export const DEDICATED_DEPLOY_TOPOLOGY = 'dedicated-slots' as const
 
-export type DedicatedDeployAction = 'deploy' | 'abort' | 'rollback'
+export type DedicatedDeployAction = 'deploy' | 'restart' | 'abort' | 'rollback'
 
 export type DedicatedDeployRequest = {
   schemaVersion: typeof DEDICATED_DEPLOY_SCHEMA_VERSION
@@ -157,7 +157,7 @@ const quiescenceSessionFields = new Set(['sessionId', 'status', 'safe', 'waiting
 export function parseDedicatedDeployRequest(value: unknown): DedicatedDeployRequest {
   const input = record(value, 'deployment request')
   if (input.schemaVersion !== DEDICATED_DEPLOY_SCHEMA_VERSION) throw new Error('unsupported deployment request schema version')
-  const action = oneOf(input.action, ['deploy', 'abort', 'rollback'] as const, 'action')
+  const action = oneOf(input.action, ['deploy', 'restart', 'abort', 'rollback'] as const, 'action')
   const request: DedicatedDeployRequest = {
     schemaVersion: DEDICATED_DEPLOY_SCHEMA_VERSION,
     action,
@@ -178,6 +178,9 @@ export function parseDedicatedDeployRequest(value: unknown): DedicatedDeployRequ
     request.releaseId = pattern(input.releaseId, releasePattern, 'releaseId')
     request.stagedReleaseDir = absolutePath(input.stagedReleaseDir, 'stagedReleaseDir')
     request.bundleSha256 = pattern(input.bundleSha256, digestPattern, 'bundleSha256')
+  } else if (action === 'restart') {
+    if (input.releaseId !== undefined || input.stagedReleaseDir !== undefined || input.bundleSha256 !== undefined || input.targetDeploymentId !== undefined) throw new Error('restart request cannot include staged or target deployment fields')
+    if (request.sourceReleaseDigest !== request.targetReleaseDigest) throw new Error('restart must preserve the active immutable release')
   } else {
     if (input.releaseId !== undefined || input.stagedReleaseDir !== undefined || input.bundleSha256 !== undefined) throw new Error(`${action} request cannot include staged release fields`)
     request.targetDeploymentId = identifier(input.targetDeploymentId, 'targetDeploymentId')
@@ -222,7 +225,7 @@ export function parseDeploymentReceipt(value: unknown): DeploymentReceipt {
     schemaVersion: DEDICATED_DEPLOY_SCHEMA_VERSION, receiptRevision: positiveInteger(input.receiptRevision, 'receiptRevision'),
     deploymentId: identifier(input.deploymentId, 'deploymentId'), operationId, operationIds,
     requestDigest, operationRequestDigests,
-    action: oneOf(input.action, ['deploy', 'abort', 'rollback'] as const, 'action'),
+    action: oneOf(input.action, ['deploy', 'restart', 'abort', 'rollback'] as const, 'action'),
     topology: oneOf(input.topology, [DEDICATED_DEPLOY_TOPOLOGY] as const, 'topology'), unitId: oneOf(input.unitId, ['local'] as const, 'unitId'), phase,
     releaseId: pattern(input.releaseId, releasePattern, 'releaseId'), releaseDir: absolutePath(input.releaseDir, 'releaseDir'),
     bundleSha256: pattern(input.bundleSha256, digestPattern, 'bundleSha256'), releaseDigest: pattern(input.releaseDigest, digestPattern, 'releaseDigest'),
@@ -430,6 +433,7 @@ function rejectUnknownFields(input: Record<string, unknown>, allowed: ReadonlySe
 function validateReceiptInvariants(receipt: DeploymentReceipt): void {
   if (receipt.action === 'rollback' && !receipt.targetDeploymentId) throw new Error('rollback receipt requires targetDeploymentId')
   if (receipt.action !== 'rollback' && receipt.targetDeploymentId) throw new Error('targetDeploymentId is valid only for rollback receipts')
+  if (receipt.action === 'restart' && receipt.releaseDigest !== receipt.sourceReleaseDigest) throw new Error('restart receipt must preserve the immutable release')
   if (receipt.originResultPersistedAt && !receipt.origin) throw new Error('origin result timestamp requires origin identity')
   if (receipt.previousSlot && receipt.previousSlot === receipt.candidateSlot) throw new Error('previousSlot and candidateSlot must differ')
   if (receipt.observedRouteGeneration !== undefined && receipt.observedRouteGeneration < receipt.expectedRouteGeneration) throw new Error('observed route generation regressed')
@@ -439,7 +443,7 @@ function validateReceiptInvariants(receipt: DeploymentReceipt): void {
   if (receipt.phase === 'rollback_failed' && receipt.rollback?.outcome !== 'failed') throw new Error('rollback_failed receipt requires failed rollback outcome')
   if (receipt.phase === 'rolled_back' && receipt.rollback?.outcome !== 'completed') throw new Error('rolled_back receipt requires completed rollback outcome')
   if (receipt.phase === 'completed' && (!receipt.activatedPid || !receipt.processReadyAt || !receipt.runtimeReadyAt || !receipt.routeGeneration || receipt.health?.publicRoute !== true)) throw new Error('completed receipt lacks committed runtime readiness')
-  if (['control_ready', 'waiting_for_boundary', 'reserved', 'handed_off', 'activating', 'verifying', 'route_committing', 'completed'].includes(receipt.phase) && !receipt.controlPlane) throw new Error('post-control phase lacks activation evidence')
+  if (receipt.action !== 'restart' && ['control_ready', 'waiting_for_boundary', 'reserved', 'handed_off', 'activating', 'verifying', 'route_committing', 'completed'].includes(receipt.phase) && !receipt.controlPlane) throw new Error('post-control phase lacks activation evidence')
   if (receipt.controlPlane?.readyAt && !receipt.controlPlane.supervisorPid) throw new Error('control-plane readiness requires Supervisor pid')
 }
 function parseContinuation(value: unknown): NonNullable<DeploymentReceipt['continuation']> {

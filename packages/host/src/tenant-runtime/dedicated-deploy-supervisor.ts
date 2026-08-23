@@ -116,9 +116,34 @@ export class DedicatedDeploySupervisor {
         return existing
       }
       if (request.action === 'deploy') return await this.acceptDeploy(request, digest)
+      if (request.action === 'restart') return await this.acceptRestart(request, digest)
       if (request.action === 'abort') return await this.acceptAbort(request, digest)
       return await this.acceptRollback(request, digest)
     })
+  }
+
+  private async acceptRestart(request: DedicatedDeployRequest, requestDigest: string): Promise<DeploymentReceipt> {
+    await this.assertDeploymentIdAvailable(request.deploymentId)
+    await this.assertNoActiveDeployment()
+    const route = await this.adapter.routeState()
+    assertRequestRoute(request, route)
+    const releaseId = route.slots[route.activeSlot].releaseId
+    if (request.predecessorReleaseId !== releaseId || request.sourceReleaseDigest !== request.targetReleaseDigest) throw new Error('restart release identity mismatch')
+    const releaseDir = resolve(this.root, 'releases', releaseId)
+    const bundleSha256 = sha256(await readFile(join(releaseDir, 'agent-runlab-runtime.cjs')))
+    await verifyImmutableRelease({ deployRoot: this.root, releaseDir, releaseId, releaseDigest: request.targetReleaseDigest, bundleSha256 })
+    const now = new Date().toISOString()
+    const receipt: DeploymentReceipt = {
+      schemaVersion: 1, receiptRevision: 1, deploymentId: request.deploymentId, operationId: request.operationId,
+      operationIds: [request.operationId], requestDigest, operationRequestDigests: { [request.operationId]: requestDigest },
+      action: 'restart', topology: 'dedicated-slots', unitId: 'local', phase: 'control_ready',
+      releaseId, releaseDir, bundleSha256, releaseDigest: request.targetReleaseDigest, sourceReleaseDigest: request.sourceReleaseDigest,
+      requestedAt: request.requestedAt, updatedAt: now, expectedRouteGeneration: request.expectedRouteGeneration,
+      observedRouteGeneration: route.generation, fencingToken: request.fencingToken, predecessorReleaseId: releaseId,
+      previousRelease: releaseDir, previousSlot: route.activeSlot, candidateSlot: request.candidateSlot,
+    }
+    await this.persist(receipt)
+    return receipt
   }
 
   private async acceptDeploy(request: DedicatedDeployRequest, requestDigest: string): Promise<DeploymentReceipt> {

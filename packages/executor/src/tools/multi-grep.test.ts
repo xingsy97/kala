@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createSandbox } from '../sandbox.js'
 import { multiGrepTool } from './multi-grep.js'
+import { grepTool } from './grep.js'
+import { allTools } from './index.js'
 
 let root: string
 let ctx: Parameters<typeof multiGrepTool.run>[1]
@@ -43,11 +45,22 @@ describe('multi_grep', () => {
     await expect(multiGrepTool.run(input as never, ctx)).rejects.toThrow(message)
   })
 
-  it('enforces a UTF-8-safe global byte budget', async () => {
-    const out = await multiGrepTool.run({ searches: [{ pattern: '.', path: 'src/a.ts', output_mode: 'content' }, { pattern: 'beta', path: 'src' }], max_bytes: 110 }, ctx)
-    expect(Buffer.byteLength(out, 'utf8')).toBeLessThanOrEqual(110)
-    expect(out).not.toContain('�')
-    expect(out).toContain('truncated')
+  it('preserves every child result exactly even when an earlier search is large', async () => {
+    writeFileSync(join(root, 'src/large.ts'), Array.from({ length: 900 }, (_, index) => `common-${index}`).join('\n'))
+    const searches = [
+      { pattern: 'common', path: 'src', output_mode: 'content' },
+      { pattern: 'gamma', path: 'src/b.ts', output_mode: 'content' },
+    ] as const
+    const expected = await Promise.all(searches.map((search) => grepTool.run(search, ctx)))
+    const out = await multiGrepTool.run({ searches }, ctx)
+    expect(out).toBe(expected.map((result, index) => `===== search[${index}] =====\n${result}`).join('\n\n'))
+    expect(out).toContain(':2:gamma')
+    expect(out).not.toContain('multi_grep output truncated')
+  })
+
+  it('is the only publicly registered regex search tool', () => {
+    expect(allTools.some((tool) => tool.name === 'grep')).toBe(false)
+    expect(allTools.some((tool) => tool.name === 'multi_grep')).toBe(true)
   })
 
   it('honors cancellation before execution', async () => {

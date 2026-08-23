@@ -27,8 +27,8 @@ describe('ConnectionStatus', () => {
 
     await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('34 ms'))
     fireEvent.click(screen.getByTestId('connection-status'))
-    expect(screen.getByText('Device → Host')).toBeTruthy()
-    expect(screen.getByText('Host → Executor')).toBeTruthy()
+    expect(screen.getByText('Device → Service')).toBeTruthy()
+    expect(screen.getByText('Service → Executor')).toBeTruthy()
     expect(screen.getByText('12 ms')).toBeTruthy()
     expect(screen.getAllByText('34 ms')).toHaveLength(2)
     expect(screen.queryByText(/cursor/i)).toBeNull()

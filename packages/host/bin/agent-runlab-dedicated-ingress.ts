@@ -31,6 +31,7 @@ async function main(): Promise<void> {
     ...(process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET?.trim() ? { ingressHandoffSecret: process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET.trim() } : {}),
     ...(process.env.AGENT_RUNLAB_CANDIDATE_STATE?.trim() ? { candidateStatePath: process.env.AGENT_RUNLAB_CANDIDATE_STATE.trim() } : {}),
     ...(process.env.AGENT_RUNLAB_OPERATOR_STATUS?.trim() ? { operatorStatusPath: process.env.AGENT_RUNLAB_OPERATOR_STATUS.trim() } : {}),
+    ...(process.env.AGENT_RUNLAB_DEPLOYMENT_REQUESTS?.trim() ? { deploymentRequestsPath: process.env.AGENT_RUNLAB_DEPLOYMENT_REQUESTS.trim() } : {}),
     ...(process.env.AGENT_RUNLAB_DASHBOARD_STATE?.trim() ? { dashboardStatePath: process.env.AGENT_RUNLAB_DASHBOARD_STATE.trim() } : {}),
     ...(process.env.AGENT_RUNLAB_DASHBOARD_RELEASES?.trim() ? { dashboardReleasesRoot: process.env.AGENT_RUNLAB_DASHBOARD_RELEASES.trim() } : {}),
     auth: ingressAuth(),

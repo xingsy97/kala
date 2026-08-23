@@ -508,6 +508,7 @@ function embeddedReleaseAssetsBanner(dir, names) {
 function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
   const info = {
     releaseTag: tag,
+    productVersion: packageJson.version,
     gitCommit: sourceIdentity.revision.slice(0, 12),
     sourceSnapshotSha256: sourceIdentity.snapshotSha256,
     builtAt: new Date().toISOString(),

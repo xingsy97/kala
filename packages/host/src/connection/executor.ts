@@ -96,6 +96,9 @@ export type WorkspaceResolver = {
   workspaceIdFor(sessionId: string): string | undefined
 }
 
+type PublishLocalImageRequest = { requestId: string; path: string; cwd?: string }
+type PublishLocalImageResponse = { requestId: string; path: string; base64?: string; mediaType?: string; size?: number; error?: string }
+
 export type ExecutorLookup = {
   executorForSession(sessionId: string): AttachedExecutor | undefined
   listDirs(workspaceId: string, path: string | undefined, requestId: string): Promise<DirListResult>
@@ -113,6 +116,7 @@ export type ExecutorLookup = {
   closeSessionTerminals(payload: ClientTerminalCloseSession): void
   workspaceExec(payload: WorkspaceExecRequest): Promise<WorkspaceExecResponse>
   workspaceReadBinary(payload: WorkspaceReadBinaryRequest): Promise<WorkspaceReadBinaryResponse>
+  publishLocalImage(payload: PublishLocalImageRequest & { workspaceId: string }): Promise<PublishLocalImageResponse>
 }
 
 export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
@@ -911,6 +915,17 @@ export function createExecutorRegistry(
           size: 0,
           error: { code: 'EIO', message: msg },
         }),
+      )
+    },
+    async publishLocalImage(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) return { requestId: payload.requestId, path: payload.path, error: 'workspace offline' }
+      return await callInternalTool<PublishLocalImageResponse>(
+        bind,
+        payload.workspaceId,
+        '__publish_local_image',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({ requestId: payload.requestId, path: payload.path, error: msg }),
       )
     },
     onChange(listener) {

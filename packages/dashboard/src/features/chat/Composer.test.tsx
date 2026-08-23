@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState, type ImageContent, type TextContent } from '@agent-kernel/kernel'
@@ -28,23 +28,29 @@ function renderComposer(props?: {
   onQueuedUpdate?: (id: string, text: string) => void
   state?: React.ComponentProps<typeof Composer>['state']
   disabled?: boolean
+  serviceUnavailable?: boolean
+  onReconnectService?: () => void
   humanAttention?: React.ComponentProps<typeof Composer>['humanAttention']
   displayPrefs?: ChatDisplayPrefs
   awaitingAck?: boolean
+  approvalMode?: React.ComponentProps<typeof Composer>['approvalMode']
+  onApprovalModeChange?: React.ComponentProps<typeof Composer>['onApprovalModeChange']
 }) {
   return render(
     <Composer
       model=""
       models={[]}
       onModelChange={() => {}}
-      approvalMode="auto"
-      onApprovalModeChange={() => {}}
+      approvalMode={props?.approvalMode ?? 'auto'}
+      onApprovalModeChange={props?.onApprovalModeChange ?? (() => {})}
       state={props?.state ?? null}
       config={null}
       humanAttention={props?.humanAttention ?? EMPTY_HUMAN_ATTENTION}
       queuedMessages={props?.queuedMessages ?? []}
       displayPrefs={props?.displayPrefs}
       disabled={props?.disabled}
+      serviceUnavailable={props?.serviceUnavailable}
+      onReconnectService={props?.onReconnectService}
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
       {...(props?.onQueuedUpdate ? { onQueuedUpdate: props.onQueuedUpdate } : {})}
       onSubmit={props?.onSubmit ?? (() => {})}
@@ -87,6 +93,23 @@ describe('Composer', () => {
     expect(indicator.textContent ?? '').not.toContain('Tokens')
   })
 
+  it('replaces the unavailable Composer with one compact recoverable Service state', () => {
+    const reconnect = vi.fn()
+    renderComposer({ disabled: true, serviceUnavailable: true, onReconnectService: reconnect })
+    const connectionState = screen.getByTestId('service-connection-state')
+    expect(connectionState.textContent).toContain('Connecting to service')
+    expect(connectionState.textContent).not.toContain('Restoring the realtime connection')
+    expect(Array.from(connectionState.querySelectorAll('span')).some((node) => node.className.includes('motion-safe:animate-ping'))).toBe(true)
+    expect(screen.queryByTestId('composer')).toBeNull()
+    expect(screen.queryByTestId('composer-input')).toBeNull()
+    expect(screen.queryByTestId('composer-input-simple')).toBeNull()
+    expect(screen.queryByTestId('composer-config-trigger')).toBeNull()
+    expect(screen.queryByTestId('composer-send')).toBeNull()
+    expect(screen.queryByTestId('context-usage-bar')).toBeNull()
+    fireEvent.click(screen.getByTestId('service-reconnect'))
+    expect(reconnect).toHaveBeenCalledOnce()
+  })
+
   it('uses the low-attention hint as the empty input placeholder', () => {
     renderComposer({ humanAttention: attentionTimeline(18, 'absent', 52) })
 
@@ -96,7 +119,7 @@ describe('Composer', () => {
   it('keeps the disabled placeholder above the low-attention hint', () => {
     renderComposer({ disabled: true, humanAttention: attentionTimeline(18, 'absent', 52) })
 
-    expect(screen.getByTestId('composer-input').getAttribute('placeholder')).toBe('waiting for host...')
+    expect(screen.getByTestId('composer-input').getAttribute('placeholder')).toBe('waiting for service...')
   })
 
   it('aligns composer width with the chat content width preference', () => {
@@ -341,24 +364,39 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'new draft')
   })
 
-  it('keeps send mode selection available in simple mode', () => {
+  it('keeps send mode selection in the simple-mode config without a separate arrow button', () => {
     const onSubmit = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
-    renderComposer({ onSubmit })
-    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
-    else window.localStorage.setItem('ak-composer-mode', previousMode)
+    try {
+      renderComposer({ onSubmit })
+      expect(screen.queryByTestId('send-mode-toggle')).toBeNull()
+      fireEvent.click(screen.getByTestId('composer-config-trigger'))
+      fireEvent.click(screen.getByTestId('composer-config-send-queue'))
+      const input = screen.getByTestId('composer-input-simple')
+      input.textContent = 'follow up'
+      fireEvent.input(input)
+      fireEvent.click(screen.getByTestId('composer-send'))
+      expect(onSubmit).toHaveBeenCalledWith('follow up', 'queue', undefined, undefined)
+    } finally {
+      if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+      else window.localStorage.setItem('ak-composer-mode', previousMode)
+    }
+  })
 
-    expect(screen.getByTestId('composer-simple-shell')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('send-mode-toggle'))
-    fireEvent.click(screen.getByTestId('send-mode-queue'))
-
+  it('accepts the first keystroke after a running send clears the simple editor', () => {
+    const onSubmit = vi.fn(() => new Promise<void>(() => {}))
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({ onSubmit, state: { ...createInitialState({ sessionId: 'running-simple' }), status: 'thinking' } })
     const input = screen.getByTestId('composer-input-simple')
-    input.textContent = 'later from simple'
+    input.textContent = 'first message'
     fireEvent.input(input)
-    fireEvent.click(screen.getByTestId('composer-send'))
-
-    expect(onSubmit).toHaveBeenCalledWith('later from simple', 'queue', undefined, undefined)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSubmit).toHaveBeenCalledWith('first message', 'steer', undefined, undefined)
+    expect(input.textContent).toBe('')
+    input.textContent = 'n'
+    fireEvent.input(input)
+    expect(input.textContent).toBe('n')
   })
 
   it('focuses the mobile simple composer without scrolling the viewport', () => {
@@ -467,31 +505,31 @@ describe('Composer', () => {
     const frame = screen.getByTestId('composer-simple-frame')
     const indicator = screen.getByTestId('context-usage-bar')
     const send = screen.getByTestId('composer-send')
-    const sendMode = screen.getByTestId('send-mode-toggle')
 
-    expect(shell.contains(indicator)).toBe(false)
+    expect(shell.contains(indicator)).toBe(true)
     expect(frame.contains(indicator)).toBe(true)
     expect(shell.contains(send)).toBe(true)
     expect(shell.contains(screen.getByTestId('composer-config-trigger'))).toBe(true)
-    expect(indicator.compareDocumentPosition(shell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(indicator.className).toContain('absolute')
     expect(screen.queryByTestId('context-usage-indicator')).toBeNull()
-    expect(indicator.className).toContain('inset-x-3')
-    expect(send.className).toContain('h-9')
-    expect(sendMode.className).toContain('h-9')
+    expect(indicator.className).toContain('-inset-x-px')
+    expect(indicator.className).toContain('h-5')
+    expect(indicator.className).toContain('rounded-t-[22px]')
+    expect(send.className).toContain('h-11')
+    expect(screen.queryByTestId('send-mode-toggle')).toBeNull()
 
     // The mode switch is a quiet control inside the shared Composer surface,
     // not a bordered segment that makes the capsule visually heavier.
     const modeToggle = screen.getByTestId('composer-mode-toggle')
     expect(modeToggle).toBeTruthy()
     expect(modeToggle.className).not.toContain('absolute')
-    expect(modeToggle.className).toContain('h-10')
-    expect(modeToggle.className).toContain('w-8')
+    expect(modeToggle.className).toContain('h-11')
+    expect(modeToggle.className).toContain('w-10')
     expect(modeToggle.className).toContain('bg-transparent')
     expect(modeToggle.className).toContain('border-0')
     expect(modeToggle.querySelector('svg')).toBeTruthy()
     expect(shell.contains(modeToggle)).toBe(true)
     expect(modeToggle.compareDocumentPosition(shell.querySelector('textarea, [contenteditable="true"]') ?? indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    fireEvent.click(sendMode)
     expect(screen.queryByTestId('composer-mode-toggle-menuitem')).toBeNull()
   })
 
@@ -651,6 +689,29 @@ describe('Composer', () => {
     expect(onQueuedDelete).toHaveBeenCalledWith('q2')
   })
 
+  it('uses commercial-size text, shell height, and touch targets in both composer modes', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    const { unmount } = renderComposer()
+    expect(screen.getByTestId('composer-simple-shell').className).toContain('min-h-14')
+    expect(screen.getByTestId('composer-input-simple').className).toContain('text-[18px]')
+    expect(screen.getByTestId('composer-input-simple').className).not.toContain('sm:text-base')
+    expect(screen.getByTestId('composer-input-simple').className).toContain('min-h-12')
+    expect(screen.getByTestId('composer-mode-toggle').className).toContain('h-11')
+    expect(screen.getByTestId('composer-send').className).toContain('h-11')
+    expect(screen.queryByTestId('send-mode-toggle')).toBeNull()
+    unmount()
+
+    window.localStorage.setItem('ak-composer-mode', 'full')
+    renderComposer()
+    expect(screen.getByTestId('composer-input').className).toContain('min-h-14')
+    expect(screen.getByTestId('composer-input').className).toContain('text-[18px]')
+    expect(screen.getByTestId('composer-input').className).not.toContain('sm:text-base')
+    expect(screen.getByTestId('composer-input').className).not.toContain('sm:text-sm')
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+  })
+
   it('renders the approval mode picker and reports selection', () => {
     const onApprovalModeChange = vi.fn()
     render(
@@ -672,6 +733,38 @@ describe('Composer', () => {
     expect(picker).toBeTruthy()
     expect(picker.textContent ?? '').toContain('Auto')
     expect(picker.textContent ?? '').not.toContain('ask only for tools marked unsafe')
+  })
+
+  it('changes approval mode through the mobile-native config control', () => {
+    const onApprovalModeChange = vi.fn()
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({ approvalMode: 'auto', onApprovalModeChange })
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    fireEvent.click(screen.getByTestId('composer-config-trigger'))
+    const nativeApproval = screen.getByTestId('composer-config-approval-native')
+    expect(nativeApproval.className).toContain('sm:hidden')
+    fireEvent.change(nativeApproval, { target: { value: 'ask' } })
+    expect(onApprovalModeChange).toHaveBeenCalledWith('ask')
+  })
+
+  it('does not dismiss config when a desktop select portal receives mousedown', async () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({ approvalMode: 'auto' })
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    fireEvent.click(screen.getByTestId('composer-config-trigger'))
+    const config = screen.getByTestId('composer-config-popover')
+    const desktopApproval = within(config).getAllByRole('combobox', { name: /approval mode/i })[1]!
+    fireEvent.keyDown(desktopApproval, { key: 'ArrowDown' })
+    const option = await screen.findByRole('option', { name: /^Ask everything/i })
+    expect(option.closest('[data-composer-config-select="approval"]')).toBeTruthy()
+    fireEvent.mouseDown(option)
+    expect(screen.getByTestId('composer-config-popover')).toBeTruthy()
   })
 
   it('keeps model and approval picker labels hidden below desktop width', () => {

@@ -93,6 +93,8 @@ if (dryRun) {
   console.log('dry run complete: no build, SSH command, upload, activation, restart, or rollback was executed')
   process.exit(0)
 }
+const remote = (command, options = {}) => run('ssh', [sshTarget, command], options)
+assertPortableTarget(JSON.parse(remote(`curl -fsS --max-time 5 ${sh(`${hostUrl.replace(/\/$/u, '')}/runtime/capabilities`)}`, { capture: true }).stdout))
 if (!effectiveArgs.includes('--skip-build')) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
 stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
 const sums = readFileSync(join(releaseDir, 'SHA256SUMS'), 'utf8')
@@ -104,7 +106,6 @@ const generation = createGenerationPlan({
 })
 const txLocal = join('/tmp', `agent-runlab-deploy-${generation.deployId}.json`)
 writeFileSync(txLocal, `${transactionJson(generation)}\n`, { mode: 0o600 })
-const remote = (command) => run('ssh', [sshTarget, command])
 let remoteHandedOff = false
 try {
   stage('prepare immutable remote generation', () => remote(prepareGenerationScript(generation)))
@@ -153,6 +154,9 @@ function run(command, args, options = {}) {
 
 function deployLxd({ container, remoteBin, service, skipBuild }) {
   const releaseDir = join(root, 'release')
+  const hostUrl = optionValueLocal(effectiveArgs, '--host-url') ?? process.env.AK_DEPLOY_HOST_URL ?? 'http://127.0.0.1:13000'
+  const capabilities = run('lxc', ['exec', container, '--', 'curl', '-fsS', '--max-time', '5', `${hostUrl.replace(/\/$/u, '')}/runtime/capabilities`], { capture: true })
+  assertPortableTarget(JSON.parse(capabilities.stdout))
   if (!skipBuild) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
   stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
   const sums = readFileSync(join(releaseDir, 'SHA256SUMS'), 'utf8')
@@ -160,7 +164,6 @@ function deployLxd({ container, remoteBin, service, skipBuild }) {
   const bundleHash = sums.match(/^([a-f0-9]{64})\s+bundle-dashboard-with-runtime\.cjs$/m)?.[1]
   if (!bundleHash) throw new Error('bundle hash is missing from SHA256SUMS')
   for (const file of files) if (!existsSync(join(releaseDir, file))) throw new Error(`missing release asset: ${file}`)
-  const hostUrl = optionValueLocal(effectiveArgs, '--host-url') ?? process.env.AK_DEPLOY_HOST_URL ?? 'http://127.0.0.1:13000'
   const plan = createGenerationPlan({
     remoteBin, service, hostUrl, files, bundleHash,
     sessionId: process.env.AGENT_RUNLAB_SESSION_ID,
@@ -187,6 +190,15 @@ function deployLxd({ container, remoteBin, service, skipBuild }) {
       try { lxcExec(container, `rm -rf ${sh(`${plan.root}/deploy.active`)} ${sh(plan.generationDir)}`) } catch {}
     }
     rmSync(txLocal, { force: true })
+  }
+}
+
+export function assertPortableTarget(capabilities) {
+  if (capabilities?.deployment?.architecture === 'platform' || capabilities?.product === 'dedicated' || capabilities?.product === 'private-cloud') {
+    throw new Error('LEGACY_DEPLOYMENT_FORBIDDEN: platform topology must be updated through deploy:dedicated and the Deploy Supervisor protocol')
+  }
+  if (capabilities?.deployment?.architecture !== 'portable' && capabilities?.product !== 'portable') {
+    throw new Error('cannot verify target as a portable deployment; refusing legacy deploy:remote')
   }
 }
 

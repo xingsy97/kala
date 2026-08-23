@@ -575,6 +575,8 @@ export type ExecutorOs = 'linux' | 'darwin' | 'win32' | 'other'
 
 export type BuildMetadata = {
   releaseTag: string
+  /** Semantic product version, independent from channel-like release tags. */
+  productVersion?: string
   gitCommit: string
   builtAt: string
   artifactKind: 'source' | 'cjs' | 'native'
@@ -1469,7 +1471,7 @@ export type DedicatedDeploymentStatus = {
     green: { pid: number; active: boolean; releaseId: string; releaseDigest?: string }
   }
   writeLeaseOwnerPid?: number
-  admission: { pending: number; leased: number; committed: number; expired: number; oldestAgeMs: number; capacity: number }
+  admission: { pending: number; leased: number; committed: number; failed: number; expired: number; oldestAgeMs: number; capacity: number }
   dashboard?: { schemaVersion: 1; generation: number; releaseId: string; releaseDigest: string; assetDigest: string; version: string; protocol: { min: string; max: string }; activatedAt: string }
   deployment: null | {
     deploymentId: string

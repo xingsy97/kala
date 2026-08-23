@@ -111,7 +111,7 @@ The current implementation has the right primitive:
   action coverage verifies graph export from real session logs.
 - `SubAgentRoleTemplate` / `resolveSubAgentPolicy` in
   `@agent-kernel/shared/enhancement` provide fixed role templates (`research`,
-  `test`, `review`) with default allowed tools, enforced max turns, ordinary
+  `implementation`, `test`, `review`) with default allowed tools, enforced max turns, ordinary
   idle, active-tool idle, absolute deadline, grace period, and expected output.
   Aggressive defaults are documented in
   [`subagent-timeout-policy.md`](../architecture/subagent-timeout-policy.md).
@@ -120,6 +120,16 @@ The current implementation has the right primitive:
   requests are capped, and low-cardinality reason codes include
   `policy_max_turns_raised`, `policy_max_turns_capped`,
   `policy_timeout_raised`, and `policy_timeout_capped`.
+- Role capability is least-privilege and uses the actual public Tool names.
+  `research` and `review` are read-only; `test` may read and run bounded shell
+  verification without editing source; `implementation` may use `write_file`,
+  `replace_in_file`, `replace_many_in_file`, and `apply_file_patch` plus read and
+  shell tools. No template includes the `agent` Tool, so delegation cannot grow
+  recursively merely because a child can edit. The selected role is also the
+  child `agentType` unless the caller explicitly supplies a distinct type. A
+  recognized `agent_type` also selects its matching role when `role` is omitted,
+  so a child labelled `implementation` cannot accidentally receive a read-only
+  or unbounded capability set.
 - Host-level depth and fan-out caps are enforced in `runAgentTool`:
   `AgentConfig.maxAgentDepth` (default 3) walks the `parentSessionId` chain at
   spawn time; `AgentConfig.maxAgentFanOut` (default 4) counts live sibling

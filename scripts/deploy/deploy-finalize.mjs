@@ -50,12 +50,33 @@ export function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
+export async function assertLegacyRestartTopology({ hostUrl, fetchImpl = fetch }) {
+  let response
+  try {
+    response = await fetchImpl(`${hostUrl}/runtime/capabilities`, { signal: AbortSignal.timeout(5_000) })
+  } catch (error) {
+    throw new Error(`cannot verify target deployment topology before legacy restart: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (!response.ok) throw new Error(`cannot verify target deployment topology before legacy restart: HTTP ${response.status}`)
+  const capabilities = await response.json()
+  if (capabilities?.deployment?.architecture === 'platform' || capabilities?.product === 'dedicated' || capabilities?.product === 'private-cloud') {
+    throw new Error('LEGACY_DEPLOYMENT_FORBIDDEN: platform topology must be updated through deploy:dedicated and the Deploy Supervisor protocol')
+  }
+  if (capabilities?.deployment?.architecture !== 'portable' && capabilities?.product !== 'portable') {
+    throw new Error('cannot verify target as a portable deployment; refusing legacy restart')
+  }
+}
+
 async function main() {
   const configPath = process.argv[2]
   if (!configPath) throw new Error('usage: deploy-finalize.mjs <transaction.json>')
   const config = JSON.parse(readFileSync(configPath, 'utf8'))
   const persist = (patch) => writeFileSync(configPath, `${JSON.stringify(Object.assign(config, patch), null, 2)}\n`, { mode: 0o600 })
   try {
+    // This check must precede both the origin barrier and bootstrap symlink
+    // activation: an old client may target Stable Ingress after the platform
+    // topology is already active.
+    await assertLegacyRestartTopology(config)
     await waitForOriginBarrier(config)
     if (config.bootstrap) activateGeneration({ currentLink: config.currentLink, generationDir: config.generationDir })
     const request = await fetch(`${config.hostUrl}/runtime/restart`, {

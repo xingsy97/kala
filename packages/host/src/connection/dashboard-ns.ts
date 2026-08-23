@@ -987,11 +987,9 @@ export function configureDashboardNamespace(
         const selectedModel = p.selectedModel?.trim()
         const normalizedSelectedModel = selectedModel ? normalizeIncomingModel(deps, selectedModel) : undefined
         if (selectedModel && !normalizedSelectedModel) {
-          socket.emit('session:error', {
-            sessionId: p.sessionId,
-            scope: 'host',
-            message: `unknown or ambiguous model: ${selectedModel}`,
-          })
+          const message = `unknown or ambiguous model: ${selectedModel}`
+          socket.emit('session:error', { sessionId: p.sessionId, scope: 'host', message })
+          ack?.({ ok: false, error: message })
           return
         }
         const cwd = p.cwd?.trim()
@@ -1019,29 +1017,23 @@ export function configureDashboardNamespace(
           ...(p.cwd !== undefined ? { initialCwd: p.cwd } : {}),
           ...(normalizedSelectedModel !== undefined ? { preferences: { selectedModel: normalizedSelectedModel } } : {}),
         })
-        await refreshSessionSkillsIfNeeded(deps, record)
-        await socket.join(sessionRoom(record.sessionId))
-        socket.emit(
-          'session:ready',
-          readyEventFor(
-            record,
-            effectiveModelForRecord(deps, record),
-            created ? 'created' : 'load',
-            contextWindowForSession(deps, record),
-          ),
-        )
-        if (created) {
-          deps.audit?.log({ action: 'dashboard.session_create', actor: auditActor(socket), target: { sessionId: record.sessionId, workspaceId: record.workspaceId }, outcome: 'ok', metadata: { cwd: record.state.cwd } })
-          await broadcastSessionList(deps)
-          if (deps.onSessionCreated) {
-            try {
-              await deps.onSessionCreated(record)
-            } catch {
-              // Lifecycle hook errors are advisory — swallow.
-            }
-          }
-        }
+        // `ensure` is the durable commit point. Acknowledge immediately so a
+        // slow Session-list refresh, skill scan, or advisory lifecycle hook can
+        // never turn a successful create into a client-visible timeout.
         ack?.({ ok: true })
+        void (async () => {
+          try {
+            await refreshSessionSkillsIfNeeded(deps, record)
+            await socket.join(sessionRoom(record.sessionId))
+            socket.emit('session:ready', readyEventFor(record, effectiveModelForRecord(deps, record), created ? 'created' : 'load', contextWindowForSession(deps, record)))
+            if (!created) return
+            deps.audit?.log({ action: 'dashboard.session_create', actor: auditActor(socket), target: { sessionId: record.sessionId, workspaceId: record.workspaceId }, outcome: 'ok', metadata: { cwd: record.state.cwd } })
+            await broadcastSessionList(deps)
+            void Promise.resolve(deps.onSessionCreated?.(record)).catch(() => {})
+          } catch (error) {
+            deps.broadcastError(record.sessionId, 'host', error instanceof Error ? error.message : String(error))
+          }
+        })()
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         deps.broadcastError(p.sessionId, 'host', message)

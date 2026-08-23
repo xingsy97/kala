@@ -30,6 +30,8 @@ type BreakdownSegment = {
   percent: number
 }
 
+function isSimpleDensity(density: Props['density']): boolean { return density === 'simple' }
+
 export function RuntimeMetrics({
   state,
   config,
@@ -46,6 +48,7 @@ export function RuntimeMetrics({
   const [open, setOpen] = useState(false)
   const [breakdownExpanded, setBreakdownExpanded] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
+  const [simpleGeometry, setSimpleGeometry] = useState({ width: 100, height: 56 })
   useEffect(() => {
     if (!open) return
     const onDocClick = (event: MouseEvent): void => {
@@ -54,6 +57,20 @@ export function RuntimeMetrics({
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [open])
+
+  useEffect(() => {
+    if (!isSimpleDensity(density) || !ref.current) return
+    const element = ref.current
+    const update = (): void => {
+      const rect = element.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) setSimpleGeometry({ width: rect.width, height: rect.height })
+    }
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [density])
 
   const contextTokens = contextSnapshot?.usage.inputTokens ?? 0
   const evaluation = evaluateDashboardContextPressure({
@@ -73,15 +90,10 @@ export function RuntimeMetrics({
       ? 'text-amber-600 dark:text-amber-300'
       : 'text-sky-600 dark:text-sky-300'
   const barTone = evaluation.tone === 'error'
-    ? 'from-rose-400/75 via-rose-500/80 to-fuchsia-500/75'
+    ? 'border-rose-500/85'
     : evaluation.tone === 'warn'
-      ? 'from-amber-300/75 via-amber-400/80 to-orange-500/75'
-      : 'from-cyan-400/70 via-sky-500/80 to-indigo-500/75'
-  const barGlow = evaluation.tone === 'error'
-    ? 'bg-rose-300 shadow-[0_0_7px_2px_rgb(251_113_133/0.42)]'
-    : evaluation.tone === 'warn'
-      ? 'bg-amber-200 shadow-[0_0_7px_2px_rgb(251_191_36/0.38)]'
-      : 'bg-sky-200 shadow-[0_0_7px_2px_rgb(56_189_248/0.38)]'
+      ? 'border-amber-400/85'
+      : 'border-sky-500/85'
   const title = userContextWindow && userContextWindow > 0
     ? t('chat.runtimeMetrics.title', {
       input: formatTokens(contextTokens),
@@ -94,7 +106,8 @@ export function RuntimeMetrics({
   const ringRadius = 7
   const ringCircumference = 2 * Math.PI * ringRadius
   const ringOffset = ringCircumference * (1 - visualRatio)
-  const usedWidth = userContextWindow && userContextWindow > 0 ? `${Math.min(100, visualRatio * 100)}%` : '0%'
+  const usedPercent = userContextWindow && userContextWindow > 0 ? Math.min(100, visualRatio * 100) : 0
+  const usedWidth = `${usedPercent}%`
   const reservedStart = `${Math.max(0, Math.min(100, (1 - reservedRatio) * 100))}%`
   const reservedWidth = `${Math.max(0, Math.min(100, reservedRatio * 100))}%`
   const isSimple = density === 'simple'
@@ -121,14 +134,23 @@ export function RuntimeMetrics({
       .filter((seg) => seg.tokens > 0)
       .map((seg) => ({ ...seg, percent: (seg.tokens / window) * 100 }))
   }, [contextSnapshot, t, userContextWindow])
+  const borderInset = 1.5
+  const borderRadius = Math.max(0, Math.min(21, simpleGeometry.height / 2 - borderInset, simpleGeometry.width / 2 - borderInset))
+  const contextBorderPath = `M ${borderInset} ${borderRadius + borderInset} Q ${borderInset} ${borderInset} ${borderRadius + borderInset} ${borderInset} H ${simpleGeometry.width - borderRadius - borderInset} Q ${simpleGeometry.width - borderInset} ${borderInset} ${simpleGeometry.width - borderInset} ${borderRadius + borderInset}`
 
   return (
-    <div className={cn('relative flex-none', isSimple && 'h-1 w-full px-3')} ref={ref}>
+    <div className={cn('relative flex-none', isSimple && 'pointer-events-none absolute inset-0 z-10')} ref={ref} data-testid={isSimple ? 'context-usage-overlay' : undefined}>
+      {isSimple ? (
+        <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${simpleGeometry.width} ${simpleGeometry.height}`} aria-hidden="true" data-testid="context-usage-track">
+          <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          <path d={contextBorderPath} pathLength="100" fill="none" className={cn('opacity-90 transition-[filter,opacity] duration-[240ms] ease-out', barTone.replace('border-', 'stroke-'))} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${usedPercent} ${100 - usedPercent}`} vectorEffect="non-scaling-stroke" data-context-usage-tone={evaluation.tone} />
+        </svg>
+      ) : null}
       <button
         type="button"
         className={cn(
           'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground',
-          isSimple ? 'group absolute inset-x-3 -top-[5px] h-[14px] rounded-full p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/30' : 'h-9 rounded-lg px-1.5 hover:bg-accent sm:h-7 sm:px-1',
+          isSimple ? 'pointer-events-auto absolute -inset-x-px -top-px h-5 overflow-visible rounded-t-[22px] p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400/30' : 'h-9 rounded-lg px-1.5 hover:bg-accent sm:h-7 sm:px-1',
         )}
         title={title}
         aria-label={title}
@@ -136,19 +158,7 @@ export function RuntimeMetrics({
         data-testid={isSimple ? 'context-usage-bar' : 'context-usage-indicator'}
         onClick={() => setOpen((value) => !value)}
       >
-        {isSimple ? (
-          <span className="relative block h-[3px] w-full overflow-visible rounded-full bg-foreground/[0.055] shadow-[inset_0_1px_1px_rgb(255_255_255/0.05)] transition-colors duration-200 group-hover:bg-foreground/[0.085]" aria-hidden="true">
-            <span
-              className={cn('absolute inset-y-0 left-0 rounded-full bg-gradient-to-r opacity-90 transition-[width,filter,opacity] duration-[240ms] ease-out group-hover:brightness-110 group-hover:opacity-100', barTone)}
-              style={{ width: usedWidth }}
-            >
-              {userContextWindow && userContextWindow > 0 && visualRatio > 0 ? (
-                <span className={cn('absolute right-0 top-1/2 h-[3px] w-[3px] -translate-y-1/2 translate-x-1/2 rounded-full opacity-80 transition-opacity duration-200 group-hover:opacity-100', barGlow)} />
-              ) : null}
-            </span>
-            <span className="absolute inset-y-0 border-l border-foreground/10 bg-foreground/[0.025]" style={{ left: reservedStart, width: reservedWidth }} />
-          </span>
-        ) : <svg
+        {!isSimple ? <svg
           viewBox="0 0 20 20"
           className={cn('flex-none -rotate-90', isSimple ? 'h-[18px] w-[18px]' : 'h-5 w-5')}
           aria-hidden="true"
@@ -179,7 +189,7 @@ export function RuntimeMetrics({
             strokeDasharray={ringCircumference}
             strokeDashoffset={ringOffset}
           />
-        </svg>}
+        </svg> : null}
         {!isSimple ? (
           <span className={cn(
             'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
@@ -191,7 +201,7 @@ export function RuntimeMetrics({
       </button>
       {open ? (
         <div
-          className="ak-motion-popover fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl sm:absolute sm:inset-x-auto sm:bottom-full sm:right-0 sm:mb-2 sm:w-[min(24rem,calc(100vw-1rem))]"
+          className="ak-motion-popover pointer-events-auto absolute inset-x-0 bottom-full z-30 mb-2 w-auto max-h-[min(32rem,calc(100dvh-7rem))] sm:left-auto sm:w-[min(24rem,calc(100vw-1rem))] overflow-y-auto overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl"
           data-testid="context-pressure-popover"
         >
           <div className="text-lg font-semibold tracking-tight text-foreground">{t('chat.runtimeMetrics.contextWindow')}</div>

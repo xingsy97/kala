@@ -61,6 +61,7 @@ import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { BannerStack, BannerSlot } from './features/chat/BannerStack.js'
 import { OfflineBanner, PwaLifecycleHost, PwaUpdateGlobalBanner } from './features/chat/PwaBanners.js'
 import { isStandalone } from './lib/pwa.js'
+import { loadDashboardExport } from './lib/dashboard-version-recovery.js'
 import { CommandPalette, type CommandPaletteItem } from './features/command/CommandPalette.js'
 import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
 import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
@@ -89,16 +90,16 @@ import { useAuthSession } from './auth-session.js'
 // own async chunk (see vite build output) and drops the initial JS payload
 // substantially. Fallback is a bare blank div so we don't flash a skeleton
 // while the chunk arrives on a fast connection.
-const OperationsPage = lazy(() => import('./features/operations/OperationsPage.js').then((m) => ({ default: m.OperationsPage })))
-const ArtifactsPage = lazy(() => import('./features/artifacts-browser/ArtifactsPage.js').then((m) => ({ default: m.ArtifactsPage })))
-const DocsPage = lazy(() => import('./features/docs/DocsPage.js').then((m) => ({ default: m.DocsPage })))
-const MemoPage = lazy(() => import('./features/memo/MemoPage.js').then((m) => ({ default: m.MemoPage })))
-const PipelinePage = lazy(() => import('./features/pipeline/PipelinePage.js').then((m) => ({ default: m.PipelinePage })))
-const SettingsDialog = lazy(() => import('./features/settings/SettingsDialog.js').then((m) => ({ default: m.SettingsDialog })))
-const SessionFilesPanel = lazy(() => import('./features/session-files/SessionFilesPanel.js').then((m) => ({ default: m.SessionFilesPanel })))
-const SessionTerminalPanel = lazy(() => import('./features/session-terminal/SessionTerminalPanel.js').then((m) => ({ default: m.SessionTerminalPanel })))
-const WorkspaceFileViewDialog = lazy(() => import('./features/session-files/SessionFilesPanel.js').then((m) => ({ default: m.WorkspaceFileViewDialog })))
-const SourceControlPanel = lazy(() => import('./features/source-control/SourceControlPanel.js').then((m) => ({ default: m.SourceControlPanel })))
+const OperationsPage = lazy(() => loadDashboardExport(import('./features/operations/OperationsPage.js'), 'OperationsPage', 'OperationsPage'))
+const ArtifactsPage = lazy(() => loadDashboardExport(import('./features/artifacts-browser/ArtifactsPage.js'), 'ArtifactsPage', 'ArtifactsPage'))
+const DocsPage = lazy(() => loadDashboardExport(import('./features/docs/DocsPage.js'), 'DocsPage', 'DocsPage'))
+const MemoPage = lazy(() => loadDashboardExport(import('./features/memo/MemoPage.js'), 'MemoPage', 'MemoPage'))
+const PipelinePage = lazy(() => loadDashboardExport(import('./features/pipeline/PipelinePage.js'), 'PipelinePage', 'PipelinePage'))
+const SettingsDialog = lazy(() => loadDashboardExport(import('./features/settings/SettingsDialog.js'), 'SettingsDialog', 'SettingsDialog'))
+const SessionFilesPanel = lazy(() => loadDashboardExport(import('./features/session-files/SessionFilesPanel.js'), 'SessionFilesPanel', 'SessionFilesPanel'))
+const SessionTerminalPanel = lazy(() => loadDashboardExport(import('./features/session-terminal/SessionTerminalPanel.js'), 'SessionTerminalPanel', 'SessionTerminalPanel'))
+const WorkspaceFileViewDialog = lazy(() => loadDashboardExport(import('./features/session-files/SessionFilesPanel.js'), 'WorkspaceFileViewDialog', 'SessionFilesPanel'))
+const SourceControlPanel = lazy(() => loadDashboardExport(import('./features/source-control/SourceControlPanel.js'), 'SourceControlPanel', 'SourceControlPanel'))
 import {
   cancelSession,
   clearSession,
@@ -122,7 +123,7 @@ import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
 import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { emitRpc } from './socket-rpc.js'
-import { admitUserMessage } from './admission-client.js'
+import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage } from './admission-client.js'
 import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, type TranscriptItem } from './transcript.js'
 import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent } from './app-logic/compaction.js'
 import { mergeOptimisticQueuedMessages, nextSessionSelection, queuedMessageKey, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
@@ -266,6 +267,7 @@ export function App(): JSX.Element {
   const [workspaceFileViewTarget, setWorkspaceFileViewTarget] = useState<WorkspaceFileTarget | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const [awaitingAck, setAwaitingAck] = useState(false)
+  const [messageDeliveryError, setMessageDeliveryError] = useState<{ message: string; operationId?: string } | null>(null)
   // A cancel can arrive while the Host has accepted the socket request but has
   // not yet moved the durable session from idle to thinking. Keep that intent
   // until the authoritative state becomes active, then replay it exactly once.
@@ -930,10 +932,8 @@ export function App(): JSX.Element {
     setWorkspacePickSubmitting(true)
     setWorkspacePickError(null)
     try {
-      const cwd = `/tmp/agent-kernel-chat-${randomId()}`
       await createSessionWithAck(controlSocket, {
         sessionId,
-        cwd,
         tools: SIMPLE_CHAT_TOOLS,
         selectedModel: preferredModel,
       })
@@ -1057,10 +1057,10 @@ export function App(): JSX.Element {
       (e) => e.workspaceId === currentSession.workspaceId,
     )
   }, [currentSession?.workspaceId, control.executors])
-  const fileExplorerWorkspaceId = useMemo(() => {
-    if (currentSession?.workspaceId) return currentSession.workspaceId
-    return control.executors.length === 1 ? control.executors[0]?.workspaceId : undefined
-  }, [currentSession?.workspaceId, control.executors])
+  // A workspace-free Chat must never silently borrow the only connected
+  // Executor. File, Git, and Terminal stay unavailable until the user creates
+  // or selects a workspace-bound Session.
+  const fileExplorerWorkspaceId = currentSession?.workspaceId
   const workspaceExplorerBinding = resolveWorkspaceExplorerBinding({
     activeSessionId,
     sessionSocket: session.socket,
@@ -1758,7 +1758,8 @@ export function App(): JSX.Element {
             <WorkbenchToolbar
               sessionLabel={sessionLabel}
               sessionActivityStatus={indicatorActiveSessionStatus}
-              cwd={currentCwd}
+              cwd={currentSession?.workspaceId ? currentCwd : ''}
+              simpleChat={hasSelectedSession && !currentSession?.workspaceId}
               onOpenTopbar={() => setTopbarOpen(true)}
               topbarAvailable={!topbarOpen}
               onOpenExplorer={() => {
@@ -1771,7 +1772,7 @@ export function App(): JSX.Element {
                 else setInspectorDrawerOpen(true)
               }}
               sidebarAvailable={hasSelectedSession && (!wideLayout || !inspectorOpen)}
-              onChangeCwd={runtimeCapabilities.workspace ? openCwdDialog : undefined}
+              onChangeCwd={runtimeCapabilities.workspace && currentSession?.workspaceId ? openCwdDialog : undefined}
               sessionSelected={hasSelectedSession}
               sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
               sessionTabs={!explorerOpen ? <SessionTabStrip sessions={control.sessions} openIds={sessionTabs.state.open} pinned={sessionTabs.state.pinned} active={config.sessionId} onSelect={selectSession} onClose={sessionTabs.close} onPin={sessionTabs.pin} onReorder={sessionTabs.reorder} /> : undefined}
@@ -1874,6 +1875,11 @@ export function App(): JSX.Element {
                           }).then(() => setAwaitingAck(false)).catch((error) => {
                             setPendingUserMessages((prev) => prev.filter((item) => item.id !== pendingId))
                             setAwaitingAck(false)
+                            setMessageDeliveryError(error instanceof AdmissionDeliveryPendingError
+                              ? { message: error.lastError ? t('composer.delivery.pendingDetail', { reason: error.lastError, attempts: error.attempts }) : t('composer.delivery.pending'), operationId: error.operationId }
+                              : error instanceof AdmissionDeliveryFailedError
+                                ? { message: error.lastError ?? t('composer.delivery.failed'), operationId: error.operationId }
+                              : { message: error instanceof Error ? error.message : String(error) })
                             notify.error(error instanceof Error ? error.message : String(error))
                           })
                           if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
@@ -1904,6 +1910,20 @@ export function App(): JSX.Element {
                     <div className="min-h-0">
                       <BannerStack>
                         <SessionErrorBanner error={session.lastError} />
+                        {messageDeliveryError ? (
+                          <BannerSlot>
+                            <div className="flex items-start gap-3 border-t border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200" data-testid="message-delivery-error">
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium">{t('composer.delivery.failedTitle')}</div>
+                                <div className="mt-0.5 break-words">{messageDeliveryError.message}</div>
+                                {messageDeliveryError.operationId ? <div className="mt-1 font-mono text-[10px] opacity-75">{messageDeliveryError.operationId}</div> : null}
+                              </div>
+                              <Button type="button" size="sm" variant="outline" className="h-7 shrink-0" onClick={() => { setMessageDeliveryError(null); controlSocket?.connect() }}>
+                                {t('composer.delivery.reconnect')}
+                              </Button>
+                            </div>
+                          </BannerSlot>
+                        ) : null}
                         {sessionWorkspaceKnownOffline ? (
                           <BannerSlot>
                             <div
@@ -1946,6 +1966,8 @@ export function App(): JSX.Element {
                         front={
                           <Composer
                           disabled={!controlSocket?.connected || sessionWorkspaceKnownOffline}
+                          serviceUnavailable={!controlSocket?.connected}
+                          onReconnectService={() => controlSocket?.connect()}
                           model={composerModel}
                           models={models}
                           onModelChange={onModelChange}
@@ -2048,6 +2070,7 @@ export function App(): JSX.Element {
                               ])
                             }
                             setAwaitingAck(true)
+                            setMessageDeliveryError(null)
                             try {
                               await admitUserMessage({
                                 host: hostEndpoint.url,
@@ -2061,6 +2084,21 @@ export function App(): JSX.Element {
                             } catch (error) {
                               setPendingUserMessages((prev) => prev.filter((item) => item.text !== text || item.createdAt !== createdAt))
                               setOptimisticQueuedMessages((prev) => prev.filter((item) => item.text !== text || item.createdAt !== createdAt))
+                              if (error instanceof AdmissionDeliveryPendingError) {
+                                setMessageDeliveryError({
+                                  message: error.lastError
+                                    ? t('composer.delivery.pendingDetail', { reason: error.lastError, attempts: error.attempts })
+                                    : t('composer.delivery.pending'),
+                                  operationId: error.operationId,
+                                })
+                              } else if (error instanceof AdmissionDeliveryFailedError) {
+                                setMessageDeliveryError({
+                                  message: error.lastError ?? t('composer.delivery.failed'),
+                                  operationId: error.operationId,
+                                })
+                              } else {
+                                setMessageDeliveryError({ message: error instanceof Error ? error.message : String(error) })
+                              }
                               throw error
                             } finally {
                               setAwaitingAck(false)
@@ -2608,6 +2646,7 @@ export function WorkbenchToolbar({
   onChangeCwd,
   sessionSelected,
   sessionDirectoryLoading = false,
+  simpleChat = false,
   sessionTabs,
 }: {
   sessionLabel: string
@@ -2622,6 +2661,7 @@ export function WorkbenchToolbar({
   onChangeCwd?: () => void
   sessionSelected: boolean
   sessionDirectoryLoading?: boolean
+  simpleChat?: boolean
   sessionTabs?: React.ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
@@ -2676,6 +2716,7 @@ export function WorkbenchToolbar({
           <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" data-testid="session-label">
             {displayLabel}
           </span>
+          {simpleChat ? <span className="flex-none rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary" data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
         </span>
         {sessionSelected && onChangeCwd ? (
           <Button
