@@ -89,11 +89,14 @@ export function RuntimeMetrics({
     : evaluation.tone === 'warn'
       ? 'text-amber-600 dark:text-amber-300'
       : 'text-sky-600 dark:text-sky-300'
-  const barTone = evaluation.tone === 'error'
-    ? 'border-rose-500/85'
+  // Keep these as complete, static Tailwind class names. Constructing them at
+  // runtime leaves production CSS without the SVG stroke rules, so the path
+  // exists but its context-pressure color is invisible.
+  const contextStrokeTone = evaluation.tone === 'error'
+    ? 'stroke-rose-500/85'
     : evaluation.tone === 'warn'
-      ? 'border-amber-400/85'
-      : 'border-sky-500/85'
+      ? 'stroke-amber-400/85'
+      : 'stroke-sky-500/85'
   const title = userContextWindow && userContextWindow > 0
     ? t('chat.runtimeMetrics.title', {
       input: formatTokens(contextTokens),
@@ -143,7 +146,7 @@ export function RuntimeMetrics({
       {isSimple ? (
         <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${simpleGeometry.width} ${simpleGeometry.height}`} aria-hidden="true" data-testid="context-usage-track">
           <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-          <path d={contextBorderPath} pathLength="100" fill="none" className={cn('opacity-90 transition-[filter,opacity] duration-[240ms] ease-out', barTone.replace('border-', 'stroke-'))} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${usedPercent} ${100 - usedPercent}`} vectorEffect="non-scaling-stroke" data-context-usage-tone={evaluation.tone} />
+          <path d={contextBorderPath} pathLength="100" fill="none" className={cn('opacity-90 transition-[filter,opacity] duration-[240ms] ease-out', contextStrokeTone)} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${usedPercent} ${100 - usedPercent}`} vectorEffect="non-scaling-stroke" data-context-usage-tone={evaluation.tone} />
         </svg>
       ) : null}
       <button

@@ -185,7 +185,10 @@ describe('RuntimeMetrics', () => {
     expect(track.querySelectorAll('[data-context-segment]')).toHaveLength(0)
     const usage = track.querySelector('[data-context-usage-tone]')
     expect(usage?.getAttribute('data-context-usage-tone')).toBe('ok')
+    expect(usage?.getAttribute('class')).toContain('stroke-sky-500/85')
+    expect(usage?.getAttribute('class')).not.toContain('border-')
     expect(usage?.getAttribute('stroke-linecap')).toBe('round')
+    expect(usage?.getAttribute('stroke-dasharray')).toBe('30 70')
     // No inline percentage number in the composer chrome...
     expect(indicator.textContent ?? '').not.toContain('%')
     // ...but the exact figure is still reachable via the tooltip and popover.
