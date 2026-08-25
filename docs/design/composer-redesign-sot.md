@@ -34,7 +34,7 @@ Visible surfaces are smaller than touch hit targets.
 
 - Model, Approval, Tasks, and Shell must not all look like heavy pills.
 - Desktop secondary controls default to transparent or a very subtle surface; hover, focus, and pressed states may reveal a stronger surface.
-- Context uses its ring plus percentage without a large enclosing capsule.
+- Full mode uses the compact Context ring and percentage. Simple mode renders a clickable, segmented Context stroke along the Composer’s own upper rounded border; User, Assistant, and Tool-result segments share one measured SVG path and the exact percentage remains in the popover.
 - Typography is 12 px minimum for visible control labels on desktop and 12–13 px on touch layouts.
 
 ## Shared behavior
@@ -64,15 +64,15 @@ Switching modes changes presentation only. It must not clear or replace any shar
 
 - Compact capsule with one auto-growing input row.
 - Inline image tokens remain editable/removable.
-- Always expose mode toggle, input, context, attachment/config access, and Send/Stop.
+- Always expose mode toggle, input, the border-integrated Context trigger, attachment/config access, and one Send/Stop button.
 - Model and approval are summarized by a lightweight settings control.
-- Runtime status and queue summary appear above the capsule only when relevant.
+- Queue summary appears above the capsule only when relevant. Agent Activity belongs to the transcript tail, not the Composer surface.
 - Settings opens an anchored popover on pointer layouts.
 
 ### Phone
 
 - Use a two-level structure: input area plus one compact action row.
-- Visible controls are attach/config, model/approval summary, context, and Send/Stop.
+- Visible controls are mode, input, config, the border-integrated Context trigger, and one Send/Stop button.
 - Settings opens a bottom sheet.
 - Queue opens a touch-native review sheet/card instead of reproducing desktop drag controls.
 
@@ -82,7 +82,7 @@ Switching modes changes presentation only. It must not clear or replace any shar
 
 - One coherent surface with an auto-growing input and a quiet footer toolbar.
 - Footer exposes mode toggle, Model, Approval, Tasks/Shell extras, Context, Human Attention when meaningful, and Send/Stop.
-- Steer/Queue remains available through the send split control but does not create an oversized button cluster.
+- Steer/Queue remains available through the Full-mode send split control. Simple mode keeps one send button and moves Steer/Queue selection into config.
 - Image tray is shown above input content.
 - Model/Approval controls use compact text-button geometry rather than full-height pills.
 
@@ -104,7 +104,8 @@ Switching modes changes presentation only. It must not clear or replace any shar
 
 - Queue Dock remains separate from the editor surface.
 - Normal idle state renders no status rail.
-- Running, waiting, disconnected, pending, and error status use a concise rail above Composer.
+- Connection, pending, and error feedback use concise dedicated surfaces.
+- Agent Activity is a transcript-tail badge. It shows the real runtime state and, when available, the current or immediately preceding persisted Tool Intention without duplicating Dot Line text.
 - Queue summary is collapsed by default on touch layouts and can be expanded without destroying input focus.
 - Desktop queue editing, reorder, delete, pending, and retry behavior remains available.
 

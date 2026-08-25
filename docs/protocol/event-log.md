@@ -162,6 +162,16 @@ values.
 
 ---
 
+## Tool Intention normalization
+
+LLM-facing Tool schemas require `_intent`. On `llm_response`, the Kernel trims and
+bounds that value, removes it from execution input, and persists it as
+`tool_call.intent`. Pending calls, approval events, and `call_tool` effects may carry
+`intent`; the Executor receives only the real Tool input. Missing legacy values stay
+absent rather than being synthesized from commands, paths, or parameters.
+
+---
+
 ## 3. Full example
 
 A four-event session ("hi" → LLM tool call → tool result → LLM text reply):
@@ -169,7 +179,7 @@ A four-event session ("hi" → LLM tool call → tool result → LLM text reply)
 ```jsonl
 {"kind":"header","seq":0,"ts":"2026-07-04T17:30:15.000Z","sessionId":"01J1XZ8T4W9F2A3B4C5D6E7F8G","formatVersion":1,"kernelVersion":"@agent-kernel/kernel@0.1.0","config":{"tools":[{"name":"read","description":"Read a file","inputSchema":{"type":"object"},"requiresApproval":false}],"systemPrompt":"You are a coding agent."},"initialState":{"sessionId":"01J1XZ8T4W9F2A3B4C5D6E7F8G","messages":[{"role":"system","content":[{"type":"text","text":"You are a coding agent."}]}],"pendingCalls":[],"status":"idle","usage":{"inputTokens":0,"outputTokens":0,"cacheCreationTokens":0,"cacheReadTokens":0},"cursor":0}}
 {"kind":"event","seq":1,"ts":"2026-07-04T17:30:15.412Z","event":{"kind":"user_message","text":"Read /tmp/notes.md"},"effects":[{"kind":"call_llm","messages":[...],"tools":[...]}]}
-{"kind":"event","seq":2,"ts":"2026-07-04T17:30:17.891Z","event":{"kind":"llm_response","message":{"role":"assistant","content":[{"type":"tool_call","callId":"c1","name":"read","input":{"path":"/tmp/notes.md"}}]},"usage":{"inputTokens":142,"outputTokens":38}},"effects":[{"kind":"call_tool","callId":"c1","name":"read","input":{"path":"/tmp/notes.md"}}],"usage":{"inputTokens":142,"outputTokens":38,"cacheCreationTokens":0,"cacheReadTokens":0}}
+{"kind":"event","seq":2,"ts":"2026-07-04T17:30:17.891Z","event":{"kind":"llm_response","message":{"role":"assistant","content":[{"type":"tool_call","callId":"c1","name":"read","input":{"path":"/tmp/notes.md"},"intent":"Inspect the requested notes so their contents can be summarized accurately."}]},"usage":{"inputTokens":142,"outputTokens":38}},"effects":[{"kind":"call_tool","callId":"c1","name":"read","input":{"path":"/tmp/notes.md"},"intent":"Inspect the requested notes so their contents can be summarized accurately."}],"usage":{"inputTokens":142,"outputTokens":38,"cacheCreationTokens":0,"cacheReadTokens":0}}
 {"kind":"event","seq":3,"ts":"2026-07-04T17:30:18.104Z","event":{"kind":"tool_result","callId":"c1","ok":true,"content":"# My notes\n..."},"effects":[{"kind":"call_llm","messages":[...],"tools":[...]}]}
 {"kind":"event","seq":4,"ts":"2026-07-04T17:30:20.552Z","event":{"kind":"llm_response","message":{"role":"assistant","content":[{"type":"text","text":"The file contains your notes about..."}]},"usage":{"inputTokens":210,"outputTokens":56}},"effects":[{"kind":"finish"}],"usage":{"inputTokens":352,"outputTokens":94,"cacheCreationTokens":0,"cacheReadTokens":0}}
 ```

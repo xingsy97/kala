@@ -2,40 +2,37 @@
 
 **Status**: Normative for the executor tool surface.
 
-Every bundled executor MUST implement the tools below. Third-party executors MAY implement a subset declared through `executor:announce.tools`.
+The model-visible Tool catalog is owned by the Host. Executor announcements declare
+RPC implementations; Host builtins such as `agent`, `todo_graph`, `todowrite`, and
+`websearch` do not imply an Executor handler.
+
+At disclosure time the Host augments every model-visible input schema with required
+`_intent` (12–240 characters). The Kernel persists it as `tool_call.intent` and
+removes `_intent` before dispatch, so Executor handler schemas and execution input do
+not contain presentation metadata.
 
 ## Design Principles
 
 1. Tool names use explicit `snake_case` identifiers.
-2. Read-only tools never require approval. File mutation tools always require approval by default.
-3. JSON Schema is the input contract.
-4. Tool output is still a string on the wire. Structured output is JSON-stringified.
-5. Mutating file tools share one mutation engine for path resolution, text decoding, exact replacement validation, patch parsing, diff generation, stale guards, and per-file locks.
-6. Error strings keep stable prefixes such as `EINVAL:`, `ENOENT:`, `EACCES:`, `EAMBIG:`, and `ENOTFOUND:`.
+2. Read-only tools never require approval. File mutation tools require approval by default.
+3. JSON Schema is the input contract; Host disclosure may add `_intent`.
+4. Tool output is a string on the wire. Structured output is JSON-stringified.
+5. Mutating file tools share one mutation engine for validation, diffs, stale guards, and locks.
+6. Errors keep stable codes such as `EINVAL`, `ENOENT`, `EACCES`, `EAMBIG`, and `ENOTFOUND`.
 
-## Tool Summary
+## Tool ownership summary
 
-| Name | Purpose | Approval | Category |
-|---|---|---|---|
-| `read_file` | Read one text file | No | Read-only |
-| `read_files` | Read multiple text files with batcat-style sections | No | Read-only |
-| `ls` | List directory entries | No | Read-only |
-| `glob` | Find files by glob pattern | No | Read-only |
-| `grep` | Search file contents | No | Read-only |
-| `write_file` | Create or fully overwrite one text file | Yes | Mutating |
-| `replace_in_file` | One exact string replacement in one file | Yes | Mutating |
-| `replace_many_in_file` | Multiple exact string replacements in one file | Yes | Mutating |
-| `apply_file_patch` | Apply patch-format file mutations | Yes | Mutating |
-| `bash` | Execute shell command; supports background mode | Yes | Mutating |
-| `bash_output` | Poll background shell output | No | Background shell |
-| `kill_shell` | Stop a background shell task | Yes | Background shell |
-| `todowrite` | Replace the session todo list | No | Planning |
-| `memory` | List, read, write, or delete memory entries | No | Memory |
-| `websearch` | Web search | No | Network |
-| `webfetch` | Fetch a web page | No | Network |
-| `agent` | Spawn a host-side child agent | No | Host builtin |
+| Model-visible name | Execution owner | Handler / notes |
+|---|---|---|
+| `read_file`, `read_files`, `ls`, `glob`, `multi_grep` | Executor | Read-only filesystem/search RPCs; ordinary `grep` is not public |
+| `write_file`, `replace_in_file`, `replace_many_in_file`, `apply_file_patch` | Executor | File mutation RPCs |
+| `shell` | Executor | Cross-platform public name mapped to the shell handler; `bash` remains an internal/compatibility implementation name |
+| `memory`, `webfetch` | Executor | Scoped memory and network fetch handlers |
+| `todowrite`, `todo_graph`, `agent`, `websearch`, discovery tools | Host | Host lifecycle/control-plane implementations |
+| `__*` internal tools | Executor | Host-initiated direct RPCs; never disclosed to the model |
 
-`read`, `write`, and `edit` are not part of the bundled executor surface anymore.
+`read`, `write`, `edit`, and ordinary public `grep` are not part of the current
+model-visible catalog.
 
 ## File Read Tools
 
@@ -236,4 +233,7 @@ Update hunks use strict context. Missing or ambiguous context fails.
 
 ## Other Tools
 
-`ls`, `glob`, `grep`, `bash`, `bash_output`, `kill_shell`, `todowrite`, `memory`, `websearch`, `webfetch`, and host builtin `agent` keep their existing schemas and behavior except that docs and prompts should refer to the renamed file tools above.
+`ls`, `glob`, `multi_grep`, public `shell`, `memory`, and `webfetch` retain their
+specialized contracts. Planning, sub-agent, discovery, and Web Search tools are
+Host-owned. Background-shell polling/killing and `__*` filesystem, terminal, and
+publication operations are internal RPCs rather than additional public model Tools.

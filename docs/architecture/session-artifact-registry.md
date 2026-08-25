@@ -40,6 +40,17 @@ GET /session-artifacts/<artifactId>?sessionId=<sessionId>
 
 The response has the stored image media type, immutable private cache headers, content length, and hash ETag. A mismatched session is rejected.
 
+## Assistant local-image publication
+
+Before an authoritative Assistant `llm_response` is reduced and persisted, the Host
+scans non-fenced Markdown image references. Local Workspace or Executor-owned system
+temporary images are read through a private Executor RPC, magic-byte validated,
+copied into this registry, and rewritten to `artifact://<artifactId>`. Remote,
+`data:`, `blob:`, and existing `artifact:` URLs are untouched. Publication failure
+becomes readable `Image unavailable` text rather than a broken browser URL. The
+JSONL therefore remains stable across refresh, reconnect, device change, and source
+file deletion.
+
 ## Dashboard behavior
 
 `ReactMarkdown` preserves `artifact://` image URLs. The custom image renderer converts them to the session-bound HTTP URL, renders a lazy thumbnail, provides a full-viewport preview, and displays a readable error fallback.

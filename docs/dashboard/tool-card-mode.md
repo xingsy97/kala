@@ -66,8 +66,8 @@ current merely because it is the newest one.
 
 The completion wording refers only to the preceding Tool step, not to completion
 of the user's whole task. When a new Tool starts, its current Intention replaces
-the previous-step projection immediately. Missing legacy Intention data may use
-a generic lifecycle fallback, but must never expose Tool arguments. The Badge
+the previous-step projection immediately. Missing legacy Intention data uses only the short lifecycle state; it must not
+fabricate an Intention or expose Tool arguments. The Badge
 must not render prose prefixes such as `In progress`, `Previous step completed`,
 `Previous step did not complete`, or `Awaiting approval`; lifecycle is visual
 state, not a second sentence competing with the Intention.
@@ -100,6 +100,19 @@ existing non-sensitive Tool summary (for example, `Read completed` or
 Failed, running, and approval calls likewise remain individually inspectable.
 Commands, paths, and parameters remain hidden behind the per-call closed
 `Technical details` disclosure.
+
+
+### Dot grouping and expansion
+
+Dots are grouped only when adjacent calls use the same Tool name. A group renders
+`×N`; it never merges across a different Tool. `×N` is semantic call aggregation,
+while `+N` remains the width-budget omission count. Aggregated status preserves
+failure, approval, running, orphaned, and success precedence, and expansion still
+shows every original call and result.
+
+Expanded Tool activity ends with a visible Collapse action. Collapsing from the
+bottom returns the summary near the viewport instead of forcing the user to scroll
+back through a long detail block.
 
 ### Responsive expanded layout
 

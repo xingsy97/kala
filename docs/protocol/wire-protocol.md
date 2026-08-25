@@ -1147,7 +1147,13 @@ Sent by executor immediately after the handshake succeeds. Declares the workspac
   executorId: string          // client-generated stable id (usually a ULID)
   workspaceId: string         // REQUIRED. Stable ULID minted on the executor's first launch and persisted (default `~/.agent-kernel/workspace-id`). Sessions bind to this in their JSONL header (see event-log.md §3); Host routes `tool:call` by matching `session.workspaceId` against a live announce. Never renamed — a lost or regenerated id detaches the machine's existing sessions, which is why the executor refuses to boot with a corrupted id file.
   workspaceName: string       // REQUIRED. Human-readable display label. Free to change via `--name` — routing goes by workspaceId, not this. Falls back to `os.hostname()` when the operator doesn't pass a name.
-  tools: string[]             // tool names this executor implements
+  tools: string[]             // public implementation names this executor can serve
+  toolImplementations?: Array<{ name: string; version?: string; schemaHash?: string }>
+  installId?: string          // stable managed-install identity
+  executorVersion?: string    // executor package/release version
+  build?: { version?: string; commit?: string; builtAt?: string }
+  capabilities?: Record<string, unknown>
+  defaultCwd?: string
   sandboxRoots?: string[]     // optional filesystem jail(s). Empty / omitted = executor trusts whole machine (defers to OS user permissions).
   workingDir?: string         // for logging/display only; NOT part of the workspace identity.
   runtime: 'node' | 'browser-webcontainer' | 'other'

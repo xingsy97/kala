@@ -128,6 +128,17 @@ Tool records show tool name, intent when present, status, and a bounded target/r
 
 `SessionPreviewStore` accumulates token deltas immediately in its runtime but schedules publication. At most one timer/animation-frame callback exists per Session. Terminal events flush pending text before publishing authoritative state. Unwatch and disconnect cancel scheduled publication.
 
+
+## User-message anchor navigation
+
+The transcript treats each User message as the start of a conversational chapter.
+When at least two User messages exist, compact previous/next controls at the left of
+the chat jump to the adjacent User-message anchor, not by a fixed pixel/page offset.
+The current viewport anchor determines the starting point; the target User message
+is placed near the top so the reader can continue downward through the complete
+Assistant/Tool turn. The first/last direction is disabled, and navigation changes no
+Session state or persisted event.
+
 ## 5. Overlay rules
 
 - Visible modal dialogs may intentionally block background input.
@@ -162,7 +173,7 @@ Required deployment behavior:
 - the deploying Session is never required to poll a Host endpoint whose drain state blocks that same Session;
 - global checkpoint restart remains valid for operator-driven maintenance from an independent control process, not for self-hosted in-Session deployment.
 
-Until an external deferred-cutover command exists, the safe manual procedure is: stage the release, verify `deploy/current`, wait for all Sessions to be resting without enabling drain, then use the external service supervisor for one bounded restart. Do not repeatedly invoke `/runtime/restart` from the Session being deployed.
+Dedicated now uses `deploy:dedicated` and the external Deploy Supervisor request/receipt protocol. Portable retains the separate single-service finalizer. Dashboard-only changes use `deploy:dashboard` and do not wait for Runtime quiescence. Do not poll a deployment from the same Tool call whose durable result is the origin barrier.
 
 ## 7. Required automated evidence
 
