@@ -70,7 +70,7 @@ The `source: consolidator` field is what enables the "don't downgrade" check on 
 
 ### 2.4 `MEMORY.md` maintenance
 
-`MEMORY.md` stays agent-authored between runs. When consolidator writes a new file, it appends a one-line entry to `MEMORY.md` in the format the existing memory tool already uses: `- [Name](key.md) — description`. If the key already existed, replace the line in place. No index-wide rewrite.
+`MEMORY.md` stays agent-authored between runs. When consolidator writes a new file, it appends a one-line entry to `MEMORY.md` in the format the existing memory tool already uses: `- Name (key.md) — description`. If the key already existed, replace the line in place. No index-wide rewrite.
 
 ### 2.5 What the consolidator does not do
 

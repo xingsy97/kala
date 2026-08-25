@@ -1,5 +1,7 @@
 # Platform Deployment Feature Review Ledger
 
+**Status:** historical review snapshot; not current release evidence.
+
 **Status:** current review record
 **Reviewed:** 2026-07-29
 **Normative contracts:** [`../architecture/deployment-mode-contract.md`](../architecture/deployment-mode-contract.md), [`critical-user-action-matrix.md`](critical-user-action-matrix.md)

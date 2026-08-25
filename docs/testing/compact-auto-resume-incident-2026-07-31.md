@@ -1,5 +1,7 @@
 # Compact Auto-resume Incident — 2026-07-31
 
+**Status:** historical incident report; not current release evidence or implementation status.
+
 Session: `123e4567-e89b-42d3-a456-42661417000d`
 
 ## Evidence

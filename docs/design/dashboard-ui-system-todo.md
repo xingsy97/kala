@@ -1,5 +1,7 @@
 # Dashboard UI system redesign TODO
 
+**Status:** derived implementation plan and status ledger; non-normative. Topic-specific SOTs such as Composer and Tool Card contracts take precedence.
+
 > Status: approved source of truth; implementation in progress
 >
 > This document defines the design direction, implementation sequence, acceptance criteria, and regression gates for the Dashboard UI redesign. Product UI changes must conform to it.

@@ -1,5 +1,7 @@
 # Dashboard Product Readiness Plan
 
+**Status:** historical coordinating plan; non-normative and not current implementation evidence.
+
 Status: active / incremental delivery
 Owner: dashboard + host
 Last updated: 2026-07-28

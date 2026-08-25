@@ -1,5 +1,7 @@
 # Product Hardening Program Architecture
 
+**Status:** historical closed execution program; current release evidence is revision-bound under `docs/evidence/README.md`.
+
 **Status:** accepted execution order for the current program
 **Baseline:** [`../testing/current-program-baseline.md`](../testing/current-program-baseline.md)
 **Acceptance contract:** [`../testing/product-e2e-harness.md`](../testing/product-e2e-harness.md)

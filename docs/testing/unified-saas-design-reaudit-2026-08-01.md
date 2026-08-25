@@ -1,5 +1,7 @@
 # Unified SaaS Design Re-audit — 2026-08-01
 
+**Status:** historical re-audit snapshot superseded by current Private Cloud contracts and revision-bound evidence.
+
 **Historical terminology:** this frozen 2026-08-01 re-audit preserves the removed product name used when its evidence was captured. Its current successor is Private Cloud; see [`../architecture/deployment-mode-contract.md`](../architecture/deployment-mode-contract.md).
 
 ## Frozen product contract

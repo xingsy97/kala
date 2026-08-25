@@ -1,5 +1,7 @@
 # Tool Call Failure Investigation
 
+**Status:** historical sampled investigation; non-normative.
+
 ## Purpose
 
 This document records an empirical investigation of tool-call failures in locally retained Agent RunLab session logs. Its goals are to:

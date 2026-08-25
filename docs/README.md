@@ -1,6 +1,6 @@
 # docs/
 
-Documentation index for `agent-kernel`. If you're new here, start with the project [README](../README.md) — it has curated reading paths for different intents. This index is grouped by **component** so you can jump straight to whatever you're touching.
+Documentation index for `agent-kernel`. If you're new here, start with the project [README](../README.md) — it provides the project overview and primary entry points. This index is grouped by **component** so you can jump straight to whatever you're touching.
 
 ---
 
@@ -24,12 +24,14 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [host/memory-consolidation.md](host/memory-consolidation.md) | Memory extension: consolidation triggers, storage, tool exposure |
 | [host/tool-output-overflow.md](host/tool-output-overflow.md) | Executor-side large-output spillover and preview pointers |
 | [host/skills.md](host/skills.md) | OpenCode-style `skill({ name })` tool loading |
+| [host/security-control-plane.md](host/security-control-plane.md) | **Normative.** Deployment-boundary credentials, authorization, audit, and security ownership |
 | [host/mcp.md](host/mcp.md) | MCP runtime integration design (planned, not yet implemented) |
 
 ### Dashboard — React SPA (`packages/dashboard`)
 
 | File | Purpose |
 |---|---|
+| [design/composer-redesign-sot.md](design/composer-redesign-sot.md) | **Normative.** Composer modes, controls, Context border, responsive geometry, and interaction contract |
 | [dashboard/debugger-design.md](dashboard/debugger-design.md) | Right-sidebar Inspector — debugger, not metrics dashboard |
 | [dashboard/advanced-debugger-features.md](dashboard/advanced-debugger-features.md) | Follow-up features building on the debugger foundation |
 | [dashboard/llm-message-assembly-debugger.md](dashboard/llm-message-assembly-debugger.md) | Explaining how LLM API messages are assembled |
@@ -51,7 +53,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [protocol/wire-protocol.md](protocol/wire-protocol.md) | **Normative.** Every Socket.IO event between Dashboard, Host, and Executor |
-| [protocol/event-log.md](protocol/event-log.md) | **Current implementation.** JSONL event log format for persistence, replay, fork; see the host session-log document for the breaking v2 target |
+| [protocol/event-log.md](protocol/event-log.md) | **Implemented v1 format.** JSONL event log format for persistence, replay, fork; see the host session-log document for the breaking v2 target |
 
 ### Evaluation — standalone platform and benchmark references
 
@@ -83,7 +85,13 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | Three processes and one full turn end-to-end |
 | [architecture/deployment-mode-contract.md](architecture/deployment-mode-contract.md) | **Normative.** Portable/Dedicated/Private Cloud configuration, capabilities, identity boundary, Unit isolation, and required release lanes |
-| [architecture/product-hardening-program.md](architecture/product-hardening-program.md) | Current gated implementation order: product foundation, refactors, Docker, Box, quality gate, then LXD |
+| [architecture/graceful-restart-and-deployment.md](architecture/graceful-restart-and-deployment.md) | **Normative.** Portable finalizer, Dedicated Supervisor, Dashboard-only activation, restart and rollback invariants |
+| [architecture/dashboard-multiplexed-connection-sot.md](architecture/dashboard-multiplexed-connection-sot.md) | **Normative.** Dashboard multiplexed connection and subscription authority |
+| [architecture/executor-installation-service-update-sot.md](architecture/executor-installation-service-update-sot.md) | **Normative.** Executor install, pairing, service and update lifecycle |
+| [architecture/turn-timing-observability-sot.md](architecture/turn-timing-observability-sot.md) | **Normative.** Turn timing authority and human-readable presentation |
+| [architecture/private-cloud-enterprise-architecture-contract.md](architecture/private-cloud-enterprise-architecture-contract.md) | **Normative.** Private Cloud enterprise composition and adapter boundaries |
+| [architecture/control-plane-postgresql-schema.md](architecture/control-plane-postgresql-schema.md) | **Normative.** Private Cloud control-plane PostgreSQL authority |
+| [architecture/product-hardening-program.md](architecture/product-hardening-program.md) | Historical closed execution program: product foundation, refactors, Docker, Box, quality gate, then LXD |
 | [architecture/private-cloud-enterprise-benchmark-matrix.md](architecture/private-cloud-enterprise-benchmark-matrix.md) | Grafana/GitLab/GitHub/Sentry benchmark matrix and Private Cloud build-vs-integrate decisions |
 | [architecture/core-agent-invariants-and-fault-model.md](architecture/core-agent-invariants-and-fault-model.md) | Normative cross-component authority map, invariants, fault injections, proofs, and release blockers |
 | [architecture/browser-session-store.md](architecture/browser-session-store.md) | Accepted design for opaque, server-revocable browser Sessions, device lists, refresh, and logout-all |
@@ -106,6 +114,9 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 |---|---|
 | [operations/private-cloud-local-runbook.md](operations/private-cloud-local-runbook.md) | Single Docker Private Cloud stack with mandatory NFS Session storage, bootstrap, verification, backup, upgrade, and rollback |
 | [operations/dedicated-operator-cli.md](operations/dedicated-operator-cli.md) | Source-free Dedicated install, upgrade, rollback, backup, restore, and uninstall contract |
+| [operations/private-cloud-release.md](operations/private-cloud-release.md) | **Normative.** Private Cloud release and Dashboard-only lifecycle |
+| [operations/release-evidence-contract.md](operations/release-evidence-contract.md) | **Normative.** Revision-bound release evidence requirements |
+| [operations/release-support-policy.md](operations/release-support-policy.md) | **Normative.** Supported versions, rollback and compatibility boundaries |
 | [operations/public-release-readiness.md](operations/public-release-readiness.md) | **Normative.** Public repository governance, unified version, distribution, supply-chain, operator CLI, and clean-environment release gates |
 | [operations/dedicated-platform-runtime-unit-cutover.md](operations/dedicated-platform-runtime-unit-cutover.md) | External staging, preflight, bounded cutover, verification, observation, and rollback for Dedicated Runtime Unit migration |
 
@@ -124,8 +135,8 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [testing/critical-user-action-matrix.md](testing/critical-user-action-matrix.md) | Mode-aware end-to-end acceptance criteria for every critical visible action |
-| [testing/feature-review-ledger.md](testing/feature-review-ledger.md) | Current feature-by-feature implementation evidence, gaps, and remaining release proof |
-| [testing/current-program-baseline.md](testing/current-program-baseline.md) | Frozen LXD boundary, current service snapshot, isolated validation environments, and evidence policy |
+| [testing/feature-review-ledger.md](testing/feature-review-ledger.md) | Historical feature-by-feature review snapshot, gaps, and remaining release proof |
+| [testing/current-program-baseline.md](testing/current-program-baseline.md) | Historical frozen LXD boundary and service snapshot, isolated validation environments, and evidence policy |
 | [testing/product-e2e-harness.md](testing/product-e2e-harness.md) | Normative real-action, side-effect, persistence, failure/recovery, evidence, and cleanup contract |
 
 ### Capabilities
@@ -141,8 +152,16 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [planning/roadmap.md](planning/roadmap.md) | Shipped feature ledger + deferred items |
 | [planning/feature-gaps.md](planning/feature-gaps.md) | Shipped vs. deliberately-out vs. gaps; comparison table (pi / opencode / codex / claude-code) |
 | [planning/production-readiness.md](planning/production-readiness.md) | What still stands between the current build and a production deploy |
-| [planning/roadmap-notes/dashboard-product-readiness.md](planning/roadmap-notes/dashboard-product-readiness.md) | Active coordinating plan for product maturity, phased implementation, and verification evidence |
+| [planning/roadmap-notes/dashboard-product-readiness.md](planning/roadmap-notes/dashboard-product-readiness.md) | Historical coordinating plan for product maturity, phased implementation, and verification evidence |
 | [planning/roadmap-notes/](planning/roadmap-notes/) | Free-form roadmap essays: streaming, RL, product-polish, and explicit non-goals |
+
+### Evidence and historical records
+
+| File | Purpose |
+|---|---|
+| [evidence/README.md](evidence/README.md) | Authority rules for revision-bound current evidence versus historical snapshots |
+| [operations/dedicated-platform-systemd-external-agent-handoff.md](operations/dedicated-platform-systemd-external-agent-handoff.md) | Historical legacy migration handoff; not a current runbook |
+| [operations/dedicated-platform-systemd-external-agent-prompt.md](operations/dedicated-platform-systemd-external-agent-prompt.md) | Archived pre-migration prompt; do not execute as current procedure |
 
 ### Meta — principles, testing, releasing, ADRs
 
@@ -173,7 +192,7 @@ Each cross-cutting document should declare its status and scope. If documents co
 
 ## When code disagrees with docs
 
-**Docs win.** The kernel and its consumers are meant to be spec-driven. If the code does something the spec doesn't describe, either the code is buggy or the spec is missing something. Open an issue.
+**Applicable, unsuperseded normative contracts win.** Historical snapshots, prompts, handoffs, plans, ledgers, and evidence do not override normative contracts or prove current implementation status. If code and a normative contract disagree, treat the code as buggy or the contract as incomplete and reconcile both explicitly.
 
 ## Adding a new doc
 

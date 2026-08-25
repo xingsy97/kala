@@ -1,5 +1,7 @@
 # Current Program Baseline
 
+**Status:** historical frozen baseline despite the filename; not current runtime state.
+
 **Captured:** 2026-07-30
 **Source revision:** `1e01821a46f05b703db6fc97b6cd61cb6d179dc4`
 **Purpose:** freeze deployment boundaries and evidence locations before the product-hardening program starts.
