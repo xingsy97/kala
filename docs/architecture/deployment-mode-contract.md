@@ -70,7 +70,7 @@ Private Cloud + containers + one host
 Private Cloud + Kubernetes + multiple nodes
 ```
 
-The current production migration implements the second line: Dedicated on systemd with Stable Ingress, one logical `local` Runtime Unit, blue/green process slots, and Deploy Supervisor. The `local` Unit and one-host layout are properties of that installer, not the definition of Dedicated.
+The current Dedicated systemd implementation uses the second line: Dedicated on systemd with Stable Ingress, one logical `local` Runtime Unit, blue/green process slots, and Deploy Supervisor. The `local` Unit and one-host layout are properties of that installer, not the definition of Dedicated.
 
 ## 4. Capability contract
 
@@ -158,7 +158,9 @@ A rendered page or HTTP 200 alone is never task-chain acceptance.
 
 - Dedicated systemd architecture: [`dedicated-platform-runtime-unit.md`](dedicated-platform-runtime-unit.md)
 - Private Cloud Runtime Units: [`private-cloud-runtime-units.md`](private-cloud-runtime-units.md)
-- Dedicated migration runbook: [`../operations/dedicated-platform-systemd-external-agent-handoff.md`](../operations/dedicated-platform-systemd-external-agent-handoff.md)
+- Dedicated operator lifecycle: [`../operations/dedicated-operator-cli.md`](../operations/dedicated-operator-cli.md)
+- Dedicated cutover runbook: [`../operations/dedicated-platform-runtime-unit-cutover.md`](../operations/dedicated-platform-runtime-unit-cutover.md)
+- Historical legacy migration handoff: [`../operations/dedicated-platform-systemd-external-agent-handoff.md`](../operations/dedicated-platform-systemd-external-agent-handoff.md)
 - Private Cloud local operations: [`../operations/private-cloud-local-runbook.md`](../operations/private-cloud-local-runbook.md)
 - Authenticated browser shell: [`../design/authenticated-product-shell.md`](../design/authenticated-product-shell.md)
 - Verification policy: [`../meta/testing.md`](../meta/testing.md)

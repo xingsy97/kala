@@ -1,7 +1,7 @@
 # Dedicated Platform Runtime Unit External Cutover
 
 **Status:** normative operator runbook
-**Applies to:** migration from the legacy single-process Dedicated service to Stable Ingress, logical Runtime Unit `local` with `blue`/`green` slots, Deploy Supervisor, and the static Control Updater
+**Applies to:** legacy migration to, and current verification of, the Dedicated systemd topology with Stable Ingress, logical Runtime Unit `local` with `blue`/`green` slots, Deploy Supervisor, and the static Control Updater
 **Execution boundary:** run from an external administrative shell, never from a Session hosted by the target Runtime Unit
 
 ## Preconditions
@@ -93,6 +93,9 @@ The capability response must indicate Dedicated mode and enabled Agent, Workspac
 Then verify through the product UI:
 
 - Dashboard loads without console or request errors;
+- `/var/lib/agent-runlab/deploy/dashboard/route-state.json` identifies an immutable Dashboard release, digest, asset digest, and generation;
+- a Runtime blue/green deployment leaves Dashboard generation unchanged;
+- a `deploy:dashboard` acceptance increments only Dashboard generation and leaves Ingress/Runtime PIDs, active slot, Unit route generation, Session cursor continuity, and Executor attachment unchanged;
 - an existing Session is readable;
 - a new Session can be created;
 - a Workspace Executor reconnects;

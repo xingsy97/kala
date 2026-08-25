@@ -1,4 +1,6 @@
-# Prompt for the External Dedicated Platform Migration Agent
+# Historical Prompt for the External Dedicated Platform Migration Agent
+
+**Status:** archived pre-migration prompt; do not copy or execute as a current procedure. Use [`dedicated-operator-cli.md`](dedicated-operator-cli.md) and [`dedicated-platform-runtime-unit-cutover.md`](dedicated-platform-runtime-unit-cutover.md).
 
 Copy the block below verbatim into the external Agent Session.
 

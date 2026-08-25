@@ -8,7 +8,7 @@ systemd distribution of Agent RunLab Dedicated
 ## 1. Command surface
 
 The release bundle contains `runlab-dedicated.mjs`. Installation publishes the
-same program as `/usr/local/bin/runlab-dedicated`. Operators use one entry point:
+same program as `/usr/local/bin/runlab-dedicated`. Operators use this entry point for installation and Runtime/control-plane lifecycle:
 
 ```text
 runlab-dedicated install --release-dir <verified-release>
@@ -31,6 +31,13 @@ Release verification happens before installation or upgrade.
 `upgrade` and `rollback` are thin clients of the versioned Deploy Supervisor
 request/receipt protocol. They do not stop a service directly, call the Portable
 restart endpoint, or maintain a second deployment state machine.
+
+The independent Dashboard has a separate release lane. From a source checkout use
+`pnpm run deploy:dashboard -- stage`; from a release bundle use
+`node deploy-dashboard.mjs stage`. Both support `status`, `wait`, `inspect`, and
+Dashboard rollback. `runlab-dedicated upgrade` does not advance Dashboard generation,
+and a Dashboard-only activation does not restart Ingress, Runtime, Sessions, or
+Executors.
 
 ## 2. Install state
 

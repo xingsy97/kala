@@ -126,7 +126,7 @@ Restart cannot cut through message replacement. It waits for the replacement com
 
 A parent and every required active child form one restart dependency group. The parent cannot report a safe checkpoint while a required child has active external work. Recovery resumes children before allowing the parent's waiting Tool result to continue. Cancellation and timeout envelopes remain durable and idempotent.
 
-## Self-deployment protocol
+## Portable single-service self-deployment protocol
 
 A deployment initiated by a Session running on the target Host must not synchronously wait for that Host to restart.
 
@@ -143,7 +143,7 @@ A deployment initiated by a Session running on the target Host must not synchron
 
 A fixed delay is not a deployment barrier. Synchronous self-deploy is rejected. `--async` is a compatibility spelling for durable worker handoff, not fire-and-forget success.
 
-## Release transaction
+## Portable single-service release transaction
 
 SSH and LXD are transports only:
 
@@ -165,9 +165,9 @@ Both use one target-side transaction:
 
 Deployments must not overwrite live release files one by one. LXD must not call `systemctl restart` directly from its upload/install path.
 
-## Supervisor contract
+## Portable systemd finalizer contract
 
-A supported Dedicated service must be preflighted for:
+A supported Portable single-service installation must be preflighted for:
 
 - one MainPID and one writable data owner;
 - `Restart=always` or equivalent replacement after exit code 0;
@@ -179,6 +179,24 @@ A supported Dedicated service must be preflighted for:
 - least-privilege activation/restart permissions.
 
 An invalid supervisor contract blocks deployment before activation.
+
+
+## Dedicated slot deployment contract
+
+Dedicated does not use the Portable `current`-symlink finalizer or
+`/runtime/restart`. `deploy:dedicated` submits an immutable request to the Deploy
+Supervisor, which owns admission fencing, inactive-slot startup, process and Runtime
+readiness, private verification, atomic route-generation commit, continuation, and
+rollback. LXD and SSH are transports to that same request/receipt protocol.
+
+The independent Dashboard has its own immutable releases and monotonically
+increasing Dashboard generation. `deploy:dashboard` changes only Dashboard route
+state: it must not change Runtime or Ingress PIDs, active slot, Unit route generation,
+write lease, Session continuation, or Executor connection. Conversely, a Dedicated
+Runtime deployment does not publish a new Dashboard generation.
+
+`deploy:remote` must inspect capabilities and reject Dedicated and Private Cloud
+Platform targets.
 
 ## Restart workflow
 

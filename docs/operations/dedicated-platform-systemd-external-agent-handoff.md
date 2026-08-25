@@ -1,6 +1,8 @@
 # Dedicated Platform systemd Migration — External Agent Handoff
 
-**Status:** execution handoff; production cutover is blocked until the defects and gates below are closed
+**Status:** historical migration handoff; non-normative and not a current operator runbook
+
+**Current procedure:** use [`dedicated-operator-cli.md`](dedicated-operator-cli.md) and [`dedicated-platform-runtime-unit-cutover.md`](dedicated-platform-runtime-unit-cutover.md). The implementation/task state below is preserved as a handoff-time record.
 
 **Audience:** an Agent operating from an independent SSH/console control channel
 

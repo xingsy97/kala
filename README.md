@@ -78,9 +78,10 @@ Dedicated release bundles include the source-free `runlab-dedicated` operator fo
 install, status, upgrade, rollback, backup, restore, and data-preserving uninstall.
 Its contract is documented in the
 [Dedicated operator CLI runbook](docs/operations/dedicated-operator-cli.md). Operators should also follow the
-[Dedicated runbook](docs/operations/dedicated-platform-systemd-external-agent-handoff.md)
-and must perform cutover from a control process independent of the Runtime being
-replaced.
+[Dedicated cutover runbook](docs/operations/dedicated-platform-runtime-unit-cutover.md).
+The former external-Agent handoff and prompt are historical migration records, not
+current operator procedures. Runtime cutovers must run from a control process
+independent of the Runtime being replaced.
 
 Private Cloud releases use digest-pinned multi-architecture Runtime, Ingress, and
 Dashboard images plus Linux x64/arm64 Compose bundles. The native
@@ -94,12 +95,16 @@ is for development and acceptance.
 ## Architecture
 
 ```text
-Browser -> Dashboard / Stable Ingress -> Runtime Host -> model provider
-                                      |
-                                      +-> outbound-connected Executor fleet
-                                          File / Git / Shell / Terminal / Artifacts
+Portable:
+Browser -> combined Dashboard + Runtime executable -> model provider
+                                             +-----> outbound Executor fleet
 
-Runtime Host -> append-only Session log -> pure Kernel reducer -> effects
+Dedicated / Private Cloud:
+Browser -> Stable Ingress / Gateway -> independent Dashboard release
+                                  +--> active Runtime Unit -> model provider
+                                                        +--> outbound Executor fleet
+
+Runtime Unit -> append-only Session log -> pure Kernel reducer -> effects
 ```
 
 The repository also contains a separately deployable evaluation platform and RL

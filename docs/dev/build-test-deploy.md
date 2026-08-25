@@ -49,84 +49,60 @@ Private Cloud, use `pnpm private-cloud:deploy-dashboard`; it replaces only the D
 container and fails if Runtime or Ingress container identity changes. Portable continues to
 ship and update one combined executable.
 
-Use the single `deploy:remote` entry point for LXD and SSH. It builds and verifies release assets unless `--skip-build` is explicitly supplied. Inspect the supported command without selecting a target or causing side effects:
+### Portable single-service deployment
+
+`deploy:remote` is the legacy/Portable single-service transaction. It supports LXD
+and SSH transports, but it fails closed when `/runtime/capabilities` reports a
+Dedicated or Private Cloud Platform target:
 
 ```bash
 pnpm run deploy:remote -- --help
-```
-
-### LXD
-
-The standard local LXD deployment is:
-
-```bash
-pnpm run deploy:remote -- --lxd <container>
-```
-
-The conventional legacy Portable-service defaults are `--host-url http://127.0.0.1:13000`, `--remote-bin /home/ubuntu/.bin`, and `--service agent-runlab-host`. Override them only when the target uses a different supervisor contract:
-
-```bash
-pnpm run deploy:remote -- \
-  --lxd <container> \
-  --host-url <host-url-reachable-from-container> \
+pnpm run deploy:remote -- --lxd <portable-container>
+pnpm run deploy:remote -- --ssh <portable-target> \
+  --host-url <portable-host-url> \
   --remote-bin <remote-bin-dir> \
-  --service <systemd-unit>
+  --service <portable-systemd-unit>
 ```
 
-Use `--dry-run` to validate target selection without building, transferring, activating, restarting, or cleaning anything. Use `--skip-build` only when the current `release/` was already built; digest verification still runs.
+It stages an immutable generation and hands activation to the Portable external
+finalizer. Do not use it for a Dedicated blue/green Runtime or Private Cloud.
 
-### SSH
+### Dedicated Runtime and control plane
 
-Deploy with explicit remote settings:
+Dedicated uses the versioned Deploy Supervisor request/receipt protocol:
 
 ```bash
-pnpm run deploy:remote -- \
-  --ssh <ssh-target> \
-  --host-url <host-url-reachable-from-remote> \
-  --remote-bin <remote-bin-dir> \
-  --service <systemd-unit>
+pnpm run deploy:dedicated -- stage --lxd <container>
+pnpm run deploy:dedicated -- stage --ssh <target>
+pnpm run deploy:dedicated -- status <deployment-or-operation-id> --lxd <container>
+pnpm run deploy:dedicated -- wait <deployment-or-operation-id> --lxd <container>
+pnpm run deploy:dedicated -- inspect --lxd <container>
 ```
 
-Useful optional flags:
-
-```bash
-pnpm run deploy:remote -- \
-  --ssh <ssh-target> \
-  --host-url <host-url-reachable-from-remote> \
-  --remote-bin <remote-bin-dir> \
-  --service <systemd-unit> \
-  --restart-mode checkpoint \
-  --restart-timeout-ms 600000 \
-  --status-timeout-ms 660000
-```
-
-Equivalent environment variables are available for local shell aliases or CI secrets:
-
-```bash
-AK_DEPLOY_SSH=<ssh-target>
-AK_DEPLOY_HOST_URL=<host-url-reachable-from-remote>
-AK_DEPLOY_REMOTE_BIN=<remote-bin-dir>
-AK_DEPLOY_SERVICE=<systemd-unit>
-```
-
-SSH and LXD are transport adapters for the same target-side transaction. The command stages an immutable generation, validates its manifest, hands finalization to a worker outside the Host cgroup, atomically activates `current` after checkpoint readiness, and requests restart through `/runtime/restart`. Never replace it with direct live-file copies or a direct service restart.
+`abort` and Supervisor-owned `rollback` are also supported. A Dedicated deployment
+starts and privately verifies the inactive slot, fences admission, commits route
+generation atomically, and records planned continuation. It must never fall back to
+`deploy:remote`, `/runtime/restart`, direct live-file replacement, or direct
+`systemctl restart`.
 
 ### Self-deployment from a running Session
 
-A deployment started from a Session running on the target Host must use durable asynchronous handoff. The supported topology is:
+A deployment started by a Session must use a command channel that survives the
+target Runtime cutover:
 
 ```text
-Session on target Runtime Host
-  -> external Tool Executor with repository and target access
-  -> deploy:remote LXD or SSH transport
-  -> external target-side finalizer
-  -> checkpoint restart and planned continuation
+Portable Session -> external Executor -> deploy:remote -> external finalizer
+Dedicated Session -> external Executor -> deploy:dedicated -> Deploy Supervisor
 ```
 
-The Runtime Host may be inside LXD, but the `--lxd` command normally runs on the Box Executor that can access the LXD daemon. Running it inside the target container itself is unsupported unless that environment independently has the repository, build toolchain, `lxc` access, and required privileges.
+The LXD command normally runs on a Box Executor with access to the LXD daemon.
+When either command prints `accepted: true`, the initiating Tool call must end
+immediately. Do not poll from that same Tool call: its durable Tool result may be
+the origin barrier. Verify completion from a later turn or independent operator.
+Fixed sleeps are not deployment barriers.
 
-When the command prints `accepted: true`, the initiating Tool call must end immediately. Do not poll the transaction from that same Tool call: its durable Tool result is the origin barrier the finalizer is waiting for. A later Tool turn or an independent operator may read the reported transaction file and verify completion. A fixed sleep is not a valid substitute.
-
-Final acceptance must check the transaction phase, PID change, `current` generation, exact bundle digest, HTTP readiness, Executor reconnection, participant cursor monotonicity, continuation outcome, and absence of new structured interrupted responses during the deployment window. Count structured `llm_response` events—not raw JSONL string occurrences, which may include quoted source code or Tool output.
+Final acceptance records the authoritative receipt, exact release digest, route or
+generation change, readiness, Executor reconnection, Session cursor monotonicity,
+continuation outcome, and absence of new structured interrupted responses.
 
 Do not commit personal SSH targets, public domains, ports, container names, credentials, or machine paths into package scripts or docs.
