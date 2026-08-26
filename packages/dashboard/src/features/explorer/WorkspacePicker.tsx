@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { AgentRuntimeDescriptor, AgentRuntimeId, AttachedExecutor } from '@agent-kernel/shared'
 import { KERNEL_AGENT_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 
-import { X } from 'lucide-react'
+import { Bot, Check, Sparkles, X } from 'lucide-react'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -124,7 +124,7 @@ export function NewSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !submitting) onCancel() }}>
-      <DialogContent className={cn(dialogMobileSheetClassName, 'h-[min(calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem),44rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-4xl')} data-testid="new-session-dialog">
+      <DialogContent className={cn(dialogMobileSheetClassName, 'h-[min(calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem),48rem)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-4xl')} data-testid="new-session-dialog">
         <DialogHeader className="relative border-b border-border/50 px-4 py-2 pr-14 sm:py-3">
           <DialogTitle>{t('dialogs.newSession')}</DialogTitle>
           <DialogDescription className="hidden sm:block">
@@ -133,23 +133,49 @@ export function NewSessionDialog({
           <DialogClose className={dialogTouchCloseClassName} disabled={submitting} aria-label={t('common.close')} data-testid="new-session-close">
             <X className="h-4 w-4" aria-hidden="true" />
           </DialogClose>
-          <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <span>{t('dialogs.agentRuntime')}</span>
-            <select
-              value={agentRuntime}
-              onChange={(event) => setAgentRuntime(event.target.value as AgentRuntimeId)}
-              disabled={submitting}
-              className="rounded border border-border bg-background px-2 py-1 text-foreground"
-              data-testid="new-session-agent-runtime"
-            >
-              {agentRuntimes.map((runtime) => (
-                <option key={runtime.id} value={runtime.id} disabled={!runtime.available}>
-                  {runtime.label}{runtime.available ? '' : ` (${runtime.reason ?? runtime.status})`}
-                </option>
-              ))}
-            </select>
-          </label>
         </DialogHeader>
+        <section className="border-b border-border/50 bg-muted/20 px-4 py-3" aria-labelledby="new-session-runtime-label">
+          <div id="new-session-runtime-label" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('dialogs.chooseAgentRuntime')}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-labelledby="new-session-runtime-label">
+            {agentRuntimes.map((runtime) => {
+              const selected = agentRuntime === runtime.id
+              const RuntimeIcon = runtime.id === 'copilot' ? Sparkles : Bot
+              return (
+                <button
+                  key={runtime.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={submitting || !runtime.available}
+                  onClick={() => setAgentRuntime(runtime.id)}
+                  data-testid={`new-session-runtime-${runtime.id}`}
+                  className={cn(
+                    'relative flex min-h-20 items-start gap-3 rounded-xl border p-3 text-left transition-colors',
+                    selected
+                      ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
+                      : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50',
+                    !runtime.available && 'cursor-not-allowed opacity-55',
+                  )}
+                >
+                  <span className={cn('mt-0.5 rounded-lg p-2', selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
+                    <RuntimeIcon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2 font-semibold">
+                      {runtime.label}
+                      {selected ? <Check className="h-4 w-4 text-primary" aria-hidden="true" /> : null}
+                    </span>
+                    <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                      {runtime.available ? runtime.description : runtime.reason ?? runtime.status}
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
         <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
           <aside className="flex min-h-0 flex-col border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r md:bg-muted">
             <div className="px-2 pt-2 max-md:hidden">

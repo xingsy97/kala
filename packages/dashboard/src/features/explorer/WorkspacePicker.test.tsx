@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AttachedExecutor, DirListResult } from '@agent-kernel/shared'
+import { KERNEL_AGENT_RUNTIME_CAPABILITIES, type AttachedExecutor, type DirListResult } from '@agent-kernel/shared'
 
 import { NewSessionDialog } from './WorkspacePicker.js'
 
@@ -93,7 +93,7 @@ describe('NewSessionDialog', () => {
     expect(dialog.className).toContain('!bottom-0')
     expect(dialog.className).toContain('w-screen')
     expect(dialog.className).toContain('--ak-viewport-h')
-    expect(dialog.className).toContain('grid-rows-[auto_minmax(0,1fr)_auto]')
+    expect(dialog.className).toContain('grid-rows-[auto_auto_minmax(0,1fr)_auto]')
     expect(dialog.className).toContain('sm:max-w-4xl')
     expect(screen.getByTestId('new-session-close').className).toContain('h-11 w-11')
   })
@@ -238,6 +238,7 @@ describe('NewSessionDialog', () => {
     fireEvent.change(screen.getByTestId('new-session-cwd-input'), {
       target: { value: '/tmp/root/manual' },
     })
+
     fireEvent.click(screen.getByTestId('new-session-create'))
 
     expect(onCreate).toHaveBeenCalledWith({
@@ -246,6 +247,49 @@ describe('NewSessionDialog', () => {
       workspaceName: 'mbp',
       cwd: '/tmp/root/manual',
     })
+  })
+
+  it('shows prominent runtime choices and creates with the selected runtime', () => {
+    const onCreate = vi.fn()
+    const harness = makeSocket()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        agentRuntimes={[
+          {
+            id: 'kernel',
+            label: 'Agent RunLab',
+            description: 'RunLab kernel',
+            available: true,
+            status: 'ready',
+            capabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
+          },
+          {
+            id: 'copilot',
+            label: 'GitHub Copilot',
+            description: 'Official Copilot SDK',
+            available: true,
+            status: 'ready',
+            capabilities: { ...KERNEL_AGENT_RUNTIME_CAPABILITIES, queue: false },
+          },
+        ]}
+        socket={harness.socket as never}
+        onCreate={onCreate}
+        onCreateSimpleChat={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    const copilot = screen.getByTestId('new-session-runtime-copilot')
+    expect(copilot.getAttribute('role')).toBe('radio')
+    fireEvent.click(copilot)
+    expect(copilot.getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.click(screen.getByTestId('new-session-create'))
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      agentRuntime: 'copilot',
+    }))
   })
 
   it('shows create errors and blocks duplicate submit while creating', () => {
