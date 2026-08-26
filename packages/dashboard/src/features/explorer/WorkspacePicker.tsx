@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { AgentRuntimeDescriptor, AgentRuntimeId, AttachedExecutor } from '@agent-kernel/shared'
 import { KERNEL_AGENT_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 
-import { Bot, Check, Sparkles, X } from 'lucide-react'
+import { Bot, Check, X } from 'lucide-react'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -124,7 +124,7 @@ export function NewSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !submitting) onCancel() }}>
-      <DialogContent className={cn(dialogMobileSheetClassName, 'h-[min(calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem),48rem)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-4xl')} data-testid="new-session-dialog">
+      <DialogContent className={cn(dialogMobileSheetClassName, 'h-[min(calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem),44rem)] min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-4xl')} data-testid="new-session-dialog">
         <DialogHeader className="relative border-b border-border/50 px-4 py-2 pr-14 sm:py-3">
           <DialogTitle>{t('dialogs.newSession')}</DialogTitle>
           <DialogDescription className="hidden sm:block">
@@ -134,14 +134,13 @@ export function NewSessionDialog({
             <X className="h-4 w-4" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
-        <section className="border-b border-border/50 bg-muted/20 px-4 py-3" aria-labelledby="new-session-runtime-label">
-          <div id="new-session-runtime-label" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <section className="min-w-0 overflow-hidden border-b border-border/50 bg-muted/20 px-3 py-2" aria-labelledby="new-session-runtime-label">
+          <div id="new-session-runtime-label" className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             {t('dialogs.chooseAgentRuntime')}
           </div>
-          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-labelledby="new-session-runtime-label">
+          <div className="grid min-w-0 grid-cols-2 gap-2" role="radiogroup" aria-labelledby="new-session-runtime-label">
             {agentRuntimes.map((runtime) => {
               const selected = agentRuntime === runtime.id
-              const RuntimeIcon = runtime.id === 'copilot' ? Sparkles : Bot
               return (
                 <button
                   key={runtime.id}
@@ -152,22 +151,24 @@ export function NewSessionDialog({
                   onClick={() => setAgentRuntime(runtime.id)}
                   data-testid={`new-session-runtime-${runtime.id}`}
                   className={cn(
-                    'relative flex min-h-20 items-start gap-3 rounded-xl border p-3 text-left transition-colors',
+                    'relative flex min-h-14 min-w-0 items-center gap-2 rounded-lg border p-2 text-left transition-colors sm:min-h-16 sm:items-start sm:gap-3 sm:p-3',
                     selected
                       ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
                       : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50',
                     !runtime.available && 'cursor-not-allowed opacity-55',
                   )}
                 >
-                  <span className={cn('mt-0.5 rounded-lg p-2', selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
-                    <RuntimeIcon className="h-4 w-4" aria-hidden="true" />
+                  <span className={cn('flex-none rounded-md p-1.5 sm:mt-0.5 sm:rounded-lg sm:p-2', selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
+                    {runtime.id === 'copilot'
+                      ? <GitHubMark className="h-4 w-4" />
+                      : <Bot className="h-4 w-4" aria-hidden="true" />}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2 font-semibold">
-                      {runtime.label}
+                    <span className="flex min-w-0 items-center gap-1 text-sm font-semibold">
+                      <span className="truncate">{runtime.label}</span>
                       {selected ? <Check className="h-4 w-4 text-primary" aria-hidden="true" /> : null}
                     </span>
-                    <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                    <span className="mt-1 hidden text-xs leading-relaxed text-muted-foreground sm:block">
                       {runtime.available ? runtime.description : runtime.reason ?? runtime.status}
                     </span>
                   </span>
@@ -176,8 +177,8 @@ export function NewSessionDialog({
             })}
           </div>
         </section>
-        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
-          <aside className="flex min-h-0 flex-col border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r md:bg-muted">
+        <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
+          <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r md:bg-muted">
             <div className="px-2 pt-2 max-md:hidden">
               <button
                 type="button"
@@ -234,7 +235,7 @@ export function NewSessionDialog({
               </div>
             </ScrollArea>
           </aside>
-          <main className="flex min-h-0 min-w-0 flex-col">
+          <main className="flex min-h-0 min-w-0 overflow-hidden flex-col">
             <label
               className="border-b border-border/50 px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground"
               htmlFor="new-session-cwd"
@@ -278,6 +279,14 @@ export function NewSessionDialog({
 }
 
 export const WorkspacePicker = NewSessionDialog
+
+function GitHubMark({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M12 .7A11.3 11.3 0 0 0 8.4 22.8c.6.1.8-.3.8-.6v-2.2c-3.4.7-4.1-1.4-4.1-1.4-.5-1.4-1.4-1.8-1.4-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.9 1.3 1.9 1.3 1.1 1.9 2.9 1.3 3.6 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.6-1.4-5.6-6a4.7 4.7 0 0 1 1.3-3.3 4.4 4.4 0 0 1 .1-3.3s1-.3 3.4 1.3a11.7 11.7 0 0 1 6.2 0C17.9 3.8 19 4.1 19 4.1a4.4 4.4 0 0 1 .1 3.3 4.7 4.7 0 0 1 1.3 3.3c0 4.7-2.9 5.7-5.6 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.3 11.3 0 0 0 12 .7Z" />
+    </svg>
+  )
+}
 
 function initialPathFor(workspace: AttachedExecutor): string {
   return workspace.sandboxRoots?.[0] ?? workspace.defaultCwd ?? workspace.workingDir ?? '/'
