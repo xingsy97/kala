@@ -22,6 +22,7 @@ Environment=AGENT_RUNLAB_RUNTIME_READINESS=/run/agent-runlab/unit-%i-readiness.j
 Environment=AGENT_RUNLAB_PROCESS_READINESS=/run/agent-runlab/unit-%i-process-ready.json
 Environment=AGENT_RUNLAB_ROUTE_STATE=/var/lib/agent-runlab/deploy/route-state.json
 Environment=AGENT_RUNLAB_SLOT=%i
+Environment=COPILOT_CLI_PATH=/var/lib/agent-runlab/deploy/slots/%i/copilot-cli
 ExecStartPre=/usr/bin/rm -f /run/agent-runlab/unit-%i-readiness.json
 ExecStartPre=/usr/bin/rm -f /run/agent-runlab/unit-%i-process-ready.json
 ExecStart=/usr/bin/flock --exclusive --nonblock --no-fork /var/lib/agent-runlab/units/local/write.lock /usr/bin/node /var/lib/agent-runlab/deploy/slots/%i/agent-runlab-runtime.cjs --port ${HOST_PORT}

@@ -20,6 +20,7 @@ describe('Dedicated systemd packaging', () => {
     expect(unit).toContain('AGENT_RUNLAB_PROCESS_READINESS=/run/agent-runlab/unit-%i-process-ready.json')
     expect(unit).toContain('ExecStopPost=/usr/bin/rm -f /run/agent-runlab/unit-%i-readiness.json /run/agent-runlab/unit-%i-process-ready.json')
     expect(unit).toContain('AGENT_RUNLAB_WRITE_LEASE=/var/lib/agent-runlab/units/local/write.lock')
+    expect(unit).toContain('COPILOT_CLI_PATH=/var/lib/agent-runlab/deploy/slots/%i/copilot-cli')
     expect(unit).toContain('/var/lib/agent-runlab/deploy/requests')
     expect(unit).toContain('/var/lib/agent-runlab/deploy/submissions')
     expect(supervisor).toContain('deploy/control-current/agent-runlab-dedicated-deploy-supervisor.cjs')

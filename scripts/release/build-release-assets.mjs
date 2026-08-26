@@ -151,6 +151,7 @@ for (const item of buildEntries) {
 }
 
 if (nativeOnly) {
+  if (component === 'all' || component === 'host') prepareCopilotRuntimeAsset(nativeTarget, false)
   removeNativeBuildWorkspace()
   console.log(`native release assets written to ${outDir} for ${nativeTarget}`)
   for (const item of entries) console.log(` - ${basename(nativeAssetName(item.name, nativeTarget))}`)
@@ -174,6 +175,9 @@ function finalizeRelease() {
   assertSourceIdentityUnchanged()
   removeNativeBuildWorkspace()
   const bootstrapAssets = prepareBootstrapAssets()
+  const copilotRuntimeAssets = component === 'all' || component === 'host'
+    ? prepareCopilotRuntimeAsset(detectNativeTarget(), true)
+    : []
   if (entries.some((entry) => entry.name === 'agent-kernel-executor') && currentNativeTarget && exists(executorNativeAssetName(currentNativeTarget))) writeExecutorUpdateManifest()
   if (includeDashboard && existsSync(modelCatalogSeed)) {
     copyFileSync(modelCatalogSeed, join(outDir, 'agent-runlab-model-catalog-seed.json'))
@@ -215,6 +219,7 @@ function finalizeRelease() {
   writeDependencyMetadata()
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
     .concat(executorProductNatives)
+    .concat(copilotRuntimeAssets)
     .concat(includeDashboard && exists('agent-kernel-dashboard-dist.tar.gz') ? ['agent-kernel-dashboard-dist.tar.gz'] : [])
     .concat(includeDashboard && exists('dashboard-release.json') ? ['dashboard-release.json'] : [])
     .concat(includeDashboard && exists('agent-runlab-docs.tar.gz') ? ['agent-runlab-docs.tar.gz'] : [])
@@ -247,10 +252,33 @@ function finalizeRelease() {
       'Portable uses bundle-dashboard-with-runtime.cjs with embedded dashboard assets; Self-hosted Platform uses agent-runlab-runtime.cjs plus an independently activated dashboard release',
     ],
   }
+
   writeFileSync(join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   writeFileSync(join(outDir, 'RELEASE_NOTES.md'), releaseNotes(manifest))
 
   writeSha256Sums(releaseFiles())
+}
+
+function prepareCopilotRuntimeAsset(target, includeGenericAlias) {
+  const [platform, arch] = target.split('-')
+  const packageName = `@github/copilot-${platform}-${arch}`
+  const hostRequire = createRequire(new URL('../../packages/host/package.json', import.meta.url))
+  const sdkEntry = hostRequire.resolve('@github/copilot-sdk')
+  const sdkRequire = createRequire(sdkEntry)
+  const copilotPackage = sdkRequire.resolve('@github/copilot/package.json')
+  const copilotRequire = createRequire(copilotPackage)
+  const source = copilotRequire.resolve(packageName)
+  if (!existsSync(source)) throw new Error(`Copilot runtime binary is missing from ${packageName}`)
+  const binaryAsset = `copilot-cli-${target}${platform === 'win32' ? '.exe' : ''}`
+  const licenseAsset = 'COPILOT_CLI_LICENSE.md'
+  copyFileSync(source, join(outDir, binaryAsset))
+  copyFileSync(join(dirname(copilotPackage), 'LICENSE.md'), join(outDir, licenseAsset))
+  chmodSync(join(outDir, binaryAsset), 0o755)
+  if (includeGenericAlias) {
+    copyFileSync(source, join(outDir, 'copilot-cli'))
+    chmodSync(join(outDir, 'copilot-cli'), 0o755)
+  }
+  return [binaryAsset, ...(includeGenericAlias ? ['copilot-cli'] : []), licenseAsset]
 }
 
 function writeDependencyMetadata() {
@@ -260,7 +288,11 @@ function writeDependencyMetadata() {
   const components = []
   for (const [reportedLicense, packages] of Object.entries(classes)) {
     for (const dependency of packages) {
-      const license = reportedLicense === 'Unknown' && dependency.name === 'khroma' ? 'MIT' : reportedLicense
+      const license = reportedLicense === 'Unknown' && dependency.name === 'khroma'
+        ? 'MIT'
+        : reportedLicense === 'Unknown' && (dependency.name === '@github/copilot' || dependency.name.startsWith('@github/copilot-'))
+          ? 'LicenseRef-GitHub-Copilot-CLI'
+          : reportedLicense
       if (license === 'Unknown') throw new Error(`unreviewed dependency license: ${dependency.name}`)
       for (const version of dependency.versions) {
         const encodedName = dependency.name.startsWith('@')
@@ -832,6 +864,18 @@ function unifiedBootstrap({ repo, tag, component }) {
     '    cjs="bundle-dashboard-with-runtime.cjs"',
     '  fi',
     '  runtime="${AGENT_KERNEL_RUNTIME:-auto}"',
+    '  if [ "${AGENT_RUNLAB_COPILOT_ENABLED:-0}" = "1" ]; then',
+    '    local copilot_asset="copilot-cli-${target}"',
+    '    case "$target" in win32-*) copilot_asset="${copilot_asset}.exe" ;; esac',
+    '    if [ -z "$target" ] || ! checksum_exists "$copilot_asset"; then',
+    '      log "Copilot runtime is enabled but no Copilot CLI is published for platform ${target:-unsupported}"',
+    '      exit 1',
+    '    fi',
+    '    download "$copilot_asset"',
+    '    verify_file "$copilot_asset"',
+    '    chmod +x "${WORK_DIR}/${copilot_asset}"',
+    '    export COPILOT_CLI_PATH="${WORK_DIR}/${copilot_asset}"',
+    '  fi',
     '  case "$runtime" in auto|cjs|native) ;; *) echo "AGENT_KERNEL_RUNTIME must be auto, cjs, or native" >&2; exit 1 ;; esac',
     '  if [ "$runtime" = "cjs" ] || { [ "$runtime" = "auto" ] && has_node22; }; then',
     '    if checksum_exists "$cjs"; then',
