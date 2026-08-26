@@ -17,6 +17,7 @@
     "deploy:dedicated": "node scripts/deploy/deploy-dedicated.mjs",
     "deploy:dashboard": "node scripts/deploy/deploy-dashboard.mjs",
     "verify:release-assets": "node scripts/release/verify-release-assets.mjs",
+    "verify:agent-runtime-tools": "node scripts/runtime/verify-agent-runtime-tools.mjs",
     "verify:private-cloud-bundle": "node scripts/release/verify-private-cloud-bundle.mjs",
     "verify:version": "node scripts/release/version-policy.mjs",
     "verify:public-packages": "node scripts/release/verify-public-packages.mjs",

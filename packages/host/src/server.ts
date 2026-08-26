@@ -85,6 +85,7 @@ import { attachExecutorInstallationRoutes } from './http/executor-installation-r
 import { AgentRuntimeRegistry } from './agent-runtime/types.js'
 import { KernelAgentRuntime } from './agent-runtime/kernel-runtime.js'
 import { CopilotAgentRuntime } from './agent-runtime/copilot-runtime.js'
+import { createRuntimeToolDispatcher } from './agent-runtime/tool-dispatcher.js'
 
 export type HostServerOptions = {
   port: number
@@ -973,9 +974,10 @@ export async function startHostServer(
   loop = runHostLoop(loopDeps)
   agentRuntimes = new AgentRuntimeRegistry()
   agentRuntimes.register(new KernelAgentRuntime(loop))
+  const copilotTools = createRuntimeToolDispatcher(loopDeps, executors, loop)
   const copilotRuntime = new CopilotAgentRuntime({
     store,
-    tools: executors,
+    tools: copilotTools,
     broadcast: {
       onState(record, state) {
         scheduleSessionsBroadcast()

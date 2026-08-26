@@ -176,6 +176,12 @@ RunLab registers selected existing tools as Copilot custom tools. Each handler:
 5. returns a bounded, structured result to Copilot;
 6. records normalized Tool lifecycle and timing evidence.
 
+Kernel and Copilot must call the same runtime Tool dispatcher. The dispatcher
+applies memory policy and pre/post hooks before routing by the configured
+`executionKind`: Host tools stay in the Host and Executor tools cross the
+Workspace Executor boundary. A runtime must never call the Executor registry
+directly for an arbitrary model-facing Tool name.
+
 Tool handlers must not bypass Executor sandbox roots, existing authorization,
 audit, cancellation, or output limits.
 
@@ -364,3 +370,13 @@ restart the LXD-hosted service outside the Dedicated Supervisor protocol.
   `runtime_ready`;
 - failed candidate verification automatically preserves or restores the prior
   route and runtime.
+
+The deployed-runtime Tool matrix is repeatable with:
+
+```bash
+RUNLAB_URL=http://host:13000 pnpm verify:agent-runtime-tools
+```
+
+It creates disposable Kernel and Copilot Sessions, executes one Executor tool
+and one Host tool through each runtime, verifies projected and reloaded
+Tool-call results, and deletes the Sessions.

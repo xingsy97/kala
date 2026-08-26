@@ -49,7 +49,7 @@ import { interruptSubAgentsForParent, isCancelledSubAgentChild } from './extensi
 import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
 import { isSkillManager } from './extensions/skills.js'
 import { todoGraphContinuationState } from './extensions/todo-graph.js'
-import { dispatchConfiguredTool } from './agent-modules/execution.js'
+import { dispatchConfiguredTool, type ToolExecutionResult } from './agent-modules/execution.js'
 import type {
   HostLoopDeps,
   EventBroadcastExtras,
@@ -76,6 +76,34 @@ export type {
   SubAgentStartedPayload,
   ToolDispatcher,
 } from './loop-types.js'
+
+export async function dispatchRuntimeTool(
+  deps: HostLoopDeps,
+  sessionId: string,
+  effect: CallToolEffect,
+  aborts: Map<string, AbortController>,
+  turnId?: string,
+  loop?: LoopHandle,
+  plannedContinuation = false,
+): Promise<ToolExecutionResult> {
+  const memoryPolicyBlock = guardMemoryPolicy(deps, sessionId, effect)
+  if (memoryPolicyBlock) return { ok: false, content: memoryPolicyBlock }
+
+  const blocked = await runPreToolHooks(deps, sessionId, effect)
+  if (blocked) return { ok: false, content: blocked }
+
+  const result = await dispatchConfiguredTool(
+    deps,
+    sessionId,
+    effect,
+    aborts,
+    turnId,
+    loop,
+    plannedContinuation,
+  )
+  await runPostToolHooks(deps, sessionId, effect, result)
+  return result
+}
 
 export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   // Per-session guard so an auto-compact triggered by a hard-tier state
@@ -1062,41 +1090,16 @@ async function performCallTool(
       )
       return
     }
-    const memoryPolicyBlock = guardMemoryPolicy(deps, sessionId, effect)
-    if (memoryPolicyBlock) {
-      await dispatchToolResult(
-        deps,
-        sessionId,
-        effect.callId,
-        false,
-        memoryPolicyBlock,
-        aborts,
-        runtime,
-        resultQueue,
-        undefined,
-        timedSpan('tool', `tool-${effect.callId}`, toolStartedAt, toolStartedMono, 'failed', { callId: effect.callId }),
-      )
-      return
-    }
-    const blocked = await runPreToolHooks(deps, sessionId, effect)
-    if (blocked) {
-      await dispatchToolResult(
-        deps,
-        sessionId,
-        effect.callId,
-        false,
-        blocked,
-        aborts,
-        runtime,
-        resultQueue,
-        undefined,
-        timedSpan('tool', `tool-${effect.callId}`, toolStartedAt, toolStartedMono, 'failed', { callId: effect.callId }),
-      )
-      return
-    }
     const tracker = timingTrackers.get(deps.store)
-    const res = await dispatchConfiguredTool(deps, sessionId, effect, aborts, tracker?.currentTurnId(sessionId), runtime?.handle, runtime?.plannedContinuation === true)
-    await runPostToolHooks(deps, sessionId, effect, res)
+    const res = await dispatchRuntimeTool(
+      deps,
+      sessionId,
+      effect,
+      aborts,
+      tracker?.currentTurnId(sessionId),
+      runtime?.handle,
+      runtime?.plannedContinuation === true,
+    )
     await dispatchToolResult(
       deps,
       sessionId,
