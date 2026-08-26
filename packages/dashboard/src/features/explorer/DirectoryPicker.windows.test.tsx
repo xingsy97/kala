@@ -18,4 +18,27 @@ describe('DirectoryPicker Windows paths',()=>{
     fireEvent.keyDown(input,{key:'Enter'})
     expect(emit).toHaveBeenCalledWith('client:list_dirs',expect.objectContaining({path:child}))
   })
+
+  it('reloads the selected path after the Dashboard socket reconnects',async()=>{
+    const root='/workspace'
+    const listeners=new Map<string,(value:any)=>void>()
+    const emit=vi.fn((event:string,payload:any)=>{
+      if(event==='client:list_dirs')queueMicrotask(()=>listeners.get('server:dir_list')?.({
+        requestId:payload.requestId,
+        workspaceId:'ws',
+        path:payload.path??root,
+        roots:[root],
+        entries:[],
+      }))
+    })
+    const socket={emit,on:(event:string,fn:(value:any)=>void)=>listeners.set(event,fn),off:vi.fn()} as any
+    function Harness(){const [value,setValue]=useState(root);return <DirectoryPicker socket={socket} workspaceId="ws" initialPath={root} value={value} onChange={setValue}/>}
+    render(<Harness/>)
+    await waitFor(()=>expect(emit).toHaveBeenCalledTimes(1))
+
+    listeners.get('connect')?.(undefined)
+
+    await waitFor(()=>expect(emit).toHaveBeenCalledTimes(2))
+    expect(emit).toHaveBeenLastCalledWith('client:list_dirs',expect.objectContaining({path:root}))
+  })
 })

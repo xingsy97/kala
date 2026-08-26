@@ -46,6 +46,24 @@ export function DirectoryPicker({
   const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestTimeoutRef = useRef<number | null>(null)
   const finderScrollRef = useRef<HTMLDivElement | null>(null)
+  const selectedPathRef = useRef(value)
+  selectedPathRef.current = value
+
+  const showDirectoryTimeout = (path: string): void => {
+    setLoadingPath(null)
+    setColumns([{ path, entries: [], error: 'Directory request timed out. Check that this workspace executor is online and connected to the same Host.' }])
+  }
+
+  const requestPath = (path: string): void => {
+    if (!socket || !workspaceId) return
+    setLoadingPath(path)
+    activeRequestIdRef.current = requestDirs(socket, workspaceId, path)
+    if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
+    requestTimeoutRef.current = window.setTimeout(
+      () => showDirectoryTimeout(path),
+      DIRECTORY_REQUEST_TIMEOUT_MS,
+    )
+  }
 
   useEffect(() => {
     setColumns([])
@@ -75,11 +93,14 @@ export function DirectoryPicker({
       })
     }
     socket.on('server:dir_list', onDirList)
-    activeRequestIdRef.current = requestDirs(socket, workspaceId, initialPath)
-    setLoadingPath(initialPath ?? '')
-    requestTimeoutRef.current = window.setTimeout(() => showDirectoryTimeout(initialPath ?? ''), DIRECTORY_REQUEST_TIMEOUT_MS)
+    const onReconnect = (): void => {
+      requestPath(selectedPathRef.current.trim() || initialPath || '')
+    }
+    socket.on('connect', onReconnect)
+    requestPath(initialPath ?? '')
     return () => {
       socket.off('server:dir_list', onDirList)
+      socket.off('connect', onReconnect)
       if (manualTimerRef.current) clearTimeout(manualTimerRef.current)
       if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
     }
@@ -96,18 +117,10 @@ export function DirectoryPicker({
     el.scrollLeft = el.scrollWidth
   }, [columns.length])
 
-  const showDirectoryTimeout = (path: string): void => {
-    setLoadingPath(null)
-    setColumns([{ path, entries: [], error: 'Directory request timed out. Check that this workspace executor is online and connected to the same Host.' }])
-  }
-
   const loadPath = (path: string): void => {
     if (!socket || !workspaceId) return
     onChange(path)
-    setLoadingPath(path)
-    activeRequestIdRef.current = requestDirs(socket, workspaceId, path)
-    if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
-    requestTimeoutRef.current = window.setTimeout(() => showDirectoryTimeout(path), DIRECTORY_REQUEST_TIMEOUT_MS)
+    requestPath(path)
   }
 
   const scheduleManualLoad = (path: string): void => {
@@ -116,8 +129,7 @@ export function DirectoryPicker({
     if (!isAbsoluteWorkspacePath(path)) return
     manualTimerRef.current = setTimeout(() => {
       manualTimerRef.current = null
-      setLoadingPath(path)
-      activeRequestIdRef.current = requestDirs(socket, workspaceId, path)
+      requestPath(path)
     }, MANUAL_LOAD_DEBOUNCE_MS)
   }
 
