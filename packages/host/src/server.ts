@@ -1014,7 +1014,9 @@ export async function startHostServer(
   }, {
     enabled: options.copilot?.enabled ?? process.env.AGENT_RUNLAB_COPILOT_ENABLED === '1',
     sessionsDir: options.sessionsDir,
-    ...(options.copilot?.gitHubToken ? { gitHubToken: options.copilot.gitHubToken } : {}),
+    ...(options.copilot?.gitHubToken ?? process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
+      ? { gitHubToken: options.copilot?.gitHubToken ?? process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN }
+      : {}),
   })
   await copilotRuntime.start()
   agentRuntimes.register(copilotRuntime)
