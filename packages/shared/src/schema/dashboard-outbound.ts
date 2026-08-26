@@ -180,6 +180,21 @@ export const ContextUsageSnapshotSchema = z.object({
 
 export const SessionReadyEventSchema = z.object({
   sessionId: z.string(),
+  agentRuntime: z.enum(['kernel', 'copilot']),
+  agentRuntimeCapabilities: z.object({
+    queue: z.boolean(),
+    fork: z.boolean(),
+    compact: z.boolean(),
+    clear: z.boolean(),
+    approvalMode: z.boolean(),
+    workspace: z.boolean(),
+    cwdMutation: z.boolean(),
+    modelSelection: z.boolean(),
+    attachments: z.boolean(),
+    memoryConsolidation: z.boolean(),
+    customTools: z.boolean(),
+    nativeReasoning: z.boolean(),
+  }),
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
   config: AgentConfigSchema,
@@ -442,6 +457,7 @@ export const ServerMessageQueueEventSchema = z.object({
 
 export const SessionSummarySchema = z.object({
   sessionId: z.string(),
+  agentRuntime: z.enum(['kernel', 'copilot']),
   createdAt: z.string(),
   lastEventAt: z.string().optional(),
   eventCount: z.number().int().nonnegative(),
@@ -899,6 +915,9 @@ export const HeaderEntrySchema = z.object({
   seq: z.literal(0),
   ts: z.string(),
   sessionId: z.string(),
+  agentRuntime: z.enum(['kernel', 'copilot']).optional(),
+  agentRuntimeVersion: z.string().optional(),
+  externalSessionId: z.string().optional(),
   parentSessionId: z.string().optional(),
   parentCursor: z.number().int().nonnegative().optional(),
   workspaceId: z.string().optional(),

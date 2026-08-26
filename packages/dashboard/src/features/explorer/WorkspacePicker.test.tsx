@@ -172,6 +172,7 @@ describe('NewSessionDialog', () => {
 
     fireEvent.click(screen.getByTestId('new-session-create'))
     expect(onCreate).toHaveBeenCalledWith({
+      agentRuntime: 'kernel',
       workspaceId: 'ws-a',
       workspaceName: 'mbp',
       cwd: '/tmp/root/project',
@@ -240,6 +241,7 @@ describe('NewSessionDialog', () => {
     fireEvent.click(screen.getByTestId('new-session-create'))
 
     expect(onCreate).toHaveBeenCalledWith({
+      agentRuntime: 'kernel',
       workspaceId: 'ws-a',
       workspaceName: 'mbp',
       cwd: '/tmp/root/manual',

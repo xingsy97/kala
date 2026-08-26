@@ -167,7 +167,7 @@ import {
   sessionViewCacheMaxBytesFromMb,
 } from './session-view-cache.js'
 import { createDurableSessionViewCache, sessionCacheNamespace } from './durable-session-cache.js'
-import { PROTOCOL_VERSION } from '@agent-kernel/shared'
+import { KERNEL_AGENT_RUNTIME_CAPABILITIES, PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
 import { AccountCenter } from './features/account/AccountCenter.js'
 import { AdminCenter } from './features/admin/AdminCenter.js'
@@ -446,6 +446,9 @@ export function App(): JSX.Element {
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
   )
+  const currentAgentRuntimeCapabilities = control.agentRuntimes.find(
+    (runtime) => runtime.id === (currentSession?.agentRuntime ?? 'kernel'),
+  )?.capabilities ?? KERNEL_AGENT_RUNTIME_CAPABILITIES
   useEffect(() => {
     if (!controlSocket || !currentSession?.workspaceId || !currentSession.sessionId) return
     const releaseWorkspace = dashboardConnectionManager(controlSocket).acquire(`workspace:${currentSession.workspaceId}`)
@@ -735,6 +738,7 @@ export function App(): JSX.Element {
   }, [session.contextSnapshot, session.config?.hardThreshold, session.state?.status, compactStatus.kind])
 
   const onModelChange = (model: string): void => {
+    if (!currentAgentRuntimeCapabilities.modelSelection) return
     setStoredModel(model)
     try {
       localStorage.setItem(PREF_MODEL, model)
@@ -759,6 +763,7 @@ export function App(): JSX.Element {
   }
 
   const runCompactNow = (): void => {
+    if (!currentAgentRuntimeCapabilities.compact) return
     if (config.sessionId === null) return
     if (!hasCompactableContent(session.state)) {
       setCompactStatus({ kind: 'empty', message: t('app.compactEmpty') })
@@ -793,7 +798,7 @@ export function App(): JSX.Element {
   >(null)
   const consolidateBannerTimer = useRef<number | null>(null)
   const runConsolidateMemory = useCallback((): void => {
-    if (!session.socket || config.sessionId === null) return
+    if (!session.socket || config.sessionId === null || !currentAgentRuntimeCapabilities.memoryConsolidation) return
     const socket = session.socket
     const requestId = randomId()
     const handler = (result: ConsolidateMemoryResult): void => {
@@ -826,7 +831,7 @@ export function App(): JSX.Element {
     }
     socket.on('server:memory_consolidated', handler)
     socket.emit('client:consolidate_memory', { requestId, sessionId: config.sessionId })
-  }, [session.socket, config.sessionId])
+  }, [session.socket, config.sessionId, currentAgentRuntimeCapabilities.memoryConsolidation])
 
   const selectSession = useCallback((sessionId: string): void => {
     setOptimisticSelectedSessionId(sessionId)
@@ -889,11 +894,12 @@ export function App(): JSX.Element {
     window.addEventListener('keydown',handler);return()=>window.removeEventListener('keydown',handler)
   },[config.sessionId,newSession,selectSession,sessionTabs])
   const clearCurrentSession = (): void => {
-    if (!session.socket || config.sessionId === null) return
+    if (!session.socket || config.sessionId === null || !currentAgentRuntimeCapabilities.clear) return
     sessionViewCache.delete(config.sessionId)
     clearSession(session.socket, config.sessionId)
   }
   const pickWorkspaceForNew = async (
+    agentRuntime: import('@agent-kernel/shared').AgentRuntimeId,
     workspaceId: string,
     workspaceName: string | undefined,
     cwd: string,
@@ -909,10 +915,11 @@ export function App(): JSX.Element {
     try {
       await createSessionWithAck(controlSocket, {
         sessionId,
+        agentRuntime,
         workspaceId,
         ...(workspaceName !== undefined ? { workspaceName } : {}),
         cwd,
-        selectedModel: preferredModel,
+        ...(agentRuntime === 'kernel' ? { selectedModel: preferredModel } : {}),
       })
       selectCreatedSession(sessionId)
       setPendingWorkspacePick(null)
@@ -922,7 +929,7 @@ export function App(): JSX.Element {
       setWorkspacePickSubmitting(false)
     }
   }
-  const startSimpleChat = async (): Promise<void> => {
+  const startSimpleChat = async (agentRuntime: import('@agent-kernel/shared').AgentRuntimeId): Promise<void> => {
     if (!pendingWorkspacePick) return
     const { sessionId } = pendingWorkspacePick
     if (!controlSocket) {
@@ -934,8 +941,9 @@ export function App(): JSX.Element {
     try {
       await createSessionWithAck(controlSocket, {
         sessionId,
+        agentRuntime,
         tools: SIMPLE_CHAT_TOOLS,
-        selectedModel: preferredModel,
+        ...(agentRuntime === 'kernel' ? { selectedModel: preferredModel } : {}),
       })
       selectCreatedSession(sessionId)
       setPendingWorkspacePick(null)
@@ -1364,7 +1372,7 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.changeCwdHint'),
         icon: FolderOpen,
         keywords: ['directory', 'folder'],
-        disabled: !hasSelectedSession || sessionWorkspaceKnownOffline,
+        disabled: !hasSelectedSession || sessionWorkspaceKnownOffline || !currentAgentRuntimeCapabilities.cwdMutation,
         disabledReason: !hasSelectedSession ? t('commandPalette.disabled.noSessionSelected') : t('commandPalette.disabled.workspaceOffline'),
         run: openCwdDialog,
       },
@@ -1375,7 +1383,7 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.compactContextHint'),
         icon: Archive,
         keywords: ['summarize', 'shrink'],
-        disabled: !canRun || !hasCompactableContent(session.state),
+        disabled: !canRun || !currentAgentRuntimeCapabilities.compact || !hasCompactableContent(session.state),
         disabledReason: !canRun ? t('commandPalette.disabled.noActiveSession') : t('commandPalette.disabled.nothingToCompact'),
         run: runCompactNow,
       },
@@ -1386,7 +1394,7 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.consolidateMemoryHint'),
         icon: ListChecks,
         keywords: ['memory'],
-        disabled: !canRun,
+        disabled: !canRun || !currentAgentRuntimeCapabilities.memoryConsolidation,
         disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => runConsolidateMemory(),
       },
@@ -1413,7 +1421,7 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.clearSessionHint'),
         icon: Eraser,
         keywords: ['reset'],
-        disabled: !canRun,
+        disabled: !canRun || !currentAgentRuntimeCapabilities.clear,
         disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => {
           if (socket && activeSessionId !== null) clearSession(socket, activeSessionId)
@@ -1499,7 +1507,7 @@ export function App(): JSX.Element {
       },
     )
 
-    for (const mode of APPROVAL_MODES) {
+    for (const mode of currentAgentRuntimeCapabilities.approvalMode ? APPROVAL_MODES : []) {
       cmds.push({
         id: `runtime.approval-${mode.value}`,
         group: t('commandPalette.groups.runtime'),
@@ -1517,7 +1525,7 @@ export function App(): JSX.Element {
       })
     }
 
-    for (const modelInfo of models) {
+    for (const modelInfo of currentAgentRuntimeCapabilities.modelSelection ? models : []) {
       const key = modelKey(modelInfo)
       cmds.push({
         id: `runtime.model-${key}`,
@@ -1535,6 +1543,7 @@ export function App(): JSX.Element {
     return cmds
   }, [
     activeSessionId,
+    currentAgentRuntimeCapabilities,
     control.executors.length,
     hasSelectedSession,
     inspectorOpen,
@@ -1772,7 +1781,7 @@ export function App(): JSX.Element {
                 else setInspectorDrawerOpen(true)
               }}
               sidebarAvailable={hasSelectedSession && (!wideLayout || !inspectorOpen)}
-              onChangeCwd={runtimeCapabilities.workspace && currentSession?.workspaceId ? openCwdDialog : undefined}
+              onChangeCwd={runtimeCapabilities.workspace && currentAgentRuntimeCapabilities.cwdMutation && currentSession?.workspaceId ? openCwdDialog : undefined}
               sessionSelected={hasSelectedSession}
               sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
               sessionTabs={!explorerOpen ? <SessionTabStrip sessions={control.sessions} openIds={sessionTabs.state.open} pinned={sessionTabs.state.pinned} active={config.sessionId} onSelect={selectSession} onClose={sessionTabs.close} onPin={sessionTabs.pin} onReorder={sessionTabs.reorder} /> : undefined}
@@ -1952,13 +1961,13 @@ export function App(): JSX.Element {
                             </div>
                           </BannerSlot>
                         ) : null}
-                        <ContextPressureBanner
+                        {currentAgentRuntimeCapabilities.compact ? <ContextPressureBanner
                           state={session.state}
                           contextSnapshot={session.contextSnapshot}
                           compactRunning={compactStatus.kind === 'running'}
                           suppressed={awaitingAck || compactStatus.kind === 'running'}
                           onCompactNow={runCompactNow}
-                        />
+                        /> : null}
                         <OfflineBanner />
                       </BannerStack>
                       <ComposerFlipContainer
@@ -1971,8 +1980,12 @@ export function App(): JSX.Element {
                           model={composerModel}
                           models={models}
                           onModelChange={onModelChange}
+                          allowModelSelection={currentAgentRuntimeCapabilities.modelSelection}
                           approvalMode={session.state?.approvalMode ?? 'auto'}
                           onApprovalModeChange={onApprovalModeChange}
+                          allowApprovalMode={currentAgentRuntimeCapabilities.approvalMode}
+                          allowQueue={currentAgentRuntimeCapabilities.queue}
+                          allowAttachments={currentAgentRuntimeCapabilities.attachments}
                           state={session.state}
                           config={session.config}
                           contextSnapshot={session.contextSnapshot}
@@ -1980,17 +1993,17 @@ export function App(): JSX.Element {
                           queuedMessages={visibleQueuedMessages}
                           timeline={session.timeline}
                           displayPrefs={chatDisplayPrefs}
-                          onQueuedReorder={session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
+                          onQueuedReorder={currentAgentRuntimeCapabilities.queue && session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
                             ? (id, beforeId) => reorderQueuedMessage(session.socket!, activeSessionId, id, beforeId)
                             : undefined}
-                          onQueuedUpdate={session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
+                          onQueuedUpdate={currentAgentRuntimeCapabilities.queue && session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
                             ? (id, text, content) => updateQueuedMessage(session.socket!, activeSessionId, id, text, content)
                             : undefined}
-                          onQueuedDelete={session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
+                          onQueuedDelete={currentAgentRuntimeCapabilities.queue && session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
                             ? (id) => deleteQueuedMessage(session.socket!, activeSessionId, id)
                             : undefined}
-                          onCompact={runCompactNow}
-                          onClearSession={clearCurrentSession}
+                          onCompact={currentAgentRuntimeCapabilities.compact ? runCompactNow : undefined}
+                          onClearSession={currentAgentRuntimeCapabilities.clear ? clearCurrentSession : undefined}
                           onCancel={() => {
                             if (!session.socket || activeSessionId === null) return
                             if (cancelPendingSessionId === activeSessionId) return
@@ -2005,7 +2018,7 @@ export function App(): JSX.Element {
                           }}
                           onRenameSession={renameCurrentSessionFromSlash}
                           onDeleteSession={requestSlashDeleteCurrentSession}
-                          onConsolidateMemory={runConsolidateMemory}
+                          onConsolidateMemory={currentAgentRuntimeCapabilities.memoryConsolidation ? runConsolidateMemory : undefined}
                           workspaceOnline={sessionWorkspaceOnline}
                           onListFiles={listWorkspaceFiles}
                           onReadFile={readWorkspaceFile}
@@ -2145,9 +2158,9 @@ export function App(): JSX.Element {
                         socket={session.socket}
                         parentSessionId={session.parentSessionId}
                         parentCursor={session.parentCursor}
-                        onFork={(cursor) => {
+                        onFork={currentAgentRuntimeCapabilities.fork ? (cursor) => {
                           if (activeSessionId !== null) session.socket?.emit('client:fork', { sourceSessionId: activeSessionId, cursor })
-                        }}
+                        } : undefined}
                         onJumpToMessage={(index) => {
                           setHighlightIndex(index)
                           const el = document.getElementById(`msg-${index}`)
@@ -2224,10 +2237,10 @@ export function App(): JSX.Element {
               socket={session.socket}
               parentSessionId={session.parentSessionId}
               parentCursor={session.parentCursor}
-              onFork={(cursor) => {
+              onFork={currentAgentRuntimeCapabilities.fork ? (cursor) => {
                 if (activeSessionId !== null) session.socket?.emit('client:fork', { sourceSessionId: activeSessionId, cursor })
                 setInspectorDrawerOpen(false)
-              }}
+              } : undefined}
               onJumpToMessage={(index) => {
                 setHighlightIndex(index)
                 const el = document.getElementById(`msg-${index}`)
@@ -2319,6 +2332,8 @@ export function App(): JSX.Element {
         summary={metadataSession}
         state={metadataIsCurrentSession ? session.state : null}
         selectedModel={metadataIsCurrentSession ? session.selectedModel : metadataSession?.preferences?.selectedModel ?? null}
+        canChangeCwd={metadataIsCurrentSession && currentAgentRuntimeCapabilities.cwdMutation}
+        canChangeApprovalMode={metadataIsCurrentSession && currentAgentRuntimeCapabilities.approvalMode}
         {...(metadataIsCurrentSession && executorHost !== undefined ? { executorHost } : {})}
         onRename={(label) => {
           if (metadataTargetSessionId !== null) renameSessionAt(metadataTargetSessionId, label)
@@ -2338,14 +2353,15 @@ export function App(): JSX.Element {
       <WorkspacePicker
         open={pendingWorkspacePick !== null}
         workspaces={control.executors}
+        agentRuntimes={control.agentRuntimes}
         initialWorkspaceId={pendingWorkspacePick?.workspaceId}
         socket={session.socket}
         error={workspacePickError}
         submitting={workspacePickSubmitting}
-        onCreate={({ workspaceId, workspaceName, cwd }) =>
-          void pickWorkspaceForNew(workspaceId, workspaceName, cwd)
+        onCreate={({ agentRuntime, workspaceId, workspaceName, cwd }) =>
+          void pickWorkspaceForNew(agentRuntime, workspaceId, workspaceName, cwd)
         }
-        onCreateSimpleChat={() => void startSimpleChat()}
+        onCreateSimpleChat={(agentRuntime) => void startSimpleChat(agentRuntime)}
         onCancel={() => {
           setPendingWorkspacePick(null)
           setWorkspacePickError(null)

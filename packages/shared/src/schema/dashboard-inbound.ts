@@ -158,6 +158,7 @@ export const ClientForkSchema = z.object({
 export const ClientCreateSessionSchema = z.object({
   operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
+  agentRuntime: z.enum(['kernel', 'copilot']).optional(),
   workspaceId: WorkspaceIdSchema.optional(),
   workspaceName: z.string().optional(),
   cwd: z.string().optional(),

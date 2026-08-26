@@ -31,6 +31,41 @@ describe('SessionStore.ensure', () => {
     expect(record.toolLock).toEqual({ read: { version: '2.1.0', schemaHash: 'sha256:test' } })
   })
 
+  it('reloads Copilot sessions from snapshots and settles interrupted turns without kernel events', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-session',
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: 'copilot-session',
+      config,
+    })
+    const projected = {
+      ...record.state,
+      cursor: 1,
+      status: 'thinking' as const,
+      pendingCalls: [] as const,
+      messages: [...record.state.messages, {
+        role: 'user' as const,
+        content: [{ type: 'text' as const, text: 'hello copilot' }],
+      }],
+    }
+    await store.recordRuntimeProjection(record.sessionId, projected, 'copilot.user_message', { text: 'hello copilot' })
+
+    const reloaded = await new SessionStore(dir).load(record.sessionId)
+    expect(reloaded.agentRuntime).toBe('copilot')
+    expect(reloaded.externalSessionId).toBe('copilot-session')
+    expect(reloaded.state.status).toBe('error')
+    expect(reloaded.state.cursor).toBe(2)
+    expect(reloaded.state.messages).toEqual(projected.messages)
+    expect(reloaded.state.pendingCalls).toEqual([])
+    expect(reloaded.state.error).toBe('Copilot turn was interrupted by a host restart')
+    const log = await readSessionLog(record.logPath)
+    expect(log.events).toHaveLength(0)
+    expect(log.snapshots).toHaveLength(2)
+    expect(log.runtimeMetadata.at(-1)?.action).toBe('copilot.recovered_interrupted_turn')
+  })
+
   it('returns the same record for concurrent callers and writes ONE log file', async () => {
     // The race: dashboard + executor sockets arrive in the same tick, both
     // find no cached record, both fail to load, both call create() with a

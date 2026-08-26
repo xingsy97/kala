@@ -10,6 +10,7 @@ import type {
   UsageTotal,
 } from '@agent-kernel/kernel'
 import type { EventTimingMetadata } from './turn-timing.js'
+import type { AgentRuntimeId } from './protocol.js'
 
 export type LogEntryKind = 'header' | 'event' | 'snapshot' | 'metadata' | 'runtime_metadata'
 
@@ -18,6 +19,12 @@ export type HeaderEntry = {
   seq: 0
   ts: string
   sessionId: string
+  /** Runtime that owns the session's agent loop. Missing in legacy logs means `kernel`. */
+  agentRuntime?: AgentRuntimeId
+  /** Runtime implementation version captured when the session was created. */
+  agentRuntimeVersion?: string
+  /** Runtime-native durable session identity, when different from sessionId. */
+  externalSessionId?: string
   parentSessionId?: string
   parentCursor?: number
   /** Parent tool_call id when this session was spawned by the `agent` tool. */

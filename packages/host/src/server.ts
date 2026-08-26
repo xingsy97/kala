@@ -82,12 +82,19 @@ import type { WebSearchCredentialStore } from './web-search/index.js'
 import type { WebSearchCredentialStatus } from './web-search/credential-store.js'
 import { ExecutorInstallationStore } from './store/executor-installation.js'
 import { attachExecutorInstallationRoutes } from './http/executor-installation-routes.js'
+import { AgentRuntimeRegistry } from './agent-runtime/types.js'
+import { KernelAgentRuntime } from './agent-runtime/kernel-runtime.js'
+import { CopilotAgentRuntime } from './agent-runtime/copilot-runtime.js'
 
 export type HostServerOptions = {
   port: number
   listenHost?: string
   sessionsDir: string
   llm: LLMAdapter
+  copilot?: {
+    enabled?: boolean
+    gitHubToken?: string
+  }
   defaultConfig: AgentConfig | (() => AgentConfig)
   toolTimeoutMs?: number
   /**
@@ -215,6 +222,7 @@ export async function startHostServer(
     }
   }
   let closed = false
+  let agentRuntimes: AgentRuntimeRegistry | undefined
   const closeServer = async (): Promise<void> => {
     if (closed) return
     closed = true
@@ -224,6 +232,7 @@ export async function startHostServer(
     // boundary after the last socket closes. Wait before callers remove the
     // Session directory (tests) or replace storage (shutdown/deploy).
     await Promise.allSettled([...queueLoads.values(), ...queueMutations.values()])
+    await agentRuntimes?.close()
     for (let attempt = 0; attempt < 100 && drainingQueues.size > 0; attempt += 1) {
       await new Promise<void>((resolve) => setTimeout(resolve, 10))
     }
@@ -962,6 +971,53 @@ export async function startHostServer(
     }),
   }
   loop = runHostLoop(loopDeps)
+  agentRuntimes = new AgentRuntimeRegistry()
+  agentRuntimes.register(new KernelAgentRuntime(loop))
+  const copilotRuntime = new CopilotAgentRuntime({
+    store,
+    tools: executors,
+    broadcast: {
+      onState(record, state) {
+        scheduleSessionsBroadcast()
+        const room = sessionRoom(record.sessionId)
+        const contextSnapshot = snapshotFromConfig(
+          record.config,
+          state.messages,
+          contextWindowForModel(effectiveModelForSession(record.sessionId)),
+          effectiveModelForSession(record.sessionId),
+        )
+        dashboardNs.to(room).emit('state:changed', {
+          sessionId: record.sessionId,
+          cursor: state.cursor,
+          state,
+          contextSnapshot,
+        })
+      },
+      onTokenDelta(sessionId, text) {
+        broadcast.onTokenDelta?.(sessionId, text)
+      },
+      onApprovalRequired(sessionId) {
+        const call = store.get(sessionId)?.state.pendingCalls.find((candidate) => candidate.status === 'awaiting_approval')
+        if (!call) return
+        broadcast.onApprovalRequired(sessionId, {
+          kind: 'request_approval',
+          callId: call.callId,
+          name: call.name,
+          input: call.input,
+          ...(call.intent ? { intent: call.intent } : {}),
+        })
+      },
+      onError(sessionId, message) {
+        broadcast.onError(sessionId, message)
+      },
+    },
+  }, {
+    enabled: options.copilot?.enabled ?? process.env.AGENT_RUNLAB_COPILOT_ENABLED === '1',
+    sessionsDir: options.sessionsDir,
+    ...(options.copilot?.gitHubToken ? { gitHubToken: options.copilot.gitHubToken } : {}),
+  })
+  await copilotRuntime.start()
+  agentRuntimes.register(copilotRuntime)
   restart = new RestartCoordinator({
     store,
     loop,
@@ -1036,6 +1092,7 @@ export async function startHostServer(
     normalizeModelRef,
     dashboardNs,
     messageQueues,
+    agentRuntimes,
     executorSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     renameWorkspace: async (workspaceId, workspaceName) => {
       const applied = await workspaceAliases.rename(workspaceId, workspaceName)

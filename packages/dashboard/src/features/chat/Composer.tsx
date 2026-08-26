@@ -49,7 +49,7 @@ type Props = {
   serviceUnavailable?: boolean
   onReconnectService?(): void
   onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void | Promise<void>
-  onCompact(): void
+  onCompact?(): void
   onCancel?(): void
   onClearSession?(): void
   onConsolidateMemory?(): void
@@ -60,6 +60,10 @@ type Props = {
   onModelChange(model: string): void
   approvalMode: ApprovalMode
   onApprovalModeChange(mode: ApprovalMode): void
+  allowModelSelection?: boolean
+  allowApprovalMode?: boolean
+  allowQueue?: boolean
+  allowAttachments?: boolean
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
@@ -192,6 +196,10 @@ export function Composer({
   onModelChange,
   approvalMode,
   onApprovalModeChange,
+  allowModelSelection = true,
+  allowApprovalMode = true,
+  allowQueue = true,
+  allowAttachments = true,
   state,
   config,
   contextSnapshot,
@@ -258,6 +266,9 @@ export function Composer({
   useEffect(() => {
     setSendMode(readStoredSendMode(sessionId))
   }, [sessionId])
+  useEffect(() => {
+    if (!allowQueue && sendMode !== 'steer') setSendMode('steer')
+  }, [allowQueue, sendMode])
   const updateSendMode = useCallback((next: SendMode): void => {
     setSendMode(next)
     writeStoredSendMode(sessionId, next)
@@ -274,15 +285,16 @@ export function Composer({
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
   const slashCommands = useMemo(
     () => {
-      const commands: SlashCommand[] = [
-        {
+      const commands: SlashCommand[] = []
+      if (onCompact) {
+        commands.push({
           command: '/compact',
           icon: Archive,
           label: t('composer.slash.compact'),
           description: t('composer.slash.compactDesc'),
           run: onCompact,
-        },
-      ]
+        })
+      }
       if (onCancel) {
         commands.push({
           command: '/stop',
@@ -504,6 +516,7 @@ export function Composer({
   }
 
   async function extractImagesFromClipboardData(data: DataTransfer | null): Promise<PastedImage[]> {
+    if (!allowAttachments) return []
     const items = Array.from(data?.items ?? [])
     const imageItems = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
     const added: PastedImage[] = []
@@ -650,6 +663,9 @@ export function Composer({
               onComposerModeChange={toggleMode}
               sendMode={sendMode}
               onSendModeChange={updateSendMode}
+              allowModelSelection={allowModelSelection}
+              allowApprovalMode={allowApprovalMode}
+              allowQueue={allowQueue}
             />
             <span className="hidden sm:inline-flex">
               <HumanAttentionIndicator timeline={humanAttention} density="simple" />
@@ -659,6 +675,7 @@ export function Composer({
               sendMode={sendMode}
               onSendModeChange={updateSendMode}
               density="simple"
+              allowQueue={allowQueue}
               stop={showStopButton ? { onClick: onCancel } : undefined}
             />
             </div>
@@ -815,10 +832,13 @@ export function Composer({
               onComposerModeChange={toggleMode}
               sendMode={sendMode}
               onSendModeChange={updateSendMode}
+              allowModelSelection={allowModelSelection}
+              allowApprovalMode={allowApprovalMode}
+              allowQueue={allowQueue}
               className="flex sm:hidden"
             />
             <div className="hidden min-w-0 items-center gap-1.5 sm:flex" data-testid="composer-footer-config">
-            <Select
+            {allowModelSelection ? <Select
               value={modelInfoFor(models, model ?? '') ? model : ''}
               onValueChange={onModelChange}
               disabled={models.length === 0}
@@ -844,8 +864,8 @@ export function Composer({
                   </SelectItem>
                 )})}
               </SelectContent>
-            </Select>
-            <Select
+            </Select> : null}
+            {allowApprovalMode ? <Select
               value={approvalMode}
               onValueChange={(v) => onApprovalModeChange(v as ApprovalMode)}
             >
@@ -883,7 +903,7 @@ export function Composer({
                   </SelectItem>
                 )})}
               </SelectContent>
-            </Select>
+            </Select> : null}
             </div>
             {footerExtras}
             <div className="ml-auto flex min-w-0 max-w-full items-center gap-0.5 max-sm:justify-end" data-testid="composer-footer-actions">
@@ -902,6 +922,7 @@ export function Composer({
                 disabled={!canSubmit}
                 sendMode={sendMode}
                 onSendModeChange={updateSendMode}
+                allowQueue={allowQueue}
                 stop={showStopButton ? { onClick: onCancel } : undefined}
               />
             </div>
@@ -961,12 +982,14 @@ function SendButton({
   disabled,
   sendMode,
   onSendModeChange,
+  allowQueue = true,
   density = 'default',
   stop,
 }: {
   disabled: boolean
   sendMode: SendMode
   onSendModeChange(value: SendMode): void
+  allowQueue?: boolean
   density?: 'default' | 'simple'
   stop?: { onClick?: () => void }
 }): JSX.Element {
@@ -1022,7 +1045,7 @@ function SendButton({
         disabled={disabled}
         data-testid="composer-send"
         className={cn(
-          isSimple
+          isSimple || !allowQueue
             ? 'h-11 min-w-11 rounded-xl p-0 text-sm font-medium shadow-sm'
             : 'h-11 min-w-11 rounded-r-none rounded-l-xl p-0 text-sm font-medium',
           disabled ? 'opacity-50' : '',
@@ -1033,7 +1056,7 @@ function SendButton({
         <ModeIcon className={cn('h-[18px] w-[18px]', 'sm:mr-1.5')} aria-hidden="true" />
         <span className="sr-only">{t('composer.send')}</span>
       </Button>
-      {!isSimple ? <button
+      {!isSimple && allowQueue ? <button
         type="button"
         onClick={() => setMenuOpen((v) => !v)}
         className={cn(
@@ -1113,6 +1136,9 @@ function ComposerConfigButton({
   onComposerModeChange,
   sendMode,
   onSendModeChange,
+  allowModelSelection,
+  allowApprovalMode,
+  allowQueue,
   className,
 }: {
   model: string
@@ -1125,6 +1151,9 @@ function ComposerConfigButton({
   onComposerModeChange(): void
   sendMode: SendMode
   onSendModeChange(value: SendMode): void
+  allowModelSelection: boolean
+  allowApprovalMode: boolean
+  allowQueue: boolean
   className?: string
 }): JSX.Element {
   const { t } = useTranslation()
@@ -1187,7 +1216,7 @@ function ComposerConfigButton({
             {t('composer.config.title')}
           </div>
           <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1">
+            {allowModelSelection ? <label className="flex flex-col gap-1">
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
                 <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                 {t('common.model')}
@@ -1213,9 +1242,9 @@ function ComposerConfigButton({
                   })}
                 </SelectContent>
               </Select>
-            </label>
+            </label> : null}
 
-            <label className="flex flex-col gap-1">
+            {allowApprovalMode ? <label className="flex flex-col gap-1">
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
                 <ShieldCheck className={cn('h-3.5 w-3.5', approvalTone)} aria-hidden="true" />
                 {t('composer.approvalMode')}
@@ -1255,9 +1284,9 @@ function ComposerConfigButton({
                   </SelectContent>
                 </Select>
               </div>
-            </label>
+            </label> : null}
 
-            <fieldset className="flex flex-col gap-1" data-testid="composer-config-send-mode">
+            {allowQueue ? <fieldset className="flex flex-col gap-1" data-testid="composer-config-send-mode">
               <legend className="flex w-full items-center gap-1.5 text-[11px] font-medium text-foreground">
                 <Navigation className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                 {t('chat.transcript.sendMode')}
@@ -1269,7 +1298,7 @@ function ComposerConfigButton({
                   </button>
                 ))}
               </div>
-            </fieldset>
+            </fieldset> : null}
 
             <label className="flex flex-col gap-1" data-testid="composer-config-mode">
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">

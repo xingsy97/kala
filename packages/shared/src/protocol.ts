@@ -19,6 +19,64 @@ import type {
 import type { ContextUsageSnapshot } from './context-usage/types.js'
 import type { LLMTrace } from './log.js'
 
+export type AgentRuntimeId = 'kernel' | 'copilot'
+
+export type AgentRuntimeCapabilities = {
+  readonly queue: boolean
+  readonly fork: boolean
+  readonly compact: boolean
+  readonly clear: boolean
+  readonly approvalMode: boolean
+  readonly workspace: boolean
+  readonly cwdMutation: boolean
+  readonly modelSelection: boolean
+  readonly attachments: boolean
+  readonly memoryConsolidation: boolean
+  readonly customTools: boolean
+  readonly nativeReasoning: boolean
+}
+
+export type AgentRuntimeDescriptor = {
+  readonly id: AgentRuntimeId
+  readonly label: string
+  readonly description: string
+  readonly available: boolean
+  readonly status: 'ready' | 'disabled' | 'unavailable'
+  readonly reason?: string
+  readonly version?: string
+  readonly capabilities: AgentRuntimeCapabilities
+}
+
+export const KERNEL_AGENT_RUNTIME_CAPABILITIES: AgentRuntimeCapabilities = {
+  queue: true,
+  fork: true,
+  compact: true,
+  clear: true,
+  approvalMode: true,
+  workspace: true,
+  cwdMutation: true,
+  modelSelection: true,
+  attachments: true,
+  memoryConsolidation: true,
+  customTools: true,
+  nativeReasoning: false,
+}
+
+export const COPILOT_AGENT_RUNTIME_CAPABILITIES: AgentRuntimeCapabilities = {
+  queue: false,
+  fork: false,
+  compact: false,
+  clear: false,
+  approvalMode: true,
+  workspace: true,
+  cwdMutation: false,
+  modelSelection: false,
+  attachments: false,
+  memoryConsolidation: false,
+  customTools: true,
+  nativeReasoning: true,
+}
+
 // ============================================================================
 // Handshake
 // ============================================================================
@@ -48,6 +106,8 @@ export type HandshakeAuth = {
 
 export type SessionReadyEvent = {
   sessionId: string
+  agentRuntime: AgentRuntimeId
+  agentRuntimeCapabilities: AgentRuntimeCapabilities
   cursor: number
   state: AgentState
   config: AgentConfig
@@ -466,6 +526,7 @@ export type ClientFork = {
 export type ClientCreateSession = {
   operationId?: string
   sessionId: string
+  agentRuntime?: AgentRuntimeId
   /**
    * Bind the session to a workspace. Optional — when omitted, the session
    * is unbound and any online executor may run its tools (legacy fallback).
@@ -1210,6 +1271,7 @@ export type ClientListSessions = Record<string, never>
 
 export type SessionSummary = {
   sessionId: string
+  agentRuntime: AgentRuntimeId
   createdAt: string
   lastEventAt?: string
   eventCount: number
@@ -1704,6 +1766,7 @@ export type DashboardServerToClientEvents = {
    * discriminated payload.
    */
   'server:control_update': (payload: ControlUpdate) => void
+  'server:agent_runtimes': (payload: { runtimes: readonly AgentRuntimeDescriptor[] }) => void
   'server:compact_status': (payload: CompactStatusEvent) => void
 }
 

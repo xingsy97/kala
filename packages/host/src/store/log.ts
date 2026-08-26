@@ -21,6 +21,7 @@ import type {
 } from '@agent-kernel/kernel'
 import type {
   EventEntry,
+  AgentRuntimeId,
   HeaderEntry,
   LLMTrace,
   LogArtifactRef,
@@ -36,6 +37,9 @@ const KERNEL_VERSION = '@agent-kernel/kernel@0.0.0'
 export type WriteHeaderParams = {
   path: string
   sessionId: string
+  agentRuntime?: AgentRuntimeId
+  agentRuntimeVersion?: string
+  externalSessionId?: string
   config: AgentConfig
   initialState: AgentState
   parentSessionId?: string
@@ -55,6 +59,9 @@ export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntr
     seq: 0,
     ts: new Date().toISOString(),
     sessionId: params.sessionId,
+    ...(params.agentRuntime ? { agentRuntime: params.agentRuntime } : {}),
+    ...(params.agentRuntimeVersion ? { agentRuntimeVersion: params.agentRuntimeVersion } : {}),
+    ...(params.externalSessionId ? { externalSessionId: params.externalSessionId } : {}),
     formatVersion: LOG_FORMAT_VERSION,
     kernelVersion: KERNEL_VERSION,
     config: params.config,

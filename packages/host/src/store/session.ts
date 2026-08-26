@@ -15,7 +15,7 @@ import type {
   Effect,
   UsageTotal,
 } from '@agent-kernel/kernel'
-import type { LLMTrace, SessionMemoryPolicy, SessionPreferences } from '@agent-kernel/shared'
+import type { AgentRuntimeId, LLMTrace, SessionMemoryPolicy, SessionPreferences } from '@agent-kernel/shared'
 import { createInitialState, fold } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
 import { ulid } from 'ulid'
@@ -23,6 +23,8 @@ import { ulid } from 'ulid'
 import {
   appendEventEntry,
   appendMetadataEntry,
+  appendRuntimeMetadataEntry,
+  appendSnapshotEntry,
   readSessionLog,
   writeHeader,
 } from './log.js'
@@ -31,6 +33,9 @@ import { toolLockFor } from '../tool-version.js'
 
 export type SessionRecord = {
   readonly sessionId: string
+  readonly agentRuntime: AgentRuntimeId
+  readonly agentRuntimeVersion?: string
+  readonly externalSessionId?: string
   readonly logPath: string
   readonly createdAt: string
   readonly config: AgentConfig
@@ -67,6 +72,9 @@ export type SessionRecord = {
 export type CreateSessionParams = {
   systemPrompt?: string
   config: AgentConfig
+  agentRuntime?: AgentRuntimeId
+  agentRuntimeVersion?: string
+  externalSessionId?: string
   parentSessionId?: string
   parentCursor?: number
   parentCallId?: string
@@ -154,6 +162,9 @@ export class SessionStore {
     const header = await writeHeader({
       path: logPath,
       sessionId,
+      agentRuntime: params.agentRuntime ?? 'kernel',
+      ...(params.agentRuntimeVersion ? { agentRuntimeVersion: params.agentRuntimeVersion } : {}),
+      ...(params.externalSessionId ? { externalSessionId: params.externalSessionId } : {}),
       config: params.config,
       initialState: stateWithApproval,
       ...(params.parentSessionId
@@ -183,6 +194,9 @@ export class SessionStore {
     })
     const record: SessionRecord = {
       sessionId,
+      agentRuntime: params.agentRuntime ?? 'kernel',
+      ...(params.agentRuntimeVersion ? { agentRuntimeVersion: params.agentRuntimeVersion } : {}),
+      ...(params.externalSessionId ? { externalSessionId: params.externalSessionId } : {}),
       logPath,
       createdAt: header.ts,
       config: params.config,
@@ -322,6 +336,9 @@ export class SessionStore {
    */
   async ensure(params: {
     sessionId: string
+    agentRuntime?: AgentRuntimeId
+    agentRuntimeVersion?: string
+    externalSessionId?: string
     defaultConfig: AgentConfig
     workspaceId?: string
     workspaceName?: string
@@ -348,6 +365,9 @@ export class SessionStore {
       params.workspaceId,
       params.workspaceName,
       params.initialCwd,
+      params.agentRuntime,
+      params.agentRuntimeVersion,
+      params.externalSessionId,
       this.resolveRuntimeConfig(params.runtimeConfig) ?? params.defaultConfig,
       () => { created = true },
     ).finally(() => {
@@ -364,6 +384,9 @@ export class SessionStore {
     workspaceId: string | undefined,
     workspaceName: string | undefined,
     initialCwd: string | undefined,
+    agentRuntime: AgentRuntimeId | undefined,
+    agentRuntimeVersion: string | undefined,
+    externalSessionId: string | undefined,
     runtimeConfig: AgentConfig,
     markCreated: () => void,
   ): Promise<SessionRecord> {
@@ -386,6 +409,9 @@ export class SessionStore {
       return await this.create({
         sessionId,
         config: defaultConfig,
+        ...(agentRuntime ? { agentRuntime } : {}),
+        ...(agentRuntimeVersion ? { agentRuntimeVersion } : {}),
+        ...(externalSessionId ? { externalSessionId } : {}),
         ...(workspaceId !== undefined ? { workspaceId } : {}),
         ...(workspaceName !== undefined ? { workspaceName } : {}),
         ...(initialCwd !== undefined ? { initialCwd } : {}),
@@ -467,6 +493,7 @@ export class SessionStore {
           `stale Session transition for ${sessionId}: expected cursor ${expectedCursor}, received ${nextState.cursor}`,
         )
       }
+
       const entry = await appendEventEntry({
         path: rec.logPath,
         seq: nextState.cursor,
@@ -483,6 +510,40 @@ export class SessionStore {
       if (event.kind === 'user_message' && event.text?.trim() && !rec.firstUserMessage) {
         rec.firstUserMessage = event.text
       }
+      this.summaryCache.delete(rec.logPath)
+    })
+    this.recordTails.set(sessionId, commit)
+    try {
+      await commit
+    } finally {
+      if (this.recordTails.get(sessionId) === commit) this.recordTails.delete(sessionId)
+    }
+  }
+
+  async recordRuntimeProjection(
+    sessionId: string,
+    nextState: AgentState,
+    action: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const previous = this.recordTails.get(sessionId) ?? Promise.resolve()
+    const commit = previous.catch(() => undefined).then(async () => {
+      const rec = this.records.get(sessionId)
+      if (!rec) throw new Error(`Cannot record projection on unknown session: ${sessionId}`)
+      if (rec.agentRuntime === 'kernel') {
+        throw new Error(`Kernel session ${sessionId} cannot record an external runtime projection`)
+      }
+      const expectedCursor = rec.state.cursor + 1
+      if (nextState.cursor !== expectedCursor) {
+        throw new Error(
+          `stale runtime projection for ${sessionId}: expected cursor ${expectedCursor}, received ${nextState.cursor}`,
+        )
+      }
+      await appendRuntimeMetadataEntry(rec.logPath, { sessionId, action, payload })
+      const entry = await appendSnapshotEntry(rec.logPath, nextState.cursor, nextState)
+      rec.state = nextState
+      rec.lastEventAt = entry.ts
+      if (!rec.firstUserMessage) rec.firstUserMessage = firstUserMessageFromState(nextState)
       this.summaryCache.delete(rec.logPath)
     })
     this.recordTails.set(sessionId, commit)
@@ -655,9 +716,50 @@ export class SessionStore {
     options: { recoverDangling: boolean; runtimeConfig?: AgentConfig } = { recoverDangling: true },
   ): Promise<SessionRecord> {
     const parsed = await readSessionLog(path)
+    const agentRuntime = parsed.header.agentRuntime ?? 'kernel'
     const events = parsed.events.map((e) => e.event)
-    let finalState = fold(parsed.header.initialState, events, parsed.header.config)
+    const lastSnapshot = parsed.snapshots.at(-1)
+    let finalState = agentRuntime === 'kernel'
+      ? fold(parsed.header.initialState, events, parsed.header.config)
+      : lastSnapshot?.state ?? parsed.header.initialState
     let cursor = finalState.cursor
+
+    if (
+      options.recoverDangling &&
+      agentRuntime !== 'kernel' &&
+      (finalState.status === 'thinking' ||
+        finalState.status === 'awaiting_approval' ||
+        finalState.status === 'executing_tools')
+    ) {
+      const interruptedCalls = finalState.pendingCalls
+      finalState = {
+        ...finalState,
+        cursor: finalState.cursor + 1,
+        status: 'error',
+        pendingCalls: [],
+        messages: [
+          ...finalState.messages,
+          ...interruptedCalls.map((call) => ({
+            role: 'tool' as const,
+            content: [{
+              type: 'tool_result' as const,
+              callId: call.callId,
+              ok: false,
+              content: 'host restarted while call was pending',
+            }],
+          })),
+        ],
+        error: 'Copilot turn was interrupted by a host restart',
+      }
+      cursor = finalState.cursor
+      await appendRuntimeMetadataEntry(path, {
+        sessionId,
+        action: 'copilot.recovered_interrupted_turn',
+        payload: { pendingCallCount: interruptedCalls.length },
+      })
+      const recoverySnapshot = await appendSnapshotEntry(path, cursor, finalState)
+      parsed.snapshots.push(recoverySnapshot)
+    }
 
     // Crash recovery: a session that was mid-tool-call when the host died
     // has status='awaiting_approval' or 'executing_tools' with non-empty
@@ -667,6 +769,7 @@ export class SessionStore {
     let recoveredPending = false
     if (
       options.recoverDangling &&
+      agentRuntime === 'kernel' &&
       (finalState.status === 'awaiting_approval' ||
         finalState.status === 'executing_tools') &&
       finalState.pendingCalls.length > 0
@@ -730,6 +833,7 @@ export class SessionStore {
     // turn, not a stuck stream.
     if (
       options.recoverDangling &&
+      agentRuntime === 'kernel' &&
       !recoveredPending &&
       finalState.status === 'thinking' &&
       finalState.pendingCalls.length === 0
@@ -760,7 +864,9 @@ export class SessionStore {
       latestStringFromMetadata(parsed.metadata, 'workspaceName') ??
       parsed.header.workspaceName
     const label = latestStringFromMetadata(parsed.metadata, 'label')
-    const firstUserMessage = firstUserMessageFromEvents(parsed.events)
+    const firstUserMessage = agentRuntime === 'kernel'
+      ? firstUserMessageFromEvents(parsed.events)
+      : firstUserMessageFromState(finalState)
     const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel')
     const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)
     const preferences: SessionPreferences = {
@@ -772,6 +878,9 @@ export class SessionStore {
 
     const record: SessionRecord = {
       sessionId,
+      agentRuntime,
+      ...(parsed.header.agentRuntimeVersion ? { agentRuntimeVersion: parsed.header.agentRuntimeVersion } : {}),
+      ...(parsed.header.externalSessionId ? { externalSessionId: parsed.header.externalSessionId } : {}),
       logPath: path,
       createdAt: parsed.header.ts,
       config: options.runtimeConfig ?? parsed.header.config,
@@ -870,6 +979,7 @@ function loadedRecordForPath(
 function summarizeRecord(record: SessionRecord): SessionSummary {
   return {
     sessionId: record.sessionId,
+    agentRuntime: record.agentRuntime,
     createdAt: record.createdAt,
     eventCount: record.state.cursor,
     ...(record.lastEventAt ? { lastEventAt: record.lastEventAt } : {}),
@@ -898,13 +1008,16 @@ function summarizeLog(
   parsed: Awaited<ReturnType<typeof readSessionLog>>,
 ): SessionSummary {
   const header = parsed.header
+  const agentRuntime = header.agentRuntime ?? 'kernel'
   const events = parsed.events
   const lastEvent = events.length > 0 ? events[events.length - 1]! : undefined
   const lastSnapshot =
     parsed.snapshots.length > 0
       ? parsed.snapshots[parsed.snapshots.length - 1]!
       : undefined
-  const firstUserText = firstUserMessageFromEvents(events)
+  const firstUserText = agentRuntime === 'kernel'
+    ? firstUserMessageFromEvents(events)
+    : firstUserMessageFromState(lastSnapshot?.state ?? header.initialState)
   const label = latestStringFromMetadata(parsed.metadata, 'label')
   const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel')
   const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)
@@ -924,9 +1037,10 @@ function summarizeLog(
   )
   return {
     sessionId: header.sessionId,
+    agentRuntime,
     createdAt: header.ts,
-    eventCount: events.length,
-    ...(lastEvent ? { lastEventAt: lastEvent.ts } : {}),
+    eventCount: agentRuntime === 'kernel' ? events.length : (lastSnapshot?.seq ?? 0),
+    ...((lastSnapshot?.ts ?? lastEvent?.ts) ? { lastEventAt: lastSnapshot?.ts ?? lastEvent?.ts } : {}),
     ...(header.parentSessionId ? { parentSessionId: header.parentSessionId } : {}),
     ...(workspaceId !== undefined
       ? { workspaceId }
@@ -946,6 +1060,16 @@ function summarizeLog(
       ? { preferences: { ...(selectedModel ? { selectedModel } : {}), ...(toolCardMode ? { toolCardMode } : {}) } }
       : {}),
   }
+
+}
+
+function firstUserMessageFromState(state: AgentState): string | undefined {
+  for (const message of state.messages) {
+    if (message.role !== 'user') continue
+    const text = message.content.find((content) => content.type === 'text')
+    if (text?.type === 'text' && text.text.trim()) return text.text
+  }
+  return undefined
 }
 
 /** Walk metadata entries in reverse to find the most recent string value. */

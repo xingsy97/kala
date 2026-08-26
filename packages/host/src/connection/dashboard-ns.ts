@@ -65,8 +65,16 @@ import type {
   SessionErrorScope,
   SessionReadyEvent,
   SubAgentSummary,
+  AgentRuntimeCapabilities,
 } from '@agent-kernel/shared'
-import { isCompatibleVersion, schema, validateClientMessagePayload, validateInlineMessageImages } from '@agent-kernel/shared'
+import {
+  COPILOT_AGENT_RUNTIME_CAPABILITIES,
+  KERNEL_AGENT_RUNTIME_CAPABILITIES,
+  isCompatibleVersion,
+  schema,
+  validateClientMessagePayload,
+  validateInlineMessageImages,
+} from '@agent-kernel/shared'
 import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
 import type { SessionSummary } from '@agent-kernel/shared'
 import type {
@@ -101,6 +109,7 @@ import { contextSnapshot, snapshotFromConfig, type ContextWindowOverride } from 
 import { sessionRoom } from './rooms.js'
 import { dashboardConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
 import { OperationDeduper } from './operation-deduper.js'
+import type { AgentRuntimeRegistry } from '../agent-runtime/types.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -111,6 +120,45 @@ export type QueuedUserMessage = {
   createdAt: string
   content?: readonly MessageContent[]
   model?: string
+}
+
+async function safeRuntimeAction(
+  deps: DashboardDeps,
+  sessionId: string,
+  action: (
+    runtime: ReturnType<AgentRuntimeRegistry['require']>,
+    record: SessionRecord,
+  ) => Promise<void>,
+): Promise<void> {
+  try {
+    const record = await loadRecordForDashboard(deps, sessionId)
+    if (!record) {
+      deps.broadcastError(sessionId, 'host', 'unknown session')
+      return
+    }
+    await action(deps.agentRuntimes.require(record.agentRuntime), record)
+  } catch (err) {
+    deps.broadcastError(sessionId, 'host', err instanceof Error ? err.message : String(err))
+  }
+}
+
+async function requireRuntimeCapability(
+  deps: DashboardDeps,
+  sessionId: string,
+  capability: keyof AgentRuntimeCapabilities,
+  operation: string,
+): Promise<SessionRecord | undefined> {
+  const record = await loadRecordForDashboard(deps, sessionId)
+  if (!record) {
+    deps.broadcastError(sessionId, 'host', 'unknown session')
+    return undefined
+  }
+  const descriptor = deps.agentRuntimes.require(record.agentRuntime).descriptor()
+  if (!descriptor.capabilities[capability]) {
+    deps.broadcastError(sessionId, 'host', `${descriptor.label} sessions do not support ${operation}`)
+    return undefined
+  }
+  return record
 }
 
 export type MessageQueueManager = {
@@ -157,6 +205,7 @@ export type DashboardDeps = {
   normalizeModelRef?(model: string): string | undefined
   dashboardNs: DashboardNs
   messageQueues: MessageQueueManager
+  agentRuntimes: AgentRuntimeRegistry
   executorSnapshot?(): readonly AttachedExecutor[]
   onSessionCreated?(record: SessionRecord): void | Promise<void>
   onSessionDeleted?(record: SessionRecord): void | Promise<void>
@@ -216,6 +265,7 @@ export function configureDashboardNamespace(
     const multiplexed = Boolean(auth.clientId)
     // Legacy clients bind transport to one Session; multiplexed clients use a control placeholder until subscribing.
     const sessionId = auth.sessionId ?? `control:${auth.clientId}`
+    socket.emit('server:agent_runtimes', { runtimes: deps.agentRuntimes.catalog() })
     socket.use(([event, ...args], next) => {
       if (deps.mutableReady?.() === false && !READ_ONLY_DASHBOARD_EVENTS.has(String(event))) {
         const ack = args.at(-1)
@@ -293,6 +343,7 @@ export function configureDashboardNamespace(
       if (!vparse(schema.ClientListSessionsSchema, raw, 'client:list_sessions')) return
       const sessions = withQueuedCounts(deps, await deps.store.listSummaries())
       socket.emit('server:sessions', { sessions })
+      socket.emit('server:agent_runtimes', { runtimes: deps.agentRuntimes.catalog() })
     })
 
     socket.on('client:load_history', async (raw: ClientLoadHistory) => {
@@ -556,19 +607,13 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientUserApproveSchema, raw, 'client:user_approve', (raw as ClientUserApprove | undefined)?.sessionId)
       if (!p) return
       deps.audit?.log({ action: 'dashboard.user_approve', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok' })
-      const evt: AgentEvent = { kind: 'user_approve', callId: p.callId }
-      await safeDispatch(deps, p.sessionId, evt)
+      await safeRuntimeAction(deps, p.sessionId, (runtime, record) => runtime.approve(record, p.callId))
     })
     socket.on('client:user_reject', async (raw: ClientUserReject) => {
       const p = vparse(schema.ClientUserRejectSchema, raw, 'client:user_reject', (raw as ClientUserReject | undefined)?.sessionId)
       if (!p) return
       deps.audit?.log({ action: 'dashboard.user_reject', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok', metadata: { reasonBytes: p.reason ? Buffer.byteLength(p.reason, 'utf8') : 0 } })
-      const evt: AgentEvent = {
-        kind: 'user_reject',
-        callId: p.callId,
-        ...(p.reason !== undefined ? { reason: p.reason } : {}),
-      }
-      await safeDispatch(deps, p.sessionId, evt)
+      await safeRuntimeAction(deps, p.sessionId, (runtime, record) => runtime.reject(record, p.callId, p.reason))
     })
     socket.on('client:cancel', async (raw: ClientCancel) => {
       const p = vparse(schema.ClientCancelSchema, raw, 'client:cancel', (raw as ClientCancel | undefined)?.sessionId)
@@ -577,8 +622,7 @@ export function configureDashboardNamespace(
       // queue drainer can observe the resulting resting state and immediately
       // start a queued steer/follow-up, making Stop appear ineffective.
       await deps.messageQueues.stop(p.sessionId)
-      const evt: AgentEvent = { kind: 'cancel' }
-      await safeDispatch(deps, p.sessionId, evt)
+      await safeRuntimeAction(deps, p.sessionId, (runtime, record) => runtime.cancel(record))
     })
     socket.on('client:interrupt_sub_agent', async (raw: ClientInterruptSubAgent) => {
       const p = vparse(schema.ClientInterruptSubAgentSchema, raw, 'client:interrupt_sub_agent')
@@ -601,6 +645,7 @@ export function configureDashboardNamespace(
     socket.on('client:clear', async (raw: ClientClear) => {
       const p = vparse(schema.ClientClearSchema, raw, 'client:clear', (raw as ClientClear | undefined)?.sessionId)
       if (!p) return
+      if (!await requireRuntimeCapability(deps, p.sessionId, 'clear', 'clear')) return
       deps.audit?.log({ action: 'dashboard.session_clear', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok' })
       deps.loopDeps.tools.cancelPending(p.sessionId)
       deps.loop.cancelStream(p.sessionId)
@@ -627,6 +672,9 @@ export function configureDashboardNamespace(
           )
           return
         }
+        if (!deps.agentRuntimes.require(record.agentRuntime).descriptor().capabilities.compact) {
+          throw new Error(`${record.agentRuntime} sessions do not support compaction`)
+        }
         // Manual compaction is transcript maintenance. Persist the handoff but
         // leave the Session resting; only a later user message starts work.
         await deps.loop.compact(p.sessionId, { trigger: 'manual', continuation: 'stay_resting' })
@@ -644,7 +692,9 @@ export function configureDashboardNamespace(
       // No error path — cancelStream is a no-op when nothing is streaming.
       // The loop turns the abort into a normal llm_response, so the FSM
       // and log stay coherent without any special-case wiring here.
-      deps.loop.cancelStream(p.sessionId)
+      void requireRuntimeCapability(deps, p.sessionId, 'compact', 'stream cancellation').then((record) => {
+        if (record) deps.loop.cancelStream(p.sessionId)
+      })
     })
     socket.on('client:set_approval_mode', async (raw: ClientSetApprovalMode, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientSetApprovalModeSchema, raw, 'client:set_approval_mode', (raw as ClientSetApprovalMode | undefined)?.sessionId)
@@ -661,13 +711,14 @@ export function configureDashboardNamespace(
       const result = await operations.run(p.operationId, async () => {
         const record = await loadRecordForDashboard(deps, p.sessionId)
         if (!record) throw new Error('unknown session')
-        await deps.loop.dispatch(p.sessionId, { kind: 'approval_mode_changed', mode: p.mode })
+        const runtime = deps.agentRuntimes.require(record.agentRuntime)
+        await runtime.setApprovalMode(record, p.mode)
         // Changing to allow_all must also unblock calls already parked by the
         // previous mode; otherwise the selector appears to do nothing.
         if (p.mode === 'allow_all') {
           for (const call of record.state.pendingCalls) {
             if (call.status === 'awaiting_approval') {
-              await deps.loop.dispatch(p.sessionId, { kind: 'user_approve', callId: call.callId })
+              await runtime.approve(record, call.callId)
             }
           }
         }
@@ -681,6 +732,10 @@ export function configureDashboardNamespace(
       const record = await loadRecordForDashboard(deps, p.sessionId)
       if (!record) {
         deps.broadcastError(p.sessionId, 'host', 'unknown session')
+        return
+      }
+      if (!deps.agentRuntimes.require(record.agentRuntime).descriptor().capabilities.cwdMutation) {
+        deps.broadcastError(p.sessionId, 'host', `${record.agentRuntime} sessions do not support working-directory changes`)
         return
       }
       if (!isRestingStatus(record.state.status)) {
@@ -707,18 +762,21 @@ export function configureDashboardNamespace(
     socket.on('client:reorder_queued_message', async (raw: ClientReorderQueuedMessage, ack) => {
       const p = vparse(schema.ClientReorderQueuedMessageSchema, raw, 'client:reorder_queued_message', (raw as ClientReorderQueuedMessage | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
+      if (!await requireRuntimeCapability(deps, p.sessionId, 'queue', 'message queues')) { ack?.({ ok: false, error: 'runtime does not support message queues' }); return }
       const result = await operations.run(p.operationId, () => deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId))
       ack?.(result)
     })
     socket.on('client:update_queued_message', async (raw: ClientUpdateQueuedMessage, ack) => {
       const p = vparse(schema.ClientUpdateQueuedMessageSchema, raw, 'client:update_queued_message', (raw as ClientUpdateQueuedMessage | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
+      if (!await requireRuntimeCapability(deps, p.sessionId, 'queue', 'message queues')) { ack?.({ ok: false, error: 'runtime does not support message queues' }); return }
       const result = await operations.run(p.operationId, () => deps.messageQueues.update(p.sessionId, p.id, p.text, p.content))
       ack?.(result)
     })
     socket.on('client:delete_queued_message', async (raw: ClientDeleteQueuedMessage, ack) => {
       const p = vparse(schema.ClientDeleteQueuedMessageSchema, raw, 'client:delete_queued_message', (raw as ClientDeleteQueuedMessage | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
+      if (!await requireRuntimeCapability(deps, p.sessionId, 'queue', 'message queues')) { ack?.({ ok: false, error: 'runtime does not support message queues' }); return }
       const result = await operations.run(p.operationId, () => deps.messageQueues.delete(p.sessionId, p.id))
       ack?.(result)
     })
@@ -962,6 +1020,16 @@ export function configureDashboardNamespace(
     socket.on('client:consolidate_memory', async (raw: ClientConsolidateMemory) => {
       const p = vparse(schema.ClientConsolidateMemorySchema, raw, 'client:consolidate_memory', (raw as ClientConsolidateMemory | undefined)?.sessionId)
       if (!p) return
+      if (!await requireRuntimeCapability(deps, p.sessionId, 'memoryConsolidation', 'memory consolidation')) {
+        socket.emit('server:memory_consolidated', {
+          requestId: p.requestId,
+          sessionId: p.sessionId,
+          saved: [],
+          skipped: 0,
+          error: 'runtime does not support memory consolidation',
+        })
+        return
+      }
       const outcome = await consolidateMemory(deps.loopDeps, p.sessionId).catch(
         (err: unknown): ConsolidationOutcome => ({
           saved: [],
@@ -984,8 +1052,12 @@ export function configureDashboardNamespace(
       if (!parsed) { ack?.({ ok: false, error: 'invalid payload' }); return }
       let p: ClientCreateSession = parsed
       try {
+        const agentRuntime = p.agentRuntime ?? 'kernel'
+        const runtime = deps.agentRuntimes.require(agentRuntime)
         const selectedModel = p.selectedModel?.trim()
-        const normalizedSelectedModel = selectedModel ? normalizeIncomingModel(deps, selectedModel) : undefined
+        const normalizedSelectedModel = agentRuntime === 'kernel' && selectedModel
+          ? normalizeIncomingModel(deps, selectedModel)
+          : selectedModel
         if (selectedModel && !normalizedSelectedModel) {
           const message = `unknown or ambiguous model: ${selectedModel}`
           socket.emit('session:error', { sessionId: p.sessionId, scope: 'host', message })
@@ -1008,6 +1080,9 @@ export function configureDashboardNamespace(
         }
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
+          agentRuntime,
+          ...(runtime.descriptor().version ? { agentRuntimeVersion: runtime.descriptor().version } : {}),
+          ...(agentRuntime === 'copilot' ? { externalSessionId: p.sessionId } : {}),
           defaultConfig: deriveSessionConfig(getDefaultConfig(), p.tools),
           runtimeConfig: deriveSessionConfig(getDefaultConfig(), p.tools),
           ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
@@ -1046,6 +1121,9 @@ export function configureDashboardNamespace(
       if (!p) return
       try {
         const source = await deps.store.load(p.sourceSessionId)
+        if (!deps.agentRuntimes.require(source.agentRuntime).descriptor().capabilities.fork) {
+          throw new Error(`${source.agentRuntime} sessions do not support fork`)
+        }
         const parsed = await readSessionLog(source.logPath)
         const keptEvents = parsed.events
           .filter((e) => e.seq <= p.cursor)
@@ -1085,6 +1163,8 @@ export function configureDashboardNamespace(
         await socket.join(sessionRoom(record.sessionId))
         const forked: SessionReadyEvent = {
           sessionId: record.sessionId,
+          agentRuntime: 'kernel',
+          agentRuntimeCapabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
           reason: 'forked',
           parentSessionId: p.sourceSessionId,
           parentCursor: p.cursor,
@@ -1132,6 +1212,7 @@ export function configureDashboardNamespace(
         }
         for (const targetSessionId of targetIds.reverse()) {
           const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId).catch(() => undefined))
+          if (record) await deps.agentRuntimes.get(record.agentRuntime)?.delete?.(record)
           if (record && deps.onSessionDeleted) {
             try {
               await deps.onSessionDeleted(record)
@@ -1157,6 +1238,7 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientUpdatePreferencesSchema, raw, 'client:update_preferences', (raw as { sessionId?: string } | undefined)?.sessionId)
       if (!p) return
       if ('selectedModel' in p.preferences) {
+        if (!await requireRuntimeCapability(deps, p.sessionId, 'modelSelection', 'model selection')) return
         deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: p.preferences.selectedModel?.trim() ?? '' } })
       }
       await applyPreferencesUpdate(deps, p.sessionId, p.preferences)
@@ -1319,6 +1401,23 @@ async function handleUserMessage(
       'host',
       'session not created — click "New" in the sidebar to start a session bound to a workspace',
     )
+    return
+  }
+  const capabilities = deps.agentRuntimes.require(record.agentRuntime).descriptor().capabilities
+  if (p.mode === 'queue' && !capabilities.queue) {
+    deps.broadcastError(p.sessionId, 'host', `${record.agentRuntime} sessions do not support queued messages`)
+    return
+  }
+  if (p.content?.some((block) => block.type === 'image') && !capabilities.attachments) {
+    deps.broadcastError(p.sessionId, 'host', `${record.agentRuntime} sessions do not support attachments`)
+    return
+  }
+  if (record.agentRuntime !== 'kernel') {
+    const runtime = deps.agentRuntimes.require(record.agentRuntime)
+    await runtime.send(record, {
+      text: p.text,
+      ...(p.content ? { content: p.content } : {}),
+    })
     return
   }
   const messageModel = effectiveModelForRecord(deps, record)
@@ -1508,6 +1607,10 @@ export function readyEventFor(
 ): SessionReadyEvent {
   return {
     sessionId: record.sessionId,
+    agentRuntime: record.agentRuntime,
+    agentRuntimeCapabilities: record.agentRuntime === 'copilot'
+      ? COPILOT_AGENT_RUNTIME_CAPABILITIES
+      : KERNEL_AGENT_RUNTIME_CAPABILITIES,
     reason,
     cursor: record.state.cursor,
     state: record.state,
@@ -1557,6 +1660,8 @@ export function ephemeralReadyEventFor(
   })
   return {
     sessionId,
+    agentRuntime: 'kernel',
+    agentRuntimeCapabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
     cursor: state.cursor,
     state,
     config: defaultConfig,

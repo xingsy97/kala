@@ -53,6 +53,8 @@ type Props = {
   onOpenChangeCwdDialog(): void
   onChangeApprovalMode(mode: ApprovalMode): void
   onChangeToolCardMode(mode: ToolCardMode): void
+  canChangeCwd?: boolean
+  canChangeApprovalMode?: boolean
 }
 
 const APPROVAL_MODE_ITEMS: ReadonlyArray<{ value: ApprovalMode; labelKey: string }> = [
@@ -75,6 +77,8 @@ export function SessionMetadataDialog({
   onOpenChangeCwdDialog,
   onChangeApprovalMode,
   onChangeToolCardMode,
+  canChangeCwd = true,
+  canChangeApprovalMode = true,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const initialLabel = summary?.label ?? ''
@@ -131,6 +135,10 @@ export function SessionMetadataDialog({
         <DialogBody className="px-4 py-4 sm:px-6" data-testid="session-metadata-body">
         <div className="grid gap-3 text-sm">
           <ReadOnlyRow label={t('dialogs.sessionId')} value={sessionId} mono />
+          <ReadOnlyRow
+            label={t('dialogs.agentRuntime')}
+            value={summary?.agentRuntime === 'copilot' ? 'GitHub Copilot' : 'Agent RunLab'}
+          />
           {summary?.parentSessionId ? (
             <ReadOnlyRow
               label={t('dialogs.parentSession')}
@@ -222,6 +230,7 @@ export function SessionMetadataDialog({
                   onOpenChange(false)
                   onOpenChangeCwdDialog()
                 }}
+                disabled={!canChangeCwd}
                 data-testid="session-metadata-cwd-change"
               >
                 {t('dialogs.change')}
@@ -232,6 +241,7 @@ export function SessionMetadataDialog({
             <Select
               value={approvalDraft}
               onValueChange={(v) => setApprovalDraft(v as ApprovalMode)}
+              disabled={!canChangeApprovalMode}
             >
               <SelectTrigger className="h-11 text-base sm:h-8 sm:text-sm" data-testid="session-metadata-approval">
                 <SelectValue />

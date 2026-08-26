@@ -3,4 +3,5 @@ packages:
   - "adapters/*/*"
 allowBuilds:
   esbuild: true
+  koffi: true
   node-pty: true

@@ -810,6 +810,7 @@ export function createSession(
   socket: DashboardSocket,
   input: {
     sessionId: string
+    agentRuntime?: import('@agent-kernel/shared').AgentRuntimeId
     workspaceId?: string
     workspaceName?: string
     cwd?: string
@@ -819,6 +820,7 @@ export function createSession(
 ): void {
   socket.emit('client:create_session', {
     sessionId: input.sessionId,
+    ...(input.agentRuntime ? { agentRuntime: input.agentRuntime } : {}),
     ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
     ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
     ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),
@@ -831,6 +833,7 @@ export function createSessionWithAck(
   socket: DashboardSocket,
   input: {
     sessionId: string
+    agentRuntime?: import('@agent-kernel/shared').AgentRuntimeId
     workspaceId?: string
     workspaceName?: string
     cwd?: string
@@ -841,6 +844,7 @@ export function createSessionWithAck(
 ): Promise<void> {
   return emitRpc(socket, 'client:create_session', {
     sessionId: input.sessionId,
+    ...(input.agentRuntime ? { agentRuntime: input.agentRuntime } : {}),
     ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
     ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
     ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),
@@ -915,6 +919,7 @@ export function renameWorkspace(
 export type ControlPlaneView = {
   executors: readonly AttachedExecutor[]
   sessions: readonly SessionSummary[]
+  agentRuntimes: readonly import('@agent-kernel/shared').AgentRuntimeDescriptor[]
   executorsLoaded: boolean
   sessionsLoaded: boolean
   refreshSessions(): void
@@ -936,6 +941,7 @@ export function useControlPlane(
 ): ControlPlaneView {
   const [executors, setExecutors] = useState<readonly AttachedExecutor[]>([])
   const [sessions, setSessions] = useState<readonly SessionSummary[]>([])
+  const [agentRuntimes, setAgentRuntimes] = useState<readonly import('@agent-kernel/shared').AgentRuntimeDescriptor[]>([])
   const [executorsLoaded, setExecutorsLoaded] = useState(false)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
   const summaryStoreRef = useRef<SessionSummaryStore | null>(null)
@@ -947,6 +953,7 @@ export function useControlPlane(
       summaryStore.clear()
       setExecutors([])
       setSessions([])
+      setAgentRuntimes([])
       setExecutorsLoaded(false)
       setSessionsLoaded(false)
       return
@@ -983,6 +990,9 @@ export function useControlPlane(
       flushSummaryUpdates()
       setSessions(summaryStore.replace(p.sessions))
       setSessionsLoaded(true)
+    }
+    const onAgentRuntimes: DashboardServerToClientEvents['server:agent_runtimes'] = (p) => {
+      if (isActive()) setAgentRuntimes(p.runtimes)
     }
     const onExecutorChanged = (change: Extract<ControlUpdate, { kind: 'executor_changed' }>): void => {
       if (!isActive()) return
@@ -1048,6 +1058,7 @@ export function useControlPlane(
     }
     socket.on('server:executors', onExecutors)
     socket.on('server:sessions', onSessions)
+    socket.on('server:agent_runtimes', onAgentRuntimes)
     socket.on('server:control_update', onControlUpdate)
     socket.on('event:appended', onEventAppended)
     socket.on('state:changed', onStateChanged)
@@ -1075,6 +1086,7 @@ export function useControlPlane(
       summaryUpdates = []
       socket.off('server:executors', onExecutors)
       socket.off('server:sessions', onSessions)
+      socket.off('server:agent_runtimes', onAgentRuntimes)
       socket.off('server:control_update', onControlUpdate)
       socket.off('event:appended', onEventAppended)
       socket.off('state:changed', onStateChanged)
@@ -1091,7 +1103,7 @@ export function useControlPlane(
     [socket],
   )
 
-  return { executors, sessions, executorsLoaded, sessionsLoaded, refreshSessions }
+  return { executors, sessions, agentRuntimes, executorsLoaded, sessionsLoaded, refreshSessions }
 }
 
 export function mergeSessionSummaries(

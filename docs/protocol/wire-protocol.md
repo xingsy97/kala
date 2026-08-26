@@ -64,6 +64,21 @@ Emitted once per client, right after handshake succeeds.
 ```ts
 {
   sessionId: string
+  agentRuntime: 'kernel' | 'copilot'
+  agentRuntimeCapabilities: {
+    queue: boolean
+    fork: boolean
+    compact: boolean
+    clear: boolean
+    approvalMode: boolean
+    workspace: boolean
+    cwdMutation: boolean
+    modelSelection: boolean
+    attachments: boolean
+    memoryConsolidation: boolean
+    customTools: boolean
+    nativeReasoning: boolean
+  }
   cursor: number              // current event cursor of the session
   state: AgentState           // current snapshot (see SPEC §1.4)
   config: AgentConfig         // (see SPEC §1.3)
@@ -338,6 +353,7 @@ navigate away or open a new session.
 ```ts
 {
   sessionId: string           // Dashboard-generated id for the new session
+  agentRuntime?: 'kernel' | 'copilot' // defaults to kernel
   workspaceId: string         // executor workspace to bind to
   workspaceName?: string      // display label snapshot
   cwd?: string                // initial working directory
@@ -349,6 +365,10 @@ provided it is validated against the executor's sandbox roots before it
 becomes the session's `initialCwd` / initial `state.cwd`. Responds with
 `session:ready` for the new sessionId; the dashboard MUST `emit('subscribe',
 newSessionId)` after receiving the reply.
+
+The Host rejects unavailable runtimes. Copilot Sessions are owned by the
+official GitHub Copilot SDK runtime; their RunLab logs contain authoritative
+projection snapshots and runtime metadata rather than synthetic Kernel events.
 
 #### `client:list_dirs`
 
@@ -614,6 +634,7 @@ Explorer stays in sync without individually re-issuing the list request.
 {
   sessions: Array<{
     sessionId: string
+    agentRuntime: 'kernel' | 'copilot'
     createdAt: string          // from JSONL header
     lastEventAt?: string       // ts of the last event line, if any
     eventCount: number
@@ -628,6 +649,12 @@ Explorer stays in sync without individually re-issuing the list request.
   }>
 }
 ```
+
+#### `server:agent_runtimes`
+
+Emitted on dashboard connection and alongside `client:list_sessions`
+responses. Carries each runtime's readiness, implementation version, and
+capabilities so creation and Session controls can be gated by the server.
 
 Host derives these fields by reading each session's JSONL header + scanning events. The scan is `O(events)` per session; if a Host tracks many sessions this endpoint may want caching, but v1 reads on demand.
 

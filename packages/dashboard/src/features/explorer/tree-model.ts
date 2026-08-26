@@ -155,6 +155,7 @@ export function sessionStructureKeyFor(session: SessionSummary): string {
 export function toStructuralSessionSummary(session: SessionSummary): SessionSummary {
   return {
     sessionId: session.sessionId,
+    agentRuntime: session.agentRuntime,
     createdAt: session.createdAt,
     eventCount: 0,
     ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),

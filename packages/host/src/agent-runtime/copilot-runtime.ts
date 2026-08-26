@@ -1,0 +1,404 @@
+import { join } from 'node:path'
+
+import type {
+  AgentState,
+  ApprovalMode,
+  Message,
+  MessageContent,
+  PendingToolCall,
+  ToolSchema,
+} from '@agent-kernel/kernel'
+import {
+  COPILOT_AGENT_RUNTIME_CAPABILITIES,
+  type AgentRuntimeDescriptor,
+} from '@agent-kernel/shared'
+import {
+  CopilotClient,
+  type CopilotSession,
+  type SessionEvent,
+  type Tool,
+  type ToolResultObject,
+} from '@github/copilot-sdk'
+
+import type { SessionRecord } from '../store/session.js'
+import type {
+  AgentRuntime,
+  AgentRuntimeContext,
+  AgentRuntimeSendInput,
+} from './types.js'
+
+type ApprovalDecision = { approved: true } | { approved: false; reason?: string }
+
+type PendingApproval = {
+  resolve(decision: ApprovalDecision): void
+}
+
+export type CopilotAgentRuntimeOptions = {
+  enabled: boolean
+  sessionsDir: string
+  gitHubToken?: string
+}
+
+export class CopilotAgentRuntime implements AgentRuntime {
+  readonly id = 'copilot' as const
+  private client: CopilotClient | undefined
+  private readonly sessions = new Map<string, CopilotSession>()
+  private readonly approvals = new Map<string, PendingApproval>()
+  private readonly cancelledCalls = new Set<string>()
+  private readonly tails = new Map<string, Promise<void>>()
+  private status: AgentRuntimeDescriptor['status']
+  private reason: string | undefined
+
+  constructor(
+    private readonly context: AgentRuntimeContext,
+    private readonly options: CopilotAgentRuntimeOptions,
+  ) {
+    this.status = options.enabled ? 'unavailable' : 'disabled'
+    this.reason = options.enabled ? 'Copilot runtime is starting' : 'Copilot runtime is disabled'
+  }
+
+  async start(): Promise<void> {
+    if (!this.options.enabled) return
+    try {
+      this.client = new CopilotClient({
+        mode: 'empty',
+        baseDirectory: join(this.options.sessionsDir, '..', 'copilot-runtime'),
+        ...(this.options.gitHubToken ? { gitHubToken: this.options.gitHubToken, useLoggedInUser: false } : {}),
+      })
+      await this.client.start()
+      const auth = await this.client.getAuthStatus()
+      if (!auth.isAuthenticated) throw new Error('Copilot CLI is not authenticated')
+      this.status = 'ready'
+      this.reason = undefined
+    } catch (error) {
+      this.status = 'unavailable'
+      this.reason = error instanceof Error ? error.message : String(error)
+      await this.client?.stop().catch(() => [])
+      this.client = undefined
+    }
+  }
+
+  descriptor(): AgentRuntimeDescriptor {
+    return {
+      id: this.id,
+      label: 'GitHub Copilot',
+      description: 'Official GitHub Copilot SDK agent runtime',
+      available: this.status === 'ready',
+      status: this.status,
+      ...(this.reason ? { reason: this.reason } : {}),
+      version: '1.0.11',
+      capabilities: COPILOT_AGENT_RUNTIME_CAPABILITIES,
+    }
+  }
+
+  async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {
+    const session = await this.ensureSession(record, input.model)
+    await this.project(record, 'copilot.user_message', { text: input.text }, (state) => ({
+      ...state,
+      messages: [...state.messages, userMessage(input)],
+      status: 'thinking',
+      pendingCalls: [],
+      error: undefined,
+    }))
+    await session.send({ prompt: input.text })
+  }
+
+  async cancel(record: SessionRecord): Promise<void> {
+    const session = this.sessions.get(record.sessionId)
+    if (session) await session.abort()
+    for (const call of record.state.pendingCalls) {
+      this.cancelledCalls.add(approvalKey(record.sessionId, call.callId))
+    }
+    this.context.tools.cancelPending(record.sessionId)
+    for (const [key, approval] of this.approvals) {
+      if (!key.startsWith(`${record.sessionId}:`)) continue
+      approval.resolve({ approved: false, reason: 'cancelled' })
+      this.approvals.delete(key)
+    }
+    await this.project(record, 'copilot.cancelled', {}, (state) => ({
+      ...state,
+      status: 'done',
+      pendingCalls: [],
+      error: undefined,
+    }))
+  }
+
+  async approve(record: SessionRecord, callId: string): Promise<void> {
+    const pending = this.approvals.get(approvalKey(record.sessionId, callId))
+    if (!pending) throw new Error(`Copilot approval expired after runtime restart: ${callId}`)
+    pending.resolve({ approved: true })
+    this.approvals.delete(approvalKey(record.sessionId, callId))
+  }
+
+  async reject(record: SessionRecord, callId: string, reason?: string): Promise<void> {
+    const pending = this.approvals.get(approvalKey(record.sessionId, callId))
+    if (!pending) throw new Error(`Copilot approval expired after runtime restart: ${callId}`)
+    pending.resolve({ approved: false, ...(reason ? { reason } : {}) })
+    this.approvals.delete(approvalKey(record.sessionId, callId))
+  }
+
+  async setApprovalMode(record: SessionRecord, mode: ApprovalMode): Promise<void> {
+    await this.project(record, 'copilot.approval_mode_changed', { mode }, (state) => ({
+      ...state,
+      approvalMode: mode,
+    }))
+  }
+
+  async delete(record: SessionRecord): Promise<void> {
+    const session = this.sessions.get(record.sessionId)
+    if (session) {
+      await session.disconnect()
+      this.sessions.delete(record.sessionId)
+    }
+    await this.client?.deleteSession(record.externalSessionId ?? record.sessionId).catch(() => undefined)
+  }
+
+  async close(): Promise<void> {
+    this.sessions.clear()
+    if (this.client) await this.client.stop()
+    this.client = undefined
+  }
+
+  private async ensureSession(record: SessionRecord, model?: string): Promise<CopilotSession> {
+    const existing = this.sessions.get(record.sessionId)
+    if (existing) return existing
+    if (!this.client || this.status !== 'ready') {
+      throw new Error(this.reason ?? 'Copilot runtime is unavailable')
+    }
+    const config = this.sessionConfig(record, model)
+    let session: CopilotSession
+    try {
+      session = await this.client.resumeSession(record.externalSessionId ?? record.sessionId, {
+        ...config,
+        continuePendingWork: false,
+      })
+    } catch {
+      session = await this.client.createSession({
+        ...config,
+        sessionId: record.externalSessionId ?? record.sessionId,
+      })
+    }
+    session.on((event) => this.handleEvent(record, event))
+    this.sessions.set(record.sessionId, session)
+    return session
+  }
+
+  private sessionConfig(record: SessionRecord, model?: string) {
+    const tools = record.config.tools.map((schema) => this.tool(record, schema))
+    return {
+      clientName: 'agent-runlab',
+      ...(model ? { model } : {}),
+      workingDirectory: record.state.cwd,
+      systemMessage: {
+        mode: 'replace' as const,
+        content: record.config.systemPrompt ?? 'You are an AI coding agent.',
+      },
+      tools,
+      availableTools: tools.map((tool) => `custom:${tool.name}`),
+      excludedTools: ['builtin:*', 'mcp:*'],
+      skipCustomInstructions: true,
+      customAgentsLocalOnly: true,
+      coauthorEnabled: false,
+      enableExperimentalMode: false,
+    }
+  }
+
+  private tool(record: SessionRecord, schema: ToolSchema): Tool {
+    return {
+      name: schema.name,
+      description: schema.description,
+      parameters: schema.inputSchema,
+      skipPermission: true,
+      handler: async (args, invocation) => {
+        const input = asRecord(args)
+        const pending: PendingToolCall = {
+          callId: invocation.toolCallId,
+          name: schema.name,
+          input,
+          status: 'dispatched',
+        }
+        if (record.state.approvalMode === 'deny' && schema.requiresApproval) {
+          await this.projectToolCall(record, { ...pending, status: 'awaiting_approval' })
+          await this.projectToolResult(record, pending, false, 'rejected by approval policy')
+          return toolResult(false, 'rejected by approval policy', 'denied')
+        }
+        if (requiresApproval(record.state.approvalMode, schema.requiresApproval)) {
+          pending.status = 'awaiting_approval'
+          await this.projectToolCall(record, pending)
+          this.context.broadcast.onApprovalRequired(record.sessionId)
+          const decision = await new Promise<ApprovalDecision>((resolve) => {
+            this.approvals.set(approvalKey(record.sessionId, pending.callId), { resolve })
+          })
+          if (!decision.approved) {
+            await this.projectToolResult(record, pending, false, decision.reason ?? 'rejected by user')
+            return toolResult(false, decision.reason ?? 'rejected by user', 'rejected')
+          }
+          await this.project(record, 'copilot.tool_approved', { callId: pending.callId }, (state) => ({
+            ...state,
+            status: 'executing_tools',
+            pendingCalls: state.pendingCalls.map((call) => call.callId === pending.callId
+              ? { ...call, status: 'dispatched' }
+              : call),
+            error: undefined,
+          }))
+        } else {
+          await this.projectToolCall(record, pending)
+        }
+        const result = await this.context.tools.callTool(record.sessionId, {
+          kind: 'call_tool',
+          callId: pending.callId,
+          name: pending.name,
+          input: pending.input,
+          ...(record.state.cwd ? { cwd: record.state.cwd } : {}),
+        })
+        const callKey = approvalKey(record.sessionId, pending.callId)
+        if (this.cancelledCalls.delete(callKey)) {
+          return toolResult(false, 'cancelled', 'failure')
+        }
+        await this.projectToolResult(record, pending, result.ok, result.content)
+        return toolResult(result.ok, result.content, result.ok ? 'success' : 'failure')
+      },
+    }
+  }
+
+  private handleEvent(record: SessionRecord, event: SessionEvent): void {
+    if (event.type === 'assistant.message_delta') {
+      this.context.broadcast.onTokenDelta(record.sessionId, event.data.deltaContent)
+      return
+    }
+    if (event.type === 'assistant.message') {
+      const content: MessageContent[] = []
+      if (event.data.reasoningText) {
+        content.push({ type: 'thinking' as const, text: event.data.reasoningText, provider: 'github-copilot' })
+      }
+      if (event.data.content) content.push({ type: 'text' as const, text: event.data.content })
+      if (content.length > 0) {
+        void this.project(record, 'copilot.assistant_message', nativeEventPayload(event), (state) => ({
+          ...state,
+          messages: [...state.messages, { role: 'assistant', content }],
+          status: 'thinking',
+          pendingCalls: [],
+          error: undefined,
+        }))
+      }
+      return
+    }
+    if (event.type === 'session.idle') {
+      void this.project(record, 'copilot.session_idle', nativeEventPayload(event), (state) => ({
+        ...state,
+        status: 'done',
+        pendingCalls: [],
+        error: undefined,
+      }))
+      return
+    }
+    if (event.type === 'session.error') {
+      void this.project(record, 'copilot.session_error', nativeEventPayload(event), (state) => ({
+        ...state,
+        status: 'error',
+        pendingCalls: [],
+        error: event.data.message,
+      }))
+      this.context.broadcast.onError(record.sessionId, event.data.message)
+    }
+  }
+
+  private async projectToolCall(record: SessionRecord, pending: PendingToolCall): Promise<void> {
+    await this.project(record, 'copilot.tool_call', {
+      callId: pending.callId,
+      name: pending.name,
+      input: pending.input,
+    }, (state) => ({
+      ...state,
+      messages: [...state.messages, {
+        role: 'assistant',
+        content: [{
+          type: 'tool_call',
+          callId: pending.callId,
+          name: pending.name,
+          input: pending.input,
+        }],
+      }],
+      status: pending.status === 'awaiting_approval' ? 'awaiting_approval' : 'executing_tools',
+      pendingCalls: [...state.pendingCalls.filter((call) => call.callId !== pending.callId), pending],
+      error: undefined,
+    }))
+  }
+
+  private async projectToolResult(
+    record: SessionRecord,
+    pending: PendingToolCall,
+    ok: boolean,
+    content: string,
+  ): Promise<void> {
+    await this.project(record, 'copilot.tool_result', { callId: pending.callId, ok }, (state) => ({
+      ...state,
+      messages: [...state.messages, {
+        role: 'tool',
+        content: [{ type: 'tool_result', callId: pending.callId, ok, content }],
+      }],
+      status: 'thinking',
+      pendingCalls: state.pendingCalls.filter((call) => call.callId !== pending.callId),
+      error: undefined,
+    }))
+  }
+
+  private async project(
+    record: SessionRecord,
+    action: string,
+    payload: Record<string, unknown>,
+    update: (state: AgentState) => Omit<AgentState, 'cursor'>,
+  ): Promise<void> {
+    const previous = this.tails.get(record.sessionId) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(async () => {
+      const latest = this.context.store.get(record.sessionId) ?? record
+      const next = { ...update(latest.state), cursor: latest.state.cursor + 1 } as AgentState
+      await this.context.store.recordRuntimeProjection(record.sessionId, next, action, payload)
+      this.context.broadcast.onState(latest, next)
+    })
+    this.tails.set(record.sessionId, current)
+    try {
+      await current
+    } finally {
+      if (this.tails.get(record.sessionId) === current) this.tails.delete(record.sessionId)
+    }
+  }
+}
+
+function userMessage(input: AgentRuntimeSendInput): Message {
+  if (input.content && input.content.length > 0) return { role: 'user', content: [...input.content] }
+  return { role: 'user', content: [{ type: 'text', text: input.text }] }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function requiresApproval(mode: ApprovalMode, toolRequiresApproval: boolean): boolean {
+  if (mode === 'allow_all') return false
+  if (mode === 'ask') return true
+  if (mode === 'deny') return false
+  return toolRequiresApproval
+}
+
+function approvalKey(sessionId: string, callId: string): string {
+  return `${sessionId}:${callId}`
+}
+
+function toolResult(ok: boolean, content: string, resultType: ToolResultObject['resultType']): ToolResultObject {
+  return {
+    textResultForLlm: content,
+    resultType,
+    ...(!ok ? { error: content } : {}),
+  }
+}
+
+function nativeEventPayload(event: SessionEvent): Record<string, unknown> {
+  return {
+    id: event.id,
+    type: event.type,
+    timestamp: event.timestamp,
+  }
+}

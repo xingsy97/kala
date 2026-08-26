@@ -1,6 +1,7 @@
 import type { AgentConfig, AgentEvent, AgentState, Effect, Message } from '@agent-kernel/kernel'
 import { step } from '@agent-kernel/kernel'
 import type {
+  AgentRuntimeId,
   CompactStatusEvent, CompactionMetadata, ContextUsageSnapshot, EventAppendedEvent,
   LLMTrace, QueuedMessagePreview, SessionErrorEvent, SessionReadyEvent, StateChangedEvent,
 } from '@agent-kernel/shared'
@@ -26,6 +27,7 @@ export type ConnectionStatus = 'idle' | 'connecting' | 'ready' | 'error' | 'disc
 export type SessionProjection = {
   generation: number
   sessionId: string | null
+  agentRuntime: AgentRuntimeId
   status: ConnectionStatus
   state: AgentState | null
   config: AgentConfig | null
@@ -57,7 +59,7 @@ export type SessionProjectionEvent =
   | ({ kind: 'reset_timeline' } & Scoped)
 
 export const EMPTY_SESSION_PROJECTION: SessionProjection = {
-  generation: 0, sessionId: null, status: 'idle', state: null, config: null,
+  generation: 0, sessionId: null, agentRuntime: 'kernel', status: 'idle', state: null, config: null,
   contextSnapshot: null, compactStatus: null, timeline: [], queuedMessages: [],
   lastError: null, parentSessionId: null, parentCursor: null, selectedModel: null,
   hydratedSessionId: null, historyLoadedSessionId: null,
@@ -92,7 +94,7 @@ export function reduceSessionProjection(
     case 'ready': {
       const p = event.payload
       return {
-        ...current, status: 'ready', state: p.state, config: p.config,
+        ...current, status: 'ready', agentRuntime: p.agentRuntime ?? 'kernel', state: p.state, config: p.config,
         contextSnapshot: p.contextSnapshot ?? null, parentSessionId: p.parentSessionId ?? null,
         parentCursor: p.parentCursor ?? null, selectedModel: p.selectedModel ?? null,
         hydratedSessionId: p.sessionId, lastError: null,
@@ -114,7 +116,7 @@ export function reduceSessionProjection(
       const entry = timelineEntry(event.payload)
       let state = current.state
       let contextSnapshot = current.contextSnapshot
-      if (state && current.config && event.payload.seq === state.cursor + 1) {
+      if (current.agentRuntime === 'kernel' && state && current.config && event.payload.seq === state.cursor + 1) {
         state = step(state, event.payload.event, current.config).next
         if (event.payload.event.kind === 'messages_replaced' && event.payload.event.reason === 'compaction') {
           contextSnapshot = reprojectContextSnapshotAfterCompaction(current.config, state.messages, contextSnapshot)
@@ -136,6 +138,7 @@ export function reduceSessionProjection(
 
 function projectionFromCache(cached: CachedSessionView): Partial<SessionProjection> {
   return {
+    agentRuntime: cached.agentRuntime ?? 'kernel',
     state: cached.state, config: cached.config, contextSnapshot: cached.contextSnapshot,
     timeline: cached.timeline, queuedMessages: cached.queuedMessages, lastError: cached.lastError,
     parentSessionId: cached.parentSessionId, parentCursor: cached.parentCursor,
