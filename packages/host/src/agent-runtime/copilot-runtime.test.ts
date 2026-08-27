@@ -19,24 +19,40 @@ type CapturedTool = {
 }
 
 const sdk = vi.hoisted(() => ({
-  configs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string }>,
+  clientOptions: [] as Array<{ connection?: { kind: string; args?: readonly string[] } }>,
+  configs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }>,
+  resumeConfigs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }>,
+  resumeSucceeds: false,
   listeners: [] as Array<(event: unknown) => void>,
   responses: [] as Array<unknown>,
   abort: vi.fn(async () => {}),
 }))
 
 vi.mock('@github/copilot-sdk', () => ({
+  RuntimeConnection: {
+    forStdio(options: { args?: readonly string[] } = {}) {
+      return { kind: 'stdio', ...options }
+    },
+  },
   CopilotClient: class {
+    constructor(options: { connection?: { kind: string; args?: readonly string[] } }) {
+      sdk.clientOptions.push(options)
+    }
     async start() {}
     async stop() {}
     async getAuthStatus() {
       return { isAuthenticated: true }
     }
-    async resumeSession() {
-      throw new Error('not found')
+    async resumeSession(_sessionId: string, config: { tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }) {
+      sdk.resumeConfigs.push(config)
+      if (!sdk.resumeSucceeds) throw new Error('not found')
+      return this.session()
     }
-    async createSession(config: { tools: CapturedTool[]; workingDirectory?: string }) {
+    async createSession(config: { tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }) {
       sdk.configs.push(config)
+      return this.session()
+    }
+    session() {
       return {
         async send() {},
         async sendAndWait() {
@@ -68,6 +84,9 @@ describe('Copilot runtime custom tools', () => {
 
   beforeEach(() => {
     sdk.configs.length = 0
+    sdk.clientOptions.length = 0
+    sdk.resumeConfigs.length = 0
+    sdk.resumeSucceeds = false
     sdk.listeners.length = 0
     sdk.responses.length = 0
     sdk.abort.mockClear()
@@ -119,7 +138,13 @@ describe('Copilot runtime custom tools', () => {
     const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'todo_graph')
     expect(tool).toBeDefined()
     expect(tool?.overridesBuiltInTool).toBe(true)
+    expect(sdk.clientOptions).toHaveLength(1)
+    expect(sdk.clientOptions[0]?.connection).toEqual({
+      kind: 'stdio',
+      args: ['--no-remote-export'],
+    })
     expect(sdk.configs.at(-1)?.workingDirectory).toBe(dir)
+    expect(sdk.configs.at(-1)?.remoteSession).toBe('off')
 
     const result = await tool?.handler(
       { operations: [{ op: 'clear' }] },
@@ -151,6 +176,37 @@ describe('Copilot runtime custom tools', () => {
         content: 'host tool result',
       }),
     ]))
+    await runtime.close()
+  })
+
+  it('disables remote export when resuming an existing SDK session', async () => {
+    sdk.resumeSucceeds = true
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: '' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, {
+      enabled: true,
+      sessionsDir: dir,
+    })
+    const record = await store.create({
+      sessionId: 'copilot-resume-private',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+
+    await runtime.start()
+    await runtime.send(record, { text: 'Continue privately.' })
+
+    expect(sdk.resumeConfigs).toHaveLength(1)
+    expect(sdk.resumeConfigs[0]?.remoteSession).toBe('off')
+    expect(sdk.configs).toHaveLength(0)
+    expect(sdk.clientOptions[0]?.connection?.args).toEqual(['--no-remote-export'])
     await runtime.close()
   })
 

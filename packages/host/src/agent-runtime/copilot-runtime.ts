@@ -14,6 +14,7 @@ import {
 } from '@agent-kernel/shared'
 import {
   CopilotClient,
+  RuntimeConnection,
   type CopilotSession,
   type SessionEvent,
   type Tool,
@@ -66,6 +67,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
     try {
       this.client = new CopilotClient({
         mode: 'empty',
+        connection: RuntimeConnection.forStdio({ args: ['--no-remote-export'] }),
         baseDirectory: join(this.options.sessionsDir, '..', 'copilot-runtime'),
         ...(this.options.gitHubToken ? { gitHubToken: this.options.gitHubToken, useLoggedInUser: false } : {}),
       })
@@ -219,6 +221,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
       excludedTools: ['builtin:*', 'mcp:*'],
       skipCustomInstructions: true,
       customAgentsLocalOnly: true,
+      remoteSession: 'off' as const,
       coauthorEnabled: false,
       enableExperimentalMode: false,
     }
