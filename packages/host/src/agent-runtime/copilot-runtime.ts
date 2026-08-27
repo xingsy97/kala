@@ -33,6 +33,9 @@ type PendingApproval = {
   resolve(decision: ApprovalDecision): void
 }
 
+const COPILOT_INACTIVITY_TIMEOUT_MS = 30 * 60_000
+const COPILOT_SDK_TURN_TIMEOUT_MS = 24 * 60 * 60_000
+
 export type CopilotAgentRuntimeOptions = {
   enabled: boolean
   sessionsDir: string
@@ -305,7 +308,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   private async runTurn(record: SessionRecord, session: CopilotSession, prompt: string): Promise<void> {
     try {
-      const response = await session.sendAndWait({ prompt }, 30 * 60_000)
+      const response = await sendAndWaitWithActivityTimeout(session, prompt)
       if (this.cancelledSessions.delete(record.sessionId)) return
       const pendingProjection = this.tails.get(record.sessionId)
       if (pendingProjection) await pendingProjection
@@ -332,7 +335,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
     } catch (error) {
       if (this.cancelledSessions.delete(record.sessionId)) return
       const message = error instanceof Error ? error.message : String(error)
-      if (message.includes('waiting for session.idle')) {
+      if (message.includes('waiting for session.idle') || message.includes('without Copilot session activity')) {
         await session.abort().catch(() => undefined)
         for (const call of record.state.pendingCalls) {
           this.cancelledCalls.add(approvalKey(record.sessionId, call.callId))
@@ -433,6 +436,32 @@ export class CopilotAgentRuntime implements AgentRuntime {
     } finally {
       if (this.tails.get(record.sessionId) === current) this.tails.delete(record.sessionId)
     }
+  }
+}
+
+async function sendAndWaitWithActivityTimeout(session: CopilotSession, prompt: string) {
+  let timeout: NodeJS.Timeout | undefined
+  let rejectInactivity!: (error: Error) => void
+  const inactivity = new Promise<never>((_, reject) => {
+    rejectInactivity = reject
+  })
+  const armTimeout = () => {
+    if (timeout) clearTimeout(timeout)
+    timeout = setTimeout(() => {
+      rejectInactivity(new Error(`Timeout after ${COPILOT_INACTIVITY_TIMEOUT_MS}ms without Copilot session activity`))
+    }, COPILOT_INACTIVITY_TIMEOUT_MS)
+    timeout.unref?.()
+  }
+  const unsubscribe = session.on(() => armTimeout())
+  armTimeout()
+  try {
+    return await Promise.race([
+      session.sendAndWait({ prompt }, COPILOT_SDK_TURN_TIMEOUT_MS),
+      inactivity,
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    unsubscribe()
   }
 }
 

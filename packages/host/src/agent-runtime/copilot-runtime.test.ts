@@ -47,7 +47,13 @@ vi.mock('@github/copilot-sdk', () => ({
           }
           return await new Promise(() => {})
         },
-        on(listener: (event: unknown) => void) { sdk.listeners.push(listener) },
+        on(listener: (event: unknown) => void) {
+          sdk.listeners.push(listener)
+          return () => {
+            const index = sdk.listeners.indexOf(listener)
+            if (index >= 0) sdk.listeners.splice(index, 1)
+          }
+        },
         abort: sdk.abort,
         async disconnect() {},
       }
@@ -148,7 +154,7 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
-  it('aborts SDK work and cancels pending tools after an idle timeout', async () => {
+  it('aborts SDK work and cancels pending tools after an SDK timeout', async () => {
     const cancelPending = vi.fn()
     const runtime = new CopilotAgentRuntime({
       store,
@@ -176,6 +182,48 @@ describe('Copilot runtime custom tools', () => {
 
     expect(sdk.abort).toHaveBeenCalledOnce()
     expect(cancelPending).toHaveBeenCalledWith(record.sessionId)
+  })
+
+  it('keeps an active Copilot turn alive and aborts only after prolonged inactivity', async () => {
+    vi.useFakeTimers()
+    try {
+      const cancelPending = vi.fn()
+      const runtime = new CopilotAgentRuntime({
+        store,
+        tools: { async callTool() { return { ok: true, content: '' } }, cancelPending },
+        broadcast: {
+          onState() {},
+          onTokenDelta() {},
+          onApprovalRequired() {},
+          onError() {},
+        },
+      }, {
+        enabled: true,
+        sessionsDir: dir,
+      })
+      const record = await store.create({
+        sessionId: 'copilot-active-timeout',
+        agentRuntime: 'copilot',
+        config: createConfig({ tools: [] }),
+      })
+
+      await runtime.start()
+      await runtime.send(record, { text: 'Run a long task.' })
+      await vi.advanceTimersByTimeAsync(29 * 60_000)
+      for (const listener of [...sdk.listeners]) {
+        listener({ type: 'assistant.turn_start', id: 'activity', timestamp: new Date().toISOString(), parentId: null, data: { turnId: '1' } })
+      }
+      await vi.advanceTimersByTimeAsync(2 * 60_000)
+      expect(store.get(record.sessionId)?.state.status).toBe('thinking')
+      expect(sdk.abort).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(28 * 60_000)
+      await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('error'))
+      expect(sdk.abort).toHaveBeenCalledOnce()
+      expect(cancelPending).toHaveBeenCalledWith(record.sessionId)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('settles an unresumable approval instead of reporting an expired runtime error', async () => {
