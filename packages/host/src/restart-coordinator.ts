@@ -214,12 +214,17 @@ export class RestartCoordinator {
         // migration state and must not be silently marked complete when their
         // JSONL is missing, corrupt, or has advanced outside this attempt.
         const record = this.options.store.get(plan.sessionId) ?? await this.options.store.load(plan.sessionId, { recoverDangling: false })
-        assertRecoveryCursor(plan, receipt, record.state.cursor)
         if (record.agentRuntime === 'copilot') {
+          if (record.state.cursor >= plan.cursor) assertRecoveryCursor(plan, receipt, record.state.cursor)
+          receipts[plan.sessionId] = startedRecoveryReceipt(receipt)
+          persist()
           const recovered = await this.options.store.load(plan.sessionId)
+          if (recovered.state.cursor < plan.cursor) {
+            throw new Error(`cursor regressed after external runtime recovery (expected at least ${plan.cursor}, observed ${recovered.state.cursor})`)
+          }
+          receipts[plan.sessionId] = adoptedRecoveryReceipt(receipts[plan.sessionId]!, recovered.state.cursor)
+          persist()
           if ((this.options.queuedMessages?.(plan.sessionId) ?? 0) > 0) {
-            receipts[plan.sessionId] = startedRecoveryReceipt(receipt)
-            persist()
             await this.options.drainQueue?.(plan.sessionId)
             await this.options.waitForQueueStable?.()
             if ((this.options.queuedMessages?.(plan.sessionId) ?? 0) !== 0) {
@@ -233,6 +238,7 @@ export class RestartCoordinator {
           persist()
           continue
         }
+        assertRecoveryCursor(plan, receipt, record.state.cursor)
         if (plan.resumeAction === 'drain_queue') {
           receipts[plan.sessionId] = startedRecoveryReceipt(receipt)
           persist()

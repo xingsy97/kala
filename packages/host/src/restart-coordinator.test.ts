@@ -374,6 +374,30 @@ describe('RestartCoordinator', () => {
     })
   })
 
+  it('quarantines an external runtime before enforcing its frozen cursor', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'restart-copilot-quarantine-'))
+    roots.push(root)
+    const statePath = join(root, 'restart.json')
+    writeFileSync(statePath, JSON.stringify({
+      attemptId: 'copilot-quarantine-attempt', phase: 'restarting', mode: 'checkpoint', reason: 'deploy',
+      requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), oldPid: 10,
+      sessions: [{ sessionId: 'copilot-session', cursor: 2, initialStatus: 'awaiting_approval', checkpointStatus: 'safe', checkpointKind: 'waiting_for_approval', resumeAction: 'wait_for_approval' }],
+    } satisfies HostRestartAttempt))
+    const load = vi.fn(async (_sessionId: string, options?: { recoverDangling?: boolean }) => options?.recoverDangling === false
+      ? { sessionId: 'copilot-session', agentRuntime: 'copilot' as const, state: { status: 'idle' as const, cursor: 0 } }
+      : { sessionId: 'copilot-session', agentRuntime: 'copilot' as const, state: { status: 'error' as const, cursor: 2 } })
+    const store = { recordsSnapshot: () => [], get: () => undefined, load } as unknown as SessionStore
+    const { coordinator, loop } = harness({ statePath, store })
+
+    await coordinator.resumeMarkedSessions()
+
+    expect(loop.resumeSession).not.toHaveBeenCalled()
+    expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+      phase: 'completed',
+      recoveryReceipts: { 'copilot-session': { state: 'settled', observedCursor: 2 } },
+    })
+  })
+
   it('fails closed when a non-resuming participant cannot be loaded at its frozen cursor', async () => {
     const root = mkdtempSync(join(tmpdir(), 'restart-resting-fence-'))
     roots.push(root)

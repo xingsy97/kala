@@ -776,7 +776,8 @@ export class SessionStore {
       && parsed.events.length > 0
       && !externalRuntimeAlreadyQuarantined
     ) {
-      finalState = quarantinedExternalRuntimeState(finalState)
+      const foreignEventCursor = parsed.events.at(-1)?.seq ?? finalState.cursor
+      finalState = quarantinedExternalRuntimeState(finalState, foreignEventCursor)
       cursor = finalState.cursor
       await appendRuntimeMetadataEntry(path, {
         sessionId,
@@ -1069,11 +1070,11 @@ function interruptedExternalRuntimeState(
   }
 }
 
-function quarantinedExternalRuntimeState(state: AgentState): AgentState {
+function quarantinedExternalRuntimeState(state: AgentState, minimumCursor = state.cursor): AgentState {
   const message = 'Non-Kernel Session contained Kernel events and was quarantined'
   return {
     ...state,
-    cursor: state.cursor + 1,
+    cursor: Math.max(state.cursor + 1, minimumCursor),
     status: 'error',
     pendingCalls: [],
     messages: [...state.messages, {

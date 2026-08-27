@@ -126,6 +126,18 @@ try {
     socket.emit('subscribe', { sessionId })
     const persisted = await persistedPromise
     assertSuccessfulToolCall(persisted.state, testCase.tool)
+    const history = await responseEvent(
+      socket,
+      'client:load_history',
+      'server:history',
+      { sessionId },
+    )
+    if (testCase.runtime === 'copilot' && history.entries?.length !== 0) {
+      throw new Error(`Copilot Session was contaminated by ${history.entries.length} Kernel events`)
+    }
+    if (testCase.runtime === 'kernel' && (history.entries?.length ?? 0) === 0) {
+      throw new Error('Kernel Session did not persist Kernel events')
+    }
     console.log(JSON.stringify({
       runtime: testCase.runtime,
       tool: testCase.tool,

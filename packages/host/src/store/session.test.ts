@@ -143,10 +143,37 @@ describe('SessionStore.ensure', () => {
     const recovered = await replacement.load(record.sessionId)
 
     expect(recovered.state.status).toBe('error')
+    expect(recovered.state.cursor).toBe(1)
     expect(recovered.state.error).toBe('Non-Kernel Session contained Kernel events and was quarantined')
     const parsed = await readSessionLog(record.logPath)
     expect(parsed.runtimeMetadata.at(-1)?.action).toBe('runtime.quarantined_kernel_events')
     expect(parsed.snapshots.at(-1)?.state.status).toBe('error')
+  })
+
+  it('preserves the highest foreign Kernel cursor when quarantining a Copilot Session', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-kernel-cursor',
+      agentRuntime: 'copilot',
+      config,
+    })
+    await appendEventEntry({
+      path: record.logPath,
+      seq: 1,
+      event: { kind: 'user_message', text: 'wrong loop' },
+      effects: [],
+    })
+    await appendEventEntry({
+      path: record.logPath,
+      seq: 2,
+      event: { kind: 'llm_response', content: [{ type: 'text', text: 'wrong runtime' }] },
+      effects: [],
+    })
+
+    const recovered = await new SessionStore(dir).load(record.sessionId)
+
+    expect(recovered.state.cursor).toBe(2)
+    expect(recovered.state.status).toBe('error')
   })
 
   it('returns the same record for concurrent callers and writes ONE log file', async () => {
