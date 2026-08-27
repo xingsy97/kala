@@ -198,7 +198,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
     return {
       clientName: 'agent-runlab',
       ...(model ? { model } : {}),
-      workingDirectory: record.state.cwd,
+      // The Copilot CLI runs with the Host, while record.state.cwd belongs to
+      // the remote Workspace Executor. Keep the SDK in Host-owned storage and
+      // pass the workspace cwd only through RunLab custom Tool dispatch.
+      workingDirectory: this.options.sessionsDir,
       systemMessage: {
         mode: 'replace' as const,
         content: record.config.systemPrompt ?? 'You are an AI coding agent.',

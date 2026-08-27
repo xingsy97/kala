@@ -86,6 +86,11 @@ RunLab continues to own:
 - Tool authorization and dispatch into the selected Workspace;
 - mapping between RunLab Session IDs and Copilot Session IDs.
 
+The Copilot CLI process runs on the Host and must use a Host-local working
+directory. A Session `cwd` belongs to its Workspace Executor and is passed only
+through RunLab custom Tool dispatch; it must never be used as the SDK process
+working directory.
+
 Copilot must not be implemented through `LLMAdapter.call()`. Doing so would
 create two competing Agent loops and make Tool, approval, replay, and
 compaction ownership ambiguous.

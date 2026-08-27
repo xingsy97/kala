@@ -18,7 +18,7 @@ type CapturedTool = {
 }
 
 const sdk = vi.hoisted(() => ({
-  configs: [] as Array<{ tools: CapturedTool[] }>,
+  configs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string }>,
 }))
 
 vi.mock('@github/copilot-sdk', () => ({
@@ -31,7 +31,7 @@ vi.mock('@github/copilot-sdk', () => ({
     async resumeSession() {
       throw new Error('not found')
     }
-    async createSession(config: { tools: CapturedTool[] }) {
+    async createSession(config: { tools: CapturedTool[]; workingDirectory?: string }) {
       sdk.configs.push(config)
       return {
         async send() {},
@@ -80,6 +80,7 @@ describe('Copilot runtime custom tools', () => {
     const record = await store.create({
       sessionId: 'copilot-tool-session',
       agentRuntime: 'copilot',
+      initialCwd: '/workspace/only-on-the-executor',
       config: createConfig({
         tools: [{
           name: 'todo_graph',
@@ -96,6 +97,7 @@ describe('Copilot runtime custom tools', () => {
     await runtime.send(record, { text: 'Use todo_graph.' })
     const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'todo_graph')
     expect(tool).toBeDefined()
+    expect(sdk.configs.at(-1)?.workingDirectory).toBe(dir)
 
     const result = await tool?.handler(
       { operations: [{ op: 'clear' }] },
@@ -107,6 +109,7 @@ describe('Copilot runtime custom tools', () => {
       callId: 'copilot-call-1',
       name: 'todo_graph',
       input: { operations: [{ op: 'clear' }] },
+      cwd: '/workspace/only-on-the-executor',
     })
     expect(result).toEqual({
       textResultForLlm: 'host tool result',
