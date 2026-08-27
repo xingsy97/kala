@@ -190,8 +190,12 @@ try {
       && assistantText(candidate).includes(hostFinalMarker)
     ), 180_000)
     await actor.page.waitForFunction((marker) => document.body.innerText.includes(marker), { timeout: 30_000 }, hostFinalMarker)
-    const toolDots = await actor.page.$$('[data-testid^="tool-card-dot-"]')
-    if (toolDots.length < 2) throw new Error(`production transcript projected only ${toolDots.length} Tool indicators`)
+    const toolNames = await actor.page.$$eval('[data-testid="tool-name-chip"]', (chips) => (
+      chips.map((chip) => chip.getAttribute('data-tool-name') ?? chip.textContent ?? '')
+    ))
+    if (!toolNames.includes('shell') || !toolNames.includes('todo_graph')) {
+      throw new Error(`production transcript omitted Tool UI: ${JSON.stringify(toolNames)}`)
+    }
     const history = await responseEvent(socket, 'client:load_history', 'server:history', { sessionId })
     if ((history.entries?.length ?? 0) !== 0) {
       throw new Error(`Copilot Session was contaminated by ${history.entries.length} Kernel events`)
@@ -200,7 +204,7 @@ try {
       status: state.status,
       cursor: state.cursor,
       hostTool: toolEvidence(state, 'todo_graph'),
-      projectedToolIndicators: toolDots.length,
+      projectedToolNames: toolNames,
       kernelHistoryEntries: history.entries?.length ?? 0,
     }
   })
