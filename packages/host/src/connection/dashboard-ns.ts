@@ -55,6 +55,7 @@ import type {
   ClientUserReject,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
+  DirListResult,
   RpcAck,
   EventAppendedEvent,
   CompactionMetadata,
@@ -806,20 +807,24 @@ export function configureDashboardNamespace(
         )
       }
     })
-    socket.on('client:list_dirs', async (raw: ClientListDirs) => {
+    socket.on('client:list_dirs', async (raw: ClientListDirs, ack?: (result: DirListResult) => void) => {
       const p = vparse(schema.ClientListDirsSchema, raw, 'client:list_dirs') as ClientListDirs | undefined
       if (!p) return
+      const respond = (result: DirListResult): void => {
+        socket.emit('server:dir_list', result)
+        ack?.(result)
+      }
       if (p.sessionId) {
         const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
         if (error) {
           auditScopedAccessDenied('internal_tool.list_dirs', p.sessionId, p.workspaceId, error)
-          socket.emit('server:dir_list', { requestId: p.requestId, workspaceId: p.workspaceId, path: p.path ?? '', roots: [], entries: [], error })
+          respond({ requestId: p.requestId, workspaceId: p.workspaceId, path: p.path ?? '', roots: [], entries: [], error })
           return
         }
       }
       deps.audit?.log({ action: 'internal_tool.list_dirs', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)
-      socket.emit('server:dir_list', result)
+      respond(result)
     })
     socket.on('client:list_files', async (raw: ClientListFiles) => {
       const p = vparse(schema.ClientListFilesSchema, raw, 'client:list_files') as ClientListFiles | undefined

@@ -1680,7 +1680,7 @@ export type DashboardClientToServerEvents = {
   'client:set_approval_mode': (payload: ClientSetApprovalMode, ack?: (result: RpcAck) => void) => void
   'client:fork': (payload: ClientFork) => void
   'client:create_session': (payload: ClientCreateSession, ack?: (result: RpcAck) => void) => void
-  'client:list_dirs': (payload: ClientListDirs) => void
+  'client:list_dirs': (payload: ClientListDirs, ack?: (result: DirListResult) => void) => void
   'client:list_files': (payload: ClientListFiles) => void
   'client:read_overflow': (payload: ClientReadOverflow) => void
   'client:list_executors': (payload: ClientListExecutors) => void

@@ -46,10 +46,12 @@ export function DirectoryPicker({
   const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestTimeoutRef = useRef<number | null>(null)
   const finderScrollRef = useRef<HTMLDivElement | null>(null)
+  const dirListHandlerRef = useRef<(result: DirListResult) => void>(() => {})
   const selectedPathRef = useRef(value)
   selectedPathRef.current = value
 
   const showDirectoryTimeout = (path: string): void => {
+    activeRequestIdRef.current = null
     setLoadingPath(null)
     setColumns([{ path, entries: [], error: 'Directory request timed out. Check that this workspace executor is online and connected to the same Host.' }])
   }
@@ -57,7 +59,12 @@ export function DirectoryPicker({
   const requestPath = (path: string): void => {
     if (!socket || !workspaceId) return
     setLoadingPath(path)
-    activeRequestIdRef.current = requestDirs(socket, workspaceId, path)
+    activeRequestIdRef.current = requestDirs(
+      socket,
+      workspaceId,
+      path,
+      (result) => dirListHandlerRef.current(result),
+    )
     if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
     requestTimeoutRef.current = window.setTimeout(
       () => showDirectoryTimeout(path),
@@ -73,6 +80,7 @@ export function DirectoryPicker({
     const onDirList = (result: DirListResult): void => {
       if (result.workspaceId !== workspaceId) return
       if (result.requestId !== activeRequestIdRef.current) return
+      activeRequestIdRef.current = null
       setLoadingPath(null)
       if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
       onChange(result.path)
@@ -92,6 +100,7 @@ export function DirectoryPicker({
         return [nextColumn]
       })
     }
+    dirListHandlerRef.current = onDirList
     socket.on('server:dir_list', onDirList)
     const onReconnect = (): void => {
       requestPath(selectedPathRef.current.trim() || initialPath || '')
@@ -101,6 +110,7 @@ export function DirectoryPicker({
     return () => {
       socket.off('server:dir_list', onDirList)
       socket.off('connect', onReconnect)
+      dirListHandlerRef.current = () => {}
       if (manualTimerRef.current) clearTimeout(manualTimerRef.current)
       if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
     }
@@ -370,13 +380,18 @@ function DirectoryColumn({
   )
 }
 
-function requestDirs(socket: DashboardSocket, workspaceId: string, path: string | undefined): string {
+function requestDirs(
+  socket: DashboardSocket,
+  workspaceId: string,
+  path: string | undefined,
+  onResult: (result: DirListResult) => void,
+): string {
   const requestId = randomId()
   socket.emit('client:list_dirs', {
     requestId,
     workspaceId,
     ...(path !== undefined && path.length > 0 ? { path } : {}),
-  })
+  }, onResult)
   return requestId
 }
 

@@ -3494,17 +3494,21 @@ describe('wire protocol', () => {
     const listed = new Promise<import('@agent-kernel/shared').DirListResult>((resolve) => {
       dashboard.on('server:dir_list', resolve)
     })
-    dashboard.emit('client:list_dirs', {
-      requestId: 'dirs-1',
-      workspaceId: 'ws-list-dirs',
-      path: root,
+    const acknowledged = new Promise<import('@agent-kernel/shared').DirListResult>((resolve) => {
+      dashboard.emit('client:list_dirs', {
+        requestId: 'dirs-1',
+        workspaceId: 'ws-list-dirs',
+        path: root,
+      }, resolve)
     })
-    await expect(listed).resolves.toMatchObject({
+    const expected = {
       requestId: 'dirs-1',
       workspaceId: 'ws-list-dirs',
       path: root,
       entries: [{ name: 'child', path: child }],
-    })
+    }
+    await expect(listed).resolves.toMatchObject(expected)
+    await expect(acknowledged).resolves.toMatchObject(expected)
 
     dashboard.close()
     executor.close()

@@ -12,11 +12,11 @@ describe('DirectoryPicker Windows paths',()=>{
     const socket={emit,on:(event:string,fn:(value:any)=>void)=>listeners.set(event,fn),off:vi.fn()} as any
     function Harness(){const [value,setValue]=useState(root);return <DirectoryPicker socket={socket} workspaceId="ws" initialPath={root} value={value} onChange={setValue}/>}
     render(<Harness/>)
-    await waitFor(()=>expect(emit).toHaveBeenCalledWith('client:list_dirs',expect.objectContaining({path:root})))
+    await waitFor(()=>expect(emit).toHaveBeenCalledWith('client:list_dirs',expect.objectContaining({path:root}),expect.any(Function)))
     const input=screen.getByDisplayValue(root)
     fireEvent.change(input,{target:{value:child}})
     fireEvent.keyDown(input,{key:'Enter'})
-    expect(emit).toHaveBeenCalledWith('client:list_dirs',expect.objectContaining({path:child}))
+    expect(emit).toHaveBeenCalledWith('client:list_dirs',expect.objectContaining({path:child}),expect.any(Function))
   })
 
   it('reloads the selected path after the Dashboard socket reconnects',async()=>{
@@ -39,6 +39,6 @@ describe('DirectoryPicker Windows paths',()=>{
     listeners.get('connect')?.(undefined)
 
     await waitFor(()=>expect(emit).toHaveBeenCalledTimes(2))
-    expect(emit).toHaveBeenLastCalledWith('client:list_dirs',expect.objectContaining({path:root}))
+    expect(emit).toHaveBeenLastCalledWith('client:list_dirs',expect.objectContaining({path:root}),expect.any(Function))
   })
 })
