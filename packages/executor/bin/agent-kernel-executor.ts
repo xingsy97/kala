@@ -46,6 +46,7 @@ import { readPairingJson } from '../src/pairing-response.js'
 import { readExecutorCredential, readExecutorRuntimeConfig } from '../src/executor-config.js'
 import { parseSandboxRootsEnv } from '../src/sandbox-roots-env.js'
 import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile } from '../src/workspace-id.js'
+import { acquireExecutorLock } from '../src/local-lock.js'
 import { bootstrapEnvironment, defaultManagedRoot, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
 import { assertManagedWindowsInstallation, createWindowsServicePlan, executeWindowsServicePlan, type WindowsServiceAction } from '../src/windows-service.js'
@@ -233,42 +234,9 @@ async function acquireLocalLock(
   logger: ReturnType<typeof createRuntimeLogger>,
   profile?: string,
 ): Promise<string> {
-  const dir = executorProfileDir(profile)
-  mkdirSync(dir, { recursive: true })
-  const lockPath = join(dir, 'executor.lock')
-  // proper-lockfile locks a target file - write an empty sentinel first
-  // so its existence check succeeds.
-  if (!existsSync(lockPath)) {
-    writeFileSync(lockPath, '', { flag: 'a', mode: 0o600 })
-  }
   try {
-    await lockfile.lock(lockPath, {
-      stale: 30_000,
-      retries: 0,
-      realpath: false,
-    })
-    // Overwrite the sentinel with our PID + timestamp so a user can trace
-    // stray locks. (proper-lockfile itself keeps a sibling `.lock`
-    // directory; the payload of `lockPath` is just informational.)
-    writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n`)
-    return lockPath
-  } catch (err) {
-    // Contention: read whoever's already holding the lock.
-    let existingPid = '?'
-    try {
-      existingPid = readFileSync(lockPath, 'utf8').split('\n')[0]?.trim() ?? '?'
-    } catch {
-      // ignore
-    }
-    logger.error(
-      {
-        existingPid,
-        lockPath,
-        err: err instanceof Error ? err.message : String(err),
-      },
-      `another executor is already running on this machine (pid ${existingPid}). ` +
-        `Stop it first, or if you're sure no executor is running, delete ${lockPath}.`,
-    )
+    return await acquireExecutorLock(executorProfileDir(profile), logger)
+  } catch {
     process.exit(1)
   }
 }
