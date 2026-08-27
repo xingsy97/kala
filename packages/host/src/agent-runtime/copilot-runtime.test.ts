@@ -19,6 +19,7 @@ type CapturedTool = {
 
 const sdk = vi.hoisted(() => ({
   configs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string }>,
+  listeners: [] as Array<(event: unknown) => void>,
 }))
 
 vi.mock('@github/copilot-sdk', () => ({
@@ -35,7 +36,7 @@ vi.mock('@github/copilot-sdk', () => ({
       sdk.configs.push(config)
       return {
         async send() {},
-        on() {},
+        on(listener: (event: unknown) => void) { sdk.listeners.push(listener) },
         async abort() {},
         async disconnect() {},
       }
@@ -50,6 +51,7 @@ describe('Copilot runtime custom tools', () => {
 
   beforeEach(() => {
     sdk.configs.length = 0
+    sdk.listeners.length = 0
     dir = mkdtempSync(join(tmpdir(), 'copilot-runtime-tools-'))
     store = new SessionStore(dir)
   })
@@ -190,5 +192,36 @@ describe('Copilot runtime custom tools', () => {
       ok: false,
       content: 'Copilot approval could not be resumed after host restart',
     })
+  })
+
+  it('persists streamed assistant text when the SDK reaches idle without a final message event', async () => {
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-streamed-message',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    await runtime.send(record, { text: 'Reply with OK.' })
+
+    sdk.listeners[0]?.({ type: 'assistant.message_delta', data: { deltaContent: 'O' } })
+    sdk.listeners[0]?.({ type: 'assistant.message_delta', data: { deltaContent: 'K' } })
+    sdk.listeners[0]?.({ type: 'session.idle', data: {} })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+
+    expect(store.get(record.sessionId)?.state.messages.at(-1)).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'OK' }],
+    })
+    await runtime.close()
   })
 })

@@ -60,6 +60,11 @@ const cases = [
     },
   },
 ]
+const requestedCase = process.env.RUNTIME_TOOL_CASE
+const selectedCases = requestedCase
+  ? cases.filter((testCase) => `${testCase.runtime}/${testCase.tool}` === requestedCase)
+  : cases
+if (selectedCases.length === 0) throw new Error(`unknown RUNTIME_TOOL_CASE: ${requestedCase}`)
 
 const bootstrapSessionId = `runtime-tool-acceptance-${randomUUID()}`
 const socket = io(`${origin.replace(/\/$/u, '')}/dashboard`, {
@@ -90,7 +95,7 @@ try {
   const executor = executors.executors?.find((candidate) => candidate.workspaceId)
   if (!executor) throw new Error('no connected workspace Executor is available')
 
-  for (const testCase of cases) {
+  for (const testCase of selectedCases) {
     const sessionId = `runtime-tool-${testCase.runtime}-${testCase.tool}-${randomUUID()}`
     createdSessions.push(sessionId)
     assertAck(await ack(socket, 'client:create_session', {
@@ -190,7 +195,18 @@ async function waitForState(sessionId, predicate, timeout) {
     if (state && predicate(state)) return state
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
-  throw new Error(`timed out waiting for ${sessionId}`)
+  const latest = states.get(sessionId)
+  throw new Error(`timed out waiting for ${sessionId}; latest state: ${JSON.stringify({
+    status: latest?.status,
+    cursor: latest?.cursor,
+    error: latest?.error,
+    content: latest?.messages?.flatMap((message) => message.content ?? []).map((content) => ({
+      type: content.type,
+      ...('text' in content ? { text: String(content.text).slice(0, 240) } : {}),
+      ...('name' in content ? { name: content.name } : {}),
+      ...('ok' in content ? { ok: content.ok } : {}),
+    })),
+  })}`)
 }
 
 function responseEvent(client, request, response, payload) {

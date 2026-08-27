@@ -46,6 +46,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   private readonly approvals = new Map<string, PendingApproval>()
   private readonly cancelledCalls = new Set<string>()
   private readonly tails = new Map<string, Promise<void>>()
+  private readonly assistantBuffers = new Map<string, string>()
   private status: AgentRuntimeDescriptor['status']
   private reason: string | undefined
 
@@ -93,6 +94,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {
     const session = await this.ensureSession(record, input.model)
+    this.assistantBuffers.delete(record.sessionId)
     await this.project(record, 'copilot.user_message', {
       text: input.text,
       ...(input.operationId ? { operationId: input.operationId } : {}),
@@ -110,6 +112,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   async cancel(record: SessionRecord): Promise<void> {
     const session = this.sessions.get(record.sessionId)
     if (session) await session.abort()
+    this.assistantBuffers.delete(record.sessionId)
     for (const call of record.state.pendingCalls) {
       this.cancelledCalls.add(approvalKey(record.sessionId, call.callId))
     }
@@ -160,11 +163,13 @@ export class CopilotAgentRuntime implements AgentRuntime {
       await session.disconnect()
       this.sessions.delete(record.sessionId)
     }
+    this.assistantBuffers.delete(record.sessionId)
     await this.client?.deleteSession(record.externalSessionId ?? record.sessionId).catch(() => undefined)
   }
 
   async close(): Promise<void> {
     this.sessions.clear()
+    this.assistantBuffers.clear()
     if (this.client) await this.client.stop()
     this.client = undefined
   }
@@ -276,15 +281,22 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   private handleEvent(record: SessionRecord, event: SessionEvent): void {
     if (event.type === 'assistant.message_delta') {
+      this.assistantBuffers.set(
+        record.sessionId,
+        (this.assistantBuffers.get(record.sessionId) ?? '') + event.data.deltaContent,
+      )
       this.context.broadcast.onTokenDelta(record.sessionId, event.data.deltaContent)
       return
     }
     if (event.type === 'assistant.message') {
+      const buffered = this.assistantBuffers.get(record.sessionId) ?? ''
+      this.assistantBuffers.delete(record.sessionId)
       const content: MessageContent[] = []
       if (event.data.reasoningText) {
         content.push({ type: 'thinking' as const, text: event.data.reasoningText, provider: 'github-copilot' })
       }
-      if (event.data.content) content.push({ type: 'text' as const, text: event.data.content })
+      const text = event.data.content || buffered
+      if (text) content.push({ type: 'text' as const, text })
       if (content.length > 0) {
         void this.project(record, 'copilot.assistant_message', nativeEventPayload(event), (state) => ({
           ...state,
@@ -297,14 +309,12 @@ export class CopilotAgentRuntime implements AgentRuntime {
       return
     }
     if (event.type === 'session.idle') {
-      void this.project(record, 'copilot.session_idle', nativeEventPayload(event), (state) => ({
-        ...state,
-        status: 'done',
-        pendingCalls: [],
-        error: undefined,
-      }))
+      const buffered = this.assistantBuffers.get(record.sessionId) ?? ''
+      this.assistantBuffers.delete(record.sessionId)
+      void this.finishIdle(record, event, buffered)
       return
     }
+
     if (event.type === 'session.error') {
       void this.project(record, 'copilot.session_error', nativeEventPayload(event), (state) => ({
         ...state,
@@ -314,6 +324,24 @@ export class CopilotAgentRuntime implements AgentRuntime {
       }))
       this.context.broadcast.onError(record.sessionId, event.data.message)
     }
+  }
+
+  private async finishIdle(record: SessionRecord, event: SessionEvent, buffered: string): Promise<void> {
+    if (buffered) {
+      await this.project(record, 'copilot.assistant_message', { source: 'assistant.message_delta' }, (state) => ({
+        ...state,
+        messages: [...state.messages, { role: 'assistant', content: [{ type: 'text', text: buffered }] }],
+        status: 'thinking',
+        pendingCalls: [],
+        error: undefined,
+      }))
+    }
+    await this.project(record, 'copilot.session_idle', nativeEventPayload(event), (state) => ({
+      ...state,
+      status: 'done',
+      pendingCalls: [],
+      error: undefined,
+    }))
   }
 
   private async projectToolCall(record: SessionRecord, pending: PendingToolCall): Promise<void> {
