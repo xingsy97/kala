@@ -347,6 +347,14 @@ async function waitForState(expectedSessionId, predicate, timeoutMs) {
     error: latest?.error,
     assistant: assistantText(latest).slice(-1_000),
     pendingCalls: latest?.pendingCalls,
+    contents: latest?.messages?.flatMap((message) => message.content ?? []).map((content) => ({
+      type: content.type,
+      ...('name' in content ? { name: content.name } : {}),
+      ...('callId' in content ? { callId: content.callId } : {}),
+      ...('ok' in content ? { ok: content.ok } : {}),
+      ...('input' in content ? { input: content.input } : {}),
+      ...('content' in content ? { content: String(content.content).slice(0, 500) } : {}),
+    })),
   })}`)
 }
 
