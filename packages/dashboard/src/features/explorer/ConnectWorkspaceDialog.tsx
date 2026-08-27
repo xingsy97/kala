@@ -281,18 +281,18 @@ function TerminalCommand({ command, copied, mode, modeLabel, transitioning, onCo
   if (command.includes('\n') || command.includes('\r')) throw new Error('Executor install command must be one physical line')
   return (
     <section
-      className="min-w-0 max-w-full overflow-hidden rounded-2xl bg-foreground text-background shadow-[0_12px_30px_hsl(var(--foreground)/0.12)]"
+      className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-border/60 bg-muted/35 text-foreground shadow-sm"
       data-testid="executor-terminal-command"
       data-mode={mode}
       aria-busy={transitioning}
     >
-      <div className="flex items-center justify-between border-b border-background/10 px-4 py-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.12em] opacity-65">{modeLabel}</span>
-        {transitioning ? <LoaderCircle className="h-3.5 w-3.5 animate-spin opacity-70" data-testid="executor-command-transition" aria-hidden="true" /> : null}
+      <div className="flex items-center justify-between border-b border-border/50 bg-background/45 px-4 py-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{modeLabel}</span>
+        {transitioning ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" data-testid="executor-command-transition" aria-hidden="true" /> : null}
       </div>
       <div className={cn('flex min-w-0 flex-col gap-3 p-4 transition-opacity duration-200 sm:flex-row sm:items-start', transitioning && 'animate-pulse opacity-55')}>
-        <span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none opacity-55" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-5">{transitioning ? t('explorer.connectDialog.preparing') : command || t('explorer.connectDialog.preparing')}</pre></span>
-        <Button type="button" variant="ghost" size="sm" className="h-9 w-full flex-none gap-1.5 rounded-lg bg-background/10 px-3 text-[11px] text-background hover:bg-background/20 hover:text-background sm:w-auto" onClick={onCopy} disabled={!command || transitioning} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button>
+        <span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none text-primary" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-5">{transitioning ? t('explorer.connectDialog.preparing') : command || t('explorer.connectDialog.preparing')}</pre></span>
+        <Button type="button" variant="outline" size="sm" className="h-9 w-full flex-none gap-1.5 rounded-lg bg-background/70 px-3 text-[11px] shadow-none hover:bg-accent sm:w-auto" onClick={onCopy} disabled={!command || transitioning} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button>
       </div>
     </section>
   )

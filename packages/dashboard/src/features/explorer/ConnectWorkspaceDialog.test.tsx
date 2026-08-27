@@ -66,6 +66,9 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByText('Workspace setup')).toBeTruthy()
     const terminal = screen.getByTestId('executor-terminal-command')
     expect(terminal.className).toContain('rounded-2xl')
+    expect(terminal.className).toContain('bg-muted/35')
+    expect(terminal.className).toContain('text-foreground')
+    expect(terminal.className).not.toContain('bg-foreground')
     expect(screen.getByTestId('copy-executor-command').className).toContain('w-full')
     expect(terminal.className).not.toContain('ring-1')
     const command = terminal.textContent ?? ''
