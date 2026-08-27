@@ -1161,7 +1161,10 @@ export function App(): JSX.Element {
   // which was saturating the main thread on long sessions and dropping button
   // clicks / freezing the hover cursor while the agent ran.
   const stateMessages = session.state?.messages ?? EMPTY_MESSAGES
-  const transcriptTimeline = transcriptTimelineForRuntime(session.agentRuntime, session.timeline)
+  const transcriptTimeline = transcriptTimelineForRuntime(
+    currentSession?.agentRuntime ?? session.agentRuntime,
+    session.timeline,
+  )
   const includeStatePrefix = session.parentSessionId !== null
   const transcriptProjectionRef = useRef<{
     sessionId: string | null
