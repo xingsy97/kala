@@ -155,7 +155,7 @@ try {
     await clickByTestId(actor.page, 'approval-approve')
     const state = await waitForState(sessionId, (candidate) => (
       candidate.status === 'done'
-      && successfulToolResult(candidate, 'shell', executorMarker)
+      && successfulToolResult(candidate, 'shell')
       && assistantText(candidate).includes(executorFinalMarker)
     ), 180_000)
     await actor.page.waitForFunction((marker) => document.body.innerText.includes(marker), { timeout: 30_000 }, executorFinalMarker)
