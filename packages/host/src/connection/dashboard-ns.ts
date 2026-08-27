@@ -1337,6 +1337,16 @@ function normalizePreferencesPatch(
   if (!('selectedModel' in patch)) return patch
   const selectedModel = patch.selectedModel?.trim()
   if (!selectedModel) return { ...patch, selectedModel: '' }
+  const record = deps.store.get(sessionId)
+  if (record?.agentRuntime === 'copilot') {
+    const models = deps.agentRuntimes.get('copilot')?.descriptor().models ?? []
+    const exact = models.find((model) => model.ref === selectedModel || model.id === selectedModel)
+    if (!exact) {
+      deps.broadcastError(sessionId, 'host', `unknown Copilot model: ${selectedModel}`)
+      return null
+    }
+    return { ...patch, selectedModel: exact.ref }
+  }
   const normalized = normalizeIncomingModel(deps, selectedModel)
   if (!normalized) {
     deps.broadcastError(sessionId, 'host', `unknown or ambiguous model: ${selectedModel}`)
@@ -1409,6 +1419,7 @@ async function handleUserMessage(
       text: p.text,
       ...(p.content ? { content: p.content } : {}),
       ...(p.operationId ? { operationId: p.operationId } : {}),
+      ...(effectiveModelForRecord(deps, record) ? { model: effectiveModelForRecord(deps, record) } : {}),
     })
     return
   }

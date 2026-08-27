@@ -473,7 +473,9 @@ export async function startHostServer(
     return normalizeModelRef(configured) ?? (fallback.length > 0 ? fallback : undefined)
   }
   const effectiveModelForSession = (sessionId: string): string | undefined => {
-    const selected = store.get(sessionId)?.preferences.selectedModel
+    const record = store.get(sessionId)
+    const selected = record?.preferences.selectedModel
+    if (record?.agentRuntime === 'copilot') return selected
     return (selected ? normalizeModelRef(selected) : undefined) ?? effectiveDefaultModel()
   }
   const contextWindowForModel = (model: string | undefined): ContextWindowOverride | undefined => {

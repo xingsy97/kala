@@ -11,10 +11,12 @@ import type {
 import {
   COPILOT_AGENT_RUNTIME_CAPABILITIES,
   type AgentRuntimeDescriptor,
+  type ModelInfo,
 } from '@agent-kernel/shared'
 import {
   CopilotClient,
   RuntimeConnection,
+  type ModelInfo as CopilotModelInfo,
   type CopilotSession,
   type SessionEvent,
   type Tool,
@@ -53,6 +55,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   private readonly tails = new Map<string, Promise<void>>()
   private status: AgentRuntimeDescriptor['status']
   private reason: string | undefined
+  private models: readonly ModelInfo[] = []
 
   constructor(
     private readonly context: AgentRuntimeContext,
@@ -74,6 +77,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
       await this.client.start()
       const auth = await this.client.getAuthStatus()
       if (!auth.isAuthenticated) throw new Error('Copilot CLI is not authenticated')
+      this.models = (await this.client.listModels()).map(modelInfo)
       this.status = 'ready'
       this.reason = undefined
     } catch (error) {
@@ -94,11 +98,13 @@ export class CopilotAgentRuntime implements AgentRuntime {
       ...(this.reason ? { reason: this.reason } : {}),
       version: '1.0.11',
       capabilities: COPILOT_AGENT_RUNTIME_CAPABILITIES,
+      models: this.models,
     }
   }
 
   async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {
     const session = await this.ensureSession(record, input.model)
+    if (input.model) await session.setModel(input.model)
     this.cancelledSessions.delete(record.sessionId)
     await this.project(record, 'copilot.user_message', {
       text: input.text,
@@ -465,6 +471,19 @@ async function sendAndWaitWithActivityTimeout(session: CopilotSession, prompt: s
   } finally {
     if (timeout) clearTimeout(timeout)
     unsubscribe()
+  }
+}
+
+function modelInfo(model: CopilotModelInfo): ModelInfo {
+  return {
+    ref: model.id,
+    id: model.id,
+    label: model.name,
+    provider: 'GitHub Copilot',
+    providerId: 'github-copilot',
+    ...(model.capabilities.limits.max_context_window_tokens
+      ? { contextWindow: model.capabilities.limits.max_context_window_tokens }
+      : {}),
   }
 }
 

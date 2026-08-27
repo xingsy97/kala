@@ -435,20 +435,21 @@ export function App(): JSX.Element {
     },
   })
   useEffect(() => previewStore.connect(controlSocket, sessionViewCache), [controlSocket, previewStore, sessionViewCache])
-  const selectedModelKey = useMemo(
-    () => resolveModelKey(models, session.selectedModel) || session.selectedModel || '',
-    [models, session.selectedModel],
-  )
-  const composerModel = selectedModelKey || resolveModelKey(models, defaultModel) || defaultModel || modelKey(models[0])
   const control = useControlPlane(controlSocket)
   const controlSessionsRef = useRef<readonly SessionSummary[]>([])
   controlSessionsRef.current = control.sessions
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
   )
-  const currentAgentRuntimeCapabilities = control.agentRuntimes.find(
+  const currentRuntimeDescriptor = control.agentRuntimes.find(
     (runtime) => runtime.id === (currentSession?.agentRuntime ?? 'kernel'),
-  )?.capabilities ?? KERNEL_AGENT_RUNTIME_CAPABILITIES
+  )
+  const currentAgentRuntimeCapabilities = currentRuntimeDescriptor?.capabilities ?? KERNEL_AGENT_RUNTIME_CAPABILITIES
+  const availableModels = currentRuntimeDescriptor?.models ?? models
+  const selectedModelKey = resolveModelKey(availableModels, session.selectedModel) || session.selectedModel || ''
+  const composerModel = selectedModelKey
+    || (currentSession?.agentRuntime === 'copilot' ? '' : resolveModelKey(availableModels, defaultModel) || defaultModel)
+    || modelKey(availableModels[0])
   useEffect(() => {
     if (!controlSocket || !currentSession?.workspaceId || !currentSession.sessionId) return
     const releaseWorkspace = dashboardConnectionManager(controlSocket).acquire(`workspace:${currentSession.workspaceId}`)
@@ -1995,7 +1996,7 @@ export function App(): JSX.Element {
                           serviceUnavailable={!controlSocket?.connected}
                           onReconnectService={() => controlSocket?.connect()}
                           model={composerModel}
-                          models={models}
+                          models={availableModels}
                           onModelChange={onModelChange}
                           allowModelSelection={currentAgentRuntimeCapabilities.modelSelection}
                           approvalMode={session.state?.approvalMode ?? 'auto'}

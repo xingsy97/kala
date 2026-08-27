@@ -26,6 +26,7 @@ const sdk = vi.hoisted(() => ({
   listeners: [] as Array<(event: unknown) => void>,
   responses: [] as Array<unknown>,
   abort: vi.fn(async () => {}),
+  setModel: vi.fn(async () => {}),
 }))
 
 vi.mock('@github/copilot-sdk', () => ({
@@ -42,6 +43,13 @@ vi.mock('@github/copilot-sdk', () => ({
     async stop() {}
     async getAuthStatus() {
       return { isAuthenticated: true }
+    }
+    async listModels() {
+      return [{
+        id: 'gpt-5.4-mini',
+        name: 'GPT-5.4 mini',
+        capabilities: { limits: { max_context_window_tokens: 128_000 } },
+      }]
     }
     async resumeSession(_sessionId: string, config: { tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }) {
       sdk.resumeConfigs.push(config)
@@ -71,6 +79,7 @@ vi.mock('@github/copilot-sdk', () => ({
           }
         },
         abort: sdk.abort,
+        setModel: sdk.setModel,
         async disconnect() {},
       }
     }
@@ -90,6 +99,7 @@ describe('Copilot runtime custom tools', () => {
     sdk.listeners.length = 0
     sdk.responses.length = 0
     sdk.abort.mockClear()
+    sdk.setModel.mockClear()
     dir = mkdtempSync(join(tmpdir(), 'copilot-runtime-tools-'))
     store = new SessionStore(dir)
   })
@@ -134,7 +144,7 @@ describe('Copilot runtime custom tools', () => {
     })
 
     await runtime.start()
-    await runtime.send(record, { text: 'Use todo_graph.' })
+    await runtime.send(record, { text: 'Use todo_graph.', model: 'gpt-5.4-mini' })
     const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'todo_graph')
     expect(tool).toBeDefined()
     expect(tool?.overridesBuiltInTool).toBe(true)
@@ -145,6 +155,17 @@ describe('Copilot runtime custom tools', () => {
     })
     expect(sdk.configs.at(-1)?.workingDirectory).toBe(dir)
     expect(sdk.configs.at(-1)?.remoteSession).toBe('off')
+    expect(runtime.descriptor()).toMatchObject({
+      capabilities: { modelSelection: true },
+      models: [{
+        ref: 'gpt-5.4-mini',
+        id: 'gpt-5.4-mini',
+        label: 'GPT-5.4 mini',
+        providerId: 'github-copilot',
+        contextWindow: 128_000,
+      }],
+    })
+    expect(sdk.setModel).toHaveBeenCalledWith('gpt-5.4-mini')
 
     const result = await tool?.handler(
       { operations: [{ op: 'clear' }] },

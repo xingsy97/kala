@@ -45,6 +45,7 @@ export type AgentRuntimeDescriptor = {
   readonly reason?: string
   readonly version?: string
   readonly capabilities: AgentRuntimeCapabilities
+  readonly models?: readonly ModelInfo[]
 }
 
 export const KERNEL_AGENT_RUNTIME_CAPABILITIES: AgentRuntimeCapabilities = {
@@ -70,7 +71,7 @@ export const COPILOT_AGENT_RUNTIME_CAPABILITIES: AgentRuntimeCapabilities = {
   approvalMode: true,
   workspace: true,
   cwdMutation: false,
-  modelSelection: false,
+  modelSelection: true,
   attachments: false,
   memoryConsolidation: false,
   customTools: true,
