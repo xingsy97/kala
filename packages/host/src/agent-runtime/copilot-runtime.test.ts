@@ -22,6 +22,7 @@ const sdk = vi.hoisted(() => ({
   configs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string }>,
   listeners: [] as Array<(event: unknown) => void>,
   responses: [] as Array<unknown>,
+  abort: vi.fn(async () => {}),
 }))
 
 vi.mock('@github/copilot-sdk', () => ({
@@ -39,11 +40,15 @@ vi.mock('@github/copilot-sdk', () => ({
       return {
         async send() {},
         async sendAndWait() {
-          if (sdk.responses.length > 0) return sdk.responses.shift()
+          if (sdk.responses.length > 0) {
+            const response = sdk.responses.shift()
+            if (response instanceof Error) throw response
+            return response
+          }
           return await new Promise(() => {})
         },
         on(listener: (event: unknown) => void) { sdk.listeners.push(listener) },
-        async abort() {},
+        abort: sdk.abort,
         async disconnect() {},
       }
     }
@@ -59,6 +64,7 @@ describe('Copilot runtime custom tools', () => {
     sdk.configs.length = 0
     sdk.listeners.length = 0
     sdk.responses.length = 0
+    sdk.abort.mockClear()
     dir = mkdtempSync(join(tmpdir(), 'copilot-runtime-tools-'))
     store = new SessionStore(dir)
   })
@@ -140,6 +146,36 @@ describe('Copilot runtime custom tools', () => {
       }),
     ]))
     await runtime.close()
+  })
+
+  it('aborts SDK work and cancels pending tools after an idle timeout', async () => {
+    const cancelPending = vi.fn()
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: '' } }, cancelPending },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, {
+      enabled: true,
+      sessionsDir: dir,
+    })
+    const record = await store.create({
+      sessionId: 'copilot-timeout',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    sdk.responses.push(new Error('Timeout after 1800000ms waiting for session.idle'))
+
+    await runtime.start()
+    await runtime.send(record, { text: 'Continue.' })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('error'))
+
+    expect(sdk.abort).toHaveBeenCalledOnce()
+    expect(cancelPending).toHaveBeenCalledWith(record.sessionId)
   })
 
   it('settles an unresumable approval instead of reporting an expired runtime error', async () => {

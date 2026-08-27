@@ -332,6 +332,13 @@ export class CopilotAgentRuntime implements AgentRuntime {
     } catch (error) {
       if (this.cancelledSessions.delete(record.sessionId)) return
       const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('waiting for session.idle')) {
+        await session.abort().catch(() => undefined)
+        for (const call of record.state.pendingCalls) {
+          this.cancelledCalls.add(approvalKey(record.sessionId, call.callId))
+        }
+        this.context.tools.cancelPending(record.sessionId)
+      }
       await this.project(record, 'copilot.session_error', { message }, (state) => ({
         ...state,
         status: 'error',
