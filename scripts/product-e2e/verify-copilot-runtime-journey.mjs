@@ -155,7 +155,7 @@ try {
     await clickByTestId(actor.page, 'approval-approve')
     const state = await waitForState(sessionId, (candidate) => (
       candidate.status === 'done'
-      && successfulToolResult(candidate, 'shell')
+      && toolEvidenceByInput(candidate, executorMarker)?.ok === true
       && assistantText(candidate).includes(executorFinalMarker)
     ), 180_000)
     await actor.page.waitForFunction((marker) => document.body.innerText.includes(marker), { timeout: 30_000 }, executorFinalMarker)
@@ -166,7 +166,7 @@ try {
       sawStreaming,
       status: state.status,
       cursor: state.cursor,
-      executorTool: toolEvidence(state, 'shell'),
+      executorTool: toolEvidenceByInput(state, executorMarker),
     }
   })
 
@@ -310,6 +310,17 @@ function toolEvidence(state, toolName) {
   const result = contents.find((content) => content.type === 'tool_result' && content.callId === call.callId)
   if (!result) return undefined
   return { callId: call.callId, ok: result.ok === true, content: String(result.content ?? '').slice(0, 2_000) }
+}
+
+function toolEvidenceByInput(state, marker) {
+  const contents = state?.messages?.flatMap((message) => message.content ?? []) ?? []
+  const call = contents
+    .filter((content) => content.type === 'tool_call' && JSON.stringify(content.input).includes(marker))
+    .at(-1)
+  if (!call) return undefined
+  const result = contents.find((content) => content.type === 'tool_result' && content.callId === call.callId)
+  if (!result) return undefined
+  return { name: call.name, callId: call.callId, ok: result.ok === true, content: String(result.content ?? '').slice(0, 2_000) }
 }
 
 function assistantText(state) {
