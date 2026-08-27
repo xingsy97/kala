@@ -1059,6 +1059,7 @@ export function configureDashboardNamespace(
               scope: 'host',
               message: validation.reason,
             })
+            ack?.({ ok: false, error: validation.reason })
             return
           }
           p = { ...p, cwd: validation.cwd }

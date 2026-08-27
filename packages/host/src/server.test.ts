@@ -3281,7 +3281,7 @@ describe('wire protocol', () => {
     const err = new Promise<{ scope: string; message: string }>((resolve) => {
       dashboard.on('session:error', resolve)
     })
-    dashboard.emit('client:create_session', {
+    const badAck = dashboard.timeout(1000).emitWithAck('client:create_session', {
       sessionId: 'wire-create-session-cwd-bad',
       workspaceId: 'ws-create-cwd',
       workspaceName: 'cwd-box',
@@ -3291,11 +3291,15 @@ describe('wire protocol', () => {
       scope: 'host',
       message: 'cwd outside sandbox roots',
     })
+    await expect(badAck).resolves.toEqual({
+      ok: false,
+      error: 'cwd outside sandbox roots',
+    })
 
     const missingErr = new Promise<{ scope: string; message: string }>((resolve) => {
       dashboard.once('session:error', resolve)
     })
-    dashboard.emit('client:create_session', {
+    const missingAck = dashboard.timeout(1000).emitWithAck('client:create_session', {
       sessionId: 'wire-create-session-cwd-missing',
       workspaceId: 'ws-create-cwd',
       workspaceName: 'cwd-box',
@@ -3304,6 +3308,10 @@ describe('wire protocol', () => {
     await expect(missingErr).resolves.toMatchObject({
       scope: 'host',
       message: expect.stringContaining('cwd is not a readable directory'),
+    })
+    await expect(missingAck).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('cwd is not a readable directory'),
     })
     expect(server.store.get('wire-create-session-cwd-missing')).toBeUndefined()
 
