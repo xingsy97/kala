@@ -190,9 +190,9 @@ try {
       && assistantText(candidate).includes(hostFinalMarker)
     ), 180_000)
     await actor.page.waitForFunction((marker) => document.body.innerText.includes(marker), { timeout: 30_000 }, hostFinalMarker)
-    const toolNames = await collectVirtualizedToolNames(actor.page)
-    if (!toolNames.includes('shell') || !toolNames.includes('todo_graph')) {
-      throw new Error(`production transcript omitted Tool UI: ${JSON.stringify(toolNames)}`)
+    const toolUi = await collectVirtualizedToolUi(actor.page)
+    if (toolUi.indicatorCount < 2) {
+      throw new Error(`production transcript omitted Tool UI: ${JSON.stringify(toolUi)}`)
     }
     const history = await responseEvent(socket, 'client:load_history', 'server:history', { sessionId })
     if ((history.entries?.length ?? 0) !== 0) {
@@ -202,7 +202,7 @@ try {
       status: state.status,
       cursor: state.cursor,
       hostTool: toolEvidence(state, 'todo_graph'),
-      projectedToolNames: toolNames,
+      projectedToolUi: toolUi,
       kernelHistoryEntries: history.entries?.length ?? 0,
     }
   })
@@ -299,23 +299,32 @@ async function sendMessage(page, text) {
   await clickByTestId(page, 'composer-send')
 }
 
-async function collectVirtualizedToolNames(page) {
+async function collectVirtualizedToolUi(page) {
   const names = new Set()
+  const indicators = new Set()
   const metrics = await page.$eval('[data-virtuoso-scroller="true"]', (scroller) => ({
     clientHeight: scroller.clientHeight,
     scrollHeight: scroller.scrollHeight,
   }))
   const step = Math.max(100, Math.floor(metrics.clientHeight / 2))
   for (let top = 0; top <= metrics.scrollHeight; top += step) {
-    await page.$eval('[data-virtuoso-scroller="true"]', (scroller, value) => { scroller.scrollTop = value }, top)
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await page.$eval('[data-virtuoso-scroller="true"]', (scroller, value) => {
+      scroller.scrollTop = value
+      scroller.dispatchEvent(new Event('scroll'))
+    }, top)
+    await new Promise((resolve) => setTimeout(resolve, 250))
     const visible = await page.$$eval('[data-testid="tool-name-chip"]', (chips) => (
       chips.map((chip) => chip.getAttribute('data-tool-name') ?? chip.textContent ?? '')
     ))
     for (const name of visible) names.add(name)
+    const visibleIndicators = await page.$$eval(
+      '[data-testid^="tool-card-dot-"], [data-testid^="tool-call-group-"]',
+      (elements) => elements.map((element) => element.getAttribute('data-testid') ?? ''),
+    )
+    for (const indicator of visibleIndicators) indicators.add(indicator)
   }
   await page.$eval('[data-virtuoso-scroller="true"]', (scroller) => { scroller.scrollTop = scroller.scrollHeight })
-  return [...names]
+  return { names: [...names], indicators: [...indicators], indicatorCount: indicators.size }
 }
 
 function successfulToolResult(state, toolName, expectedText) {
