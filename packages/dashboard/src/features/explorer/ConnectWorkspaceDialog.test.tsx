@@ -93,6 +93,26 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByTestId('connect-workspace-macos')).toBeTruthy()
   })
 
+  it('immediately shows the target run mode and prevents copying the previous command', async () => {
+    render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
+    await screen.findByText(/curl -fsSL/)
+
+    fireEvent.click(screen.getByTestId('connect-workspace-temporary'))
+
+    const terminal = screen.getByTestId('executor-terminal-command')
+    expect(terminal.getAttribute('data-mode')).toBe('temporary')
+    expect(terminal.getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByTestId('executor-command-transition')).toBeTruthy()
+    expect(screen.getByTestId('copy-executor-command').hasAttribute('disabled')).toBe(true)
+    expect(terminal.textContent).not.toContain('A1B2C3D4E5')
+
+    await vi.advanceTimersByTimeAsync(400)
+    await waitFor(() => expect(screen.getByText(/F6E7D8C9B0/)).toBeTruthy())
+    expect(terminal.getAttribute('aria-busy')).toBe('false')
+    expect(screen.queryByTestId('executor-command-transition')).toBeNull()
+    expect(screen.getByTestId('copy-executor-command').hasAttribute('disabled')).toBe(false)
+  })
+
   it('closes when the backdrop is clicked', async () => {
     const onOpenChange = vi.fn()
     render(<ConnectWorkspaceDialog open onOpenChange={onOpenChange} />)

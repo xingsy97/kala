@@ -46,6 +46,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
   const [copyError, setCopyError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [deciding, setDeciding] = useState(false)
+  const [commandTransitioning, setCommandTransitioning] = useState(false)
   const generationRef = useRef(0)
   const createdFormRef = useRef<FormState | null>(null)
   const installationIdRef = useRef<string | null>(null)
@@ -64,6 +65,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
       setPairingCode(null)
       setError(null)
       setCopyError(null)
+      setCommandTransitioning(false)
       createdFormRef.current = null
       return
     }
@@ -115,9 +117,13 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
         setCommand(created.command ?? '')
         updatePairingCode(created, setPairingCode)
         setError(null)
+        setCommandTransitioning(false)
         void fetch(`/api/executor-installs/${encodeURIComponent(previousInstallationId)}`, { method: 'DELETE' }).catch(() => {})
       }).catch((cause: unknown) => {
-        if (!controller.signal.aborted && generationRef.current === generation) setError(errorMessage(cause))
+        if (!controller.signal.aborted && generationRef.current === generation) {
+          setError(errorMessage(cause))
+          setCommandTransitioning(false)
+        }
       })
     }, PATCH_DEBOUNCE_MS)
     return () => {
@@ -176,9 +182,11 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
     })
     setCopied(false)
     setCopyError(null)
+    if (createdFormRef.current) setCommandTransitioning(!sameForm(nextForm(form, patch), createdFormRef.current))
   }
 
   const copy = async (): Promise<void> => {
+    if (commandTransitioning) return
     try {
       await navigator.clipboard.writeText(command)
       setCopyError(null)
@@ -228,7 +236,15 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
                 <SectionLabel index="2" label={t('explorer.connectDialog.runCommand')} />
                 <InstallStatus status={installation?.status ?? 'preparing'} label={t(`explorer.connectDialog.statuses.${installation?.status ?? 'preparing'}`)} />
               </div>
-              <TerminalCommand command={command} copied={copied} onCopy={() => void copy()} />
+              <TerminalCommand
+                key={`${form.platform}:${form.mode}`}
+                command={command}
+                copied={copied}
+                mode={form.mode}
+                modeLabel={t(`explorer.connectDialog.modes.${form.mode}`)}
+                transitioning={commandTransitioning}
+                onCopy={() => void copy()}
+              />
               {pairingCode ? (
                 <div className="flex min-w-0 flex-col gap-3 rounded-2xl bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between" data-testid="connect-workspace-pairing">
                   <span className="flex min-w-0 items-center gap-2 text-sm"><ShieldCheck className="h-4 w-4 flex-none text-amber-600 dark:text-amber-300" /><span className="text-muted-foreground">{t('explorer.connectDialog.installationStatus')}</span><strong className="font-mono tracking-widest text-foreground">{pairingCode}</strong></span>
@@ -260,10 +276,26 @@ function ChoiceGroup<T extends string>({ label, values, selected, labelFor, onCh
   return <fieldset className="min-w-0 space-y-2.5"><legend className="text-xs font-medium text-muted-foreground">{label}</legend><div className="grid min-w-0 grid-cols-2 rounded-xl bg-muted/30 p-1">{values.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`h-10 min-w-0 rounded-lg px-3 text-xs font-medium transition-colors sm:h-9 ${selected === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{labelFor(value)}</button>)}</div></fieldset>
 }
 
-function TerminalCommand({ command, copied, onCopy }: { command: string; copied: boolean; onCopy(): void }): JSX.Element {
+function TerminalCommand({ command, copied, mode, modeLabel, transitioning, onCopy }: { command: string; copied: boolean; mode: ExecutorInstallMode; modeLabel: string; transitioning: boolean; onCopy(): void }): JSX.Element {
   const { t } = useTranslation()
   if (command.includes('\n') || command.includes('\r')) throw new Error('Executor install command must be one physical line')
-  return <section className="min-w-0 max-w-full overflow-hidden rounded-2xl bg-foreground text-background shadow-[0_12px_30px_hsl(var(--foreground)/0.12)]" data-testid="executor-terminal-command"><div className="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-start"><span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none opacity-55" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-5">{command || t('explorer.connectDialog.preparing')}</pre></span><Button type="button" variant="ghost" size="sm" className="h-9 w-full flex-none gap-1.5 rounded-lg bg-background/10 px-3 text-[11px] text-background hover:bg-background/20 hover:text-background sm:w-auto" onClick={onCopy} disabled={!command} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button></div></section>
+  return (
+    <section
+      className="min-w-0 max-w-full overflow-hidden rounded-2xl bg-foreground text-background shadow-[0_12px_30px_hsl(var(--foreground)/0.12)]"
+      data-testid="executor-terminal-command"
+      data-mode={mode}
+      aria-busy={transitioning}
+    >
+      <div className="flex items-center justify-between border-b border-background/10 px-4 py-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.12em] opacity-65">{modeLabel}</span>
+        {transitioning ? <LoaderCircle className="h-3.5 w-3.5 animate-spin opacity-70" data-testid="executor-command-transition" aria-hidden="true" /> : null}
+      </div>
+      <div className={cn('flex min-w-0 flex-col gap-3 p-4 transition-opacity duration-200 sm:flex-row sm:items-start', transitioning && 'animate-pulse opacity-55')}>
+        <span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none opacity-55" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-5">{transitioning ? t('explorer.connectDialog.preparing') : command || t('explorer.connectDialog.preparing')}</pre></span>
+        <Button type="button" variant="ghost" size="sm" className="h-9 w-full flex-none gap-1.5 rounded-lg bg-background/10 px-3 text-[11px] text-background hover:bg-background/20 hover:text-background sm:w-auto" onClick={onCopy} disabled={!command || transitioning} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button>
+      </div>
+    </section>
+  )
 }
 
 function InstallStatus({ status, label }: { status: string; label: string }): JSX.Element {
@@ -298,6 +330,10 @@ function toApiInput(form: FormState): CreateExecutorInstall {
 
 function sameForm(left: FormState, right: FormState): boolean {
   return JSON.stringify(toApiInput(left)) === JSON.stringify(toApiInput(right))
+}
+
+function nextForm(current: FormState, patch: Partial<FormState>): FormState {
+  return { ...current, ...patch }
 }
 
 function updatePairingCode(value: ExecutorInstallEvent | ExecutorInstallStatusSnapshot, set: (code: string | null) => void): void {
