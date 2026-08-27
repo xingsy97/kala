@@ -18,6 +18,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import {
   appendEventEntry,
   appendRuntimeMetadataEntry,
+  readSessionHeader,
   readSessionLog,
   writeHeader,
 } from './log.js'
@@ -42,6 +43,18 @@ describe('readSessionLog', () => {
     dir = mkdtempSync(join(tmpdir(), 'ak-log-'))
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('reads only the header when later log content is malformed', async () => {
+    const path = join(dir, 'header-only.jsonl')
+    await writeHeader({ path, sessionId: 'child', config, initialState, parentSessionId: 'parent' })
+    await appendFile(path, '{"kind":"event","truncated":', 'utf8')
+
+    await expect(readSessionHeader(path)).resolves.toMatchObject({
+      kind: 'header',
+      sessionId: 'child',
+      parentSessionId: 'parent',
+    })
+  })
 
   it('round-trips header + events + snapshots cleanly', async () => {
     const path = join(dir, 'clean.jsonl')

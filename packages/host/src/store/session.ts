@@ -25,6 +25,7 @@ import {
   appendMetadataEntry,
   appendRuntimeMetadataEntry,
   appendSnapshotEntry,
+  readSessionHeader,
   readSessionLog,
   writeHeader,
 } from './log.js'
@@ -614,9 +615,9 @@ export class SessionStore {
       const path = join(this.sessionsDir, file)
       if (loadedRecordForPath(this.records, path)) continue
       try {
-        const parsed = await readSessionLog(path)
-        if (parsed.header.parentSessionId !== parentSessionId) continue
-        const record = await this.loadFromFile(parsed.header.sessionId, path)
+        const header = await readSessionHeader(path)
+        if (header.parentSessionId !== parentSessionId) continue
+        const record = await this.loadFromFile(header.sessionId, path)
         loaded.set(record.sessionId, record)
       } catch {
         // Skip malformed or partially-written logs; session listing should be

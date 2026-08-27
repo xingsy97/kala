@@ -94,6 +94,23 @@ export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntr
   return entry
 }
 
+export async function readSessionHeader(path: string): Promise<HeaderEntry> {
+  const rl = createInterface({
+    input: createReadStream(path, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
+  })
+  try {
+    for await (const line of rl) {
+      const entry = JSON.parse(line) as LogEntry
+      if (entry.kind !== 'header') throw new Error(`First log entry is not a header: ${path}`)
+      return entry
+    }
+  } finally {
+    rl.close()
+  }
+  throw new Error(`Session log is empty: ${path}`)
+}
+
 async function maybeWriteAgentModuleArtifacts(logPath: string, header: HeaderEntry): Promise<void> {
   if (!header.config.agentModule) return
   const root = artifactRootForLog(logPath)
