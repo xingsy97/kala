@@ -3,12 +3,23 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from './session.js'
-import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, visibleMessages, visibleTranscript } from './transcript.js'
+import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, visibleMessages, visibleTranscript } from './transcript.js'
 
 const system: Message = {
   role: 'system',
   content: [{ type: 'text', text: 'sys' }],
 }
+
+describe('transcriptTimelineForRuntime', () => {
+  it('keeps external Runtime state authoritative over Kernel event timelines', () => {
+    const timeline: TimelineEntry[] = [
+      { seq: 1, ts: '2026-08-27T00:00:00Z', event: { kind: 'user_message', text: 'request' }, effects: [] },
+    ]
+
+    expect(transcriptTimelineForRuntime('kernel', timeline)).toBe(timeline)
+    expect(transcriptTimelineForRuntime('copilot', timeline)).toEqual([])
+  })
+})
 
 describe('Turn timing transcript projection', () => {
   it('attaches a durable Turn summary only to its terminal assistant message', () => {

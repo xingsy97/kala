@@ -1,5 +1,5 @@
 import type { AgentStatus, Message, MessageContent } from '@agent-kernel/kernel'
-import type { QueuedMessagePreview } from '@agent-kernel/shared'
+import type { AgentRuntimeId, QueuedMessagePreview } from '@agent-kernel/shared'
 
 import type { TimelineEntry } from './session.js'
 
@@ -40,6 +40,15 @@ export type PendingUserTranscriptMessage = {
   content?: readonly MessageContent[]
   createdAt: string
   afterSeq?: number
+}
+
+const EMPTY_TIMELINE: readonly TimelineEntry[] = []
+
+export function transcriptTimelineForRuntime(
+  agentRuntime: AgentRuntimeId,
+  timeline: readonly TimelineEntry[],
+): readonly TimelineEntry[] {
+  return agentRuntime === 'kernel' ? timeline : EMPTY_TIMELINE
 }
 
 export function reconcilePendingUserMessages(

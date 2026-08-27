@@ -60,6 +60,7 @@ export type DashboardSocket = Socket<
 
 export type SessionView = {
   status: ConnectionStatus
+  agentRuntime: import('@agent-kernel/shared').AgentRuntimeId
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
@@ -621,7 +622,7 @@ export function useSession({
   }, [host, sessionId, token, cache, sharedSocket])
 
   const {
-    status, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
+    status, agentRuntime, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
     queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, hydratedSessionId, historyLoadedSessionId,
   } = projection
 
@@ -662,6 +663,7 @@ export function useSession({
   return useMemo(
     () => ({
       status,
+      agentRuntime,
       state,
       config,
       contextSnapshot,
@@ -682,6 +684,7 @@ export function useSession({
     }),
     [
       status,
+      agentRuntime,
       state,
       config,
       contextSnapshot,

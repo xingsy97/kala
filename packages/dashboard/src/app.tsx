@@ -124,7 +124,7 @@ import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js
 import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { emitRpc } from './socket-rpc.js'
 import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage } from './admission-client.js'
-import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, type TranscriptItem } from './transcript.js'
+import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, type TranscriptItem } from './transcript.js'
 import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent } from './app-logic/compaction.js'
 import { mergeOptimisticQueuedMessages, nextSessionSelection, queuedMessageKey, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity, isRunningSessionActivity } from './app-logic/session-activity.js'
@@ -1161,6 +1161,7 @@ export function App(): JSX.Element {
   // which was saturating the main thread on long sessions and dropping button
   // clicks / freezing the hover cursor while the agent ran.
   const stateMessages = session.state?.messages ?? EMPTY_MESSAGES
+  const transcriptTimeline = transcriptTimelineForRuntime(session.agentRuntime, session.timeline)
   const includeStatePrefix = session.parentSessionId !== null
   const transcriptProjectionRef = useRef<{
     sessionId: string | null
@@ -1175,12 +1176,12 @@ export function App(): JSX.Element {
       && previous.sessionId === activeSessionId
       && previous.stateMessages === stateMessages
       && previous.includeStatePrefix === includeStatePrefix
-      ? appendTranscriptBaseItems(previous.items, previous.timeline, session.timeline)
+      ? appendTranscriptBaseItems(previous.items, previous.timeline, transcriptTimeline)
       : null
-    const items = incremental ?? transcriptBaseItems(stateMessages, session.timeline, { includeStatePrefix })
-    transcriptProjectionRef.current = { sessionId: activeSessionId, stateMessages, includeStatePrefix, timeline: session.timeline, items }
+    const items = incremental ?? transcriptBaseItems(stateMessages, transcriptTimeline, { includeStatePrefix })
+    transcriptProjectionRef.current = { sessionId: activeSessionId, stateMessages, includeStatePrefix, timeline: transcriptTimeline, items }
     return items
-  }, [activeSessionId, stateMessages, session.timeline, includeStatePrefix])
+  }, [activeSessionId, stateMessages, transcriptTimeline, includeStatePrefix])
   const visiblePendingUserMessages = useMemo(
     () => reconcilePendingUserMessages(pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText),
     [pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText],
@@ -1190,12 +1191,12 @@ export function App(): JSX.Element {
       appendLiveTranscriptItems(
         transcriptBase,
         stateMessages,
-        session.timeline,
+        transcriptTimeline,
         session.streamingText,
         visiblePendingUserMessages,
         visibleQueuedMessages,
       ),
-    [transcriptBase, stateMessages, session.timeline, session.streamingText, visiblePendingUserMessages, visibleQueuedMessages],
+    [transcriptBase, stateMessages, transcriptTimeline, session.streamingText, visiblePendingUserMessages, visibleQueuedMessages],
   )
   // The header only needs the *count* of visible messages; derive it from the
   // already-built transcript instead of building a second full transcript.
