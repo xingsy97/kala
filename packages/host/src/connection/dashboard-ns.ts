@@ -1282,6 +1282,15 @@ async function applyPreferencesUpdate(
 ): Promise<void> {
   const normalizedPatch = normalizePreferencesPatch(deps, sessionId, patch)
   if (!normalizedPatch) return
+  const record = deps.store.get(sessionId)
+  if (record?.agentRuntime === 'copilot' && normalizedPatch.selectedModel) {
+    try {
+      await deps.agentRuntimes.require('copilot').setModel?.(record, normalizedPatch.selectedModel)
+    } catch (err) {
+      deps.broadcastError(sessionId, 'host', err instanceof Error ? err.message : String(err))
+      return
+    }
+  }
   let effective: import('@agent-kernel/shared').SessionPreferences
   try {
     effective = await deps.store.updatePreferences(sessionId, normalizedPatch)
@@ -1298,13 +1307,13 @@ async function applyPreferencesUpdate(
     sessionId,
     preferences: effective,
   })
-  const record = deps.store.get(sessionId)
-  if (record) {
+  const updatedRecord = deps.store.get(sessionId)
+  if (updatedRecord) {
     deps.dashboardNs.to(sessionRoom(sessionId)).emit('state:changed', {
       sessionId,
-      cursor: record.state.cursor,
-      state: record.state,
-      contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record), effectiveModelForRecord(deps, record)),
+      cursor: updatedRecord.state.cursor,
+      state: updatedRecord.state,
+      contextSnapshot: contextSnapshot(updatedRecord, updatedRecord.state.messages, contextWindowForSession(deps, updatedRecord), effectiveModelForRecord(deps, updatedRecord)),
     })
   }
 }

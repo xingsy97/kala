@@ -33,6 +33,7 @@ export interface AgentRuntime {
   approve(record: SessionRecord, callId: string): Promise<void>
   reject(record: SessionRecord, callId: string, reason?: string): Promise<void>
   setApprovalMode(record: SessionRecord, mode: ApprovalMode): Promise<void>
+  setModel?(record: SessionRecord, model: string): Promise<void>
   delete?(record: SessionRecord): Promise<void>
   close(): Promise<void>
 }

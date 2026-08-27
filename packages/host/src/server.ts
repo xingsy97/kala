@@ -428,6 +428,7 @@ export async function startHostServer(
         await runtime.send(record, {
           text,
           ...(content ? { content } : {}),
+          ...(effectiveModelForSession(sessionId) ? { model: effectiveModelForSession(sessionId) } : {}),
           operationId,
         })
         return {
@@ -716,7 +717,9 @@ export async function startHostServer(
               await runtime.send(record, {
                 text: next.text,
                 ...(next.content ? { content: next.content } : {}),
-                ...(next.model ? { model: next.model } : {}),
+                ...(next.model ?? effectiveModelForSession(sessionId)
+                  ? { model: next.model ?? effectiveModelForSession(sessionId) }
+                  : {}),
                 operationId: next.operationId,
                 queuedAt: next.createdAt,
               })

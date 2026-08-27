@@ -168,6 +168,11 @@ export class CopilotAgentRuntime implements AgentRuntime {
     }))
   }
 
+  async setModel(record: SessionRecord, model: string): Promise<void> {
+    const session = await this.ensureSession(record)
+    await session.setModel(model)
+  }
+
   async delete(record: SessionRecord): Promise<void> {
     const session = this.sessions.get(record.sessionId)
     this.cancelledSessions.add(record.sessionId)
