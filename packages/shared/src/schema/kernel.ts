@@ -123,6 +123,11 @@ export const MessageContentSchema = z.discriminatedUnion('type', [
 export const MessageSchema: z.ZodType<Message> = z.object({
   role: RoleSchema,
   content: z.array(MessageContentSchema),
+  metadata: z.object({
+    kind: z.literal('model_changed'),
+    from: z.string().optional(),
+    to: z.string(),
+  }).optional(),
 })
 
 // ============================================================================
