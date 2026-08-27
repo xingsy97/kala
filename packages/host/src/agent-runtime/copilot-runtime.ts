@@ -227,6 +227,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
       description: schema.description,
       parameters: schema.inputSchema,
       skipPermission: true,
+      overridesBuiltInTool: true,
       handler: async (args, invocation) => {
         const input = asRecord(args)
         const pending: PendingToolCall = {

@@ -11,6 +11,7 @@ import { CopilotAgentRuntime } from './copilot-runtime.js'
 
 type CapturedTool = {
   name: string
+  overridesBuiltInTool?: boolean
   handler(
     args: unknown,
     invocation: { toolCallId: string },
@@ -105,6 +106,7 @@ describe('Copilot runtime custom tools', () => {
     await runtime.send(record, { text: 'Use todo_graph.' })
     const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'todo_graph')
     expect(tool).toBeDefined()
+    expect(tool?.overridesBuiltInTool).toBe(true)
     expect(sdk.configs.at(-1)?.workingDirectory).toBe(dir)
 
     const result = await tool?.handler(

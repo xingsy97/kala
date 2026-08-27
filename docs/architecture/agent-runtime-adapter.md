@@ -186,6 +186,10 @@ RunLab registers selected existing tools as Copilot custom tools. Each handler:
 5. returns a bounded, structured result to Copilot;
 6. records normalized Tool lifecycle and timing evidence.
 
+Every registered RunLab custom Tool explicitly overrides an SDK built-in with
+the same name. Built-in and MCP tools remain excluded, so the RunLab
+authorization and dispatch path is the only executable implementation.
+
 Kernel and Copilot must call the same runtime Tool dispatcher. The dispatcher
 applies memory policy and pre/post hooks before routing by the configured
 `executionKind`: Host tools stay in the Host and Executor tools cross the
