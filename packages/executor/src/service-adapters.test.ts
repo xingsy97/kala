@@ -93,6 +93,17 @@ describe('Linux service adapter', () => {
     const plan = createLinuxServicePlan('install', 'system', '/home/example', managed)
     expect(plan.commands.some((command) => command.args.includes('runlab-executor-update.timer'))).toBe(true)
   })
+
+  it('restarts an existing managed service so a repeated install activates the new generation', () => {
+    const plan = createLinuxServicePlan('install', 'system', '/home/example', session)
+    const serviceCommands = plan.commands
+      .filter((command) => command.file === 'systemctl')
+      .map((command) => command.args.join(' '))
+    expect(serviceCommands).toContain('enable runlab-executor.service')
+    expect(serviceCommands).toContain('restart runlab-executor.service')
+    expect(serviceCommands).not.toContain('enable --now runlab-executor.service')
+    expect(serviceCommands.indexOf('enable runlab-executor.service')).toBeLessThan(serviceCommands.indexOf('restart runlab-executor.service'))
+  })
 })
 
 function spawnCommand(command: { file: string; args: readonly string[]; stdin?: string }): Promise<{ code: number; stdout: string; stderr: string }> {

@@ -39,6 +39,7 @@ import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
 import { applyManagedUpdate, rollbackManagedUpdate } from '../src/update-runtime.js'
+import { installManagedGeneration } from '../src/managed-install.js'
 import { startUpdateControlServer } from '../src/update-control.js'
 import { executorReleaseVersion } from '../src/build-info.js'
 import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
@@ -276,13 +277,7 @@ async function runInternalInstaller(): Promise<void> {
     return await main(['--host', env.HOST_URL, '--sandbox-root', workspaceRoot, '--config', writeTemporaryConfig(installerSession)])
   }
   const release = executorReleaseVersion()
-  const generation = join(managedRoot, 'generations', release)
-  mkdirSync(generation, { recursive: true, mode: 0o700 })
-  const generationExecutable = join(generation, 'runlab-executor')
-  copyFileSync(process.execPath, generationExecutable)
-  chmodSync(generationExecutable, 0o755)
-  rmSync(join(managedRoot, 'current'), { recursive: true, force: true })
-  symlinkSync(generation, join(managedRoot, 'current'), process.platform === 'win32' ? 'junction' : 'dir')
+  installManagedGeneration(process.execPath, managedRoot, release)
   const keyResponse = await fetch(`${env.HOST_URL.replace(/\/$/u, '')}/install/assets/executor-update-public-key.pem`)
   if (!keyResponse.ok) throw new Error(`failed to download Executor update verification key: ${keyResponse.status}`)
   writeFileSync(join(managedRoot, 'update-public-key.pem'), await keyResponse.text(), { mode: 0o600 })

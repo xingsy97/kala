@@ -32,6 +32,8 @@ const hostLogs = []
 let actor
 let installationId
 let redactedCommand
+let initialServicePid
+let initialWorkspaceId
 let result
 let thrown
 
@@ -112,13 +114,21 @@ try {
       'systemctl is-active runlab-executor.service',
       'systemctl is-enabled runlab-executor.service',
       'stat -c "%a %n" /etc/runlab-executor/executor.json /etc/runlab-executor/credential /etc/systemd/system/runlab-executor.service',
+      'systemctl show runlab-executor.service --property=MainPID --value',
+      'cat /root/.agent-kernel/workspace-id',
     ].join('; ')])
     const snapshot = await fetch(`${localProbe}/api/executor-installs/${encodeURIComponent(installationId)}`).then((response) => response.json())
     await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]', { timeout: 30_000 })
     await actor.page.waitForFunction(() => /connected|已连接/iu.test(document.querySelector('[data-testid="installation-status"]')?.textContent ?? ''), { timeout: 30_000 })
     const visibleStatus = await actor.page.$eval('[data-testid="installation-status"]', (element) => element.textContent?.trim() ?? '')
     await harness.screenshot(actor, 'installed-workspace')
-    return { service: service.stdout.trim(), snapshot, visibleStatus }
+    const lines = service.stdout.trim().split('\n')
+    initialServicePid = Number(lines.at(-2))
+    initialWorkspaceId = lines.at(-1)?.trim()
+    if (!Number.isSafeInteger(initialServicePid) || initialServicePid <= 0 || !initialWorkspaceId) {
+      throw new Error(`failed to capture initial service identity: ${service.stdout}`)
+    }
+    return { service: service.stdout.trim(), snapshot, visibleStatus, initialServicePid, initialWorkspaceId }
   }, ({ service, snapshot }) => {
     if (snapshot.status !== 'completed') throw new Error(`installation is ${snapshot.status}`)
     if (!/^active\nenabled\n600 /u.test(service)) throw new Error(`unexpected service proof: ${service}`)
@@ -153,6 +163,39 @@ try {
     }, { timeoutMs: 30_000, name: 'restarted service' })
     await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]', { timeout: 30_000 })
     return { active: true, visibleOnline: true }
+  })
+
+  await harness.step('repeat Add Workspace with a fresh code and activate the installed generation', async () => {
+    const created = await actor.page.evaluate(async () => {
+      const response = await fetch('/api/executor-installs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '__RUNLAB_CURRENT_DIRECTORY__' }),
+      })
+      if (!response.ok) throw new Error(await response.text())
+      return await response.json()
+    })
+    const command = typeof created.command === 'string' ? created.command : ''
+    if (!command.includes('RUNLAB_SETUP_CODE=') || !created.id) throw new Error(`fresh install command is invalid: ${JSON.stringify(created)}`)
+    const execution = await runCommand('lxc', ['exec', container, '--cwd', workspace, '--', 'sh', '-lc', command], { cwd: root, timeoutMs: 180_000 })
+    await waitFor(async () => {
+      const snapshot = await fetch(`${localProbe}/api/executor-installs/${encodeURIComponent(created.id)}`).then((response) => response.json())
+      return snapshot.status === 'completed' && snapshot
+    }, { timeoutMs: 60_000, name: 'repeated installation completion' })
+    const proof = await runCommand('lxc', ['exec', container, '--', 'sh', '-lc', [
+      'systemctl is-active runlab-executor.service',
+      'systemctl show runlab-executor.service --property=MainPID --value',
+      'cat /root/.agent-kernel/workspace-id',
+    ].join('; ')])
+    const [active, pidText, workspaceId] = proof.stdout.trim().split('\n')
+    const pid = Number(pidText)
+    if (active !== 'active' || !Number.isSafeInteger(pid) || pid <= 0 || pid === initialServicePid) {
+      throw new Error(`repeated install did not restart the managed service: ${proof.stdout}`)
+    }
+    if (workspaceId !== initialWorkspaceId) {
+      throw new Error(`repeated install changed Workspace identity: ${initialWorkspaceId} -> ${workspaceId}`)
+    }
+    return { installationId: created.id, exitCode: execution.code, previousPid: initialServicePid, activePid: pid, workspaceId }
   })
 
   await harness.step('reject setup-code replay', async () => {

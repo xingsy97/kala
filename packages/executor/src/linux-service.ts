@@ -182,7 +182,8 @@ export function createLinuxServicePlan(
       privateWrite(paths.unit, rendered.unit),
       ...(rendered.updateUnit && rendered.updateTimer ? [privateWrite(paths.updateUnit, rendered.updateUnit), privateWrite(paths.updateTimer, rendered.updateTimer)] : []),
       systemctl(mode, 'daemon-reload'),
-      systemctl(mode, 'enable', '--now', SERVICE_NAME),
+      systemctl(mode, 'enable', SERVICE_NAME),
+      systemctl(mode, 'restart', SERVICE_NAME),
       ...(rendered.updateTimer ? [systemctl(mode, 'enable', '--now', 'runlab-executor-update.timer')] : []),
     ],
     rollback: [
