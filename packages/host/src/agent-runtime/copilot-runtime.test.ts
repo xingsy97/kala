@@ -20,6 +20,7 @@ type CapturedTool = {
 const sdk = vi.hoisted(() => ({
   configs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string }>,
   listeners: [] as Array<(event: unknown) => void>,
+  responses: [] as Array<unknown>,
 }))
 
 vi.mock('@github/copilot-sdk', () => ({
@@ -36,6 +37,10 @@ vi.mock('@github/copilot-sdk', () => ({
       sdk.configs.push(config)
       return {
         async send() {},
+        async sendAndWait() {
+          if (sdk.responses.length > 0) return sdk.responses.shift()
+          return await new Promise(() => {})
+        },
         on(listener: (event: unknown) => void) { sdk.listeners.push(listener) },
         async abort() {},
         async disconnect() {},
@@ -52,6 +57,7 @@ describe('Copilot runtime custom tools', () => {
   beforeEach(() => {
     sdk.configs.length = 0
     sdk.listeners.length = 0
+    sdk.responses.length = 0
     dir = mkdtempSync(join(tmpdir(), 'copilot-runtime-tools-'))
     store = new SessionStore(dir)
   })
@@ -194,7 +200,7 @@ describe('Copilot runtime custom tools', () => {
     })
   })
 
-  it('persists streamed assistant text when the SDK reaches idle without a final message event', async () => {
+  it('persists the final assistant response before marking the Session done', async () => {
     const runtime = new CopilotAgentRuntime({
       store,
       tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
@@ -211,11 +217,13 @@ describe('Copilot runtime custom tools', () => {
       config: createConfig({ tools: [] }),
     })
     await runtime.start()
+    sdk.responses.push({
+      type: 'assistant.message',
+      data: { content: 'OK', messageId: 'message-1' },
+      id: 'event-1',
+      timestamp: new Date().toISOString(),
+    })
     await runtime.send(record, { text: 'Reply with OK.' })
-
-    sdk.listeners[0]?.({ type: 'assistant.message_delta', data: { deltaContent: 'O' } })
-    sdk.listeners[0]?.({ type: 'assistant.message_delta', data: { deltaContent: 'K' } })
-    sdk.listeners[0]?.({ type: 'session.idle', data: {} })
     await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
 
     expect(store.get(record.sessionId)?.state.messages.at(-1)).toEqual({
