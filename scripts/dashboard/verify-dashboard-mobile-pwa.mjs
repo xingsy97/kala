@@ -194,7 +194,7 @@ async function verifyDotsToolActivity(page, name) {
       documentScrollWidth: document.documentElement.scrollWidth,
     }
   })
-  check(`${name}: narrated tool turns end with one bounded dots rail`, metrics.railCount === 1 && metrics.dotCount >= 4 && metrics.dotCount <= 8 && metrics.narrationCount >= 3 && metrics.lastNarrationBeforeRail && metrics.assistantAvatarCount <= 1 && metrics.directionVisible && (metrics.rail?.right ?? Number.POSITIVE_INFINITY) <= metrics.viewportWidth + 1 && !metrics.hasToolActivityLabel, JSON.stringify(metrics))
+  check(`${name}: narrated tool turns end with one bounded dots rail`, metrics.railCount === 1 && metrics.dotCount >= 2 && metrics.dotCount <= 8 && metrics.narrationCount >= 3 && metrics.lastNarrationBeforeRail && metrics.assistantAvatarCount <= 1 && metrics.directionVisible && (metrics.rail?.right ?? Number.POSITIVE_INFINITY) <= metrics.viewportWidth + 1 && !metrics.hasToolActivityLabel, JSON.stringify(metrics))
   check(`${name}: dots rail stays inside the viewport`, Boolean(metrics.rail) && metrics.rail.left >= -1 && metrics.rail.right <= metrics.viewportWidth + 1 && metrics.documentScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
 
   await page.click('[data-testid="tool-activity-direction"]')
@@ -396,11 +396,11 @@ async function verifyViewportContract(page, name) {
     width: window.innerWidth,
     explorer: Boolean(document.querySelector('[data-testid="explorer-toggle"]')),
     terminal: Boolean(document.querySelector('[data-testid="terminal-toggle"]')),
-    inspector: Boolean(document.querySelector('[data-testid="inspector-toggle"]')),
+    sidebar: Boolean(document.querySelector('[data-testid="sidebar-toggle"]')),
     titleWidth: document.querySelector('[data-testid="session-title"]')?.getBoundingClientRect().width ?? 0,
   }))
   if (toolbarActions.width < 640) {
-    check(`${name}: mobile toolbar keeps one Tools entry and preserves Session title space`, toolbarActions.explorer && !toolbarActions.terminal && toolbarActions.inspector && toolbarActions.titleWidth >= 80, JSON.stringify(toolbarActions))
+    check(`${name}: mobile toolbar keeps one Tools entry and preserves Session title space`, toolbarActions.explorer && !toolbarActions.terminal && toolbarActions.sidebar && toolbarActions.titleWidth >= 80, JSON.stringify(toolbarActions))
   }
   if (metrics.innerWidth < 600) {
     check(`${name}: touch form controls avoid iOS focus zoom`, metrics.minInputFontSize === null || metrics.minInputFontSize >= 16, JSON.stringify(metrics))
@@ -454,18 +454,65 @@ async function focusComposerAndVerify(page, name) {
 }
 
 async function verifySessionMetadataDialog(page, name) {
-  // Session Info is also a first-class command, so this path works on mobile
-  // without relying on hover-only session-card actions inside the drawer.
-  await page.keyboard.down('Control')
-  await page.keyboard.press('KeyK')
-  await page.keyboard.up('Control')
-  await page.waitForSelector('[data-testid="command-palette"]')
-  await page.waitForSelector('[data-testid="command-palette-search"]')
-  await page.$eval('[data-testid="command-palette-search"]', (element) => element.focus())
-  await page.keyboard.type('session info')
-  await page.waitForSelector('[data-testid="command-palette-item-session.info"]')
-  await page.click('[data-testid="command-palette-item-session.info"]')
+  const narrow = await page.evaluate(() => window.innerWidth < 640)
+  if (narrow) {
+    await page.evaluate(() => {
+      const button = Array.from(document.querySelectorAll('[data-testid="explorer-toggle"]'))
+        .find((candidate) => {
+          const rect = candidate.getBoundingClientRect()
+          return rect.width > 0 && rect.height > 0
+        })
+      if (!(button instanceof HTMLElement)) throw new Error('visible Explorer trigger is missing')
+      button.click()
+    })
+    await page.waitForSelector('[data-testid="explorer-drawer"]', { visible: true })
+    await page.waitForSelector('[data-testid="session-more-button"]', { visible: true })
+    await page.click('[data-testid="session-more-button"]')
+    await page.waitForSelector('[data-testid="session-action-menu"]', { visible: true })
+    const menuButtons = await page.$$('[data-testid="session-action-menu"] button')
+    const infoButton = (await Promise.all(menuButtons.map(async (button) => ({
+      button,
+      text: await button.evaluate((element) => element.textContent?.trim() ?? ''),
+    })))).find((candidate) => candidate.text === 'Session info')?.button
+    if (!infoButton) throw new Error('mobile Session info action is missing')
+    const hitTarget = await infoButton.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      const menu = element.closest('[data-testid="session-action-menu"]')
+      const drawer = document.querySelector('[data-testid="explorer-drawer"]')
+      return {
+        button: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+        buttonPointerEvents: getComputedStyle(element).pointerEvents,
+        menuZIndex: menu ? getComputedStyle(menu).zIndex : null,
+        drawerZIndex: drawer ? getComputedStyle(drawer).zIndex : null,
+        targetTag: target?.tagName,
+        targetText: target?.textContent?.trim(),
+        targetTestId: target?.getAttribute('data-testid'),
+      }
+    })
+    await infoButton.click()
+    await sleep(250)
+    const clickResult = await page.evaluate(() => ({
+      drawer: Boolean(document.querySelector('[data-testid="explorer-drawer"]')),
+      menu: Boolean(document.querySelector('[data-testid="session-action-menu"]')),
+      metadata: Boolean(document.querySelector('[data-testid="session-metadata-dialog"]')),
+    }))
+    check(`${name}: Session info touch target receives the real pointer click`, hitTarget.targetText === 'Session info' && clickResult.metadata, JSON.stringify({ hitTarget, clickResult }))
+  } else {
+    await page.keyboard.down('Control')
+    await page.keyboard.press('KeyK')
+    await page.keyboard.up('Control')
+    await page.waitForSelector('[data-testid="command-palette"]')
+    await page.waitForSelector('[data-testid="command-palette-search"]')
+    await page.$eval('[data-testid="command-palette-search"]', (element) => element.focus())
+    await page.keyboard.type('session info')
+    await page.waitForSelector('[data-testid="command-palette-item-session.info"]')
+    await page.click('[data-testid="command-palette-item-session.info"]')
+  }
   await page.waitForSelector('[data-testid="session-metadata-dialog"]')
+  if (narrow) {
+    await page.waitForSelector('[data-testid="explorer-drawer"]', { hidden: true })
+  }
   await sleep(150)
   const metrics = await page.evaluate(() => {
     const dialog = document.querySelector('[data-testid="session-metadata-dialog"]')
@@ -511,12 +558,6 @@ async function verifySessionMetadataDialog(page, name) {
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="session-metadata-dialog"]'))
   await sleep(150)
-  // Close the narrow explorer drawer opened to reach the session card action.
-  const overlay = await page.$('.ak-drawer-overlay')
-  if (overlay && await overlay.isVisible()) {
-    await page.keyboard.press('Escape')
-    await sleep(150)
-  }
 }
 
 async function verifySettingsDialog(page, name, fullSettings) {

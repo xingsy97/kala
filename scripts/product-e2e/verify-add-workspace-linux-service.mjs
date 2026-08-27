@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import {
   ProductE2EHarness,
   clickByTestId,
+  hoverAncestorAndClickFirst,
   runCommand,
   sha256File,
   startProcess,
@@ -137,7 +138,7 @@ try {
 
   await harness.step('browse installed Workspace directory and create a Session', async () => {
     const previous = new URL(actor.page.url()).searchParams.get('sessionId')
-    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].find((item) => !item.hasAttribute('disabled'))?.click())
+    await hoverAncestorAndClickFirst(actor.page, '[data-testid^="workspace-new-session-"]', '[data-testid="workspace-row"]', { description: 'New Session for installed Workspace' })
     await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
     await actor.page.waitForSelector('[data-testid="finder-column"]', { timeout: 15_000 })
     const dialogText = await actor.page.$eval('[data-testid="new-session-dialog"]', (element) => element.textContent ?? '')

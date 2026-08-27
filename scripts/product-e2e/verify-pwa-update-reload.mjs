@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ProductE2EHarness, clickByTestId, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
+import { ProductE2EHarness, clickByTestId, hoverAncestorAndClickFirst, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const dist = join(root, 'packages', 'dashboard', 'dist')
@@ -78,7 +78,7 @@ try {
     if (!await actor.page.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
       await actor.page.reload({ waitUntil: 'networkidle2' })
     }
-    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].find((item) => !item.hasAttribute('disabled'))?.click())
+    await hoverAncestorAndClickFirst(actor.page, '[data-testid^="workspace-new-session-"]', '[data-testid="workspace-row"]', { description: 'New Session for online Workspace' })
     await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
     await clickByTestId(actor.page, 'new-session-create')
     await actor.page.waitForFunction(() => new URL(location.href).searchParams.has('sessionId'))
@@ -94,13 +94,11 @@ try {
       await registration?.update()
     })
     await actor.page.waitForSelector('[data-testid="pwa-update-global-banner"]', { timeout: 30_000 })
-    return { waiting: await actor.page.evaluate(async () => Boolean((await navigator.serviceWorker.getRegistration())?.waiting)), banner: true }
+    return { banner: true }
   })
 
-  await harness.step('click Reload and bound controllerchange plus navigation', async () => {
-    await actor.page.evaluate(() => { sessionStorage.setItem('pwa-e2e-reload-start', String(performance.now())) })
+  await harness.step('bound automatic update navigation and preserve the Session', async () => {
     const started = Date.now()
-    await clickByTestId(actor.page, 'pwa-update-reload')
     await actor.page.waitForFunction((expectedSession) => {
       return document.querySelector('meta[name="runlab-e2e-build"]')?.content === 'v2'
         && new URL(location.href).searchParams.get('sessionId') === expectedSession
@@ -108,12 +106,16 @@ try {
     }, { timeout: 15_000 }, sessionId)
     const reloadMs = Date.now() - started
     if (reloadMs > 10_000) throw new Error(`PWA reload took ${reloadMs}ms`)
+    const expectedNavigationAborts = actor.requestFailures.filter((failure) =>
+      failure.error === 'net::ERR_ABORTED' && failure.url.includes(`sessionId=${sessionId}`))
+    actor.requestFailures = actor.requestFailures.filter((failure) => !expectedNavigationAborts.includes(failure))
     await harness.screenshot(actor, 'v2-reloaded-session')
-    return { reloadMs, version: 'v2', sessionId, controlled: await actor.page.evaluate(() => Boolean(navigator.serviceWorker.controller)) }
+    return { reloadMs, version: 'v2', sessionId, expectedNavigationAborts: expectedNavigationAborts.length, controlled: await actor.page.evaluate(() => Boolean(navigator.serviceWorker.controller)) }
   })
 
   await harness.step('serve cached shell while browser is offline and recover online', async () => {
     const expectedErrorStart = actor.consoleErrors.length
+    const expectedFailureStart = actor.requestFailures.length
     await actor.page.setOfflineMode(true)
     await actor.page.evaluate(() => window.dispatchEvent(new Event('offline')))
     await actor.page.waitForSelector('[data-testid="offline-banner"]', { timeout: 15_000 })
@@ -125,8 +127,11 @@ try {
     await actor.page.waitForFunction((expected) => new URL(location.href).searchParams.get('sessionId') === expected, {}, sessionId)
     const offlineErrors = actor.consoleErrors.slice(expectedErrorStart)
     if (offlineErrors.some((message) => !message.includes('ERR_INTERNET_DISCONNECTED'))) throw new Error(`unexpected offline console error: ${offlineErrors.join(' | ')}`)
+    const offlineFailures = actor.requestFailures.slice(expectedFailureStart)
+    if (offlineFailures.some((failure) => failure.error !== 'net::ERR_INTERNET_DISCONNECTED')) throw new Error(`unexpected offline request failure: ${JSON.stringify(offlineFailures)}`)
     actor.consoleErrors.splice(expectedErrorStart)
-    return { offlineShell: true, offlineBanner: true, recovered: true, sessionId, expectedOfflineErrors: offlineErrors.length }
+    actor.requestFailures.splice(expectedFailureStart)
+    return { offlineShell: true, offlineBanner: true, recovered: true, sessionId, expectedOfflineErrors: offlineErrors.length, expectedOfflineFailures: offlineFailures.length }
   })
 } catch (error) { thrown = error } finally {
   if (actor) await actor.page.setOfflineMode(false).catch(() => {})

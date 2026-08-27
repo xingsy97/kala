@@ -2431,10 +2431,10 @@ export function App(): JSX.Element {
           unstyled: false,
           classNames: {
             toast:
-              'group toast border border-border/70 bg-popover text-popover-foreground shadow-md rounded-md text-xs pl-3 pr-3 py-2 border-l-2',
+              'group toast pointer-events-none border border-border/70 bg-popover text-popover-foreground shadow-md rounded-md text-xs pl-3 pr-3 py-2 border-l-2',
             title: 'text-xs font-medium',
             description: 'text-[11px] text-muted-foreground mt-0.5',
-            actionButton: 'text-[11px] px-2 py-0.5 rounded bg-accent text-accent-foreground hover:bg-accent/80',
+            actionButton: 'pointer-events-auto text-[11px] px-2 py-0.5 rounded bg-accent text-accent-foreground hover:bg-accent/80',
             success: 'border-l-emerald-500/70',
             info: 'border-l-sky-500/70',
             warning: 'border-l-amber-500/70',

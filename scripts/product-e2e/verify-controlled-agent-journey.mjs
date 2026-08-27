@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ProductE2EHarness, clickByTestId, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
+import { ProductE2EHarness, clickByTestId, clickElement, clickFirstVisible, hoverAncestorAndClickFirst, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
@@ -62,11 +62,13 @@ const provider = createServer(async (req, res) => {
   if (latestRequestText.includes('spawn failing subagent')) {
     sendToolResponse(res, 'controlled-agent-fail', 'agent', { prompt: 'Child must fail from provider.', max_turns: 1, _intent: 'Spawn a child whose provider fails to prove failure propagation.' }, 'msg_agent_fail')
   } else if (latestRequestText.includes('run controlled write shell test')) {
+    sendToolResponse(res, 'matrix-search-1', 'tool_search', { query: 'write_file', limit: 4, _intent: 'Discover the file-writing tool before creating the matrix fixture.' }, 'msg_matrix_search')
+  } else if (latestRequestText.includes('matrix-search-1')) {
     sendToolResponse(res, 'matrix-write-1', 'write_file', { path: 'matrix-e2e.txt', content: 'MATRIX_E2E_OK\n', _intent: 'Create the matrix fixture before validating it with a shell test.' }, 'msg_matrix_write')
-  } else if (latestRequestText.includes('matrix-write-1') || latestRequestText.includes('matrix-e2e.txt')) {
-    sendToolResponse(res, 'matrix-shell-1', 'shell', { command: "test \"$(cat matrix-e2e.txt)\" = MATRIX_E2E_OK && printf MATRIX_SHELL_OK", _intent: 'Run a real shell assertion against the newly written fixture.' }, 'msg_matrix_shell')
   } else if (latestRequestText.includes('MATRIX_SHELL_OK')) {
     sendTextResponse(res, 'MATRIX_TOOL_CHAIN_COMPLETE', 'msg_matrix_final')
+  } else if (latestRequestText.includes('matrix-write-1') || latestRequestText.includes('matrix-e2e.txt')) {
+    sendToolResponse(res, 'matrix-shell-1', 'shell', { command: "test \"$(cat matrix-e2e.txt)\" = MATRIX_E2E_OK && printf MATRIX_SHELL_OK", _intent: 'Run a real shell assertion against the newly written fixture.' }, 'msg_matrix_shell')
   } else if (latestRequestText.includes('attempt denied outside read')) {
     sendSse(res, { type: 'message_start', message: { id: 'msg_denied', usage: { input_tokens: 8, output_tokens: 0 } } })
     sendSse(res, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'controlled-denied-read', name: 'read_file', input: {} } })
@@ -164,16 +166,15 @@ try {
   await selectSession(actor.page, primarySessionId)
 
   await harness.step('send message and switch Sessions during a live provider stream', async () => {
-    await clickByTestId(actor.page, 'approval-mode-picker')
-    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
+    await setAllowAll(actor.page)
     await clickByTestId(actor.page, 'send-mode-toggle')
     await clickByTestId(actor.page, 'send-mode-queue')
-    await actor.page.click('[data-testid="composer-input"]')
+    await clickByTestId(actor.page, 'composer-input')
     await actor.page.keyboard.type('Read controlled.txt and report the result.')
     await clickByTestId(actor.page, 'composer-send')
     await waitFor(() => providerRequests.length >= 1, { timeoutMs: 20_000, name: 'provider request' })
     for (const text of ['queue-second', 'queue-third', 'queue-delete']) {
-      await actor.page.click('[data-testid="composer-input"]')
+      await clickByTestId(actor.page, 'composer-input')
       await actor.page.keyboard.type(text)
       await clickByTestId(actor.page, 'composer-send')
     }
@@ -184,19 +185,21 @@ try {
       return text.includes('queue-second') && text.includes('queue-third') && text.includes('queue-delete')
     }, { timeoutMs: 20_000, name: 'three persisted queue messages' })
     const rows = await actor.page.$$('[data-testid="queued-message-row"]')
-    await rows[1].$eval('[data-testid="queued-message-edit"]', (element) => element.click())
-    await actor.page.waitForSelector('[data-testid="queued-message-edit-input"]')
-    await actor.page.click('[data-testid="queued-message-edit-input"]')
+    await clickElement(await rows[1].$('[data-testid="queued-message-edit"]'), 'Edit queued message')
+    const editInput = await actor.page.waitForSelector('[data-testid="queued-message-edit-input"]')
+    await clickElement(editInput, 'Queued message editor')
     await actor.page.keyboard.down('Control'); await actor.page.keyboard.press('KeyA'); await actor.page.keyboard.up('Control')
     await actor.page.keyboard.type('queue-third-edited')
+    const editedValue = await editInput.evaluate((element) => element.value)
+    if (editedValue !== 'queue-third-edited') throw new Error(`queued message editor contains ${JSON.stringify(editedValue)}`)
     await clickByTestId(actor.page, 'queued-message-save')
     await actor.page.waitForFunction(() => (document.querySelector('[data-testid="queued-messages-dock"]')?.textContent ?? '').includes('queue-third-edited'))
     const updatedRows = await actor.page.$$('[data-testid="queued-message-row"]')
     const editedRow = await findRowByText(updatedRows, 'queue-third-edited')
-    await editedRow.$eval('[data-testid="queued-message-up"]', (element) => element.click())
+    await clickElement(await editedRow.$('[data-testid="queued-message-up"]'), 'Move queued message up')
     const deleteRows = await actor.page.$$('[data-testid="queued-message-row"]')
     const deleteRow = await findRowByText(deleteRows, 'queue-delete')
-    await deleteRow.$eval('[data-testid="queued-message-delete"]', (element) => element.click())
+    await clickElement(await deleteRow.$('[data-testid="queued-message-delete"]'), 'Delete queued message')
     await actor.page.waitForFunction(() => {
       const text = document.querySelector('[data-testid="queued-messages-dock"]')?.textContent ?? ''
       return document.querySelectorAll('[data-testid="queued-message-row"]').length === 2 && text.includes('queue-third-edited') && !text.includes('queue-delete')
@@ -253,40 +256,50 @@ try {
       ? providerRequests[0].system.map((block) => block?.text ?? '').join('\n')
       : String(providerRequests[0]?.system ?? '')
     if (!requestSystem.includes(customPrompt)) throw new Error(`custom prompt missing from real provider request: ${requestSystem.slice(0, 1_500)}`)
-    await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-read-1"]')
-    await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-read-2"]')
-    await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-read-3"]')
+    await actor.page.waitForSelector('[data-testid="tool-card-dot-group-controlled-read-1"]')
+    await actor.page.waitForFunction(() => document.querySelector('[data-testid="tool-card-dot-count-controlled-read-1"]')?.textContent === '×3')
     await actor.page.waitForSelector('[data-testid="tool-card-dots-intent-controlled-read-1"]')
     const intent = await actor.page.$eval('[data-testid="tool-card-dots-intent-controlled-read-1"]', (element) => element.textContent ?? '')
     if (!intent.includes(intention)) throw new Error(`intention missing from dot line: ${intent}`)
-    await clickByTestId(actor.page, 'tool-card-dot-controlled-read-1')
-    await actor.page.waitForSelector('[data-testid="tool-call-detail-intent-controlled-read-1"]')
-    const detail = await actor.page.$eval('[data-testid="tool-call-detail-intent-controlled-read-1"]', (element) => element.textContent ?? '')
-    const previewText = await actor.page.$eval('[data-testid="tool-card-preview-scroll-controlled-read-1"]', (element) => element.textContent ?? '')
-    const resultVisible = previewText.includes('CONTROLLED_TOOL_FILE')
-    if (!detail.includes(intention) || !resultVisible) throw new Error(`expanded tool detail/result is incomplete: ${previewText.slice(0, 1_500)}`)
     const geometry = await actor.page.evaluate(() => {
-      const connector = document.querySelector('[data-testid="tool-activity-connector"]')?.getBoundingClientRect()
-      const first = document.querySelector('[data-testid="tool-card-dot-controlled-read-1"]')?.getBoundingClientRect()
-      const last = document.querySelector('[data-testid="tool-card-dot-controlled-read-3"]')?.getBoundingClientRect()
-      const preview = document.querySelector('[data-testid^="tool-card-preview-layer-"]')?.getBoundingClientRect()
+      const dot = document.querySelector('[data-testid="tool-card-dot-group-controlled-read-1"]')?.getBoundingClientRect()
+      const rail = document.querySelector('[data-testid="tool-activity-rail"]')?.getBoundingClientRect()
       const chat = document.querySelector('[data-testid="chat-panel"]')?.getBoundingClientRect()
-      return { connector, first, last, preview, chat }
+      const rect = (value) => value ? { left: value.left, right: value.right, top: value.top, bottom: value.bottom } : null
+      return { dot: rect(dot), rail: rect(rail), chat: rect(chat) }
     })
-    if (!geometry.connector || !geometry.first || !geometry.last || geometry.connector.right > geometry.last.right + 2) throw new Error(`invalid tool connector geometry: ${JSON.stringify(geometry)}`)
+    if (!geometry.dot || !geometry.rail || !geometry.chat || geometry.dot.left < geometry.chat.left || geometry.dot.right > geometry.chat.right || geometry.rail.right > geometry.chat.right) {
+      throw new Error(`invalid tool rail geometry: ${JSON.stringify(geometry)}`)
+    }
+    await clickByTestId(actor.page, 'tool-card-dot-group-controlled-read-1')
+    await clickFirstVisible(actor.page, '[data-testid^="grouped-tool-row-controlled-read-"]', { description: 'Expanded controlled read row' })
+    const previewText = await actor.page.$eval('[data-testid="tool-call-group-details-controlled-read-1"]', (element) => element.textContent ?? '')
+    const resultVisible = previewText.includes('CONTROLLED_TOOL_FILE')
+    if (!previewText.includes(intention) || !resultVisible) throw new Error(`expanded tool detail/result is incomplete: ${previewText.slice(0, 1_500)}`)
     await harness.screenshot(actor, 'controlled-tool-complete')
     return { providerRequests: providerRequests.length, intention, resultVisible: true, customPromptForwarded: true, toolCount: 3, geometry }
   })
 
   await harness.step('run real write and shell test tool chain', async () => {
     const matrixSessionId = await createSession(actor.page)
-    await clickByTestId(actor.page, 'approval-mode-picker')
-    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
-    await actor.page.click('[data-testid="composer-input"]')
+    await setAllowAll(actor.page)
+    await clickByTestId(actor.page, 'composer-input')
     await actor.page.keyboard.type('run controlled write shell test')
     await clickByTestId(actor.page, 'composer-send')
-    await actor.page.waitForFunction(() => document.body.innerText.includes('MATRIX_TOOL_CHAIN_COMPLETE'), { timeout: 30_000 })
+    try {
+      await actor.page.waitForFunction(() => document.body.innerText.includes('MATRIX_TOOL_CHAIN_COMPLETE'), { timeout: 30_000 })
+    } catch (error) {
+      const recent = providerRequests.slice(-6).map((request) => JSON.stringify((request.messages ?? []).at(-1) ?? null))
+      const ui = await actor.page.evaluate(() => ({
+        approval: document.querySelector('[data-testid="approval-card"]')?.textContent ?? null,
+        composer: document.querySelector('[data-testid="composer-input"]')?.value ?? null,
+        sendMode: document.querySelector('[data-testid="send-mode-toggle"]')?.getAttribute('aria-label') ?? null,
+        bodyTail: document.body.innerText.slice(-2_000),
+      }))
+      throw new Error(`matrix flow did not finish; recent provider messages: ${JSON.stringify(recent)}; ui=${JSON.stringify(ui)}`, { cause: error })
+    }
     if (readFileSync(join(workspace, 'matrix-e2e.txt'), 'utf8') !== 'MATRIX_E2E_OK\n') throw new Error('write_file side effect missing')
+    await actor.page.waitForSelector('[data-testid="tool-card-dot-matrix-search-1"]')
     await actor.page.waitForSelector('[data-testid="tool-card-dot-matrix-write-1"]')
     await actor.page.waitForSelector('[data-testid="tool-card-dot-matrix-shell-1"]')
     return { sessionId: matrixSessionId, fileWritten: true, shellAsserted: true }
@@ -294,26 +307,29 @@ try {
 
   await harness.step('surface real sandbox path denial in tool UI', async () => {
     const denialSessionId = await createSession(actor.page)
-    await clickByTestId(actor.page, 'approval-mode-picker')
-    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
-    await actor.page.click('[data-testid="composer-input"]')
+    await setAllowAll(actor.page)
+    await clickByTestId(actor.page, 'composer-input')
     await actor.page.keyboard.type('attempt denied outside read')
     await clickByTestId(actor.page, 'composer-send')
     await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-denied-read"]', { timeout: 30_000 })
-    await clickByTestId(actor.page, 'tool-card-dot-controlled-denied-read')
-    const denialText = await actor.page.$eval('[data-testid="tool-card-preview-scroll-controlled-denied-read"]', (element) => element.textContent ?? '')
+    const deniedDot = await actor.page.$('[data-testid="tool-card-dot-controlled-denied-read"]')
+    const deniedGroupHandle = await deniedDot.evaluateHandle((element) => element.closest('[data-testid^="tool-call-group-"]'))
+    const deniedGroup = deniedGroupHandle.asElement()
+    await clickElement(await deniedGroup?.$('[data-testid="tool-activity-direction"]'), 'Expand denied tool activity')
+    await actor.page.waitForSelector('[data-testid="tool-call-group-details-controlled-denied-read"]')
+    const denialText = await actor.page.$eval('[data-testid="tool-call-group-details-controlled-denied-read"]', (element) => element.textContent ?? '')
     if (!/EACCES|outside|denied|not allowed/iu.test(denialText)) throw new Error(`sandbox denial missing: ${denialText}`)
     return { sessionId: denialSessionId, denied: true, diagnostic: denialText.slice(-500) }
   })
 
   await selectSession(actor.page, primarySessionId)
   await harness.step('spawn and complete a live Sub-agent Session', async () => {
-    await actor.page.click('[data-testid="composer-input"]')
+    await clickByTestId(actor.page, 'composer-input')
     await actor.page.keyboard.type('spawn controlled subagent')
     await clickByTestId(actor.page, 'composer-send')
     await actor.page.waitForSelector('[data-testid="sub-agent-row-controlled-agent-1"]', { timeout: 30_000 })
     await actor.page.waitForFunction(() => document.querySelector('[data-testid="sub-agent-row-controlled-agent-1"]')?.getAttribute('data-sub-agent-status') === 'completed', { timeout: 30_000 })
-    await clickByTestId(actor.page, 'sub-agent-toggle-controlled-agent-1')
+    await clickFirstVisible(actor.page, '[data-testid="sub-agent-dot-controlled-agent-1"], [data-testid="sub-agent-toggle-controlled-agent-1"]', { description: 'Completed Sub-agent details' })
     const childLog = await waitFor(() => {
       const file = readdirSync(sessionsDir).find((name) => !name.includes(primarySessionId) && !name.includes(secondarySessionId) && readFileSync(join(sessionsDir, name), 'utf8').includes('SUBAGENT_E2E_SUCCESS'))
       return file ? join(sessionsDir, file) : undefined
@@ -323,9 +339,8 @@ try {
 
   await harness.step('propagate a real child provider failure to the parent card', async () => {
     const failureSessionId = await createSession(actor.page)
-    await clickByTestId(actor.page, 'approval-mode-picker')
-    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
-    await actor.page.click('[data-testid="composer-input"]')
+    await setAllowAll(actor.page)
+    await clickByTestId(actor.page, 'composer-input')
     await actor.page.keyboard.type('spawn failing subagent')
     await clickByTestId(actor.page, 'composer-send')
     await actor.page.waitForSelector('[data-testid="sub-agent-row-controlled-agent-fail"]', { timeout: 30_000 })
@@ -337,9 +352,8 @@ try {
   await harness.step('interrupt a live Sub-agent and persist cancelled state', async () => {
     const cancelSessionId = await createSession(actor.page)
     await actor.page.waitForSelector('[data-testid="composer-send"]', { timeout: 30_000 })
-    await clickByTestId(actor.page, 'approval-mode-picker')
-    await clickByTestId(actor.page, 'approval-mode-option-allow_all')
-    await actor.page.click('[data-testid="composer-input"]')
+    await setAllowAll(actor.page)
+    await clickByTestId(actor.page, 'composer-input')
     await actor.page.keyboard.type('spawn cancellable subagent')
     const requestsBefore = providerRequests.length
     await clickByTestId(actor.page, 'composer-send')
@@ -355,7 +369,7 @@ try {
     await selectSession(actor.page, primarySessionId)
     const expectedFailureStart = actor.requestFailures.length
     await actor.page.reload({ waitUntil: 'networkidle2' })
-    await actor.page.waitForSelector('[data-testid="tool-card-dot-controlled-read-1"]')
+    await actor.page.waitForSelector('[data-testid="tool-card-dot-group-controlled-read-1"]')
     const text = await actor.page.$eval('[data-testid="tool-card-dots-intent-controlled-read-1"]', (element) => element.textContent ?? '')
     if (!text.includes(intention)) throw new Error('persisted intention missing after reload')
     const reloadFailures = actor.requestFailures.slice(expectedFailureStart)
@@ -383,7 +397,7 @@ console.log(`PASS controlled-agent-journey system E2E\nEvidence: ${result.eviden
 
 async function createSession(page) {
   const previous = new URL(page.url()).searchParams.get('sessionId')
-  await page.evaluate(() => [...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].find((item) => !item.hasAttribute('disabled'))?.click())
+  await hoverAncestorAndClickFirst(page, '[data-testid^="workspace-new-session-"]', '[data-testid="workspace-row"]', { description: 'New Session for online Workspace' })
   await page.waitForSelector('[data-testid="new-session-dialog"]')
   await clickByTestId(page, 'new-session-create')
   await page.waitForFunction((oldId) => {
@@ -392,20 +406,32 @@ async function createSession(page) {
   }, {}, previous)
   await page.waitForSelector('[data-testid="new-session-dialog"]', { hidden: true })
   await page.waitForSelector('[data-testid="dialog-overlay"]', { hidden: true })
+  await page.waitForSelector('[data-testid="composer-input"]')
+  await clickByTestId(page, 'send-mode-toggle')
+  await clickByTestId(page, 'send-mode-steer')
   return new URL(page.url()).searchParams.get('sessionId')
 }
+
+async function setAllowAll(page) {
+  const successText = 'Approval mode changed to Allow all'
+  const before = await page.evaluate((expected) => document.body.innerText.split(expected).length - 1, successText)
+  await clickByTestId(page, 'approval-mode-picker')
+  await clickByTestId(page, 'approval-mode-option-allow_all')
+  await page.waitForFunction(() =>
+    /allow all/iu.test(document.querySelector('[data-testid="approval-mode-picker"]')?.textContent ?? ''))
+  await page.waitForFunction((expected, previous) =>
+    document.body.innerText.split(expected).length - 1 > previous, {}, successText, before)
+}
+
 async function visibleSessionRow(page, id) {
   const selector = `[data-testid="session-row"][data-session-id="${id}"]`
-  await page.waitForSelector(selector)
-  const rows = await page.$$(selector)
-  for (const row of rows) {
-    if (await row.evaluate((element) => {
-      const rect = element.getBoundingClientRect()
-      const style = getComputedStyle(element)
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.pointerEvents !== 'none'
-    })) return row
-  }
-  throw new Error(`no visible Session row for ${id}`)
+  return await waitFor(async () => {
+    const rows = await page.$$(selector)
+    for (const row of rows) {
+      if (await row.isVisible()) return row
+    }
+    return null
+  }, { timeoutMs: 15_000, name: `visible Session row ${id}` })
 }
 async function selectSession(page, id) {
   const visible = await visibleSessionRow(page, id)

@@ -2,6 +2,10 @@ name: Product System E2E
 
 on:
   workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
   schedule:
     - cron: '17 3 * * *'
 
@@ -57,6 +61,8 @@ jobs:
       - name: Enable pnpm
         run: corepack enable && corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
+      - name: Verify system-E2E harness fidelity
+        run: pnpm run test:product-e2e-harness
       - name: Preflight real-system capabilities
         run: |
           set -eu

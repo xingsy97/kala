@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ProductE2EHarness, clickByTestId, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
+import { ProductE2EHarness, clickByTestId, clickElement, clickFirstVisible, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
@@ -121,13 +121,9 @@ try {
   })
 
   await harness.step('send real Chromium keyboard input through Host and Executor PTY', async () => {
-    await clickByTestId(actor.page, 'terminal-toggle')
+    await clickByTestId(actor.page, 'right-panel-terminal-tab')
     await actor.page.waitForSelector('[data-testid="session-terminal-panel"]')
-    await actor.page.evaluate(() => {
-      const panel = document.querySelector('[data-testid="session-terminal-panel"]')
-      const start = [...(panel?.querySelectorAll('button') ?? [])].find((button) => /start|启动/iu.test(button.textContent ?? ''))
-      start?.click()
-    })
+    await clickFirstVisible(actor.page, '[data-testid="session-terminal-panel"] button', { textIncludes: 'Start', description: 'Start terminal' })
     await actor.page.waitForFunction(() => /running|运行/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
     await actor.page.waitForSelector('.xterm-helper-textarea')
     await actor.page.click('.xterm-helper-textarea')
@@ -164,10 +160,11 @@ try {
     await clickByTestId(actor.page, 'right-panel-files-tab')
     await actor.page.waitForSelector('[data-testid="session-files-panel"]')
     await actor.page.waitForFunction(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].some((item) => item.textContent?.includes('e2e-visible.txt')), { timeout: 30_000 })
-    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].find((item) => item.textContent?.includes('e2e-visible.txt'))?.click())
+    await clickFirstVisible(actor.page, '[data-testid="session-file-file"]', { textIncludes: 'e2e-visible.txt', description: 'e2e-visible.txt file' })
     await actor.page.waitForFunction(() => document.body.innerText.includes('FILES_E2E_VISIBLE'), { timeout: 30_000 })
-    const binaryRow = await findFileRow(actor.page, 'e2e-binary.bin')
-    await binaryRow.click()
+    await clickByTestId(actor.page, 'session-file-view-close')
+    await actor.page.waitForSelector('[data-testid="session-file-view-dialog"]', { hidden: true })
+    await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="dialog-overlay"]').length === 0)
     await actor.page.evaluate(() => {
       window.__runlabDownload = null
       window.showSaveFilePicker = async (options) => ({
@@ -178,14 +175,12 @@ try {
       })
     })
     const freshBinaryRow = await findFileRow(actor.page, 'e2e-binary.bin')
-    await freshBinaryRow.evaluate((element) => element.parentElement?.querySelector('button[aria-label^="Download "]')?.click())
+    await freshBinaryRow.hover()
+    const binaryParentHandle = await freshBinaryRow.evaluateHandle((element) => element.parentElement)
+    const binaryParent = binaryParentHandle.asElement()
+    await clickElement(await binaryParent?.$('button[aria-label^="Download "]'), 'Download e2e-binary.bin')
     const downloaded = await actor.page.waitForFunction(() => Boolean(window.__runlabDownload?.bytes), { timeout: 30_000 }).then(async () => await actor.page.evaluate(() => window.__runlabDownload))
     if (downloaded.name !== 'e2e-binary.bin' || JSON.stringify(downloaded.bytes) !== JSON.stringify([0, 255, 1, 254, 2, 253])) throw new Error(`download bytes mismatch: ${JSON.stringify(downloaded)}`)
-    const close = await actor.page.$('[data-testid="session-file-view-close"]')
-    if (close) {
-      await close.click()
-      await actor.page.waitForSelector('[data-testid="session-file-view-dialog"]', { hidden: true })
-    }
     return { path: join(workspace, 'e2e-visible.txt'), visibleContents: true, binaryHandled: true, downloaded }
   })
 
@@ -205,7 +200,7 @@ try {
     ]
     for (const [name, testId, text] of cases) {
       const row = await findFileRow(actor.page, name)
-      await row.evaluate((element) => element.click())
+      await clickElement(row, `Open ${name}`)
       await actor.page.waitForSelector('[data-testid="session-file-view-dialog"]', { visible: true, timeout: 30_000 })
       await actor.page.waitForSelector(`[data-testid="${testId}"]`, { timeout: 30_000 })
       if (text) await actor.page.waitForFunction((expected) => document.body.innerText.includes(expected), { timeout: 30_000 }, text)
@@ -230,14 +225,14 @@ try {
       }
       await actor.page.click('[data-testid="session-file-view-close"]')
       await actor.page.waitForSelector('[data-testid="session-file-view-dialog"]', { hidden: true })
+      await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="dialog-overlay"]').length === 0)
     }
     return { formats: cases.map(([name]) => name), realFilesystemRpc: true, csvTotalDataRows: 1_051, csvRenderedRows, markdownActiveContentBlocked: true, pdfViewerEnabled, pdfDefaultFallbackVerified: true }
   })
 
   await harness.step('use Files and Terminal through the real mobile Tools drawer', async () => {
     await actor.page.setViewport({ width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
-    await actor.page.waitForSelector('[data-testid="inspector-toggle"]')
-    await actor.page.click('[data-testid="inspector-toggle"]')
+    await clickByTestId(actor.page, 'sidebar-toggle')
     await actor.page.waitForSelector('[data-testid="inspector-drawer-mobile"]', { visible: true })
     await sleep(250)
     const drawer = await actor.page.$eval('[data-testid="inspector-drawer-mobile"]', (element) => {
@@ -259,7 +254,7 @@ try {
     await actor.page.click('[data-testid="inspector-drawer-mobile"] [aria-label="Refresh files"]')
     await sleep(150)
     const csvRow = await findFileRow(actor.page, 'e2e-data.csv', '[data-testid="inspector-drawer-mobile"]')
-    await csvRow.evaluate((element) => element.click())
+    await clickElement(csvRow, 'Open mobile e2e-data.csv')
     await actor.page.waitForSelector('[data-testid="session-file-table-preview"]')
     const table = await actor.page.$eval('[data-testid="session-file-table-preview"]', (element) => ({ pageWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth, scrollable: Array.from(element.querySelectorAll('*')).some((child) => child.scrollWidth > child.clientWidth + 1) }))
     if (table.pageWidth > table.viewportWidth + 1 || !table.scrollable) throw new Error(`mobile CSV table contract failed: ${JSON.stringify(table)}`)
@@ -273,9 +268,12 @@ try {
     await clickByTestId(actor.page, 'right-panel-git-tab')
     await actor.page.waitForSelector('[data-testid="source-control-panel"]')
     await actor.page.waitForFunction(() => [...document.querySelectorAll('[data-testid="source-control-file"]')].some((item) => item.textContent?.includes('e2e-visible.txt')), { timeout: 30_000 })
-    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid="source-control-file"]')].find((item) => item.textContent?.includes('e2e-visible.txt'))?.click())
+    await clickFirstVisible(actor.page, '[data-testid="source-control-file"]', { textIncludes: 'e2e-visible.txt', description: 'e2e-visible.txt source control row' })
     await actor.page.waitForSelector('[data-testid="source-control-diff-dialog"]')
     await actor.page.waitForFunction(() => document.body.innerText.includes('GIT_DIFF_VISIBLE'), { timeout: 30_000 })
+    await actor.page.keyboard.press('Escape')
+    await actor.page.waitForSelector('[data-testid="source-control-diff-dialog"]', { hidden: true })
+    await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="dialog-overlay"]').length === 0)
     return { repo: workspace, modifiedFile: 'e2e-visible.txt', diffVisible: true }
   })
 

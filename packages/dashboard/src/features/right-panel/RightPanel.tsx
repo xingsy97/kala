@@ -35,7 +35,7 @@ export function RightPanel({
           <TabButton active={activeTab === 'inspector'} onClick={() => onTabChange('inspector')} icon={<Bug className="h-3.5 w-3.5" />} label={t('rightPanel.inspector')} testId="right-panel-inspector-tab" />
         </div>
         <span className="ml-1 h-5 w-px flex-none bg-border/40" aria-hidden="true" />
-        <Button variant="ghost" size="icon" className="h-10 w-10 flex-none rounded-lg text-muted-foreground hover:bg-accent/70 hover:text-foreground sm:h-8 sm:w-8" onClick={onCollapse} title={t('rightPanel.collapse')} aria-label={t('rightPanel.collapse')} data-testid="right-panel-collapse"><PanelRightClose className="h-4 w-4" /></Button>
+        <Button variant="ghost" size="icon" className="h-11 w-11 flex-none rounded-lg text-muted-foreground hover:bg-accent/70 hover:text-foreground sm:h-8 sm:w-8" onClick={onCollapse} title={t('rightPanel.collapse')} aria-label={t('rightPanel.collapse')} data-testid="right-panel-collapse"><PanelRightClose className="h-4 w-4" /></Button>
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <PanelContent active={activeTab === 'files'} testId="right-panel-files-content">{files}</PanelContent>
@@ -64,7 +64,7 @@ function TabButton({ active, onClick, icon, label, testId }: { active: boolean; 
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        'inline-flex h-10 w-full min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-[11px] font-medium transition-all sm:h-8 sm:px-1.5',
+        'inline-flex h-11 w-full min-w-0 items-center justify-center gap-1 rounded-lg px-1 text-[11px] font-medium transition-all sm:h-8 sm:px-1.5',
         active
           ? 'bg-card text-foreground shadow-sm ring-1 ring-border/45'
           : 'text-muted-foreground hover:bg-card/55 hover:text-foreground',

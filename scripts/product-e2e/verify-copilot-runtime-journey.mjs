@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 
 import { io } from 'socket.io-client'
 
-import { ProductE2EHarness, clickByTestId, waitFor } from './harness.mjs'
+import { ProductE2EHarness, clickByTestId, clickElement, waitFor } from './harness.mjs'
 
 const origin = process.env.RUNLAB_URL ?? process.env.DASHBOARD_URL
 const sourceRevision = process.env.RUNLAB_REVISION
@@ -148,7 +148,7 @@ try {
   await harness.step('expose the authoritative Copilot Runtime in Session Info', async () => {
     const row = await sessionRow(actor.page, sessionId)
     await row.hover()
-    await row.$eval('[data-testid="session-info-button"]', (button) => button.click())
+    await clickElement(await row.$('[data-testid="session-info-button"]'), 'Session info')
     await actor.page.waitForSelector('[data-testid="session-metadata-dialog"]')
     const runtimeText = await actor.page.$eval('[data-testid="session-metadata-agent-runtime"]', (element) => element.textContent ?? '')
     if (!runtimeText.includes('GitHub Copilot SDK') || !runtimeText.includes('(copilot)')) {
@@ -317,7 +317,7 @@ try {
   await harness.step('delete the Copilot Session through UI and verify authoritative cleanup', async () => {
     const row = await sessionRow(actor.page, sessionId)
     await row.hover()
-    await row.$eval('[data-testid="session-delete-button"]', (button) => button.click())
+    await clickElement(await row.$('[data-testid="session-delete-button"]'), 'Delete Session')
     await actor.page.waitForSelector('[data-testid="confirm-delete-button"]', { visible: true })
     await clickByTestId(actor.page, 'confirm-delete-button')
     await actor.page.waitForFunction((expected) => !document.querySelector(`[data-testid="session-row"][data-session-id="${expected}"]`), { timeout: 30_000 }, sessionId)
@@ -354,7 +354,7 @@ harness.assertClean(result.report)
 
 async function openNewSession(page, expectedWorkspaceId) {
   await page.waitForSelector(`[data-testid="workspace-new-session-${expectedWorkspaceId}"]`, { timeout: 30_000 })
-  await page.$eval(`[data-testid="workspace-new-session-${expectedWorkspaceId}"]`, (button) => button.click())
+  await clickByTestId(page, `workspace-new-session-${expectedWorkspaceId}`)
   await page.waitForSelector('[data-testid="new-session-dialog"]')
   await page.waitForSelector('[data-testid="finder-column"]', { timeout: 30_000 })
 }

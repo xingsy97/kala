@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ProductE2EHarness, clickByTestId, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
+import { ProductE2EHarness, clickByTestId, hoverAncestorAndClickFirst, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
@@ -87,7 +87,7 @@ try {
 
   await harness.step('browse temporary Workspace directory and create a Session', async () => {
     const previous = new URL(actor.page.url()).searchParams.get('sessionId')
-    await actor.page.evaluate(() => [...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].find((item) => !item.hasAttribute('disabled'))?.click())
+    await hoverAncestorAndClickFirst(actor.page, '[data-testid^="workspace-new-session-"]', '[data-testid="workspace-row"]', { description: 'New Session for temporary Workspace' })
     await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
     await actor.page.waitForSelector('[data-testid="finder-column"]', { timeout: 15_000 })
     const dialogText = await actor.page.$eval('[data-testid="new-session-dialog"]', (element) => element.textContent ?? '')

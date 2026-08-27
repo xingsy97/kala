@@ -212,6 +212,12 @@ Component tests (React Testing Library + jsdom) verify contract, not visual beha
 3. Load `http://localhost:3000`, toggle each theme the change touches, and read `getComputedStyle(document.body).backgroundColor` (and text color of the primary panels). Fail the check if the computed color falls outside the expected range for that theme — a "white screen in dark mode" bug can pass every jsdom test because jsdom doesn't compute CSS.
 4. Verify the fetched CSS bundle is served with `Cache-Control: no-cache` (or a filename hash) — otherwise old CSS keeps loading even after a rebuild and the check appears to pass on a stale bundle.
 
+Browser acceptance must use Chromium pointer/keyboard input for user actions.
+DOM-dispatched `element.click()` calls bypass hit-testing and can hide blocked,
+covered, or inert controls. Product E2E uses the pointer-safe helpers in
+`scripts/product-e2e/harness.mjs`; `pnpm run test:product-e2e-harness` enforces
+this rule in the release journey scripts.
+
 The rule is stricter than jsdom/component coverage because these checks run against the production-shape bundle that end users see.
 
 ---

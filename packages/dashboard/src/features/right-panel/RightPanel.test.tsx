@@ -18,7 +18,7 @@ describe('RightPanel', () => {
     expect(inspectorTab.className).toContain('bg-card')
     expect(inspectorTab.className).not.toContain('border-b-2')
     expect(inspectorTab.className).toContain('w-full')
-    expect(screen.getByTestId('right-panel-collapse').className).toContain('h-10')
+    expect(screen.getByTestId('right-panel-collapse').className).toContain('h-11')
     expect(screen.getByText('terminal body')).toBeTruthy()
     expect(screen.getByTestId('right-panel-terminal-content').classList.contains('hidden')).toBe(true)
     expect(screen.getByTestId('right-panel-inspector-content').classList.contains('hidden')).toBe(false)

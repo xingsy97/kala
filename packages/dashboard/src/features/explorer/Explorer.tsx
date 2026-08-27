@@ -1323,9 +1323,9 @@ function SessionRow({
           </Button>
           {touchMenuPosition && typeof document !== 'undefined' ? createPortal(
             <>
-              <button type="button" className="fixed inset-0 z-40 cursor-default" aria-label={t('common.close')} onClick={(e) => { e.stopPropagation(); setTouchMenuPosition(null) }} />
+              <button type="button" className="pointer-events-auto fixed inset-0 z-[55] cursor-default" aria-label={t('common.close')} onClick={(e) => { e.stopPropagation(); setTouchMenuPosition(null) }} />
               <div
-                className="fixed z-50 min-w-40 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+                className="pointer-events-auto fixed z-[60] min-w-40 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl"
                 style={{ right: touchMenuPosition.right, top: touchMenuPosition.top }}
                 data-testid="session-action-menu"
                 onClick={(e) => e.stopPropagation()}

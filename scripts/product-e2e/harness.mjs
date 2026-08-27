@@ -123,8 +123,102 @@ export class ProductE2EHarness {
 }
 
 export async function clickByTestId(page, testId) {
-  await page.waitForSelector(`[data-testid="${testId}"]`)
-  await page.$eval(`[data-testid="${testId}"]`, (element) => element.click())
+  const selector = `[data-testid="${testId}"]`
+  await page.waitForSelector(selector)
+  const elements = await page.$$(selector)
+  for (const element of elements) {
+    if (await element.isVisible()) {
+      await clickElement(element, testId)
+      return
+    }
+  }
+  throw new Error(`no visible element found for data-testid="${testId}"`)
+}
+
+export async function clickElement(element, description = 'element') {
+  if (!element) throw new Error(`cannot pointer-click missing ${description}`)
+  await element.scrollIntoView()
+  const box = await element.boundingBox()
+  if (!box || box.width <= 0 || box.height <= 0) {
+    throw new Error(`cannot pointer-click hidden ${description}`)
+  }
+  const hit = await element.evaluate((candidate) => {
+    const rect = candidate.getBoundingClientRect()
+    const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    return {
+      reachable: target === candidate || candidate.contains(target),
+      target: target?.getAttribute('data-testid') ?? target?.tagName ?? null,
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    }
+  })
+  if (!hit.reachable) {
+    throw new Error(`cannot pointer-click covered ${description}; ${JSON.stringify(hit)}`)
+  }
+  await element.click()
+}
+
+export async function clickFirstVisible(page, selector, options = {}) {
+  await page.waitForSelector(selector)
+  const elements = await page.$$(selector)
+  for (const element of elements) {
+    if (!await element.isVisible()) continue
+    const matches = await element.evaluate((candidate, expected) => {
+      if (expected.enabled !== false && (
+        candidate.hasAttribute('disabled')
+        || candidate.getAttribute('aria-disabled') === 'true'
+      )) return false
+      const text = candidate.textContent?.trim() ?? ''
+      if (expected.text !== undefined && text !== expected.text) return false
+      if (expected.textIncludes !== undefined && !text.includes(expected.textIncludes)) return false
+      return true
+    }, options)
+    if (!matches) continue
+    await clickElement(element, options.description ?? selector)
+    return
+  }
+  throw new Error(`no visible matching element found for ${options.description ?? selector}`)
+}
+
+export async function hoverAncestorAndClickFirst(page, selector, ancestorSelector, options = {}) {
+  await page.waitForSelector(selector)
+  await waitFor(async () => {
+    const elements = await page.$$(selector)
+    for (const element of elements) {
+      const matches = await element.evaluate((candidate, expected) => {
+        if (expected.enabled !== false && (
+          candidate.hasAttribute('disabled')
+          || candidate.getAttribute('aria-disabled') === 'true'
+        )) return false
+        const text = candidate.textContent?.trim() ?? ''
+        return expected.textIncludes === undefined || text.includes(expected.textIncludes)
+      }, options)
+      if (!matches) continue
+      const ancestorHandle = await element.evaluateHandle((candidate, expectedSelector) =>
+        candidate.closest(expectedSelector), ancestorSelector)
+      const ancestor = ancestorHandle.asElement()
+      if (!ancestor) continue
+      const targetTestId = await element.evaluate((candidate) => candidate.getAttribute('data-testid'))
+      await ancestor.scrollIntoView()
+      await ancestor.hover()
+      const refreshed = targetTestId
+        ? await page.$$(`[data-testid="${targetTestId}"]`)
+        : await page.$$(selector)
+      const target = await findVisibleElement(refreshed, async (candidate) =>
+        await candidate.evaluate((item) => !item.hasAttribute('disabled') && item.getAttribute('aria-disabled') !== 'true'))
+      if (!target) continue
+      const refreshedAncestorHandle = await target.evaluateHandle((candidate, expectedSelector) =>
+        candidate.closest(expectedSelector), ancestorSelector)
+      await refreshedAncestorHandle.asElement()?.hover()
+      try {
+        await clickElement(target, options.description ?? selector)
+        return true
+      } catch {
+        return false
+      }
+    }
+    return false
+  }, { timeoutMs: options.timeoutMs ?? 15_000, name: options.description ?? selector })
 }
 
 export async function waitForText(page, text, timeout = 60_000) {
@@ -215,7 +309,15 @@ export async function loginWithPassword(page, { productOrigin, loginName, passwo
     for (let index = 0; index < Math.min(fields.length, values.length); index += 1) {
       await fields[index].type(values[index])
     }
-    await page.$$eval('button', (buttons) => buttons.find((button) => !button.disabled && /continue|change|save/iu.test(button.textContent ?? ''))?.click())
+    const buttons = await page.$$('button')
+    const submit = await findVisibleElement(buttons, async (button) => {
+      const value = await button.evaluate((element) => ({
+        disabled: element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true',
+        text: element.textContent?.trim() ?? '',
+      }))
+      return !value.disabled && /continue|change|save/iu.test(value.text)
+    })
+    await clickElement(submit, 'password change submit')
   }
   await page.waitForSelector('[data-testid=app-shell-nav]')
   return effectivePassword
@@ -229,7 +331,15 @@ async function typeStableValue(page, selector, value) {
     if (await page.$eval(selector, (input) => input.value).catch(() => '') === value) return
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
+
   throw new Error(`input value did not stabilize: ${selector}`)
+}
+
+async function findVisibleElement(elements, predicate) {
+  for (const element of elements) {
+    if (await element.isVisible() && await predicate(element)) return element
+  }
+  return null
 }
 
 async function submitVisibleForm(page, selector) {

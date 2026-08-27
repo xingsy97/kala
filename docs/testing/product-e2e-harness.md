@@ -17,6 +17,11 @@ Each critical journey records:
 
 A selector existing, a dialog opening, or a screenshot alone is not success.
 
+User actions must be delivered through Chromium's input path (`ElementHandle.click`,
+keyboard, touch, or equivalent Puppeteer input). Calling DOM `element.click()` from
+`page.evaluate`, `$eval`, or `$$eval` bypasses hit-testing, overlays, pointer-event
+rules, and real focus behavior, so it is not accepted as user-entry evidence.
+
 ## Reality standard
 
 Unless a scenario declares an external-capability boundary, all links below are real:

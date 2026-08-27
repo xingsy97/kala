@@ -92,6 +92,7 @@
     "verify:e2e:controlled-agent-journey": "node scripts/product-e2e/verify-controlled-agent-journey.mjs",
     "verify:canary:copilot-runtime": "node scripts/product-e2e/verify-copilot-runtime-journey.mjs",
     "verify:e2e:pwa-update-reload": "node scripts/product-e2e/verify-pwa-update-reload.mjs",
+    "test:product-e2e-harness": "node --test scripts/product-e2e/harness.test.mjs",
     "dashboard:dev": "pnpm --filter @agent-kernel/dashboard dev",
     "host:dev": "pnpm --filter @agent-kernel/host dev",
     "executor:dev": "pnpm --filter @agent-kernel/executor dev",
