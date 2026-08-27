@@ -8,6 +8,7 @@ import { ProductE2EHarness, clickByTestId, waitFor } from './harness.mjs'
 const origin = process.env.RUNLAB_URL ?? process.env.DASHBOARD_URL
 const sourceRevision = process.env.RUNLAB_REVISION
 const artifactDigest = process.env.RUNLAB_ARTIFACT_DIGEST
+const requestedWorkspaceId = process.env.RUNLAB_WORKSPACE_ID
 if (!origin) throw new Error('set RUNLAB_URL or DASHBOARD_URL to the production Agent RunLab origin')
 if (!sourceRevision || !artifactDigest) {
   throw new Error('set RUNLAB_REVISION and RUNLAB_ARTIFACT_DIGEST to the exact deployed production artifact evidence')
@@ -57,8 +58,14 @@ try {
     }
     runtimeVersion = copilot.version
     const executors = await responseEvent(socket, 'client:list_executors', 'server:executors', {})
-    const executor = executors.executors?.find((candidate) => candidate.workspaceId)
-    if (!executor) throw new Error('no connected Workspace Executor is available')
+    const executor = requestedWorkspaceId
+      ? executors.executors?.find((candidate) => candidate.workspaceId === requestedWorkspaceId)
+      : executors.executors?.find((candidate) => candidate.workspaceId)
+    if (!executor) {
+      throw new Error(requestedWorkspaceId
+        ? `requested Workspace Executor is not connected: ${requestedWorkspaceId}`
+        : 'no connected Workspace Executor is available')
+    }
     workspaceId = executor.workspaceId
     workspaceName = executor.workspaceName
     return {
