@@ -163,6 +163,29 @@ describe('BackgroundShellsButton', () => {
     expect(screen.getByTestId('bg-task-empty').textContent ?? '').toContain('No background shells')
   })
 
+  it('waits for Session and Workspace subscriptions before listing shells', async () => {
+    const socket = makeManagedBgListSocket({
+      requestId: 'ignored',
+      workspaceId: 'ws-1',
+      sessionId: 'sess-1',
+      tasks: [],
+    })
+    render(
+      <BackgroundShellsButton
+        socket={socket}
+        workspaceId="ws-1"
+        sessionId="sess-1"
+        fallbackTasks={[]}
+      />,
+    )
+
+    await waitFor(() => expect(socket.events.filter((event) => event === 'client:subscribe_channels')).toHaveLength(2))
+    expect(socket.events).not.toContain('bg:list')
+    socket.acknowledgeSubscriptions()
+
+    await waitFor(() => expect(socket.events).toContain('bg:list'))
+  })
+
   it('surfaces workspace operation errors in the shell panel', async () => {
     render(
       <BackgroundShellsButton
@@ -236,5 +259,59 @@ function makeBgListSocket(result: BgListResult): DashboardSocket & { emitMock: R
       return this
     },
   }
+
   return socket as unknown as DashboardSocket & { emitMock: ReturnType<typeof vi.fn> }
+}
+
+function makeManagedBgListSocket(result: BgListResult): DashboardSocket & {
+  events: string[]
+  acknowledgeSubscriptions(): void
+} {
+  const handlers = new Map<string, Set<(...args: unknown[]) => void>>()
+  const subscriptionAcks: Array<() => void> = []
+  const socket = {
+    io: {},
+    connected: true,
+    events: [] as string[],
+    acknowledgeSubscriptions() {
+      for (const acknowledge of subscriptionAcks.splice(0)) acknowledge()
+    },
+    on(event: string, handler: (...args: unknown[]) => void) {
+      const eventHandlers = handlers.get(event) ?? new Set()
+      eventHandlers.add(handler)
+      handlers.set(event, eventHandlers)
+      return this
+    },
+    off(event: string, handler: (...args: unknown[]) => void) {
+      handlers.get(event)?.delete(handler)
+      return this
+    },
+    emit(event: string, payload: any, ack?: (value: any) => void) {
+      this.events.push(event)
+      if (event === 'client:subscribe_channels') {
+        subscriptionAcks.push(() => ack?.({
+          requestId: payload.requestId,
+          generation: payload.generation,
+          accepted: payload.channels,
+          rejected: [],
+          cursors: {},
+        }))
+      }
+      if (event === 'client:unsubscribe_channels') {
+        ack?.({
+          requestId: payload.requestId,
+          generation: payload.generation,
+          accepted: payload.channels,
+          rejected: [],
+          cursors: {},
+        })
+      }
+      if (event === 'bg:list') ack?.(result)
+      return this
+    },
+  }
+  return socket as unknown as DashboardSocket & {
+    events: string[]
+    acknowledgeSubscriptions(): void
+  }
 }

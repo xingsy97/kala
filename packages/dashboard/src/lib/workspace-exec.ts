@@ -43,13 +43,9 @@ async function ensureWorkspaceSubscription(socket: WorkspaceSocket, workspaceId:
   // subscriptions; production Socket.IO sockets always provide on/off.
   if (typeof socket.on !== 'function' || typeof socket.off !== 'function' || !('io' in socket)) return () => {}
   const manager = dashboardConnectionManager(socket)
-  const release = manager.acquire(`workspace:${workspaceId}`)
-  const deadline = Date.now() + 1_500
-  while (Date.now() < deadline) {
-    const state = manager.snapshot().get(`workspace:${workspaceId}`)?.state
-    if (state === 'active' || state === 'rejected') break
-    await new Promise((resolve) => window.setTimeout(resolve, 10))
-  }
+  const channel = `workspace:${workspaceId}` as const
+  const release = manager.acquire(channel)
+  await manager.waitUntilActive(channel, 1_500)
   return release
 }
 

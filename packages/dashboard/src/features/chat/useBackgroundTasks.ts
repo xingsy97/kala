@@ -26,6 +26,7 @@ import type {
 } from '@agent-kernel/shared'
 
 import type { DashboardSocket } from '../../session.js'
+import { dashboardConnectionManager } from '../../session.js'
 
 export type LiveBackgroundTask = BackgroundTaskSummary & {
   /** Tail of stdout+stderr held on the client (may be less than bytesLogged when the ring buffer wrapped). */
@@ -93,32 +94,57 @@ export function useBackgroundTasks({
     let cancelled = false
     setError(null)
 
-    // Baseline: fetch the full list once the workspace binding is known.
-    socket.emit(
-      'bg:list',
-      { requestId: requestId(), workspaceId, sessionId },
-      (result) => {
+    const isManagedSocket = typeof socket.on === 'function'
+      && typeof socket.off === 'function'
+      && 'io' in socket
+    const manager = isManagedSocket ? dashboardConnectionManager(socket) : null
+    const sessionChannel = `session:${sessionId}` as const
+    const workspaceChannel = `workspace:${workspaceId}` as const
+    const releaseSession = manager?.acquire(sessionChannel)
+    const releaseWorkspace = manager?.acquire(workspaceChannel)
+
+    const loadTasks = async (): Promise<void> => {
+      if (manager) {
+        const [sessionActive, workspaceActive] = await Promise.all([
+          manager.waitUntilActive(sessionChannel),
+          manager.waitUntilActive(workspaceChannel),
+        ])
         if (cancelled) return
-        if (result.error || !result.tasks) {
-          setError(result.error ?? 'Unable to load background shells.')
+        if (!sessionActive || !workspaceActive) {
+          setError('Unable to subscribe to this workspace session.')
           return
         }
-        setError(null)
-        setTasks((prev) => {
-          const next = new Map<string, LiveBackgroundTask>()
-          for (const summary of result.tasks) {
-            const existing = prev.get(summary.taskId)
-            next.set(summary.taskId, {
-              ...summary,
-              output: existing?.output ?? '',
-              nextOffset: existing?.nextOffset ?? 0,
-              killing: existing?.killing ?? false,
-            })
+      }
+      socket.emit(
+        'bg:list',
+        { requestId: requestId(), workspaceId, sessionId },
+        (result) => {
+          if (cancelled) return
+          if (result.error || !result.tasks) {
+            setError(result.error ?? 'Unable to load background shells.')
+            return
           }
-          return next
-        })
-      },
-    )
+          setError(null)
+          setTasks((prev) => {
+            const next = new Map<string, LiveBackgroundTask>()
+            for (const summary of result.tasks) {
+              const existing = prev.get(summary.taskId)
+              next.set(summary.taskId, {
+                ...summary,
+                output: existing?.output ?? '',
+                nextOffset: existing?.nextOffset ?? 0,
+                killing: existing?.killing ?? false,
+              })
+            }
+            return next
+          })
+        },
+      )
+    }
+
+    void loadTasks()
+    const onConnect = (): void => { void loadTasks() }
+    socket.on('connect', onConnect)
 
     const onUpdate = (payload: ServerBgTaskUpdated): void => {
       if (payload.workspaceId !== workspaceId || payload.sessionId !== sessionId) return
@@ -171,6 +197,9 @@ export function useBackgroundTasks({
 
     return () => {
       cancelled = true
+      releaseSession?.()
+      releaseWorkspace?.()
+      socket.off('connect', onConnect)
       socket.off('server:control_update', onControlUpdate)
     }
   }, [socket, workspaceId, sessionId, setTask])

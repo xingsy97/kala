@@ -20,6 +20,7 @@ export class DashboardConnectionManager {
     if (current) {
       current.refs += 1
       if (cursor !== undefined) current.cursor = Math.max(current.cursor ?? 0, cursor)
+      if (this.socket.connected && current.state === 'desired') void this.subscribe([channel], false)
     } else {
       this.channels.set(channel, { refs: 1, generation: 0, ...(cursor !== undefined ? { cursor } : {}), state: 'desired' })
       if (this.socket.connected) void this.subscribe([channel], false)
@@ -33,6 +34,17 @@ export class DashboardConnectionManager {
       this.channels.delete(channel)
       if (this.socket.connected) this.unsubscribe([channel])
     }
+  }
+
+  async waitUntilActive(channel: DashboardChannel, timeoutMs = 5_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const state = this.channels.get(channel)?.state
+      if (state === 'active') return true
+      if (state === 'rejected' || state === undefined) return false
+      await new Promise((resolve) => window.setTimeout(resolve, 10))
+    }
+    return this.channels.get(channel)?.state === 'active'
   }
 
   setCursor(channel: DashboardChannel, cursor: number): void {

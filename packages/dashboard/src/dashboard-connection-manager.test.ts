@@ -67,4 +67,30 @@ describe('DashboardConnectionManager', () => {
     captured?.({ requestId: 'old', generation: 1, accepted: ['session:s1'], rejected: [], cursors: {} })
     expect(manager.snapshot().has('session:s1')).toBe(false)
   })
+
+  it('waits until a channel subscription is active', async () => {
+    const socket = new SocketMock()
+    let acknowledge: (() => void) | undefined
+    socket.emit = function (event: string, payload: any, ack?: (value: any) => void) {
+      this.emits.push({ event, payload })
+      if (event === 'client:subscribe_channels') {
+        acknowledge = () => ack?.({
+          requestId: payload.requestId,
+          generation: payload.generation,
+          accepted: payload.channels,
+          rejected: [],
+          cursors: {},
+        })
+      }
+      return this
+    }
+    const manager = new DashboardConnectionManager(socket as never)
+    const release = manager.acquire('session:s1')
+    const ready = manager.waitUntilActive('session:s1')
+
+    expect(manager.snapshot().get('session:s1')?.state).toBe('subscribing')
+    acknowledge?.()
+    await expect(ready).resolves.toBe(true)
+    release()
+  })
 })
