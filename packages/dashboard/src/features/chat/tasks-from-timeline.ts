@@ -1,3 +1,4 @@
+import type { Message } from '@agent-kernel/kernel'
 import type { TimelineEntry } from '../../session.js'
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
@@ -29,6 +30,25 @@ export function tasksFromTimeline(timeline: readonly TimelineEntry[]): readonly 
     current = parseTasksFromInput(input, current)
   }
 
+  return current
+}
+
+export function tasksFromMessages(
+  messages: readonly Message[],
+  fallback: readonly TaskItem[] = [],
+): readonly TaskItem[] {
+  const inputsByCallId = new Map<string, Record<string, unknown>>()
+  let current = fallback
+  for (const message of messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call' && content.name === 'todowrite') {
+        inputsByCallId.set(content.callId, content.input)
+      }
+      if (content.type !== 'tool_result' || !content.ok) continue
+      const input = inputsByCallId.get(content.callId)
+      if (input) current = parseTasksFromInput(input, current)
+    }
+  }
   return current
 }
 

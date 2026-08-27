@@ -69,7 +69,7 @@ import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDial
 import { ExecutorPairingPrompt } from './features/explorer/ExecutorPairingPrompt.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
 import { TasksButton } from './features/chat/TasksButton.js'
-import { tasksFromTimeline } from './features/chat/tasks-from-timeline.js'
+import { tasksFromMessages, tasksFromTimeline } from './features/chat/tasks-from-timeline.js'
 import { taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
 import { TaskGraphButton } from './features/chat/TaskGraphButton.js'
 import { Explorer, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
@@ -1219,7 +1219,10 @@ export function App(): JSX.Element {
     () => backgroundTerminalTasks(session.timeline),
     [session.timeline],
   )
-  const taskItems = useMemo(() => tasksFromTimeline(session.timeline), [session.timeline])
+  const taskItems = useMemo(
+    () => tasksFromMessages(session.state?.messages ?? [], tasksFromTimeline(session.timeline)),
+    [session.state?.messages, session.timeline],
+  )
   const agentProgress = useMemo(() => deriveAgentProgress(session.state, session.timeline), [session.state, session.timeline])
   const taskGraph = useMemo(() => taskGraphFromTimeline(session.timeline), [session.timeline])
   useRunningTitleIndicator(selectedSessionActivity.derived.isRunning)

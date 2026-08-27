@@ -129,6 +129,7 @@ export function NewSessionDialog({
   }
 
   const initialPath = selectedWorkspace ? initialPathFor(selectedWorkspace) : undefined
+  const scopedWorkspace = initialWorkspaceId !== undefined && selectedWorkspace !== undefined
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !submitting) onCancel() }}>
@@ -185,8 +186,13 @@ export function NewSessionDialog({
             })}
           </div>
         </section>
-        <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
-          <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r md:bg-muted">
+        <div className={cn(
+          'grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden',
+          scopedWorkspace
+            ? 'grid-rows-1'
+            : 'grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1',
+        )}>
+          {!scopedWorkspace ? <aside data-testid="new-session-workspace-list" className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r md:bg-muted">
             <div className="px-2 pt-2 max-md:hidden">
               <button
                 type="button"
@@ -242,8 +248,14 @@ export function NewSessionDialog({
                 ))}
               </div>
             </ScrollArea>
-          </aside>
+          </aside> : null}
           <main className="flex min-h-0 min-w-0 overflow-hidden flex-col">
+            {scopedWorkspace && selectedWorkspace ? (
+              <div className="border-b border-border/50 bg-muted/30 px-3 py-2" data-testid="new-session-scoped-workspace">
+                <div className="truncate font-mono text-sm font-medium">{selectedWorkspace.workspaceName}</div>
+                <div className="truncate font-mono text-[11px] text-muted-foreground">{workspaceMeta(selectedWorkspace)}</div>
+              </div>
+            ) : null}
             <label
               className="border-b border-border/50 px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground"
               htmlFor="new-session-cwd"

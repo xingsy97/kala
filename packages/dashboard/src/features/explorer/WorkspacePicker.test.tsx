@@ -32,10 +32,14 @@ type Handler = (payload: DirListResult) => void
 function makeSocket(): {
   socket: { on: ReturnType<typeof vi.fn>; off: ReturnType<typeof vi.fn>; emit: ReturnType<typeof vi.fn> }
   emitDirList(payload: DirListResult): void
+  ackDirList(payload: DirListResult): void
   lastDirRequest(): { requestId: string; workspaceId: string; path?: string }
 } {
   let handler: Handler | null = null
-  const emit = vi.fn()
+  let ack: Handler | null = null
+  const emit = vi.fn((event: string, _payload: unknown, callback?: Handler) => {
+    if (event === 'client:list_dirs') ack = callback ?? null
+  })
   return {
     socket: {
       on: vi.fn((event: string, cb: Handler) => {
@@ -48,6 +52,9 @@ function makeSocket(): {
     },
     emitDirList(payload) {
       handler?.(payload)
+    },
+    ackDirList(payload) {
+      ack?.(payload)
     },
     lastDirRequest() {
       const calls = emit.mock.calls.filter(([event]) => event === 'client:list_dirs')
@@ -140,6 +147,7 @@ describe('NewSessionDialog', () => {
       expect(harness.socket.emit).toHaveBeenCalledWith(
         'client:list_dirs',
         expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+        expect.any(Function),
       )
     })
 
@@ -158,6 +166,7 @@ describe('NewSessionDialog', () => {
     expect(harness.socket.emit).toHaveBeenLastCalledWith(
       'client:list_dirs',
       expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
+      expect.any(Function),
     )
 
     act(() => {
@@ -222,6 +231,7 @@ describe('NewSessionDialog', () => {
     expect(harness.socket.emit).toHaveBeenLastCalledWith(
       'client:list_dirs',
       expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
+      expect.any(Function),
     )
   })
 
@@ -377,9 +387,38 @@ describe('NewSessionDialog', () => {
       expect(harness.socket.emit).toHaveBeenCalledWith(
         'client:list_dirs',
         expect.objectContaining({ workspaceId: 'ws-b', path: '/work/project' }),
+        expect.any(Function),
       )
     })
     expect(screen.getByDisplayValue('/work/project')).toBeTruthy()
+    expect(screen.queryByTestId('new-session-workspace-list')).toBeNull()
+    expect(screen.getByTestId('new-session-scoped-workspace').textContent).toContain('linux-box')
+  })
+
+  it('accepts a request-level directory acknowledgement without a broadcast event', async () => {
+    const harness = makeSocket()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        socket={harness.socket as never}
+        onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    await waitFor(() => expect(harness.lastDirRequest()).toBeTruthy())
+    const request = harness.lastDirRequest()
+    act(() => harness.ackDirList({
+      requestId: request.requestId,
+      workspaceId: request.workspaceId,
+      path: '/tmp/root',
+      roots: ['/tmp/root'],
+      entries: [{ name: 'project', path: '/tmp/root/project', type: 'directory' }],
+    }))
+
+    expect(await screen.findByText('project')).toBeTruthy()
   })
 
   it('keeps a requested workspace missing instead of silently switching targets', () => {
@@ -460,6 +499,7 @@ describe('NewSessionDialog', () => {
       expect(harness.socket.emit).toHaveBeenCalledWith(
         'client:list_dirs',
         expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+        expect.any(Function),
       )
     })
     const initialRequest = harness.lastDirRequest()
@@ -507,6 +547,7 @@ describe('NewSessionDialog', () => {
       expect(harness.socket.emit).toHaveBeenCalledWith(
         'client:list_dirs',
         expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+        expect.any(Function),
       )
     })
 
@@ -551,6 +592,7 @@ describe('NewSessionDialog', () => {
     expect(harness.socket.emit).toHaveBeenLastCalledWith(
       'client:list_dirs',
       expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
+      expect.any(Function),
     )
     expect(screen.getByDisplayValue('/tmp/root/project')).toBeTruthy()
 
@@ -558,6 +600,7 @@ describe('NewSessionDialog', () => {
     expect(harness.socket.emit).toHaveBeenLastCalledWith(
       'client:list_dirs',
       expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+      expect.any(Function),
     )
     // At the workspace root the up button should be disabled.
     expect((screen.getByTestId('dir-picker-up') as HTMLButtonElement).disabled).toBe(true)
@@ -602,6 +645,7 @@ describe('NewSessionDialog', () => {
       expect(harness.socket.emit).toHaveBeenLastCalledWith(
         'client:list_dirs',
         expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/typed' }),
+        expect.any(Function),
       )
     } finally {
       vi.useRealTimers()
@@ -625,6 +669,7 @@ describe('NewSessionDialog', () => {
       expect(harness.socket.emit).toHaveBeenCalledWith(
         'client:list_dirs',
         expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+        expect.any(Function),
       )
     })
 
@@ -669,6 +714,7 @@ describe('NewSessionDialog', () => {
     expect(harness.socket.emit).toHaveBeenLastCalledWith(
       'client:list_dirs',
       expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
+      expect.any(Function),
     )
   })
 

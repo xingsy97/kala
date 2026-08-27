@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TimelineEntry } from '../../session.js'
-import { parseTasksFromInput, tasksFromTimeline } from './tasks-from-timeline.js'
+import { parseTasksFromInput, tasksFromMessages, tasksFromTimeline } from './tasks-from-timeline.js'
 
 describe('tasksFromTimeline', () => {
   it('derives the latest successful todowrite list from ordinary tool calls', () => {
@@ -63,6 +63,37 @@ describe('tasksFromTimeline', () => {
     expect(tasksFromTimeline(timeline)).toEqual([{ content: 'Keep', status: 'pending' }])
     expect(parseTasksFromInput({ todos: [{ content: '', status: 'pending' }, { content: 'Ok', status: 'completed' }] })).toEqual([
       { content: 'Ok', status: 'completed' },
+    ])
+  })
+
+  it('derives Copilot todo state from projected tool messages', () => {
+    expect(tasksFromMessages([
+      {
+        role: 'assistant',
+        content: [{
+          type: 'tool_call',
+          callId: 'copilot-todo-1',
+          name: 'todowrite',
+          input: {
+            todos: [
+              { content: 'Inspect runtime', status: 'completed' },
+              { content: 'Deploy fix', status: 'in_progress', priority: 'high' },
+            ],
+          },
+        }],
+      },
+      {
+        role: 'tool',
+        content: [{
+          type: 'tool_result',
+          callId: 'copilot-todo-1',
+          ok: true,
+          content: 'todos updated',
+        }],
+      },
+    ])).toEqual([
+      { content: 'Inspect runtime', status: 'completed' },
+      { content: 'Deploy fix', status: 'in_progress', priority: 'high' },
     ])
   })
 })
