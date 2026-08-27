@@ -76,6 +76,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   dashboardLanguage: { key: 'ak-dashboard-language', type: 'string', defaultValue: 'en' },
   hostEndpoint: { key: 'agent-kernel:host-endpoint', type: 'string', defaultValue: '' },
   model: { key: 'ak-model', type: 'string', defaultValue: '' },
+  agentRuntime: { key: 'ak-agent-runtime', type: 'string', defaultValue: 'kernel' },
   composerMode: { key: 'ak-composer-mode', type: 'string', defaultValue: 'full' },
   composerSendModePrefix: { key: 'agent-kernel:composer:send-mode:', type: 'string', defaultValue: '' },
   composerDraftPrefix: { key: 'agent-kernel:composer:draft:', type: 'string', defaultValue: '' },
@@ -127,6 +128,14 @@ export function readBooleanPref(key: string, defaultValue: boolean): boolean {
   const raw = readRaw(key)
   if (raw === null) return defaultValue
   return raw === '1' || raw === 'true'
+}
+
+export function readStringPref(key: string, defaultValue: string): string {
+  return readRaw(key) ?? defaultValue
+}
+
+export function writeStringPref(key: string, value: string): void {
+  writeRaw(key, value)
 }
 
 export function useBooleanPref(
@@ -240,6 +249,7 @@ export const PREF_APP_BADGE_ENABLED = DASHBOARD_PREFERENCES.appBadgeEnabled.key
 export const PREF_KEEP_SCREEN_AWAKE = DASHBOARD_PREFERENCES.keepScreenAwake.key
 export const PREF_SMOOTH_STREAMING_TEXT = DASHBOARD_PREFERENCES.smoothStreamingText.key
 export const PREF_MODEL = DASHBOARD_PREFERENCES.model.key
+export const PREF_AGENT_RUNTIME = DASHBOARD_PREFERENCES.agentRuntime.key
 export const PREF_HOST_ENDPOINT = DASHBOARD_PREFERENCES.hostEndpoint.key
 export const PREF_THEME = DASHBOARD_PREFERENCES.theme.key
 export const PREF_VSCODE_THEME = DASHBOARD_PREFERENCES.vscodeTheme.key

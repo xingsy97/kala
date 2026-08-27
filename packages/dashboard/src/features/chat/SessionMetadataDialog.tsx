@@ -85,6 +85,11 @@ export function SessionMetadataDialog({
   const initialCwd = state?.cwd ?? summary?.currentCwd ?? ''
   const approvalMode = state?.approvalMode ?? 'auto'
   const toolCardMode = summary?.preferences?.toolCardMode ?? 'dots'
+  const agentRuntime = summary?.agentRuntime ?? 'kernel'
+  const agentRuntimeLabel = agentRuntime === 'copilot'
+    ? 'GitHub Copilot SDK'
+    : 'Agent Kernel'
+  const agentRuntimeDisplay = `${agentRuntimeLabel} (${agentRuntime})${summary?.agentRuntimeVersion ? ` · v${summary.agentRuntimeVersion}` : ''}`
 
   const [labelDraft, setLabelDraft] = useState(initialLabel)
   const [approvalDraft, setApprovalDraft] = useState<ApprovalMode>(approvalMode)
@@ -137,7 +142,8 @@ export function SessionMetadataDialog({
           <ReadOnlyRow label={t('dialogs.sessionId')} value={sessionId} mono />
           <ReadOnlyRow
             label={t('dialogs.agentRuntime')}
-            value={summary?.agentRuntime === 'copilot' ? 'GitHub Copilot' : 'Agent RunLab'}
+            value={agentRuntimeDisplay}
+            testId="session-metadata-agent-runtime"
           />
           {summary?.parentSessionId ? (
             <ReadOnlyRow
@@ -294,10 +300,12 @@ function ReadOnlyRow({
   label,
   value,
   mono = false,
+  testId,
 }: {
   label: string
   value: string
   mono?: boolean
+  testId?: string
 }): JSX.Element {
   return (
     <div className="flex items-baseline justify-between gap-4">
@@ -305,6 +313,7 @@ function ReadOnlyRow({
         {label}
       </span>
       <span
+        data-testid={testId}
         className={
           mono
             ? 'font-mono text-xs text-foreground truncate max-w-[65%]'

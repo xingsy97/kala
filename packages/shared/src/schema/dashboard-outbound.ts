@@ -458,6 +458,7 @@ export const ServerMessageQueueEventSchema = z.object({
 export const SessionSummarySchema = z.object({
   sessionId: z.string(),
   agentRuntime: z.enum(['kernel', 'copilot']),
+  agentRuntimeVersion: z.string().optional(),
   createdAt: z.string(),
   lastEventAt: z.string().optional(),
   eventCount: z.number().int().nonnegative(),

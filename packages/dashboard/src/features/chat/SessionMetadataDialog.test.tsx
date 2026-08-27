@@ -60,6 +60,7 @@ const baseState: AgentState = {
 
 const baseSummary: SessionSummary = {
   sessionId: '01JXXXXXXXXXXXXXXXXXXXXX',
+  agentRuntime: 'kernel',
   createdAt: '2026-07-01T00:00:00.000Z',
   lastEventAt: '2026-07-05T00:00:00.000Z',
   eventCount: 12,
@@ -129,6 +130,27 @@ describe('SessionMetadataDialog', () => {
     expect(screen.getByTestId('session-metadata-body').className).toContain('overflow-y-auto')
     expect(screen.getByTestId('session-metadata-footer').className).toContain('border-t')
     expect(screen.getByTestId('session-metadata-label').className).toContain('text-base')
+  })
+
+  it('shows the persisted agent runtime identity and version', () => {
+    render(
+      <SessionMetadataDialog
+        open
+        onOpenChange={() => {}}
+        sessionId={baseSummary.sessionId}
+        summary={{ ...baseSummary, agentRuntime: 'copilot', agentRuntimeVersion: '1.0.11' }}
+        state={baseState}
+        selectedModel={null}
+        onRename={() => {}}
+        onOpenChangeCwdDialog={() => {}}
+        onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('session-metadata-agent-runtime').textContent).toBe(
+      'GitHub Copilot SDK (copilot) · v1.0.11',
+    )
   })
 
   it('shows the current cwd as a read-only display next to a Change trigger', () => {

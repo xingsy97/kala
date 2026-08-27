@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { KERNEL_AGENT_RUNTIME_CAPABILITIES, type AttachedExecutor, type DirListResult } from '@agent-kernel/shared'
 
@@ -57,6 +57,10 @@ function makeSocket(): {
 }
 
 describe('NewSessionDialog', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
   it('renders nothing when closed', () => {
     const { container } = render(
       <NewSessionDialog
@@ -285,11 +289,46 @@ describe('NewSessionDialog', () => {
     expect(copilot.getAttribute('role')).toBe('radio')
     fireEvent.click(copilot)
     expect(copilot.getAttribute('aria-checked')).toBe('true')
+    expect(localStorage.getItem('ak-agent-runtime')).toBe('copilot')
 
     fireEvent.click(screen.getByTestId('new-session-create'))
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       agentRuntime: 'copilot',
     }))
+  })
+
+  it('defaults to the last available runtime selected by the user', () => {
+    localStorage.setItem('ak-agent-runtime', 'copilot')
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        agentRuntimes={[
+          {
+            id: 'kernel',
+            label: 'Agent RunLab',
+            description: 'RunLab kernel',
+            available: true,
+            status: 'ready',
+            capabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
+          },
+          {
+            id: 'copilot',
+            label: 'GitHub Copilot',
+            description: 'Official Copilot SDK',
+            available: true,
+            status: 'ready',
+            capabilities: { ...KERNEL_AGENT_RUNTIME_CAPABILITIES, queue: false },
+          },
+        ]}
+        socket={makeSocket().socket as never}
+        onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('new-session-runtime-copilot').getAttribute('aria-checked')).toBe('true')
   })
 
   it('shows create errors and blocks duplicate submit while creating', () => {

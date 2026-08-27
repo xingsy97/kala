@@ -40,6 +40,10 @@ describe('SessionStore.ensure', () => {
       externalSessionId: 'copilot-session',
       config,
     })
+    expect((await store.listSummaries())[0]).toMatchObject({
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+    })
     const projected = {
       ...record.state,
       cursor: 1,

@@ -980,6 +980,7 @@ function summarizeRecord(record: SessionRecord): SessionSummary {
   return {
     sessionId: record.sessionId,
     agentRuntime: record.agentRuntime,
+    ...(record.agentRuntimeVersion ? { agentRuntimeVersion: record.agentRuntimeVersion } : {}),
     createdAt: record.createdAt,
     eventCount: record.state.cursor,
     ...(record.lastEventAt ? { lastEventAt: record.lastEventAt } : {}),

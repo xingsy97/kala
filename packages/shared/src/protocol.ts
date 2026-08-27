@@ -1272,6 +1272,7 @@ export type ClientListSessions = Record<string, never>
 export type SessionSummary = {
   sessionId: string
   agentRuntime: AgentRuntimeId
+  agentRuntimeVersion?: string
   createdAt: string
   lastEventAt?: string
   eventCount: number

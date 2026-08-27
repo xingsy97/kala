@@ -19,6 +19,7 @@ import {
 } from '../../components/ui/dialog.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
+import { PREF_AGENT_RUNTIME, readStringPref, writeStringPref } from '../../lib/prefs.js'
 import type { DashboardSocket } from '../../session.js'
 import { DirectoryPicker } from './DirectoryPicker.js'
 
@@ -77,7 +78,9 @@ export function NewSessionDialog({
     }
     if (initializedOpenRef.current) return
     initializedOpenRef.current = true
-    const preferredRuntime = agentRuntimes.find((runtime) => runtime.id === 'kernel' && runtime.available)
+    const rememberedRuntime = readStringPref(PREF_AGENT_RUNTIME, 'kernel')
+    const preferredRuntime = agentRuntimes.find((runtime) => runtime.id === rememberedRuntime && runtime.available)
+      ?? agentRuntimes.find((runtime) => runtime.id === 'kernel' && runtime.available)
       ?? agentRuntimes.find((runtime) => runtime.available)
     setAgentRuntime(preferredRuntime?.id ?? 'kernel')
     if (initialWorkspaceId) {
@@ -108,6 +111,11 @@ export function NewSessionDialog({
     setWorkspaceId(id)
     setMissingWorkspaceId(workspace ? null : id)
     setCwd(workspace ? initialPathFor(workspace) : '')
+  }
+
+  const selectAgentRuntime = (runtime: AgentRuntimeId): void => {
+    setAgentRuntime(runtime)
+    writeStringPref(PREF_AGENT_RUNTIME, runtime)
   }
 
   const create = (): void => {
@@ -148,7 +156,7 @@ export function NewSessionDialog({
                   role="radio"
                   aria-checked={selected}
                   disabled={submitting || !runtime.available}
-                  onClick={() => setAgentRuntime(runtime.id)}
+                  onClick={() => selectAgentRuntime(runtime.id)}
                   data-testid={`new-session-runtime-${runtime.id}`}
                   className={cn(
                     'relative flex min-h-14 min-w-0 items-center gap-2 rounded-lg border p-2 text-left transition-colors sm:min-h-16 sm:items-start sm:gap-3 sm:p-3',

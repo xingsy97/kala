@@ -18,6 +18,7 @@ try {
     const page = await browser.newPage()
     await page.setViewport(viewport)
     await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    await page.evaluate(() => localStorage.removeItem('ak-agent-runtime'))
     await openNewSession(page, viewport.name)
     await page.waitForSelector('[data-testid="new-session-runtime-kernel"]')
     await page.waitForSelector('[data-testid="new-session-runtime-copilot"]')
@@ -52,6 +53,23 @@ try {
     for (const [name, rect] of [['finder', result.finder], ['create', result.create]]) {
       if (rect.left < -1 || rect.right > result.viewportWidth + 1) {
         throw new Error(`${viewport.name}: ${name} overflows viewport: ${JSON.stringify(result)}`)
+      }
+    }
+    if (viewport.name === 'desktop') {
+      await page.click('[data-testid="new-session-runtime-copilot"]')
+      const storedRuntime = await page.evaluate(() => localStorage.getItem('ak-agent-runtime'))
+      if (storedRuntime !== 'copilot') {
+        throw new Error(`desktop: runtime preference was not persisted: ${storedRuntime}`)
+      }
+      await page.click('[data-testid="new-session-close"]')
+      await page.waitForSelector('[data-testid="new-session-dialog"]', { hidden: true })
+      await openNewSession(page, viewport.name)
+      const remembered = await page.$eval(
+        '[data-testid="new-session-runtime-copilot"]',
+        (element) => element.getAttribute('aria-checked'),
+      )
+      if (remembered !== 'true') {
+        throw new Error('desktop: persisted Copilot runtime was not restored')
       }
     }
     console.log(JSON.stringify({ viewport: viewport.name, ...result }))

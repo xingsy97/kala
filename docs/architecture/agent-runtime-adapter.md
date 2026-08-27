@@ -197,7 +197,11 @@ Agent runtime selection is a first-class Session creation decision.
 
 The New Session dialog displays available Agent runtimes before creation:
 
-- **Agent RunLab** (`kernel`) is selected by default;
+- **Agent RunLab** (`kernel`) is selected on first use;
+- the Dashboard remembers the user's most recently selected runtime and
+  preselects it for later Session creation when it is available;
+- an unavailable remembered runtime falls back to an available runtime without
+  discarding the preference;
 - **GitHub Copilot** (`copilot`) is shown only when the Host reports it ready;
 - unavailable runtimes remain visible only when an actionable configuration
   message can be shown; otherwise they are omitted;
@@ -211,18 +215,27 @@ boundary.
 
 ### 7.2 Session identity
 
-Session lists and `session:ready` include:
+Session lists include:
 
 ```typescript
 {
   agentRuntime: 'kernel' | 'copilot'
-  agentRuntimeLabel: string
+  agentRuntimeVersion?: string
+}
+```
+
+`session:ready` includes:
+
+```typescript
+{
+  agentRuntime: 'kernel' | 'copilot'
   agentRuntimeCapabilities: AgentRuntimeCapabilities
 }
 ```
 
-Explorer rows and Session metadata show the runtime without replacing the
-Session title or Workspace identity.
+Session metadata shows the human-readable runtime label, stable runtime ID, and
+persisted runtime version without replacing the Session title or Workspace
+identity.
 
 ### 7.3 Capability-driven interaction
 
