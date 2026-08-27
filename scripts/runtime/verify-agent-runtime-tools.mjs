@@ -101,6 +101,15 @@ try {
       workspaceName: executor.workspaceName,
       tools: [testCase.tool],
     }))
+    const readyPromise = onceMatching(
+      socket,
+      'session:ready',
+      (payload) => payload?.sessionId === sessionId,
+      15_000,
+    )
+    socket.emit('subscribe', { sessionId })
+    const ready = await readyPromise
+    states.set(sessionId, ready.state)
     assertAck(await ack(socket, 'client:set_approval_mode', { sessionId, mode: 'allow_all' }))
     const prompt = [
       `Call the ${testCase.tool} tool exactly once before answering.`,

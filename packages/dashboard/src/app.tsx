@@ -924,7 +924,8 @@ export function App(): JSX.Element {
       selectCreatedSession(sessionId)
       setPendingWorkspacePick(null)
     } catch (err) {
-      setWorkspacePickError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setWorkspacePickError(message === 'runtime_not_ready' ? t('dialogs.runtimeTemporarilyReadOnly') : message)
     } finally {
       setWorkspacePickSubmitting(false)
     }
@@ -948,7 +949,8 @@ export function App(): JSX.Element {
       selectCreatedSession(sessionId)
       setPendingWorkspacePick(null)
     } catch (err) {
-      setWorkspacePickError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setWorkspacePickError(message === 'runtime_not_ready' ? t('dialogs.runtimeTemporarilyReadOnly') : message)
     } finally {
       setWorkspacePickSubmitting(false)
     }
