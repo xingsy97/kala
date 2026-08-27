@@ -447,6 +447,16 @@ export function ChatPanel({
           />
         )
       }
+      if (item.kind === 'model_changed') {
+        return (
+          <div
+            className="flex justify-center py-2 text-xs text-muted-foreground"
+            data-testid="model-changed-notice"
+          >
+            Model changed{item.from ? `: ${item.from} → ${item.to}` : ` to ${item.to}`}
+          </div>
+        )
+      }
       if (item.kind === 'pending_user_message') {
         return <PendingUserMessageRow item={item} />
       }

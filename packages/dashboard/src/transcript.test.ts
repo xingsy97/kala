@@ -19,6 +19,21 @@ describe('transcriptTimelineForRuntime', () => {
     expect(transcriptTimelineForRuntime('kernel', timeline)).toBe(timeline)
     expect(transcriptTimelineForRuntime('copilot', timeline)).toEqual([])
   })
+
+  it('renders persisted external Runtime model changes without exposing system prompts', () => {
+    const messages: Message[] = [
+      system,
+      {
+        role: 'system',
+        content: [{ type: 'text', text: 'Model changed: old → new' }],
+        metadata: { kind: 'model_changed', from: 'old', to: 'new' },
+      },
+    ]
+
+    expect(visibleTranscript(messages, [], '')).toEqual([
+      { kind: 'model_changed', from: 'old', to: 'new' },
+    ])
+  })
 })
 
 describe('Turn timing transcript projection', () => {

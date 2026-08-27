@@ -171,6 +171,23 @@ export class CopilotAgentRuntime implements AgentRuntime {
   async setModel(record: SessionRecord, model: string): Promise<void> {
     const session = await this.ensureSession(record)
     await session.setModel(model)
+    const from = record.preferences.selectedModel
+    if (from === model) return
+    await this.project(record, 'copilot.model_changed', {
+      ...(from ? { from } : {}),
+      to: model,
+    }, (state) => ({
+      ...state,
+      messages: [...state.messages, {
+        role: 'system',
+        content: [{ type: 'text', text: `Model changed${from ? `: ${from} → ${model}` : ` to ${model}`}` }],
+        metadata: {
+          kind: 'model_changed',
+          ...(from ? { from } : {}),
+          to: model,
+        },
+      }],
+    }))
   }
 
   async delete(record: SessionRecord): Promise<void> {

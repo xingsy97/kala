@@ -22,6 +22,7 @@ export type CompactBoundary = {
 
 export type TranscriptItem =
   | { kind: 'message'; message: Message; seq?: number; ts?: string; streaming?: boolean; turnTiming?: import('@agent-kernel/shared').TurnTimingSummary }
+  | { kind: 'model_changed'; from?: string; to: string }
   | {
       kind: 'pending_user_message'
       id: string
@@ -266,9 +267,16 @@ export function appendLiveTranscriptItems(
   }
 
   if (timeline.length > 0 || streamingText.length > 0 || pendingUserMessages.length > 0 || queuedMessages.length > 0) return out
-  return stateMessages
-    .filter((m) => m.role !== 'system')
-    .map((message) => ({ kind: 'message', message }))
+  return stateMessages.flatMap((message): TranscriptItem[] => {
+    if (message.metadata?.kind === 'model_changed') {
+      return [{
+        kind: 'model_changed',
+        ...(message.metadata.from ? { from: message.metadata.from } : {}),
+        to: message.metadata.to,
+      }]
+    }
+    return message.role === 'system' ? [] : [{ kind: 'message', message }]
+  })
 }
 
 export function visibleMessages(

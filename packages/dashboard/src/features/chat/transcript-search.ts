@@ -29,7 +29,11 @@ export function searchTranscript(
     if (item.kind === 'message') messageIndex += 1
     const anchor = item.kind === 'message'
       ? item.seq !== undefined ? `seq:${item.seq}` : item.streaming ? 'streaming-assistant' : `message:${rawItemIndex}`
-      : item.kind === 'pending_user_message' ? `pending:${item.id}` : `compact:${item.seq}`
+      : item.kind === 'pending_user_message'
+        ? `pending:${item.id}`
+        : item.kind === 'model_changed'
+          ? `model-changed:${rawItemIndex}`
+          : `compact:${item.seq}`
     for (const part of searchableParts(item)) {
       if (category !== 'all' && part.category !== category) continue
       const haystack = part.text.toLocaleLowerCase()
@@ -60,6 +64,9 @@ export function searchMatchSnippet(match: TranscriptSearchMatch, radius = 42): s
 function searchableParts(item: TranscriptItem): SearchPart[] {
   if (item.kind === 'compact_boundary') return item.summary ? [{ category: 'assistant', text: item.summary }] : []
   if (item.kind === 'pending_user_message') return [{ category: 'user', text: item.text }]
+  if (item.kind === 'model_changed') {
+    return [{ category: 'assistant', text: `Model changed${item.from ? `: ${item.from} → ${item.to}` : ` to ${item.to}`}` }]
+  }
   const role = item.message.role
   const parts: SearchPart[] = []
   for (const content of item.message.content) {

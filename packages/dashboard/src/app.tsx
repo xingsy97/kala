@@ -740,13 +740,22 @@ export function App(): JSX.Element {
 
   const onModelChange = (model: string): void => {
     if (!currentAgentRuntimeCapabilities.modelSelection) return
-    setStoredModel(model)
-    try {
-      localStorage.setItem(PREF_MODEL, model)
-    } catch {}
-    if (session.socket && config.sessionId !== null) {
-      updateSessionPreferences(session.socket, config.sessionId, { selectedModel: model })
+    if (!session.socket || config.sessionId === null) {
+      notify.error('Unable to change model', { description: 'No active Session connection.' })
+      return
     }
+    const selected = availableModels.find((candidate) => candidate.ref === model)
+    void updateSessionPreferences(session.socket, config.sessionId, { selectedModel: model }).then(() => {
+      setStoredModel(model)
+      try {
+        localStorage.setItem(PREF_MODEL, model)
+      } catch {}
+      notify.success(`Model changed to ${selected?.label ?? model}`)
+    }).catch((error) => {
+      notify.error('Unable to change model', {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    })
   }
 
   const onApprovalModeChange = (mode: import('@agent-kernel/kernel').ApprovalMode): void => {

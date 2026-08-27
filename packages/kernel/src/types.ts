@@ -108,6 +108,11 @@ export type MessageContent =
 export type Message = {
   role: Role
   content: MessageContent[]
+  metadata?: {
+    kind: 'model_changed'
+    from?: string
+    to: string
+  }
 }
 
 // ============================================================================

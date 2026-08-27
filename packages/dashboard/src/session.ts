@@ -868,8 +868,8 @@ export function updateSessionPreferences(
   socket: DashboardSocket,
   sessionId: string,
   preferences: import('@agent-kernel/shared').SessionPreferences,
-): void {
-  socket.emit('client:update_preferences', { sessionId, preferences })
+): Promise<void> {
+  return emitRpc(socket, 'client:update_preferences', { sessionId, preferences })
 }
 
 export function setSessionApprovalMode(

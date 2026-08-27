@@ -108,6 +108,41 @@ describe('Copilot runtime custom tools', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('persists a model-change notice only after the SDK accepts the model', async () => {
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: '' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, {
+      enabled: true,
+      sessionsDir: dir,
+    })
+    const record = await store.create({
+      sessionId: 'copilot-model-session',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await store.updatePreferences(record.sessionId, { selectedModel: 'gpt-old' })
+
+    await runtime.start()
+    await runtime.setModel(record, 'gpt-new')
+
+    expect(sdk.setModel).toHaveBeenCalledWith('gpt-new')
+    expect(store.get(record.sessionId)?.state.messages.at(-1)).toMatchObject({
+      role: 'system',
+      metadata: { kind: 'model_changed', from: 'gpt-old', to: 'gpt-new' },
+    })
+
+    sdk.setModel.mockRejectedValueOnce(new Error('model unavailable'))
+    await expect(runtime.setModel(record, 'gpt-broken')).rejects.toThrow('model unavailable')
+    expect(store.get(record.sessionId)?.state.messages).toHaveLength(1)
+  })
+
   it('delegates an SDK custom tool call to the configured runtime dispatcher', async () => {
     const callTool = vi.fn(async () => ({ ok: true, content: 'host tool result' }))
     const tools: ToolDispatcher = {
