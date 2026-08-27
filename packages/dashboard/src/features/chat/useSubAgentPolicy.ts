@@ -49,8 +49,9 @@ type ContentResponse = { body?: unknown }
 export function useSubAgentPolicy(opts: {
   parentSessionId: string
   parentCallId: string
+  enabled?: boolean
 }): SubAgentPolicyView | null {
-  const { parentSessionId, parentCallId } = opts
+  const { parentSessionId, parentCallId, enabled = true } = opts
 
   const query = useQuery({
     queryKey: ['subagent-policy', parentSessionId, parentCallId],
@@ -65,7 +66,7 @@ export function useSubAgentPolicy(opts: {
       if (!raw) return null
       return normalize(raw)
     },
-    enabled: Boolean(parentSessionId) && Boolean(parentCallId),
+    enabled: enabled && Boolean(parentSessionId) && Boolean(parentCallId),
     staleTime: 60_000,
   })
 

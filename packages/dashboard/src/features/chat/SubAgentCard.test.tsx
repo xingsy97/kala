@@ -418,10 +418,8 @@ describe('SubAgentCard', () => {
     }
   })
 
-  it('renders nothing when no policy artifact exists', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ error: 'not found' }), { status: 404 }),
-    )
+  it('does not request a policy artifact when no role was requested', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
     vi.stubGlobal('fetch', fetchMock)
     try {
       const call = makeCall('c2', { prompt: 'noop' })
@@ -434,7 +432,7 @@ describe('SubAgentCard', () => {
           approvalByCallId={new Map()}
         />,
       )
-      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      expect(fetchMock).not.toHaveBeenCalled()
       expect(screen.queryByTestId('sub-agent-policy-c2')).toBeNull()
     } finally {
       vi.unstubAllGlobals()

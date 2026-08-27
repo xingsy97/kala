@@ -20,6 +20,10 @@ const executorMarker = `COPILOT_E2E_EXECUTOR_${runId}`
 const executorFinalMarker = `COPILOT_E2E_EXECUTOR_DONE_${runId}`
 const hostFinalMarker = `COPILOT_E2E_HOST_DONE_${runId}`
 const hostNodeId = `copilot-e2e-host-${runId}`
+const todoMarker = `COPILOT_E2E_TODO_${runId}`
+const todoFinalMarker = `COPILOT_E2E_TODO_DONE_${runId}`
+const childMarker = `COPILOT_E2E_CHILD_${runId}`
+const subAgentFinalMarker = `COPILOT_E2E_SUBAGENT_DONE_${runId}`
 const bootstrapSessionId = `copilot-e2e-bootstrap-${runId}`
 const initialSessionIds = new Set()
 const harness = new ProductE2EHarness({ name: 'copilot-runtime-official-provider-canary' })
@@ -83,6 +87,10 @@ try {
     await actor.page.goto(normalizedOrigin, { waitUntil: 'networkidle2' })
     await actor.page.evaluate(() => localStorage.removeItem('ak-agent-runtime'))
     await openNewSession(actor.page, workspaceId)
+    if (await actor.page.$('[data-testid="new-session-workspace-list"]')) {
+      throw new Error('Workspace-scoped creation still rendered the Workspace selection list')
+    }
+    await actor.page.waitForSelector('[data-testid="finder-column"] button', { visible: true, timeout: 20_000 })
     const runtimeButton = await actor.page.$('[data-testid="new-session-runtime-copilot"]')
     if (!runtimeButton || await runtimeButton.evaluate((element) => element.hasAttribute('disabled'))) {
       throw new Error('Copilot runtime is not selectable in the production Session dialog')
@@ -227,12 +235,61 @@ try {
     }
   })
 
+  await harness.step('project Copilot todowrite state into the Composer task control', async () => {
+    const input = {
+      todos: [
+        { content: todoMarker, status: 'in_progress', priority: 'high' },
+        { content: `verify-${runId}`, status: 'pending', priority: 'medium' },
+      ],
+    }
+    await sendMessage(actor.page, [
+      'Call the todowrite tool exactly once before answering.',
+      `Use exactly this JSON input: ${JSON.stringify(input)}.`,
+      `Do not use any other tool. After success, reply with exactly ${todoFinalMarker}.`,
+    ].join(' '))
+    const state = await waitForState(sessionId, (candidate) => (
+      candidate.status === 'done'
+      && successfulToolResult(candidate, 'todowrite')
+      && assistantText(candidate).includes(todoFinalMarker)
+    ), 180_000)
+    await actor.page.waitForSelector('[data-testid="tasks-button-trigger"]', { visible: true, timeout: 30_000 })
+    await clickByTestId(actor.page, 'tasks-button-trigger')
+    await actor.page.waitForFunction((marker) => document.querySelector('[data-testid="tasks-popover"]')?.textContent?.includes(marker), { timeout: 30_000 }, todoMarker)
+    await actor.page.keyboard.press('Escape')
+    return { status: state.status, cursor: state.cursor, todoTool: toolEvidence(state, 'todowrite') }
+  })
+
+  await harness.step('run a Copilot sub-agent through the inherited Runtime', async () => {
+    await sendMessage(actor.page, [
+      'Call the agent tool exactly once before answering.',
+      `Use exactly this JSON input: ${JSON.stringify({ prompt: `Reply with exactly ${childMarker}. Do not call tools.` })}.`,
+      `After the agent tool succeeds, reply with exactly ${subAgentFinalMarker}.`,
+    ].join(' '))
+    const state = await waitForState(sessionId, (candidate) => (
+      candidate.status === 'done'
+      && successfulToolResult(candidate, 'agent', childMarker)
+      && assistantText(candidate).includes(subAgentFinalMarker)
+    ), 240_000)
+    const child = await waitFor(async () => {
+      const summaries = await responseEvent(socket, 'client:list_sessions', 'server:sessions', {})
+      return summaries.sessions?.find((summary) => summary.parentSessionId === sessionId)
+    }, { timeoutMs: 30_000, name: 'Copilot child Session summary' })
+    if (child.agentRuntime !== 'copilot') {
+      throw new Error(`Copilot sub-agent fell back to ${child.agentRuntime ?? 'kernel'}`)
+    }
+    return {
+      status: state.status,
+      cursor: state.cursor,
+      childSessionId: child.sessionId,
+      childRuntime: child.agentRuntime,
+      agentTool: toolEvidence(state, 'agent'),
+    }
+  })
+
   await harness.step('reload and recover Copilot preference, transcript, and authoritative state', async () => {
     await actor.page.reload({ waitUntil: 'networkidle2' })
     await actor.page.waitForFunction((expected) => new URL(location.href).searchParams.get('sessionId') === expected, {}, sessionId)
     await actor.page.waitForSelector('[data-testid="composer-input"]')
-    await actor.page.waitForFunction((marker) => document.body.innerText.includes(marker), { timeout: 30_000 }, executorFinalMarker)
-    await actor.page.waitForFunction((marker) => document.body.innerText.includes(marker), { timeout: 30_000 }, hostFinalMarker)
     if (await actor.page.evaluate(() => localStorage.getItem('ak-agent-runtime')) !== 'copilot') {
       throw new Error('Copilot Runtime preference was lost after reload')
     }
@@ -243,6 +300,12 @@ try {
     if (persisted.agentRuntime !== 'copilot' || persisted.state?.status !== 'done') {
       throw new Error(`persisted Runtime state is inconsistent: ${JSON.stringify({ runtime: persisted.agentRuntime, status: persisted.state?.status })}`)
     }
+    for (const marker of [executorFinalMarker, hostFinalMarker, todoFinalMarker, subAgentFinalMarker]) {
+      if (!assistantText(persisted.state).includes(marker)) {
+        throw new Error(`persisted Copilot transcript omitted marker: ${marker}`)
+      }
+    }
+    await actor.page.waitForSelector('[data-testid="tasks-button-trigger"]', { visible: true, timeout: 30_000 })
     const reloadedToolUi = await collectVirtualizedToolUi(actor.page)
     if (reloadedToolUi.indicatorCount < 2) {
       throw new Error(`reloaded production transcript omitted Tool UI: ${JSON.stringify({ liveToolUi, reloadedToolUi })}`)

@@ -122,6 +122,7 @@ const SubAgentRow = memo(function SubAgentRow({
   const promptInput = readPrompt(call)
   const agentTypeInput = readAgentType(call)
   const modelInput = readModel(call)
+  const roleInput = readRole(call)
 
   const seededLifecycle: SubAgentLifecycle | undefined = envelope
     ? envelope.status === 'completed' || envelope.status === 'timed_out_with_partial_result'
@@ -151,7 +152,11 @@ const SubAgentRow = memo(function SubAgentRow({
     ...(envelope?.agentType ? { initialAgentType: envelope.agentType } : {}),
   })
 
-  const policy = useSubAgentPolicy({ parentSessionId, parentCallId: call.callId })
+  const policy = useSubAgentPolicy({
+    parentSessionId,
+    parentCallId: call.callId,
+    enabled: roleInput !== undefined,
+  })
 
   const status = view.lifecycle.status
   const runningChildSessionId = view.lifecycle.status === 'running' ? view.lifecycle.childSessionId : null
@@ -469,6 +474,11 @@ function readAgentType(call: ToolCallContent): string | undefined {
 
 function readModel(call: ToolCallContent): string | undefined {
   const raw = (call.input as Record<string, unknown>)['model']
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined
+}
+
+function readRole(call: ToolCallContent): string | undefined {
+  const raw = (call.input as Record<string, unknown>)['role']
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined
 }
 
