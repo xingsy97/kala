@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ProductE2EHarness, clickByTestId, clickElement, clickFirstVisible, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
+import { ProductE2EHarness, clickByTestId, clickElement, clickFirstVisible, hoverAncestorAndClickFirst, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
-const executorAsset = join(root, 'release', 'runlab-executor-linux-x64')
+const executorAsset = join(root, 'release', 'agent-kernel-executor.cjs')
 const port = Number(process.env.PRODUCT_E2E_CORE_PORT ?? 3195)
 const origin = `http://127.0.0.1:${port}`
 const stateRoot = mkdtempSync(join(tmpdir(), 'runlab-e2e-core-state-'))
@@ -94,10 +94,7 @@ try {
   await harness.step('create Session from real online Workspace and select exact ACK id', async () => {
     await actor.page.goto(origin, { waitUntil: 'networkidle2' })
     await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]')
-    await actor.page.evaluate(() => {
-      const button = [...document.querySelectorAll('[data-testid^="workspace-new-session-"]')].find((item) => !item.hasAttribute('disabled'))
-      button?.click()
-    })
+    await hoverAncestorAndClickFirst(actor.page, '[data-testid^="workspace-new-session-"]', '[data-testid="workspace-row"]', { description: 'New Session for online Workspace' })
     await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
     await clickByTestId(actor.page, 'new-session-create')
     await actor.page.waitForFunction(() => new URL(location.href).searchParams.has('sessionId'))
@@ -137,17 +134,9 @@ try {
   await harness.step('resize, kill, restart, and reuse the real PTY', async () => {
     await actor.page.setViewport({ width: 1180, height: 760 })
     await sleep(300)
-    await actor.page.evaluate(() => {
-      const panel = document.querySelector('[data-testid="session-terminal-panel"]')
-      const kill = [...(panel?.querySelectorAll('button') ?? [])].find((button) => /kill|终止/iu.test(button.getAttribute('title') ?? button.getAttribute('aria-label') ?? ''))
-      kill?.click()
-    })
+    await clickFirstVisible(actor.page, '[data-testid="session-terminal-panel"] button[title*="Kill"], [data-testid="session-terminal-panel"] button[aria-label*="Kill"]', { description: 'Kill terminal' })
     await actor.page.waitForFunction(() => /exited|已退出/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
-    await actor.page.evaluate(() => {
-      const panel = document.querySelector('[data-testid="session-terminal-panel"]')
-      const restart = [...(panel?.querySelectorAll('button') ?? [])].find((button) => /restart|重新启动|重启/iu.test(button.getAttribute('title') ?? button.getAttribute('aria-label') ?? ''))
-      restart?.click()
-    })
+    await clickFirstVisible(actor.page, '[data-testid="session-terminal-panel"] button[title*="Restart"], [data-testid="session-terminal-panel"] button[aria-label*="Restart"]', { description: 'Restart terminal' })
     await actor.page.waitForFunction(() => /running|运行/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
     await actor.page.click('.xterm-helper-textarea')
     await actor.page.keyboard.type("printf 'TERMINAL_RESTART_OK\\n'")

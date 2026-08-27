@@ -9,7 +9,7 @@ import { ProductE2EHarness, clickByTestId, hoverAncestorAndClickFirst, runComman
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const dist = join(root, 'packages', 'dashboard', 'dist')
 const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
-const executorAsset = join(root, 'release', 'runlab-executor-linux-x64')
+const executorAsset = join(root, 'release', 'agent-kernel-executor.cjs')
 const port = Number(process.env.PRODUCT_E2E_PWA_PORT ?? 3199)
 const origin = `http://127.0.0.1:${port}`
 const stateRoot = mkdtempSync(join(tmpdir(), 'runlab-e2e-pwa-state-'))

@@ -106,6 +106,7 @@ export class ProductE2EHarness {
     }
     const report = { name: this.name, generatedAt: new Date().toISOString(), steps: this.steps, actors, cleanup, failures: this.failures, ...extra }
     const reportPath = join(this.evidenceRoot, 'report.json')
+    await mkdir(this.evidenceRoot, { recursive: true })
     await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
     return { report, reportPath, evidenceRoot: this.evidenceRoot }
   }
@@ -344,12 +345,11 @@ async function findVisibleElement(elements, predicate) {
 
 async function submitVisibleForm(page, selector) {
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => !button.disabled && /continue|next|sign in/iu.test(button.textContent ?? '')))
-  const clicked = await page.evaluate(() => {
-    const button = [...document.querySelectorAll('button')].find((candidate) => !candidate.disabled && /continue|next|sign in/iu.test(candidate.textContent ?? ''))
-    button?.click()
-    return Boolean(button)
-  })
-  if (!clicked) throw new Error(`missing submit button for: ${selector}`)
+  const buttons = await page.$$('button')
+  const button = await findVisibleElement(buttons, async (candidate) =>
+    await candidate.evaluate((item) =>
+      !item.disabled && /continue|next|sign in/iu.test(item.textContent ?? '')))
+  await clickElement(button, `submit button for ${selector}`)
 }
 
 function safeName(value) { return value.replace(/[^a-zA-Z0-9_-]+/gu, '-') }

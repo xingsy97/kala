@@ -9,7 +9,7 @@ import { ProductE2EHarness, clickByTestId, clickElement, clickFirstVisible, hove
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
-const executorAsset = join(root, 'release', 'runlab-executor-linux-x64')
+const executorAsset = join(root, 'release', 'agent-kernel-executor.cjs')
 const hostPort = Number(process.env.PRODUCT_E2E_AGENT_PORT ?? 3197)
 const providerPort = Number(process.env.PRODUCT_E2E_PROVIDER_PORT ?? 3198)
 const origin = `http://127.0.0.1:${hostPort}`
@@ -61,6 +61,10 @@ const provider = createServer(async (req, res) => {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
   if (latestRequestText.includes('spawn failing subagent')) {
     sendToolResponse(res, 'controlled-agent-fail', 'agent', { prompt: 'Child must fail from provider.', max_turns: 1, _intent: 'Spawn a child whose provider fails to prove failure propagation.' }, 'msg_agent_fail')
+  } else if (latestRequestText.includes('run controlled background shell')) {
+    sendToolResponse(res, 'controlled-background-shell-1', 'shell', { command: "printf 'BACKGROUND_SHELL_E2E_READY\\n'; sleep 60", run_in_background: true, _intent: 'Start a real long-running background shell for Workspace registry verification.' }, 'msg_background_shell')
+  } else if (latestRequestText.includes('controlled-background-shell-1')) {
+    sendTextResponse(res, 'BACKGROUND_SHELL_STARTED', 'msg_background_shell_final')
   } else if (latestRequestText.includes('run controlled write shell test')) {
     sendToolResponse(res, 'matrix-search-1', 'tool_search', { query: 'write_file', limit: 4, _intent: 'Discover the file-writing tool before creating the matrix fixture.' }, 'msg_matrix_search')
   } else if (latestRequestText.includes('matrix-search-1')) {
@@ -303,6 +307,36 @@ try {
     await actor.page.waitForSelector('[data-testid="tool-card-dot-matrix-write-1"]')
     await actor.page.waitForSelector('[data-testid="tool-card-dot-matrix-shell-1"]')
     return { sessionId: matrixSessionId, fileWritten: true, shellAsserted: true }
+  })
+
+  await harness.step('run, inspect, reload, and kill a real background Workspace shell', async () => {
+    const backgroundSessionId = await createSession(actor.page)
+    await setAllowAll(actor.page)
+    await clickByTestId(actor.page, 'composer-input')
+    await actor.page.keyboard.type('run controlled background shell')
+    await clickByTestId(actor.page, 'composer-send')
+    await actor.page.waitForFunction(() => document.body.innerText.includes('BACKGROUND_SHELL_STARTED'), { timeout: 30_000 })
+    await clickByTestId(actor.page, 'background-shells-trigger')
+    await actor.page.waitForSelector('[data-testid^="bg-task-row-"]', { visible: true, timeout: 30_000 })
+    await actor.page.waitForFunction(() => document.body.innerText.includes('BACKGROUND_SHELL_E2E_READY'), { timeout: 30_000 })
+    const taskId = await actor.page.$eval('[data-testid^="bg-task-row-"]', (element) =>
+      element.getAttribute('data-testid')?.replace('bg-task-row-', '') ?? '')
+    if (!taskId) throw new Error('background shell task id is missing')
+    await actor.page.keyboard.press('Escape')
+    await actor.page.waitForSelector('[data-testid="background-terminal-panel"]', { hidden: true })
+    await actor.page.reload({ waitUntil: 'networkidle2' })
+    await actor.page.waitForFunction((expected) => new URL(location.href).searchParams.get('sessionId') === expected, {}, backgroundSessionId)
+    await clickByTestId(actor.page, 'background-shells-trigger')
+    await actor.page.waitForSelector(`[data-testid="bg-task-row-${taskId}"]`, { visible: true, timeout: 30_000 })
+    await actor.page.waitForFunction(() => document.body.innerText.includes('BACKGROUND_SHELL_E2E_READY'), { timeout: 30_000 })
+    await clickByTestId(actor.page, `bg-task-kill-selected-${taskId}`)
+    await actor.page.waitForFunction((expectedTaskId) => {
+      const row = document.querySelector(`[data-testid="bg-task-row-${expectedTaskId}"]`)
+      return /killed|signaled|exited/iu.test(row?.textContent ?? '')
+    }, { timeout: 30_000 }, taskId)
+    await actor.page.keyboard.press('Escape')
+    await actor.page.waitForSelector('[data-testid="background-terminal-panel"]', { hidden: true })
+    return { sessionId: backgroundSessionId, taskId, outputVisible: true, survivedReload: true, killed: true }
   })
 
   await harness.step('surface real sandbox path denial in tool UI', async () => {
