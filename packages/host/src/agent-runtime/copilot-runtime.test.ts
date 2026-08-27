@@ -202,6 +202,61 @@ describe('Copilot runtime custom tools', () => {
     })
   })
 
+  it('registers a live approval before broadcasting its pending state', async () => {
+    const callTool = vi.fn(async () => ({ ok: true, content: 'approved result' }))
+    let runtime!: CopilotAgentRuntime
+    let approvalTriggered = false
+    const record = await store.create({
+      sessionId: 'copilot-live-approval',
+      agentRuntime: 'copilot',
+      config: createConfig({
+        tools: [{
+          name: 'shell',
+          description: 'Run a command',
+          inputSchema: { type: 'object' },
+          requiresApproval: true,
+          executionKind: 'executor',
+          executionHandler: 'shell',
+        }],
+      }),
+    })
+    runtime = new CopilotAgentRuntime({
+      store,
+      tools: { callTool, cancelPending() {} },
+      broadcast: {
+        onState(_record, state) {
+          if (approvalTriggered || state.status !== 'awaiting_approval') return
+          approvalTriggered = true
+          void runtime.approve(record, 'call-live')
+        },
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+
+    await runtime.start()
+    await runtime.send(record, { text: 'Run the command.' })
+    const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'shell')
+    const result = await tool?.handler({ command: 'true' }, { toolCallId: 'call-live' })
+
+    expect(result).toEqual({
+      textResultForLlm: 'approved result',
+      resultType: 'success',
+    })
+    const results = store.get(record.sessionId)?.state.messages
+      .flatMap((message) => message.content)
+      .filter((content) => content.type === 'tool_result' && content.callId === 'call-live')
+    expect(results).toEqual([{
+      type: 'tool_result',
+      callId: 'call-live',
+      ok: true,
+      content: 'approved result',
+    }])
+    expect(callTool).toHaveBeenCalledOnce()
+    await runtime.close()
+  })
+
   it('persists the final assistant response before marking the Session done', async () => {
     const runtime = new CopilotAgentRuntime({
       store,

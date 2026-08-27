@@ -243,11 +243,17 @@ export class CopilotAgentRuntime implements AgentRuntime {
         }
         if (requiresApproval(record.state.approvalMode, schema.requiresApproval)) {
           pending.status = 'awaiting_approval'
-          await this.projectToolCall(record, pending)
-          this.context.broadcast.onApprovalRequired(record.sessionId)
-          const decision = await new Promise<ApprovalDecision>((resolve) => {
+          const decisionPromise = new Promise<ApprovalDecision>((resolve) => {
             this.approvals.set(approvalKey(record.sessionId, pending.callId), { resolve })
           })
+          try {
+            await this.projectToolCall(record, pending)
+            this.context.broadcast.onApprovalRequired(record.sessionId)
+          } catch (error) {
+            this.approvals.delete(approvalKey(record.sessionId, pending.callId))
+            throw error
+          }
+          const decision = await decisionPromise
           if (!decision.approved) {
             await this.projectToolResult(record, pending, false, decision.reason ?? 'rejected by user')
             return toolResult(false, decision.reason ?? 'rejected by user', 'rejected')
