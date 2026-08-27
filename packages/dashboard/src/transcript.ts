@@ -57,6 +57,7 @@ export function reconcilePendingUserMessages(
   queuedMessages: readonly QueuedMessagePreview[],
   status: AgentStatus | undefined,
   streamingText: string,
+  authoritativeMessages: readonly Message[] = [],
 ): readonly PendingUserTranscriptMessage[] {
   if (pendingUserMessages.length === 0) return pendingUserMessages
   const acked = new Map<string, number>()
@@ -66,6 +67,14 @@ export function reconcilePendingUserMessages(
   }
   for (const queued of queuedMessages) {
     incrementPendingAck(acked, pendingMessageKey(queued.text, queued.mode))
+  }
+  for (const message of authoritativeMessages) {
+    if (message.role !== 'user') continue
+    const text = message.content
+      .filter((content) => content.type === 'text')
+      .map((content) => content.text)
+      .join('')
+    incrementPendingAck(acked, pendingMessageKey(text, 'steer'))
   }
 
   const canDropCompleted = isRestingStatus(status) && streamingText.length === 0

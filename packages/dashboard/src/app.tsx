@@ -1161,8 +1161,9 @@ export function App(): JSX.Element {
   // which was saturating the main thread on long sessions and dropping button
   // clicks / freezing the hover cursor while the agent ran.
   const stateMessages = session.state?.messages ?? EMPTY_MESSAGES
+  const currentAgentRuntime = currentSession?.agentRuntime ?? session.agentRuntime
   const transcriptTimeline = transcriptTimelineForRuntime(
-    currentSession?.agentRuntime ?? session.agentRuntime,
+    currentAgentRuntime,
     session.timeline,
   )
   const includeStatePrefix = session.parentSessionId !== null
@@ -1186,8 +1187,15 @@ export function App(): JSX.Element {
     return items
   }, [activeSessionId, stateMessages, transcriptTimeline, includeStatePrefix])
   const visiblePendingUserMessages = useMemo(
-    () => reconcilePendingUserMessages(pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText),
-    [pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText],
+    () => reconcilePendingUserMessages(
+      pendingUserMessages,
+      session.timeline,
+      session.queuedMessages,
+      session.state?.status,
+      session.streamingText,
+      currentAgentRuntime === 'kernel' ? EMPTY_MESSAGES : stateMessages,
+    ),
+    [pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText, currentAgentRuntime, stateMessages],
   )
   const chatItems = useMemo(
     () =>

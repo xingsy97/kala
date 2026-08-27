@@ -53,6 +53,21 @@ describe('appendTranscriptBaseItems', () => {
 })
 
 describe('optimistic to durable message handoff', () => {
+  it('reconciles an external Runtime pending message from authoritative state', () => {
+    const pending = [{
+      id: 'pending-copilot',
+      text: 'run the tool',
+      mode: 'steer' as const,
+      createdAt: '2026-08-27T00:00:00Z',
+    }]
+    const authoritative: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'run the tool' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+    ]
+
+    expect(reconcilePendingUserMessages(pending, [], [], 'done', '', authoritative)).toEqual([])
+  })
+
   it('never renders the same accepted user message in both durable and optimistic rows', () => {
     const timeline: TimelineEntry[] = [{ seq: 1, ts: '2026-01-01T00:00:00Z', event: { kind: 'user_message', text: 'send once' }, effects: [] }]
     const pending = [{ id: 'pending-1', text: 'send once', mode: 'steer' as const, createdAt: '2026-01-01T00:00:00Z' }]
