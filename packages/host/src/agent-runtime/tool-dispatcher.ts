@@ -1,10 +1,12 @@
 import type { HostLoopDeps, LoopHandle, ToolDispatcher } from '../loop-types.js'
 import { dispatchRuntimeTool } from '../loop.js'
+import type { SubAgentRuntimeController } from '../extensions/agent-tool.js'
 
 export function createRuntimeToolDispatcher(
   deps: HostLoopDeps,
   executors: ToolDispatcher,
   loop: LoopHandle,
+  runtimeController?: SubAgentRuntimeController,
 ): ToolDispatcher {
   const aborts = new Map<string, AbortController>()
   const callsBySession = new Map<string, Set<string>>()
@@ -18,7 +20,7 @@ export function createRuntimeToolDispatcher(
       }
       calls.add(effect.callId)
       try {
-        return await dispatchRuntimeTool(deps, sessionId, effect, aborts, turnId, loop)
+        return await dispatchRuntimeTool(deps, sessionId, effect, aborts, turnId, loop, false, runtimeController)
       } finally {
         calls.delete(effect.callId)
         if (calls.size === 0) callsBySession.delete(sessionId)

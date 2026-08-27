@@ -26,6 +26,7 @@ import {
   type SubAgentPolicyInput,
   type SubAgentRole,
 } from '@agent-kernel/shared/enhancement'
+import { ulid } from 'ulid'
 
 import type { SessionRecord, SessionStore } from '../store/session.js'
 import type { HostLoopDeps, LoopHandle, ModelResolver } from '../loop-types.js'
@@ -43,6 +44,12 @@ type ActiveSubAgent = {
   startedAt: Date
   cancelled: boolean
   cancelReason?: string
+  cancelRuntime?: () => Promise<void>
+}
+
+export type SubAgentRuntimeController = {
+  send(record: SessionRecord, text: string, model?: string): Promise<void>
+  cancel(record: SessionRecord): Promise<void>
 }
 
 type TimeoutReason = 'ordinary-idle' | 'tool-idle' | 'absolute-deadline' | 'turn-limit'
@@ -113,7 +120,13 @@ export async function interruptSubAgent(
 ): Promise<{ ok: boolean; childSessionId?: string; error?: string }> {
   const marked = markSubAgentInterrupted(parentSessionId, parentCallId, childSessionId, reason)
   if (!marked.ok) return marked
-  await dispatchOne(deps, marked.childSessionId, { kind: 'cancel' }, aborts)
+  const active = activeSubAgentFor(parentSessionId, parentCallId)
+  if (active?.cancelRuntime) {
+    await interruptSubAgentsForParent(deps, aborts, marked.childSessionId, reason)
+    await active.cancelRuntime()
+  } else {
+    await dispatchOne(deps, marked.childSessionId, { kind: 'cancel' }, aborts)
+  }
   return { ok: true, childSessionId: marked.childSessionId }
 }
 
@@ -150,6 +163,7 @@ export async function runAgentTool(
   effect: CallToolEffect,
   aborts: Map<string, AbortController>,
   loop?: LoopHandle,
+  runtimeController?: SubAgentRuntimeController,
 ): Promise<{ ok: boolean; content: string }> {
   const parent = deps.store.get(parentSessionId)
   if (!parent) return { ok: false, content: 'parent session not found' }
@@ -220,8 +234,13 @@ export async function runAgentTool(
 
   const effectiveTools = pickEffectiveTools(effect.input.tools, policy.allowedTools)
   const startedAt = new Date()
+  const childSessionId = ulid()
   const child = await deps.store.create({
+    sessionId: childSessionId,
     config: filteredAgentConfig(parent.config, effectiveTools),
+    agentRuntime: parent.agentRuntime,
+    ...(parent.agentRuntimeVersion ? { agentRuntimeVersion: parent.agentRuntimeVersion } : {}),
+    ...(parent.agentRuntime !== 'kernel' ? { externalSessionId: childSessionId } : {}),
     parentSessionId,
     parentCursor: parent.state.cursor,
     parentCallId: effect.callId,
@@ -245,6 +264,9 @@ export async function runAgentTool(
     ...(agentType !== undefined ? { agentType } : {}),
     startedAt,
     cancelled: false,
+    ...(parent.agentRuntime !== 'kernel' && runtimeController
+      ? { cancelRuntime: async () => await runtimeController.cancel(child) }
+      : {}),
   }
   activeSubAgents.set(activeKey(parentSessionId, effect.callId), active)
   deps.broadcast.onSubAgentStarted?.({
@@ -306,12 +328,18 @@ export async function runAgentTool(
   try {
     try {
       if (!active.cancelled) {
-        // Join the child to the same Loop actor when available. This preserves
-        // per-Session serialization and lets an idle restart drain observe the
-        // child's terminal transition. Direct dispatchOne() bypassed the Loop's
-        // checkpoint notification channel and could deadlock a deployment.
-        if (loop) await loop.dispatch(child.sessionId, { kind: 'user_message', text: prompt })
-        else await dispatchOne(deps, child.sessionId, { kind: 'user_message', text: prompt }, aborts)
+        if (child.agentRuntime !== 'kernel') {
+          if (!runtimeController) throw new Error(`${child.agentRuntime} sub-agent runtime is unavailable`)
+          await runtimeController.send(child, prompt, model)
+          await waitForExternalSubAgent(deps.store, child.sessionId, active)
+        } else {
+          // Join the child to the same Loop actor when available. This preserves
+          // per-Session serialization and lets an idle restart drain observe the
+          // child's terminal transition. Direct dispatchOne() bypassed the Loop's
+          // checkpoint notification channel and could deadlock a deployment.
+          if (loop) await loop.dispatch(child.sessionId, { kind: 'user_message', text: prompt })
+          else await dispatchOne(deps, child.sessionId, { kind: 'user_message', text: prompt }, aborts)
+        }
       }
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err)
@@ -378,6 +406,18 @@ export async function runAgentTool(
     finishedAt: finishedAt.toISOString(),
   })
   return okEnvelope(child.sessionId, agentType, finalAssistantText(final), turns, durationMs)
+}
+
+async function waitForExternalSubAgent(
+  store: SessionStore,
+  childSessionId: string,
+  active: ActiveSubAgent,
+): Promise<void> {
+  while (!active.cancelled) {
+    const status = store.get(childSessionId)?.state.status
+    if (status === 'done' || status === 'error') return
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
 }
 
 function assistantTurnCount(state: AgentState): number {

@@ -1024,7 +1024,17 @@ export async function startHostServer(
   loop = runHostLoop(loopDeps)
   agentRuntimes = new AgentRuntimeRegistry()
   agentRuntimes.register(new KernelAgentRuntime(loop))
-  const copilotTools = createRuntimeToolDispatcher(loopDeps, executors, loop)
+  const copilotTools = createRuntimeToolDispatcher(loopDeps, executors, loop, {
+    async send(record, text, model) {
+      await agentRuntimes!.require(record.agentRuntime).send(record, {
+        text,
+        ...(model ? { model } : {}),
+      })
+    },
+    async cancel(record) {
+      await agentRuntimes!.require(record.agentRuntime).cancel(record)
+    },
+  })
   const copilotRuntime = new CopilotAgentRuntime({
     store,
     tools: copilotTools,

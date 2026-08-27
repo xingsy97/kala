@@ -45,7 +45,7 @@ import {
 } from '@agent-kernel/shared/enhancement'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
-import { interruptSubAgentsForParent, isCancelledSubAgentChild } from './extensions/agent-tool.js'
+import { interruptSubAgentsForParent, isCancelledSubAgentChild, type SubAgentRuntimeController } from './extensions/agent-tool.js'
 import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
 import { isSkillManager } from './extensions/skills.js'
 import { todoGraphContinuationState } from './extensions/todo-graph.js'
@@ -85,6 +85,7 @@ export async function dispatchRuntimeTool(
   turnId?: string,
   loop?: LoopHandle,
   plannedContinuation = false,
+  runtimeController?: SubAgentRuntimeController,
 ): Promise<ToolExecutionResult> {
   const memoryPolicyBlock = guardMemoryPolicy(deps, sessionId, effect)
   if (memoryPolicyBlock) return { ok: false, content: memoryPolicyBlock }
@@ -100,6 +101,7 @@ export async function dispatchRuntimeTool(
     turnId,
     loop,
     plannedContinuation,
+    runtimeController,
   )
   await runPostToolHooks(deps, sessionId, effect, result)
   return result

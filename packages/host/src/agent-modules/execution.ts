@@ -1,6 +1,6 @@
 import type { CallToolEffect } from '@agent-kernel/kernel'
 
-import { runAgentTool } from '../extensions/agent-tool.js'
+import { runAgentTool, type SubAgentRuntimeController } from '../extensions/agent-tool.js'
 import { isSkillManager, runSkillTool } from '../extensions/skills.js'
 import { runTodoGraphTool } from '../extensions/todo-graph.js'
 import { runToolCatalogTool } from '../extensions/tool-catalog.js'
@@ -22,6 +22,7 @@ export async function dispatchConfiguredTool(
   turnId?: string,
   loop?: LoopHandle,
   plannedContinuation = false,
+  runtimeController?: SubAgentRuntimeController,
 ): Promise<ToolExecutionResult> {
   const record = deps.store.get(sessionId)
   const schema = record?.config.tools.find((tool) => tool.name === effect.name)
@@ -44,7 +45,7 @@ export async function dispatchConfiguredTool(
       }
       return await runWebSearch(effect.input, { credentials: deps.webSearchCredentials, sessionId, callId: effect.callId, audit: deps.audit })
     case 'agent':
-      return await runAgentTool(deps, sessionId, effect, aborts, loop)
+      return await runAgentTool(deps, sessionId, effect, aborts, loop, runtimeController)
     case 'todo_graph':
       return await runTodoGraphTool(deps, sessionId, effect)
     case 'tool_search':

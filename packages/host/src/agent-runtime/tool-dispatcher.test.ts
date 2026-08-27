@@ -107,4 +107,59 @@ describe('runtime tool dispatcher', () => {
       expect.objectContaining({ id: 'runtime-check', status: 'completed' }),
     ])
   })
+
+  it('creates and runs Copilot sub-agents through the parent Runtime', async () => {
+    await store.create({
+      sessionId: 'copilot-parent',
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: 'copilot-parent',
+      config: createConfig({
+        tools: [{
+          name: 'agent',
+          description: 'Spawn a sub-agent',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'agent',
+        }],
+      }),
+    })
+    const send = vi.fn(async (record) => {
+      await store.recordRuntimeProjection(
+        record.sessionId,
+        {
+          ...record.state,
+          cursor: record.state.cursor + 1,
+          status: 'done',
+          messages: [
+            ...record.state.messages,
+            { role: 'assistant', content: [{ type: 'text', text: 'copilot child result' }] },
+          ],
+        },
+        'copilot.assistant_message',
+        {},
+      )
+    })
+    const dispatcher = createRuntimeToolDispatcher(deps, executors, {} as LoopHandle, {
+      send,
+      cancel: vi.fn(),
+    })
+
+    const result = await dispatcher.callTool(
+      'copilot-parent',
+      effect('agent', { prompt: 'delegate through Copilot' }),
+    )
+
+    if (!result.ok) throw new Error(result.content)
+    expect(result.ok).toBe(true)
+    expect(send).toHaveBeenCalledOnce()
+    const child = store.list().find((record) => record.parentSessionId === 'copilot-parent')
+    expect(child).toMatchObject({
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: child?.sessionId,
+    })
+    expect(result.content).toContain('copilot child result')
+  })
 })

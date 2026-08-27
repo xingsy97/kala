@@ -270,6 +270,10 @@ capabilities to enable:
 Unsupported controls are removed or disabled with an explanation. The server
 also rejects unsupported raw protocol requests.
 
+Sub-agent Sessions inherit the parent Session's Runtime identity and version.
+The Host must execute and cancel the child through that Runtime rather than
+silently falling back to the Kernel Loop.
+
 ### 7.4 Transcript projection
 
 Both runtimes render through one transcript vocabulary:
