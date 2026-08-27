@@ -70,6 +70,85 @@ describe('SessionStore.ensure', () => {
     expect(log.runtimeMetadata.at(-1)?.action).toBe('copilot.recovered_interrupted_turn')
   })
 
+  it('recovers a cached Copilot approval after read-only candidate inspection', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-cached-approval',
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      config,
+    })
+    await store.recordRuntimeProjection(record.sessionId, {
+      ...record.state,
+      cursor: record.state.cursor + 1,
+      status: 'awaiting_approval',
+      pendingCalls: [{
+        callId: 'call-restart',
+        name: 'shell',
+        input: { command: 'true' },
+        status: 'awaiting_approval',
+      }],
+      messages: [...record.state.messages, {
+        role: 'assistant',
+        content: [{
+          type: 'tool_call',
+          callId: 'call-restart',
+          name: 'shell',
+          input: { command: 'true' },
+        }],
+      }],
+    }, 'copilot.tool_call', { callId: 'call-restart' })
+
+    const replacement = new SessionStore(dir)
+    const inspected = await replacement.load(record.sessionId, { recoverDangling: false })
+    expect(inspected.state.status).toBe('awaiting_approval')
+
+    const [first, second] = await Promise.all([
+      replacement.load(record.sessionId),
+      replacement.load(record.sessionId),
+    ])
+
+    expect(first).toBe(second)
+    expect(first.state.status).toBe('error')
+    expect(first.state.pendingCalls).toEqual([])
+    expect(first.state.messages.flatMap((message) => message.content)).toContainEqual({
+      type: 'tool_result',
+      callId: 'call-restart',
+      ok: false,
+      content: 'host restarted while call was pending',
+    })
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.runtimeMetadata.filter((entry) => entry.action === 'copilot.recovered_interrupted_turn')).toHaveLength(1)
+  })
+
+  it('quarantines Kernel events written into a Copilot Session', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-kernel-contamination',
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      config,
+    })
+    await appendEventEntry({
+      path: record.logPath,
+      seq: 1,
+      event: { kind: 'user_message', text: 'wrong loop' },
+      effects: [],
+    })
+
+    const replacement = new SessionStore(dir)
+    const inspected = await replacement.load(record.sessionId, { recoverDangling: false })
+    expect(inspected.state.status).toBe('idle')
+
+    const recovered = await replacement.load(record.sessionId)
+
+    expect(recovered.state.status).toBe('error')
+    expect(recovered.state.error).toBe('Non-Kernel Session contained Kernel events and was quarantined')
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.runtimeMetadata.at(-1)?.action).toBe('runtime.quarantined_kernel_events')
+    expect(parsed.snapshots.at(-1)?.state.status).toBe('error')
+  })
+
   it('returns the same record for concurrent callers and writes ONE log file', async () => {
     // The race: dashboard + executor sockets arrive in the same tick, both
     // find no cached record, both fail to load, both call create() with a

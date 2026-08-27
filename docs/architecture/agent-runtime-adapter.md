@@ -151,6 +151,11 @@ Compatibility rules:
 - deleting a RunLab Copilot Session deletes or tombstones the mapped Copilot
   Session according to the configured retention policy.
 
+Ingress admission, durable message queues, Dashboard reconnect hydration, and
+deployment continuation must dispatch through the Session's registered
+`AgentRuntime`. The Kernel Loop fails closed if asked to mutate a non-Kernel
+Session.
+
 Each durable Copilot projection change is appended as a `runtime_metadata`
 record followed by an authoritative `snapshot` at the next cursor. There is
 deliberately no synthetic Kernel `event` entry. `SessionStore.loadFromFile()`

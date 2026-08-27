@@ -419,6 +419,22 @@ export async function startHostServer(
       if (!record) record = await store.load(sessionId, { recoverDangling: false })
       const existingCursor = await sessionUserOperationCursor(store, sessionId, operationId)
       if (existingCursor !== undefined) return { committed: true, cursor: existingCursor }
+      if (record.agentRuntime !== 'kernel') {
+        if (!isRestingStatus(record.state.status)) {
+          throw new Error(`${record.agentRuntime} runtime cannot accept another message while the Session is active`)
+        }
+        const runtime = agentRuntimes?.require(record.agentRuntime)
+        if (!runtime) throw new Error(`agent runtime is not ready: ${record.agentRuntime}`)
+        await runtime.send(record, {
+          text,
+          ...(content ? { content } : {}),
+          operationId,
+        })
+        return {
+          committed: true,
+          cursor: store.get(sessionId)?.state.cursor ?? record.state.cursor,
+        }
+      }
       if (record.state.status === 'thinking' && !loop.hasActiveLlmCall(sessionId)) {
         await loop.recoverInterruptedLlm(sessionId)
         record = store.get(sessionId) ?? record
@@ -686,6 +702,35 @@ export async function startHostServer(
               return
             }
           }
+          if (record.agentRuntime !== 'kernel') {
+            record = await store.load(sessionId)
+            if (!isRestingStatus(record.state.status)) return
+            const next = (await loadQueue(sessionId))[0]
+            if (!next || closed) return
+            const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, next.operationId) !== undefined
+            if (!alreadyDispatched) {
+              const runtime = agentRuntimes?.require(record.agentRuntime)
+              if (!runtime) return
+              await runtime.send(record, {
+                text: next.text,
+                ...(next.content ? { content: next.content } : {}),
+                ...(next.model ? { model: next.model } : {}),
+                operationId: next.operationId,
+                queuedAt: next.createdAt,
+              })
+            }
+            let changed = false
+            await withQueueMutation(sessionId, async () => {
+              if (closed) return
+              const queue = [...await loadQueue(sessionId)]
+              if (queue[0]?.id !== next.id) return
+              queue.shift()
+              await persistQueue(sessionId, queue)
+              changed = true
+            })
+            if (changed && !closed) emitQueueUpdate(sessionId)
+            continue
+          }
           // `state.status` can briefly be `done` while dispatchOne is still
           // unwinding after an LLM/tool effect. Status alone is therefore not a
           // safe queue-drain boundary: dispatching here starts the queued turn
@@ -752,9 +797,14 @@ export async function startHostServer(
     const record = sessionStore.get(sessionId)
     if (!record) return undefined
     const parsed = await readSessionLog(record.logPath)
-    return parsed.events.find((entry) =>
+    const eventCursor = parsed.events.find((entry) =>
       entry.event.kind === 'user_message' && entry.event.operationId === operationId,
     )?.seq
+    if (eventCursor !== undefined) return eventCursor
+    const runtimeOperation = parsed.runtimeMetadata.some((entry) =>
+      entry.payload.operationId === operationId,
+    )
+    return runtimeOperation ? record.state.cursor : undefined
   }
 
   // Coalesce `server:sessions` broadcasts. The loop's onEvent fires once per

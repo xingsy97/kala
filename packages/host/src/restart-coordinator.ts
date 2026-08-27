@@ -215,6 +215,24 @@ export class RestartCoordinator {
         // JSONL is missing, corrupt, or has advanced outside this attempt.
         const record = this.options.store.get(plan.sessionId) ?? await this.options.store.load(plan.sessionId, { recoverDangling: false })
         assertRecoveryCursor(plan, receipt, record.state.cursor)
+        if (record.agentRuntime === 'copilot') {
+          const recovered = await this.options.store.load(plan.sessionId)
+          if ((this.options.queuedMessages?.(plan.sessionId) ?? 0) > 0) {
+            receipts[plan.sessionId] = startedRecoveryReceipt(receipt)
+            persist()
+            await this.options.drainQueue?.(plan.sessionId)
+            await this.options.waitForQueueStable?.()
+            if ((this.options.queuedMessages?.(plan.sessionId) ?? 0) !== 0) {
+              throw new Error('external runtime queue did not drain after interrupted-turn recovery')
+            }
+          }
+          receipts[plan.sessionId] = settledRecoveryReceipt(
+            receipts[plan.sessionId]!,
+            recovered.state.cursor,
+          )
+          persist()
+          continue
+        }
         if (plan.resumeAction === 'drain_queue') {
           receipts[plan.sessionId] = startedRecoveryReceipt(receipt)
           persist()

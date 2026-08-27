@@ -489,6 +489,9 @@ async function commitTransition(
   const current = previous.catch(() => undefined).then(async () => {
     const record = deps.store.get(sessionId)
     if (!record) throw new Error(`Unknown session: ${sessionId}`)
+    if (record.agentRuntime !== 'kernel') {
+      throw new Error(`Kernel Loop cannot mutate ${record.agentRuntime} session: ${sessionId}`)
+    }
     if (event.kind !== 'cancel' && isSkillManager(deps.skills)) await deps.skills.refreshConfig(record)
     const prior = record.state
     const preparedEvent: AgentEvent = event.kind === 'llm_response' && deps.publishLocalImages

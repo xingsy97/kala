@@ -128,4 +128,64 @@ describe('Copilot runtime custom tools', () => {
     ]))
     await runtime.close()
   })
+
+  it('settles an unresumable approval instead of reporting an expired runtime error', async () => {
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: {
+        async callTool() {
+          return { ok: true, content: 'unused' }
+        },
+        cancelPending() {},
+      },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, {
+      enabled: false,
+      sessionsDir: dir,
+    })
+    const record = await store.create({
+      sessionId: 'copilot-expired-approval',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await store.recordRuntimeProjection(record.sessionId, {
+      ...record.state,
+      cursor: record.state.cursor + 1,
+      status: 'awaiting_approval',
+      pendingCalls: [{
+        callId: 'call-expired',
+        name: 'shell',
+        input: { command: 'true' },
+        status: 'awaiting_approval',
+      }],
+      messages: [...record.state.messages, {
+        role: 'assistant',
+        content: [{
+          type: 'tool_call',
+          callId: 'call-expired',
+          name: 'shell',
+          input: { command: 'true' },
+        }],
+      }],
+    }, 'copilot.tool_call', { callId: 'call-expired' })
+
+    await expect(runtime.approve(record, 'call-expired')).resolves.toBeUndefined()
+    await expect(runtime.approve(record, 'call-expired')).resolves.toBeUndefined()
+
+    const state = store.get(record.sessionId)?.state
+    expect(state?.status).toBe('error')
+    expect(state?.pendingCalls).toEqual([])
+    expect(state?.error).toBe('Copilot approval could not be resumed after host restart')
+    expect(state?.messages.flatMap((message) => message.content)).toContainEqual({
+      type: 'tool_result',
+      callId: 'call-expired',
+      ok: false,
+      content: 'Copilot approval could not be resumed after host restart',
+    })
+  })
 })

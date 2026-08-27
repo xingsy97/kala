@@ -466,7 +466,7 @@ export function configureDashboardNamespace(
       // the route-generation fence is publicly committed. A read subscription
       // must never become a second resume/drain path.
       if (mutableRuntimeReady()) {
-        if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(targetSessionId)
+        if (target?.agentRuntime === 'kernel' && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(targetSessionId)
         void deps.messageQueues.drain(targetSessionId)
       }
       return payload.cursor
@@ -540,7 +540,7 @@ export function configureDashboardNamespace(
     // the active turn. Resume any dangling LLM/tool state on first hydration;
     // resumeSession is idempotent while a live serialized turn exists.
     if (mutableRuntimeReady()) {
-      if (record && !isRestingStatus(record.state.status)) void deps.loop.resumeSession(sessionId)
+      if (record?.agentRuntime === 'kernel' && !isRestingStatus(record.state.status)) void deps.loop.resumeSession(sessionId)
       void deps.messageQueues.drain(sessionId)
     }
 
@@ -576,7 +576,7 @@ export function configureDashboardNamespace(
       socket.emit('session:ready', payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
       if (mutableRuntimeReady()) {
-        if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(sessionId)
+        if (target?.agentRuntime === 'kernel' && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(sessionId)
         void deps.messageQueues.drain(sessionId)
       }
     })
@@ -1417,6 +1417,7 @@ async function handleUserMessage(
     await runtime.send(record, {
       text: p.text,
       ...(p.content ? { content: p.content } : {}),
+      ...(p.operationId ? { operationId: p.operationId } : {}),
     })
     return
   }

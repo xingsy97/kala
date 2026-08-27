@@ -107,11 +107,7 @@ try {
       `Use exactly this JSON input: ${JSON.stringify(testCase.input)}.`,
       'Do not use any other tool. After the tool succeeds, reply with TOOL_OK.',
     ].join(' ')
-    assertAck(await ack(socket, 'client:user_message', {
-      operationId: `operation-message-${randomUUID()}`,
-      sessionId,
-      text: prompt,
-    }))
+    await admitUserMessage(sessionId, prompt)
 
     const state = await waitForState(sessionId, (candidate) => {
       if (candidate.status === 'error') {
@@ -188,6 +184,36 @@ function ack(client, event, payload) {
 
 function assertAck(value) {
   if (!value?.ok) throw new Error(`Socket operation failed: ${value?.error ?? 'unknown error'}`)
+}
+
+async function admitUserMessage(sessionId, text) {
+  const operationId = `operation-message-${randomUUID()}`
+  const response = await fetch(`${origin.replace(/\/$/u, '')}/runtime/admission/messages`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId, operationId, text, mode: 'steer' }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const accepted = await response.json()
+  if (!response.ok || accepted.accepted !== true) {
+    throw new Error(`message admission failed: ${accepted.error ?? response.status}`)
+  }
+  if (accepted.state === 'committed' || accepted.routeGeneration === 0) return
+
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    const statusResponse = await fetch(
+      `${origin.replace(/\/$/u, '')}/runtime/admission/messages/${encodeURIComponent(operationId)}`,
+      { signal: AbortSignal.timeout(5_000) },
+    )
+    const status = await statusResponse.json()
+    if (status.state === 'committed') return
+    if (status.state === 'failed' || status.state === 'expired') {
+      throw new Error(`message admission ${status.state}: ${status.lastError ?? 'unknown error'}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error(`message admission did not commit: ${operationId}`)
 }
 
 function once(client, event, timeout) {

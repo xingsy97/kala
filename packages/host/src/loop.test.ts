@@ -99,6 +99,34 @@ function scriptedLlm(responses: LLMResponse[]): LLMAdapter {
   }
 }
 
+describe('Kernel Loop runtime ownership', () => {
+  it('fails closed without appending events to a Copilot Session', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kernel-loop-ownership-'))
+    try {
+      const store = new SessionStore(dir)
+      const record = await store.create({
+        sessionId: 'copilot-owned-session',
+        agentRuntime: 'copilot',
+        config: createConfig({ tools: [] }),
+      })
+      const loop = runHostLoop({
+        store,
+        llm: scriptedLlm([]),
+        tools: nullTools(),
+        broadcast: silentBroadcast(),
+      })
+
+      await expect(loop.dispatch(record.sessionId, {
+        kind: 'user_message',
+        text: 'must not enter Kernel',
+      })).rejects.toThrow('Kernel Loop cannot mutate copilot session')
+      expect((await readSessionLog(record.logPath)).events).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 const READ = {
   name: 'read',
   description: 'read',

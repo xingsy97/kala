@@ -29,6 +29,8 @@ export class KernelAgentRuntime implements AgentRuntime {
       kind: 'user_message',
       text: input.text,
       ...(input.content ? { content: input.content } : {}),
+      ...(input.operationId ? { operationId: input.operationId } : {}),
+      ...(input.queuedAt ? { queuedAt: input.queuedAt } : {}),
     }, input.model ? { model: input.model } : undefined)
   }
 

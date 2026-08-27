@@ -93,7 +93,11 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {
     const session = await this.ensureSession(record, input.model)
-    await this.project(record, 'copilot.user_message', { text: input.text }, (state) => ({
+    await this.project(record, 'copilot.user_message', {
+      text: input.text,
+      ...(input.operationId ? { operationId: input.operationId } : {}),
+      ...(input.queuedAt ? { queuedAt: input.queuedAt } : {}),
+    }, (state) => ({
       ...state,
       messages: [...state.messages, userMessage(input)],
       status: 'thinking',
@@ -125,14 +129,20 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   async approve(record: SessionRecord, callId: string): Promise<void> {
     const pending = this.approvals.get(approvalKey(record.sessionId, callId))
-    if (!pending) throw new Error(`Copilot approval expired after runtime restart: ${callId}`)
+    if (!pending) {
+      await this.expireUnresumableApproval(record, callId)
+      return
+    }
     pending.resolve({ approved: true })
     this.approvals.delete(approvalKey(record.sessionId, callId))
   }
 
   async reject(record: SessionRecord, callId: string, reason?: string): Promise<void> {
     const pending = this.approvals.get(approvalKey(record.sessionId, callId))
-    if (!pending) throw new Error(`Copilot approval expired after runtime restart: ${callId}`)
+    if (!pending) {
+      await this.expireUnresumableApproval(record, callId)
+      return
+    }
     pending.resolve({ approved: false, ...(reason ? { reason } : {}) })
     this.approvals.delete(approvalKey(record.sessionId, callId))
   }
@@ -341,6 +351,31 @@ export class CopilotAgentRuntime implements AgentRuntime {
       pendingCalls: state.pendingCalls.filter((call) => call.callId !== pending.callId),
       error: undefined,
     }))
+  }
+
+  private async expireUnresumableApproval(
+    record: SessionRecord,
+    callId: string,
+  ): Promise<void> {
+    const latest = this.context.store.get(record.sessionId) ?? record
+    const pending = latest.state.pendingCalls.find((call) => call.callId === callId)
+    if (!pending) return
+    const message = 'Copilot approval could not be resumed after host restart'
+    await this.project(
+      latest,
+      'copilot.approval_expired_after_restart',
+      { callId },
+      (state) => ({
+        ...state,
+        messages: [...state.messages, {
+          role: 'tool',
+          content: [{ type: 'tool_result', callId, ok: false, content: message }],
+        }],
+        status: 'error',
+        pendingCalls: state.pendingCalls.filter((call) => call.callId !== callId),
+        error: message,
+      }),
+    )
   }
 
   private async project(

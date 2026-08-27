@@ -124,6 +124,7 @@ export class SessionStore {
    * in-flight map guarantees only one `create()` per sessionId.
    */
   private readonly inFlight = new Map<string, Promise<SessionRecord>>()
+  private readonly runtimeRecoveries = new Map<string, Promise<void>>()
   /**
    * Last-resort per-Session commit lock. HostLoop normally serializes turns, but
    * cancellation, recovery and administrative paths have historically reached
@@ -283,6 +284,7 @@ export class SessionStore {
     const recoverDangling = options.recoverDangling !== false
     const cached = this.records.get(sessionId)
     if (cached) {
+      if (recoverDangling) await this.recoverCachedExternalRuntime(cached)
       this.applyRuntimeConfig(cached, this.resolveRuntimeConfig(options.runtimeConfig))
       return cached
     }
@@ -297,6 +299,46 @@ export class SessionStore {
     })
     if (recoverDangling) this.inFlight.set(sessionId, promise)
     return promise
+  }
+
+  private async recoverCachedExternalRuntime(record: SessionRecord): Promise<void> {
+    const existing = this.runtimeRecoveries.get(record.sessionId)
+    if (existing) {
+      await existing
+      return
+    }
+    if (record.agentRuntime === 'kernel') return
+
+    const recovery = (async () => {
+      const latest = this.records.get(record.sessionId) ?? record
+      const parsed = await readSessionLog(latest.logPath)
+      const alreadyQuarantined = parsed.runtimeMetadata.some((entry) =>
+        entry.action === 'runtime.quarantined_kernel_events',
+      )
+      const contaminatedEventCount = alreadyQuarantined ? 0 : parsed.events.length
+      const next = contaminatedEventCount > 0
+        ? quarantinedExternalRuntimeState(latest.state)
+        : interruptedExternalRuntimeState(latest.agentRuntime, latest.state)
+      if (!next) return
+      await this.recordRuntimeProjection(
+        latest.sessionId,
+        next,
+        contaminatedEventCount > 0
+          ? 'runtime.quarantined_kernel_events'
+          : 'copilot.recovered_interrupted_turn',
+        contaminatedEventCount > 0
+          ? { eventCount: contaminatedEventCount }
+          : { pendingCallCount: latest.state.pendingCalls.length },
+      )
+    })()
+    this.runtimeRecoveries.set(record.sessionId, recovery)
+    try {
+      await recovery
+    } finally {
+      if (this.runtimeRecoveries.get(record.sessionId) === recovery) {
+        this.runtimeRecoveries.delete(record.sessionId)
+      }
+    }
   }
 
   private async loadInner(sessionId: string, options: { recoverDangling: boolean; runtimeConfig?: AgentConfig }): Promise<SessionRecord> {
@@ -636,6 +678,7 @@ export class SessionStore {
     }
     this.records.delete(sessionId)
     this.inFlight.delete(sessionId)
+    this.runtimeRecoveries.delete(sessionId)
     this.recordTails.delete(sessionId)
     for (const path of paths) {
       this.summaryCache.delete(path)
@@ -724,33 +767,27 @@ export class SessionStore {
       : lastSnapshot?.state ?? parsed.header.initialState
     let cursor = finalState.cursor
 
+    const externalRuntimeAlreadyQuarantined = parsed.runtimeMetadata.some((entry) =>
+      entry.action === 'runtime.quarantined_kernel_events',
+    )
     if (
-      options.recoverDangling &&
-      agentRuntime !== 'kernel' &&
-      (finalState.status === 'thinking' ||
-        finalState.status === 'awaiting_approval' ||
-        finalState.status === 'executing_tools')
+      options.recoverDangling
+      && agentRuntime !== 'kernel'
+      && parsed.events.length > 0
+      && !externalRuntimeAlreadyQuarantined
     ) {
+      finalState = quarantinedExternalRuntimeState(finalState)
+      cursor = finalState.cursor
+      await appendRuntimeMetadataEntry(path, {
+        sessionId,
+        action: 'runtime.quarantined_kernel_events',
+        payload: { eventCount: parsed.events.length },
+      })
+      const quarantineSnapshot = await appendSnapshotEntry(path, cursor, finalState)
+      parsed.snapshots.push(quarantineSnapshot)
+    } else if (options.recoverDangling && needsExternalRuntimeRecovery(agentRuntime, finalState)) {
       const interruptedCalls = finalState.pendingCalls
-      finalState = {
-        ...finalState,
-        cursor: finalState.cursor + 1,
-        status: 'error',
-        pendingCalls: [],
-        messages: [
-          ...finalState.messages,
-          ...interruptedCalls.map((call) => ({
-            role: 'tool' as const,
-            content: [{
-              type: 'tool_result' as const,
-              callId: call.callId,
-              ok: false,
-              content: 'host restarted while call was pending',
-            }],
-          })),
-        ],
-        error: 'Copilot turn was interrupted by a host restart',
-      }
+      finalState = interruptedExternalRuntimeState(agentRuntime, finalState)!
       cursor = finalState.cursor
       await appendRuntimeMetadataEntry(path, {
         sessionId,
@@ -992,6 +1029,58 @@ function summarizeRecord(record: SessionRecord): SessionSummary {
     ...(record.firstUserMessage ? { firstUserMessage: record.firstUserMessage.slice(0, 120) } : {}),
     ...(record.label ? { label: record.label } : {}),
     ...(Object.keys(record.preferences).length > 0 ? { preferences: record.preferences } : {}),
+  }
+}
+
+function needsExternalRuntimeRecovery(
+  agentRuntime: AgentRuntimeId,
+  state: AgentState,
+): boolean {
+  return agentRuntime !== 'kernel' && (
+    state.status === 'thinking'
+    || state.status === 'awaiting_approval'
+    || state.status === 'executing_tools'
+  )
+}
+
+function interruptedExternalRuntimeState(
+  agentRuntime: AgentRuntimeId,
+  state: AgentState,
+): AgentState | undefined {
+  if (!needsExternalRuntimeRecovery(agentRuntime, state)) return undefined
+  return {
+    ...state,
+    cursor: state.cursor + 1,
+    status: 'error',
+    pendingCalls: [],
+    messages: [
+      ...state.messages,
+      ...state.pendingCalls.map((call) => ({
+        role: 'tool' as const,
+        content: [{
+          type: 'tool_result' as const,
+          callId: call.callId,
+          ok: false,
+          content: 'host restarted while call was pending',
+        }],
+      })),
+    ],
+    error: 'Copilot turn was interrupted by a host restart',
+  }
+}
+
+function quarantinedExternalRuntimeState(state: AgentState): AgentState {
+  const message = 'Non-Kernel Session contained Kernel events and was quarantined'
+  return {
+    ...state,
+    cursor: state.cursor + 1,
+    status: 'error',
+    pendingCalls: [],
+    messages: [...state.messages, {
+      role: 'assistant',
+      content: [{ type: 'text', text: message }],
+    }],
+    error: message,
   }
 }
 

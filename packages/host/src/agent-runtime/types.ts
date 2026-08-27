@@ -21,6 +21,8 @@ export type AgentRuntimeSendInput = {
   text: string
   content?: readonly MessageContent[]
   model?: string
+  operationId?: string
+  queuedAt?: string
 }
 
 export interface AgentRuntime {

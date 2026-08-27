@@ -337,7 +337,7 @@ describe('RestartCoordinator', () => {
       requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), oldPid: 10,
       sessions: [{ sessionId: 'approval-session', cursor: 8, initialStatus: 'awaiting_approval', checkpointStatus: 'safe', checkpointKind: 'waiting_for_approval', resumeAction: 'wait_for_approval' }],
     } satisfies HostRestartAttempt))
-    const load = vi.fn(async () => ({ sessionId: 'approval-session', state: { status: 'awaiting_approval' as const, cursor: 8 } }))
+    const load = vi.fn(async () => ({ sessionId: 'approval-session', agentRuntime: 'kernel' as const, state: { status: 'awaiting_approval' as const, cursor: 8 } }))
     const store = { recordsSnapshot: () => [], get: () => undefined, load } as unknown as SessionStore
     const { coordinator, loop } = harness({ statePath, store })
     await coordinator.resumeMarkedSessions()
@@ -345,6 +345,32 @@ describe('RestartCoordinator', () => {
     expect(loop.resumeSession).not.toHaveBeenCalled()
     expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
       phase: 'completed', recoveryReceipts: { 'approval-session': { state: 'settled' } },
+    })
+  })
+
+  it('recovers an external runtime participant without entering the Kernel Loop', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'restart-copilot-receipt-'))
+    roots.push(root)
+    const statePath = join(root, 'restart.json')
+    writeFileSync(statePath, JSON.stringify({
+      attemptId: 'copilot-attempt', phase: 'restarting', mode: 'checkpoint', reason: 'deploy',
+      requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), oldPid: 10,
+      sessions: [{ sessionId: 'copilot-session', cursor: 8, initialStatus: 'awaiting_approval', checkpointStatus: 'safe', checkpointKind: 'waiting_for_approval', resumeAction: 'wait_for_approval' }],
+    } satisfies HostRestartAttempt))
+    const load = vi.fn(async (_sessionId: string, options?: { recoverDangling?: boolean }) => options?.recoverDangling === false
+      ? { sessionId: 'copilot-session', agentRuntime: 'copilot' as const, state: { status: 'awaiting_approval' as const, cursor: 8 } }
+      : { sessionId: 'copilot-session', agentRuntime: 'copilot' as const, state: { status: 'error' as const, cursor: 9 } })
+    const store = { recordsSnapshot: () => [], get: () => undefined, load } as unknown as SessionStore
+    const { coordinator, loop } = harness({ statePath, store })
+
+    await coordinator.resumeMarkedSessions()
+
+    expect(load).toHaveBeenNthCalledWith(1, 'copilot-session', { recoverDangling: false })
+    expect(load).toHaveBeenNthCalledWith(2, 'copilot-session')
+    expect(loop.resumeSession).not.toHaveBeenCalled()
+    expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+      phase: 'completed',
+      recoveryReceipts: { 'copilot-session': { state: 'settled', observedCursor: 9 } },
     })
   })
 
