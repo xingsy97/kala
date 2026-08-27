@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 export type StoredExecutorIdentity = {
@@ -56,7 +56,15 @@ export class ExecutorIdentityStore {
 
   load(): void {
     if (!existsSync(this.path)) return
-    const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as FileShape
+    let parsed: FileShape
+    try {
+      parsed = this.readFile(this.path)
+    } catch (primaryError) {
+      const backupPath = this.backupPath()
+      if (!existsSync(backupPath)) throw primaryError
+      parsed = this.readFile(backupPath)
+      this.writeAtomic(`${JSON.stringify(parsed, null, 2)}\n`, false)
+    }
     if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.executors)) return
     this.identities = parsed.executors.filter((entry) => typeof entry.tokenHash === 'string' && typeof entry.workspaceId === 'string')
     this.invites.clear()
@@ -238,10 +246,62 @@ export class ExecutorIdentityStore {
   }
 
   private save(): void {
-    mkdirSync(dirname(this.path), { recursive: true })
     const invites: StoredExecutorInvite[] = [...this.invites.values()].map((invite) => ({ ...invite }))
     const body: FileShape = { schemaVersion: 1, executors: this.identities, invites, pairings: [...this.pairings.values()] }
-    writeFileSync(this.path, `${JSON.stringify(body, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+    this.writeAtomic(`${JSON.stringify(body, null, 2)}\n`, true)
+  }
+
+  private readFile(path: string): FileShape {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as FileShape
+    if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.executors)) throw new Error(`invalid executor identity store: ${path}`)
+    return parsed
+  }
+
+  private writeAtomic(body: string, rotateBackup: boolean): void {
+    const directory = dirname(this.path)
+    mkdirSync(directory, { recursive: true })
+    const temporaryPath = `${this.path}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
+    try {
+      const fd = openSync(temporaryPath, 'wx', 0o600)
+      try {
+        writeFileSync(fd, body, { encoding: 'utf8' })
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
+      if (rotateBackup && existsSync(this.path)) this.writeBackupSnapshot()
+      renameSync(temporaryPath, this.path)
+      const directoryFd = openSync(directory, 'r')
+      try {
+        fsyncSync(directoryFd)
+      } finally {
+        closeSync(directoryFd)
+      }
+    } finally {
+      rmSync(temporaryPath, { force: true })
+    }
+  }
+
+  private backupPath(): string {
+    return `${this.path}.bak`
+  }
+
+  private writeBackupSnapshot(): void {
+    const backupPath = this.backupPath()
+    const temporaryBackupPath = `${backupPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
+    try {
+      copyFileSync(this.path, temporaryBackupPath)
+      const fd = openSync(temporaryBackupPath, 'r')
+      try {
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
+      rmSync(backupPath, { force: true })
+      renameSync(temporaryBackupPath, backupPath)
+    } finally {
+      rmSync(temporaryBackupPath, { force: true })
+    }
   }
 
   private findInviteByToken(inviteToken: string): InviteRecord | undefined {

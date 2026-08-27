@@ -29,6 +29,19 @@ describe('ExecutorIdentityStore invite expiry', () => {
     expect(readFileSync(file, 'utf8')).not.toContain(invite.inviteToken)
   })
 
+  it('recovers an empty primary file from the previous durable snapshot', () => {
+    const file = path(), store = new ExecutorIdentityStore(file)
+    const token = store.provisionWorkspace('workspace', 'Executor')
+    store.createInvite({ label: 'backup trigger' })
+    writeFileSync(file, '')
+
+    const loaded = new ExecutorIdentityStore(file)
+    loaded.load()
+
+    expect(loaded.resolveToken(token)?.workspaceId).toBe('workspace')
+    expect(JSON.parse(readFileSync(file, 'utf8')).schemaVersion).toBe(1)
+  })
+
   it('permanently deletes an invite without revoking an unrelated executor identity', () => {
     const file = path(), store = new ExecutorIdentityStore(file)
     const identity = store.provisionWorkspace('workspace', 'Executor')
