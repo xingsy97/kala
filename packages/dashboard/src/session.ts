@@ -123,6 +123,10 @@ export function dashboardConnectionManager(socket: DashboardSocket): DashboardCo
 import { computeReveal } from './features/chat/text-reveal/rate.js'
 import { shouldCommitStreamFrame, streamReleaseCount } from './features/chat/text-reveal/scheduler.js'
 
+export function acceptsSessionTokenDelta(status: AgentState['status']): boolean {
+  return status === 'thinking'
+}
+
 export function useSession({
   host,
   sessionId,
@@ -345,6 +349,7 @@ export function useSession({
 
     let disposed = false
     let liveBaselineReceived = false
+    let acceptStreamDeltas = false
     let socket: DashboardSocket | null = null
     let reconnectCleanup: (() => void) | null = null
     let socketListenerCleanup: (() => void) | null = null
@@ -445,6 +450,8 @@ export function useSession({
       }
       if (p.sessionId !== sessionId) return
       liveBaselineReceived = true
+      acceptStreamDeltas = acceptsSessionTokenDelta(p.state.status)
+      if (!acceptStreamDeltas) resetStream()
       flushProjectionQueue()
       dispatchProjectionEvent({ kind: 'ready', generation, sessionId, payload: p })
       // Timeline was cleared for a fresh connect; ask the host to replay
@@ -488,8 +495,9 @@ export function useSession({
       // Coalesced to one commit per frame (see enqueueProjection): during a
       // tool-heavy turn state:changed fires very frequently and each one used
       // to re-render the whole App synchronously.
+      acceptStreamDeltas = acceptsSessionTokenDelta(p.state.status)
       enqueueProjection({ kind: 'authoritative', generation, sessionId, payload: p })
-      if (p.state.status !== 'thinking') resetStream()
+      if (!acceptStreamDeltas) resetStream()
     })
     bind('event:appended', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
@@ -534,7 +542,7 @@ export function useSession({
     })
     bind('session:token_delta', (p) => {
       if (!isCurrentSocket()) return
-      if (p.sessionId === sessionId) pushStreamDelta(p.text)
+      if (p.sessionId === sessionId && acceptStreamDeltas) pushStreamDelta(p.text)
     })
     bind('server:control_update', (p: ControlUpdate) => {
       if (p.kind === 'host_restart') noteHostRestart(p)

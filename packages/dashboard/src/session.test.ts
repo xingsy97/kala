@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 import type { TimelineEntry } from './session.js'
-import { createSessionWithAck, deleteSession, deriveHumanAttentionTimeline, deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
+import { acceptsSessionTokenDelta, createSessionWithAck, deleteSession, deriveHumanAttentionTimeline, deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
 
 function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry {
   if (kind === 'llm_response') {
@@ -23,6 +23,16 @@ function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry
     effects: [{ kind: 'call_llm', messages: [], tools: [] }],
   }
 }
+
+describe('acceptsSessionTokenDelta', () => {
+  it('rejects deltas after the authoritative turn leaves thinking state', () => {
+    expect(acceptsSessionTokenDelta('thinking')).toBe(true)
+    expect(acceptsSessionTokenDelta('awaiting_approval')).toBe(false)
+    expect(acceptsSessionTokenDelta('executing_tools')).toBe(false)
+    expect(acceptsSessionTokenDelta('done')).toBe(false)
+    expect(acceptsSessionTokenDelta('error')).toBe(false)
+  })
+})
 
 
 describe('createSessionWithAck', () => {
