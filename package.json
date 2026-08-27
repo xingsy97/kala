@@ -90,6 +90,7 @@
     "verify:e2e:add-workspace-powershell-temporary": "node scripts/product-e2e/verify-add-workspace-powershell-temporary.mjs",
     "verify:e2e:core-workspace-journeys": "node scripts/product-e2e/verify-core-workspace-journeys.mjs",
     "verify:e2e:controlled-agent-journey": "node scripts/product-e2e/verify-controlled-agent-journey.mjs",
+    "verify:canary:copilot-runtime": "node scripts/product-e2e/verify-copilot-runtime-journey.mjs",
     "verify:e2e:pwa-update-reload": "node scripts/product-e2e/verify-pwa-update-reload.mjs",
     "dashboard:dev": "pnpm --filter @agent-kernel/dashboard dev",
     "host:dev": "pnpm --filter @agent-kernel/host dev",
