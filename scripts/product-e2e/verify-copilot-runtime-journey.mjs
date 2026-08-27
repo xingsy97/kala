@@ -31,6 +31,7 @@ let runtimeVersion
 let result
 let thrown
 let deletedThroughUi = false
+let liveToolUi
 
 try {
   await harness.start()
@@ -190,9 +191,9 @@ try {
       && assistantText(candidate).includes(hostFinalMarker)
     ), 180_000)
     await actor.page.waitForFunction((marker) => document.body.innerText.includes(marker), { timeout: 30_000 }, hostFinalMarker)
-    const toolUi = await collectVirtualizedToolUi(actor.page)
-    if (toolUi.indicatorCount < 2) {
-      throw new Error(`production transcript omitted Tool UI: ${JSON.stringify(toolUi)}`)
+    liveToolUi = await collectVirtualizedToolUi(actor.page)
+    if (liveToolUi.indicatorCount < 2) {
+      throw new Error(`live production transcript omitted Tool UI: ${JSON.stringify(liveToolUi)}`)
     }
     const history = await responseEvent(socket, 'client:load_history', 'server:history', { sessionId })
     if ((history.entries?.length ?? 0) !== 0) {
@@ -202,7 +203,7 @@ try {
       status: state.status,
       cursor: state.cursor,
       hostTool: toolEvidence(state, 'todo_graph'),
-      projectedToolUi: toolUi,
+      projectedToolUi: liveToolUi,
       kernelHistoryEntries: history.entries?.length ?? 0,
     }
   })
@@ -223,8 +224,12 @@ try {
     if (persisted.agentRuntime !== 'copilot' || persisted.state?.status !== 'done') {
       throw new Error(`persisted Runtime state is inconsistent: ${JSON.stringify({ runtime: persisted.agentRuntime, status: persisted.state?.status })}`)
     }
+    const reloadedToolUi = await collectVirtualizedToolUi(actor.page)
+    if (reloadedToolUi.indicatorCount < 2) {
+      throw new Error(`reloaded production transcript omitted Tool UI: ${JSON.stringify({ liveToolUi, reloadedToolUi })}`)
+    }
     const screenshot = await harness.screenshot(actor, 'copilot-runtime-persisted')
-    return { runtime: persisted.agentRuntime, status: persisted.state.status, cursor: persisted.cursor, screenshot }
+    return { runtime: persisted.agentRuntime, status: persisted.state.status, cursor: persisted.cursor, liveToolUi, reloadedToolUi, screenshot }
   })
 
   await harness.step('delete the Copilot Session through UI and verify authoritative cleanup', async () => {
@@ -300,15 +305,16 @@ async function sendMessage(page, text) {
 }
 
 async function collectVirtualizedToolUi(page) {
+  const scrollerSelector = '[data-testid="chat-panel"] [data-virtuoso-scroller="true"]'
   const names = new Set()
   const indicators = new Set()
-  const metrics = await page.$eval('[data-virtuoso-scroller="true"]', (scroller) => ({
+  const metrics = await page.$eval(scrollerSelector, (scroller) => ({
     clientHeight: scroller.clientHeight,
     scrollHeight: scroller.scrollHeight,
   }))
   const step = Math.max(100, Math.floor(metrics.clientHeight / 2))
   for (let top = 0; top <= metrics.scrollHeight; top += step) {
-    await page.$eval('[data-virtuoso-scroller="true"]', (scroller, value) => {
+    await page.$eval(scrollerSelector, (scroller, value) => {
       scroller.scrollTop = value
       scroller.dispatchEvent(new Event('scroll'))
     }, top)
@@ -323,7 +329,7 @@ async function collectVirtualizedToolUi(page) {
     )
     for (const indicator of visibleIndicators) indicators.add(indicator)
   }
-  await page.$eval('[data-virtuoso-scroller="true"]', (scroller) => { scroller.scrollTop = scroller.scrollHeight })
+  await page.$eval(scrollerSelector, (scroller) => { scroller.scrollTop = scroller.scrollHeight })
   return { names: [...names], indicators: [...indicators], indicatorCount: indicators.size }
 }
 
