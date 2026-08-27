@@ -2003,6 +2003,7 @@ export function App(): JSX.Element {
                           <Composer
                           disabled={!controlSocket?.connected || sessionWorkspaceKnownOffline}
                           serviceUnavailable={!controlSocket?.connected}
+                          workspaceUnavailable={sessionWorkspaceKnownOffline}
                           onReconnectService={() => controlSocket?.connect()}
                           model={composerModel}
                           models={availableModels}

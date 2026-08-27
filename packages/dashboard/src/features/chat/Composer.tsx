@@ -47,6 +47,7 @@ import { prepareComposerImage } from './image-compression.js'
 type Props = {
   disabled?: boolean
   serviceUnavailable?: boolean
+  workspaceUnavailable?: boolean
   onReconnectService?(): void
   onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void | Promise<void>
   onCompact?(): void
@@ -183,6 +184,7 @@ function useIsNarrow(): boolean {
 export function Composer({
   disabled,
   serviceUnavailable = false,
+  workspaceUnavailable = false,
   onReconnectService,
   onSubmit,
   onCompact,
@@ -220,7 +222,9 @@ export function Composer({
   const isNarrow = useIsNarrow()
   const lowAttentionHint = shouldShowLowAttentionHint(humanAttention)
   const placeholderText = disabled
-    ? t('composer.waitingForService')
+    ? workspaceUnavailable
+      ? t('composer.waitingForWorkspace')
+      : t('composer.waitingForService')
     : lowAttentionHint
       ? isNarrow
         ? t('composer.placeholderLowAttentionShort')

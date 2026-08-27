@@ -29,6 +29,7 @@ function renderComposer(props?: {
   state?: React.ComponentProps<typeof Composer>['state']
   disabled?: boolean
   serviceUnavailable?: boolean
+  workspaceUnavailable?: boolean
   onReconnectService?: () => void
   humanAttention?: React.ComponentProps<typeof Composer>['humanAttention']
   displayPrefs?: ChatDisplayPrefs
@@ -50,6 +51,7 @@ function renderComposer(props?: {
       displayPrefs={props?.displayPrefs}
       disabled={props?.disabled}
       serviceUnavailable={props?.serviceUnavailable}
+      workspaceUnavailable={props?.workspaceUnavailable}
       onReconnectService={props?.onReconnectService}
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
       {...(props?.onQueuedUpdate ? { onQueuedUpdate: props.onQueuedUpdate } : {})}
@@ -108,6 +110,12 @@ describe('Composer', () => {
     expect(screen.queryByTestId('context-usage-bar')).toBeNull()
     fireEvent.click(screen.getByTestId('service-reconnect'))
     expect(reconnect).toHaveBeenCalledOnce()
+  })
+
+  it('distinguishes an offline Workspace Executor from an unavailable Service', () => {
+    renderComposer({ disabled: true, workspaceUnavailable: true })
+    expect(screen.getByPlaceholderText('workspace executor is offline...')).toBeTruthy()
+    expect(screen.queryByTestId('service-connection-state')).toBeNull()
   })
 
   it('uses the low-attention hint as the empty input placeholder', () => {

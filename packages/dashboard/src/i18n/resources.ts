@@ -212,7 +212,7 @@ export const resources = {
         chinese: 'Chinese',
       },
       composer: {
-        waitingForHost: 'waiting for service...', waitingForService: 'waiting for service...', connectingToService: 'Connecting to service', connectingToServiceDescription: 'Restoring the realtime connection. Messaging will be available when the service is ready.', reconnectService: 'Reconnect',
+        waitingForHost: 'waiting for service...', waitingForService: 'waiting for service...', waitingForWorkspace: 'workspace executor is offline...', connectingToService: 'Connecting to service', connectingToServiceDescription: 'Restoring the realtime connection. Messaging will be available when the service is ready.', reconnectService: 'Reconnect',
         placeholder: 'Message the agent - @ for files, / for commands',
         placeholderShort: 'Message agent…',
         placeholderLowAttention: 'Review recent changes before broad instructions…',
@@ -1733,7 +1733,7 @@ export const resources = {
         chinese: '简体中文',
       },
       composer: {
-        waitingForHost: '等待服务...', waitingForService: '等待服务...', connectingToService: '正在连接服务', connectingToServiceDescription: '正在恢复实时连接，服务就绪后即可继续发送消息。', reconnectService: '重新连接',
+        waitingForHost: '等待服务...', waitingForService: '等待服务...', waitingForWorkspace: '工作区 Executor 已离线...', connectingToService: '正在连接服务', connectingToServiceDescription: '正在恢复实时连接，服务就绪后即可继续发送消息。', reconnectService: '重新连接',
         placeholder: '给 agent 发消息 - @ 引用文件，/ 输入命令',
         placeholderShort: '给 agent 发消息…',
         placeholderLowAttention: '先检查最近的修改，再给宽泛指令…',
