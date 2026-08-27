@@ -93,8 +93,12 @@ try {
     }
 
     await replaceInput(actor.page, cwdSelector, validCwd)
+    const previousSessionId = new URL(actor.page.url()).searchParams.get('sessionId')
     await clickByTestId(actor.page, 'new-session-create')
-    await actor.page.waitForFunction(() => new URL(location.href).searchParams.has('sessionId'))
+    await actor.page.waitForFunction((previous) => {
+      const current = new URL(location.href).searchParams.get('sessionId')
+      return current !== null && current !== previous
+    }, {}, previousSessionId)
     sessionId = new URL(actor.page.url()).searchParams.get('sessionId')
     if (!sessionId) throw new Error('created Session ACK id is missing from the URL')
     harness.registerResource('session', sessionId, async () => {
@@ -286,8 +290,10 @@ async function setApprovalMode(page, mode) {
 }
 
 async function sendMessage(page, text) {
-  await page.click('[data-testid="composer-input"]')
+  await page.waitForSelector('[data-testid="composer-input"]')
+  await page.$eval('[data-testid="composer-input"]', (input) => input.focus())
   await page.keyboard.type(text)
+  await page.waitForFunction((expected) => document.querySelector('[data-testid="composer-input"]')?.value === expected, {}, text)
   await clickByTestId(page, 'composer-send')
 }
 
