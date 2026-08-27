@@ -21,6 +21,7 @@ const executorFinalMarker = `COPILOT_E2E_EXECUTOR_DONE_${runId}`
 const hostFinalMarker = `COPILOT_E2E_HOST_DONE_${runId}`
 const hostNodeId = `copilot-e2e-host-${runId}`
 const bootstrapSessionId = `copilot-e2e-bootstrap-${runId}`
+const initialSessionIds = new Set()
 const harness = new ProductE2EHarness({ name: 'copilot-runtime-official-provider-canary' })
 const states = new Map()
 let actor
@@ -50,8 +51,10 @@ try {
   await harness.step('preflight real Copilot Runtime and connected Workspace', async () => {
     await once(socket, 'session:ready', 20_000)
     const runtimesPromise = once(socket, 'server:agent_runtimes', 10_000)
+    const sessionsPromise = once(socket, 'server:sessions', 10_000)
     socket.emit('client:list_sessions', {})
-    const runtimes = await runtimesPromise
+    const [runtimes, sessions] = await Promise.all([runtimesPromise, sessionsPromise])
+    for (const summary of sessions.sessions ?? []) initialSessionIds.add(summary.sessionId)
     const copilot = runtimes.runtimes?.find((runtime) => runtime.id === 'copilot')
     if (!copilot?.available || copilot.status !== 'ready') {
       throw new Error(`Copilot runtime is not ready: ${copilot?.reason ?? copilot?.status ?? 'missing'}`)
@@ -109,8 +112,17 @@ try {
     }, {}, previousSessionId)
     sessionId = new URL(actor.page.url()).searchParams.get('sessionId')
     if (!sessionId) throw new Error('created Session ACK id is missing from the URL')
+    if (initialSessionIds.has(sessionId)) {
+      throw new Error(`Session creation selected a pre-existing Session id; refusing cleanup: ${sessionId}`)
+    }
+    const summaries = await responseEvent(socket, 'client:list_sessions', 'server:sessions', {})
+    const createdSummary = summaries.sessions?.find((summary) => summary.sessionId === sessionId)
+    if (!createdSummary || createdSummary.agentRuntime !== 'copilot') {
+      throw new Error(`new Copilot Session summary is missing or inconsistent: ${JSON.stringify(createdSummary)}`)
+    }
     harness.registerResource('session', sessionId, async () => {
       if (deletedThroughUi) return
+      if (initialSessionIds.has(sessionId)) throw new Error(`refusing to delete pre-existing Session: ${sessionId}`)
       const response = await ack(socket, 'client:delete_session', {
         operationId: `operation-cleanup-${randomUUID()}`,
         sessionId,
