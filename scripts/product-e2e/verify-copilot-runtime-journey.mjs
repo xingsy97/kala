@@ -337,7 +337,9 @@ async function collectVirtualizedToolUi(page) {
     for (const indicator of visibleIndicators) indicators.add(indicator)
   }
   await page.$eval(scrollerSelector, (scroller) => { scroller.scrollTop = scroller.scrollHeight })
-  return { names: [...names], indicators: [...indicators], indicatorCount: indicators.size }
+  const streamingCursorCount = await page.$$eval('[data-testid="streaming-cursor"]', (elements) => elements.length)
+  const visibleText = await page.$eval('[data-testid="chat-panel"]', (element) => (element.textContent ?? '').slice(-2_000))
+  return { names: [...names], indicators: [...indicators], indicatorCount: indicators.size, streamingCursorCount, visibleText }
 }
 
 function successfulToolResult(state, toolName, expectedText) {
