@@ -1225,14 +1225,25 @@ export function configureDashboardNamespace(
       if (!result.ok) deps.broadcastError(p.sessionId, 'host', result.error)
     })
 
-    socket.on('client:update_preferences', async (raw) => {
+    socket.on('client:update_preferences', async (raw, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientUpdatePreferencesSchema, raw, 'client:update_preferences', (raw as { sessionId?: string } | undefined)?.sessionId)
-      if (!p) return
-      if ('selectedModel' in p.preferences) {
-        if (!await requireRuntimeCapability(deps, p.sessionId, 'modelSelection', 'model selection')) return
-        deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: p.preferences.selectedModel?.trim() ?? '' } })
+      if (!p) {
+        ack?.({ ok: false, error: 'invalid preferences update' })
+        return
       }
-      await applyPreferencesUpdate(deps, p.sessionId, p.preferences)
+      const result = await operations.run(p.operationId, async () => {
+        if ('selectedModel' in p.preferences) {
+          if (!await requireRuntimeCapability(deps, p.sessionId, 'modelSelection', 'model selection')) {
+            throw new Error('model selection is unavailable for this Session Runtime')
+          }
+        }
+        await applyPreferencesUpdate(deps, p.sessionId, p.preferences)
+        if ('selectedModel' in p.preferences) {
+          deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: p.preferences.selectedModel?.trim() ?? '' } })
+        }
+      })
+      ack?.(result)
+      if (!result.ok) deps.broadcastError(p.sessionId, 'host', result.error)
     })
   })
 }
@@ -1281,32 +1292,44 @@ async function applyPreferencesUpdate(
   patch: import('@agent-kernel/shared').SessionPreferences,
 ): Promise<void> {
   const normalizedPatch = normalizePreferencesPatch(deps, sessionId, patch)
-  if (!normalizedPatch) return
+  if (!normalizedPatch) throw new Error('invalid Session preferences')
   const record = deps.store.get(sessionId)
+  const previousModel = record?.preferences.selectedModel
+  const requestedModel = normalizedPatch.selectedModel
+  const runtime = record?.agentRuntime === 'copilot' ? deps.agentRuntimes.require('copilot') : undefined
   if (record?.agentRuntime === 'copilot' && normalizedPatch.selectedModel) {
-    try {
-      await deps.agentRuntimes.require('copilot').setModel?.(record, normalizedPatch.selectedModel)
-    } catch (err) {
-      deps.broadcastError(sessionId, 'host', err instanceof Error ? err.message : String(err))
-      return
-    }
+    await runtime?.setModel?.(record, normalizedPatch.selectedModel)
   }
   let effective: import('@agent-kernel/shared').SessionPreferences
   try {
     effective = await deps.store.updatePreferences(sessionId, normalizedPatch)
-  } catch (err) {
-    deps.broadcastError(
-      sessionId,
-      'host',
-      err instanceof Error ? err.message : String(err),
-    )
-    return
+  } catch (error) {
+    const rollbackModel = previousModel
+      ?? runtime?.descriptor().models?.find((model) => model.id === 'auto' || model.ref === 'auto')?.ref
+    if (record && requestedModel && rollbackModel && rollbackModel !== requestedModel) {
+      try {
+        await runtime?.setModel?.(record, rollbackModel)
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          `failed to persist model ${requestedModel} and failed to restore ${rollbackModel}`,
+        )
+      }
+    }
+    throw error
   }
   deps.dashboardNs.emit('server:control_update', {
     kind: 'session_meta_changed',
     sessionId,
     preferences: effective,
   })
+  if (record && runtime && requestedModel && previousModel !== requestedModel) {
+    try {
+      await runtime.confirmModelChange?.(record, previousModel, requestedModel)
+    } catch (error) {
+      deps.broadcastError(sessionId, 'host', `model changed, but its transcript notice could not be persisted: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const updatedRecord = deps.store.get(sessionId)
   if (updatedRecord) {
     deps.dashboardNs.to(sessionRoom(sessionId)).emit('state:changed', {

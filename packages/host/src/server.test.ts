@@ -1678,7 +1678,12 @@ describe('wire protocol', () => {
         resolve()
       }
     }))
-    dashboard.emit('client:update_preferences', { sessionId, preferences: { selectedModel: 'anthropic:claude-opus' } })
+    const ack = await dashboard.timeout(1_000).emitWithAck('client:update_preferences', {
+      operationId: 'persist-model-preference',
+      sessionId,
+      preferences: { selectedModel: 'anthropic:claude-opus' },
+    })
+    expect(ack).toEqual({ ok: true })
     await changed
     dashboard.close()
 

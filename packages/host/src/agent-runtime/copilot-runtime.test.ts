@@ -131,6 +131,7 @@ describe('Copilot runtime custom tools', () => {
 
     await runtime.start()
     await runtime.setModel(record, 'gpt-new')
+    await runtime.confirmModelChange(record, 'gpt-old', 'gpt-new')
 
     expect(sdk.setModel).toHaveBeenCalledWith('gpt-new')
     expect(store.get(record.sessionId)?.state.messages.at(-1)).toMatchObject({
