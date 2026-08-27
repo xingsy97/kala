@@ -449,8 +449,8 @@ export function configureDashboardNamespace(
     }
 
     const subscribeSession = async (targetSessionId: string): Promise<number> => {
-      let target = deps.store.get(targetSessionId)
-      if (!target) try { target = await deps.store.load(targetSessionId, { recoverDangling: false, runtimeConfig: getDefaultConfig() }) } catch { target = undefined }
+      let target: SessionRecord | undefined
+      try { target = await loadDashboardSession(deps.store, targetSessionId, getDefaultConfig()) } catch { target = undefined }
       if (target) await refreshSessionSkillsIfNeeded(deps, target)
       await socket.join(sessionRoom(targetSessionId))
       subscribedSessions.add(targetSessionId)
@@ -511,17 +511,8 @@ export function configureDashboardNamespace(
     // dispatched user event (`client:user_message` / `client:fork`) is what
     // commits a session to disk. Until then the dashboard sees an ephemeral
     // initial state.
-    let record: SessionRecord | undefined = deps.store.get(sessionId)
-    if (!record) {
-      try {
-        // Do not convert a dangling `thinking` state into a terminal
-        // `[interrupted]` response during reconnect. The Loop resumes that
-        // state below; eager Store recovery would end the turn first.
-        record = await deps.store.load(sessionId, { recoverDangling: false })
-      } catch {
-        record = undefined
-      }
-    }
+    let record: SessionRecord | undefined
+    try { record = await loadDashboardSession(deps.store, sessionId) } catch { record = undefined }
     if (record) await refreshSessionSkillsIfNeeded(deps, record)
     await socket.join(sessionRoom(sessionId))
     await deps.messageQueues.hydrate(sessionId)
@@ -550,14 +541,8 @@ export function configureDashboardNamespace(
       if (!p) return
       const { sessionId } = p
       desiredPreviewSessions.add(sessionId)
-      let target = deps.store.get(sessionId)
-      if (!target) {
-        try {
-          target = await deps.store.load(sessionId, { recoverDangling: false, runtimeConfig: getDefaultConfig() })
-        } catch {
-          target = undefined
-        }
-      }
+      let target: SessionRecord | undefined
+      try { target = await loadDashboardSession(deps.store, sessionId, getDefaultConfig()) } catch { target = undefined }
       if (target) {
         await refreshSessionSkillsIfNeeded(deps, target)
       }
@@ -1468,6 +1453,9 @@ async function loadRecordForDashboard(
   sessionId: string,
 ): Promise<SessionRecord | undefined> {
   let record: SessionRecord | undefined = deps.store.get(sessionId)
+  if (record?.agentRuntime !== undefined && record.agentRuntime !== 'kernel') {
+    record = await deps.store.load(sessionId)
+  }
   if (!record) {
     try {
       const defaultConfig = typeof deps.defaultConfig === 'function'
@@ -1477,6 +1465,24 @@ async function loadRecordForDashboard(
     } catch {
       record = undefined
     }
+  }
+  return record
+}
+
+export async function loadDashboardSession(
+  store: SessionStore,
+  sessionId: string,
+  runtimeConfig?: AgentConfig,
+): Promise<SessionRecord> {
+  let record = store.get(sessionId)
+  if (!record) {
+    record = await store.load(sessionId, {
+      recoverDangling: false,
+      ...(runtimeConfig ? { runtimeConfig } : {}),
+    })
+  }
+  if (record.agentRuntime !== 'kernel') {
+    record = await store.load(sessionId, runtimeConfig ? { runtimeConfig } : undefined)
   }
   return record
 }

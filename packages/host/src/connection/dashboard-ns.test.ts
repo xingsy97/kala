@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
 
-import { buildCompactionMetadataIndex, consumeCompactionMetadata } from './dashboard-ns.js'
+import { buildCompactionMetadataIndex, consumeCompactionMetadata, loadDashboardSession } from './dashboard-ns.js'
+import type { SessionStore } from '../store/session.js'
 
 function makeMeta(
   action: string,
@@ -106,6 +107,31 @@ describe('history compaction-metadata correlator', () => {
       tokensBefore: 0,
       tokensAfter: 0,
       replacedCount: 3,
+    })
+  })
+
+  describe('Dashboard Session hydration', () => {
+    it('runs external Runtime recovery even when an unrecovered record is cached', async () => {
+      const cached = { sessionId: 'copilot-session', agentRuntime: 'copilot' as const, state: { status: 'idle' as const, cursor: 0 } }
+      const recovered = { ...cached, state: { status: 'error' as const, cursor: 2 } }
+      const store = {
+        get: vi.fn(() => cached),
+        load: vi.fn(async () => recovered),
+      } as unknown as SessionStore
+
+      await expect(loadDashboardSession(store, cached.sessionId)).resolves.toBe(recovered)
+      expect(store.load).toHaveBeenCalledWith(cached.sessionId, undefined)
+    })
+
+    it('does not eagerly recover a cached Kernel Session during hydration', async () => {
+      const cached = { sessionId: 'kernel-session', agentRuntime: 'kernel' as const, state: { status: 'thinking' as const, cursor: 4 } }
+      const store = {
+        get: vi.fn(() => cached),
+        load: vi.fn(),
+      } as unknown as SessionStore
+
+      await expect(loadDashboardSession(store, cached.sessionId)).resolves.toBe(cached)
+      expect(store.load).not.toHaveBeenCalled()
     })
   })
 })
