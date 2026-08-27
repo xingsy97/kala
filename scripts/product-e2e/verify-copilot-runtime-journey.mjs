@@ -190,9 +190,7 @@ try {
       && assistantText(candidate).includes(hostFinalMarker)
     ), 180_000)
     await actor.page.waitForFunction((marker) => document.body.innerText.includes(marker), { timeout: 30_000 }, hostFinalMarker)
-    const toolNames = await actor.page.$$eval('[data-testid="tool-name-chip"]', (chips) => (
-      chips.map((chip) => chip.getAttribute('data-tool-name') ?? chip.textContent ?? '')
-    ))
+    const toolNames = await collectVirtualizedToolNames(actor.page)
     if (!toolNames.includes('shell') || !toolNames.includes('todo_graph')) {
       throw new Error(`production transcript omitted Tool UI: ${JSON.stringify(toolNames)}`)
     }
@@ -299,6 +297,25 @@ async function sendMessage(page, text) {
   await page.keyboard.type(text)
   await page.waitForFunction((expected) => document.querySelector('[data-testid="composer-input"]')?.value === expected, {}, text)
   await clickByTestId(page, 'composer-send')
+}
+
+async function collectVirtualizedToolNames(page) {
+  const names = new Set()
+  const metrics = await page.$eval('[data-virtuoso-scroller="true"]', (scroller) => ({
+    clientHeight: scroller.clientHeight,
+    scrollHeight: scroller.scrollHeight,
+  }))
+  const step = Math.max(100, Math.floor(metrics.clientHeight / 2))
+  for (let top = 0; top <= metrics.scrollHeight; top += step) {
+    await page.$eval('[data-virtuoso-scroller="true"]', (scroller, value) => { scroller.scrollTop = value }, top)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const visible = await page.$$eval('[data-testid="tool-name-chip"]', (chips) => (
+      chips.map((chip) => chip.getAttribute('data-tool-name') ?? chip.textContent ?? '')
+    ))
+    for (const name of visible) names.add(name)
+  }
+  await page.$eval('[data-virtuoso-scroller="true"]', (scroller) => { scroller.scrollTop = scroller.scrollHeight })
+  return [...names]
 }
 
 function successfulToolResult(state, toolName, expectedText) {
