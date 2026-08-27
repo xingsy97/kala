@@ -121,6 +121,43 @@ describe('SessionStore.ensure', () => {
     expect(parsed.runtimeMetadata.filter((entry) => entry.action === 'copilot.recovered_interrupted_turn')).toHaveLength(1)
   })
 
+  it('does not recover an external Runtime turn projected by the current Host process', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-live-current-process',
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      config,
+    })
+    await store.recordRuntimeProjection(record.sessionId, {
+      ...record.state,
+      cursor: record.state.cursor + 1,
+      status: 'awaiting_approval',
+      pendingCalls: [{
+        callId: 'call-live',
+        name: 'shell',
+        input: { command: 'true' },
+        status: 'awaiting_approval',
+      }],
+      messages: [...record.state.messages, {
+        role: 'assistant',
+        content: [{
+          type: 'tool_call',
+          callId: 'call-live',
+          name: 'shell',
+          input: { command: 'true' },
+        }],
+      }],
+    }, 'copilot.tool_call', { callId: 'call-live' })
+
+    const loaded = await store.load(record.sessionId)
+
+    expect(loaded.state.status).toBe('awaiting_approval')
+    expect(loaded.state.pendingCalls).toHaveLength(1)
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.runtimeMetadata.some((entry) => entry.action === 'copilot.recovered_interrupted_turn')).toBe(false)
+  })
+
   it('quarantines Kernel events written into a Copilot Session', async () => {
     const store = new SessionStore(dir)
     const record = await store.create({

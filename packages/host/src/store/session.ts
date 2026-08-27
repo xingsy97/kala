@@ -125,6 +125,7 @@ export class SessionStore {
    */
   private readonly inFlight = new Map<string, Promise<SessionRecord>>()
   private readonly runtimeRecoveries = new Map<string, Promise<void>>()
+  private readonly locallyProjectedExternalSessions = new Set<string>()
   /**
    * Last-resort per-Session commit lock. HostLoop normally serializes turns, but
    * cancellation, recovery and administrative paths have historically reached
@@ -302,6 +303,7 @@ export class SessionStore {
   }
 
   private async recoverCachedExternalRuntime(record: SessionRecord): Promise<void> {
+    if (this.locallyProjectedExternalSessions.has(record.sessionId)) return
     const existing = this.runtimeRecoveries.get(record.sessionId)
     if (existing) {
       await existing
@@ -585,6 +587,7 @@ export class SessionStore {
       const entry = await appendSnapshotEntry(rec.logPath, nextState.cursor, nextState)
       rec.state = nextState
       rec.lastEventAt = entry.ts
+      this.locallyProjectedExternalSessions.add(sessionId)
       if (!rec.firstUserMessage) rec.firstUserMessage = firstUserMessageFromState(nextState)
       this.summaryCache.delete(rec.logPath)
     })
@@ -679,6 +682,7 @@ export class SessionStore {
     this.records.delete(sessionId)
     this.inFlight.delete(sessionId)
     this.runtimeRecoveries.delete(sessionId)
+    this.locallyProjectedExternalSessions.delete(sessionId)
     this.recordTails.delete(sessionId)
     for (const path of paths) {
       this.summaryCache.delete(path)
