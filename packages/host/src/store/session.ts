@@ -15,7 +15,7 @@ import type {
   Effect,
   UsageTotal,
 } from '@agent-kernel/kernel'
-import type { AgentRuntimeId, LLMTrace, SessionMemoryPolicy, SessionPreferences } from '@agent-kernel/shared'
+import type { AgentRuntimeId, LLMTrace, SessionMemoryPolicy, SessionPreferences, SnapshotEntry } from '@agent-kernel/shared'
 import { createInitialState, fold } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
 import { ulid } from 'ulid'
@@ -25,6 +25,7 @@ import {
   appendMetadataEntry,
   appendRuntimeMetadataEntry,
   appendSnapshotEntry,
+  readLastSessionSnapshot,
   readSessionHeader,
   readSessionLog,
   readSessionState,
@@ -70,6 +71,11 @@ export type SessionRecord = {
    * `CreateSessionParams.memoryPolicy`.
    */
   memoryPolicy?: SessionMemoryPolicy
+}
+
+async function optionalSnapshot(path: string): Promise<SnapshotEntry[]> {
+  const snapshot = await readLastSessionSnapshot(path)
+  return snapshot ? [snapshot] : []
 }
 
 export type CreateSessionParams = {
@@ -761,8 +767,12 @@ export class SessionStore {
         }
         this.summaryCache.set(path, cachedSummary)
         await writeJsonFile(summaryCachePath(path), {
-          schemaVersion: 1,
+          schemaVersion: 2,
           ...cachedSummary,
+          hasEvents: parsed.events.length > 0,
+          externalRuntimeAlreadyQuarantined: parsed.runtimeMetadata.some((entry) =>
+            entry.action === 'runtime.quarantined_kernel_events'
+          ),
         })
       }
       return summary
@@ -800,7 +810,28 @@ export class SessionStore {
     path: string,
     options: { recoverDangling: boolean; runtimeConfig?: AgentConfig } = { recoverDangling: true },
   ): Promise<SessionRecord> {
-    const parsed = await readSessionState(path)
+    const header = await readSessionHeader(path)
+    const persistedSummary = await readPersistedSummary(path)
+    const fastExternalLoad = (header.agentRuntime ?? 'kernel') !== 'kernel'
+      && persistedSummary?.hasEvents === false
+    const parsed = fastExternalLoad
+      ? {
+          header,
+          events: [],
+          snapshots: [...await optionalSnapshot(path)],
+          metadata: [],
+          runtimeMetadata: persistedSummary.externalRuntimeAlreadyQuarantined
+            ? [{
+                kind: 'runtime_metadata' as const,
+                ts: header.ts,
+                sessionId,
+                action: 'runtime.quarantined_kernel_events',
+                payload: {},
+              }]
+            : [],
+          warnings: [],
+        }
+      : await readSessionState(path)
     const agentRuntime = parsed.header.agentRuntime ?? 'kernel'
     const events = parsed.events.map((e) => e.event)
     const lastSnapshot = parsed.snapshots.at(-1)
@@ -938,17 +969,22 @@ export class SessionStore {
     }
 
     const latestWorkspaceId =
+      persistedSummary?.summary.workspaceId ??
       latestStringFromMetadata(parsed.metadata, 'workspaceId') ??
       parsed.header.workspaceId
     const latestWorkspaceName =
+      persistedSummary?.summary.workspaceName ??
       latestStringFromMetadata(parsed.metadata, 'workspaceName') ??
       parsed.header.workspaceName
-    const label = latestStringFromMetadata(parsed.metadata, 'label')
+    const label = persistedSummary?.summary.label ??
+      latestStringFromMetadata(parsed.metadata, 'label')
     const firstUserMessage = agentRuntime === 'kernel'
       ? firstUserMessageFromEvents(parsed.events)
       : firstUserMessageFromState(finalState)
-    const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel')
-    const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)
+    const selectedModel = persistedSummary?.summary.preferences?.selectedModel ??
+      latestStringFromMetadata(parsed.metadata, 'selectedModel')
+    const toolCardMode = persistedSummary?.summary.preferences?.toolCardMode ??
+      latestToolCardModeFromMetadata(parsed.metadata)
     const preferences: SessionPreferences = {
       ...(selectedModel
         ? { selectedModel }
@@ -966,8 +1002,8 @@ export class SessionStore {
       config: options.runtimeConfig ?? parsed.header.config,
       toolLock: toolLockFor(parsed.header.config),
       preferences,
-      ...(parsed.events.length > 0
-        ? { lastEventAt: parsed.events[parsed.events.length - 1]!.ts }
+      ...(persistedSummary?.summary.lastEventAt || parsed.events.length > 0
+        ? { lastEventAt: persistedSummary?.summary.lastEventAt ?? parsed.events[parsed.events.length - 1]!.ts }
         : {}),
       state: finalState,
       ...(firstUserMessage ? { firstUserMessage } : {}),
@@ -1044,10 +1080,14 @@ type CachedSessionSummary = {
   mtimeMs: number
   size: number
   summary: SessionSummary
+  hasEvents?: boolean
+  externalRuntimeAlreadyQuarantined?: boolean
 }
 
 type PersistedSessionSummary = CachedSessionSummary & {
-  schemaVersion: 1
+  schemaVersion: 2
+  hasEvents: boolean
+  externalRuntimeAlreadyQuarantined: boolean
 }
 
 function summaryCachePath(logPath: string): string {
@@ -1058,9 +1098,11 @@ async function readPersistedSummary(logPath: string): Promise<CachedSessionSumma
   try {
     const parsed = JSON.parse(await readFile(summaryCachePath(logPath), 'utf8')) as Partial<PersistedSessionSummary>
     if (
-      parsed.schemaVersion !== 1
+      parsed.schemaVersion !== 2
       || typeof parsed.mtimeMs !== 'number'
       || typeof parsed.size !== 'number'
+      || typeof parsed.hasEvents !== 'boolean'
+      || typeof parsed.externalRuntimeAlreadyQuarantined !== 'boolean'
       || !parsed.summary
       || typeof parsed.summary.sessionId !== 'string'
     ) return undefined
@@ -1068,6 +1110,8 @@ async function readPersistedSummary(logPath: string): Promise<CachedSessionSumma
       mtimeMs: parsed.mtimeMs,
       size: parsed.size,
       summary: parsed.summary,
+      hasEvents: parsed.hasEvents,
+      externalRuntimeAlreadyQuarantined: parsed.externalRuntimeAlreadyQuarantined,
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return undefined

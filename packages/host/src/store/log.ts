@@ -412,6 +412,39 @@ export async function readSessionState(path: string): Promise<ParsedLog> {
   return categorizeLogEntries(path, entries, warnings)
 }
 
+export async function readLastSessionSnapshot(path: string): Promise<SnapshotEntry | undefined> {
+  const handle = await open(path, 'r')
+  try {
+    const stat = await handle.stat()
+    let position = stat.size
+    let carry = Buffer.alloc(0)
+    while (position > 0) {
+      const length = Math.min(64 * 1024, position)
+      position -= length
+      const chunk = Buffer.allocUnsafe(length)
+      await handle.read(chunk, 0, length, position)
+      const data = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk
+      let end = data.length
+      while (end > 0) {
+        const newline = data.lastIndexOf(10, end - 1)
+        if (newline < 0) break
+        const line = data.subarray(newline + 1, end)
+        if (line.length > 0 && line.subarray(0, 20).toString('utf8').startsWith('{"kind":"snapshot"')) {
+          return JSON.parse(line.toString('utf8')) as SnapshotEntry
+        }
+        end = newline
+      }
+      carry = data.subarray(0, end)
+    }
+    if (carry.subarray(0, 20).toString('utf8').startsWith('{"kind":"snapshot"')) {
+      return JSON.parse(carry.toString('utf8')) as SnapshotEntry
+    }
+    return undefined
+  } finally {
+    await handle.close()
+  }
+}
+
 export async function readSessionLog(path: string): Promise<ParsedLog> {
   const entries: LogEntry[] = []
   const warnings: string[] = []

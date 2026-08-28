@@ -20,6 +20,7 @@ import {
   appendRuntimeMetadataEntry,
   readSessionHistory,
   readSessionHeader,
+  readLastSessionSnapshot,
   readSessionLog,
   readSessionState,
   writeHeader,
@@ -104,6 +105,20 @@ describe('readSessionLog', () => {
     expect(parsed.snapshots).toHaveLength(1)
     expect(parsed.snapshots[0]?.seq).toBe(2)
     expect(parsed.snapshots[0]?.state.status).toBe('done')
+  })
+
+  it('finds the latest snapshot from the tail without parsing earlier snapshots', async () => {
+    const path = join(dir, 'last-snapshot.jsonl')
+    await writeHeader({ path, sessionId: 'external', agentRuntime: 'copilot', config, initialState })
+    await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 1, ts: new Date().toISOString(), state: { ...initialState, cursor: 1, messages: [{ role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(200_000) }] }] } })}\n`, 'utf8')
+    await appendRuntimeMetadataEntry(path, { sessionId: 'external', action: 'between', payload: {} })
+    await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 2, ts: new Date().toISOString(), state: { ...initialState, cursor: 2, status: 'done' } })}\n`, 'utf8')
+    await appendRuntimeMetadataEntry(path, { sessionId: 'external', action: 'after', payload: {} })
+
+    const snapshot = await readLastSessionSnapshot(path)
+
+    expect(snapshot?.seq).toBe(2)
+    expect(snapshot?.state.status).toBe('done')
   })
 
   it('round-trips header + events + snapshots cleanly', async () => {
