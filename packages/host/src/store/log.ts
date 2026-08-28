@@ -378,6 +378,40 @@ export async function readSessionHistory(path: string): Promise<ParsedHistory> {
   return { events, runtimeMetadata }
 }
 
+export async function readSessionState(path: string): Promise<ParsedLog> {
+  const entries: LogEntry[] = []
+  const warnings: string[] = []
+  const endsWithNewline = await fileEndsWithNewline(path)
+  const input = createReadStream(path, { encoding: 'utf8' })
+  const rl = createInterface({ input, crlfDelay: Infinity })
+  let lineNo = 0
+  let latestSnapshot: { line: string; lineNo: number } | undefined
+  try {
+    for await (const line of rl) {
+      lineNo += 1
+      if (line.startsWith('{"kind":"snapshot"')) {
+        latestSnapshot = { line, lineNo }
+        continue
+      }
+      try {
+        parseLogLine(line, lineNo, entries)
+      } catch (error) {
+        if (!endsWithNewline && lineNo > 1) {
+          warnings.push(`Dropped truncated final line ${lineNo} (${line.length} bytes): ${(error as Error).message}`)
+          break
+        }
+        throw error
+      }
+    }
+  } finally {
+    rl.close()
+    input.destroy()
+    if (!input.closed) await once(input, 'close')
+  }
+  if (latestSnapshot) parseLogLine(latestSnapshot.line, latestSnapshot.lineNo, entries)
+  return categorizeLogEntries(path, entries, warnings)
+}
+
 export async function readSessionLog(path: string): Promise<ParsedLog> {
   const entries: LogEntry[] = []
   const warnings: string[] = []
@@ -418,6 +452,10 @@ export async function readSessionLog(path: string): Promise<ParsedLog> {
     }
   }
 
+  return categorizeLogEntries(path, entries, warnings)
+}
+
+function categorizeLogEntries(path: string, entries: LogEntry[], warnings: string[]): ParsedLog {
   if (entries.length === 0) throw new Error(`Empty log: ${path}`)
   const header = entries[0]
   if (!header || header.kind !== 'header')

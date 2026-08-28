@@ -27,6 +27,7 @@ import {
   appendSnapshotEntry,
   readSessionHeader,
   readSessionLog,
+  readSessionState,
   writeHeader,
 } from './log.js'
 import { step } from '@agent-kernel/kernel'
@@ -799,7 +800,7 @@ export class SessionStore {
     path: string,
     options: { recoverDangling: boolean; runtimeConfig?: AgentConfig } = { recoverDangling: true },
   ): Promise<SessionRecord> {
-    const parsed = await readSessionLog(path)
+    const parsed = await readSessionState(path)
     const agentRuntime = parsed.header.agentRuntime ?? 'kernel'
     const events = parsed.events.map((e) => e.event)
     const lastSnapshot = parsed.snapshots.at(-1)

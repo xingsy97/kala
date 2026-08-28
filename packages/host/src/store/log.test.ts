@@ -21,6 +21,7 @@ import {
   readSessionHistory,
   readSessionHeader,
   readSessionLog,
+  readSessionState,
   writeHeader,
 } from './log.js'
 
@@ -90,6 +91,19 @@ describe('readSessionLog', () => {
 
     expect(parsed.events.map((entry) => entry.event.kind)).toEqual(['user_message'])
     expect(parsed.runtimeMetadata.map((entry) => entry.action)).toEqual(['test'])
+  })
+
+  it('loads state using only the latest external runtime snapshot', async () => {
+    const path = join(dir, 'state-only.jsonl')
+    await writeHeader({ path, sessionId: 'external', agentRuntime: 'copilot', config, initialState })
+    await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 1, ts: new Date().toISOString(), state: { ...initialState, cursor: 1, status: 'thinking' } })}\n`, 'utf8')
+    await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 2, ts: new Date().toISOString(), state: { ...initialState, cursor: 2, status: 'done' } })}\n`, 'utf8')
+
+    const parsed = await readSessionState(path)
+
+    expect(parsed.snapshots).toHaveLength(1)
+    expect(parsed.snapshots[0]?.seq).toBe(2)
+    expect(parsed.snapshots[0]?.state.status).toBe('done')
   })
 
   it('round-trips header + events + snapshots cleanly', async () => {
