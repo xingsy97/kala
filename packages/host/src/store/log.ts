@@ -9,6 +9,7 @@ import { createReadStream } from 'node:fs'
 import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import { open } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { once } from 'node:events'
 import { createInterface } from 'node:readline/promises'
 import { basename, dirname, join, relative } from 'node:path'
 
@@ -95,8 +96,9 @@ export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntr
 }
 
 export async function readSessionHeader(path: string): Promise<HeaderEntry> {
+  const input = createReadStream(path, { encoding: 'utf8' })
   const rl = createInterface({
-    input: createReadStream(path, { encoding: 'utf8' }),
+    input,
     crlfDelay: Infinity,
   })
   try {
@@ -107,6 +109,8 @@ export async function readSessionHeader(path: string): Promise<HeaderEntry> {
     }
   } finally {
     rl.close()
+    input.destroy()
+    if (!input.closed) await once(input, 'close')
   }
   throw new Error(`Session log is empty: ${path}`)
 }

@@ -7,7 +7,7 @@
  * and the newline byte still leaves a partial line on disk.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readlinkSync, readdirSync, rmSync } from 'node:fs'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -54,6 +54,23 @@ describe('readSessionLog', () => {
       sessionId: 'child',
       parentSessionId: 'parent',
     })
+  })
+
+  it.runIf(process.platform === 'linux')('closes the header read stream after returning the first line', async () => {
+    const path = join(dir, 'header-fd.jsonl')
+    await writeHeader({ path, sessionId: 'child', config, initialState, parentSessionId: 'parent' })
+
+    for (let index = 0; index < 100; index++) await readSessionHeader(path)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    const openCopies = readdirSync('/proc/self/fd').filter((fd) => {
+      try {
+        return readlinkSync(`/proc/self/fd/${fd}`) === path
+      } catch {
+        return false
+      }
+    })
+    expect(openCopies).toEqual([])
   })
 
   it('round-trips header + events + snapshots cleanly', async () => {

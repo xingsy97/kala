@@ -117,6 +117,11 @@ const SESSION_ARTIFACT_KINDS = [
 export class SessionStore {
   private readonly records = new Map<string, SessionRecord>()
   private readonly summaryCache = new Map<string, CachedSessionSummary>()
+  private readonly summaryLoads = new Map<string, {
+    mtimeMs: number
+    size: number
+    promise: Promise<SessionSummary>
+  }>()
   /**
    * De-duplicates concurrent `ensure` / `load` requests for the same
    * sessionId. Two dashboard + executor sockets arriving for a fresh
@@ -732,14 +737,32 @@ export class SessionStore {
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
       return cached.summary
     }
-    const parsed = await readSessionLog(path)
-    const summary = summarizeLog(parsed)
-    this.summaryCache.set(path, {
+    const active = this.summaryLoads.get(path)
+    if (active && active.mtimeMs === stat.mtimeMs && active.size === stat.size) {
+      return active.promise
+    }
+    const load = readSessionLog(path).then((parsed) => {
+      const summary = summarizeLog(parsed)
+      const latest = statSync(path)
+      if (latest.mtimeMs === stat.mtimeMs && latest.size === stat.size) {
+        this.summaryCache.set(path, {
+          mtimeMs: stat.mtimeMs,
+          size: stat.size,
+          summary,
+        })
+      }
+      return summary
+    })
+    this.summaryLoads.set(path, {
       mtimeMs: stat.mtimeMs,
       size: stat.size,
-      summary,
+      promise: load,
     })
-    return summary
+    try {
+      return await load
+    } finally {
+      if (this.summaryLoads.get(path)?.promise === load) this.summaryLoads.delete(path)
+    }
   }
 
   private pathFor(sessionId: string): string {
