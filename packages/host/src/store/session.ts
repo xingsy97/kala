@@ -5,7 +5,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import type {
@@ -31,6 +31,7 @@ import {
 } from './log.js'
 import { step } from '@agent-kernel/kernel'
 import { toolLockFor } from '../tool-version.js'
+import { writeJsonFile } from '../tenant-runtime/atomic-json-file.js'
 
 export type SessionRecord = {
   readonly sessionId: string
@@ -692,7 +693,9 @@ export class SessionStore {
     this.recordTails.delete(sessionId)
     for (const path of paths) {
       this.summaryCache.delete(path)
+      this.summaryLoads.delete(path)
       await rm(path, { force: true })
+      await rm(summaryCachePath(path), { force: true })
     }
     for (const slug of artifactSlugs) {
       await rm(safeDirectChild(logArtifactRoot, slug), { recursive: true, force: true })
@@ -737,18 +740,28 @@ export class SessionStore {
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
       return cached.summary
     }
+    const persisted = await readPersistedSummary(path)
+    if (persisted && persisted.mtimeMs === stat.mtimeMs && persisted.size === stat.size) {
+      this.summaryCache.set(path, persisted)
+      return persisted.summary
+    }
     const active = this.summaryLoads.get(path)
     if (active && active.mtimeMs === stat.mtimeMs && active.size === stat.size) {
       return active.promise
     }
-    const load = readSessionLog(path).then((parsed) => {
+    const load = readSessionLog(path).then(async (parsed) => {
       const summary = summarizeLog(parsed)
       const latest = statSync(path)
       if (latest.mtimeMs === stat.mtimeMs && latest.size === stat.size) {
-        this.summaryCache.set(path, {
+        const cachedSummary = {
           mtimeMs: stat.mtimeMs,
           size: stat.size,
           summary,
+        }
+        this.summaryCache.set(path, cachedSummary)
+        await writeJsonFile(summaryCachePath(path), {
+          schemaVersion: 1,
+          ...cachedSummary,
         })
       }
       return summary
@@ -1030,6 +1043,35 @@ type CachedSessionSummary = {
   mtimeMs: number
   size: number
   summary: SessionSummary
+}
+
+type PersistedSessionSummary = CachedSessionSummary & {
+  schemaVersion: 1
+}
+
+function summaryCachePath(logPath: string): string {
+  return `${logPath}.summary.json`
+}
+
+async function readPersistedSummary(logPath: string): Promise<CachedSessionSummary | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(summaryCachePath(logPath), 'utf8')) as Partial<PersistedSessionSummary>
+    if (
+      parsed.schemaVersion !== 1
+      || typeof parsed.mtimeMs !== 'number'
+      || typeof parsed.size !== 'number'
+      || !parsed.summary
+      || typeof parsed.summary.sessionId !== 'string'
+    ) return undefined
+    return {
+      mtimeMs: parsed.mtimeMs,
+      size: parsed.size,
+      summary: parsed.summary,
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return undefined
+    throw error
+  }
 }
 
 function loadedRecordForPath(

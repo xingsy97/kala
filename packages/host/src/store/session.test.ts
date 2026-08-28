@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createConfig, step } from '@agent-kernel/kernel'
 
@@ -602,6 +602,11 @@ describe('SessionStore.listSummaries', () => {
     const [second] = await store.listSummaries()
 
     expect(second).toBe(first)
+    await vi.waitFor(() => expect(existsSync(`${path}.summary.json`)).toBe(true))
+
+    const restarted = new SessionStore(dir)
+    const [persisted] = await restarted.listSummaries()
+    expect(persisted).toEqual(first)
 
     await appendEventEntry({
       path,
