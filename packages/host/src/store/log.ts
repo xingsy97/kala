@@ -339,6 +339,45 @@ export type ParsedLog = {
   warnings: readonly string[]
 }
 
+export type ParsedHistory = {
+  events: EventEntry[]
+  runtimeMetadata: RuntimeMetadataEntry[]
+}
+
+export async function readSessionHistory(path: string): Promise<ParsedHistory> {
+  const input = createReadStream(path, { encoding: 'utf8' })
+  const rl = createInterface({ input, crlfDelay: Infinity })
+  let header: HeaderEntry | undefined
+  const events: EventEntry[] = []
+  const runtimeMetadata: RuntimeMetadataEntry[] = []
+  let canonicalEventSeq = 0
+  try {
+    for await (const line of rl) {
+      if (!header) {
+        const entry = JSON.parse(line) as LogEntry
+        if (entry.kind !== 'header') throw new Error(`Log ${path} missing header`)
+        header = entry
+        canonicalEventSeq = entry.initialState.cursor
+        continue
+      }
+      if (line.startsWith('{"kind":"event"')) {
+        const entry = JSON.parse(line) as EventEntry
+        if (!Number.isSafeInteger(entry.seq) || entry.seq <= 0) continue
+        canonicalEventSeq += 1
+        events.push(entry.seq === canonicalEventSeq ? entry : { ...entry, seq: canonicalEventSeq })
+      } else if (line.startsWith('{"kind":"runtime_metadata"')) {
+        runtimeMetadata.push(JSON.parse(line) as RuntimeMetadataEntry)
+      }
+    }
+  } finally {
+    rl.close()
+    input.destroy()
+    if (!input.closed) await once(input, 'close')
+  }
+  if (!header) throw new Error(`Empty log: ${path}`)
+  return { events, runtimeMetadata }
+}
+
 export async function readSessionLog(path: string): Promise<ParsedLog> {
   const entries: LogEntry[] = []
   const warnings: string[] = []

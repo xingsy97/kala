@@ -96,7 +96,7 @@ import type { HostLoopDeps, LoopHandle } from '../loop.js'
 import { consolidateMemory, type ConsolidationOutcome } from '../extensions/memory-consolidation.js'
 import { markSubAgentInterrupted } from '../extensions/agent-tool.js'
 import { resetCompactRuntime } from '../extensions/compaction.js'
-import { readSessionLog } from '../store/log.js'
+import { readSessionHistory, readSessionLog } from '../store/log.js'
 import { SessionStore, type SessionRecord } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
 import { dirname, resolve as resolvePath, sep } from 'node:path'
@@ -368,7 +368,7 @@ export function configureDashboardNamespace(
             return
           }
         }
-        const parsed = await readSessionLog(target.logPath)
+        const parsed = await readSessionHistory(target.logPath)
         const since = p.sinceCursor ?? 0
         const compactionMetadataByReplaceRange = buildCompactionMetadataIndex(parsed.runtimeMetadata)
         const entries: EventAppendedEvent[] = parsed.events

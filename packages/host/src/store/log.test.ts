@@ -18,6 +18,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import {
   appendEventEntry,
   appendRuntimeMetadataEntry,
+  readSessionHistory,
   readSessionHeader,
   readSessionLog,
   writeHeader,
@@ -71,6 +72,24 @@ describe('readSessionLog', () => {
       }
     })
     expect(openCopies).toEqual([])
+  })
+
+  it('loads history without materializing repeated external runtime snapshots', async () => {
+    const path = join(dir, 'history-only.jsonl')
+    await writeHeader({ path, sessionId: 'external', agentRuntime: 'copilot', config, initialState })
+    await appendEventEntry({
+      path,
+      seq: 1,
+      event: { kind: 'user_message', text: 'hello' },
+      effects: [],
+    })
+    await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 2, ts: new Date().toISOString(), state: { ...initialState, cursor: 2, messages: [{ role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(1_000_000) }] }] } })}\n`, 'utf8')
+    await appendRuntimeMetadataEntry(path, { sessionId: 'external', action: 'test', payload: { ok: true } })
+
+    const parsed = await readSessionHistory(path)
+
+    expect(parsed.events.map((entry) => entry.event.kind)).toEqual(['user_message'])
+    expect(parsed.runtimeMetadata.map((entry) => entry.action)).toEqual(['test'])
   })
 
   it('round-trips header + events + snapshots cleanly', async () => {
