@@ -327,11 +327,15 @@ export class SessionStore {
 
     const recovery = (async () => {
       const latest = this.records.get(record.sessionId) ?? record
-      const parsed = await readSessionLog(latest.logPath)
-      const alreadyQuarantined = parsed.runtimeMetadata.some((entry) =>
-        entry.action === 'runtime.quarantined_kernel_events',
-      )
-      const contaminatedEventCount = alreadyQuarantined ? 0 : parsed.events.length
+      const persistedSummary = await readPersistedSummary(latest.logPath)
+      const parsed = persistedSummary?.hasEvents === false
+        ? undefined
+        : await readSessionState(latest.logPath)
+      const alreadyQuarantined = persistedSummary?.externalRuntimeAlreadyQuarantined === true
+        || parsed?.runtimeMetadata.some((entry) =>
+          entry.action === 'runtime.quarantined_kernel_events'
+        ) === true
+      const contaminatedEventCount = alreadyQuarantined ? 0 : parsed?.events.length ?? 0
       const next = contaminatedEventCount > 0
         ? quarantinedExternalRuntimeState(latest.state)
         : interruptedExternalRuntimeState(latest.agentRuntime, latest.state)
