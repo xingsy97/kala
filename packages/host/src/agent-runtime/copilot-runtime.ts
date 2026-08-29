@@ -17,6 +17,7 @@ import {
   CopilotClient,
   RuntimeConnection,
   type ModelInfo as CopilotModelInfo,
+  type MessageOptions,
   type CopilotSession,
   type SessionEvent,
   type Tool,
@@ -117,7 +118,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
       pendingCalls: [],
       error: undefined,
     }))
-    void this.runTurn(record, session, input.text)
+    void this.runTurn(record, session, input)
   }
 
   async cancel(record: SessionRecord): Promise<void> {
@@ -339,9 +340,9 @@ export class CopilotAgentRuntime implements AgentRuntime {
     }
   }
 
-  private async runTurn(record: SessionRecord, session: CopilotSession, prompt: string): Promise<void> {
+  private async runTurn(record: SessionRecord, session: CopilotSession, input: AgentRuntimeSendInput): Promise<void> {
     try {
-      const response = await sendAndWaitWithActivityTimeout(session, prompt)
+      const response = await sendAndWaitWithActivityTimeout(session, copilotMessageOptions(input))
       if (this.cancelledSessions.delete(record.sessionId)) return
       const pendingProjection = this.tails.get(record.sessionId)
       if (pendingProjection) await pendingProjection
@@ -472,7 +473,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   }
 }
 
-async function sendAndWaitWithActivityTimeout(session: CopilotSession, prompt: string) {
+async function sendAndWaitWithActivityTimeout(session: CopilotSession, message: MessageOptions) {
   let timeout: NodeJS.Timeout | undefined
   let rejectInactivity!: (error: Error) => void
   const inactivity = new Promise<never>((_, reject) => {
@@ -489,7 +490,7 @@ async function sendAndWaitWithActivityTimeout(session: CopilotSession, prompt: s
   armTimeout()
   try {
     return await Promise.race([
-      session.sendAndWait({ prompt }, COPILOT_SDK_TURN_TIMEOUT_MS),
+      session.sendAndWait(message, COPILOT_SDK_TURN_TIMEOUT_MS),
       inactivity,
     ])
   } finally {
@@ -514,6 +515,36 @@ function modelInfo(model: CopilotModelInfo): ModelInfo {
 function userMessage(input: AgentRuntimeSendInput): Message {
   if (input.content && input.content.length > 0) return { role: 'user', content: [...input.content] }
   return { role: 'user', content: [{ type: 'text', text: input.text }] }
+}
+
+function copilotMessageOptions(input: AgentRuntimeSendInput): MessageOptions {
+  const attachments: NonNullable<MessageOptions['attachments']> = []
+  for (const block of input.content ?? []) {
+    if (block.type !== 'image') continue
+    if (block.source.kind === 'base64') {
+      attachments.push({
+        type: 'blob',
+        data: block.source.data,
+        mimeType: block.source.mediaType,
+        displayName: `pasted-image.${imageExtension(block.source.mediaType)}`,
+      })
+    } else {
+      attachments.push({
+        type: 'file',
+        path: block.source.path,
+        displayName: block.source.path.split(/[\\/]/u).at(-1) ?? block.source.path,
+      })
+    }
+  }
+  return {
+    prompt: input.text,
+    ...(attachments.length > 0 ? { attachments } : {}),
+  }
+}
+
+function imageExtension(mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'): string {
+  if (mediaType === 'image/jpeg') return 'jpg'
+  return mediaType.slice('image/'.length)
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

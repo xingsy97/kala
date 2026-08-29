@@ -72,7 +72,7 @@ export const COPILOT_AGENT_RUNTIME_CAPABILITIES: AgentRuntimeCapabilities = {
   workspace: true,
   cwdMutation: false,
   modelSelection: true,
-  attachments: false,
+  attachments: true,
   memoryConsolidation: false,
   customTools: true,
   nativeReasoning: true,

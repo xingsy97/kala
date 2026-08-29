@@ -63,6 +63,9 @@ try {
     if (!copilot?.available || copilot.status !== 'ready') {
       throw new Error(`Copilot runtime is not ready: ${copilot?.reason ?? copilot?.status ?? 'missing'}`)
     }
+    if (copilot.capabilities?.attachments !== true) {
+      throw new Error('Copilot runtime does not advertise image attachment support')
+    }
     runtimeVersion = copilot.version
     const executors = await responseEvent(socket, 'client:list_executors', 'server:executors', {})
     const executor = requestedWorkspaceId
@@ -160,6 +163,28 @@ try {
     await actor.page.keyboard.press('Escape')
     await actor.page.waitForSelector('[data-testid="session-metadata-dialog"]', { hidden: true })
     return { runtimeText }
+  })
+
+  await harness.step('paste an image through the production Copilot Composer', async () => {
+    await actor.page.waitForSelector('[data-testid="composer-input"]', { visible: true, timeout: 20_000 })
+    await actor.page.$eval('[data-testid="composer-input"]', (input) => {
+      const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEAQH/1jK7WQAAAABJRU5ErkJggg=='), (char) => char.charCodeAt(0))
+      const file = new File([bytes], 'copilot-e2e.png', { type: 'image/png' })
+      const clipboardData = new DataTransfer()
+      clipboardData.items.add(file)
+      input.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData,
+      }))
+    })
+    await actor.page.waitForSelector('[data-testid="pasted-image-tray"]', { visible: true, timeout: 20_000 })
+    const previewCount = await actor.page.$$eval('[data-testid="pasted-image-tray"] img', (images) => images.length)
+    if (previewCount !== 1) throw new Error(`expected one pasted image preview, found ${previewCount}`)
+    const removeButton = await actor.page.$('[data-testid^="pasted-image-remove-"]')
+    await clickElement(removeButton, 'pasted image remove')
+    await actor.page.waitForSelector('[data-testid="pasted-image-tray"]', { hidden: true, timeout: 20_000 })
+    return { previewCount }
   })
 
   await harness.step('approve a real Copilot Executor tool and observe streaming final output', async () => {

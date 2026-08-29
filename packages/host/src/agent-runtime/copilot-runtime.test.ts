@@ -25,6 +25,7 @@ const sdk = vi.hoisted(() => ({
   resumeSucceeds: false,
   listeners: [] as Array<(event: unknown) => void>,
   responses: [] as Array<unknown>,
+  sentMessages: [] as Array<unknown>,
   abort: vi.fn(async () => {}),
   setModel: vi.fn(async () => {}),
 }))
@@ -63,7 +64,8 @@ vi.mock('@github/copilot-sdk', () => ({
     session() {
       return {
         async send() {},
-        async sendAndWait() {
+        async sendAndWait(options: unknown) {
+          sdk.sentMessages.push(options)
           if (sdk.responses.length > 0) {
             const response = sdk.responses.shift()
             if (response instanceof Error) throw response
@@ -98,6 +100,7 @@ describe('Copilot runtime custom tools', () => {
     sdk.resumeSucceeds = false
     sdk.listeners.length = 0
     sdk.responses.length = 0
+    sdk.sentMessages.length = 0
     sdk.abort.mockClear()
     sdk.setModel.mockClear()
     dir = mkdtempSync(join(tmpdir(), 'copilot-runtime-tools-'))
@@ -192,7 +195,7 @@ describe('Copilot runtime custom tools', () => {
     expect(sdk.configs.at(-1)?.workingDirectory).toBe(dir)
     expect(sdk.configs.at(-1)?.remoteSession).toBe('off')
     expect(runtime.descriptor()).toMatchObject({
-      capabilities: { modelSelection: true },
+      capabilities: { modelSelection: true, attachments: true },
       models: [{
         ref: 'gpt-5.4-mini',
         id: 'gpt-5.4-mini',
@@ -201,6 +204,7 @@ describe('Copilot runtime custom tools', () => {
         contextWindow: 128_000,
       }],
     })
+
     expect(sdk.setModel).toHaveBeenCalledWith('gpt-5.4-mini')
 
     const result = await tool?.handler(
@@ -233,6 +237,64 @@ describe('Copilot runtime custom tools', () => {
         content: 'host tool result',
       }),
     ]))
+    await runtime.close()
+  })
+
+  it('forwards pasted images to the Copilot SDK as blob attachments', async () => {
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-image-session',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    sdk.responses.push({
+      type: 'assistant.message',
+      data: { content: 'I can see it.', messageId: 'message-image' },
+      id: 'event-image',
+      timestamp: new Date().toISOString(),
+    })
+
+    await runtime.send(record, {
+      text: 'Describe this screenshot.',
+      content: [
+        { type: 'text', text: 'Describe this screenshot.' },
+        {
+          type: 'image',
+          source: {
+            kind: 'base64',
+            mediaType: 'image/png',
+            data: 'iVBORw0KGgo=',
+          },
+        },
+      ],
+    })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+
+    expect(sdk.sentMessages).toContainEqual({
+      prompt: 'Describe this screenshot.',
+      attachments: [{
+        type: 'blob',
+        data: 'iVBORw0KGgo=',
+        mimeType: 'image/png',
+        displayName: 'pasted-image.png',
+      }],
+    })
+    expect(store.get(record.sessionId)?.state.messages[0]).toMatchObject({
+      role: 'user',
+      content: expect.arrayContaining([
+        expect.objectContaining({ type: 'image' }),
+      ]),
+    })
     await runtime.close()
   })
 
