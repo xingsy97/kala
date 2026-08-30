@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createInitialState, type ImageContent, type TextContent } from '@agent-kernel/kernel'
+import { createInitialState, type FileContent, type ImageContent, type TextContent } from '@agent-kernel/kernel'
 import type { FileListEntry, HumanAttentionTimeline } from '@agent-kernel/shared'
 
 import { Composer } from './Composer.js'
@@ -13,7 +13,7 @@ function renderComposer(props?: {
   onSubmit?: (
     text: string,
     mode: 'steer' | 'queue',
-    images?: readonly ImageContent[],
+    attachments?: readonly (ImageContent | FileContent)[],
     extraBlocks?: readonly TextContent[],
   ) => void
   onCompact?: () => void
@@ -840,6 +840,7 @@ describe('Composer', () => {
     fireEvent.change(screen.getByTestId('composer-input'), {
       target: { value: 'look at this' },
     })
+
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
@@ -859,6 +860,39 @@ describe('Composer', () => {
       expect(images[0].source.data.length).toBeGreaterThan(0)
     }
     await waitFor(() => expect(screen.queryByTestId('pasted-image-tray')).toBeNull())
+  })
+
+  it('selects, previews, removes, and submits generic file attachments', async () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit })
+    const file = new File(['export const answer = 42\n'], 'answer.ts', { type: 'text/typescript' })
+
+    fireEvent.change(screen.getByTestId('composer-file-input'), {
+      target: { files: [file] },
+    })
+
+    const tray = await screen.findByTestId('attachment-tray')
+    expect(tray.textContent).toContain('answer.ts')
+    expect(tray.textContent).toContain('text/typescript')
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'review this file' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    const attachments = onSubmit.mock.calls[0]?.[2] as readonly (ImageContent | FileContent)[]
+    expect(attachments).toEqual([{
+      type: 'file',
+      name: 'answer.ts',
+      mediaType: 'text/typescript',
+      data: btoa('export const answer = 42\n'),
+    }])
+    expect(screen.queryByTestId('attachment-tray')).toBeNull()
+
+    fireEvent.change(screen.getByTestId('composer-file-input'), {
+      target: { files: [file] },
+    })
+    const secondTray = await screen.findByTestId('attachment-tray')
+    fireEvent.click(secondTray.querySelector('[data-testid^="attached-file-remove-"]') as Element)
+    expect(screen.queryByTestId('attachment-tray')).toBeNull()
   })
 
   it('removes a pasted image when the close button is clicked', async () => {

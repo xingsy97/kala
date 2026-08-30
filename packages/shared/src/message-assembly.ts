@@ -110,7 +110,7 @@ export function createMessageAssemblyArtifact(input: {
     existing.estimatedTokens += estimateMessageTokens([message])
     buckets.set(message.role, existing)
     for (const content of message.content) {
-      const key = content.type === 'image' ? 'images' : content.type === 'thinking' ? 'thinking' : undefined
+      const key = content.type === 'image' || content.type === 'file' ? 'images' : content.type === 'thinking' ? 'thinking' : undefined
       if (!key) continue
       const bucket = buckets.get(key) ?? { messages: 0, chars: 0, estimatedTokens: 0 }
       const chars = estimateContentChars(content)
@@ -307,6 +307,7 @@ function estimateContentChars(content: Message['content'][number]): number {
   if (content.type === 'text' || content.type === 'thinking') return content.text.length
   if (content.type === 'tool_call') return content.name.length + content.callId.length + JSON.stringify(content.input).length
   if (content.type === 'tool_result') return content.callId.length + content.content.length + 16
+  if (content.type === 'file') return content.name.length + content.mediaType.length + Math.round(content.data.length / 4)
   return content.source.kind === 'file_ref'
     ? content.source.path.length + 64
     : Math.round(content.source.data.length / 4)
@@ -318,6 +319,7 @@ function estimateContentTokens(content: Message['content'][number]): number {
     return estimateStringTokens(content.name) + estimateStringTokens(content.callId) + estimateStringTokens(JSON.stringify(content.input)) + 16
   }
   if (content.type === 'tool_result') return estimateStringTokens(content.callId) + estimateStringTokens(content.content) + 16
+  if (content.type === 'file') return estimateStringTokens(content.name) + Math.ceil(content.data.length / 3) + 32
   if (content.source.kind === 'file_ref') return estimateStringTokens(content.source.path) + 32
   return Math.ceil(content.source.data.length / 3) + 32
 }

@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { ImageContent } from '@agent-kernel/kernel'
+import type { FileContent, ImageContent } from '@agent-kernel/kernel'
 
 import {
   CLIENT_MESSAGE_SAFE_BYTES,
   MAX_IMAGE_DECODED_BYTES,
+  MAX_FILE_DECODED_BYTES,
   MAX_MESSAGE_IMAGE_BYTES,
   decodedBase64Bytes,
   detectBase64ImageMediaType,
   validateClientMessagePayload,
+  validateInlineMessageFiles,
   validateInlineMessageImages,
 } from './image-message-policy.js'
 
@@ -17,6 +19,15 @@ function image(bytes: number): ImageContent {
   return {
     type: 'image',
     source: { kind: 'base64', mediaType: 'image/png', data: content.subarray(0, bytes).toString('base64') },
+  }
+}
+
+function file(bytes: number): FileContent {
+  return {
+    type: 'file',
+    name: 'notes.txt',
+    mediaType: 'text/plain',
+    data: Buffer.alloc(bytes).toString('base64'),
   }
 }
 
@@ -52,5 +63,16 @@ describe('image message policy', () => {
   it('rejects an encoded socket payload above the safe client threshold', () => {
     expect(validateClientMessagePayload({ text: 'x'.repeat(CLIENT_MESSAGE_SAFE_BYTES + 1) })).toMatchObject({ code: 'MESSAGE_PAYLOAD_TOO_LARGE' })
     expect(validateClientMessagePayload({ text: 'small' })).toBeNull()
+  })
+
+  it('validates generic file attachment count, encoding, and size', () => {
+    expect(validateInlineMessageFiles([file(20)])).toEqual({
+      ok: true,
+      fileCount: 1,
+      decodedFileBytes: 20,
+    })
+    expect(validateInlineMessageFiles([{ ...file(1), data: 'invalid!' }])).toMatchObject({ ok: false, error: { code: 'FILE_INVALID_BASE64' } })
+    expect(validateInlineMessageFiles([file(MAX_FILE_DECODED_BYTES + 1)])).toMatchObject({ ok: false, error: { code: 'FILE_TOO_LARGE' } })
+    expect(validateInlineMessageFiles(Array.from({ length: 9 }, () => file(1)))).toMatchObject({ ok: false, error: { code: 'FILE_COUNT_EXCEEDED' } })
   })
 })

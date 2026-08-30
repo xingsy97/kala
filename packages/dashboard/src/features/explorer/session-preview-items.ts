@@ -56,7 +56,7 @@ export function projectSessionPreviewSummary({
         continue
       }
       if (content.type === 'thinking') continue
-      if (content.type === 'image') {
+      if (content.type === 'image' || content.type === 'file') {
         omittedContent += 1
         continue
       }

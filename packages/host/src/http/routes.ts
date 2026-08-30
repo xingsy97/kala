@@ -38,7 +38,7 @@ import type {
   ServerModelsPayload,
   ServerSettingsPayload,
 } from '@agent-kernel/shared'
-import { PORTABLE_DEPLOYMENT, effectiveTenancy, productVariant, schema, validateClientMessagePayload, validateInlineMessageImages } from '@agent-kernel/shared'
+import { PORTABLE_DEPLOYMENT, effectiveTenancy, productVariant, schema, validateClientMessagePayload, validateInlineMessageFiles, validateInlineMessageImages } from '@agent-kernel/shared'
 import { parseWire } from '../wire-validation.js'
 
 import { buildArtifactManifest, decodeManifestCursor, pageArtifactManifest, pruneArtifacts, type ArtifactManifest } from '../artifact-manifest.js'
@@ -664,6 +664,8 @@ export function attachJsonRoutes(
         if (!input.success || !input.data.operationId) throw new HttpRouteError(400, 'invalid admission message')
         const imageValidation = validateInlineMessageImages(input.data.content)
         if (!imageValidation.ok) throw new HttpRouteError(400, `${imageValidation.error.code}: ${imageValidation.error.message}`)
+        const fileValidation = validateInlineMessageFiles(input.data.content)
+        if (!fileValidation.ok) throw new HttpRouteError(400, `${fileValidation.error.code}: ${fileValidation.error.message}`)
         if (!input.data.text.trim() && !input.data.content?.length) throw new HttpRouteError(400, 'message content is required')
         const outcome = await payloads.enqueueUserMessage!({
           sessionId: input.data.sessionId, operationId: input.data.operationId, text: input.data.text,

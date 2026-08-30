@@ -1760,7 +1760,8 @@ function ContentBlock({
     )
   }
   if (content.type === 'thinking') return <ThinkingBlock content={content} />
-  return <ImageBlock content={content} />
+  if (content.type === 'image') return <ImageBlock content={content} />
+  return <FileBlock content={content} />
 }
 
 function MessageActions({
@@ -1948,6 +1949,25 @@ function ImageBlock({
         imageTestId="message-image-preview-full"
       />
     </>
+  )
+}
+
+function FileBlock({
+  content,
+}: {
+  content: import('@agent-kernel/kernel').FileContent
+}): JSX.Element {
+  return (
+    <div
+      className="flex max-w-sm items-center gap-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2"
+      data-testid="message-file-attachment"
+    >
+      <FileText className="h-5 w-5 flex-none text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium">{content.name}</span>
+        <span className="block truncate text-[11px] text-muted-foreground">{content.mediaType}</span>
+      </span>
+    </div>
   )
 }
 

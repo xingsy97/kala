@@ -746,6 +746,8 @@ function renderTranscriptForSummarizer(messages: readonly Message[]): string {
           parts.push(content.text)
         } else if (content.type === 'image') {
           parts.push('[Attached image]')
+        } else if (content.type === 'file') {
+          parts.push(`[Attached file: ${content.name}]`)
         } else if (content.type === 'tool_result') {
           // Kernel occasionally stores tool_result on user-role messages.
           const status = content.ok ? 'Tool result' : 'Tool error'
@@ -779,6 +781,8 @@ function renderTranscriptForSummarizer(messages: readonly Message[]): string {
         lines.push(`[Assistant tool call ${content.callId}]: ${content.name}(${input})`)
       } else if (content.type === 'image') {
         lines.push('[Assistant image]')
+      } else if (content.type === 'file') {
+        lines.push(`[Assistant file: ${content.name}]`)
       }
     }
   }

@@ -65,6 +65,13 @@ export type ImageContent = {
   source: ImageSource
 }
 
+export type FileContent = {
+  type: 'file'
+  name: string
+  mediaType: string
+  data: string
+}
+
 /**
  * Model reasoning block — the model's private chain-of-thought that
  * produced the visible answer. Every major provider now surfaces some
@@ -103,6 +110,7 @@ export type MessageContent =
   | ToolCallContent
   | ToolResultContent
   | ImageContent
+  | FileContent
   | ReasoningContent
 
 export type Message = {

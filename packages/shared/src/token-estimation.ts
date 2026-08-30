@@ -75,6 +75,9 @@ function estimateContentTokens(content: Message['content'][number]): number {
   if (content.type === 'tool_result') {
     return estimateStringTokens(content.callId) + estimateStringTokens(content.content) + 16
   }
+  if (content.type === 'file') {
+    return estimateStringTokens(content.name) + Math.ceil(content.data.length / 3) + 32
+  }
   if (content.source.kind === 'file_ref') return estimateStringTokens(content.source.path) + 32
   return Math.ceil(content.source.data.length / 3) + 32
 }
@@ -82,4 +85,3 @@ function estimateContentTokens(content: Message['content'][number]): number {
 function countMatches(text: string, re: RegExp): number {
   return (text.match(re) ?? []).length
 }
-

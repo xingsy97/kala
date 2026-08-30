@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 
-import type { ImageContent, Message, MessageContent, ToolSchema } from '@agent-kernel/kernel'
+import type { FileContent, ImageContent, Message, MessageContent, ToolSchema } from '@agent-kernel/kernel'
 
 import type { LLMCallParams } from './adapter.js'
 
@@ -148,12 +148,13 @@ async function toOpenAI(msg: Message): Promise<OpenAIMessage[]> {
 }
 
 async function toOpenAIUserContent(content: readonly MessageContent[]): Promise<string | OpenAIUserContentBlock[]> {
-  const hasImage = content.some((c) => c.type === 'image')
-  if (!hasImage) return extractText(content)
+  const hasStructuredContent = content.some((c) => c.type === 'image' || c.type === 'file')
+  if (!hasStructuredContent) return extractText(content)
   const blocks: OpenAIUserContentBlock[] = []
   for (const c of content) {
     if (c.type === 'text') blocks.push({ type: 'text', text: c.text })
     else if (c.type === 'image') blocks.push({ type: 'image_url', image_url: { url: await toDataUrl(c) } })
+    else if (c.type === 'file') blocks.push({ type: 'text', text: decodeTextAttachment(c) })
   }
   return blocks
 }
@@ -174,6 +175,8 @@ async function toAnthropicBlock(content: MessageContent): Promise<AnthropicBlock
       return { type: 'tool_result', tool_use_id: content.callId, content: content.content, is_error: !content.ok }
     case 'image':
       return { type: 'image', source: await toAnthropicImageSource(content) }
+    case 'file':
+      return { type: 'text', text: decodeTextAttachment(content) }
     case 'thinking':
       return { type: 'thinking', thinking: content.text, ...(content.signature ? { signature: content.signature } : {}) }
   }
@@ -198,6 +201,29 @@ function extractSystem(messages: readonly Message[]): string | undefined {
 
 function extractText(content: readonly MessageContent[]): string {
   return content.map((c) => (c.type === 'text' ? c.text : '')).join('')
+}
+
+function decodeTextAttachment(content: FileContent): string {
+  if (!isTextAttachment(content.mediaType, content.name)) {
+    throw new Error(`Kernel runtime cannot send binary attachment "${content.name}" (${content.mediaType}); use the Copilot runtime or attach a text-based file.`)
+  }
+  const text = Buffer.from(content.data, 'base64').toString('utf8')
+  return `--- attached file: ${content.name} (${content.mediaType}) ---\n${text}\n--- end attached file: ${content.name} ---`
+}
+
+function isTextAttachment(mediaType: string, name: string): boolean {
+  if (mediaType.startsWith('text/')) return true
+  if ([
+    'application/json',
+    'application/ld+json',
+    'application/xml',
+    'application/yaml',
+    'application/x-yaml',
+    'application/javascript',
+    'application/typescript',
+    'application/sql',
+  ].includes(mediaType)) return true
+  return /\.(?:c|cc|cpp|cs|css|csv|go|h|hpp|html|java|js|json|jsx|kt|md|mjs|py|rb|rs|sh|sql|svg|toml|ts|tsx|txt|xml|ya?ml)$/iu.test(name)
 }
 
 async function toDataUrl(content: ImageContent): Promise<string> {

@@ -346,6 +346,56 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
+  it('forwards generic files to the Copilot SDK as named blob attachments', async () => {
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-file-session',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    sdk.responses.push({
+      type: 'assistant.message',
+      data: { content: 'Reviewed.', messageId: 'message-file' },
+      id: 'event-file',
+      timestamp: new Date().toISOString(),
+    })
+
+    await runtime.send(record, {
+      text: 'Review this file.',
+      content: [
+        { type: 'text', text: 'Review this file.' },
+        {
+          type: 'file',
+          name: 'config.json',
+          mediaType: 'application/json',
+          data: 'eyJvayI6dHJ1ZX0=',
+        },
+      ],
+    })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+
+    expect(sdk.sentMessages).toContainEqual({
+      prompt: 'Review this file.',
+      attachments: [{
+        type: 'blob',
+        data: 'eyJvayI6dHJ1ZX0=',
+        mimeType: 'application/json',
+        displayName: 'config.json',
+      }],
+    })
+    await runtime.close()
+  })
+
   it('projects native Copilot usage and compaction lifecycle events', async () => {
     const onState = vi.fn()
     const onCompactStatus = vi.fn()

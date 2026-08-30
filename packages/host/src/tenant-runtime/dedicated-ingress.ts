@@ -4,7 +4,7 @@ import { access } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Socket } from 'node:net'
 
-import { schema, validateClientMessagePayload, validateInlineMessageImages } from '@agent-kernel/shared'
+import { schema, validateClientMessagePayload, validateInlineMessageFiles, validateInlineMessageImages } from '@agent-kernel/shared'
 import { authenticateDashboardHandshake, type AuthConfig, type DashboardActor } from '../auth-control.js'
 import { createRuntimeUnitIngress } from './runtime-unit-ingress.js'
 import { AdmissionBackpressureError, DedicatedAdmissionLedger, type AdmissionMessage } from './dedicated-admission-ledger.js'
@@ -275,6 +275,8 @@ async function acceptAdmission(
   if (!parsed.success) throw new AdmissionHttpError(400, 'invalid admission message')
   const imageValidation = validateInlineMessageImages(parsed.data.content)
   if (!imageValidation.ok) throw new AdmissionHttpError(400, `${imageValidation.error.code}: ${imageValidation.error.message}`)
+  const fileValidation = validateInlineMessageFiles(parsed.data.content)
+  if (!fileValidation.ok) throw new AdmissionHttpError(400, `${fileValidation.error.code}: ${fileValidation.error.message}`)
   const message: AdmissionMessage = {
     schemaVersion: 1, principalDigest: principalDigest(authenticated.actor), unitId: 'local',
     sessionId: parsed.data.sessionId, operationId: required(parsed.data.operationId, 'operationId'),

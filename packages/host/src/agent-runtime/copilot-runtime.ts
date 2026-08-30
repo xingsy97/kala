@@ -625,15 +625,21 @@ function userMessage(input: AgentRuntimeSendInput): Message {
 function copilotMessageOptions(input: AgentRuntimeSendInput): MessageOptions {
   const attachments: NonNullable<MessageOptions['attachments']> = []
   for (const block of input.content ?? []) {
-    if (block.type !== 'image') continue
-    if (block.source.kind === 'base64') {
+    if (block.type === 'file') {
+      attachments.push({
+        type: 'blob',
+        data: block.data,
+        mimeType: block.mediaType,
+        displayName: block.name,
+      })
+    } else if (block.type === 'image' && block.source.kind === 'base64') {
       attachments.push({
         type: 'blob',
         data: block.source.data,
         mimeType: block.source.mediaType,
         displayName: `pasted-image.${imageExtension(block.source.mediaType)}`,
       })
-    } else {
+    } else if (block.type === 'image' && block.source.kind === 'file_ref') {
       attachments.push({
         type: 'file',
         path: block.source.path,

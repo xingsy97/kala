@@ -105,6 +105,13 @@ export const ImageContentSchema = z.object({
   source: ImageSourceSchema,
 })
 
+export const FileContentSchema = z.object({
+  type: z.literal('file'),
+  name: z.string().trim().min(1).max(255),
+  mediaType: z.string().trim().min(1).max(255),
+  data: z.string(),
+})
+
 export const ReasoningContentSchema = z.object({
   type: z.literal('thinking'),
   text: z.string(),
@@ -117,6 +124,7 @@ export const MessageContentSchema = z.discriminatedUnion('type', [
   ToolCallContentSchema,
   ToolResultContentSchema,
   ImageContentSchema,
+  FileContentSchema,
   ReasoningContentSchema,
 ]) satisfies z.ZodType<MessageContent>
 

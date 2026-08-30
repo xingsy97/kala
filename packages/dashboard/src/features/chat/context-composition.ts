@@ -130,7 +130,7 @@ export function contextBreakdownForSessionInfo(call: LlmCall | null): {
 }
 
 export function messageContextKind(message: Message): ContextProportionKind {
-  if (message.content.some((block) => block.type === 'image')) return 'attachments'
+  if (message.content.some((block) => block.type === 'image' || block.type === 'file')) return 'attachments'
   if (message.role === 'system') return 'system'
   if (message.role === 'user') return 'user'
   if (message.role === 'assistant') return 'assistant'

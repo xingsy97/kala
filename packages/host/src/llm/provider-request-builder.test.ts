@@ -94,4 +94,47 @@ describe('provider request builder', () => {
     expect((plan.body.tools as Array<Record<string, unknown>>)[0]!.cache_control).toBeUndefined()
     expect((plan.body.messages as Array<{ content: Array<Record<string, unknown>> }>)[0]!.content[0]!.cache_control).toBeUndefined()
   })
+
+  it('converts text file attachments into bounded provider text blocks', async () => {
+    const attachment = {
+      type: 'file' as const,
+      name: 'settings.json',
+      mediaType: 'application/json',
+      data: Buffer.from('{"enabled":true}').toString('base64'),
+    }
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'review' }, attachment] }]
+
+    const openai = await buildOpenAIRequestBody({ messages, tools: [] }, 'gpt-test', undefined)
+    const anthropic = await buildAnthropicRequestBody({ messages, tools: [] }, 'claude-test', undefined, false)
+
+    expect(openai.body.messages[0]).toMatchObject({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'review' },
+        { type: 'text', text: expect.stringContaining('{"enabled":true}') },
+      ],
+    })
+    expect(anthropic.body.messages[0]).toMatchObject({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'review' },
+        { type: 'text', text: expect.stringContaining('settings.json') },
+      ],
+    })
+  })
+
+  it('rejects binary file attachments on the Kernel provider path', async () => {
+    const messages: Message[] = [{
+      role: 'user',
+      content: [{
+        type: 'file',
+        name: 'archive.zip',
+        mediaType: 'application/zip',
+        data: 'UEsDBA==',
+      }],
+    }]
+
+    await expect(buildOpenAIRequestBody({ messages, tools: [] }, 'gpt-test', undefined))
+      .rejects.toThrow('cannot send binary attachment')
+  })
 })

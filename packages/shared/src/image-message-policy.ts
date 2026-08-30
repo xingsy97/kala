@@ -1,10 +1,13 @@
-import type { ImageContent, MessageContent } from '@agent-kernel/kernel'
+import type { FileContent, ImageContent, MessageContent } from '@agent-kernel/kernel'
 
 export const SOCKET_MAX_HTTP_BUFFER_BYTES = 8 * 1024 * 1024
 export const CLIENT_MESSAGE_SAFE_BYTES = 6 * 1024 * 1024
 export const MAX_MESSAGE_IMAGES = 4
 export const MAX_IMAGE_DECODED_BYTES = 2 * 1024 * 1024
 export const MAX_MESSAGE_IMAGE_BYTES = 4 * 1024 * 1024
+export const MAX_MESSAGE_FILES = 8
+export const MAX_FILE_DECODED_BYTES = 2 * 1024 * 1024
+export const MAX_MESSAGE_FILE_BYTES = 4 * 1024 * 1024
 export const IMAGE_COMPRESSION_MAX_EDGE = 2048
 export const IMAGE_COMPRESSION_QUALITY = 0.82
 
@@ -13,6 +16,10 @@ export type ImageMessagePolicyErrorCode =
   | 'IMAGE_INVALID_BASE64'
   | 'IMAGE_TOO_LARGE'
   | 'MESSAGE_IMAGES_TOO_LARGE'
+  | 'FILE_COUNT_EXCEEDED'
+  | 'FILE_INVALID_BASE64'
+  | 'FILE_TOO_LARGE'
+  | 'MESSAGE_FILES_TOO_LARGE'
   | 'MESSAGE_PAYLOAD_TOO_LARGE'
 
 export type ImageMessagePolicyError = {
@@ -24,6 +31,15 @@ export type ImageMessagePolicyResult = {
   ok: true
   imageCount: number
   decodedImageBytes: number
+} | {
+  ok: false
+  error: ImageMessagePolicyError
+}
+
+export type FileMessagePolicyResult = {
+  ok: true
+  fileCount: number
+  decodedFileBytes: number
 } | {
   ok: false
   error: ImageMessagePolicyError
@@ -42,6 +58,7 @@ export function validateInlineMessageImages(content: readonly MessageContent[] |
   if (images.length > MAX_MESSAGE_IMAGES) {
     return failure('IMAGE_COUNT_EXCEEDED', `A message can contain at most ${MAX_MESSAGE_IMAGES} images.`)
   }
+
   let total = 0
   for (const image of images) {
     if (image.source.kind !== 'base64') continue
@@ -61,6 +78,26 @@ export function validateInlineMessageImages(content: readonly MessageContent[] |
   return { ok: true, imageCount: images.length, decodedImageBytes: total }
 }
 
+export function validateInlineMessageFiles(content: readonly MessageContent[] | undefined): FileMessagePolicyResult {
+  const files = (content ?? []).filter((block): block is FileContent => block.type === 'file')
+  if (files.length > MAX_MESSAGE_FILES) {
+    return failure('FILE_COUNT_EXCEEDED', `A message can contain at most ${MAX_MESSAGE_FILES} files.`)
+  }
+  let total = 0
+  for (const file of files) {
+    const bytes = decodedBase64Bytes(file.data)
+    if (bytes === null) return failure('FILE_INVALID_BASE64', `Attached file "${file.name}" contains invalid base64 data.`)
+    if (bytes > MAX_FILE_DECODED_BYTES) {
+      return failure('FILE_TOO_LARGE', `Each attached file must be at most ${formatMiB(MAX_FILE_DECODED_BYTES)}.`)
+    }
+    total += bytes
+    if (total > MAX_MESSAGE_FILE_BYTES) {
+      return failure('MESSAGE_FILES_TOO_LARGE', `Files in one message must total at most ${formatMiB(MAX_MESSAGE_FILE_BYTES)}.`)
+    }
+  }
+  return { ok: true, fileCount: files.length, decodedFileBytes: total }
+}
+
 export function encodedJsonBytes(value: unknown): number {
   const json = JSON.stringify(value)
   if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(json).byteLength
@@ -72,7 +109,7 @@ export function validateClientMessagePayload(value: unknown): ImageMessagePolicy
   if (bytes <= CLIENT_MESSAGE_SAFE_BYTES) return null
   return {
     code: 'MESSAGE_PAYLOAD_TOO_LARGE',
-    message: `This message is ${formatMiB(bytes)} after encoding; the maximum is ${formatMiB(CLIENT_MESSAGE_SAFE_BYTES)}. Remove or compress an image and try again.`,
+    message: `This message is ${formatMiB(bytes)} after encoding; the maximum is ${formatMiB(CLIENT_MESSAGE_SAFE_BYTES)}. Remove or compress an attachment and try again.`,
   }
 }
 
@@ -104,7 +141,7 @@ function ascii(bytes: Uint8Array, length: number): string {
   return String.fromCharCode(...bytes.slice(0, length))
 }
 
-function failure(code: ImageMessagePolicyErrorCode, message: string): ImageMessagePolicyResult {
+function failure(code: ImageMessagePolicyErrorCode, message: string): { ok: false; error: ImageMessagePolicyError } {
   return { ok: false, error: { code, message } }
 }
 

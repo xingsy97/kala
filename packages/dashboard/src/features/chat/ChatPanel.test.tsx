@@ -1050,6 +1050,26 @@ describe('ChatPanel', () => {
     expect(trigger.className).not.toContain('border')
   })
 
+  it('renders generic file attachments as named transcript cards', () => {
+    render(
+      <ChatPanel
+        messages={[{
+          role: 'user',
+          content: [{
+            type: 'file',
+            name: 'report.csv',
+            mediaType: 'text/csv',
+            data: 'YSxiCjEsMgo=',
+          }],
+        }]}
+      />,
+    )
+
+    const attachment = screen.getByTestId('message-file-attachment')
+    expect(attachment.textContent).toContain('report.csv')
+    expect(attachment.textContent).toContain('text/csv')
+  })
+
   it('opens image content in a preview modal', () => {
     render(
       <ChatPanel

@@ -74,6 +74,7 @@ import {
   isCompatibleVersion,
   schema,
   validateClientMessagePayload,
+  validateInlineMessageFiles,
   validateInlineMessageImages,
 } from '@agent-kernel/shared'
 import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
@@ -583,6 +584,8 @@ export function configureDashboardNamespace(
       if (!p) { ack?.({ ok: false, error: 'INVALID_MESSAGE: invalid payload' }); return }
       const imageValidation = validateInlineMessageImages(p.content)
       if (!imageValidation.ok) { ack?.({ ok: false, error: `${imageValidation.error.code}: ${imageValidation.error.message}` }); return }
+      const fileValidation = validateInlineMessageFiles(p.content)
+      if (!fileValidation.ok) { ack?.({ ok: false, error: `${fileValidation.error.code}: ${fileValidation.error.message}` }); return }
       const result = await operations.run(p.operationId, async () => {
         deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
         await handleUserMessage(deps, p)
@@ -1447,7 +1450,7 @@ async function handleUserMessage(
     deps.broadcastError(p.sessionId, 'host', `${record.agentRuntime} sessions do not support queued messages`)
     return
   }
-  if (p.content?.some((block) => block.type === 'image') && !capabilities.attachments) {
+  if (p.content?.some((block) => block.type === 'image' || block.type === 'file') && !capabilities.attachments) {
     deps.broadcastError(p.sessionId, 'host', `${record.agentRuntime} sessions do not support attachments`)
     return
   }

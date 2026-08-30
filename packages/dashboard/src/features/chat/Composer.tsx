@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Pencil, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
+import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, FileText, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Paperclip, Pencil, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
@@ -7,7 +7,9 @@ import type { TFunction } from 'i18next'
 
 import {
   MAX_MESSAGE_IMAGES,
+  MAX_MESSAGE_FILES,
   validateClientMessagePayload,
+  validateInlineMessageFiles,
   validateInlineMessageImages,
   type ContextUsageSnapshot,
   type FileListEntry,
@@ -19,6 +21,7 @@ import type {
   AgentConfig,
   AgentState,
   ApprovalMode,
+  FileContent,
   ImageContent,
   MessageContent,
   TextContent,
@@ -49,7 +52,7 @@ type Props = {
   serviceUnavailable?: boolean
   workspaceUnavailable?: boolean
   onReconnectService?(): void
-  onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void | Promise<void>
+  onSubmit(text: string, mode: SendMode, attachments?: readonly (ImageContent | FileContent)[], extraBlocks?: readonly TextContent[]): void | Promise<void>
   onCompact?(): void
   onCancel?(): void
   onClearSession?(): void
@@ -95,6 +98,14 @@ type PastedImage = {
   dataUrl: string
   mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
   base64: string
+}
+
+type AttachedFile = {
+  id: string
+  name: string
+  mediaType: string
+  base64: string
+  size: number
 }
 
 export const APPROVAL_MODES: ReadonlyArray<{
@@ -278,12 +289,18 @@ export function Composer({
     writeStoredSendMode(sessionId, next)
   }, [sessionId])
   const [pastedImages, setPastedImages] = useState<readonly PastedImage[]>([])
+  const [attachedFiles, setAttachedFiles] = useState<readonly AttachedFile[]>([])
+  useEffect(() => {
+    setPastedImages([])
+    setAttachedFiles([])
+  }, [sessionId])
   const [mentionState, setMentionState] = useState<MentionState | null>(null)
   const [mentionFiles, setMentionFiles] = useState<readonly FileListEntry[]>([])
   const [mentionActive, setMentionActive] = useState(0)
   const [mentionLoading, setMentionLoading] = useState(false)
   const [pendingToast, setPendingToast] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const mentionRequestId = useRef(0)
   const approvalModeLabel = approvalModeDisplay(approvalMode, t).label
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
@@ -435,12 +452,12 @@ export function Composer({
 
   const submit = async (): Promise<void> => {
     const trimmed = text.trim()
-    if (trimmed.length === 0 && pastedImages.length === 0) return
+    if (trimmed.length === 0 && pastedImages.length === 0 && attachedFiles.length === 0) return
     const parsedCommand = parseSlashCommand(trimmed)
     const command = parsedCommand
       ? slashCommands.find((c) => c.command === parsedCommand.name)
       : undefined
-    if (command && pastedImages.length === 0) {
+    if (command && pastedImages.length === 0 && attachedFiles.length === 0) {
       if (!command.acceptsArgs && parsedCommand!.args.trim().length > 0) {
         setPendingToast(t('composer.slash.noArgs', { command: command.command }))
         return
@@ -456,6 +473,17 @@ export function Composer({
     const imageValidation = validateInlineMessageImages(images)
     if (!imageValidation.ok) {
       setPendingToast(imageValidation.error.message)
+      return
+    }
+    const files: FileContent[] = attachedFiles.map((file) => ({
+      type: 'file',
+      name: file.name,
+      mediaType: file.mediaType,
+      data: file.base64,
+    }))
+    const fileValidation = validateInlineMessageFiles(files)
+    if (!fileValidation.ok) {
+      setPendingToast(fileValidation.error.message)
       return
     }
     const extraBlocks: TextContent[] = []
@@ -482,26 +510,29 @@ export function Composer({
         }
       }
     }
-    const payloadError = validateClientMessagePayload({ text: trimmed, mode: sendMode, content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...extraBlocks, ...images] })
+    const attachments = [...images, ...files]
+    const payloadError = validateClientMessagePayload({ text: trimmed, mode: sendMode, content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...extraBlocks, ...attachments] })
     if (payloadError) {
       setPendingToast(payloadError.message)
       return
     }
     const submittedText = text
     const submittedImages = pastedImages
+    const submittedFiles = attachedFiles
     // Clear optimistically as soon as the operator submits. The Host ACK means
     // reliable acceptance, but an idle-session dispatch may not resolve until
     // the Agent turn completes. Keeping the submitted draft visible for that
     // whole period makes a successful send look broken and invites duplicates.
     setText('')
     setPastedImages([])
+    setAttachedFiles([])
     setMentionState(null)
     setMentionFiles([])
     try {
       await onSubmit(
         trimmed,
         sendMode,
-        images.length > 0 ? images : undefined,
+        attachments.length > 0 ? attachments : undefined,
         extraBlocks.length > 0 ? extraBlocks : undefined,
       )
     } catch (error) {
@@ -514,6 +545,7 @@ export function Composer({
       if (!durablyAccepted) {
         setText((current) => current.length === 0 ? submittedText : current)
         setPastedImages((current) => current.length === 0 ? submittedImages : current)
+        setAttachedFiles((current) => current.length === 0 ? submittedFiles : current)
       }
       setPendingToast(error instanceof Error ? error.message : String(error))
     }
@@ -528,6 +560,7 @@ export function Composer({
       setPendingToast(`A message can contain at most ${MAX_MESSAGE_IMAGES} images.`)
       return []
     }
+
     for (const item of imageItems) {
       const file = item.getAsFile()
       if (!file) continue
@@ -542,7 +575,65 @@ export function Composer({
     return added
   }
 
+  async function addFiles(files: readonly File[]): Promise<boolean> {
+    if (!allowAttachments || files.length === 0) return false
+    try {
+      const imageFiles = files.filter((file) => file.type.startsWith('image/'))
+      const genericFiles = files.filter((file) => !file.type.startsWith('image/'))
+      if (pastedImages.length + imageFiles.length > MAX_MESSAGE_IMAGES) {
+        setPendingToast(`A message can contain at most ${MAX_MESSAGE_IMAGES} images.`)
+        return false
+      }
+      if (attachedFiles.length + genericFiles.length > MAX_MESSAGE_FILES) {
+        setPendingToast(`A message can contain at most ${MAX_MESSAGE_FILES} files.`)
+        return false
+      }
+      const nextImages: PastedImage[] = []
+      for (const file of imageFiles) {
+        const prepared = await prepareComposerImage(file)
+        nextImages.push({
+          id: attachmentId('img'),
+          dataUrl: prepared.dataUrl,
+          mediaType: prepared.mediaType,
+          base64: prepared.base64,
+        })
+      }
+      const nextFiles: AttachedFile[] = []
+      for (const file of genericFiles) {
+        const base64 = await readFileBase64(file)
+        nextFiles.push({
+          id: attachmentId('file'),
+          name: file.name || 'attachment',
+          mediaType: file.type || 'application/octet-stream',
+          base64,
+          size: file.size,
+        })
+      }
+      const validation = validateInlineMessageFiles([...attachedFiles, ...nextFiles].map((file) => ({
+        type: 'file',
+        name: file.name,
+        mediaType: file.mediaType,
+        data: file.base64,
+      })))
+      if (!validation.ok) {
+        setPendingToast(validation.error.message)
+        return false
+      }
+      if (nextImages.length > 0) setPastedImages((current) => [...current, ...nextImages])
+      if (nextFiles.length > 0) setAttachedFiles((current) => [...current, ...nextFiles])
+      return true
+    } catch (error) {
+      setPendingToast(error instanceof Error ? error.message : String(error))
+      return false
+    }
+  }
+
   async function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
+    const clipboardFiles = Array.from(e.clipboardData?.files ?? [])
+    if (clipboardFiles.some((file) => !file.type.startsWith('image/'))) {
+      if (await addFiles(clipboardFiles)) e.preventDefault()
+      return
+    }
     const added = await extractImagesFromClipboardData(e.clipboardData)
     if (added.length === 0) return
     e.preventDefault()
@@ -550,6 +641,11 @@ export function Composer({
   }
 
   async function handleSimplePaste(e: ClipboardEvent<HTMLDivElement>): Promise<void> {
+    const clipboardFiles = Array.from(e.clipboardData?.files ?? [])
+    if (clipboardFiles.some((file) => !file.type.startsWith('image/'))) {
+      if (await addFiles(clipboardFiles)) e.preventDefault()
+      return
+    }
     const added = await extractImagesFromClipboardData(e.clipboardData)
     if (added.length === 0) return
     e.preventDefault()
@@ -560,12 +656,16 @@ export function Composer({
     setPastedImages((prev) => prev.filter((img) => img.id !== id))
   }
 
+  function removeFile(id: string): void {
+    setAttachedFiles((prev) => prev.filter((file) => file.id !== id))
+  }
+
   function handleSubmit(e: FormEvent<HTMLFormElement>): void {
     e.preventDefault()
     void submit()
   }
 
-  const canSubmit = !disabled && workspaceOnline !== false && (text.trim().length > 0 || pastedImages.length > 0)
+  const canSubmit = !disabled && workspaceOnline !== false && (text.trim().length > 0 || pastedImages.length > 0 || attachedFiles.length > 0)
   const canStop = typeof onCancel === 'function' && (awaitingAck || isActiveTurnStatus(state?.status))
   const showStopButton = !canSubmit && canStop
 
@@ -607,7 +707,32 @@ export function Composer({
       style={displayStyle}
       data-testid="composer"
       data-composer-mode={mode}
+      onDragOver={(event) => {
+        if (!allowAttachments || disabled || !event.dataTransfer?.types?.includes('Files')) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDrop={(event) => {
+        if (!allowAttachments || disabled) return
+        const files = Array.from(event.dataTransfer?.files ?? [])
+        if (files.length === 0) return
+        event.preventDefault()
+        void addFiles(files)
+      }}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        disabled={disabled || !allowAttachments}
+        className="hidden"
+        data-testid="composer-file-input"
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? [])
+          event.currentTarget.value = ''
+          void addFiles(files)
+        }}
+      />
       <motion.div layout transition={{ type: 'spring', stiffness: 320, damping: 30 }} className="ak-composer-container relative mx-auto w-full">
         <QueuedMessagesDock
           items={queuedMessages}
@@ -617,6 +742,7 @@ export function Composer({
         />
         {mode === 'simple' ? (
           <div className="flex flex-col gap-1" data-testid="composer-simple-frame">
+            <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} />
             <div
               className="relative flex min-h-14 items-center gap-1 rounded-[22px] border border-border/70 bg-card/95 px-1.5 py-1 shadow-[0_5px_16px_hsl(var(--foreground)/0.09),0_1px_4px_hsl(var(--foreground)/0.04)] backdrop-blur-xl transition-[border-color,background-color,box-shadow] focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_7px_19px_hsl(var(--foreground)/0.11),0_2px_5px_hsl(var(--foreground)/0.05)] sm:min-h-14 sm:px-1.5"
               data-testid="composer-simple-shell"
@@ -633,6 +759,7 @@ export function Composer({
               compactDisabled={disabled}
             />
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
+            {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
             <SlashCommandMenu
               commands={matchingCommands}
               disabled={disabled}
@@ -692,31 +819,7 @@ export function Composer({
             'focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_8px_21px_hsl(var(--foreground)/0.11),0_2px_5px_hsl(var(--foreground)/0.05)]',
           )}
         >
-          {pastedImages.length > 0 ? (
-            <div
-              className="flex flex-wrap gap-2 border-b border-border/50 px-3 py-2"
-              data-testid="pasted-image-tray"
-            >
-              {pastedImages.map((img) => (
-                <div
-                  key={img.id}
-                  className="group relative h-16 w-16 overflow-hidden rounded-lg border border-border/50 bg-background"
-                  data-testid={`pasted-image-${img.id}`}
-                >
-                  <img src={img.dataUrl} alt={t('composer.pastedImage')} className="h-full w-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeImage(img.id)}
-                    className="absolute right-1 top-1 rounded-full bg-black/60 p-0.5 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100"
-                    aria-label={t('composer.removeImage')}
-                    data-testid={`pasted-image-remove-${img.id}`}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
           <div className="relative">
             <Textarea
               ref={textareaRef}
@@ -825,6 +928,7 @@ export function Composer({
             data-testid="composer-footer"
           >
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
+            {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
             <ComposerConfigButton
               model={model}
               models={models}
@@ -945,6 +1049,114 @@ export function Composer({
       </motion.div>
     </form>
   )
+}
+
+function AttachmentButton({ disabled, onClick }: { disabled?: boolean; onClick(): void }): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={t('composer.attachFile')}
+      title={t('composer.attachFile')}
+      data-testid="composer-attach-file"
+      className="relative z-[1] flex h-11 w-10 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors active:text-foreground disabled:cursor-not-allowed disabled:opacity-40 sm:h-10 sm:w-10 sm:rounded-xl sm:hover:bg-accent/70 sm:hover:text-foreground"
+    >
+      <Paperclip className="h-[18px] w-[18px]" aria-hidden="true" />
+    </button>
+  )
+}
+
+function AttachmentTray({
+  images,
+  files,
+  onRemoveImage,
+  onRemoveFile,
+  bordered = false,
+}: {
+  images: readonly PastedImage[]
+  files: readonly AttachedFile[]
+  onRemoveImage(id: string): void
+  onRemoveFile(id: string): void
+  bordered?: boolean
+}): JSX.Element | null {
+  const { t } = useTranslation()
+  if (images.length === 0 && files.length === 0) return null
+  return (
+    <div
+      className={cn('flex flex-wrap gap-2 px-3 py-2', bordered ? 'border-b border-border/50' : 'rounded-xl border border-border/60 bg-card/90')}
+      data-testid={images.length > 0 ? 'pasted-image-tray' : 'attachment-tray'}
+    >
+      {images.map((image) => (
+        <div
+          key={image.id}
+          className="group relative h-16 w-16 overflow-hidden rounded-lg border border-border/50 bg-background"
+          data-testid={`pasted-image-${image.id}`}
+        >
+          <img src={image.dataUrl} alt={t('composer.pastedImage')} className="h-full w-full object-cover" />
+          <button
+            type="button"
+            onClick={() => onRemoveImage(image.id)}
+            className="absolute right-1 top-1 rounded-full bg-black/60 p-0.5 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+            aria-label={t('composer.removeImage')}
+            data-testid={`pasted-image-remove-${image.id}`}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ))}
+      {files.map((file) => (
+        <div
+          key={file.id}
+          className="group flex h-16 min-w-0 max-w-64 items-center gap-2 rounded-lg border border-border/50 bg-background px-3"
+          data-testid={`attached-file-${file.id}`}
+        >
+          <FileText className="h-5 w-5 flex-none text-muted-foreground" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-medium">{file.name}</span>
+            <span className="block truncate text-[10px] text-muted-foreground">{formatAttachmentBytes(file.size)} · {file.mediaType}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => onRemoveFile(file.id)}
+            className="rounded-full p-1 text-muted-foreground opacity-70 hover:bg-accent hover:text-foreground group-hover:opacity-100"
+            aria-label={t('composer.removeFile', { name: file.name })}
+            data-testid={`attached-file-remove-${file.id}`}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function attachmentId(prefix: 'img' | 'file'): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+async function readFileBase64(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error ?? new Error(`Unable to read ${file.name}`))
+    reader.onload = () => {
+      const value = typeof reader.result === 'string' ? reader.result : ''
+      const comma = value.indexOf(',')
+      if (comma < 0) {
+        reject(new Error(`Unable to encode ${file.name}`))
+        return
+      }
+      resolve(value.slice(comma + 1))
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function formatAttachmentBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function ComposerModeToggle({ mode, onToggle }: { mode: 'simple' | 'full'; onToggle(): void }): JSX.Element {
@@ -1344,10 +1556,14 @@ function ComposerConfigButton({
 export function queuedMessageSummary(item: QueuedMessagePreview, translate?: TFunction): string {
   const text = item.text.trim()
   const imageCount = item.content?.filter((part) => part.type === 'image').length ?? 0
+  const files = item.content?.filter((part): part is FileContent => part.type === 'file') ?? []
   const imageTokens = Array.from({ length: imageCount }, (_, index) => translate
     ? translate('composer.queued.imageToken', { index: index + 1 })
     : `[Image #${index + 1}]`)
-  return [text, ...imageTokens].filter(Boolean).join(' ') || (translate ? translate('composer.queued.empty') : '(empty queued message)')
+  const fileTokens = files.map((file) => translate
+    ? translate('composer.queued.fileToken', { name: file.name })
+    : `[File: ${file.name}]`)
+  return [text, ...imageTokens, ...fileTokens].filter(Boolean).join(' ') || (translate ? translate('composer.queued.empty') : '(empty queued message)')
 }
 
 function QueuedMessagesDock({
@@ -1388,8 +1604,8 @@ function QueuedMessagesDock({
     if (!editingId) return
     const trimmed = draft.trim()
     const item = items.find((candidate) => candidate.id === editingId)
-    const hasImages = item?.content?.some((part) => part.type === 'image') ?? false
-    if ((trimmed.length > 0 || hasImages) && onUpdate) {
+    const hasAttachments = item?.content?.some((part) => part.type === 'image' || part.type === 'file') ?? false
+    if ((trimmed.length > 0 || hasAttachments) && onUpdate) {
       const id = editingId
       void runMutation(id, () => onUpdate(id, trimmed, item?.content)).then(() => {
         setEditingId(null)
@@ -1479,10 +1695,10 @@ function QueuedMessagesDock({
                     }}
                     className="h-6 w-full rounded border border-border/50 bg-background px-2 text-xs outline-none focus:border-ring"
                     data-testid="queued-message-edit-input"
-                    placeholder={item.content?.some((part) => part.type === 'image') ? 'Optional message text' : undefined}
+                    placeholder={item.content?.some((part) => part.type === 'image' || part.type === 'file') ? 'Optional message text' : undefined}
                     autoFocus
                   />
-                  {item.content?.some((part) => part.type === 'image') ? (
+                  {item.content?.some((part) => part.type === 'image' || part.type === 'file') ? (
                     <span className="truncate font-mono text-[10px] text-muted-foreground" data-testid="queued-message-edit-attachments">
                       {queuedMessageSummary({ ...item, text: '' }, t)}
                     </span>
