@@ -42,8 +42,10 @@ const sdk = vi.hoisted(() => ({
   }>,
   resumeSucceeds: false,
   listeners: [] as Array<(event: unknown) => void>,
+  historyEvents: [] as Array<unknown>,
   responses: [] as Array<unknown>,
   sentMessages: [] as Array<unknown>,
+  currentModel: { modelId: 'gpt-5.4-mini', contextTier: 'long_context' },
   abort: vi.fn(async () => {}),
   setModel: vi.fn(async () => {}),
   compact: vi.fn(async () => ({
@@ -94,7 +96,13 @@ vi.mock('@github/copilot-sdk', () => ({
     }
     session() {
       return {
-        rpc: { history: { compact: sdk.compact } },
+        rpc: {
+          history: { compact: sdk.compact },
+          model: { async getCurrent() { return sdk.currentModel } },
+        },
+        async getEvents() {
+          return sdk.historyEvents
+        },
         async send() {},
         async sendAndWait(options: unknown) {
           sdk.sentMessages.push(options)
@@ -131,8 +139,10 @@ describe('Copilot runtime custom tools', () => {
     sdk.resumeConfigs.length = 0
     sdk.resumeSucceeds = false
     sdk.listeners.length = 0
+    sdk.historyEvents.length = 0
     sdk.responses.length = 0
     sdk.sentMessages.length = 0
+    sdk.currentModel = { modelId: 'gpt-5.4-mini', contextTier: 'long_context' }
     sdk.abort.mockClear()
     sdk.setModel.mockClear()
     sdk.compact.mockClear()
@@ -460,6 +470,50 @@ describe('Copilot runtime custom tools', () => {
     expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
       contextWindow: { tokens: 128_000, source: 'api_reported' },
       usage: { inputTokens: 40_000, totalTokens: 40_000 },
+    }))
+    await runtime.close()
+  })
+
+  it('restores provider context and model from persisted Copilot events', async () => {
+    sdk.resumeSucceeds = true
+    sdk.historyEvents.push({
+      type: 'session.shutdown',
+      id: 'shutdown-1',
+      parentId: null,
+      timestamp: '2026-08-30T00:00:00.000Z',
+      data: {
+        currentModel: 'gpt-5.4-mini',
+        currentTokens: 9_263,
+        systemTokens: 245,
+        conversationTokens: 2_299,
+        toolDefinitionsTokens: 6_719,
+      },
+    })
+    const onState = vi.fn()
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState,
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-restored-context',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+
+    await runtime.compact(record)
+
+    expect(record.preferences?.selectedModel).toBe('gpt-5.4-mini')
+    expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
+      model: { ref: 'gpt-5.4-mini', provider: 'github-copilot', id: 'gpt-5.4-mini' },
+      contextWindow: { tokens: 128_000, source: 'api_reported' },
+      usage: { inputTokens: 9_263, totalTokens: 9_263 },
     }))
     await runtime.close()
   })

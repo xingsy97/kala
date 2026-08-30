@@ -246,7 +246,26 @@ export class CopilotAgentRuntime implements AgentRuntime {
     }
     session.on((event) => this.handleEvent(record, event))
     this.sessions.set(record.sessionId, session)
+    await this.restoreContextFromHistory(record, session)
     return session
+  }
+
+  private async restoreContextFromHistory(record: SessionRecord, session: CopilotSession): Promise<void> {
+    const [events, currentModel] = await Promise.all([
+      session.getEvents(),
+      session.rpc.model.getCurrent(),
+    ])
+    const model = currentModel.modelId ?? record.preferences?.selectedModel
+    if (model && record.preferences?.selectedModel !== model) {
+      await this.context.store.updatePreferences(record.sessionId, { selectedModel: model })
+    }
+    const tokenLimit = this.models.find((candidate) => candidate.ref === model)?.contextWindow
+      ?? latestPersistedContextLimit(events)
+    if (!tokenLimit) return
+    const usage = latestPersistedContextUsage(events, tokenLimit)
+    if (usage) {
+      this.context.broadcast.onState(record, record.state, copilotContextSnapshot(record, usage))
+    }
   }
 
   private sessionConfig(record: SessionRecord, model?: string) {
@@ -644,6 +663,65 @@ function completeCompactionContextTokens(data: {
     || data.toolDefinitionsTokens === undefined
   ) return undefined
   return data.systemTokens + data.conversationTokens + data.toolDefinitionsTokens
+}
+
+function latestPersistedContextLimit(events: readonly SessionEvent[]): number | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (!event) continue
+    if (
+      (event.type === 'session.compaction_start' || event.type === 'session.compaction_complete')
+      && event.data.tokenLimit
+    ) return event.data.tokenLimit
+  }
+  return undefined
+}
+
+function latestPersistedContextUsage(
+  events: readonly SessionEvent[],
+  tokenLimit: number,
+): {
+  currentTokens: number
+  tokenLimit: number
+  systemTokens?: number
+  conversationTokens?: number
+  toolDefinitionsTokens?: number
+} | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (!event) continue
+    if (event.type === 'session.compaction_start' && event.data.currentTokens !== undefined) {
+      return {
+        currentTokens: event.data.currentTokens,
+        tokenLimit,
+        ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
+        ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
+        ...(event.data.toolDefinitionsTokens !== undefined ? { toolDefinitionsTokens: event.data.toolDefinitionsTokens } : {}),
+      }
+    }
+    if (event.type === 'session.compaction_complete' && event.data.success) {
+      const currentTokens = completeCompactionContextTokens(event.data)
+        ?? event.data.postCompactionTokens
+      if (currentTokens === undefined) continue
+      return {
+        currentTokens,
+        tokenLimit,
+        ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
+        ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
+        ...(event.data.toolDefinitionsTokens !== undefined ? { toolDefinitionsTokens: event.data.toolDefinitionsTokens } : {}),
+      }
+    }
+    if (event.type === 'session.shutdown' && event.data.currentTokens !== undefined) {
+      return {
+        currentTokens: event.data.currentTokens,
+        tokenLimit,
+        ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
+        ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
+        ...(event.data.toolDefinitionsTokens !== undefined ? { toolDefinitionsTokens: event.data.toolDefinitionsTokens } : {}),
+      }
+    }
+  }
+  return undefined
 }
 
 function copilotContextSnapshot(
