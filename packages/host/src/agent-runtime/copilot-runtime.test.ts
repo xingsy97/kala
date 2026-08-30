@@ -409,6 +409,10 @@ describe('Copilot runtime custom tools', () => {
         total: { kind: 'provider_reported', confidence: 'exact' },
       }),
     }))
+    expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
+      contextWindow: { tokens: 128_000, source: 'api_reported' },
+      usage: { inputTokens: 104_000, totalTokens: 104_000 },
+    }))
     expect(onCompactStatus).toHaveBeenNthCalledWith(1, {
       sessionId: record.sessionId,
       kind: 'running',

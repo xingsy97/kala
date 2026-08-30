@@ -352,6 +352,19 @@ export class CopilotAgentRuntime implements AgentRuntime {
       const attemptId = event.id
       const tokensBefore = event.data.currentTokens ?? event.data.conversationTokens ?? 0
       this.compactions.set(record.sessionId, { attemptId, tokensBefore })
+      if (event.data.tokenLimit && event.data.currentTokens !== undefined) {
+        this.context.broadcast.onState(
+          record,
+          record.state,
+          copilotContextSnapshot(record, {
+            currentTokens: event.data.currentTokens,
+            tokenLimit: event.data.tokenLimit,
+            ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
+            ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
+            ...(event.data.toolDefinitionsTokens !== undefined ? { toolDefinitionsTokens: event.data.toolDefinitionsTokens } : {}),
+          }),
+        )
+      }
       this.context.broadcast.onCompactStatus?.({
         sessionId: record.sessionId,
         kind: 'running',
