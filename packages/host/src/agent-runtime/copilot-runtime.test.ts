@@ -477,6 +477,20 @@ describe('Copilot runtime custom tools', () => {
   it('restores provider context and model from persisted Copilot events', async () => {
     sdk.resumeSucceeds = true
     sdk.historyEvents.push({
+      type: 'session.compaction_complete',
+      id: 'compact-1',
+      parentId: null,
+      timestamp: '2026-08-29T23:59:00.000Z',
+      data: {
+        success: true,
+        preCompactionTokens: 60_000,
+        postCompactionTokens: 2_299,
+        systemTokens: 245,
+        conversationTokens: 2_299,
+        toolDefinitionsTokens: 6_719,
+        tokenLimit: 272_000,
+      },
+    }, {
       type: 'session.shutdown',
       id: 'shutdown-1',
       parentId: null,
@@ -512,7 +526,7 @@ describe('Copilot runtime custom tools', () => {
     expect(record.preferences?.selectedModel).toBe('gpt-5.4-mini')
     expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
       model: { ref: 'gpt-5.4-mini', provider: 'github-copilot', id: 'gpt-5.4-mini' },
-      contextWindow: { tokens: 128_000, source: 'api_reported' },
+      contextWindow: { tokens: 272_000, source: 'api_reported' },
       usage: { inputTokens: 9_263, totalTokens: 9_263 },
     }))
     await runtime.close()

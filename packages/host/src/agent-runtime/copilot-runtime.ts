@@ -259,8 +259,8 @@ export class CopilotAgentRuntime implements AgentRuntime {
     if (model && record.preferences?.selectedModel !== model) {
       await this.context.store.updatePreferences(record.sessionId, { selectedModel: model })
     }
-    const tokenLimit = this.models.find((candidate) => candidate.ref === model)?.contextWindow
-      ?? latestPersistedContextLimit(events)
+    const tokenLimit = latestPersistedContextLimit(events)
+      ?? this.models.find((candidate) => candidate.ref === model)?.contextWindow
     if (!tokenLimit) return
     const usage = latestPersistedContextUsage(events, tokenLimit)
     if (usage) {
