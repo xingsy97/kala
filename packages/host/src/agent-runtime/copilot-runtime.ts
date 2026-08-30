@@ -376,9 +376,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
           tokensAfter,
           endedAt: event.timestamp,
         })
-        if (event.data.tokenLimit && tokensAfter > 0) {
+        const currentTokens = completeCompactionContextTokens(event.data)
+        if (event.data.tokenLimit && currentTokens !== undefined) {
           this.context.broadcast.onState(record, record.state, copilotContextSnapshot(record, {
-            currentTokens: tokensAfter,
+            currentTokens,
             tokenLimit: event.data.tokenLimit,
             ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
             ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
@@ -617,6 +618,19 @@ function copilotMessageOptions(input: AgentRuntimeSendInput): MessageOptions {
 function imageExtension(mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'): string {
   if (mediaType === 'image/jpeg') return 'jpg'
   return mediaType.slice('image/'.length)
+}
+
+function completeCompactionContextTokens(data: {
+  systemTokens?: number
+  conversationTokens?: number
+  toolDefinitionsTokens?: number
+}): number | undefined {
+  if (
+    data.systemTokens === undefined
+    || data.conversationTokens === undefined
+    || data.toolDefinitionsTokens === undefined
+  ) return undefined
+  return data.systemTokens + data.conversationTokens + data.toolDefinitionsTokens
 }
 
 function copilotContextSnapshot(

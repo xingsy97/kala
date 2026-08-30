@@ -394,6 +394,10 @@ describe('Copilot runtime custom tools', () => {
         success: true,
         preCompactionTokens: 104_000,
         postCompactionTokens: 32_000,
+        systemTokens: 2_000,
+        conversationTokens: 32_000,
+        toolDefinitionsTokens: 4_000,
+        tokenLimit: 128_000,
         messagesRemoved: 30,
       },
     })
@@ -421,6 +425,9 @@ describe('Copilot runtime custom tools', () => {
       tokensAfter: 32_000,
       endedAt: '2026-08-30T00:00:02.000Z',
     })
+    expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
+      usage: { inputTokens: 38_000, totalTokens: 38_000 },
+    }))
     await runtime.close()
   })
 
