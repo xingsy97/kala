@@ -508,6 +508,47 @@ describe('SessionStore.updatePreferences', () => {
   })
 })
 
+describe('SessionStore runtime context snapshots', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ak-runtime-context-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('restores provider-reported context usage after a Host restart', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-context-persisted',
+      agentRuntime: 'copilot',
+      config,
+    })
+    const contextSnapshot = {
+      model: { ref: 'gpt-5.4-mini', provider: 'github-copilot', id: 'gpt-5.4-mini' },
+      contextWindow: { tokens: 272_000, source: 'api_reported' as const },
+      usage: { inputTokens: 9_261, totalTokens: 9_261 },
+      breakdown: {
+        system: 245,
+        transcript: 2_294,
+        tools: 6_719,
+        memory: 3,
+        attachments: 0,
+        pendingUserInput: 0,
+      },
+      estimator: {
+        total: { kind: 'provider_reported' as const, confidence: 'exact' as const },
+        breakdown: { kind: 'heuristic' as const, confidence: 'estimated' as const },
+        version: 'copilot-sdk-usage-info-v1',
+      },
+      updatedAt: Date.now(),
+    }
+
+    await store.updateRuntimeContextSnapshot(record, contextSnapshot)
+    const reloaded = await new SessionStore(dir).load(record.sessionId)
+
+    expect(reloaded.runtimeContextSnapshot).toEqual(contextSnapshot)
+  })
+})
+
 describe('SessionStore.listSummaries', () => {
   let dir: string
   beforeEach(() => {

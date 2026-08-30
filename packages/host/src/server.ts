@@ -1047,6 +1047,11 @@ export async function startHostServer(
       onState(record, state, runtimeContextSnapshot) {
         scheduleSessionsBroadcast()
         const room = sessionRoom(record.sessionId)
+        if (runtimeContextSnapshot) {
+          void store.updateRuntimeContextSnapshot(record, runtimeContextSnapshot).catch((error) => {
+            broadcast.onError(record.sessionId, error instanceof Error ? error.message : String(error))
+          })
+        }
         const contextSnapshot = runtimeContextSnapshot ?? snapshotFromConfig(
           record.config,
           state.messages,

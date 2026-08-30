@@ -1167,7 +1167,8 @@ export function configureDashboardNamespace(
           cursor: record.state.cursor,
           state: record.state,
           config: record.config,
-          contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record), parentModel),
+          contextSnapshot: record.runtimeContextSnapshot
+            ?? contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record), parentModel),
           ...(parentModel ? { selectedModel: parentModel } : {}),
           ...(record.workspaceId !== undefined
             ? { workspaceId: record.workspaceId }
@@ -1676,7 +1677,8 @@ export function readyEventFor(
     cursor: record.state.cursor,
     state: record.state,
     config: record.config,
-    contextSnapshot: contextSnapshot(record, record.state.messages, contextOverride, selectedModel),
+    contextSnapshot: record.runtimeContextSnapshot
+      ?? contextSnapshot(record, record.state.messages, contextOverride, selectedModel),
     ...(record.parentSessionId
       ? { parentSessionId: record.parentSessionId }
       : {}),

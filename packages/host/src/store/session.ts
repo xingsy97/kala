@@ -15,7 +15,14 @@ import type {
   Effect,
   UsageTotal,
 } from '@agent-kernel/kernel'
-import type { AgentRuntimeId, LLMTrace, SessionMemoryPolicy, SessionPreferences, SnapshotEntry } from '@agent-kernel/shared'
+import type {
+  AgentRuntimeId,
+  ContextUsageSnapshot,
+  LLMTrace,
+  SessionMemoryPolicy,
+  SessionPreferences,
+  SnapshotEntry,
+} from '@agent-kernel/shared'
 import { createInitialState, fold } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
 import { ulid } from 'ulid'
@@ -62,6 +69,8 @@ export type SessionRecord = {
    */
   label?: string
   preferences: SessionPreferences
+  /** Last provider-reported context usage for external runtimes. */
+  runtimeContextSnapshot?: ContextUsageSnapshot
   /**
    * Host-side memory policy for this session. When `mode: 'disabled'`, the
    * loop rejects `memory` tool calls to workspace/global scope so an isolated
@@ -707,7 +716,9 @@ export class SessionStore {
       this.summaryLoads.delete(path)
       await rm(path, { force: true })
       await rm(summaryCachePath(path), { force: true })
+      await rm(runtimeContextCachePath(path), { force: true })
     }
+
     for (const slug of artifactSlugs) {
       await rm(safeDirectChild(logArtifactRoot, slug), { recursive: true, force: true })
     }
@@ -717,6 +728,18 @@ export class SessionStore {
       }
     }
     await this.options.deleteRegisteredArtifacts?.(sessionId)
+  }
+
+  async updateRuntimeContextSnapshot(
+    record: SessionRecord,
+    contextSnapshot: ContextUsageSnapshot,
+  ): Promise<void> {
+    record.runtimeContextSnapshot = contextSnapshot
+    await writeJsonFile(runtimeContextCachePath(record.logPath), {
+      schemaVersion: 1,
+      sessionId: record.sessionId,
+      contextSnapshot,
+    })
   }
 
   async listSummaries(): Promise<SessionSummary[]> {
@@ -816,6 +839,7 @@ export class SessionStore {
   ): Promise<SessionRecord> {
     const header = await readSessionHeader(path)
     const persistedSummary = await readPersistedSummary(path)
+    const runtimeContextSnapshot = await readPersistedRuntimeContext(path, sessionId)
     const fastExternalLoad = (header.agentRuntime ?? 'kernel') !== 'kernel'
       && persistedSummary?.hasEvents === false
     const parsed = fastExternalLoad
@@ -1006,6 +1030,7 @@ export class SessionStore {
       config: options.runtimeConfig ?? parsed.header.config,
       toolLock: toolLockFor(parsed.header.config),
       preferences,
+      ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),
       ...(persistedSummary?.summary.lastEventAt || parsed.events.length > 0
         ? { lastEventAt: persistedSummary?.summary.lastEventAt ?? parsed.events[parsed.events.length - 1]!.ts }
         : {}),
@@ -1096,6 +1121,43 @@ type PersistedSessionSummary = CachedSessionSummary & {
 
 function summaryCachePath(logPath: string): string {
   return `${logPath}.summary.json`
+}
+
+function runtimeContextCachePath(logPath: string): string {
+  return `${logPath}.context.json`
+}
+
+async function readPersistedRuntimeContext(
+  logPath: string,
+  sessionId: string,
+): Promise<ContextUsageSnapshot | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(runtimeContextCachePath(logPath), 'utf8')) as {
+      schemaVersion?: unknown
+      sessionId?: unknown
+      contextSnapshot?: unknown
+    }
+    if (
+      parsed.schemaVersion !== 1
+      || parsed.sessionId !== sessionId
+      || !isContextUsageSnapshot(parsed.contextSnapshot)
+    ) return undefined
+    return parsed.contextSnapshot
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return undefined
+    throw error
+  }
+}
+
+function isContextUsageSnapshot(value: unknown): value is ContextUsageSnapshot {
+  if (!value || typeof value !== 'object') return false
+  const snapshot = value as Partial<ContextUsageSnapshot>
+  return typeof snapshot.model?.ref === 'string'
+    && (snapshot.contextWindow?.tokens === null || typeof snapshot.contextWindow?.tokens === 'number')
+    && typeof snapshot.contextWindow?.source === 'string'
+    && typeof snapshot.usage?.inputTokens === 'number'
+    && typeof snapshot.usage?.totalTokens === 'number'
+    && typeof snapshot.updatedAt === 'number'
 }
 
 async function readPersistedSummary(logPath: string): Promise<CachedSessionSummary | undefined> {
