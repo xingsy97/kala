@@ -658,8 +658,13 @@ export function configureDashboardNamespace(
           )
           return
         }
-        if (!deps.agentRuntimes.require(record.agentRuntime).descriptor().capabilities.compact) {
+        const runtime = deps.agentRuntimes.require(record.agentRuntime)
+        if (!runtime.descriptor().capabilities.compact) {
           throw new Error(`${record.agentRuntime} sessions do not support compaction`)
+        }
+        if (runtime.compact) {
+          await runtime.compact(record)
+          return
         }
         // Manual compaction is transcript maintenance. Persist the handoff but
         // leave the Session resting; only a later user message starts work.

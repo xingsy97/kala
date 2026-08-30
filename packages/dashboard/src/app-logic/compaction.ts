@@ -1,4 +1,5 @@
 import type { AgentState } from '@agent-kernel/kernel'
+import type { AgentRuntimeId } from '@agent-kernel/shared'
 
 /**
  * Pure helpers for reasoning about context compaction events/state. Extracted
@@ -8,6 +9,14 @@ import type { AgentState } from '@agent-kernel/kernel'
 /** Whether the session has any non-system message that could be compacted. */
 export function hasCompactableContent(state: AgentState | null): boolean {
   return state?.messages.some((m, index) => !(index === 0 && m.role === 'system')) ?? false
+}
+
+export function shouldShowQueuedAutoCompact(
+  agentRuntime: AgentRuntimeId,
+  shouldCompact: boolean,
+  resting: boolean,
+): boolean {
+  return agentRuntime === 'kernel' && shouldCompact && resting
 }
 
 /** A projection event kind that terminates a compaction attempt. */

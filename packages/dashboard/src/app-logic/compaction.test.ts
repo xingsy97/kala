@@ -6,6 +6,7 @@ import {
   hasCompactableContent,
   isCompactTerminalEvent,
   isCompactionSuccess,
+  shouldShowQueuedAutoCompact,
 } from './compaction.js'
 
 describe('hasCompactableContent', () => {
@@ -25,6 +26,15 @@ describe('compaction event predicates', () => {
     expect(isCompactTerminalEvent('event:appended')).toBe(false)
     expect(isCompactionSuccess({ kind: 'messages_replaced', reason: 'compaction' })).toBe(true)
     expect(isCompactionSuccess({ kind: 'messages_replaced', reason: 'other' })).toBe(false)
+  })
+
+  describe('auto-compaction queue visibility', () => {
+    it('only predicts queued compaction for the Kernel runtime', () => {
+      expect(shouldShowQueuedAutoCompact('kernel', true, true)).toBe(true)
+      expect(shouldShowQueuedAutoCompact('copilot', true, true)).toBe(false)
+      expect(shouldShowQueuedAutoCompact('kernel', false, true)).toBe(false)
+      expect(shouldShowQueuedAutoCompact('kernel', true, false)).toBe(false)
+    })
   })
 })
 

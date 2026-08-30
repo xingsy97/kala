@@ -1044,10 +1044,10 @@ export async function startHostServer(
     store,
     tools: copilotTools,
     broadcast: {
-      onState(record, state) {
+      onState(record, state, runtimeContextSnapshot) {
         scheduleSessionsBroadcast()
         const room = sessionRoom(record.sessionId)
-        const contextSnapshot = snapshotFromConfig(
+        const contextSnapshot = runtimeContextSnapshot ?? snapshotFromConfig(
           record.config,
           state.messages,
           contextWindowForModel(effectiveModelForSession(record.sessionId)),
@@ -1076,6 +1076,9 @@ export async function startHostServer(
       },
       onError(sessionId, message) {
         broadcast.onError(sessionId, message)
+      },
+      onCompactStatus(payload) {
+        broadcast.onCompactStatus?.(payload)
       },
     },
   }, {

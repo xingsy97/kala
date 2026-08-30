@@ -125,7 +125,7 @@ import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { emitRpc } from './socket-rpc.js'
 import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage } from './admission-client.js'
 import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, type TranscriptItem } from './transcript.js'
-import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent } from './app-logic/compaction.js'
+import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent, shouldShowQueuedAutoCompact } from './app-logic/compaction.js'
 import { mergeOptimisticQueuedMessages, nextSessionSelection, queuedMessageKey, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity, isRunningSessionActivity } from './app-logic/session-activity.js'
 import { modelKey, resolveModelKey } from './app-logic/model-key.js'
@@ -731,7 +731,7 @@ export function App(): JSX.Element {
     const shouldQueueCompact = shouldCompactContext(session.contextSnapshot, {}, { triggerRatio: session.config?.hardThreshold ?? 0.92 }).shouldCompact
     const status = session.state?.status
     const resting = status === 'idle' || status === 'done' || status === 'error'
-    if (shouldQueueCompact && resting) {
+    if (shouldShowQueuedAutoCompact(session.agentRuntime, shouldQueueCompact, resting)) {
       if (compactStatus.kind === 'idle') setCompactStatus({ kind: 'queued' })
       return
     }

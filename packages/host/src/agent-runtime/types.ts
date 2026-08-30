@@ -1,14 +1,20 @@
 import type { AgentState, ApprovalMode, MessageContent } from '@agent-kernel/kernel'
-import type { AgentRuntimeDescriptor, AgentRuntimeId } from '@agent-kernel/shared'
+import type {
+  AgentRuntimeDescriptor,
+  AgentRuntimeId,
+  CompactStatusEvent,
+  ContextUsageSnapshot,
+} from '@agent-kernel/shared'
 
 import type { SessionRecord, SessionStore } from '../store/session.js'
 import type { ToolDispatcher } from '../loop-types.js'
 
 export type AgentRuntimeBroadcast = {
-  onState(record: SessionRecord, state: AgentState): void
+  onState(record: SessionRecord, state: AgentState, contextSnapshot?: ContextUsageSnapshot): void
   onTokenDelta(sessionId: string, text: string): void
   onApprovalRequired(sessionId: string): void
   onError(sessionId: string, message: string): void
+  onCompactStatus?(payload: CompactStatusEvent): void
 }
 
 export type AgentRuntimeContext = {
@@ -34,6 +40,7 @@ export interface AgentRuntime {
   reject(record: SessionRecord, callId: string, reason?: string): Promise<void>
   setApprovalMode(record: SessionRecord, mode: ApprovalMode): Promise<void>
   setModel?(record: SessionRecord, model: string): Promise<void>
+  compact?(record: SessionRecord): Promise<void>
   confirmModelChange?(record: SessionRecord, from: string | undefined, to: string): Promise<void>
   delete?(record: SessionRecord): Promise<void>
   close(): Promise<void>

@@ -20,14 +20,45 @@ type CapturedTool = {
 
 const sdk = vi.hoisted(() => ({
   clientOptions: [] as Array<{ connection?: { kind: string; args?: readonly string[] } }>,
-  configs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }>,
-  resumeConfigs: [] as Array<{ tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }>,
+  configs: [] as Array<{
+    tools: CapturedTool[]
+    workingDirectory?: string
+    remoteSession?: string
+    infiniteSessions?: {
+      enabled?: boolean
+      backgroundCompactionThreshold?: number
+      bufferExhaustionThreshold?: number
+    }
+  }>,
+  resumeConfigs: [] as Array<{
+    tools: CapturedTool[]
+    workingDirectory?: string
+    remoteSession?: string
+    infiniteSessions?: {
+      enabled?: boolean
+      backgroundCompactionThreshold?: number
+      bufferExhaustionThreshold?: number
+    }
+  }>,
   resumeSucceeds: false,
   listeners: [] as Array<(event: unknown) => void>,
   responses: [] as Array<unknown>,
   sentMessages: [] as Array<unknown>,
   abort: vi.fn(async () => {}),
   setModel: vi.fn(async () => {}),
+  compact: vi.fn(async () => ({
+    success: true,
+    tokensRemoved: 80_000,
+    messagesRemoved: 40,
+    contextWindow: {
+      currentTokens: 40_000,
+      tokenLimit: 128_000,
+      messagesLength: 10,
+      systemTokens: 1_000,
+      conversationTokens: 35_000,
+      toolDefinitionsTokens: 4_000,
+    },
+  })),
 }))
 
 vi.mock('@github/copilot-sdk', () => ({
@@ -63,6 +94,7 @@ vi.mock('@github/copilot-sdk', () => ({
     }
     session() {
       return {
+        rpc: { history: { compact: sdk.compact } },
         async send() {},
         async sendAndWait(options: unknown) {
           sdk.sentMessages.push(options)
@@ -103,6 +135,7 @@ describe('Copilot runtime custom tools', () => {
     sdk.sentMessages.length = 0
     sdk.abort.mockClear()
     sdk.setModel.mockClear()
+    sdk.compact.mockClear()
     dir = mkdtempSync(join(tmpdir(), 'copilot-runtime-tools-'))
     store = new SessionStore(dir)
   })
@@ -194,6 +227,11 @@ describe('Copilot runtime custom tools', () => {
     })
     expect(sdk.configs.at(-1)?.workingDirectory).toBe(dir)
     expect(sdk.configs.at(-1)?.remoteSession).toBe('off')
+    expect(sdk.configs.at(-1)?.infiniteSessions).toEqual({
+      enabled: true,
+      backgroundCompactionThreshold: 0.8,
+      bufferExhaustionThreshold: 0.95,
+    })
     expect(runtime.descriptor()).toMatchObject({
       capabilities: { modelSelection: true, attachments: true },
       models: [{
@@ -295,6 +333,123 @@ describe('Copilot runtime custom tools', () => {
         expect.objectContaining({ type: 'image' }),
       ]),
     })
+    await runtime.close()
+  })
+
+  it('projects native Copilot usage and compaction lifecycle events', async () => {
+    const onState = vi.fn()
+    const onCompactStatus = vi.fn()
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState,
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+        onCompactStatus,
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-native-compaction',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await store.updatePreferences(record.sessionId, { selectedModel: 'gpt-5.4-mini' })
+    await runtime.start()
+    await runtime.send(record, { text: 'Observe context.', model: 'gpt-5.4-mini' })
+
+    expect(sdk.listeners.length).toBeGreaterThanOrEqual(1)
+    const emit = (event: unknown): void => {
+      for (const listener of sdk.listeners) listener(event)
+    }
+    emit({
+      type: 'session.usage_info',
+      id: 'usage-1',
+      parentId: null,
+      timestamp: '2026-08-30T00:00:00.000Z',
+      ephemeral: true,
+      data: {
+        currentTokens: 100_000,
+        tokenLimit: 128_000,
+        messagesLength: 20,
+        systemTokens: 2_000,
+        conversationTokens: 94_000,
+        toolDefinitionsTokens: 4_000,
+      },
+    })
+    emit({
+      type: 'session.compaction_start',
+      id: 'compact-start-1',
+      parentId: null,
+      timestamp: '2026-08-30T00:00:01.000Z',
+      data: { currentTokens: 104_000, tokenLimit: 128_000, trigger: 'threshold' },
+    })
+    emit({
+      type: 'session.compaction_complete',
+      id: 'compact-complete-1',
+      parentId: 'compact-start-1',
+      timestamp: '2026-08-30T00:00:02.000Z',
+      data: {
+        success: true,
+        preCompactionTokens: 104_000,
+        postCompactionTokens: 32_000,
+        messagesRemoved: 30,
+      },
+    })
+
+    expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
+      contextWindow: { tokens: 128_000, source: 'api_reported' },
+      usage: { inputTokens: 100_000, totalTokens: 100_000 },
+      estimator: expect.objectContaining({
+        total: { kind: 'provider_reported', confidence: 'exact' },
+      }),
+    }))
+    expect(onCompactStatus).toHaveBeenNthCalledWith(1, {
+      sessionId: record.sessionId,
+      kind: 'running',
+      trigger: 'auto',
+      tokensBefore: 104_000,
+      attemptId: 'compact-start-1',
+      startedAt: '2026-08-30T00:00:01.000Z',
+    })
+    expect(onCompactStatus).toHaveBeenNthCalledWith(2, {
+      sessionId: record.sessionId,
+      kind: 'done',
+      attemptId: 'compact-start-1',
+      tokensBefore: 104_000,
+      tokensAfter: 32_000,
+      endedAt: '2026-08-30T00:00:02.000Z',
+    })
+    await runtime.close()
+  })
+
+  it('runs manual compaction through the Copilot history RPC', async () => {
+    const onState = vi.fn()
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState,
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-manual-compaction',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+
+    await runtime.compact(record)
+
+    expect(sdk.compact).toHaveBeenCalledWith({ trigger: 'manual' })
+    expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
+      contextWindow: { tokens: 128_000, source: 'api_reported' },
+      usage: { inputTokens: 40_000, totalTokens: 40_000 },
+    }))
     await runtime.close()
   })
 

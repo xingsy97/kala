@@ -11,6 +11,7 @@ import type {
 import {
   COPILOT_AGENT_RUNTIME_CAPABILITIES,
   type AgentRuntimeDescriptor,
+  type ContextUsageSnapshot,
   type ModelInfo,
 } from '@agent-kernel/shared'
 import {
@@ -53,6 +54,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   private readonly approvals = new Map<string, PendingApproval>()
   private readonly cancelledCalls = new Set<string>()
   private readonly cancelledSessions = new Set<string>()
+  private readonly compactions = new Map<string, { attemptId: string; tokensBefore: number }>()
   private readonly tails = new Map<string, Promise<void>>()
   private status: AgentRuntimeDescriptor['status']
   private reason: string | undefined
@@ -174,6 +176,19 @@ export class CopilotAgentRuntime implements AgentRuntime {
     await session.setModel(model)
   }
 
+  async compact(record: SessionRecord): Promise<void> {
+    const session = await this.ensureSession(record, record.preferences?.selectedModel)
+    const result = await session.rpc.history.compact({ trigger: 'manual' })
+    if (!result.success) throw new Error('Copilot compaction did not complete successfully')
+    if (result.contextWindow) {
+      this.context.broadcast.onState(
+        record,
+        record.state,
+        copilotContextSnapshot(record, result.contextWindow),
+      )
+    }
+  }
+
   async confirmModelChange(record: SessionRecord, from: string | undefined, to: string): Promise<void> {
     if (from === to) return
     await this.project(record, 'copilot.model_changed', {
@@ -253,6 +268,11 @@ export class CopilotAgentRuntime implements AgentRuntime {
       skipCustomInstructions: true,
       customAgentsLocalOnly: true,
       remoteSession: 'off' as const,
+      infiniteSessions: {
+        enabled: true,
+        backgroundCompactionThreshold: 0.8,
+        bufferExhaustionThreshold: 0.95,
+      },
       coauthorEnabled: false,
       enableExperimentalMode: false,
     }
@@ -324,6 +344,58 @@ export class CopilotAgentRuntime implements AgentRuntime {
   }
 
   private handleEvent(record: SessionRecord, event: SessionEvent): void {
+    if (event.type === 'session.usage_info') {
+      this.context.broadcast.onState(record, record.state, copilotContextSnapshot(record, event.data))
+      return
+    }
+    if (event.type === 'session.compaction_start') {
+      const attemptId = event.id
+      const tokensBefore = event.data.currentTokens ?? event.data.conversationTokens ?? 0
+      this.compactions.set(record.sessionId, { attemptId, tokensBefore })
+      this.context.broadcast.onCompactStatus?.({
+        sessionId: record.sessionId,
+        kind: 'running',
+        trigger: event.data.trigger === 'manual' ? 'manual' : 'auto',
+        tokensBefore,
+        attemptId,
+        startedAt: event.timestamp,
+      })
+      return
+    }
+    if (event.type === 'session.compaction_complete') {
+      const active = this.compactions.get(record.sessionId)
+      const attemptId = active?.attemptId ?? event.id
+      this.compactions.delete(record.sessionId)
+      if (event.data.success) {
+        const tokensAfter = event.data.postCompactionTokens ?? event.data.conversationTokens ?? 0
+        this.context.broadcast.onCompactStatus?.({
+          sessionId: record.sessionId,
+          kind: 'done',
+          attemptId,
+          tokensBefore: event.data.preCompactionTokens ?? active?.tokensBefore ?? 0,
+          tokensAfter,
+          endedAt: event.timestamp,
+        })
+        if (event.data.tokenLimit && tokensAfter > 0) {
+          this.context.broadcast.onState(record, record.state, copilotContextSnapshot(record, {
+            currentTokens: tokensAfter,
+            tokenLimit: event.data.tokenLimit,
+            ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
+            ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
+            ...(event.data.toolDefinitionsTokens !== undefined ? { toolDefinitionsTokens: event.data.toolDefinitionsTokens } : {}),
+          }))
+        }
+      } else {
+        this.context.broadcast.onCompactStatus?.({
+          sessionId: record.sessionId,
+          kind: 'error',
+          attemptId,
+          message: event.data.error ?? 'Copilot compaction failed',
+          endedAt: event.timestamp,
+        })
+      }
+      return
+    }
     if (event.type === 'assistant.message_delta') {
       this.context.broadcast.onTokenDelta(record.sessionId, event.data.deltaContent)
       return
@@ -545,6 +617,41 @@ function copilotMessageOptions(input: AgentRuntimeSendInput): MessageOptions {
 function imageExtension(mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'): string {
   if (mediaType === 'image/jpeg') return 'jpg'
   return mediaType.slice('image/'.length)
+}
+
+function copilotContextSnapshot(
+  record: SessionRecord,
+  usage: {
+    currentTokens: number
+    tokenLimit: number
+    systemTokens?: number
+    conversationTokens?: number
+    toolDefinitionsTokens?: number
+  },
+): ContextUsageSnapshot {
+  const system = usage.systemTokens ?? 0
+  const transcript = usage.conversationTokens ?? Math.max(0, usage.currentTokens - system - (usage.toolDefinitionsTokens ?? 0))
+  const tools = usage.toolDefinitionsTokens ?? 0
+  const model = record.preferences?.selectedModel ?? 'unknown'
+  return {
+    model: { ref: model, provider: 'github-copilot', id: model },
+    contextWindow: { tokens: usage.tokenLimit, source: 'api_reported' },
+    usage: { inputTokens: usage.currentTokens, totalTokens: usage.currentTokens },
+    breakdown: {
+      system,
+      transcript,
+      tools,
+      memory: Math.max(0, usage.currentTokens - system - transcript - tools),
+      attachments: 0,
+      pendingUserInput: 0,
+    },
+    estimator: {
+      total: { kind: 'provider_reported', confidence: 'exact' },
+      breakdown: { kind: 'heuristic', confidence: 'estimated' },
+      version: 'copilot-sdk-usage-info-v1',
+    },
+    updatedAt: Date.now(),
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
