@@ -62,8 +62,9 @@ export function RuntimeMetrics({
     if (!isSimpleDensity(density) || !ref.current) return
     const element = ref.current
     const update = (): void => {
-      const rect = element.getBoundingClientRect()
-      if (rect.width > 0 && rect.height > 0) setSimpleGeometry({ width: rect.width, height: rect.height })
+      const width = element.clientWidth
+      const height = element.clientHeight
+      if (width > 0 && height > 0) setSimpleGeometry({ width, height })
     }
     update()
     if (typeof ResizeObserver === 'undefined') return

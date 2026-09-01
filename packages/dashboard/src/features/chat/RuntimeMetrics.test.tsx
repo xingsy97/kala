@@ -215,4 +215,39 @@ describe('RuntimeMetrics', () => {
     expect(anchoredPopover.className).not.toContain('fixed')
     expect(anchoredPopover.className).not.toContain('bottom-[5.5rem]')
   })
+
+  it('measures the simple usage border independently of layout animation transforms', () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(320)
+    const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(56)
+    const transformedBounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 160,
+      bottom: 28,
+      left: 0,
+      width: 160,
+      height: 28,
+      toJSON: () => ({}),
+    })
+    try {
+      render(
+        <RuntimeMetrics
+          state={createInitialState({ sessionId: 'sess-mode-switch' })}
+          config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
+          contextSnapshot={contextSnapshot(1_200, 4_000)}
+          modelInfo={{ id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 }}
+          queuedMessages={0}
+          density="simple"
+        />,
+      )
+
+      expect(screen.getByTestId('context-usage-track').getAttribute('viewBox')).toBe('0 0 320 56')
+      expect(transformedBounds).not.toHaveBeenCalled()
+    } finally {
+      width.mockRestore()
+      height.mockRestore()
+      transformedBounds.mockRestore()
+    }
+  })
 })
