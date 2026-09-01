@@ -143,6 +143,7 @@ export class DedicatedAdmissionLedger {
       record.state = 'committed'
       record.committedAt = new Date().toISOString()
       if (sessionCursor !== undefined) record.sessionCursor = sessionCursor
+      delete record.error
       delete record.leaseOwner
       delete record.leaseExpiresAt
       delete record.leaseGeneration
@@ -162,6 +163,7 @@ export class DedicatedAdmissionLedger {
       record.state = 'committed'
       record.committedAt = new Date().toISOString()
       if (sessionCursor !== undefined) record.sessionCursor = sessionCursor
+      delete record.error
       delete record.leaseOwner
       delete record.leaseExpiresAt
       delete record.leaseGeneration

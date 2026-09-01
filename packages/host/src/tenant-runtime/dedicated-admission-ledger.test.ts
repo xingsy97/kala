@@ -99,8 +99,23 @@ describe('DedicatedAdmissionLedger', () => {
     expect(await value.operation('operation-0011', principal)).toMatchObject({
       operationId: 'operation-0011', state: 'pending', attempts: 1, lastError: '<path> failed',
     })
+
     expect(await value.operation('operation-0011', 'b'.repeat(64))).toBeUndefined()
     expect((await value.leaseNext('worker', 9, 30_000, new Set(['session-blocked'])))?.operationId).toBe('operation-0012')
+  })
+
+  it('clears retry errors when an operation commits', async () => {
+    const { value } = await ledger()
+    await value.append(message('operation-committed-after-retry'), 7)
+    const leased = await value.leaseNext('worker', 7, 30_000)
+    await value.release(leased!.operationId, 'worker', 'temporary failure')
+    await value.leaseNext('worker', 7, 30_000)
+
+    const committed = await value.commit('operation-committed-after-retry', 'worker', 7, 42)
+
+    expect(committed).toMatchObject({ state: 'committed', sessionCursor: 42 })
+    expect(committed.error).toBeUndefined()
+    await expect(value.operation('operation-committed-after-retry', principal)).resolves.not.toHaveProperty('lastError')
   })
 
   it('terminates a permanently failed operation without blocking later messages for that Session', async () => {
