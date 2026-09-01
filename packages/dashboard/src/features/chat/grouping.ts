@@ -60,18 +60,33 @@ export function makeToolCallGroup(
   resultsByCallId: ReadonlyMap<string, ToolResultContent>,
   mixed: boolean,
 ): ToolCallGroup {
+  const presentationCalls = calls.map(normalizeToolCallPresentation)
   const results = new Map<string, ToolResultContent>()
-  for (const call of calls) {
+  for (const call of presentationCalls) {
     const r = resultsByCallId.get(call.callId)
     if (r) results.set(call.callId, r)
   }
   return {
     kind: 'tool_call_group',
-    toolName: mixed ? 'tool activity' : calls[0]!.name,
+    toolName: mixed ? 'tool activity' : presentationCalls[0]!.name,
     mixed,
-    calls,
+    calls: presentationCalls,
     results,
-    firstCallId: calls[0]!.callId,
+    firstCallId: presentationCalls[0]!.callId,
+  }
+}
+
+function normalizeToolCallPresentation(call: ToolCallContent): ToolCallContent {
+  const rawIntent = call.input._intent
+  const fallbackIntent = typeof rawIntent === 'string' && rawIntent.trim()
+    ? rawIntent.trim()
+    : undefined
+  if (!fallbackIntent) return call
+  const { _intent: _discarded, ...input } = call.input
+  return {
+    ...call,
+    input,
+    intent: call.intent?.trim() || fallbackIntent,
   }
 }
 

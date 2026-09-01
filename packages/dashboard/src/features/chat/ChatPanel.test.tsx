@@ -305,7 +305,7 @@ describe('ChatPanel', () => {
                 type: 'tool_call',
                 callId: 'c1',
                 name: 'write',
-                input: { path: '/tmp/a' },
+                input: { path: '/tmp/a', _intent: 'Create the requested output file.' },
               },
             ],
           },
@@ -327,19 +327,22 @@ describe('ChatPanel', () => {
     expect(screen.getByText('about to write')).toBeTruthy()
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
     expect(screen.getByText('write')).toBeTruthy()
-    expect(screen.getByText('/tmp/a')).toBeTruthy()
     expect(screen.getByText('Succeeded')).toBeTruthy()
     expect(screen.queryByText('wrote 3 bytes')).toBeNull()
     expect(screen.queryByText(/result wrote 3 bytes/)).toBeNull()
     expect(screen.queryByText('Assistant requested tool')).toBeNull()
     expect(screen.queryByText('Tool result')).toBeNull()
     expect(screen.queryByText('Operation details')).toBeNull()
+    expect(screen.getByText('Create the requested output file.')).toBeTruthy()
+    expect(screen.queryByText('_intent')).toBeNull()
     // Body is collapsed by default; ordinary success output stays in the expanded detail.
     fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
     expect(screen.getAllByText('wrote 3 bytes').length).toBeGreaterThanOrEqual(1)
     const request = screen.getByTestId('tool-call-technical-details-c1')
     expect(request.hasAttribute('open')).toBe(true)
     expect(request.textContent).toContain('request')
+    expect(request.textContent).toContain('/tmp/a')
+    expect(request.textContent).not.toContain('_intent')
   })
 
   it('previews intent and tool summary on hover or click without expanding the group', () => {
