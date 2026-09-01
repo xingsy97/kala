@@ -2916,8 +2916,8 @@ function ToolCallInlineDetail({
           {call.intent}
         </p>
       ) : null}
-      <details className="border-b border-border/30 text-[11px]" data-testid={`tool-call-technical-details-${call.callId}`}>
-        <summary className="cursor-pointer select-none px-2.5 py-1.5 font-medium text-muted-foreground hover:text-foreground">{t('chatCommon.technicalDetails')}</summary>
+      <details open className="border-b border-border/30 text-[11px]" data-testid={`tool-call-technical-details-${call.callId}`}>
+        <summary className="cursor-pointer select-none px-2.5 py-1.5 font-medium text-muted-foreground hover:text-foreground">{t('chatCommon.request')}</summary>
         <div className="border-t border-border/30">
           {summary ? <div className="flex flex-wrap gap-1.5 px-2.5 py-2"><ToolCallInputFieldBadges fields={summary.fields} /></div> : null}
           {isPendingApproval && hasDiffPreview ? (

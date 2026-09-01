@@ -333,9 +333,13 @@ describe('ChatPanel', () => {
     expect(screen.queryByText(/result wrote 3 bytes/)).toBeNull()
     expect(screen.queryByText('Assistant requested tool')).toBeNull()
     expect(screen.queryByText('Tool result')).toBeNull()
+    expect(screen.queryByText('Operation details')).toBeNull()
     // Body is collapsed by default; ordinary success output stays in the expanded detail.
     fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
     expect(screen.getAllByText('wrote 3 bytes').length).toBeGreaterThanOrEqual(1)
+    const request = screen.getByTestId('tool-call-technical-details-c1')
+    expect(request.hasAttribute('open')).toBe(true)
+    expect(request.textContent).toContain('request')
   })
 
   it('previews intent and tool summary on hover or click without expanding the group', () => {
@@ -408,8 +412,9 @@ describe('ChatPanel', () => {
     expect(pinnedCard.textContent).toContain('failed')
     expect(pinnedCard.textContent).toContain('result')
     const technicalDetails = screen.getByTestId('tool-call-technical-details-dot-2')
-    expect(technicalDetails.hasAttribute('open')).toBe(false)
-    expect(technicalDetails.textContent).toContain('Technical details')
+    expect(technicalDetails.hasAttribute('open')).toBe(true)
+    expect(technicalDetails.textContent).toContain('request')
+    expect(technicalDetails.textContent).not.toContain('Technical details')
     expect(pinnedCard.className).toContain('pointer-events-auto')
     expect(screen.getByTestId('tool-card-preview-close')).toBeTruthy()
     const previewScroll = screen.getByTestId('tool-card-preview-scroll-dot-2')
@@ -1800,8 +1805,9 @@ describe('ChatPanel', () => {
     fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
     expect(screen.getByTestId('tool-call-detail-intent-c1').textContent).toBe('Inspect the target implementation.')
     const technical = screen.getByTestId('tool-call-technical-details-c1')
-    expect(technical.hasAttribute('open')).toBe(false)
-    expect(technical.textContent).toContain('Technical details')
+    expect(technical.hasAttribute('open')).toBe(true)
+    expect(technical.textContent).toContain('request')
+    expect(technical.textContent).not.toContain('Technical details')
   })
 
   it('collapses mixed tool activity split across timeline items', () => {

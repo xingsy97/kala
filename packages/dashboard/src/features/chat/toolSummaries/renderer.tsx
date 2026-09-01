@@ -117,7 +117,8 @@ export function GroupSummaryRow({
       ? 'Approval required'
       : status === 'running'
         ? 'Running operation'
-        : 'Operation details'
+        : undefined
+  const semanticSummary = intent ?? fallbackSummary ?? missingIntentLabel
   return (
     <button
       type="button"
@@ -131,18 +132,22 @@ export function GroupSummaryRow({
           <span className="flex-none font-mono text-[10px] font-medium">{toolName}</span>
           <span className="flex-none text-muted-foreground/60" aria-hidden="true">·</span>
           {hideTechnicalSummary ? (
-            <span className={cn('min-w-0 whitespace-pre-wrap break-words text-[11px] leading-5 text-foreground', !intent && 'truncate')} title={intent ?? undefined}>
-              {intent ?? fallbackSummary ?? missingIntentLabel}
-            </span>
+            semanticSummary ? (
+              <span className={cn('min-w-0 whitespace-pre-wrap break-words text-[11px] leading-5 text-foreground', !intent && 'truncate')} title={intent ?? undefined}>
+                {semanticSummary}
+              </span>
+            ) : null
           ) : (
             <span className="min-w-0 truncate font-mono text-[10px]" title={row.primary}>
               {row.primary}
             </span>
           )}
         </span>
-        <span className="mt-0.5 block min-w-0 truncate text-[11px] leading-4 text-foreground/90" title={intent ?? fallbackSummary ?? missingIntentLabel} data-testid={`grouped-tool-primary-${row.callId}`}>
-          {intent ?? fallbackSummary ?? missingIntentLabel}
-        </span>
+        {semanticSummary ? (
+          <span className="mt-0.5 block min-w-0 truncate text-[11px] leading-4 text-foreground/90" title={semanticSummary} data-testid={`grouped-tool-primary-${row.callId}`}>
+            {semanticSummary}
+          </span>
+        ) : null}
         {!hideTechnicalSummary && text ? (
           <span className="mt-0.5 block truncate text-[10px] leading-4 text-muted-foreground sm:hidden" title={text}>{text}</span>
         ) : null}
