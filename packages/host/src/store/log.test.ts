@@ -18,6 +18,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import {
   appendEventEntry,
   appendRuntimeMetadataEntry,
+  findSessionOperation,
   readSessionHistory,
   readSessionHeader,
   readLastSessionSnapshot,
@@ -362,5 +363,26 @@ describe('readSessionLog', () => {
     expect(parsed.events.map((entry) => entry.event.kind)).toEqual(['user_message', 'cancel', 'cancel'])
     expect(parsed.warnings).toContain('Repaired event sequence 3 to 2 after 1')
     expect(parsed.warnings).toContain('Repaired event sequence 2 to 3 after 3')
+  })
+
+  it('finds committed operations without parsing historical snapshots', async () => {
+    const path = join(dir, 'operation-lookup.jsonl')
+    await writeHeader({ path, sessionId: 'operation-lookup', config, initialState })
+    await appendFile(path, '{"kind":"snapshot","ignored":"historical invalid snapshot"\n', 'utf8')
+    await appendRuntimeMetadataEntry(path, {
+      sessionId: 'operation-lookup',
+      action: 'copilot.user_message',
+      payload: { operationId: 'runtime-operation' },
+    })
+    await appendEventEntry({
+      path,
+      seq: 7,
+      event: { kind: 'user_message', operationId: 'event-operation', text: 'hello' },
+      effects: [],
+    })
+
+    await expect(findSessionOperation(path, 'runtime-operation')).resolves.toEqual({ kind: 'runtime_metadata' })
+    await expect(findSessionOperation(path, 'event-operation')).resolves.toEqual({ kind: 'event', cursor: 7 })
+    await expect(findSessionOperation(path, 'missing-operation')).resolves.toBeUndefined()
   })
 })

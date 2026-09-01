@@ -4,7 +4,7 @@
  * disk for the same sessionId; `ensure()` coalesces via a per-id promise map.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createConfig, step } from '@agent-kernel/kernel'
 
 import { SessionStore } from './session.js'
-import { appendEventEntry, readSessionLog, writeHeader } from './log.js'
+import { appendEventEntry, appendSnapshotEntry, readSessionLog, writeHeader } from './log.js'
 import { createInitialState } from '@agent-kernel/kernel'
 
 const config = createConfig({ tools: [], systemPrompt: 'sys' })
@@ -659,6 +659,36 @@ describe('SessionStore.listSummaries', () => {
     const [third] = await store.listSummaries()
     expect(third).not.toBe(first)
     expect(third?.firstUserMessage).toBe('fresh task')
+  })
+
+  it('summarizes external Sessions without parsing superseded snapshots', async () => {
+    const sessionId = 'external-bounded-summary'
+    const path = join(dir, `2026-07-05T00-00-01.000Z_${sessionId}.jsonl`)
+    const initialState = createInitialState({ sessionId, systemPrompt: 'sys' })
+    await writeHeader({
+      path,
+      sessionId,
+      agentRuntime: 'copilot',
+      config,
+      initialState,
+    })
+    appendFileSync(path, '{"kind":"snapshot","ignored":"historical invalid snapshot"\n', 'utf8')
+    await appendSnapshotEntry(path, 1, {
+      ...initialState,
+      cursor: 1,
+      status: 'done',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'latest external request' }] }],
+    })
+
+    const [summary] = await new SessionStore(dir).listSummaries()
+
+    expect(summary).toMatchObject({
+      sessionId,
+      agentRuntime: 'copilot',
+      eventCount: 1,
+      firstUserMessage: 'latest external request',
+      status: 'done',
+    })
   })
 })
 

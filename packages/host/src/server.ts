@@ -35,7 +35,7 @@ import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
 import { selectHooks } from './extensions/hooks.js'
 import { createSkillManager, defaultSkillRoots, discoverSkills, type SkillManager, type SkillRegistry } from './extensions/skills.js'
 import { SessionStore, type SessionRecord } from './store/session.js'
-import { slimEffect } from './store/log.js'
+import { findSessionOperation, slimEffect } from './store/log.js'
 import { WorkspaceAliasStore } from './store/workspace-alias.js'
 import { PushSubscriptionStore } from './push/store.js'
 import { loadOrCreateVapidKeys } from './push/vapid.js'
@@ -801,15 +801,9 @@ export async function startHostServer(
   ): Promise<number | undefined> {
     const record = sessionStore.get(sessionId)
     if (!record) return undefined
-    const parsed = await readSessionLog(record.logPath)
-    const eventCursor = parsed.events.find((entry) =>
-      entry.event.kind === 'user_message' && entry.event.operationId === operationId,
-    )?.seq
-    if (eventCursor !== undefined) return eventCursor
-    const runtimeOperation = parsed.runtimeMetadata.some((entry) =>
-      entry.payload.operationId === operationId,
-    )
-    return runtimeOperation ? record.state.cursor : undefined
+    const operation = await findSessionOperation(record.logPath, operationId)
+    if (operation?.kind === 'event') return operation.cursor
+    return operation?.kind === 'runtime_metadata' ? record.state.cursor : undefined
   }
 
   // Coalesce `server:sessions` broadcasts. The loop's onEvent fires once per

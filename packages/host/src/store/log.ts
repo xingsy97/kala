@@ -344,6 +344,92 @@ export type ParsedHistory = {
   runtimeMetadata: RuntimeMetadataEntry[]
 }
 
+export type SessionOperationMatch =
+  | { kind: 'event'; cursor: number }
+  | { kind: 'runtime_metadata' }
+
+export async function findSessionOperation(
+  path: string,
+  operationId: string,
+): Promise<SessionOperationMatch | undefined> {
+  const handle = await open(path, 'r')
+  const needle = Buffer.from(operationId)
+  const chunkSize = 4 * 1024 * 1024
+  let carry = Buffer.alloc(0)
+  try {
+    const stat = await handle.stat()
+    let end = stat.size
+    while (end > 0) {
+      const start = Math.max(0, end - chunkSize)
+      const chunk = Buffer.allocUnsafe(end - start)
+      await handle.read(chunk, 0, chunk.length, start)
+      const data = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk
+      let match = data.lastIndexOf(needle)
+      while (match >= 0 && match < chunk.length) {
+        const line = await readLineContaining(handle, start + match, stat.size)
+        if (line.startsWith('{"kind":"event"') || line.startsWith('{"kind":"runtime_metadata"')) {
+          const entry = JSON.parse(line) as LogEntry
+          if (
+            entry.kind === 'event'
+            && Number.isSafeInteger(entry.seq)
+            && entry.seq > 0
+            && entry.event.kind === 'user_message'
+            && entry.event.operationId === operationId
+          ) {
+            return { kind: 'event', cursor: entry.seq }
+          }
+          if (entry.kind === 'runtime_metadata' && entry.payload.operationId === operationId) {
+            return { kind: 'runtime_metadata' }
+          }
+        }
+        match = data.lastIndexOf(needle, match - 1)
+      }
+      carry = chunk.subarray(0, Math.min(needle.length - 1, chunk.length))
+      end = start
+    }
+  } finally {
+    await handle.close()
+  }
+  return undefined
+}
+
+async function readLineContaining(
+  handle: Awaited<ReturnType<typeof open>>,
+  offset: number,
+  fileSize: number,
+): Promise<string> {
+  const blockSize = 64 * 1024
+  let lineStart = offset
+  while (lineStart > 0) {
+    const start = Math.max(0, lineStart - blockSize)
+    const chunk = Buffer.allocUnsafe(lineStart - start)
+    await handle.read(chunk, 0, chunk.length, start)
+    const newline = chunk.lastIndexOf(10)
+    if (newline >= 0) {
+      lineStart = start + newline + 1
+      break
+    }
+    lineStart = start
+  }
+
+  let lineEnd = offset
+  while (lineEnd < fileSize) {
+    const length = Math.min(blockSize, fileSize - lineEnd)
+    const chunk = Buffer.allocUnsafe(length)
+    await handle.read(chunk, 0, length, lineEnd)
+    const newline = chunk.indexOf(10)
+    if (newline >= 0) {
+      lineEnd += newline
+      break
+    }
+    lineEnd += length
+  }
+
+  const line = Buffer.allocUnsafe(lineEnd - lineStart)
+  await handle.read(line, 0, line.length, lineStart)
+  return line.toString('utf8')
+}
+
 export async function readSessionHistory(path: string): Promise<ParsedHistory> {
   const input = createReadStream(path, { encoding: 'utf8' })
   const rl = createInterface({ input, crlfDelay: Infinity })

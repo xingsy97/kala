@@ -783,7 +783,7 @@ export class SessionStore {
     if (active && active.mtimeMs === stat.mtimeMs && active.size === stat.size) {
       return active.promise
     }
-    const load = readSessionLog(path).then(async (parsed) => {
+    const load = readSessionState(path).then(async (parsed) => {
       const summary = summarizeLog(parsed)
       const latest = statSync(path)
       if (latest.mtimeMs === stat.mtimeMs && latest.size === stat.size) {
