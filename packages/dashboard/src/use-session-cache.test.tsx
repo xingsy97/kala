@@ -350,6 +350,28 @@ describe('useSession session view cache', () => {
     } finally { vi.useRealTimers() }
   })
 
+  it('uses the authoritative external Runtime baseline without requesting Kernel history', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result } = renderHook(() => useSession({ host: 'http://host.test', sessionId: 's1' }))
+      await act(async () => {})
+      act(() => sockets[0]!.serverEmit('session:ready', {
+        sessionId: 's1',
+        reason: 'load',
+        agentRuntime: 'copilot',
+        cursor: 2,
+        state: createInitialState({ sessionId: 's1' }),
+        config: { tools: [] },
+        contextSnapshot: null,
+      }))
+
+      expect(result.current.historyLoadedSessionId).toBe('s1')
+      expect(sockets[0]!.emitted.filter((entry) => entry.event === 'client:load_history')).toHaveLength(0)
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(result.current.lastError).toBeNull()
+    } finally { vi.useRealTimers() }
+  })
+
   it('restores cached timeline immediately and refreshes history from the cached cursor', async () => {
     const cache = createSessionViewCache({ maxBytes: 1024 * 1024 })
     const state = createInitialState({ sessionId: 's1' })

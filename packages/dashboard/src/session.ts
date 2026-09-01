@@ -455,6 +455,17 @@ export function useSession({
       if (!acceptStreamDeltas) resetStream()
       flushProjectionQueue()
       dispatchProjectionEvent({ kind: 'ready', generation, sessionId, payload: p })
+      if ((p.agentRuntime ?? 'kernel') !== 'kernel') {
+        latestHistoryRequest = null
+        historyRequestAttempts = 0
+        if (historyRequestTimer !== null) {
+          window.clearTimeout(historyRequestTimer)
+          historyRequestTimer = null
+        }
+        resetHistoryBaseOnNextReplay = false
+        dispatchProjectionEvent({ kind: 'history', generation, sessionId, entries: [], reset: true })
+        return
+      }
       // Timeline was cleared for a fresh connect; ask the host to replay
       // the log so a page reload doesn't leave the user staring at an
       // empty timeline for a session that already has history. Live
