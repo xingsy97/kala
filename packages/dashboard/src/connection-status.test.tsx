@@ -20,6 +20,15 @@ function socketWithRtt(hostRttMs = 12, executorRttMs: number | null = 34) {
   }
 }
 
+function timedOutSocket() {
+  return {
+    connected: true,
+    timeout: vi.fn(() => ({
+      emit: (_event: string, _arg: unknown, callback: (...args: unknown[]) => void) => callback(new Error('timeout')),
+    })),
+  }
+}
+
 describe('ConnectionStatus', () => {
   it('presents the complete Device to Service to Executor RTT as the headline', async () => {
     const socket = socketWithRtt()
@@ -48,5 +57,17 @@ describe('ConnectionStatus', () => {
     fireEvent.click(screen.getByTestId('connection-status'))
     expect(screen.getByText('Offline')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Measure again' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('marks the overall connection as failed when both latency probes time out', async () => {
+    render(<ConnectionStatus socket={timedOutSocket() as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
+
+    await waitFor(() => expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('error'))
+    expect(screen.getByText('Connection issue')).toBeTruthy()
+    expect(screen.getByTestId('connection-headline-latency').textContent).toBe('—')
+
+    fireEvent.click(screen.getByTestId('connection-status'))
+    expect(screen.getAllByText('Timed out')).toHaveLength(2)
+    expect(screen.getAllByText('Connection issue').length).toBeGreaterThanOrEqual(2)
   })
 })

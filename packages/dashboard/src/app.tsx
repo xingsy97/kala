@@ -2840,7 +2840,6 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   const [executorError, setExecutorError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [copied, setCopied] = useState(false)
-  const label = hostStatusLabel(status, t)
 
   const measure = useCallback(() => {
     if (!socket?.connected) {
@@ -2888,15 +2887,19 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
 
   const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, hostError, executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline', sessionCursor: cursor }
   const copy = (): void => { void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => setCopied(false)) }
-  const healthy = status === 'ready' && executorConnected && !executorError
+  const probeFailed = status === 'ready' && (hostError !== null || executorConnected && executorError !== null)
+  const displayStatus = probeFailed ? 'error' : status
+  const label = probeFailed ? t('connectionHealth.issue') : hostStatusLabel(status, t)
+  const healthy = displayStatus === 'ready' && executorConnected
+  const failed = displayStatus === 'error' || displayStatus === 'disconnected'
   const headlineLatency = executorConnected
     ? hostRtt !== null && executorRtt !== null ? hostRtt + executorRtt : null
     : hostRtt
 
   return (
     <div className="relative">
-      <button type="button" onClick={() => setOpen((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8" data-testid="connection-status" data-status={status} aria-expanded={open}>
-        <span className={cn('h-2 w-2 rounded-full', statusDot(status))} />
+      <button type="button" onClick={() => setOpen((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8" data-testid="connection-status" data-status={displayStatus} aria-expanded={open}>
+        <span className={cn('h-2 w-2 rounded-full', statusDot(displayStatus))} />
         <span className="hidden sm:inline">{label}</span>
         <span className="hidden font-mono text-[10px] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineLatency !== null ? `${headlineLatency} ms` : checking ? t('connectionHealth.measuring') : '—'}</span>
       </button>
@@ -2904,12 +2907,12 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
         <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-sm rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96" data-testid="connection-status-popover">
           <div className="flex items-start justify-between gap-3 pb-3">
             <div><h3 className="text-sm font-semibold">{t('connectionHealth.title')}</h3><p className="mt-0.5 text-[11px] text-muted-foreground">{t('connectionHealth.subtitle')}</p></div>
-            <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : 'connectionHealth.check')}</span>
+            <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : failed ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : failed ? 'connectionHealth.issue' : 'connectionHealth.check')}</span>
           </div>
           <div className="divide-y divide-border/30 rounded-2xl bg-muted/20 px-3">
-            <HealthRow label={t('connectionHealth.deviceHost')} state={status === 'ready' ? hostError ?? t('common.connected') : label} tone={status === 'ready' && !hostError ? 'healthy' : status === 'disconnected' || status === 'error' ? 'failed' : 'pending'} latency={hostRtt} measuring={checking && hostRtt === null && !hostError} measuringLabel={t('connectionHealth.measuring')} />
+            <HealthRow label={t('connectionHealth.deviceHost')} state={status === 'ready' ? hostError ?? t('common.connected') : label} tone={status === 'ready' && !hostError ? 'healthy' : hostError || status === 'disconnected' || status === 'error' ? 'failed' : 'pending'} latency={hostRtt} measuring={checking && hostRtt === null && !hostError} measuringLabel={t('connectionHealth.measuring')} />
             <HealthRow label={t('connectionHealth.hostExecutor')} state={!executorConnected ? t('connectionHealth.offline') : executorError ?? t('common.connected')} tone={!executorConnected || executorError ? 'failed' : 'healthy'} latency={executorRtt} measuring={checking && executorConnected && executorRtt === null && !executorError} measuringLabel={t('connectionHealth.measuring')} />
-            <HealthRow label={t('connectionHealth.sessionSync')} state={status === 'ready' ? t('connectionHealth.synchronized') : label} tone={status === 'ready' ? 'healthy' : status === 'disconnected' || status === 'error' ? 'failed' : 'pending'} measuringLabel={t('connectionHealth.measuring')} />
+            <HealthRow label={t('connectionHealth.sessionSync')} state={displayStatus === 'ready' ? t('connectionHealth.synchronized') : label} tone={displayStatus === 'ready' ? 'healthy' : displayStatus === 'disconnected' || displayStatus === 'error' ? 'failed' : 'pending'} measuringLabel={t('connectionHealth.measuring')} />
           </div>
           <div className="mt-3 flex items-center gap-2"><Button size="sm" variant="outline" className="h-8" disabled={checking || !socket?.connected} onClick={measure}>{t(checking ? 'connectionHealth.measuring' : 'connectionHealth.measureAgain')}</Button><Button size="sm" variant="ghost" className="h-8" onClick={onResync}>{t('connectionHealth.resync')}</Button></div>
           <details className="mt-2 text-xs"><summary className="cursor-pointer select-none rounded-lg px-2 py-2 font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground">{t('connectionHealth.diagnostics')}</summary><div className="mt-1 flex items-center justify-between gap-3 rounded-lg bg-muted/20 px-3 py-2"><p className="min-w-0 truncate text-[11px] text-muted-foreground">{t('connectionHealth.transport')} · {transport ?? t('connectionHealth.unknown')}</p><Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy}>{t(copied ? 'common.copied' : 'common.copy')}</Button></div></details>
