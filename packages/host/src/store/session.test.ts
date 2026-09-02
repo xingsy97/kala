@@ -673,6 +673,7 @@ describe('SessionStore.listSummaries', () => {
       initialState,
     })
     appendFileSync(path, '{"kind":"snapshot","ignored":"historical invalid snapshot"\n', 'utf8')
+    appendFileSync(path, '{"kind":"runtime_metadata","malformed":"legacy payload"\n', 'utf8')
     await appendSnapshotEntry(path, 1, {
       ...initialState,
       cursor: 1,

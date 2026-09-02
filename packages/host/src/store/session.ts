@@ -779,6 +779,39 @@ export class SessionStore {
       this.summaryCache.set(path, persisted)
       return persisted.summary
     }
+    const header = await readSessionHeader(path)
+    if ((header.agentRuntime ?? 'kernel') !== 'kernel') {
+      const snapshots = [...await optionalSnapshot(path)]
+      const current = summarizeLog({
+        header,
+        events: [],
+        snapshots,
+        metadata: [],
+        runtimeMetadata: [],
+        warnings: [],
+      })
+      const summary: SessionSummary = {
+        ...current,
+        ...persisted?.summary,
+        eventCount: current.eventCount,
+        ...(current.lastEventAt ? { lastEventAt: current.lastEventAt } : {}),
+        ...(current.status ? { status: current.status } : {}),
+        ...(current.currentCwd ? { currentCwd: current.currentCwd } : {}),
+        ...(current.firstUserMessage ? { firstUserMessage: current.firstUserMessage } : {}),
+      }
+      const latest = statSync(path)
+      if (latest.mtimeMs === stat.mtimeMs && latest.size === stat.size) {
+        const cachedSummary = { mtimeMs: stat.mtimeMs, size: stat.size, summary }
+        this.summaryCache.set(path, cachedSummary)
+        await writeJsonFile(summaryCachePath(path), {
+          schemaVersion: 2,
+          ...cachedSummary,
+          hasEvents: false,
+          externalRuntimeAlreadyQuarantined: persisted?.externalRuntimeAlreadyQuarantined ?? false,
+        })
+      }
+      return summary
+    }
     const active = this.summaryLoads.get(path)
     if (active && active.mtimeMs === stat.mtimeMs && active.size === stat.size) {
       return active.promise

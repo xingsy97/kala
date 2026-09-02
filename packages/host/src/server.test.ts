@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -3039,6 +3039,38 @@ describe('wire protocol', () => {
 
     dashboard.close()
     executor.close()
+  })
+
+  it('does not scan legacy JSONL metadata when loading external Runtime history', async () => {
+    const sessionId = 'external-history-fast-path'
+    const record = await server.store.create({
+      sessionId,
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: sessionId,
+      config,
+    })
+    await appendFile(record.logPath, '{"kind":"runtime_metadata", malformed legacy payload\n')
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const history = await new Promise<ServerHistoryPayload>((resolve) => {
+      dashboard.on('server:history', resolve)
+      dashboard.emit('client:load_history', { sessionId })
+    })
+    expect(history).toEqual({ sessionId, entries: [] })
+
+    dashboard.close()
   })
 
   it('client:create_session writes JSONL with workspaceId and broadcasts server:sessions', async () => {

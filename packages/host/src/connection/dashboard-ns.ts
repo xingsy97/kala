@@ -370,7 +370,13 @@ export function configureDashboardNamespace(
             return
           }
         }
-        const parsed = await readSessionHistory(target.logPath)
+        // External runtimes project their authoritative transcript through
+        // snapshots and live events. Their JSONL may contain large legacy
+        // runtime metadata, but no replayable Kernel events, so scanning it
+        // here only delays control actions and can exhaust the Host heap.
+        const parsed = target.agentRuntime === 'kernel'
+          ? await readSessionHistory(target.logPath)
+          : { events: [], runtimeMetadata: [] }
         const since = p.sinceCursor ?? 0
         const compactionMetadataByReplaceRange = buildCompactionMetadataIndex(parsed.runtimeMetadata)
         const entries: EventAppendedEvent[] = parsed.events
