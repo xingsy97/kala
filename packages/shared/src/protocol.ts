@@ -64,7 +64,7 @@ export const KERNEL_AGENT_RUNTIME_CAPABILITIES: AgentRuntimeCapabilities = {
 }
 
 export const COPILOT_AGENT_RUNTIME_CAPABILITIES: AgentRuntimeCapabilities = {
-  queue: false,
+  queue: true,
   fork: false,
   compact: true,
   clear: false,

@@ -260,7 +260,7 @@ describe('Copilot runtime custom tools', () => {
       bufferExhaustionThreshold: 0.95,
     })
     expect(runtime.descriptor()).toMatchObject({
-      capabilities: { modelSelection: true, attachments: true },
+      capabilities: { queue: true, modelSelection: true, attachments: true },
       models: [{
         ref: 'gpt-5.4-mini',
         id: 'gpt-5.4-mini',

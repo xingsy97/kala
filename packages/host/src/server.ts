@@ -431,11 +431,28 @@ export async function startHostServer(
       const existingCursor = await sessionUserOperationCursor(store, sessionId, operationId)
       if (existingCursor !== undefined) return { committed: true, cursor: existingCursor }
       if (record.agentRuntime !== 'kernel') {
-        if (!isRestingStatus(record.state.status)) {
-          throw new Error(`${record.agentRuntime} runtime cannot accept another message while the Session is active`)
-        }
         const runtime = agentRuntimes?.require(record.agentRuntime)
         if (!runtime) throw new Error(`agent runtime is not ready: ${record.agentRuntime}`)
+        if (!isRestingStatus(record.state.status)) {
+          const queued: QueuedUserMessage = {
+            id: operationId,
+            operationId,
+            text,
+            mode,
+            createdAt: new Date().toISOString(),
+            ...(content ? { content } : {}),
+            ...(effectiveModelForSession(sessionId) ? { model: effectiveModelForSession(sessionId) } : {}),
+          }
+          await messageQueues.enqueue(sessionId, queued, mode === 'steer' ? 'front' : undefined)
+          if (mode === 'steer') {
+            await runtime.cancel(record)
+            await messageQueues.drain(sessionId)
+          } else {
+            void messageQueues.drain(sessionId)
+          }
+          const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
+          return committedCursor === undefined ? { committed: false } : { committed: true, cursor: committedCursor }
+        }
         await runtime.send(record, {
           text,
           ...(content ? { content } : {}),
