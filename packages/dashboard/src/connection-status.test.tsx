@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ConnectionStatus } from './app.js'
 
-function socketWithRtt(hostRttMs = 12, executorRttMs = 34) {
+function socketWithRtt(hostRttMs = 12, executorRttMs: number | null = 34) {
   let now = 0
   vi.spyOn(performance, 'now').mockImplementation(() => {
     now += hostRttMs
@@ -14,24 +14,31 @@ function socketWithRtt(hostRttMs = 12, executorRttMs = 34) {
     timeout: vi.fn(() => ({
       emit: (event: string, _arg: unknown, callback: (...args: unknown[]) => void) => {
         if (event === 'client:connection_ping') callback(null)
-        if (event === 'client:executor_ping') callback(null, { rttMs: executorRttMs })
+        if (event === 'client:executor_ping') callback(null, { rttMs: executorRttMs ?? undefined })
       },
     })),
   }
 }
 
 describe('ConnectionStatus', () => {
-  it('measures in the compact state and presents executor RTT as the headline', async () => {
+  it('presents the complete Device to Service to Executor RTT as the headline', async () => {
     const socket = socketWithRtt()
     render(<ConnectionStatus socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
 
-    await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('34 ms'))
+    await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('46 ms'))
     fireEvent.click(screen.getByTestId('connection-status'))
     expect(screen.getByText('Device → Service')).toBeTruthy()
     expect(screen.getByText('Service → Executor')).toBeTruthy()
     expect(screen.getByText('12 ms')).toBeTruthy()
-    expect(screen.getAllByText('34 ms')).toHaveLength(2)
+    expect(screen.getByText('34 ms')).toBeTruthy()
     expect(screen.queryByText(/cursor/i)).toBeNull()
+  })
+
+  it('does not present a partial segment as complete latency while Executor measurement is unavailable', async () => {
+    const socket = socketWithRtt(12, null)
+    render(<ConnectionStatus socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
+
+    await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('—'))
   })
 
   it('distinguishes offline from an unknown or timed-out latency', () => {

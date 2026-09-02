@@ -2855,7 +2855,9 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, hostError, executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline', sessionCursor: cursor }
   const copy = (): void => { void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => setCopied(false)) }
   const healthy = status === 'ready' && executorConnected && !executorError
-  const headlineLatency = executorRtt ?? hostRtt
+  const headlineLatency = executorConnected
+    ? hostRtt !== null && executorRtt !== null ? hostRtt + executorRtt : null
+    : hostRtt
 
   return (
     <div className="relative">
