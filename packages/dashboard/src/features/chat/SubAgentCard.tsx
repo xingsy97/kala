@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { ToolCallContent } from '@agent-kernel/kernel'
+import type { Message, ToolCallContent } from '@agent-kernel/kernel'
 import type { ApprovalRequiredEvent, ToolCardMode } from '@agent-kernel/shared'
 
 import { cn } from '../../lib/utils.js'
@@ -177,8 +177,13 @@ const SubAgentRow = memo(function SubAgentRow({
       : envelope?.status === 'failed' || envelope?.status === 'cancelled'
         ? envelope.body
         : null
+  const displayedMessages: readonly Message[] = view.messages.length > 0
+    ? view.messages
+    : envelope?.body && (envelope.status === 'completed' || envelope.status === 'timed_out_with_partial_result')
+      ? [{ role: 'assistant', content: [{ type: 'text', text: envelope.body }] }]
+      : []
   const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
-  const useCompactTranscript = terminal && view.messages.length <= 12
+  const useCompactTranscript = terminal && displayedMessages.length <= 12
 
   // Default open for live rows and for failed ones (so the error is
   // visible without a click). Completed rows collapse to the header to
@@ -299,7 +304,7 @@ const SubAgentRow = memo(function SubAgentRow({
               <strong className="font-semibold">{status === 'cancelled' ? t('chat.subAgent.cancelled') : t('chat.subAgent.failed')}</strong> {failureText}
             </div>
           ) : null}
-          {view.messages.length > 0 ? (
+          {displayedMessages.length > 0 ? (
             <div
               className={cn(
                 'flex min-h-0 flex-col',
@@ -311,7 +316,7 @@ const SubAgentRow = memo(function SubAgentRow({
               data-layout={useCompactTranscript ? 'content' : 'viewport'}
             >
               <NestedTranscript
-                messages={view.messages}
+                messages={displayedMessages}
                 compact={compact}
                 virtualized={!useCompactTranscript}
               />

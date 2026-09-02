@@ -29,7 +29,7 @@ import type {
   SubAgentListResult,
 } from '@agent-kernel/shared'
 
-import type { DashboardSocket } from '../../session.js'
+import { dashboardConnectionManager, type DashboardSocket } from '../../session.js'
 
 export type SubAgentLifecycle =
   | { status: 'idle' }
@@ -233,12 +233,13 @@ export function useSubAgentSession({
 
     socket.on('session:ready', onReady)
     socket.on('state:changed', onStateChanged)
-    socket.emit('subscribe', { sessionId: childSessionId })
+    const releaseChannel = dashboardConnectionManager(socket).acquire(`session:${childSessionId}`)
 
     return () => {
       cancelled = true
       socket.off('session:ready', onReady)
       socket.off('state:changed', onStateChanged)
+      releaseChannel()
     }
   }, [socket, childSessionId])
 

@@ -126,6 +126,8 @@ describe('SubAgentCard', () => {
     expect(badge.textContent).toContain('4 turns')
     const row = screen.getByTestId('sub-agent-row-c1')
     expect(row.getAttribute('data-sub-agent-status')).toBe('completed')
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
+    expect(screen.getByText('done')).toBeTruthy()
   })
 
   it('renders a completed sub-agent as a compact node in dots mode and expands it', () => {
@@ -606,6 +608,7 @@ function makeControlledSocket(): {
 function makeImmediateReadySocket(childSessionId: string, messages: Message[]): DashboardSocket {
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   return {
+    connected: true,
     on(event: string, listener: (payload: unknown) => void) {
       const set = listeners.get(event) ?? new Set()
       set.add(listener)
@@ -616,8 +619,8 @@ function makeImmediateReadySocket(childSessionId: string, messages: Message[]): 
       listeners.get(event)?.delete(listener)
       return this
     },
-    emit(event: string, payload: { sessionId?: string }) {
-      if (event === 'subscribe' && payload.sessionId === childSessionId) {
+    emit(event: string, payload: { channels?: string[]; generation?: number }, ack?: (payload: unknown) => void) {
+      if (event === 'client:subscribe_channels' && payload.channels?.includes(`session:${childSessionId}`)) {
         for (const listener of listeners.get('session:ready') ?? []) {
           listener({
             sessionId: childSessionId,
@@ -634,6 +637,13 @@ function makeImmediateReadySocket(childSessionId: string, messages: Message[]): 
             },
           })
         }
+        ack?.({
+          requestId: 'subscribe-child',
+          generation: payload.generation,
+          accepted: [`session:${childSessionId}`],
+          rejected: [],
+          cursors: { [`session:${childSessionId}`]: messages.length },
+        })
       }
       return this
     },
@@ -648,6 +658,7 @@ function makeRecoveringSocket(input: {
 }): DashboardSocket {
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   return {
+    connected: true,
     on(event: string, listener: (payload: unknown) => void) {
       const set = listeners.get(event) ?? new Set()
       set.add(listener)
@@ -658,7 +669,7 @@ function makeRecoveringSocket(input: {
       listeners.get(event)?.delete(listener)
       return this
     },
-    emit(event: string, payload: { parentSessionId?: string; sessionId?: string }, ack?: (payload: unknown) => void) {
+    emit(event: string, payload: { parentSessionId?: string; channels?: string[]; generation?: number }, ack?: (payload: unknown) => void) {
       if (event === 'sub_agent:list' && payload.parentSessionId === input.parentSessionId && ack) {
         ack({
           requestId: 'recover',
@@ -674,7 +685,7 @@ function makeRecoveringSocket(input: {
           ],
         })
       }
-      if (event === 'subscribe' && payload.sessionId === input.childSessionId) {
+      if (event === 'client:subscribe_channels' && payload.channels?.includes(`session:${input.childSessionId}`)) {
         for (const listener of listeners.get('session:ready') ?? []) {
           listener({
             sessionId: input.childSessionId,
@@ -691,6 +702,13 @@ function makeRecoveringSocket(input: {
             },
           })
         }
+        ack?.({
+          requestId: 'subscribe-child',
+          generation: payload.generation,
+          accepted: [`session:${input.childSessionId}`],
+          rejected: [],
+          cursors: { [`session:${input.childSessionId}`]: input.messages.length },
+        })
       }
       return this
     },
