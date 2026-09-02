@@ -50,6 +50,7 @@ const sdk = vi.hoisted(() => ({
   resumeSucceeds: false,
   listeners: [] as Array<(event: unknown) => void>,
   historyEvents: [] as Array<unknown>,
+  getEvents: vi.fn(async () => sdk.historyEvents),
   responses: [] as Array<unknown>,
   sentMessages: [] as Array<unknown>,
   currentModel: { modelId: 'gpt-5.4-mini', contextTier: 'long_context' },
@@ -117,9 +118,7 @@ vi.mock('@github/copilot-sdk', () => ({
           history: { compact: sdk.compact },
           model: { async getCurrent() { return sdk.currentModel } },
         },
-        async getEvents() {
-          return sdk.historyEvents
-        },
+        getEvents: sdk.getEvents,
         async send() {},
         async sendAndWait(options: unknown) {
           sdk.sentMessages.push(options)
@@ -163,6 +162,8 @@ describe('Copilot runtime custom tools', () => {
     sdk.abort.mockClear()
     sdk.setModel.mockClear()
     sdk.compact.mockClear()
+    sdk.getEvents.mockReset()
+    sdk.getEvents.mockImplementation(async () => sdk.historyEvents)
     dir = mkdtempSync(join(tmpdir(), 'copilot-runtime-tools-'))
     store = new SessionStore(dir)
   })
@@ -601,35 +602,9 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
-  it('restores provider context and model from persisted Copilot events', async () => {
+  it('restores provider context and model from the bounded Host context snapshot', async () => {
     sdk.resumeSucceeds = true
-    sdk.historyEvents.push({
-      type: 'session.compaction_complete',
-      id: 'compact-1',
-      parentId: null,
-      timestamp: '2026-08-29T23:59:00.000Z',
-      data: {
-        success: true,
-        preCompactionTokens: 60_000,
-        postCompactionTokens: 2_299,
-        systemTokens: 245,
-        conversationTokens: 2_299,
-        toolDefinitionsTokens: 6_719,
-        tokenLimit: 272_000,
-      },
-    }, {
-      type: 'session.shutdown',
-      id: 'shutdown-1',
-      parentId: null,
-      timestamp: '2026-08-30T00:00:00.000Z',
-      data: {
-        currentModel: 'gpt-5.4-mini',
-        currentTokens: 9_263,
-        systemTokens: 245,
-        conversationTokens: 2_299,
-        toolDefinitionsTokens: 6_719,
-      },
-    })
+    sdk.getEvents.mockRejectedValue(new Error('full SDK history must not be loaded'))
     const onState = vi.fn()
     const runtime = new CopilotAgentRuntime({
       store,
@@ -646,6 +621,25 @@ describe('Copilot runtime custom tools', () => {
       agentRuntime: 'copilot',
       config: createConfig({ tools: [] }),
     })
+    await store.updateRuntimeContextSnapshot(record, {
+      model: { ref: 'previous-model', provider: 'github-copilot', id: 'previous-model' },
+      contextWindow: { tokens: 272_000, source: 'api_reported' },
+      usage: { inputTokens: 9_263, totalTokens: 9_263 },
+      breakdown: {
+        system: 245,
+        transcript: 2_299,
+        tools: 6_719,
+        memory: 0,
+        attachments: 0,
+        pendingUserInput: 0,
+      },
+      estimator: {
+        total: { kind: 'provider_reported', confidence: 'exact' },
+        breakdown: { kind: 'heuristic', confidence: 'estimated' },
+        version: 'copilot-sdk-usage-info-v1',
+      },
+      updatedAt: Date.now(),
+    })
     await runtime.start()
 
     await runtime.compact(record)
@@ -656,6 +650,7 @@ describe('Copilot runtime custom tools', () => {
       contextWindow: { tokens: 272_000, source: 'api_reported' },
       usage: { inputTokens: 9_263, totalTokens: 9_263 },
     }))
+    expect(sdk.getEvents).not.toHaveBeenCalled()
     await runtime.close()
   })
 
