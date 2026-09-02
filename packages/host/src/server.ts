@@ -61,6 +61,8 @@ import {
 import { sessionRoom } from './connection/rooms.js'
 import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, claimRoute, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount } from './http/routes.js'
 import { SessionArtifactRegistry } from './session-artifact-registry.js'
+import { MessageAttachmentStore } from './message-attachment-store.js'
+import { validateMessageAttachmentReferences } from './message-attachment-resolver.js'
 import { createLocalImagePublisher } from './local-image-publisher.js'
 import { MemoStore } from './memo-store.js'
 import type { AuthConfig } from './auth-control.js'
@@ -268,10 +270,17 @@ export async function startHostServer(
     : options.defaultConfig
   const sessionArtifacts = new SessionArtifactRegistry(join(options.sessionsDir, '..', 'session-artifacts'))
   await sessionArtifacts.load()
+  const messageAttachments = new MessageAttachmentStore(join(options.sessionsDir, '..', 'message-attachments'))
+  await messageAttachments.load()
   const store = new SessionStore(options.sessionsDir, {
     runtimeConfig: getDefaultConfig,
     artifactRootDir: options.artifactRootDir,
-    deleteRegisteredArtifacts: async (sessionId) => await sessionArtifacts.deleteSession(sessionId),
+    deleteRegisteredArtifacts: async (sessionId) => {
+      await Promise.all([
+        sessionArtifacts.deleteSession(sessionId),
+        messageAttachments.deleteSession(sessionId),
+      ])
+    },
   })
   const memoStore = new MemoStore(join(options.sessionsDir, '..', 'memos'))
   const defaultSkillRootsList = defaultSkillRoots()
@@ -363,6 +372,7 @@ export async function startHostServer(
     ...(options.docsRootDir ? { docsRootDir: options.docsRootDir } : {}),
     ...(options.embeddedDocs ? { embeddedDocs: options.embeddedDocs } : {}),
     sessionArtifacts,
+    messageAttachments,
     ...(options.routerHealth ? { routerHealth: options.routerHealth } : {}),
     ...(auth ? { auth } : {}),
     audit,
@@ -417,6 +427,7 @@ export async function startHostServer(
       const operationId = requestedOperationId ?? ulid()
       let record = store.get(sessionId)
       if (!record) record = await store.load(sessionId, { recoverDangling: false })
+      validateMessageAttachmentReferences(messageAttachments, sessionId, content)
       const existingCursor = await sessionUserOperationCursor(store, sessionId, operationId)
       if (existingCursor !== undefined) return { committed: true, cursor: existingCursor }
       if (record.agentRuntime !== 'kernel') {
@@ -1015,6 +1026,7 @@ export async function startHostServer(
     ...(options.webSearchCredentials ? { webSearchCredentials: options.webSearchCredentials } : {}),
     audit,
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
+    messageAttachments,
     publishLocalImages: createLocalImagePublisher({
       artifacts: sessionArtifacts,
       reader: async (input) => await executors.publishLocalImage(input),
@@ -1037,6 +1049,7 @@ export async function startHostServer(
   const copilotRuntime = new CopilotAgentRuntime({
     store,
     tools: copilotTools,
+    messageAttachments,
     broadcast: {
       onState(record, state, runtimeContextSnapshot) {
         scheduleSessionsBroadcast()

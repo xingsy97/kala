@@ -50,7 +50,7 @@ describe('SubAgentCard', () => {
     expect(screen.queryByTestId('border-beam')).toBeNull()
   })
 
-  it('draws the border beam only while the sub-agent is running', async () => {
+  it('uses status styling without a decorative border beam while the sub-agent is running', async () => {
     const call = makeCall('c1', { prompt: 'search', agent_type: 'Explore' })
     const group = makeGroup([call])
     const socket = makeControlledSocket()
@@ -62,7 +62,6 @@ describe('SubAgentCard', () => {
         approvalByCallId={new Map()}
       />,
     )
-    // Idle before any lifecycle event fires — no beam.
     expect(screen.queryByTestId('border-beam')).toBeNull()
 
     act(() => {
@@ -75,7 +74,8 @@ describe('SubAgentCard', () => {
         startedAt: new Date().toISOString(),
       })
     })
-    await waitFor(() => expect(screen.getByTestId('border-beam')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('sub-agent-row-c1').getAttribute('data-sub-agent-status')).toBe('running'))
+    expect(screen.queryByTestId('border-beam')).toBeNull()
 
     act(() => {
       socket.emitFinished({
@@ -88,7 +88,7 @@ describe('SubAgentCard', () => {
         finishedAt: new Date().toISOString(),
       })
     })
-    await waitFor(() => expect(screen.queryByTestId('border-beam')).toBeNull())
+    await waitFor(() => expect(screen.getByTestId('sub-agent-row-c1').getAttribute('data-sub-agent-status')).toBe('completed'))
   })
 
   it('renders the completed state from a parsed envelope', () => {
@@ -358,8 +358,8 @@ describe('SubAgentCard', () => {
 
     await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-live').getAttribute('data-sub-agent-status')).toBe('running'))
     await waitFor(() => expect(screen.getByText(/child is still working/)).toBeTruthy())
-    expect(screen.getByTestId('sub-agent-transcript-frame-c-live').getAttribute('data-layout')).toBe('viewport')
-    expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('true')
+    expect(screen.getByTestId('sub-agent-transcript-frame-c-live').getAttribute('data-layout')).toBe('content')
+    expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('false')
   })
 
   it('surfaces a resolved policy artifact inline on the expanded row', async () => {
@@ -407,7 +407,10 @@ describe('SubAgentCard', () => {
           { cache: 'no-store' },
         ),
       )
-      const panel = await screen.findByTestId('sub-agent-policy-c1')
+      const panel = await screen.findByTestId('sub-agent-policy-c1') as HTMLDetailsElement
+      expect(panel.open).toBe(false)
+      fireEvent.click(screen.getByText('Execution details'))
+      expect(panel.open).toBe(true)
       expect(panel.textContent).toContain('research')
       expect(panel.textContent).toContain('read, grep')
       expect(panel.textContent).toContain('12')
@@ -529,7 +532,7 @@ describe('ChatPanel sub-agent dispatch', () => {
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
   })
 
-  it('switches to matrix layout when a single assistant message spawns ≥2 sub-agents', () => {
+  it('uses one grouped activity container when a single assistant message spawns multiple sub-agents', () => {
     const group = makeGroup([
       makeCall('c1', { prompt: 'search A', agent_type: 'Explore' }),
       makeCall('c2', { prompt: 'search B', agent_type: 'Explore' }),
@@ -543,9 +546,9 @@ describe('ChatPanel sub-agent dispatch', () => {
         approvalByCallId={new Map()}
       />,
     )
-    const matrix = screen.getByTestId(`sub-agent-matrix-${group.firstCallId}`)
-    expect(matrix.className).toContain('grid')
-    expect(matrix.className).toContain('sm:grid-cols-2')
+    const grouped = screen.getByTestId(`sub-agent-group-${group.firstCallId}`)
+    expect(grouped.className).not.toContain('grid')
+    expect(grouped.textContent).toContain('Subagents')
     expect(screen.getByTestId('sub-agent-row-c1')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-row-c2')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-row-c3')).toBeTruthy()
@@ -561,8 +564,24 @@ describe('ChatPanel sub-agent dispatch', () => {
         approvalByCallId={new Map()}
       />,
     )
-    expect(screen.queryByTestId(`sub-agent-matrix-${group.firstCallId}`)).toBeNull()
+    expect(screen.queryByTestId(`sub-agent-group-${group.firstCallId}`)).toBeNull()
     expect(screen.getByTestId('sub-agent-row-c1')).toBeTruthy()
+  })
+
+  it('groups adjacent Copilot-style sub-agent calls projected as separate messages', () => {
+    const messages: Message[] = [
+      { role: 'assistant', content: [makeCall('c1', { prompt: 'search A', agent_type: 'Explore' })] },
+      { role: 'assistant', content: [makeCall('c2', { prompt: 'search B', agent_type: 'Research' })] },
+      { role: 'assistant', content: [makeCall('c3', { prompt: 'search C', agent_type: 'Review' })] },
+    ]
+
+    render(<ChatPanel messages={messages} parentSessionId="parent-1" socket={null} />)
+
+    expect(screen.getByTestId('sub-agent-group-c1')).toBeTruthy()
+    expect(screen.getAllByText('Subagents')).toHaveLength(1)
+    expect(screen.getByTestId('sub-agent-row-c1')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-row-c2')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-row-c3')).toBeTruthy()
   })
 })
 

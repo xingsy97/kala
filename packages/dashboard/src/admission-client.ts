@@ -1,4 +1,5 @@
-import type { MessageContent } from '@agent-kernel/kernel'
+import type { MessageContent, ReferencedFileContent } from '@agent-kernel/kernel'
+import { schema } from '@agent-kernel/shared'
 
 import { randomId } from './lib/random-id.js'
 
@@ -44,6 +45,59 @@ export class AdmissionDeliveryFailedError extends Error {
   }
 }
 
+export async function uploadMessageAttachment(input: {
+  host: string
+  token?: string
+  sessionId: string
+  file: File
+  timeoutMs?: number
+}): Promise<ReferencedFileContent> {
+  const response = await fetch(
+    `${input.host.replace(/\/$/u, '')}/runtime/attachments?sessionId=${encodeURIComponent(input.sessionId)}`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': input.file.type || 'application/octet-stream',
+        'x-agent-runlab-attachment-name': encodeURIComponent(input.file.name || 'attachment'),
+        ...(input.token ? { authorization: `Bearer ${input.token}` } : {}),
+      },
+      credentials: 'include',
+      body: input.file,
+      signal: AbortSignal.timeout(input.timeoutMs ?? 30_000),
+    },
+  )
+  const body = await response.json().catch(() => ({})) as { file?: unknown; error?: string }
+  if (!response.ok) throw new Error(body.error ?? `attachment upload returned ${response.status}`)
+  const parsed = schema.ReferencedFileContentSchema.safeParse(body.file)
+  if (!parsed.success) throw new Error('invalid attachment upload response')
+  return parsed.data
+}
+
+export async function releaseMessageAttachments(input: {
+  host: string
+  token?: string
+  sessionId: string
+  files: readonly ReferencedFileContent[]
+  timeoutMs?: number
+}): Promise<void> {
+  if (input.files.length === 0) return
+  const response = await fetch(`${input.host.replace(/\/$/u, '')}/runtime/attachments/release`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(input.token ? { authorization: `Bearer ${input.token}` } : {}),
+    },
+    credentials: 'include',
+    body: JSON.stringify({
+      sessionId: input.sessionId,
+      attachmentIds: input.files.map((file) => file.source.attachmentId),
+    }),
+    signal: AbortSignal.timeout(input.timeoutMs ?? 10_000),
+  })
+  const body = await response.json().catch(() => ({})) as { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `attachment release returned ${response.status}`)
+}
+
 export async function admitUserMessage(input: {
   host: string
   token?: string
@@ -60,6 +114,7 @@ export async function admitUserMessage(input: {
   const attempts = input.attempts ?? 3
   const timeoutMs = input.timeoutMs ?? 10_000
   let lastError: unknown
+  let durablyAccepted = false
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await fetch(`${input.host.replace(/\/$/u, '')}/runtime/admission/messages`, {
@@ -75,10 +130,14 @@ export async function admitUserMessage(input: {
         }),
         signal: AbortSignal.timeout(timeoutMs),
       })
-      const body = await response.json().catch(() => ({})) as Partial<AdmissionAccepted> & { error?: string }
+      const body = await response.json().catch(() => ({})) as Partial<AdmissionAccepted> & { error?: string; durablyAccepted?: boolean }
       if (!response.ok) {
+        if (body.durablyAccepted === true) durablyAccepted = true
         const error = new Error(body.error ?? `admission returned ${response.status}`)
-        if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) throw new AdmissionBusinessError(error.message)
+        if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+          if (durablyAccepted) throw new AdmissionDeliveryPendingError(operationId, attempt + 1, error.message)
+          throw new AdmissionBusinessError(error.message)
+        }
         throw error
       }
       if (body.accepted !== true || body.operationId !== operationId || !Number.isSafeInteger(body.sequence)) {
@@ -100,7 +159,11 @@ export async function admitUserMessage(input: {
       lastError = error
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'admission failed'))
+  throw new AdmissionDeliveryPendingError(
+    operationId,
+    attempts,
+    lastError instanceof Error ? lastError.message : String(lastError ?? (durablyAccepted ? 'attachment commitment is pending' : 'admission acknowledgement is unavailable')),
+  )
 }
 
 export async function admissionOperationStatus(input: { host: string; token?: string; operationId: string; timeoutMs?: number }): Promise<AdmissionOperationStatus> {
@@ -138,4 +201,6 @@ async function waitForAdmissionDelivery(input: { host: string; token?: string; o
   )
 }
 
-class AdmissionBusinessError extends Error {}
+class AdmissionBusinessError extends Error {
+  readonly safeToReleaseAttachments = true
+}

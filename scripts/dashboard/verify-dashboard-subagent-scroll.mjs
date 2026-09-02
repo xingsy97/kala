@@ -43,7 +43,7 @@ try {
   writeFixtureSessions()
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], {
     name: 'dashboard build',
-    timeoutMs: 90_000,
+    timeoutMs: 180_000,
   })
 
   host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/agent-kernel-host.ts'], {
@@ -145,6 +145,7 @@ async function verifySubAgentReplayExpansion(page, name) {
     const row = document.querySelector('[data-testid="sub-agent-row-agent-call-1"]')
     const nested = document.querySelector('[data-testid="nested-transcript"]')
     const frame = document.querySelector('[data-testid="sub-agent-transcript-frame-agent-call-1"]')
+    const prompt = row?.querySelector('[data-testid="sub-agent-toggle-agent-call-1"] span[class*="text-sm"]')
     return {
       rowText: row?.textContent ?? '',
       nestedHeight: nested?.getBoundingClientRect().height ?? 0,
@@ -152,11 +153,19 @@ async function verifySubAgentReplayExpansion(page, name) {
       frameHeight: frame?.getBoundingClientRect().height ?? 0,
       frameLayout: frame?.getAttribute('data-layout') ?? '',
       virtualized: nested?.getAttribute('data-virtualized') ?? '',
+      nestedFontSize: nested ? Number.parseFloat(getComputedStyle(nested).fontSize) : 0,
+      promptFontSize: prompt ? Number.parseFloat(getComputedStyle(prompt).fontSize) : 0,
     }
   })
   check(
     `${name}: expanded replayed terminal sub-agent shrinks to its child transcript`,
-    metrics.nestedHeight > 40 && metrics.frameHeight < 240 && metrics.frameLayout === 'content' && metrics.virtualized === 'false' && metrics.nestedText.includes('child answer visible in replay'),
+    metrics.nestedHeight > 40
+      && metrics.frameHeight < 240
+      && metrics.frameLayout === 'content'
+      && metrics.virtualized === 'false'
+      && metrics.nestedFontSize >= 12
+      && metrics.promptFontSize >= 13
+      && metrics.nestedText.includes('child answer visible in replay'),
     JSON.stringify(metrics),
   )
 }

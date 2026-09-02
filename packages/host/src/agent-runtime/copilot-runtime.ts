@@ -17,6 +17,7 @@ import {
 import {
   CopilotClient,
   RuntimeConnection,
+  ToolSet,
   type ModelInfo as CopilotModelInfo,
   type MessageOptions,
   type CopilotSession,
@@ -270,20 +271,37 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   private sessionConfig(record: SessionRecord, model?: string) {
     const tools = record.config.tools.map((schema) => this.tool(record, schema))
+    const workingDirectory = join(this.options.sessionsDir, '..')
     return {
       clientName: 'agent-runlab',
       ...(model ? { model } : {}),
       // The Copilot CLI runs with the Host, while record.state.cwd belongs to
-      // the remote Workspace Executor. Keep the SDK in Host-owned storage and
-      // pass the workspace cwd only through RunLab custom Tool dispatch.
-      workingDirectory: this.options.sessionsDir,
+      // the remote Workspace Executor. Its Host-owned working directory also
+      // contains the sibling attachment store so SDK file attachments remain
+      // inside the runtime's permitted filesystem boundary.
+      workingDirectory,
       systemMessage: {
         mode: 'replace' as const,
         content: record.config.systemPrompt ?? 'You are an AI coding agent.',
       },
       tools,
-      availableTools: tools.map((tool) => `custom:${tool.name}`),
-      excludedTools: ['builtin:*', 'mcp:*'],
+      availableTools: [
+        ...tools.map((tool) => `custom:${tool.name}`),
+        ...new ToolSet().addBuiltIn('view').toArray(),
+      ],
+      excludedTools: ['mcp:*'],
+      onPermissionRequest: (request: { kind: string; path?: string; managedApprovalRequired?: boolean }) => {
+        if (
+          request.kind === 'read'
+          && !request.managedApprovalRequired
+          && typeof request.path === 'string'
+          && this.context.messageAttachments?.allowsSdkRead(record.sessionId, request.path)
+        ) return { kind: 'approve-once' as const }
+        return {
+          kind: 'reject' as const,
+          feedback: 'Copilot may only read the exact Host-managed file attached to this message.',
+        }
+      },
       skipCustomInstructions: true,
       customAgentsLocalOnly: true,
       remoteSession: 'off' as const,
@@ -447,7 +465,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   private async runTurn(record: SessionRecord, session: CopilotSession, input: AgentRuntimeSendInput): Promise<void> {
     try {
-      const response = await sendAndWaitWithActivityTimeout(session, copilotMessageOptions(input))
+      const response = await sendAndWaitWithActivityTimeout(
+        session,
+        await copilotMessageOptions(this.context, record, input),
+      )
       if (this.cancelledSessions.delete(record.sessionId)) return
       const pendingProjection = this.tails.get(record.sessionId)
       if (pendingProjection) await pendingProjection
@@ -622,14 +643,29 @@ function userMessage(input: AgentRuntimeSendInput): Message {
   return { role: 'user', content: [{ type: 'text', text: input.text }] }
 }
 
-function copilotMessageOptions(input: AgentRuntimeSendInput): MessageOptions {
+async function copilotMessageOptions(
+  context: AgentRuntimeContext,
+  record: SessionRecord,
+  input: AgentRuntimeSendInput,
+): Promise<MessageOptions> {
   const attachments: NonNullable<MessageOptions['attachments']> = []
   for (const block of input.content ?? []) {
-    if (block.type === 'file') {
+    if (block.type === 'file' && 'data' in block) {
       attachments.push({
         type: 'blob',
         data: block.data,
         mimeType: block.mediaType,
+        displayName: block.name,
+      })
+    } else if (block.type === 'file') {
+      if (!context.messageAttachments) {
+        throw new Error(`Attachment "${block.name}" cannot be resolved because Host attachment storage is unavailable`)
+      }
+      const path = await context.messageAttachments.sdkFilePath(record.sessionId, block)
+      if (!path) throw new Error(`Attachment "${block.name}" cannot be exposed as a controlled Copilot SDK file`)
+      attachments.push({
+        type: 'file',
+        path,
         displayName: block.name,
       })
     } else if (block.type === 'image' && block.source.kind === 'base64') {

@@ -45,4 +45,34 @@ describe('durable message queue metadata', () => {
     expect(parsed.events).toHaveLength(2)
     expect(parsed.runtimeMetadata.at(-1)).toMatchObject({ action: 'message_queue_snapshot', payload: { items: [{ operationId: 'operation-queue-1' }] } })
   })
+
+  it('restores a queued attachment-only message with an empty text field', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'message-queue-attachment-only-'))
+    roots.push(root)
+    const store = new SessionStore(root)
+    const record = await store.create({ sessionId: 'attachment-only', config: createConfig({ tools: [] }) })
+    const file = {
+      type: 'file',
+      name: 'notes.md',
+      mediaType: 'text/markdown',
+      source: {
+        kind: 'host_ref',
+        attachmentId: '00000000-0000-4000-8000-000000000000',
+        sha256: 'a'.repeat(64),
+        bytes: 12,
+      },
+    } as const
+    await persistMessageQueueSnapshot(store, record.sessionId, [{
+      id: 'queue-file',
+      operationId: 'operation-file',
+      text: '',
+      mode: 'queue',
+      createdAt: new Date().toISOString(),
+      content: [file],
+    }])
+
+    await expect(loadPersistedMessageQueue(new SessionStore(root), record.sessionId)).resolves.toEqual([
+      expect.objectContaining({ id: 'queue-file', text: '', content: [file] }),
+    ])
+  })
 })

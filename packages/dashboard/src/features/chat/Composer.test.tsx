@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createInitialState, type FileContent, type ImageContent, type TextContent } from '@agent-kernel/kernel'
+import { createInitialState, type FileContent, type ImageContent, type ReferencedFileContent, type TextContent } from '@agent-kernel/kernel'
 import type { FileListEntry, HumanAttentionTimeline } from '@agent-kernel/shared'
 
 import { Composer } from './Composer.js'
@@ -16,6 +16,8 @@ function renderComposer(props?: {
     attachments?: readonly (ImageContent | FileContent)[],
     extraBlocks?: readonly TextContent[],
   ) => void
+  onUploadFiles?: (files: readonly File[]) => Promise<readonly ReferencedFileContent[]>
+  onReleaseFiles?: (files: readonly ReferencedFileContent[]) => Promise<void>
   onCompact?: () => void
   onCancel?: () => void
   onClearSession?: () => void
@@ -56,6 +58,8 @@ function renderComposer(props?: {
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
       {...(props?.onQueuedUpdate ? { onQueuedUpdate: props.onQueuedUpdate } : {})}
       onSubmit={props?.onSubmit ?? (() => {})}
+      {...(props?.onUploadFiles ? { onUploadFiles: props.onUploadFiles } : {})}
+      {...(props?.onReleaseFiles ? { onReleaseFiles: props.onReleaseFiles } : {})}
       onCompact={props?.onCompact ?? (() => {})}
       {...(props?.onCancel ? { onCancel: props.onCancel } : {})}
       {...(props?.onClearSession ? { onClearSession: props.onClearSession } : {})}
@@ -864,7 +868,19 @@ describe('Composer', () => {
 
   it('selects, previews, removes, and submits generic file attachments', async () => {
     const onSubmit = vi.fn()
-    renderComposer({ onSubmit })
+    const reference: ReferencedFileContent = {
+      type: 'file',
+      name: 'answer.ts',
+      mediaType: 'text/typescript',
+      source: {
+        kind: 'host_ref',
+        attachmentId: '00000000-0000-4000-8000-000000000000',
+        sha256: 'a'.repeat(64),
+        bytes: 25,
+      },
+    }
+    const onUploadFiles = vi.fn(async () => [reference])
+    renderComposer({ onSubmit, onUploadFiles })
     const file = new File(['export const answer = 42\n'], 'answer.ts', { type: 'text/typescript' })
 
     fireEvent.change(screen.getByTestId('composer-file-input'), {
@@ -878,13 +894,9 @@ describe('Composer', () => {
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onUploadFiles).toHaveBeenCalledWith([file])
     const attachments = onSubmit.mock.calls[0]?.[2] as readonly (ImageContent | FileContent)[]
-    expect(attachments).toEqual([{
-      type: 'file',
-      name: 'answer.ts',
-      mediaType: 'text/typescript',
-      data: btoa('export const answer = 42\n'),
-    }])
+    expect(attachments).toEqual([reference])
     expect(screen.queryByTestId('attachment-tray')).toBeNull()
 
     fireEvent.change(screen.getByTestId('composer-file-input'), {
@@ -893,6 +905,63 @@ describe('Composer', () => {
     const secondTray = await screen.findByTestId('attachment-tray')
     fireEvent.click(secondTray.querySelector('[data-testid^="attached-file-remove-"]') as Element)
     expect(screen.queryByTestId('attachment-tray')).toBeNull()
+  })
+
+  it('releases uploaded file references when message admission is rejected', async () => {
+    const reference: ReferencedFileContent = {
+      type: 'file',
+      name: 'answer.ts',
+      mediaType: 'text/typescript',
+      source: {
+        kind: 'host_ref',
+        attachmentId: '00000000-0000-4000-8000-000000000000',
+        sha256: 'a'.repeat(64),
+        bytes: 25,
+      },
+    }
+    const onReleaseFiles = vi.fn(async () => undefined)
+    renderComposer({
+      onSubmit: vi.fn(async () => {
+        throw Object.assign(new Error('admission rejected'), { safeToReleaseAttachments: true })
+      }),
+      onUploadFiles: vi.fn(async () => [reference]),
+      onReleaseFiles,
+    })
+    const file = new File(['export const answer = 42\n'], 'answer.ts', { type: 'text/typescript' })
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } })
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'review this file' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    await waitFor(() => expect(onReleaseFiles).toHaveBeenCalledWith([reference]))
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'review this file')
+    expect(screen.getByTestId('attachment-tray').textContent).toContain('answer.ts')
+  })
+
+  it('retains pending references when admission acceptance is transport-ambiguous', async () => {
+    const reference: ReferencedFileContent = {
+      type: 'file',
+      name: 'answer.ts',
+      mediaType: 'text/typescript',
+      source: {
+        kind: 'host_ref',
+        attachmentId: '00000000-0000-4000-8000-000000000000',
+        sha256: 'a'.repeat(64),
+        bytes: 25,
+      },
+    }
+    const onReleaseFiles = vi.fn(async () => undefined)
+    renderComposer({
+      onSubmit: vi.fn(async () => { throw new Error('connection reset') }),
+      onUploadFiles: vi.fn(async () => [reference]),
+      onReleaseFiles,
+    })
+    const file = new File(['export const answer = 42\n'], 'answer.ts', { type: 'text/typescript' })
+    fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [file] } })
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'review this file' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    await screen.findByTestId('composer-toast')
+    expect(onReleaseFiles).not.toHaveBeenCalled()
   })
 
   it('removes a pasted image when the close button is clicked', async () => {

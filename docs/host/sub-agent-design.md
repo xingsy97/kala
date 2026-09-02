@@ -216,13 +216,17 @@ This keeps the LLM oriented without needing per-type separate tools (Claude Code
 
 ### Inline card
 
-When the parent's timeline contains a `tool_call` for `agent`, the chat panel renders a `SubAgentCard` instead of the generic `ToolCallGroupBlock`. The card has three modes:
+When the parent's timeline contains one or more adjacent `tool_call`s for `agent`, the chat panel renders one grouped `SubAgentCard` activity instead of one generic Tool row per child. This grouping is based on the parent turn's adjacent Agent calls, not on how a Runtime happens to split those calls across assistant messages.
+
+The group presents each child as a readable row inside one shared container. It does not use a card matrix: parallel children are a single activity that operators scan vertically. Each child has three modes:
 
 - **Pending** — before `server:sub_agent_started` arrives (rare — usually milliseconds). Shows spinner + "Spawning sub-agent…".
-- **Running** — after started, before finished. Header shows `agent_type` badge, elapsed time (live), turn count (live from `state:changed`), and a "View full session ↗" jump to the child tab. Body is collapsed by default; expanding reveals a lightweight inline transcript of the child (same `ChatPanel` component in read-only mode, height-capped).
+- **Running** — after started, before finished. Header shows the agent type, task prompt, elapsed time, turn count, and interrupt action. The live body is open by default. Small transcripts use natural height; only long transcripts switch to a bounded virtual viewport.
 - **Completed / Failed / Cancelled** — after `server:sub_agent_finished`. Header shows final status + duration + turn count. Body still collapsible; failed and cancelled cards open by default so the reason is visible.
 
-Design constraint: the inline child transcript uses the **same** `ChatPanel` component (recursion). This keeps rendering consistent — if the child itself spawns a sub-agent, it renders the same way. We already have the messages via the child's `state:changed` events.
+The default surface prioritizes the task, progress, and result. Resolved policy internals such as allowed tools, max turns, timeout budgets, depth/fan-out, and resolution reasons live under a closed **Execution details** disclosure. They are diagnostic settings, not primary transcript content.
+
+The inline child transcript uses a compact read-only renderer over the same normalized `Message` model. If the live child transcript is unavailable after completion, the parsed `<result>` envelope is the durable fallback.
 
 ### Composer hint
 
@@ -251,6 +255,7 @@ Sessions with `parentSessionId !== null` already appear indented under their par
 4. **Loop** feeds the tool_result back into the parent's kernel as a normal `tool_result` event. Parent LLM receives the enveloped text on the next `call_llm` effect.
 5. **Dashboard**:
    - On `sub_agent_started`, mark the parent's SubAgentCard as running and open a subscription to the child session.
+   - Coalesce adjacent Agent calls from the same parent activity even when an external Runtime projected each call as a separate assistant message.
    - Render child's `event:appended` events inline via a nested `<ChatPanel readOnly>`.
    - On `sub_agent_finished`, freeze the card.
    - Later, when the parent's timeline reloads (e.g. after refresh), the envelope in the `tool_result` content lets the card reconstruct itself without needing the live events — `sub_agent:list` RPC gives it the child session ids to fetch on-demand.
@@ -273,9 +278,11 @@ Sessions with `parentSessionId !== null` already appear indented under their par
   - `agent-tool.test.ts`: emits `sub_agent_started` and `sub_agent_finished` in the right order with the right payloads, including `cancelled` for parent-cancel cascade.
 - **Dashboard**:
   - `SubAgentCard.test.tsx`: renders pending/running/completed/failed/cancelled states from prop inputs and emits `client:interrupt_sub_agent` for a running child.
-  - `useSubAgentSession.test.tsx`: subscribes on `sub_agent_started`, unsubscribes on `sub_agent_finished`, matches inline transcript to the child's `event:appended` stream.
+  - `SubAgentCard.test.tsx`: verifies adjacent external-Runtime Agent projections become one grouped activity, policy diagnostics are closed by default, and small live transcripts remain content-height.
+  - `useSubAgentSession.test.tsx`: acquires/releases the multiplexed `session:<childId>` channel and mirrors `session:ready` / `state:changed`.
   - Envelope parser: handles happy path, malformed envelopes, and legacy pre-envelope tool_results (fall back to plain text).
 - **Integration**: an end-to-end test in the host suite spawns a mock child, drives one tool_call turn, asserts both events land and the envelope round-trips.
+- **Browser layout**: verify readable computed font sizes, one group container for parallel children, and no fixed-height blank viewport for a sparse running transcript.
 
 ## 11. Non-goals for this pass
 

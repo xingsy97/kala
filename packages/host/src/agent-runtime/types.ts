@@ -8,6 +8,7 @@ import type {
 
 import type { SessionRecord, SessionStore } from '../store/session.js'
 import type { ToolDispatcher } from '../loop-types.js'
+import type { MessageAttachmentStore } from '../message-attachment-store.js'
 
 export type AgentRuntimeBroadcast = {
   onState(record: SessionRecord, state: AgentState, contextSnapshot?: ContextUsageSnapshot): void
@@ -21,6 +22,7 @@ export type AgentRuntimeContext = {
   store: SessionStore
   tools: ToolDispatcher
   broadcast: AgentRuntimeBroadcast
+  messageAttachments?: MessageAttachmentStore
 }
 
 export type AgentRuntimeSendInput = {

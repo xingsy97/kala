@@ -307,7 +307,10 @@ function estimateContentChars(content: Message['content'][number]): number {
   if (content.type === 'text' || content.type === 'thinking') return content.text.length
   if (content.type === 'tool_call') return content.name.length + content.callId.length + JSON.stringify(content.input).length
   if (content.type === 'tool_result') return content.callId.length + content.content.length + 16
-  if (content.type === 'file') return content.name.length + content.mediaType.length + Math.round(content.data.length / 4)
+  if (content.type === 'file') {
+    return content.name.length + content.mediaType.length
+      + ('data' in content ? Math.round(content.data.length / 4) : content.source.bytes)
+  }
   return content.source.kind === 'file_ref'
     ? content.source.path.length + 64
     : Math.round(content.source.data.length / 4)
@@ -319,7 +322,11 @@ function estimateContentTokens(content: Message['content'][number]): number {
     return estimateStringTokens(content.name) + estimateStringTokens(content.callId) + estimateStringTokens(JSON.stringify(content.input)) + 16
   }
   if (content.type === 'tool_result') return estimateStringTokens(content.callId) + estimateStringTokens(content.content) + 16
-  if (content.type === 'file') return estimateStringTokens(content.name) + Math.ceil(content.data.length / 3) + 32
+  if (content.type === 'file') {
+    return estimateStringTokens(content.name)
+      + ('data' in content ? Math.ceil(content.data.length / 3) : Math.ceil(content.source.bytes / 4))
+      + 32
+  }
   if (content.source.kind === 'file_ref') return estimateStringTokens(content.source.path) + 32
   return Math.ceil(content.source.data.length / 3) + 32
 }

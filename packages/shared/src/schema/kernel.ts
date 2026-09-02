@@ -23,6 +23,7 @@ import type {
   Effect,
   ImageContent,
   ImageSource,
+  FileContent,
   Message,
   MessageContent,
   PendingToolCall,
@@ -105,12 +106,31 @@ export const ImageContentSchema = z.object({
   source: ImageSourceSchema,
 })
 
-export const FileContentSchema = z.object({
+export const LegacyInlineFileContentSchema = z.object({
   type: z.literal('file'),
   name: z.string().trim().min(1).max(255),
   mediaType: z.string().trim().min(1).max(255),
   data: z.string(),
 })
+
+export const HostAttachmentReferenceSchema = z.object({
+  kind: z.literal('host_ref'),
+  attachmentId: z.string().uuid(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  bytes: z.number().int().positive().max(2 * 1024 * 1024),
+}).strict()
+
+export const ReferencedFileContentSchema = z.object({
+  type: z.literal('file'),
+  name: z.string().trim().min(1).max(255),
+  mediaType: z.string().trim().min(1).max(255),
+  source: HostAttachmentReferenceSchema,
+}).strict()
+
+export const FileContentSchema: z.ZodType<FileContent> = z.union([
+  LegacyInlineFileContentSchema,
+  ReferencedFileContentSchema,
+])
 
 export const ReasoningContentSchema = z.object({
   type: z.literal('thinking'),
@@ -119,7 +139,7 @@ export const ReasoningContentSchema = z.object({
   provider: z.string().optional(),
 })
 
-export const MessageContentSchema = z.discriminatedUnion('type', [
+export const MessageContentSchema = z.union([
   TextContentSchema,
   ToolCallContentSchema,
   ToolResultContentSchema,

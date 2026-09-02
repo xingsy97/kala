@@ -33,7 +33,6 @@ import type { Message, ToolCallContent } from '@agent-kernel/kernel'
 import type { ApprovalRequiredEvent, ToolCardMode } from '@agent-kernel/shared'
 
 import { cn } from '../../lib/utils.js'
-import { BorderBeam } from '../../components/ui/border-beam.js'
 import { withViewTransition } from '../../lib/viewTransition.js'
 import type { DashboardSocket } from '../../session.js'
 import type { ToolCallGroup } from './grouping.js'
@@ -54,25 +53,33 @@ type Props = {
 }
 
 export function SubAgentCard(props: Props): JSX.Element {
+  const { t } = useTranslation()
   const calls = props.group.calls
   if (calls.length >= 2) {
     return (
       <div
-        className="grid min-w-0 items-start gap-2 sm:grid-cols-2"
-        data-testid={`sub-agent-matrix-${props.group.firstCallId}`}
+        className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-background/50"
+        data-testid={`sub-agent-group-${props.group.firstCallId}`}
       >
-        {calls.map((call) => (
-          <SubAgentRow
-            key={call.callId}
-            compact
-            call={call}
-            parentSessionId={props.parentSessionId}
-            socket={props.socket}
-            result={props.group.results.get(call.callId) ?? null}
-            approval={props.approvalByCallId.get(call.callId) ?? null}
-            dotsMode={props.toolCardMode === 'dots'}
-          />
-        ))}
+        <div className="flex min-h-10 items-center gap-2 border-b border-border/50 px-3 py-2">
+          <Workflow className="h-4 w-4 flex-none text-violet-600 dark:text-violet-300" aria-hidden="true" />
+          <span className="text-sm font-medium text-foreground">{t('chat.subAgent.groupLabel')}</span>
+          <span className="text-xs text-muted-foreground">{calls.length}</span>
+        </div>
+        <div className="divide-y divide-border/40">
+          {calls.map((call) => (
+            <SubAgentRow
+              key={call.callId}
+              grouped
+              call={call}
+              parentSessionId={props.parentSessionId}
+              socket={props.socket}
+              result={props.group.results.get(call.callId) ?? null}
+              approval={props.approvalByCallId.get(call.callId) ?? null}
+              dotsMode={props.toolCardMode === 'dots'}
+            />
+          ))}
+        </div>
       </div>
     )
   }
@@ -106,6 +113,7 @@ type RowProps = {
    * completed rows so a grid of 4 stays readable.
    */
   compact?: boolean
+  grouped?: boolean
   dotsMode?: boolean
 }
 
@@ -115,6 +123,7 @@ const SubAgentRow = memo(function SubAgentRow({
   socket,
   result,
   compact = false,
+  grouped = false,
   dotsMode = false,
 }: RowProps): JSX.Element {
   const { t } = useTranslation()
@@ -183,7 +192,7 @@ const SubAgentRow = memo(function SubAgentRow({
       ? [{ role: 'assistant', content: [{ type: 'text', text: envelope.body }] }]
       : []
   const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
-  const useCompactTranscript = terminal && displayedMessages.length <= 12
+  const useCompactTranscript = displayedMessages.length <= 12
 
   // Default open for live rows and for failed ones (so the error is
   // visible without a click). Completed rows collapse to the header to
@@ -233,16 +242,16 @@ const SubAgentRow = memo(function SubAgentRow({
             : status === 'running'
               ? 'border-sky-300/50 bg-sky-50/40 dark:border-sky-500/40 dark:bg-sky-950/20'
               : 'border-border/60 bg-muted/40',
+        grouped && 'rounded-none border-0 bg-transparent',
       )}
       data-testid={`sub-agent-row-${call.callId}`}
       data-sub-agent-status={status}
     >
-      {status === 'running' ? <BorderBeam /> : null}
-      <div className="flex min-w-0 items-center rounded-lg text-xs text-foreground transition-colors hover:bg-muted/60">
+      <div className="flex min-w-0 items-center rounded-lg text-sm text-foreground transition-colors hover:bg-muted/60">
         <button
           type="button"
           onClick={() => withViewTransition(() => setOpen((v) => !v))}
-          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left"
           data-testid={`sub-agent-toggle-${call.callId}`}
         >
           {open ? (
@@ -251,15 +260,15 @@ const SubAgentRow = memo(function SubAgentRow({
             <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           )}
           <StatusIcon status={status} />
-          <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+          <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
             {t('chat.subAgent.label')}
           </span>
           {agentType ? (
-            <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 text-xs">
               {agentType}
             </span>
           ) : null}
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+          <span className="min-w-0 flex-1 truncate text-sm text-foreground/85 [overflow-wrap:anywhere]">
             {prompt ?? t('chat.subAgent.noPrompt')}
           </span>
           {model ? (
@@ -298,9 +307,8 @@ const SubAgentRow = memo(function SubAgentRow({
 
       {open ? (
         <div className="border-t border-border/50 bg-background/60">
-          {policy ? <SubAgentPolicyPanel policy={policy} callId={call.callId} /> : null}
           {failureText ? (
-            <div className="border-b border-rose-200/60 bg-rose-50/60 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/30 dark:text-rose-200">
+            <div className="border-b border-rose-200/60 bg-rose-50/60 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/30 dark:text-rose-200">
               <strong className="font-semibold">{status === 'cancelled' ? t('chat.subAgent.cancelled') : t('chat.subAgent.failed')}</strong> {failureText}
             </div>
           ) : null}
@@ -309,7 +317,7 @@ const SubAgentRow = memo(function SubAgentRow({
               className={cn(
                 'flex min-h-0 flex-col',
                 useCompactTranscript
-                  ? compact ? 'max-h-56 overflow-y-auto' : 'max-h-80 overflow-y-auto'
+                  ? compact ? 'max-h-64 overflow-y-auto' : 'max-h-96 overflow-y-auto'
                   : compact ? 'h-56' : 'h-[min(28rem,55dvh)]',
               )}
               data-testid={`sub-agent-transcript-frame-${call.callId}`}
@@ -324,6 +332,7 @@ const SubAgentRow = memo(function SubAgentRow({
           ) : (
             <EmptyChild status={status} />
           )}
+          {policy ? <SubAgentPolicyPanel policy={policy} callId={call.callId} /> : null}
         </div>
       ) : null}
     </div>
@@ -339,7 +348,7 @@ function EmptyChild({ status }: { status: SubAgentLifecycle['status'] }): JSX.El
         ? t('chat.subAgent.starting')
         : t('chat.subAgent.noMessages')
   return (
-    <div className="px-3 py-4 text-center text-[11px] italic text-muted-foreground">
+    <div className="px-3 py-4 text-center text-sm italic text-muted-foreground">
       {label}
     </div>
   )
@@ -496,15 +505,16 @@ function SubAgentPolicyPanel({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div
-      className="border-b border-border/50 bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground"
+    <details
+      className="border-t border-border/40 bg-muted/20 text-xs text-muted-foreground"
       data-testid={`sub-agent-policy-${callId}`}
     >
-      <div className="mb-1 flex items-center gap-1.5 font-medium uppercase tracking-wider text-foreground/80">
+      <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 font-medium text-muted-foreground hover:text-foreground">
         <Shield className="h-3 w-3" aria-hidden="true" />
-        {t('chat.subAgent.policy')}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
+        {t('chat.subAgent.executionDetails')}
+      </summary>
+      <div className="border-t border-border/30 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
         {policy.role ? (
           <PolicyChip label={t('chat.subAgent.role')} value={policy.role} />
         ) : null}
@@ -546,21 +556,21 @@ function SubAgentPolicyPanel({
         {policy.allowedTools && policy.allowedTools.length > 0 ? (
           <PolicyChip label={t('chat.subAgent.tools')} value={policy.allowedTools.join(', ')} />
         ) : null}
-      </div>
-      {policy.objective ? (
-        <div className="mt-1 text-[11px]">
+        </div>
+        {policy.objective ? (
+        <div className="mt-2 text-xs">
           <span className="font-medium text-foreground/80">{t('chat.subAgent.objective')}</span>{' '}
           <span className="italic">{policy.objective}</span>
         </div>
-      ) : null}
-      {policy.expectedOutput ? (
-        <div className="mt-1 text-[11px]">
+        ) : null}
+        {policy.expectedOutput ? (
+        <div className="mt-1 text-xs">
           <span className="font-medium text-foreground/80">{t('chat.subAgent.expectedOutput')}</span>{' '}
           <span className="italic">{policy.expectedOutput}</span>
         </div>
-      ) : null}
-      {policy.reasons.length > 0 ? (
-        <div className="mt-1 flex flex-wrap gap-1">
+        ) : null}
+        {policy.reasons.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1">
           {policy.reasons.map((reason) => (
             <span
               key={reason}
@@ -570,8 +580,9 @@ function SubAgentPolicyPanel({
             </span>
           ))}
         </div>
-      ) : null}
-    </div>
+        ) : null}
+      </div>
+    </details>
   )
 }
 

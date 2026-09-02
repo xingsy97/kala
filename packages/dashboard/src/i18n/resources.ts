@@ -1001,6 +1001,8 @@ export const resources = {
         },
         subAgent: {
           label: 'sub-agent',
+          groupLabel: 'Subagents',
+          executionDetails: 'Execution details',
           noPrompt: '(no prompt)',
           interrupt: 'Interrupt sub-agent',
           cancelled: 'Cancelled:',
@@ -2525,6 +2527,8 @@ export const resources = {
         },
         subAgent: {
           label: 'sub-agent',
+          groupLabel: 'Subagents',
+          executionDetails: '执行详情',
           noPrompt: '（无 prompt）',
           interrupt: '中断 sub-agent',
           cancelled: '已取消：',

@@ -1,5 +1,5 @@
 import type { MessageContent } from '@agent-kernel/kernel'
-import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
+import { schema, type RuntimeMetadataEntry } from '@agent-kernel/shared'
 
 import type { SessionStore } from './store/session.js'
 import { appendRuntimeMetadataEntry, readSessionLog } from './store/log.js'
@@ -61,17 +61,19 @@ function normalizeQueuedMessage(raw: unknown): QueuedUserMessage | undefined {
   const record = raw as Record<string, unknown>
   const id = stringValue(record.id)
   const operationId = stringValue(record.operationId)
-  const text = stringValue(record.text)
+  const text = typeof record.text === 'string' ? record.text : undefined
   const createdAt = stringValue(record.createdAt)
   const mode = record.mode === 'queue' || record.mode === 'steer' ? record.mode : undefined
-  if (!id || !text || !createdAt || !mode) return undefined
+  const content = schema.MessageContentSchema.array().safeParse(record.content ?? [])
+  if (!id || text === undefined || !createdAt || !mode || !content.success) return undefined
+  if (text.trim().length === 0 && content.data.length === 0) return undefined
   return {
     id,
     operationId: operationId ?? id,
     text,
     mode,
     createdAt,
-    ...(Array.isArray(record.content) ? { content: record.content as readonly MessageContent[] } : {}),
+    ...(content.data.length > 0 ? { content: content.data as readonly MessageContent[] } : {}),
     ...(typeof record.model === 'string' && record.model.trim().length > 0 ? { model: record.model } : {}),
   }
 }

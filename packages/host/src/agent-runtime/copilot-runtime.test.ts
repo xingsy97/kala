@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolDispatcher } from '../loop-types.js'
 import { SessionStore } from '../store/session.js'
 import { CopilotAgentRuntime } from './copilot-runtime.js'
+import { MessageAttachmentStore } from '../message-attachment-store.js'
 
 type CapturedTool = {
   name: string
@@ -23,6 +24,9 @@ const sdk = vi.hoisted(() => ({
   configs: [] as Array<{
     tools: CapturedTool[]
     workingDirectory?: string
+    availableTools?: readonly string[]
+    excludedTools?: readonly string[]
+    onPermissionRequest?: (request: { kind: string; path?: string; managedApprovalRequired?: boolean }) => unknown
     remoteSession?: string
     infiniteSessions?: {
       enabled?: boolean
@@ -33,6 +37,9 @@ const sdk = vi.hoisted(() => ({
   resumeConfigs: [] as Array<{
     tools: CapturedTool[]
     workingDirectory?: string
+    availableTools?: readonly string[]
+    excludedTools?: readonly string[]
+    onPermissionRequest?: (request: { kind: string; path?: string; managedApprovalRequired?: boolean }) => unknown
     remoteSession?: string
     infiniteSessions?: {
       enabled?: boolean
@@ -68,6 +75,16 @@ vi.mock('@github/copilot-sdk', () => ({
     forStdio(options: { args?: readonly string[] } = {}) {
       return { kind: 'stdio', ...options }
     },
+  },
+  ToolSet: class {
+    private readonly items: string[] = []
+    addBuiltIn(name: string) {
+      this.items.push(`builtin:${name}`)
+      return this
+    }
+    toArray() {
+      return [...this.items]
+    }
   },
   CopilotClient: class {
     constructor(options: { connection?: { kind: string; args?: readonly string[] } }) {
@@ -235,7 +252,7 @@ describe('Copilot runtime custom tools', () => {
       kind: 'stdio',
       args: ['--no-remote-export'],
     })
-    expect(sdk.configs.at(-1)?.workingDirectory).toBe(dir)
+    expect(sdk.configs.at(-1)?.workingDirectory).toBe(join(dir, '..'))
     expect(sdk.configs.at(-1)?.remoteSession).toBe('off')
     expect(sdk.configs.at(-1)?.infiniteSessions).toEqual({
       enabled: true,
@@ -393,6 +410,66 @@ describe('Copilot runtime custom tools', () => {
         displayName: 'config.json',
       }],
     })
+    await runtime.close()
+  })
+
+  it('resolves new Host file references to controlled SDK file attachments without persisting base64', async () => {
+    const messageAttachments = new MessageAttachmentStore(join(dir, 'message-attachments'))
+    const reference = await messageAttachments.register({
+      sessionId: 'copilot-reference-session',
+      name: '../config.json',
+      mediaType: 'application/json',
+      data: Buffer.from('{"ok":true}', 'utf8'),
+    })
+    const runtime = new CopilotAgentRuntime({
+      store,
+      messageAttachments,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-reference-session',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    sdk.responses.push({
+      type: 'assistant.message',
+      data: { content: 'Reviewed.', messageId: 'message-reference-file' },
+      id: 'event-reference-file',
+      timestamp: new Date().toISOString(),
+    })
+
+    await runtime.send(record, {
+      text: 'Review this file.',
+      content: [{ type: 'text', text: 'Review this file.' }, reference],
+    })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+
+    expect(sdk.sentMessages).toContainEqual({
+      prompt: 'Review this file.',
+      attachments: [{
+        type: 'file',
+        path: messageAttachments.resolve(record.sessionId, reference).path,
+        displayName: 'config.json',
+      }],
+    })
+    const config = sdk.configs.at(-1)
+    expect(config?.workingDirectory).toBe(join(dir, '..'))
+    expect(config?.availableTools).toContain('builtin:view')
+    expect(config?.excludedTools).toEqual(['mcp:*'])
+    const path = messageAttachments.resolve(record.sessionId, reference).path
+    expect(config?.onPermissionRequest?.({ kind: 'read', path })).toEqual({ kind: 'approve-once' })
+    expect(config?.onPermissionRequest?.({ kind: 'read', path: join(dir, 'secret.txt') })).toMatchObject({ kind: 'reject' })
+    expect(config?.onPermissionRequest?.({ kind: 'read', path, managedApprovalRequired: true })).toMatchObject({ kind: 'reject' })
+    const persisted = readFileSync(record.logPath, 'utf8')
+    expect(persisted).toContain(reference.source.attachmentId)
+    expect(persisted).not.toContain(Buffer.from('{"ok":true}', 'utf8').toString('base64'))
     await runtime.close()
   })
 

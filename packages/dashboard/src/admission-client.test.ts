@@ -1,10 +1,82 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admissionOperationStatus, admitUserMessage } from './admission-client.js'
+import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admissionOperationStatus, admitUserMessage, releaseMessageAttachments, uploadMessageAttachment } from './admission-client.js'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('admitUserMessage', () => {
+  it('uploads raw generic file bytes and returns a Host reference before admission', async () => {
+    const file = new File(['plain text'], '../notes.txt', { type: 'text/plain' })
+    const referenced = {
+      type: 'file',
+      name: 'notes.txt',
+      mediaType: 'text/plain',
+      source: {
+        kind: 'host_ref',
+        attachmentId: '00000000-0000-4000-8000-000000000000',
+        sha256: 'a'.repeat(64),
+        bytes: 10,
+      },
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ file: referenced }), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(uploadMessageAttachment({
+      host: 'https://runlab.example/',
+      token: 'private-token',
+      sessionId: 'session-1',
+      file,
+    })).resolves.toEqual(referenced)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://runlab.example/runtime/attachments?sessionId=session-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: file,
+        credentials: 'include',
+        headers: expect.objectContaining({
+          'content-type': 'text/plain',
+          'x-agent-runlab-attachment-name': '..%2Fnotes.txt',
+        }),
+      }),
+    )
+  })
+
+  it('releases pending Host references after an unaccepted submission', async () => {
+    const file = {
+      type: 'file',
+      name: 'notes.txt',
+      mediaType: 'text/plain',
+      source: {
+        kind: 'host_ref',
+        attachmentId: '00000000-0000-4000-8000-000000000000',
+        sha256: 'a'.repeat(64),
+        bytes: 10,
+      },
+    } as const
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ released: true }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await releaseMessageAttachments({
+      host: 'https://runlab.example/',
+      token: 'private-token',
+      sessionId: 'session-1',
+      files: [file],
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://runlab.example/runtime/attachments/release',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({
+          sessionId: 'session-1',
+          attachmentIds: [file.source.attachmentId],
+        }),
+      }),
+    )
+  })
+
   it('retries transport failure with one stable operation identity', async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockRejectedValueOnce(new Error('connection reset'))
@@ -26,6 +98,61 @@ describe('admitUserMessage', () => {
     vi.stubGlobal('fetch', fetchMock)
     await expect(admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-0002', text: 'bad', mode: 'steer' })).rejects.toThrow('invalid admission message')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves one operation identity when acknowledgement remains transport-ambiguous', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new Error('connection reset'))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = admitUserMessage({
+      host: '',
+      sessionId: 'session-1',
+      operationId: 'operation-uncertain',
+      text: 'hello',
+      mode: 'steer',
+      attempts: 3,
+    })
+    await expect(result).rejects.toMatchObject({
+      durablyAccepted: true,
+      operationId: 'operation-uncertain',
+      attempts: 3,
+      lastError: 'connection reset',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps a durable operation pending when attachment commitment returns retryable errors', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
+      error: 'attachment commitment unavailable',
+      operationId: 'operation-attachment-pending',
+      durablyAccepted: true,
+    }), { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = admitUserMessage({
+      host: '',
+      sessionId: 'session-1',
+      operationId: 'operation-attachment-pending',
+      text: '',
+      mode: 'queue',
+      content: [{
+        type: 'file',
+        name: 'notes.md',
+        mediaType: 'text/markdown',
+        source: {
+          kind: 'host_ref',
+          attachmentId: '00000000-0000-4000-8000-000000000000',
+          sha256: 'a'.repeat(64),
+          bytes: 10,
+        },
+      }],
+      attempts: 2,
+    })
+    await expect(result).rejects.toMatchObject({
+      durablyAccepted: true,
+      operationId: 'operation-attachment-pending',
+      attempts: 2,
+      lastError: 'attachment commitment unavailable',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('waits for the durable operation to reach the Session log', async () => {

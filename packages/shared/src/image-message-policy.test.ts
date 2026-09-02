@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FileContent, ImageContent } from '@agent-kernel/kernel'
+import type { FileContent, ImageContent, ReferencedFileContent } from '@agent-kernel/kernel'
 
 import {
   CLIENT_MESSAGE_SAFE_BYTES,
@@ -12,6 +12,7 @@ import {
   validateInlineMessageFiles,
   validateInlineMessageImages,
 } from './image-message-policy.js'
+import { FileContentSchema } from './schema/kernel.js'
 
 function image(bytes: number): ImageContent {
   const content = Buffer.alloc(Math.max(bytes, 8))
@@ -74,5 +75,31 @@ describe('image message policy', () => {
     expect(validateInlineMessageFiles([{ ...file(1), data: 'invalid!' }])).toMatchObject({ ok: false, error: { code: 'FILE_INVALID_BASE64' } })
     expect(validateInlineMessageFiles([file(MAX_FILE_DECODED_BYTES + 1)])).toMatchObject({ ok: false, error: { code: 'FILE_TOO_LARGE' } })
     expect(validateInlineMessageFiles(Array.from({ length: 9 }, () => file(1)))).toMatchObject({ ok: false, error: { code: 'FILE_COUNT_EXCEEDED' } })
+  })
+
+  it('accepts Host references while retaining legacy inline file replay', () => {
+    const legacy = file(20)
+    const referenced: ReferencedFileContent = {
+      type: 'file',
+      name: 'notes.txt',
+      mediaType: 'text/plain',
+      source: {
+        kind: 'host_ref',
+        attachmentId: '00000000-0000-4000-8000-000000000000',
+        sha256: 'b'.repeat(64),
+        bytes: 20,
+      },
+    }
+    expect(FileContentSchema.parse(legacy)).toEqual(legacy)
+    expect(FileContentSchema.parse(referenced)).toEqual(referenced)
+    expect(validateInlineMessageFiles([referenced])).toEqual({
+      ok: true,
+      fileCount: 1,
+      decodedFileBytes: 20,
+    })
+    expect(FileContentSchema.safeParse({
+      ...referenced,
+      source: { ...referenced.source, attachmentId: '../../escape' },
+    }).success).toBe(false)
   })
 })

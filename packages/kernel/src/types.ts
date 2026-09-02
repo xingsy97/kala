@@ -65,12 +65,33 @@ export type ImageContent = {
   source: ImageSource
 }
 
-export type FileContent = {
+export type LegacyInlineFileContent = {
   type: 'file'
   name: string
   mediaType: string
   data: string
 }
+
+export type HostAttachmentReference = {
+  kind: 'host_ref'
+  attachmentId: string
+  sha256: string
+  bytes: number
+}
+
+export type ReferencedFileContent = {
+  type: 'file'
+  name: string
+  mediaType: string
+  source: HostAttachmentReference
+}
+
+/**
+ * Generic file attachment. New browser submissions use the Host-owned
+ * reference form; the inline base64 variant remains readable for historical
+ * Session replay.
+ */
+export type FileContent = LegacyInlineFileContent | ReferencedFileContent
 
 /**
  * Model reasoning block — the model's private chain-of-thought that

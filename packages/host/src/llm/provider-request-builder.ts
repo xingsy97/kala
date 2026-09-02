@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 
-import type { FileContent, ImageContent, Message, MessageContent, ToolSchema } from '@agent-kernel/kernel'
+import type { FileContent, ImageContent, LegacyInlineFileContent, Message, MessageContent, ToolSchema } from '@agent-kernel/kernel'
 
 import type { LLMCallParams } from './adapter.js'
 
@@ -204,6 +204,13 @@ function extractText(content: readonly MessageContent[]): string {
 }
 
 function decodeTextAttachment(content: FileContent): string {
+  if ('source' in content) {
+    throw new Error(`Host attachment reference "${content.name}" was not resolved before provider dispatch.`)
+  }
+  return decodeInlineTextAttachment(content)
+}
+
+function decodeInlineTextAttachment(content: LegacyInlineFileContent): string {
   if (!isTextAttachment(content.mediaType, content.name)) {
     throw new Error(`Kernel runtime cannot send binary attachment "${content.name}" (${content.mediaType}); use the Copilot runtime or attach a text-based file.`)
   }

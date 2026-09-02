@@ -8,8 +8,9 @@ import type { TFunction } from 'i18next'
 import {
   MAX_MESSAGE_IMAGES,
   MAX_MESSAGE_FILES,
+  MAX_FILE_DECODED_BYTES,
+  MAX_MESSAGE_FILE_BYTES,
   validateClientMessagePayload,
-  validateInlineMessageFiles,
   validateInlineMessageImages,
   type ContextUsageSnapshot,
   type FileListEntry,
@@ -24,6 +25,7 @@ import type {
   FileContent,
   ImageContent,
   MessageContent,
+  ReferencedFileContent,
   TextContent,
 } from '@agent-kernel/kernel'
 
@@ -53,6 +55,8 @@ type Props = {
   workspaceUnavailable?: boolean
   onReconnectService?(): void
   onSubmit(text: string, mode: SendMode, attachments?: readonly (ImageContent | FileContent)[], extraBlocks?: readonly TextContent[]): void | Promise<void>
+  onUploadFiles?(files: readonly File[]): Promise<readonly ReferencedFileContent[]>
+  onReleaseFiles?(files: readonly ReferencedFileContent[]): Promise<void>
   onCompact?(): void
   onCancel?(): void
   onClearSession?(): void
@@ -104,8 +108,8 @@ type AttachedFile = {
   id: string
   name: string
   mediaType: string
-  base64: string
   size: number
+  file: File
 }
 
 export const APPROVAL_MODES: ReadonlyArray<{
@@ -198,6 +202,8 @@ export function Composer({
   workspaceUnavailable = false,
   onReconnectService,
   onSubmit,
+  onUploadFiles,
+  onReleaseFiles,
   onCompact,
   onCancel,
   onClearSession,
@@ -290,6 +296,7 @@ export function Composer({
   }, [sessionId])
   const [pastedImages, setPastedImages] = useState<readonly PastedImage[]>([])
   const [attachedFiles, setAttachedFiles] = useState<readonly AttachedFile[]>([])
+  const [submitting, setSubmitting] = useState(false)
   useEffect(() => {
     setPastedImages([])
     setAttachedFiles([])
@@ -451,6 +458,7 @@ export function Composer({
   }
 
   const submit = async (): Promise<void> => {
+    if (submitting) return
     const trimmed = text.trim()
     if (trimmed.length === 0 && pastedImages.length === 0 && attachedFiles.length === 0) return
     const parsedCommand = parseSlashCommand(trimmed)
@@ -473,17 +481,6 @@ export function Composer({
     const imageValidation = validateInlineMessageImages(images)
     if (!imageValidation.ok) {
       setPendingToast(imageValidation.error.message)
-      return
-    }
-    const files: FileContent[] = attachedFiles.map((file) => ({
-      type: 'file',
-      name: file.name,
-      mediaType: file.mediaType,
-      data: file.base64,
-    }))
-    const fileValidation = validateInlineMessageFiles(files)
-    if (!fileValidation.ok) {
-      setPendingToast(fileValidation.error.message)
       return
     }
     const extraBlocks: TextContent[] = []
@@ -510,25 +507,30 @@ export function Composer({
         }
       }
     }
-    const attachments = [...images, ...files]
-    const payloadError = validateClientMessagePayload({ text: trimmed, mode: sendMode, content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...extraBlocks, ...attachments] })
-    if (payloadError) {
-      setPendingToast(payloadError.message)
-      return
-    }
     const submittedText = text
     const submittedImages = pastedImages
     const submittedFiles = attachedFiles
-    // Clear optimistically as soon as the operator submits. The Host ACK means
-    // reliable acceptance, but an idle-session dispatch may not resolve until
-    // the Agent turn completes. Keeping the submitted draft visible for that
-    // whole period makes a successful send look broken and invites duplicates.
+    // Clear optimistically while raw File objects remain only in this
+    // in-memory snapshot. Upload still completes before message admission.
     setText('')
     setPastedImages([])
     setAttachedFiles([])
     setMentionState(null)
     setMentionFiles([])
+    const uploadingFiles = submittedFiles.length > 0
+    if (uploadingFiles) setSubmitting(true)
+    let files: readonly ReferencedFileContent[] = []
+    let admissionStarted = false
     try {
+      const uploadedFiles = submittedFiles.length > 0
+        ? await onUploadFiles?.(submittedFiles.map((file) => file.file))
+        : []
+      if (!uploadedFiles) throw new Error('File attachment upload is unavailable')
+      files = uploadedFiles
+      const attachments = [...images, ...(files ?? [])]
+      const payloadError = validateClientMessagePayload({ text: trimmed, mode: sendMode, content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...extraBlocks, ...attachments] })
+      if (payloadError) throw new Error(payloadError.message)
+      admissionStarted = true
       await onSubmit(
         trimmed,
         sendMode,
@@ -542,12 +544,23 @@ export function Composer({
       // the durable ledger already owns the operationId, so restoring the
       // draft would invite a second send with a different identity.
       const durablyAccepted = typeof error === 'object' && error !== null && 'durablyAccepted' in error && error.durablyAccepted === true
+      const safeToRelease = !admissionStarted
+        || (typeof error === 'object' && error !== null && 'safeToReleaseAttachments' in error && error.safeToReleaseAttachments === true)
+      if (!durablyAccepted && safeToRelease && files.length > 0 && onReleaseFiles) {
+        try {
+          await onReleaseFiles(files)
+        } catch (releaseError) {
+          console.error('Unable to release pending message attachments', releaseError)
+        }
+      }
       if (!durablyAccepted) {
         setText((current) => current.length === 0 ? submittedText : current)
         setPastedImages((current) => current.length === 0 ? submittedImages : current)
         setAttachedFiles((current) => current.length === 0 ? submittedFiles : current)
       }
       setPendingToast(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (uploadingFiles) setSubmitting(false)
     }
   }
 
@@ -600,23 +613,17 @@ export function Composer({
       }
       const nextFiles: AttachedFile[] = []
       for (const file of genericFiles) {
-        const base64 = await readFileBase64(file)
         nextFiles.push({
           id: attachmentId('file'),
           name: file.name || 'attachment',
           mediaType: file.type || 'application/octet-stream',
-          base64,
           size: file.size,
+          file,
         })
       }
-      const validation = validateInlineMessageFiles([...attachedFiles, ...nextFiles].map((file) => ({
-        type: 'file',
-        name: file.name,
-        mediaType: file.mediaType,
-        data: file.base64,
-      })))
-      if (!validation.ok) {
-        setPendingToast(validation.error.message)
+      const fileError = validateSelectedFiles([...attachedFiles, ...nextFiles])
+      if (fileError) {
+        setPendingToast(fileError)
         return false
       }
       if (nextImages.length > 0) setPastedImages((current) => [...current, ...nextImages])
@@ -665,7 +672,7 @@ export function Composer({
     void submit()
   }
 
-  const canSubmit = !disabled && workspaceOnline !== false && (text.trim().length > 0 || pastedImages.length > 0 || attachedFiles.length > 0)
+  const canSubmit = !disabled && !submitting && workspaceOnline !== false && (text.trim().length > 0 || pastedImages.length > 0 || attachedFiles.length > 0)
   const canStop = typeof onCancel === 'function' && (awaitingAck || isActiveTurnStatus(state?.status))
   const showStopButton = !canSubmit && canStop
 
@@ -1136,21 +1143,12 @@ function attachmentId(prefix: 'img' | 'file'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-async function readFileBase64(file: File): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error ?? new Error(`Unable to read ${file.name}`))
-    reader.onload = () => {
-      const value = typeof reader.result === 'string' ? reader.result : ''
-      const comma = value.indexOf(',')
-      if (comma < 0) {
-        reject(new Error(`Unable to encode ${file.name}`))
-        return
-      }
-      resolve(value.slice(comma + 1))
-    }
-    reader.readAsDataURL(file)
-  })
+function validateSelectedFiles(files: readonly AttachedFile[]): string | undefined {
+  const oversized = files.find((file) => file.size > MAX_FILE_DECODED_BYTES)
+  if (oversized) return `Each attached file must be at most ${formatAttachmentBytes(MAX_FILE_DECODED_BYTES)}.`
+  const total = files.reduce((sum, file) => sum + file.size, 0)
+  if (total > MAX_MESSAGE_FILE_BYTES) return `Files in one message must total at most ${formatAttachmentBytes(MAX_MESSAGE_FILE_BYTES)}.`
+  return undefined
 }
 
 function formatAttachmentBytes(bytes: number): string {

@@ -49,6 +49,166 @@ async function eventually(assertion: () => Promise<void>, deadlineMs = 3000): Pr
 }
 
 describe('Stable Ingress admission', () => {
+  it('proxies the authenticated raw attachment upload endpoint to the active Host', async () => {
+    let received: { url?: string; authorization?: string; name?: string; principal?: string; role?: string; body?: string } = {}
+    const upstream = createServer(async (request, response) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      received = {
+        url: request.url,
+        authorization: request.headers.authorization,
+        name: typeof request.headers['x-agent-runlab-attachment-name'] === 'string'
+          ? request.headers['x-agent-runlab-attachment-name']
+          : undefined,
+        principal: typeof request.headers['x-agent-runlab-principal'] === 'string'
+          ? request.headers['x-agent-runlab-principal']
+          : undefined,
+        role: typeof request.headers['x-agent-runlab-organization-role'] === 'string'
+          ? request.headers['x-agent-runlab-organization-role']
+          : undefined,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }
+      response.writeHead(201, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ file: { type: 'file' } }))
+    })
+    servers.push(upstream)
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    ingress = await startDedicatedIngress({
+      port: 0,
+      unitOrigin: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`,
+    })
+
+    const response = await fetch(`http://127.0.0.1:${ingress.port}/runtime/attachments?sessionId=session-1`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer attachment-token',
+        'content-type': 'text/plain',
+        'x-agent-runlab-attachment-name': 'notes.txt',
+        'x-agent-runlab-principal': 'forged-owner@example.com',
+        'x-agent-runlab-organization-id': 'forged-org',
+        'x-agent-runlab-organization-role': 'owner',
+      },
+      body: 'attachment bytes',
+    })
+
+    expect(response.status).toBe(201)
+    expect(received).toEqual({
+      url: '/runtime/attachments?sessionId=session-1',
+      authorization: 'Bearer attachment-token',
+      name: 'notes.txt',
+      principal: undefined,
+      role: undefined,
+      body: 'attachment bytes',
+    })
+  })
+
+  it('does not accept forged organization identity headers at the public admission boundary', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dedicated-ingress-forged-identity-'))
+    roots.push(root)
+    ingress = await startDedicatedIngress({
+      port: 0,
+      unitOrigin: 'http://127.0.0.1:9',
+      admissionLedgerPath: join(root, 'admission.json'),
+      auth: { sharedToken: 'real-token' },
+    })
+
+    const response = await fetch(`http://127.0.0.1:${ingress.port}/runtime/admission/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-agent-runlab-principal': 'forged-owner@example.com',
+        'x-agent-runlab-organization-id': 'forged-org',
+        'x-agent-runlab-organization-role': 'owner',
+      },
+      body: JSON.stringify({
+        sessionId: 'session-1',
+        operationId: 'operation-forged',
+        text: 'forged',
+        mode: 'queue',
+      }),
+    })
+
+    expect(response.status).toBe(401)
+  })
+
+  it('commits attachment references to the active Runtime before acknowledging durable admission', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dedicated-ingress-attachment-commit-'))
+    roots.push(root)
+    let committed: Record<string, unknown> | undefined
+    let rejectAttachmentCommit = false
+    const upstream = createServer(async (request, response) => {
+      if (request.url !== '/internal/runtime/attachments/commit') {
+        response.writeHead(404).end()
+        return
+      }
+      if (rejectAttachmentCommit) {
+        response.writeHead(500, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ error: 'attachment registry unavailable' }))
+        return
+      }
+      expect(request.headers['x-agent-runlab-ingress-handoff']).toBe('handoff-secret')
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      committed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ committed: true }))
+    })
+    servers.push(upstream)
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    ingress = await startDedicatedIngress({
+      port: 0,
+      unitOrigin: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`,
+      admissionLedgerPath: join(root, 'admission.json'),
+      ingressHandoffSecret: 'handoff-secret',
+    })
+    const file = {
+      type: 'file',
+      name: 'notes.md',
+      mediaType: 'text/markdown',
+      source: {
+        kind: 'host_ref',
+        attachmentId: '00000000-0000-4000-8000-000000000000',
+        sha256: 'a'.repeat(64),
+        bytes: 12,
+      },
+    }
+
+    const response = await fetch(`http://127.0.0.1:${ingress.port}/runtime/admission/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'session-1',
+        operationId: 'operation-attachment',
+        text: '',
+        mode: 'queue',
+        content: [file],
+      }),
+    })
+
+    expect(response.status).toBe(202)
+    expect(committed).toEqual({ sessionId: 'session-1', content: [file] })
+
+    rejectAttachmentCommit = true
+    const pending = await fetch(`http://127.0.0.1:${ingress.port}/runtime/admission/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'session-1',
+        operationId: 'operation-attachment-pending',
+        text: '',
+        mode: 'queue',
+        content: [file],
+      }),
+    })
+    expect(pending.status).toBe(503)
+    expect(await pending.json()).toMatchObject({
+      error: 'attachment registry unavailable',
+      durablyAccepted: true,
+    })
+  })
+
   it('closes long-lived transports without waiting for the service stop timeout', async () => {
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: 'http://127.0.0.1:9' })
     const client = connect(ingress.port, '127.0.0.1')

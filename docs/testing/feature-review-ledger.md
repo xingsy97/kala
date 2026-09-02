@@ -26,7 +26,8 @@ This ledger records implementation evidence and remaining review work. It is not
 | Evaluation | Enabled | Disabled | capability projection and Host action classifier | runtime capability tests | enumerate all HTTP/Socket.IO denial paths |
 | Responsive UI | Required | Required | shared Dialog/Sheet and viewport primitives | viewport screenshot matrices | active keyboard, rotation, nested modal states |
 | Streaming scroll | Required | Required | VirtualTranscript pin state | component tests | real upward scroll while tokens/tools append |
-| Sub-agent/dot mode | Enabled | Enabled | SubAgentCard and compact tool rail | component and replay browser checks | running/failure/cancel/concurrent live states |
+| Sub-agent/dot mode | Enabled | Enabled | Grouped SubAgentCard, multiplexed child channel, compact tool rail | component checks for cross-message grouping/policy disclosure; replay browser geometry and computed typography | real concurrent children through Copilot and Kernel, including interruption/failure |
+| Message attachments | Enabled | Enabled, Unit-scoped | raw-byte upload, Host content-addressed store, Session-scoped `host_ref`, controlled Copilot SDK file and Kernel text resolution | store/route/client/Composer tests cover integrity, viewer denial, pending release/expiry, attachment-only queue restart, Windows containment, and real SDK Markdown sentinel reading | full browser-to-ingress Markdown sentinel flow against each production runtime |
 
 ## Prioritized findings
 

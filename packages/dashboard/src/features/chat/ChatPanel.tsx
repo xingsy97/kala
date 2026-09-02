@@ -444,6 +444,8 @@ export function ChatPanel({
             toolCardMode={toolCardMode}
             activeToolCallIds={activeToolCallIdSet}
             badgeIntentionCallId={badgeIntentionCallId}
+            parentSessionId={parentSessionId}
+            socket={socket ?? null}
           />
         )
       }
@@ -816,6 +818,20 @@ function collectTranscriptToolActivity(
   resultsByCallId: ReadonlyMap<string, ToolResultContent>,
   options: { absorbReasoning: boolean; preserveAgentCalls: boolean },
 ): TranscriptToolActivity | null {
+  const initialCalls = toolActivityAssistantCalls(items[startIndex], options.absorbReasoning)
+  if (
+    options.preserveAgentCalls
+    && initialCalls?.length
+    && initialCalls.every((call) => call.name === 'agent')
+  ) {
+    return collectTranscriptSubAgentActivity(
+      items,
+      startIndex,
+      previousMessageIndex,
+      resultsByCallId,
+      options.absorbReasoning,
+    )
+  }
   if (options.absorbReasoning) {
     return collectDotsTranscriptToolActivity(
       items,
@@ -824,6 +840,61 @@ function collectTranscriptToolActivity(
       resultsByCallId,
       options.preserveAgentCalls,
     )
+  }
+
+  function collectTranscriptSubAgentActivity(
+    items: readonly TranscriptItem[],
+    startIndex: number,
+    previousMessageIndex: number,
+    resultsByCallId: ReadonlyMap<string, ToolResultContent>,
+    absorbReasoning: boolean,
+  ): TranscriptToolActivity | null {
+    const calls: ToolCallContent[] = []
+    const knownCallIds = new Set<string>()
+    let i = startIndex
+    let messageIndex = previousMessageIndex
+    let firstMessageIndex: number | null = null
+    let lastMessageIndex = previousMessageIndex
+    let firstSeq: number | undefined
+    let firstTs: string | undefined
+
+    while (i < items.length) {
+      const assistantItem = items[i]
+      const itemCalls = toolActivityAssistantCalls(assistantItem, absorbReasoning)
+      if (
+        !itemCalls?.length
+        || itemCalls.some((call) => call.name !== 'agent')
+        || !assistantItem
+        || assistantItem.kind !== 'message'
+      ) break
+      messageIndex += 1
+      if (firstMessageIndex === null) firstMessageIndex = messageIndex
+      lastMessageIndex = messageIndex
+      if (firstSeq === undefined) firstSeq = assistantItem.seq
+      if (firstTs === undefined) firstTs = assistantItem.ts
+      for (const call of itemCalls) {
+        calls.push(call)
+        knownCallIds.add(call.callId)
+      }
+      i += 1
+      while (i < items.length && isToolResultItemForKnownCalls(items[i], knownCallIds)) {
+        messageIndex += 1
+        lastMessageIndex = messageIndex
+        i += 1
+      }
+    }
+
+    if (calls.length === 0 || firstMessageIndex === null) return null
+    return {
+      group: makeToolCallGroup(calls, resultsByCallId, false),
+      firstMessageIndex,
+      lastMessageIndex,
+      nextIndex: i,
+      before: [],
+      after: [],
+      ...(firstSeq !== undefined ? { seq: firstSeq } : {}),
+      ...(firstTs !== undefined ? { ts: firstTs } : {}),
+    }
   }
 
   const start = items[startIndex]
@@ -1032,6 +1103,8 @@ function ToolActivityTranscriptRow({
   toolCardMode,
   activeToolCallIds,
   badgeIntentionCallId,
+  parentSessionId,
+  socket,
 }: {
   item: Extract<RenderTranscriptItem, { kind: 'tool_activity' }>
   highlighted: boolean
@@ -1043,8 +1116,39 @@ function ToolActivityTranscriptRow({
   toolCardMode: ToolCardMode
   activeToolCallIds: ReadonlySet<string> | null
   badgeIntentionCallId?: string
+  parentSessionId?: string
+  socket?: DashboardSocket | null
 }): JSX.Element {
   const { t } = useTranslation()
+  if (parentSessionId && item.group.calls.every((call) => call.name === 'agent')) {
+    return (
+      <div
+        id={`msg-${item.firstMessageIndex}`}
+        data-message-index={item.firstMessageIndex}
+        className={cn(
+          'group relative flex min-w-0 gap-3',
+          highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
+        )}
+      >
+        <AssistantAvatarRail hidden={hideHeader} label={t('chat.transcript.searchCategories.assistant')} />
+        <div className="relative min-w-0 flex-1">
+          {hideHeader ? null : (
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              {t('chat.transcript.searchCategories.assistant')}
+            </div>
+          )}
+          <InlineTimestamp ts={item.ts} className="absolute right-0 top-0 text-muted-foreground" />
+          <SubAgentCard
+            parentSessionId={parentSessionId}
+            socket={socket ?? null}
+            group={item.group}
+            approvalByCallId={approvalByCallId}
+            toolCardMode={toolCardMode}
+          />
+        </div>
+      </div>
+    )
+  }
   if (toolCardMode === 'dots') {
     return (
       <div

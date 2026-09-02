@@ -189,6 +189,77 @@ Queued messages are host-side delivery state, not kernel state. Reorder,
 edit, and delete operations below update only that queue and then rebroadcast
 `server:message_queue`.
 
+Generic file bytes are uploaded before admission:
+
+```http
+POST /runtime/attachments?sessionId=<session-id>
+Authorization: Bearer <dashboard token>
+Content-Type: <file media type>
+X-Agent-RunLab-Attachment-Name: <encodeURIComponent(display name)>
+
+<raw file bytes>
+```
+
+The Host stores bounded bytes in content-addressed, Session-associated storage
+and returns a `ReferencedFileContent`. New `client:user_message` and durable
+admission payloads carry only this reference:
+
+```ts
+{
+  type: 'file'
+  name: string
+  mediaType: string
+  source: {
+    kind: 'host_ref'
+    attachmentId: string // UUID
+    sha256: string       // lowercase hex
+    bytes: number        // 1..2 MiB
+  }
+}
+```
+
+The historical `{ type:'file', name, mediaType, data:<base64> }` form remains
+valid for replay compatibility, but browsers must not use it for new generic
+file submissions. References are validated against the target Session before
+delivery. Kernel resolves UTF-8 text on demand and rejects binary content;
+Copilot receives a controlled Host file path inside its Host-owned SDK working
+directory. Its SDK tool surface enables only the built-in `view` reader in
+addition to RunLab custom tools, and the permission handler approves that
+reader only for the exact Session-owned attachment path; all other Host reads
+are rejected. Kernel text and UTF-8 validation happens during upload so an
+unsupported binary file fails before message admission.
+
+Uploads are pending leases until a message using the reference is accepted by
+the Host. The Dashboard releases pending references after a rejected
+submission or a partially failed multi-file upload:
+
+```http
+POST /runtime/attachments/release
+Authorization: ****** token>
+Content-Type: application/json
+
+{
+  "sessionId": "<session-id>",
+  "attachmentIds": ["<attachment-uuid>"]
+}
+```
+
+Committed references cannot be released through this endpoint. Abandoned
+pending uploads expire after 24 hours and are removed when the attachment
+store loads or receives another upload. Physical content is removed only when
+no Session record references its hash. Active and candidate Runtime processes
+refresh the shared registry on reads and serialize mutations with an
+interprocess lock, so uploads remain resolvable across a blue/green cutover.
+Upload, release, and portable message admission require a write-capable actor;
+an organization `viewer` receives HTTP 403. Dedicated public ingress strips
+client-provided organization identity headers before authentication or
+proxying.
+
+If message admission becomes durable before attachment commitment finishes,
+the endpoint returns a retryable error with the same `operationId` and
+`durablyAccepted: true`. Clients must retry or monitor that operation identity;
+they must not release its attachments or restore the draft as a new message.
+
 #### `client:reorder_queued_message`
 
 ```ts

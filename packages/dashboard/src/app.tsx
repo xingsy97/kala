@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
 import { notify } from './notify.js'
 
-import type { Message, MessageContent } from '@agent-kernel/kernel'
+import type { Message, MessageContent, ReferencedFileContent } from '@agent-kernel/kernel'
 
 import type {
   ConsolidateMemoryResult,
@@ -123,7 +123,7 @@ import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
 import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { emitRpc } from './socket-rpc.js'
-import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage } from './admission-client.js'
+import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage, releaseMessageAttachments, uploadMessageAttachment } from './admission-client.js'
 import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, type TranscriptItem } from './transcript.js'
 import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent, shouldShowQueuedAutoCompact } from './app-logic/compaction.js'
 import { mergeOptimisticQueuedMessages, nextSessionSelection, queuedMessageKey, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
@@ -2063,6 +2063,40 @@ export function App(): JSX.Element {
                               {!taskGraph ? <TasksButton todos={taskItems} /> : null}
                             </>
                           }
+                          onUploadFiles={async (files) => {
+                            if (activeSessionId === null) throw new Error('No active Session for attachment upload')
+                            const uploaded: ReferencedFileContent[] = []
+                            try {
+                              for (const file of files) {
+                                uploaded.push(await uploadMessageAttachment({
+                                  host: hostEndpoint.url,
+                                  ...(config.token ? { token: config.token } : {}),
+                                  sessionId: activeSessionId,
+                                  file,
+                                }))
+                              }
+                              return uploaded
+                            } catch (error) {
+                              if (uploaded.length > 0) {
+                                await releaseMessageAttachments({
+                                  host: hostEndpoint.url,
+                                  ...(config.token ? { token: config.token } : {}),
+                                  sessionId: activeSessionId,
+                                  files: uploaded,
+                                }).catch((releaseError) => console.error('Unable to release partially uploaded attachments', releaseError))
+                              }
+                              throw error
+                            }
+                          }}
+                          onReleaseFiles={async (files) => {
+                            if (activeSessionId === null) return
+                            await releaseMessageAttachments({
+                              host: hostEndpoint.url,
+                              ...(config.token ? { token: config.token } : {}),
+                              sessionId: activeSessionId,
+                              files,
+                            })
+                          }}
                           onSubmit={async (text, mode, images, extraBlocks) => {
                             if (activeSessionId === null) return
                             const imageBlocks = images ?? []

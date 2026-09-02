@@ -50,6 +50,7 @@ import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
 import { isSkillManager } from './extensions/skills.js'
 import { todoGraphContinuationState } from './extensions/todo-graph.js'
 import { dispatchConfiguredTool, type ToolExecutionResult } from './agent-modules/execution.js'
+import { resolveKernelMessageAttachments } from './message-attachment-resolver.js'
 import type {
   HostLoopDeps,
   EventBroadcastExtras,
@@ -677,17 +678,13 @@ async function performCallLlm(
   const llmStartedMono = performance.now()
   aborts.set(sessionId, controller)
   const assembledMessages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
-  const messages = withCurrentToolIntentionInstruction(assembledMessages)
-  await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, messages, effect)
+  const persistedMessages = withCurrentToolIntentionInstruction(assembledMessages)
+  await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, persistedMessages, effect)
   const live = deps.store.get(sessionId)
   if (!live || live.state.status !== 'thinking' || controller.signal.aborted || isCancelledSubAgentChild(sessionId)) {
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
     return
   }
-  const activeTools = config.toolDisclosureMode === 'progressive' ? await activeToolsFor(live) : new Set<string>()
-  for (const name of intentActivatedTools(effect.tools, messages)) activeTools.add(name)
-  const disclosedTools = visibleTools(effect.tools, config.toolDisclosureMode ?? 'legacy_full', activeTools)
-  await maybeRecordToolDisclosure(deps, live, effect.tools, disclosedTools)
   // Only ask for token deltas when the broadcast wants them. If no consumer
   // is wired up, we skip streaming entirely — the adapter falls through to
   // the plain buffered path and no partial-message accounting is needed.
@@ -700,6 +697,11 @@ async function performCallLlm(
       }
     : undefined
   try {
+    const messages = await resolveKernelMessageAttachments(deps.messageAttachments, sessionId, persistedMessages)
+    const activeTools = config.toolDisclosureMode === 'progressive' ? await activeToolsFor(live) : new Set<string>()
+    for (const name of intentActivatedTools(effect.tools, messages)) activeTools.add(name)
+    const disclosedTools = visibleTools(effect.tools, config.toolDisclosureMode ?? 'legacy_full', activeTools)
+    await maybeRecordToolDisclosure(deps, live, effect.tools, disclosedTools)
     const callInput = {
       deps,
       tools: disclosedTools,
@@ -717,8 +719,12 @@ async function performCallLlm(
       // llm_error and stranding the autonomous run.
       if (!runtime || controller.signal.aborted || !isContextOverflowError(err)) throw err
       await runtime.handle.compact(sessionId, { trigger: 'preflight', continuation: 'current_turn' })
-      const current = deps.store.get(sessionId)?.state.messages ?? messages
-      const retryMessages = emergencyTruncate(current, config, contextLimitForSession(deps, sessionId))
+      const current = deps.store.get(sessionId)?.state.messages ?? persistedMessages
+      const retryMessages = await resolveKernelMessageAttachments(
+        deps.messageAttachments,
+        sessionId,
+        emergencyTruncate(current, config, contextLimitForSession(deps, sessionId)),
+      )
       res = await callLlmOnce(callInput, retryMessages)
     }
     assertOnlyDisclosedTools(res.message, disclosedTools)
@@ -726,7 +732,11 @@ async function performCallLlm(
     if (shouldRecoverFromMaxTokens(res) && runtime && !controller.signal.aborted) {
       try {
         await runtime.handle.compact(sessionId, { trigger: 'preflight', continuation: 'current_turn' })
-        const retryMessages = deps.store.get(sessionId)?.state.messages ?? messages
+        const retryMessages = await resolveKernelMessageAttachments(
+          deps.messageAttachments,
+          sessionId,
+          deps.store.get(sessionId)?.state.messages ?? persistedMessages,
+        )
         res = await callLlmOnce({
           deps,
           tools: disclosedTools,

@@ -85,9 +85,9 @@ export function NestedTranscript({ messages, compact = false, virtualized = true
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col text-[12px] leading-relaxed',
+        'flex min-w-0 flex-col text-[13px] leading-relaxed',
         virtualized && 'flex-1',
-        compact && 'text-[11px]',
+        compact && 'text-xs',
       )}
       data-testid="nested-transcript"
       data-virtualized={virtualized ? 'true' : 'false'}
@@ -286,9 +286,9 @@ function RoleColumn({
     <div className="flex min-w-0 flex-col gap-1">
       <div
         className={cn(
-          'text-[9px] font-semibold uppercase tracking-[0.08em]',
+          'text-[10px] font-semibold uppercase tracking-[0.08em]',
           labelTone,
-          compact && 'text-[9px]',
+          compact && 'text-[10px]',
         )}
       >
         {label}
@@ -369,7 +369,7 @@ function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
       <div className="flex min-w-0 flex-col gap-0.5" data-testid={`nested-tool-group-${group.firstCallId}`}>
         <button
           type="button"
-          className="flex min-w-0 items-center gap-1.5 rounded bg-muted/60 px-1.5 py-1 text-left text-[10px] text-muted-foreground hover:bg-muted"
+          className="flex min-w-0 items-center gap-1.5 rounded bg-muted/60 px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-muted"
           onClick={() => setOpen((v) => !v)}
         >
           <span className="flex-none rounded bg-primary px-1 text-[9px] font-medium uppercase tracking-wider text-primary-foreground">
@@ -406,7 +406,7 @@ function NestedToolRows({
           <div
             key={row.callId}
             className={cn(
-              'flex min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[10px]',
+              'flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 font-mono text-[11px]',
               ok
                 ? 'text-muted-foreground'
                 : 'bg-rose-50/60 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200',

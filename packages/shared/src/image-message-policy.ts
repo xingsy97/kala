@@ -85,7 +85,7 @@ export function validateInlineMessageFiles(content: readonly MessageContent[] | 
   }
   let total = 0
   for (const file of files) {
-    const bytes = decodedBase64Bytes(file.data)
+    const bytes = 'source' in file ? file.source.bytes : decodedBase64Bytes(file.data)
     if (bytes === null) return failure('FILE_INVALID_BASE64', `Attached file "${file.name}" contains invalid base64 data.`)
     if (bytes > MAX_FILE_DECODED_BYTES) {
       return failure('FILE_TOO_LARGE', `Each attached file must be at most ${formatMiB(MAX_FILE_DECODED_BYTES)}.`)

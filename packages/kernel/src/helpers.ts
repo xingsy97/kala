@@ -96,7 +96,8 @@ export function estimateMessageTokens(messages: readonly Message[]): number {
       } else if (content.type === 'tool_result') {
         chars += (content.callId ?? '').length + content.content.length + 16
       } else if (content.type === 'file') {
-        chars += content.name.length + content.mediaType.length + Math.round(content.data.length / 4)
+        chars += content.name.length + content.mediaType.length
+          + ('data' in content ? Math.round(content.data.length / 4) : content.source.bytes)
       } else {
         chars += content.source.kind === 'file_ref'
           ? content.source.path.length + 64

@@ -67,6 +67,11 @@ import {
 } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
 import type { SessionArtifactRegistry } from '../session-artifact-registry.js'
+import {
+  MAX_MESSAGE_ATTACHMENT_BYTES,
+  type MessageAttachmentStore,
+} from '../message-attachment-store.js'
+import { assertKernelTextAttachment, validateMessageAttachmentReferences } from '../message-attachment-resolver.js'
 import type { OperationalMetrics } from '../operational-metrics.js'
 import type { MemoStore } from '../memo-store.js'
 import { diffToolCatalogs } from '../tool-catalog-diff.js'
@@ -226,6 +231,7 @@ export function attachJsonRoutes(
     docsRootDir?: string
     embeddedDocs?: readonly EmbeddedStaticAsset[]
     sessionArtifacts?: SessionArtifactRegistry
+    messageAttachments?: MessageAttachmentStore
     sessions?: SessionStore
     routerHealth?: () => unknown
     executorsSnapshot?: () => readonly AttachedExecutor[]
@@ -657,6 +663,7 @@ export function attachJsonRoutes(
       claimRoute(req)
       const auth = authorizeDashboardHttp(req, payloads.auth)
       if (!auth.ok) { sendError(res, 401, auth.reason); return }
+      if (!dashboardActorCanWrite(auth.actor)) { sendError(res, 403, 'forbidden'); return }
       void readJson(req).then(async (body) => {
         const payloadError = validateClientMessagePayload(body)
         if (payloadError) throw new HttpRouteError(413, `${payloadError.code}: ${payloadError.message}`)
@@ -667,11 +674,97 @@ export function attachJsonRoutes(
         const fileValidation = validateInlineMessageFiles(input.data.content)
         if (!fileValidation.ok) throw new HttpRouteError(400, `${fileValidation.error.code}: ${fileValidation.error.message}`)
         if (!input.data.text.trim() && !input.data.content?.length) throw new HttpRouteError(400, 'message content is required')
+        validateMessageAttachmentReferences(payloads.messageAttachments, input.data.sessionId, input.data.content)
         const outcome = await payloads.enqueueUserMessage!({
           sessionId: input.data.sessionId, operationId: input.data.operationId, text: input.data.text,
           mode: input.data.mode ?? 'steer', ...(input.data.content ? { content: input.data.content } : {}),
         })
+        try {
+          await payloads.messageAttachments?.commitReferences(input.data.sessionId, input.data.content)
+        } catch (error) {
+          throw new DurableAdmissionError(input.data.operationId, `message was accepted but attachment commitment must be retried: ${error instanceof Error ? error.message : String(error)}`)
+        }
         sendJsonStatus(req, res, 202, { accepted: true, duplicate: false, operationId: input.data.operationId, sequence: 0, state: outcome.committed ? 'committed' : 'pending', routeGeneration: 0, ...(outcome.cursor !== undefined ? { cursor: outcome.cursor } : {}) })
+      }).catch((error) => {
+        if (error instanceof DurableAdmissionError) {
+          sendJsonStatus(req, res, error.status, {
+            error: error.message,
+            operationId: error.operationId,
+            durablyAccepted: true,
+          })
+          return
+        }
+        sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error))
+      })
+      return
+    }
+    if (path === '/runtime/attachments' && payloads.messageAttachments && payloads.sessions && req.method === 'POST') {
+      claimRoute(req)
+      const auth = authorizeDashboardHttp(req, payloads.auth)
+      if (!auth.ok) { sendError(res, 401, auth.reason); return }
+      if (!dashboardActorCanWrite(auth.actor)) { sendError(res, 403, 'forbidden'); return }
+      void (async () => {
+        const requestUrl = new URL(url, 'http://localhost')
+        const sessionId = requestUrl.searchParams.get('sessionId')?.trim()
+        const encodedName = req.headers['x-agent-runlab-attachment-name']
+        if (!sessionId || typeof encodedName !== 'string') throw new HttpRouteError(400, 'sessionId and attachment name are required')
+        let name: string
+        try { name = decodeURIComponent(encodedName) } catch { throw new HttpRouteError(400, 'invalid attachment name') }
+        const declaredLength = Number(req.headers['content-length'])
+        if (Number.isFinite(declaredLength) && declaredLength > MAX_MESSAGE_ATTACHMENT_BYTES) {
+          throw new HttpRouteError(413, `Attachment exceeds ${MAX_MESSAGE_ATTACHMENT_BYTES} bytes`)
+        }
+        const session = await payloads.sessions!.load(sessionId, { recoverDangling: false })
+        const data = await readBytes(req, MAX_MESSAGE_ATTACHMENT_BYTES)
+        const mediaType = typeof req.headers['content-type'] === 'string'
+          ? req.headers['content-type'].split(';', 1)[0]!.trim().toLowerCase()
+          : 'application/octet-stream'
+        if (session.agentRuntime === 'kernel') assertKernelTextAttachment({ name, mediaType }, data)
+        const file = await payloads.messageAttachments!.register({
+          sessionId,
+          name,
+          mediaType,
+          data,
+        })
+        sendJsonStatus(req, res, 201, { file })
+      })().catch((error) => {
+        const status = error instanceof HttpRouteError
+          ? error.status
+          : error instanceof SessionNotFoundError
+            ? 404
+            : 400
+        sendError(res, status, error instanceof Error ? error.message : String(error))
+      })
+      return
+    }
+    if (path === '/runtime/attachments/release' && payloads.messageAttachments && req.method === 'POST') {
+      claimRoute(req)
+      const auth = authorizeDashboardHttp(req, payloads.auth)
+      if (!auth.ok) { sendError(res, 401, auth.reason); return }
+      if (!dashboardActorCanWrite(auth.actor)) { sendError(res, 403, 'forbidden'); return }
+      void readJson(req).then(async (body) => {
+        if (!body || typeof body !== 'object') throw new HttpRouteError(400, 'invalid release request')
+        const input = body as Record<string, unknown>
+        if (typeof input.sessionId !== 'string' || !Array.isArray(input.attachmentIds)) {
+          throw new HttpRouteError(400, 'sessionId and attachmentIds are required')
+        }
+        const attachmentIds = input.attachmentIds.filter((value): value is string => typeof value === 'string')
+        if (attachmentIds.length !== input.attachmentIds.length) throw new HttpRouteError(400, 'invalid attachmentIds')
+        await payloads.messageAttachments!.releasePending(input.sessionId, attachmentIds)
+        sendJsonStatus(req, res, 200, { released: true })
+      }).catch((error) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
+      return
+    }
+    if (path === '/internal/runtime/attachments/commit' && payloads.messageAttachments && req.method === 'POST') {
+      claimRoute(req)
+      if (!internalIngressAuthorized(req)) { sendError(res, 401, 'unauthorized'); return }
+      void readJson(req).then(async (body) => {
+        if (!body || typeof body !== 'object') throw new HttpRouteError(400, 'invalid attachment commit request')
+        const input = body as Record<string, unknown>
+        const content = schema.MessageContentSchema.array().safeParse(input.content ?? [])
+        if (typeof input.sessionId !== 'string' || !content.success) throw new HttpRouteError(400, 'invalid attachment commit request')
+        await payloads.messageAttachments!.commitReferences(input.sessionId, content.data)
+        sendJsonStatus(req, res, 200, { committed: true })
       }).catch((error) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
       return
     }
@@ -702,6 +795,7 @@ export function attachJsonRoutes(
         const mode = input.mode === 'steer' ? 'steer' : 'queue'
         const content = Array.isArray(input.content) ? input.content as readonly import('@agent-kernel/kernel').MessageContent[] : undefined
         if (!text.trim() && !content?.length) throw new Error('message content is required')
+        validateMessageAttachmentReferences(payloads.messageAttachments, sessionId, content)
         let outcome: { committed: boolean; cursor?: number }
         try {
           outcome = await payloads.enqueueUserMessage!({ sessionId, operationId, text, mode, ...(content ? { content } : {}) })
@@ -712,8 +806,13 @@ export function attachJsonRoutes(
           }
           throw error
         }
+        try {
+          await payloads.messageAttachments?.commitReferences(sessionId, content)
+        } catch (error) {
+          throw new HttpRouteError(503, `message was accepted but attachment commitment must be retried: ${error instanceof Error ? error.message : String(error)}`)
+        }
         sendJson(req, res, { committed: outcome.committed, operationId, ...(outcome.cursor !== undefined ? { cursor: outcome.cursor } : {}) })
-      }).catch((error) => sendError(res, 400, error instanceof Error ? error.message : String(error)))
+      }).catch((error) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
       return
     }
     const internalRestartPath = path.startsWith('/internal/runtime/restart')
@@ -1098,6 +1197,10 @@ function authorizeDashboardHttp(req: IncomingMessage, auth: AuthConfig | undefin
   const authorization = req.headers.authorization
   const token = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined
   return authenticateDashboardHandshake({ role: 'dashboard', clientVersion: 'http', ...(token ? { token } : {}) }, req, auth)
+}
+
+function dashboardActorCanWrite(actor: AuditActor): boolean {
+  return actor.kind !== 'ingress' || actor.role !== 'viewer'
 }
 
 function internalIngressAuthorized(req: IncomingMessage): boolean {
@@ -1516,6 +1619,12 @@ class HttpRouteError extends Error {
   }
 }
 
+class DurableAdmissionError extends HttpRouteError {
+  constructor(readonly operationId: string, message: string) {
+    super(503, message)
+  }
+}
+
 async function resolveArtifactFile(url: string, rootDir: string): Promise<{ abs: string; rel: string; name: string; size: number; mediaType: string }> {
   const parsed = new URL(url, 'http://x')
   const requested = parsed.searchParams.get('path') ?? ''
@@ -1677,6 +1786,18 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   const raw = Buffer.concat(chunks).toString('utf8')
   if (raw.trim().length === 0) return {}
   return JSON.parse(raw) as unknown
+}
+
+async function readBytes(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let total = 0
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    total += bytes.length
+    if (total > maxBytes) throw new HttpRouteError(413, `Attachment exceeds ${maxBytes} bytes`)
+    chunks.push(bytes)
+  }
+  return Buffer.concat(chunks)
 }
 
 function sendJson(req: IncomingMessage, res: ServerResponse, body: unknown): void {

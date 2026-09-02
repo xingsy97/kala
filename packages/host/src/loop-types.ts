@@ -29,6 +29,7 @@ import type { HookConfig, HookRunner } from './extensions/hooks.js'
 import type { SkillManager, SkillRegistry } from './extensions/skills.js'
 import type { SessionStore } from './store/session.js'
 import type { WebSearchCredentialStore } from './web-search/index.js'
+import type { MessageAttachmentStore } from './message-attachment-store.js'
 
 export type LoopBroadcast = {
   onEvent(
@@ -161,6 +162,7 @@ export type HostLoopDeps = {
   webSearchCredentials?: WebSearchCredentialStore
   audit?: import('./audit-log.js').AuditLogger
   artifactRootDir?: string
+  messageAttachments?: MessageAttachmentStore
   publishLocalImages?: (sessionId: string, record: import('./store/session.js').SessionRecord, message: import('@agent-kernel/kernel').Message) => Promise<import('@agent-kernel/kernel').Message>
 }
 

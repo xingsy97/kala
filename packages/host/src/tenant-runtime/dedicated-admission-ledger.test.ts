@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -38,6 +38,29 @@ describe('DedicatedAdmissionLedger', () => {
     await value.append(message('operation-0002'), 1)
     await expect(value.append({ ...message('operation-0002'), principalDigest: 'b'.repeat(64) }, 1)).rejects.toThrow('conflicts')
     await expect(value.append(message('operation-0002', 'session-2'), 1)).rejects.toThrow('conflicts')
+  })
+
+  it('persists Host attachment references without duplicating attachment base64', async () => {
+    const { path, value } = await ledger()
+    const base64 = Buffer.from('attachment bytes').toString('base64')
+    await value.append({
+      ...message('operation-reference'),
+      content: [{
+        type: 'file',
+        name: 'notes.txt',
+        mediaType: 'text/plain',
+        source: {
+          kind: 'host_ref',
+          attachmentId: '00000000-0000-4000-8000-000000000000',
+          sha256: 'c'.repeat(64),
+          bytes: 16,
+        },
+      }],
+    }, 1)
+
+    const persisted = await readFile(path, 'utf8')
+    expect(persisted).toContain('00000000-0000-4000-8000-000000000000')
+    expect(persisted).not.toContain(base64)
   })
 
   it('applies capacity backpressure to uncommitted records', async () => {

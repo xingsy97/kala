@@ -112,6 +112,7 @@ import { sessionRoom } from './rooms.js'
 import { dashboardConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
 import { OperationDeduper } from './operation-deduper.js'
 import type { AgentRuntimeRegistry } from '../agent-runtime/types.js'
+import { validateMessageAttachmentReferences } from '../message-attachment-resolver.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -1454,6 +1455,7 @@ async function handleUserMessage(
     deps.broadcastError(p.sessionId, 'host', `${record.agentRuntime} sessions do not support attachments`)
     return
   }
+  validateMessageAttachmentReferences(deps.loopDeps.messageAttachments, p.sessionId, p.content)
   if (record.agentRuntime !== 'kernel') {
     const runtime = deps.agentRuntimes.require(record.agentRuntime)
     await runtime.send(record, {
@@ -1462,6 +1464,7 @@ async function handleUserMessage(
       ...(p.operationId ? { operationId: p.operationId } : {}),
       ...(effectiveModelForRecord(deps, record) ? { model: effectiveModelForRecord(deps, record) } : {}),
     })
+    await deps.loopDeps.messageAttachments?.commitReferences(p.sessionId, p.content)
     return
   }
   const messageModel = effectiveModelForRecord(deps, record)
@@ -1498,6 +1501,7 @@ async function handleUserMessage(
   // ACK for the entire LLM/tool turn; the dashboard timed out and restored a
   // draft that had already been sent.
   await deps.messageQueues.enqueue(p.sessionId, queued, mode === 'steer' ? 'front' : undefined)
+  await deps.loopDeps.messageAttachments?.commitReferences(p.sessionId, p.content)
   if (mode === 'steer' && !isRestingStatus(record.state.status)) {
     // Do not truncate an in-flight response/tool. Stop at the next safe boundary
     // and let the persisted front-queued steer become the next user turn.

@@ -39,15 +39,19 @@ export async function startDedicatedIngress(options: {
 }): Promise<DedicatedIngress> {
   const ledger = options.admissionLedgerPath ? new DedicatedAdmissionLedger(options.admissionLedgerPath, options.admissionCapacity) : undefined
   const http = createServer((request, response) => {
+    stripUntrustedIdentityHeaders(request)
     const path = (request.url ?? '/').split('?')[0] ?? '/'
     if (path === '/runtime/admission/messages' && request.method === 'POST' && ledger) {
-      void acceptAdmission(request, options.auth, ledger, currentRoute).then((body) => {
+      void acceptAdmission(request, options.auth, ledger, currentRoute, options.ingressHandoffSecret).then((body) => {
         response.writeHead(202, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         response.end(JSON.stringify(body))
       }).catch((error) => {
         const status = error instanceof AdmissionBackpressureError ? 429 : error instanceof AdmissionHttpError ? error.status : 400
         response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(status === 429 ? { 'retry-after': '2' } : {}) })
-        response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+        response.end(JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          ...(error instanceof AdmissionHttpError && error.durablyAccepted ? { durablyAccepted: true } : {}),
+        }))
       })
       return
     }
@@ -181,6 +185,7 @@ export async function startDedicatedIngress(options: {
       return { unitId: DEDICATED_RUNTIME_UNIT_ID, origin: handoff?.origin ?? route.origin }
     },
   })
+  http.prependListener('upgrade', stripUntrustedIdentityHeaders)
   ingress.attach(http)
   let reconciling = false
   const reconcileAdmission = async (): Promise<void> => {
@@ -206,6 +211,10 @@ export async function startDedicatedIngress(options: {
             const failure = await response.json().catch(() => ({})) as { code?: string; error?: string }
             if (response.status === 404 && failure.code === 'SESSION_NOT_FOUND') {
               await ledger.fail(record.operationId, owner, route.generation, 'The target Session no longer exists')
+              continue
+            }
+            if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+              await ledger.fail(record.operationId, owner, route.generation, failure.error ?? `Runtime rejected attachment validation (${response.status})`)
               continue
             }
             throw new Error(`runtime admission commit returned ${response.status}${failure.code ? ` (${failure.code})` : ''}`)
@@ -258,16 +267,22 @@ export async function startDedicatedIngress(options: {
   }
 }
 
-class AdmissionHttpError extends Error { constructor(readonly status: number, message: string) { super(message) } }
+class AdmissionHttpError extends Error {
+  constructor(readonly status: number, message: string, readonly durablyAccepted = false) { super(message) }
+}
 
 async function acceptAdmission(
   request: import('node:http').IncomingMessage,
   auth: AuthConfig | undefined,
   ledger: DedicatedAdmissionLedger,
   route: () => Promise<{ origin: string; generation: number }>,
+  ingressHandoffSecret: string | undefined,
 ): Promise<unknown> {
   const authenticated = ingressActor(request, auth)
   if (!authenticated.ok) throw new AdmissionHttpError(401, authenticated.reason)
+  if (authenticated.actor.kind === 'ingress' && authenticated.actor.role === 'viewer') {
+    throw new AdmissionHttpError(403, 'forbidden')
+  }
   const body = await readRequestJson(request)
   const payloadError = validateClientMessagePayload(body)
   if (payloadError) throw new AdmissionHttpError(413, `${payloadError.code}: ${payloadError.message}`)
@@ -283,8 +298,34 @@ async function acceptAdmission(
     mode: parsed.data.mode === 'queue' ? 'queue' : 'steer', text: parsed.data.text,
     ...(parsed.data.content ? { content: parsed.data.content } : {}),
   }
+  const hasReferencedAttachments = message.content?.some(isHostReferencedAttachment) ?? false
+  if (hasReferencedAttachments && !ingressHandoffSecret) {
+    throw new AdmissionHttpError(503, 'attachment admission requires the Runtime handoff channel')
+  }
+  const attachmentCommitSecret = ingressHandoffSecret
   const active = await route()
   const result = await ledger.append(message, active.generation)
+  if (hasReferencedAttachments) {
+    if (!attachmentCommitSecret) throw new AdmissionHttpError(503, 'attachment admission requires the Runtime handoff channel')
+    let response: Response
+    try {
+      response = await fetch(`${active.origin}/internal/runtime/attachments/commit`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-agent-runlab-ingress-handoff': attachmentCommitSecret,
+        },
+        body: JSON.stringify({ sessionId: message.sessionId, content: message.content }),
+        signal: AbortSignal.timeout(5_000),
+      })
+    } catch (error) {
+      throw new AdmissionHttpError(503, `attachment reservation failed after durable admission: ${error instanceof Error ? error.message : String(error)}`, true)
+    }
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({})) as { error?: string }
+      throw new AdmissionHttpError(503, failure.error ?? `attachment reservation returned ${response.status}`, true)
+    }
+  }
   return { accepted: true, duplicate: result.duplicate, operationId: result.record.operationId, sequence: result.record.sequence, state: result.record.state, routeGeneration: result.record.routeGeneration }
 }
 
@@ -292,6 +333,19 @@ function ingressActor(request: import('node:http').IncomingMessage, auth: AuthCo
   const authorization = request.headers.authorization
   const token = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined
   return authenticateDashboardHandshake({ role: 'dashboard', clientVersion: 'ingress', ...(token ? { token } : {}) }, request, auth)
+}
+
+function stripUntrustedIdentityHeaders(request: import('node:http').IncomingMessage): void {
+  delete request.headers['x-agent-runlab-principal']
+  delete request.headers['x-agent-runlab-organization-id']
+  delete request.headers['x-agent-runlab-organization-role']
+}
+
+function isHostReferencedAttachment(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const block = value as Record<string, unknown>
+  if (block.type !== 'file' || !block.source || typeof block.source !== 'object') return false
+  return (block.source as Record<string, unknown>).kind === 'host_ref'
 }
 function principalDigest(actor: DashboardActor): string { return createHash('sha256').update(JSON.stringify(actor)).digest('hex') }
 async function readCandidateState(path: string, expectedGeneration: number): Promise<{ phase: 'paused' } | { phase: 'candidate' | 'admission'; origin: string } | undefined> {
