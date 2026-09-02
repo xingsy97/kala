@@ -32,6 +32,8 @@ import {
   appendMetadataEntry,
   appendRuntimeMetadataEntry,
   appendSnapshotEntry,
+  findLatestEventEntry,
+  findLatestRuntimeMetadata,
   readLastSessionSnapshot,
   readSessionHeader,
   readSessionLog,
@@ -337,14 +339,10 @@ export class SessionStore {
     const recovery = (async () => {
       const latest = this.records.get(record.sessionId) ?? record
       const persistedSummary = await readPersistedSummary(latest.logPath)
-      const parsed = persistedSummary?.hasEvents === false
-        ? undefined
-        : await readSessionState(latest.logPath)
-      const alreadyQuarantined = persistedSummary?.externalRuntimeAlreadyQuarantined === true
-        || parsed?.runtimeMetadata.some((entry) =>
-          entry.action === 'runtime.quarantined_kernel_events'
-        ) === true
-      const contaminatedEventCount = alreadyQuarantined ? 0 : parsed?.events.length ?? 0
+      const latestQuarantine = await findLatestRuntimeMetadata(latest.logPath, 'runtime.quarantined_kernel_events', { maxScanBytes: 64 * 1024 * 1024 })
+      const latestForeignEvent = latestQuarantine ? undefined : await findLatestEventEntry(latest.logPath, { maxScanBytes: 64 * 1024 * 1024 })
+      const alreadyQuarantined = persistedSummary?.externalRuntimeAlreadyQuarantined === true || latestQuarantine !== undefined
+      const contaminatedEventCount = alreadyQuarantined ? 0 : latestForeignEvent ? 1 : 0
       const next = contaminatedEventCount > 0
         ? quarantinedExternalRuntimeState(latest.state)
         : interruptedExternalRuntimeState(latest.agentRuntime, latest.state)
@@ -874,14 +872,20 @@ export class SessionStore {
     const persistedSummary = await readPersistedSummary(path)
     const runtimeContextSnapshot = await readPersistedRuntimeContext(path, sessionId)
     const fastExternalLoad = (header.agentRuntime ?? 'kernel') !== 'kernel'
-      && persistedSummary?.hasEvents === false
+    const externalRuntimeAlreadyQuarantined = fastExternalLoad
+      ? persistedSummary?.externalRuntimeAlreadyQuarantined === true
+        || await findLatestRuntimeMetadata(path, 'runtime.quarantined_kernel_events', { maxScanBytes: 64 * 1024 * 1024 }) !== undefined
+      : false
+    const latestExternalKernelEvent = fastExternalLoad && !externalRuntimeAlreadyQuarantined
+      ? await findLatestEventEntry(path, { maxScanBytes: 64 * 1024 * 1024 })
+      : undefined
     const parsed = fastExternalLoad
       ? {
           header,
-          events: [],
+          events: latestExternalKernelEvent ? [latestExternalKernelEvent] : [],
           snapshots: [...await optionalSnapshot(path)],
           metadata: [],
-          runtimeMetadata: persistedSummary.externalRuntimeAlreadyQuarantined
+          runtimeMetadata: externalRuntimeAlreadyQuarantined
             ? [{
                 kind: 'runtime_metadata' as const,
                 ts: header.ts,
@@ -901,14 +905,14 @@ export class SessionStore {
       : lastSnapshot?.state ?? parsed.header.initialState
     let cursor = finalState.cursor
 
-    const externalRuntimeAlreadyQuarantined = parsed.runtimeMetadata.some((entry) =>
+    const parsedExternalRuntimeAlreadyQuarantined = parsed.runtimeMetadata.some((entry) =>
       entry.action === 'runtime.quarantined_kernel_events',
     )
     if (
       options.recoverDangling
       && agentRuntime !== 'kernel'
       && parsed.events.length > 0
-      && !externalRuntimeAlreadyQuarantined
+      && !parsedExternalRuntimeAlreadyQuarantined
     ) {
       const foreignEventCursor = parsed.events.at(-1)?.seq ?? finalState.cursor
       finalState = quarantinedExternalRuntimeState(finalState, foreignEventCursor)

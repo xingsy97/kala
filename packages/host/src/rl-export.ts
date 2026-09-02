@@ -118,7 +118,7 @@ export async function exportRolloutSegments(input: ExportSessionTraceInput): Pro
   segments: RolloutSegmentsArtifact
   sessionId: string
 }> {
-  const parsed = await readSessionLog(input.sessionLogPath)
+  const parsed = await readSessionLog(input.sessionLogPath, { allowExternalRuntime: true })
   await mkdir(input.rootDir, { recursive: true })
   const store = createArtifactStore(input.rootDir, {
     ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),

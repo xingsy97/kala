@@ -395,6 +395,7 @@ export async function startHostServer(
     toolResultPersisted: async (sessionId, callId) => {
       const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
       if (!record) return false
+      if (record.agentRuntime !== 'kernel') return false
       const parsed = await readSessionLog(record.logPath)
       return parsed.events.some((entry) => entry.event.kind === 'tool_result' && entry.event.callId === callId)
     },

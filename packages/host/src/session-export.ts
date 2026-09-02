@@ -33,7 +33,7 @@ export type ExportSessionTraceResult = {
 export async function exportSessionTraceArtifacts(
   input: ExportSessionTraceInput,
 ): Promise<ExportSessionTraceResult> {
-  const parsed = await readSessionLog(input.sessionLogPath)
+  const parsed = await readSessionLog(input.sessionLogPath, { allowExternalRuntime: true })
   await mkdir(input.rootDir, { recursive: true })
   const store = createArtifactStore(input.rootDir, {
     ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),

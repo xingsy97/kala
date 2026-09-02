@@ -115,7 +115,7 @@ export async function replayReliabilityChaos(
 }
 
 async function createSessionReliabilityAudit(sessionLogPath: string): Promise<SessionReliabilityAudit> {
-  const parsed = await readSessionLog(sessionLogPath)
+  const parsed = await readSessionLog(sessionLogPath, { allowExternalRuntime: true })
   const finalState = fold(parsed.header.initialState, parsed.events.map((entry) => entry.event), parsed.header.config)
   const recoveryDetails = recoveryEventDetails(parsed.events)
   const pendingCalls = finalState.pendingCalls.map((call) => ({

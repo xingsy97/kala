@@ -120,7 +120,7 @@ describe('Kernel Loop runtime ownership', () => {
         kind: 'user_message',
         text: 'must not enter Kernel',
       })).rejects.toThrow('Kernel Loop cannot mutate copilot session')
-      expect((await readSessionLog(record.logPath)).events).toEqual([])
+      expect((await readSessionLog(record.logPath, { allowExternalRuntime: true })).events).toEqual([])
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

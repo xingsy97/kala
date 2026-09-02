@@ -4,7 +4,19 @@
 **Storage**: `~/.agent-kernel/sessions/<iso-timestamp>_<sessionId>.jsonl`
 **Status**: Normative.
 
-The event log is the **canonical source of truth** for a session. Everything else — in-memory state, in-flight snapshots, dashboard timelines — can be reconstructed from the log. Nothing else is authoritative.
+For Kernel sessions, the event log is the **canonical source of truth** and can
+be replayed by folding every `event` entry. Everything else — in-memory state,
+in-flight snapshots, dashboard timelines — can be reconstructed from the log.
+Nothing else is authoritative.
+
+For external runtimes such as GitHub Copilot, the RunLab JSONL is a
+**projection log**, not a replay log. The external runtime owns its native
+conversation state; RunLab persists bounded snapshots, runtime metadata, and
+the stable mapping to the native Session. Online Host paths MUST NOT fully scan
+or fold an external-runtime JSONL. They must use the header, the latest snapshot,
+sidecar context snapshots, and bounded reverse metadata lookups. Full reads of
+external-runtime logs are allowed only for explicit offline export/audit code
+paths that opt in at the call site.
 
 ---
 
@@ -69,7 +81,7 @@ The header captures everything needed to reconstruct the session's initial condi
 
 ### 2.2 Event (kind: 'event')
 
-The primary entry type. One per `step()` call, in order.
+The primary entry type for Kernel sessions. One per `step()` call, in order.
 
 ```ts
 type EventEntry = {
@@ -85,6 +97,11 @@ type EventEntry = {
 ```
 
 `effects` is included for observability (dashboard timeline, debugging). Replay does **not** need `effects` — the kernel re-derives them from `(state, event, config)`. Effects in the log are a checked-in-transcript artifact; if a replay produces different effects, the kernel implementation drifted from the recorded run.
+
+External-runtime sessions MUST NOT append synthetic Kernel `event` entries for
+provider turns. Their transcript changes are projected through `snapshot` and
+`runtime_metadata` entries. If a Host detects Kernel events in an external log,
+it must quarantine the Session instead of folding those events into state.
 
 **Extended event kinds**: `event.kind` may be `messages_replaced`,
 `approval_mode_changed`, or `cwd_changed` in addition to the base v0.1 union

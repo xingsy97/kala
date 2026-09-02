@@ -18,7 +18,7 @@ export async function loadPersistedMessageQueue(
   // failed Tool result for a valid before_tool_dispatch checkpoint and advance
   // Session JSONL before planned continuation can verify its frozen cursor.
   const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
-  const entry = await findLatestRuntimeMetadata(record.logPath, ACTION)
+  const entry = await findLatestRuntimeMetadata(record.logPath, ACTION, { maxScanBytes: 64 * 1024 * 1024 })
   return entry ? normalizeQueueSnapshot(entry) : []
 }
 

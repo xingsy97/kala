@@ -4,7 +4,7 @@
  * disk for the same sessionId; `ensure()` coalesces via a per-id promise map.
  */
 
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -64,10 +64,40 @@ describe('SessionStore.ensure', () => {
     expect(reloaded.state.messages).toEqual(projected.messages)
     expect(reloaded.state.pendingCalls).toEqual([])
     expect(reloaded.state.error).toBe('Copilot turn was interrupted by a host restart')
-    const log = await readSessionLog(record.logPath)
+    const log = await readSessionLog(record.logPath, { allowExternalRuntime: true })
     expect(log.events).toHaveLength(0)
     expect(log.snapshots).toHaveLength(2)
     expect(log.runtimeMetadata.at(-1)?.action).toBe('copilot.recovered_interrupted_turn')
+  })
+
+  it.runIf(process.platform === 'linux')('loads a large Copilot projection log without summary cache or full replay', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-large-no-summary',
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: 'copilot-large-no-summary',
+      config,
+    })
+    truncateSync(record.logPath, 1_400 * 1024 * 1024)
+    appendFileSync(record.logPath, '\n', 'utf8')
+    await appendSnapshotEntry(record.logPath, 1234, {
+      ...record.state,
+      cursor: 1234,
+      status: 'done',
+      messages: [{
+        role: 'assistant',
+        content: [{ type: 'text', text: 'loaded from latest projection snapshot' }],
+      }],
+    })
+
+    const startedAt = performance.now()
+    const reloaded = await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })
+
+    expect(performance.now() - startedAt).toBeLessThan(1000)
+    expect(reloaded.state.cursor).toBe(1234)
+    expect(reloaded.state.messages.at(-1)?.content).toEqual([{ type: 'text', text: 'loaded from latest projection snapshot' }])
+    await expect(readSessionLog(record.logPath)).rejects.toThrow(/refuses to fully read external Runtime session copilot-large-no-summary/)
   })
 
   it('recovers a cached Copilot approval after read-only candidate inspection', async () => {
@@ -117,7 +147,7 @@ describe('SessionStore.ensure', () => {
       ok: false,
       content: 'host restarted while call was pending',
     })
-    const parsed = await readSessionLog(record.logPath)
+    const parsed = await readSessionLog(record.logPath, { allowExternalRuntime: true })
     expect(parsed.runtimeMetadata.filter((entry) => entry.action === 'copilot.recovered_interrupted_turn')).toHaveLength(1)
   })
 
@@ -154,7 +184,7 @@ describe('SessionStore.ensure', () => {
 
     expect(loaded.state.status).toBe('awaiting_approval')
     expect(loaded.state.pendingCalls).toHaveLength(1)
-    const parsed = await readSessionLog(record.logPath)
+    const parsed = await readSessionLog(record.logPath, { allowExternalRuntime: true })
     expect(parsed.runtimeMetadata.some((entry) => entry.action === 'copilot.recovered_interrupted_turn')).toBe(false)
   })
 
@@ -182,7 +212,7 @@ describe('SessionStore.ensure', () => {
     expect(recovered.state.status).toBe('error')
     expect(recovered.state.cursor).toBe(1)
     expect(recovered.state.error).toBe('Non-Kernel Session contained Kernel events and was quarantined')
-    const parsed = await readSessionLog(record.logPath)
+    const parsed = await readSessionLog(record.logPath, { allowExternalRuntime: true })
     expect(parsed.runtimeMetadata.at(-1)?.action).toBe('runtime.quarantined_kernel_events')
     expect(parsed.snapshots.at(-1)?.state.status).toBe('error')
   })

@@ -10,7 +10,7 @@ export async function profileSession(input: {
   sessionLogPath: string
   pricingPath?: string
 }): Promise<{ profile: SessionProfile; profilePath: string }> {
-  const parsed = await readSessionLog(input.sessionLogPath)
+  const parsed = await readSessionLog(input.sessionLogPath, { allowExternalRuntime: true })
   const pricing = input.pricingPath
     ? JSON.parse(await readFile(input.pricingPath, 'utf8')) as PricingTable
     : undefined

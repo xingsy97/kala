@@ -344,9 +344,66 @@ export type ParsedHistory = {
   runtimeMetadata: RuntimeMetadataEntry[]
 }
 
+export type FullSessionReadOptions = {
+  allowExternalRuntime?: boolean
+}
+
+async function assertFullSessionReadAllowed(
+  path: string,
+  options: FullSessionReadOptions | undefined,
+  api: string,
+): Promise<void> {
+  if (options?.allowExternalRuntime) return
+  let header: HeaderEntry
+  try {
+    header = await readSessionHeader(path)
+  } catch {
+    return
+  }
+  if ((header.agentRuntime ?? 'kernel') === 'kernel') return
+  throw new Error(`${api} refuses to fully read external Runtime session ${header.sessionId}; use header/snapshot/bounded metadata readers or explicitly opt in for offline export`)
+}
+
 export type SessionOperationMatch =
   | { kind: 'event'; cursor: number }
   | { kind: 'runtime_metadata' }
+
+export async function findLatestEventEntry(
+  path: string,
+  options: { maxScanBytes?: number } = {},
+): Promise<EventEntry | undefined> {
+  const handle = await open(path, 'r')
+  const needle = Buffer.from('"kind":"event"')
+  const chunkSize = 4 * 1024 * 1024
+  let carry = Buffer.alloc(0)
+  try {
+    const stat = await handle.stat()
+    let end = stat.size
+    const minimumOffset = options.maxScanBytes === undefined
+      ? 0
+      : Math.max(0, stat.size - options.maxScanBytes)
+    while (end > minimumOffset) {
+      const start = Math.max(minimumOffset, end - chunkSize)
+      const chunk = Buffer.allocUnsafe(end - start)
+      await handle.read(chunk, 0, chunk.length, start)
+      const data = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk
+      let match = data.lastIndexOf(needle)
+      while (match >= 0 && match < chunk.length) {
+        const line = await readLineContaining(handle, start + match, stat.size)
+        if (line.startsWith('{"kind":"event"')) {
+          const entry = JSON.parse(line) as LogEntry
+          if (entry.kind === 'event' && Number.isSafeInteger(entry.seq) && entry.seq > 0) return entry
+        }
+        match = data.lastIndexOf(needle, match - 1)
+      }
+      carry = chunk.subarray(0, Math.min(needle.length - 1, chunk.length))
+      end = start
+    }
+  } finally {
+    await handle.close()
+  }
+  return undefined
+}
 
 export async function findSessionOperation(
   path: string,
@@ -437,6 +494,7 @@ async function readLineContaining(
 export async function findLatestRuntimeMetadata(
   path: string,
   action: string,
+  options: { maxScanBytes?: number } = {},
 ): Promise<RuntimeMetadataEntry | undefined> {
   if (!action) throw new Error('runtime metadata action is required')
   const handle = await open(path, 'r')
@@ -446,8 +504,11 @@ export async function findLatestRuntimeMetadata(
   try {
     const stat = await handle.stat()
     let end = stat.size
-    while (end > 0) {
-      const start = Math.max(0, end - chunkSize)
+    const minimumOffset = options.maxScanBytes === undefined
+      ? 0
+      : Math.max(0, stat.size - options.maxScanBytes)
+    while (end > minimumOffset) {
+      const start = Math.max(minimumOffset, end - chunkSize)
       const chunk = Buffer.allocUnsafe(end - start)
       await handle.read(chunk, 0, chunk.length, start)
       const data = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk
@@ -469,7 +530,8 @@ export async function findLatestRuntimeMetadata(
   }
 }
 
-export async function readSessionHistory(path: string): Promise<ParsedHistory> {
+export async function readSessionHistory(path: string, options?: FullSessionReadOptions): Promise<ParsedHistory> {
+  await assertFullSessionReadAllowed(path, options, 'readSessionHistory')
   const input = createReadStream(path, { encoding: 'utf8' })
   const rl = createInterface({ input, crlfDelay: Infinity })
   let header: HeaderEntry | undefined
@@ -503,7 +565,8 @@ export async function readSessionHistory(path: string): Promise<ParsedHistory> {
   return { events, runtimeMetadata }
 }
 
-export async function readSessionState(path: string): Promise<ParsedLog> {
+export async function readSessionState(path: string, options?: FullSessionReadOptions): Promise<ParsedLog> {
+  await assertFullSessionReadAllowed(path, options, 'readSessionState')
   const entries: LogEntry[] = []
   const warnings: string[] = []
   const endsWithNewline = await fileEndsWithNewline(path)
@@ -570,7 +633,8 @@ export async function readLastSessionSnapshot(path: string): Promise<SnapshotEnt
   }
 }
 
-export async function readSessionLog(path: string): Promise<ParsedLog> {
+export async function readSessionLog(path: string, options?: FullSessionReadOptions): Promise<ParsedLog> {
+  await assertFullSessionReadAllowed(path, options, 'readSessionLog')
   const entries: LogEntry[] = []
   const warnings: string[] = []
   const endsWithNewline = await fileEndsWithNewline(path)

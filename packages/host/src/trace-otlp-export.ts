@@ -52,7 +52,7 @@ export type TraceExportOtlpResult = {
 export async function exportTraceOtlp(
   input: TraceExportOtlpInput,
 ): Promise<TraceExportOtlpResult> {
-  const parsed = await readSessionLog(input.sessionLogPath)
+  const parsed = await readSessionLog(input.sessionLogPath, { allowExternalRuntime: true })
   const spans = exportSessionSpans({
     header: parsed.header,
     events: parsed.events,

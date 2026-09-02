@@ -37,7 +37,7 @@ export async function exportSubAgentGraph(
     for (const file of files) {
       const path = join(input.sessionsDir, file)
       try {
-        const parsed = await readSessionLog(path)
+        const parsed = await readSessionLog(path, { allowExternalRuntime: true })
         nodes.push({
           sessionId: parsed.header.sessionId,
           ...(parsed.header.parentSessionId ? { parentSessionId: parsed.header.parentSessionId } : {}),

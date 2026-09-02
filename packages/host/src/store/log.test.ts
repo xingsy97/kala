@@ -90,7 +90,8 @@ describe('readSessionLog', () => {
     await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 2, ts: new Date().toISOString(), state: { ...initialState, cursor: 2, messages: [{ role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(1_000_000) }] }] } })}\n`, 'utf8')
     await appendRuntimeMetadataEntry(path, { sessionId: 'external', action: 'test', payload: { ok: true } })
 
-    const parsed = await readSessionHistory(path)
+    await expect(readSessionHistory(path)).rejects.toThrow(/refuses to fully read external Runtime session external/)
+    const parsed = await readSessionHistory(path, { allowExternalRuntime: true })
 
     expect(parsed.events.map((entry) => entry.event.kind)).toEqual(['user_message'])
     expect(parsed.runtimeMetadata.map((entry) => entry.action)).toEqual(['test'])
@@ -102,7 +103,8 @@ describe('readSessionLog', () => {
     await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 1, ts: new Date().toISOString(), state: { ...initialState, cursor: 1, status: 'thinking' } })}\n`, 'utf8')
     await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 2, ts: new Date().toISOString(), state: { ...initialState, cursor: 2, status: 'done' } })}\n`, 'utf8')
 
-    const parsed = await readSessionState(path)
+    await expect(readSessionState(path)).rejects.toThrow(/refuses to fully read external Runtime session external/)
+    const parsed = await readSessionState(path, { allowExternalRuntime: true })
 
     expect(parsed.snapshots).toHaveLength(1)
     expect(parsed.snapshots[0]?.seq).toBe(2)
