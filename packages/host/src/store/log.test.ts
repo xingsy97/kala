@@ -8,7 +8,7 @@
  */
 
 import { mkdtempSync, readlinkSync, readdirSync, rmSync } from 'node:fs'
-import { appendFile, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -18,6 +18,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import {
   appendEventEntry,
   appendRuntimeMetadataEntry,
+  findLatestRuntimeMetadata,
   findSessionOperation,
   readSessionHistory,
   readSessionHeader,
@@ -384,5 +385,44 @@ describe('readSessionLog', () => {
     await expect(findSessionOperation(path, 'runtime-operation')).resolves.toEqual({ kind: 'runtime_metadata' })
     await expect(findSessionOperation(path, 'event-operation')).resolves.toEqual({ kind: 'event', cursor: 7 })
     await expect(findSessionOperation(path, 'missing-operation')).resolves.toBeUndefined()
+  })
+
+  it('finds the latest matching runtime metadata without parsing older malformed entries', async () => {
+    const path = join(dir, 'latest-runtime-metadata.jsonl')
+    await writeHeader({ path, sessionId: 'latest-runtime-metadata', config, initialState })
+    await appendFile(path, '{"kind":"runtime_metadata","action":"message_queue_snapshot",malformed\n', 'utf8')
+    await appendRuntimeMetadataEntry(path, {
+      sessionId: 'latest-runtime-metadata',
+      action: 'message_queue_snapshot',
+      payload: { schemaVersion: 1, items: [{ id: 'latest' }] },
+    })
+
+    await expect(findLatestRuntimeMetadata(path, 'message_queue_snapshot')).resolves.toMatchObject({
+      action: 'message_queue_snapshot',
+      payload: { items: [{ id: 'latest' }] },
+    })
+  })
+
+  it('keeps queue and operation lookups bounded on a 1.4 GiB Session log', async () => {
+    const path = join(dir, 'large-session.jsonl')
+    await writeHeader({ path, sessionId: 'large-session', config, initialState })
+    await truncate(path, 1_400 * 1024 * 1024)
+    await appendFile(path, '\n', 'utf8')
+    await appendRuntimeMetadataEntry(path, {
+      sessionId: 'large-session',
+      action: 'message_queue_snapshot',
+      payload: { schemaVersion: 1, items: [] },
+    })
+
+    const startedAt = performance.now()
+    await expect(findLatestRuntimeMetadata(path, 'message_queue_snapshot')).resolves.toMatchObject({
+      action: 'message_queue_snapshot',
+    })
+    await expect(findSessionOperation(
+      path,
+      '00000000-0000-4000-8000-000000000000',
+      { maxScanBytes: 64 * 1024 * 1024 },
+    )).resolves.toBeUndefined()
+    expect(performance.now() - startedAt).toBeLessThan(5_000)
   })
 })

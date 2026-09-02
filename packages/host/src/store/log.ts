@@ -351,6 +351,7 @@ export type SessionOperationMatch =
 export async function findSessionOperation(
   path: string,
   operationId: string,
+  options: { maxScanBytes?: number } = {},
 ): Promise<SessionOperationMatch | undefined> {
   const handle = await open(path, 'r')
   const needle = Buffer.from(operationId)
@@ -359,8 +360,11 @@ export async function findSessionOperation(
   try {
     const stat = await handle.stat()
     let end = stat.size
-    while (end > 0) {
-      const start = Math.max(0, end - chunkSize)
+    const minimumOffset = options.maxScanBytes === undefined
+      ? 0
+      : Math.max(0, stat.size - options.maxScanBytes)
+    while (end > minimumOffset) {
+      const start = Math.max(minimumOffset, end - chunkSize)
       const chunk = Buffer.allocUnsafe(end - start)
       await handle.read(chunk, 0, chunk.length, start)
       const data = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk
@@ -428,6 +432,41 @@ async function readLineContaining(
   const line = Buffer.allocUnsafe(lineEnd - lineStart)
   await handle.read(line, 0, line.length, lineStart)
   return line.toString('utf8')
+}
+
+export async function findLatestRuntimeMetadata(
+  path: string,
+  action: string,
+): Promise<RuntimeMetadataEntry | undefined> {
+  if (!action) throw new Error('runtime metadata action is required')
+  const handle = await open(path, 'r')
+  const needle = Buffer.from(`"action":${JSON.stringify(action)}`)
+  const chunkSize = 4 * 1024 * 1024
+  let carry = Buffer.alloc(0)
+  try {
+    const stat = await handle.stat()
+    let end = stat.size
+    while (end > 0) {
+      const start = Math.max(0, end - chunkSize)
+      const chunk = Buffer.allocUnsafe(end - start)
+      await handle.read(chunk, 0, chunk.length, start)
+      const data = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk
+      let match = data.lastIndexOf(needle)
+      while (match >= 0 && match < chunk.length) {
+        const line = await readLineContaining(handle, start + match, stat.size)
+        if (line.startsWith('{"kind":"runtime_metadata"')) {
+          const entry = JSON.parse(line) as LogEntry
+          if (entry.kind === 'runtime_metadata' && entry.action === action) return entry
+        }
+        match = data.lastIndexOf(needle, match - 1)
+      }
+      carry = chunk.subarray(0, Math.min(needle.length - 1, chunk.length))
+      end = start
+    }
+    return undefined
+  } finally {
+    await handle.close()
+  }
 }
 
 export async function readSessionHistory(path: string): Promise<ParsedHistory> {

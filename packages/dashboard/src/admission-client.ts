@@ -147,7 +147,7 @@ export async function admitUserMessage(input: {
       // Portable mode commits in-process and has no durable Ingress ledger.
       // Platform mode returns a positive route generation and must prove the
       // accepted operation reached Session JSONL before the UI calls it done.
-      if (accepted.state !== 'committed' && accepted.routeGeneration > 0) {
+      if (input.mode !== 'queue' && accepted.state !== 'committed' && accepted.routeGeneration > 0) {
         await waitForAdmissionDelivery({
           host: input.host, token: input.token, operationId,
           timeoutMs: input.deliveryTimeoutMs ?? 15_000,

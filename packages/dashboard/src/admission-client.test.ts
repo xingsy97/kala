@@ -169,6 +169,29 @@ describe('admitUserMessage', () => {
     ])
   })
 
+  it('treats a durably accepted queue message as queued without waiting for turn completion', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        accepted: true,
+        duplicate: false,
+        operationId: 'operation-queued',
+        sequence: 10,
+        state: 'pending',
+        routeGeneration: 5,
+      }), { status: 202 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(admitUserMessage({
+      host: '',
+      sessionId: 'session-1',
+      operationId: 'operation-queued',
+      text: 'later',
+      mode: 'queue',
+      deliveryTimeoutMs: 1,
+    })).resolves.toMatchObject({ accepted: true, state: 'pending' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('surfaces a durable pending error instead of silently treating HTTP 202 as delivery', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true, duplicate: false, operationId: 'operation-0004', sequence: 10, state: 'pending', routeGeneration: 5 }), { status: 202 }))

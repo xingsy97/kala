@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -70,8 +70,17 @@ describe('durable message queue metadata', () => {
       createdAt: new Date().toISOString(),
       content: [file],
     }])
+    appendFileSync(record.logPath, '{"kind":"runtime_metadata","action":"older","malformed"\n', 'utf8')
+    await persistMessageQueueSnapshot(store, record.sessionId, [{
+      id: 'queue-file',
+      operationId: 'operation-file',
+      text: '',
+      mode: 'queue',
+      createdAt: new Date().toISOString(),
+      content: [file],
+    }])
 
-    await expect(loadPersistedMessageQueue(new SessionStore(root), record.sessionId)).resolves.toEqual([
+    await expect(loadPersistedMessageQueue(store, record.sessionId)).resolves.toEqual([
       expect.objectContaining({ id: 'queue-file', text: '', content: [file] }),
     ])
   })

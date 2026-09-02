@@ -829,7 +829,11 @@ export async function startHostServer(
   ): Promise<number | undefined> {
     const record = sessionStore.get(sessionId)
     if (!record) return undefined
-    const operation = await findSessionOperation(record.logPath, operationId)
+    const operation = await findSessionOperation(
+      record.logPath,
+      operationId,
+      record.agentRuntime === 'kernel' ? {} : { maxScanBytes: 64 * 1024 * 1024 },
+    )
     if (operation?.kind === 'event') return operation.cursor
     return operation?.kind === 'runtime_metadata' ? record.state.cursor : undefined
   }

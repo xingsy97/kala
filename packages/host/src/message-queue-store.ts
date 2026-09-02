@@ -2,7 +2,7 @@ import type { MessageContent } from '@agent-kernel/kernel'
 import { schema, type RuntimeMetadataEntry } from '@agent-kernel/shared'
 
 import type { SessionStore } from './store/session.js'
-import { appendRuntimeMetadataEntry, readSessionLog } from './store/log.js'
+import { appendRuntimeMetadataEntry, findLatestRuntimeMetadata } from './store/log.js'
 import type { QueuedUserMessage } from './connection/dashboard-ns.js'
 
 const ACTION = 'message_queue_snapshot'
@@ -18,13 +18,8 @@ export async function loadPersistedMessageQueue(
   // failed Tool result for a valid before_tool_dispatch checkpoint and advance
   // Session JSONL before planned continuation can verify its frozen cursor.
   const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
-  const parsed = await readSessionLog(record.logPath)
-  for (let i = parsed.runtimeMetadata.length - 1; i >= 0; i--) {
-    const entry = parsed.runtimeMetadata[i]
-    if (!entry || entry.action !== ACTION) continue
-    return normalizeQueueSnapshot(entry)
-  }
-  return []
+  const entry = await findLatestRuntimeMetadata(record.logPath, ACTION)
+  return entry ? normalizeQueueSnapshot(entry) : []
 }
 
 export async function persistMessageQueueSnapshot(

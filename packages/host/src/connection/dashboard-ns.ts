@@ -417,6 +417,10 @@ export function configureDashboardNamespace(
       try {
         let target: SessionRecord | undefined = deps.store.get(p.sessionId)
         if (!target) target = await deps.store.load(p.sessionId, { recoverDangling: false })
+        if (target.agentRuntime !== 'kernel') {
+          socket.emit('server:log_artifact', { sessionId: p.sessionId, seq: p.seq, error: 'event not found' })
+          return
+        }
         const parsed = await readSessionLog(target.logPath)
         const entry = parsed.events.find((e) => e.seq === p.seq)
         if (!entry) {
