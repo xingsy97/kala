@@ -209,7 +209,7 @@ export function DocsPage(): JSX.Element {
         <div className="p-4 text-xs text-muted-foreground" role={loadingContent ? 'status' : undefined} aria-live={loadingContent ? 'polite' : undefined}>{loadingContent ? t('docs.page.loading') : t('docs.page.select')}</div>
       ) : null}
       {content ? (
-        <article className="mx-auto max-w-5xl px-4 py-4 sm:px-6 sm:py-5">
+        <article className="mx-auto max-w-[88rem] px-4 py-4 sm:px-6 sm:py-5">
           <div className="mb-4 border-b border-border/60 pb-3">
             <div className="break-all font-mono text-[11px] text-muted-foreground">{content.path}</div>
             <div className="text-[11px] text-muted-foreground">{t('docs.page.updated', { value: new Date(content.updatedAt).toLocaleString() })}</div>
@@ -241,18 +241,20 @@ export function DocsPage(): JSX.Element {
         <p className="text-xs text-muted-foreground">{t('docs.page.subtitle')}</p>
       </header>
       {wideLayout ? (
-        <ResizablePanelGroup direction="horizontal" autoSaveId="ak-docs-cols-v1" className="min-h-0 flex-1">
+        <ResizablePanelGroup direction="horizontal" dir="ltr" autoSaveId="ak-docs-cols-v2" className="min-h-0 flex-1">
           <ResizablePanel
+            id="docs-sidebar"
+            order={1}
             defaultSize={20}
-            minSize={17}
-            maxSize={30}
-            className="min-w-[240px] bg-muted/20"
+            minSize={14}
+            maxSize={38}
+            className="min-w-[220px] bg-muted/20"
             data-testid="docs-sidebar-panel"
           >
             {sidebar}
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={80} minSize={70} data-testid="docs-content-panel">
+          <ResizablePanel id="docs-content-panel" order={2} defaultSize={80} minSize={62} data-testid="docs-content-panel">
             {contentView}
           </ResizablePanel>
         </ResizablePanelGroup>

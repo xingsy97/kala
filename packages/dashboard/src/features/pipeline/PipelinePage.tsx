@@ -74,7 +74,7 @@ export function PipelinePage(): JSX.Element {
       <ProductPageBody className="flex min-h-0 flex-col">
         <ProductPanel className="relative">
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-testid="pipeline-scroll-body">
-            <div className="mx-auto flex min-h-full max-w-4xl items-center justify-center px-4 py-6 sm:px-8 sm:py-10">
+            <div className="mx-auto flex min-h-full w-full max-w-[88rem] items-center justify-center px-4 py-6 sm:px-8 sm:py-10">
           {current.kind === 'step' ? (
             <StepSlide step={current.step} index={current.index} total={current.total} whereToLook={t('pipeline.whereToLook')} />
           ) : (
@@ -129,7 +129,7 @@ function StepSlide({
 }): JSX.Element {
   return (
     <article
-      className="w-full max-w-2xl"
+      className="w-full max-w-4xl"
       data-testid="pipeline-slide-step"
       data-step-index={index}
     >
@@ -153,7 +153,7 @@ function StepSlide({
 function PrinciplesSlide({ t }: { t: TFunction }): JSX.Element {
   const keys = ['coreBoundary', 'replayFirst', 'teaching'] as const
   return (
-    <article className="w-full max-w-3xl" data-testid="pipeline-slide-principles">
+    <article className="w-full max-w-5xl" data-testid="pipeline-slide-principles">
       <div className="font-mono text-sm font-medium uppercase tracking-wider text-muted-foreground">
         {t('pipeline.principlesLabel')}
       </div>

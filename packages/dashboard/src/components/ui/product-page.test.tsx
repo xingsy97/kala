@@ -24,4 +24,10 @@ describe('product page primitives', () => {
     expect(screen.getByTestId('panel').className).toContain('hidden')
     expect(screen.getByText('Preserved state')).toBeTruthy()
   })
+
+  it('can hide the product eyebrow for focused pages', () => {
+    render(<ProductPageHeader eyebrow={null} title="Memo" titleTestId="memo-title" />)
+    expect(screen.getByTestId('memo-title').textContent).toBe('Memo')
+    expect(screen.queryByText('Agent RunLab')).toBeNull()
+  })
 })

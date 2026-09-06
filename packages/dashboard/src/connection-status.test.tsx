@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ConnectionStatus } from './app.js'
 
@@ -30,6 +30,10 @@ function timedOutSocket() {
 }
 
 describe('ConnectionStatus', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('presents the complete Device to Service to Executor RTT as the headline', async () => {
     const socket = socketWithRtt()
     render(<ConnectionStatus socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
@@ -69,5 +73,26 @@ describe('ConnectionStatus', () => {
     fireEvent.click(screen.getByTestId('connection-status'))
     expect(screen.getAllByText('Timed out')).toHaveLength(2)
     expect(screen.getAllByText('Connection issue').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('keeps a rolling 10 minute curve instead of only the latest measurement', async () => {
+    let wallClock = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => wallClock)
+    const socket = socketWithRtt(10, 20)
+
+    render(<ConnectionStatus socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
+
+    await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('30 ms'))
+    fireEvent.click(screen.getByTestId('connection-status'))
+    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('2'))
+    expect(screen.getByText('Last 10 minutes')).toBeTruthy()
+
+    wallClock = 9 * 60 * 1000
+    fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
+    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('3'))
+
+    wallClock = 20 * 60 * 1000
+    fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
+    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('1'))
   })
 })

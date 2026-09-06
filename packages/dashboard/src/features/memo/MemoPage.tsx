@@ -55,12 +55,12 @@ export function MemoPage(): JSX.Element {
   }
 
   return <ProductPage testId="memo-page" className="overflow-hidden">
-    <ProductPageHeader title={t('memo.title')} description={t('memo.subtitle')} actions={<div className="inline-flex min-h-8 items-center gap-2 rounded-full bg-muted/70 px-3 text-xs text-muted-foreground">
+    <ProductPageHeader eyebrow={null} title={t('memo.title')} actions={<div className="inline-flex min-h-8 items-center gap-2 rounded-full bg-muted/70 px-3 text-xs text-muted-foreground">
         {status === 'saving' || status === 'loading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
         <span>{t(`memo.status.${status}`)}</span>
         {status === 'conflict' ? <Button size="sm" variant="outline" onClick={() => void load()}>{t('memo.reload')}</Button> : null}
       </div>} />
-    <ProductPageBody className="flex min-h-0 max-w-5xl flex-col">
+    <ProductPageBody className="flex min-h-0 flex-col">
       <ProductPanel>
       <div className="flex flex-none items-center gap-2 border-b border-border/35 px-3 py-2 sm:px-4">
         <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(event) => void insertImages(event.target.files)} />
