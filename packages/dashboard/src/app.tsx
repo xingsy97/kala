@@ -2612,15 +2612,14 @@ export function NoSessionArea({
             : t('app.noSessionEmpty')}
         </p>
         <div className="flex flex-wrap justify-center gap-2">
+          <Button type="button" onClick={() => onNewSession()} data-testid="no-session-new-button">
+            {hasWorkspace ? t('app.newSessionButton') : t('dialogs.simpleChat')}
+          </Button>
           {!hasWorkspace && onConnectWorkspace ? (
-            <Button type="button" onClick={onConnectWorkspace} data-testid="no-session-connect-workspace">
+            <Button type="button" variant="outline" onClick={onConnectWorkspace} data-testid="no-session-connect-workspace">
               {t('app.connectFirstWorkspace')}
             </Button>
-          ) : (
-            <Button type="button" onClick={() => onNewSession()} data-testid="no-session-new-button">
-              {t('app.newSessionButton')}
-            </Button>
-          )}
+          ) : null}
           <Button type="button" variant="outline" asChild>
             <a href="#/docs">{t('app.viewSetupGuide')}</a>
           </Button>
@@ -2963,10 +2962,10 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
   const height = 72
   const start = now - CONNECTION_HEALTH_WINDOW_MS
   const recent = samples.filter((sample) => sample.at >= start)
-  const values = recent.flatMap((sample) => [sample.hostRttMs, sample.executorRttMs]).filter((value): value is number => typeof value === 'number')
-  const max = Math.max(50, ...values)
-  const hostPoints = sparklinePoints(recent, (sample) => sample.hostRttMs, start, max, width, height)
-  const executorPoints = sparklinePoints(recent, (sample) => sample.executorRttMs, start, max, width, height)
+  const hostMax = latencyMax(recent, (sample) => sample.hostRttMs)
+  const executorMax = latencyMax(recent, (sample) => sample.executorRttMs)
+  const hostPoints = sparklinePoints(recent, (sample) => sample.hostRttMs, start, hostMax, width, height)
+  const executorPoints = sparklinePoints(recent, (sample) => sample.executorRttMs, start, executorMax, width, height)
   const failures = recent.filter((sample) => !sample.hostOk || !sample.executorOk)
 
   return (
@@ -2983,14 +2982,18 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('connectionHealth.historyAria')} className="h-20 w-full overflow-visible">
         <line x1="0" y1={height - 8} x2={width} y2={height - 8} className="stroke-border" strokeWidth="1" />
-        {hostPoints ? <polyline points={hostPoints} fill="none" className="stroke-primary" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /> : null}
-        {executorPoints ? <polyline points={executorPoints} fill="none" className="stroke-sky-400" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /> : null}
+        {hostPoints ? <polyline points={hostPoints} fill="none" className="stroke-primary" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="connection-health-host-line" /> : null}
+        {executorPoints ? <polyline points={executorPoints} fill="none" className="stroke-sky-400" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="connection-health-executor-line" /> : null}
         {failures.map((sample, index) => (
           <circle key={`${sample.at}:${index}`} cx={scaleHealthX(sample.at, start, width)} cy={height - 8} r="3" className="fill-rose-500" />
         ))}
       </svg>
     </div>
   )
+}
+
+function latencyMax(samples: readonly ConnectionHealthSample[], select: (sample: ConnectionHealthSample) => number | null): number {
+  return Math.max(50, ...samples.map(select).filter((value): value is number => typeof value === 'number'))
 }
 
 function sparklinePoints(samples: readonly ConnectionHealthSample[], select: (sample: ConnectionHealthSample) => number | null, start: number, max: number, width: number, height: number): string | null {
@@ -3011,7 +3014,14 @@ function scaleHealthX(at: number, start: number, width: number): number {
 }
 
 function HealthRow({ label, state, tone, latency, measuring = false, measuringLabel }: { label: string; state: string; tone: 'healthy' | 'failed' | 'pending'; latency?: number | null; measuring?: boolean; measuringLabel: string }): JSX.Element {
-  return <div className="flex min-h-12 items-center gap-3 py-2.5"><span className={cn('h-2 w-2 flex-none rounded-full', tone === 'healthy' ? 'bg-emerald-500' : tone === 'failed' ? 'bg-rose-500' : 'bg-amber-500')} /><div className="min-w-0 flex-1"><p className="font-medium text-foreground">{label}</p><p className="truncate text-[11px] text-muted-foreground">{measuring ? measuringLabel : state}</p></div>{latency !== null && latency !== undefined ? <span className="font-mono text-xs tabular-nums text-foreground">{latency} ms</span> : null}</div>
+  return (
+    <div className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2 py-1.5">
+      <span className={cn('h-2 w-2 rounded-full', tone === 'healthy' ? 'bg-emerald-500' : tone === 'failed' ? 'bg-rose-500' : 'bg-amber-500')} />
+      <span className="min-w-0 truncate font-medium text-foreground">{label}</span>
+      <span className="min-w-0 truncate text-[11px] text-muted-foreground">{measuring ? measuringLabel : state}</span>
+      {latency !== null && latency !== undefined ? <span className="font-mono text-xs tabular-nums text-foreground">{latency} ms</span> : null}
+    </div>
+  )
 }
 
 function hostStatusLabel(status: string, t: ReturnType<typeof useTranslation>['t']): string {

@@ -161,6 +161,19 @@ describe('NoSessionArea', () => {
     expect(onNewSession).toHaveBeenCalledTimes(1)
     expect(onNewSession).toHaveBeenCalledWith()
   })
+
+  it('keeps a simple chat entry available before any workspace is connected', () => {
+    const onNewSession = vi.fn()
+    const onConnectWorkspace = vi.fn()
+    render(<NoSessionArea onNewSession={onNewSession} onConnectWorkspace={onConnectWorkspace} hasSessions={false} hasWorkspace={false} />)
+
+    fireEvent.click(screen.getByTestId('no-session-new-button'))
+
+    expect(screen.getByTestId('no-session-new-button').textContent).toBe('New chat')
+    expect(screen.getByTestId('no-session-connect-workspace')).toBeTruthy()
+    expect(onNewSession).toHaveBeenCalledTimes(1)
+    expect(onConnectWorkspace).not.toHaveBeenCalled()
+  })
 })
 
 describe('deriveSelectedSessionActivity', () => {

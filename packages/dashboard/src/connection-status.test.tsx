@@ -20,6 +20,31 @@ function socketWithRtt(hostRttMs = 12, executorRttMs: number | null = 34) {
   }
 }
 
+function socketWithRttSeries(hostRtts: readonly number[], executorRtts: readonly number[]) {
+  let performanceNow = 0
+  let hostIndex = 0
+  let executorIndex = 0
+  vi.spyOn(performance, 'now').mockImplementation(() => performanceNow)
+  return {
+    connected: true,
+    timeout: vi.fn(() => ({
+      emit: (event: string, _arg: unknown, callback: (...args: unknown[]) => void) => {
+        if (event === 'client:connection_ping') {
+          const next = hostRtts[Math.min(hostIndex, hostRtts.length - 1)] ?? 0
+          hostIndex += 1
+          performanceNow += next
+          callback(null)
+        }
+        if (event === 'client:executor_ping') {
+          const next = executorRtts[Math.min(executorIndex, executorRtts.length - 1)] ?? 0
+          executorIndex += 1
+          callback(null, { rttMs: next })
+        }
+      },
+    })),
+  }
+}
+
 function timedOutSocket() {
   return {
     connected: true,
@@ -94,5 +119,23 @@ describe('ConnectionStatus', () => {
     wallClock = 20 * 60 * 1000
     fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
     await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('1'))
+  })
+
+  it('normalizes host and executor curves independently', async () => {
+    let wallClock = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => wallClock)
+    const socket = socketWithRttSeries([100, 200, 300], [1000, 2000, 3000])
+
+    render(<ConnectionStatus socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
+
+    await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('1100 ms'))
+    fireEvent.click(screen.getByTestId('connection-status'))
+    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('2'))
+
+    wallClock = 30_000
+    fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
+    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('3'))
+
+    expect(screen.getByTestId('connection-health-host-line').getAttribute('points')).toBe(screen.getByTestId('connection-health-executor-line').getAttribute('points'))
   })
 })
