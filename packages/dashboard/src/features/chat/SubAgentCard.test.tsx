@@ -547,7 +547,7 @@ describe('ChatPanel sub-agent dispatch', () => {
       />,
     )
     const grouped = screen.getByTestId(`sub-agent-group-${group.firstCallId}`)
-    expect(grouped.className).not.toContain('grid')
+    expect(screen.getByTestId(`sub-agent-group-grid-${group.firstCallId}`).className).toContain('grid')
     expect(grouped.textContent).toContain('Subagents')
     expect(screen.getByTestId('sub-agent-row-c1')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-row-c2')).toBeTruthy()

@@ -58,19 +58,20 @@ export function SubAgentCard(props: Props): JSX.Element {
   if (calls.length >= 2) {
     return (
       <div
-        className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-background/50"
+        className="min-w-0 overflow-hidden rounded-xl border border-violet-200/60 bg-violet-50/20 p-2 dark:border-violet-500/30 dark:bg-violet-950/10"
         data-testid={`sub-agent-group-${props.group.firstCallId}`}
       >
-        <div className="flex min-h-10 items-center gap-2 border-b border-border/50 px-3 py-2">
+        <div className="mb-2 flex min-h-8 items-center gap-2 px-1">
           <Workflow className="h-4 w-4 flex-none text-violet-600 dark:text-violet-300" aria-hidden="true" />
           <span className="text-sm font-medium text-foreground">{t('chat.subAgent.groupLabel')}</span>
-          <span className="text-xs text-muted-foreground">{calls.length}</span>
+          <span className="rounded-full bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/40">{calls.length}</span>
         </div>
-        <div className="divide-y divide-border/40">
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-2" data-testid={`sub-agent-group-grid-${props.group.firstCallId}`}>
           {calls.map((call) => (
             <SubAgentRow
               key={call.callId}
               grouped
+              compact
               call={call}
               parentSessionId={props.parentSessionId}
               socket={props.socket}
@@ -242,7 +243,7 @@ const SubAgentRow = memo(function SubAgentRow({
             : status === 'running'
               ? 'border-sky-300/50 bg-sky-50/40 dark:border-sky-500/40 dark:bg-sky-950/20'
               : 'border-border/60 bg-muted/40',
-        grouped && 'rounded-none border-0 bg-transparent',
+        grouped && 'bg-background/80 shadow-sm',
       )}
       data-testid={`sub-agent-row-${call.callId}`}
       data-sub-agent-status={status}
@@ -251,7 +252,7 @@ const SubAgentRow = memo(function SubAgentRow({
         <button
           type="button"
           onClick={() => withViewTransition(() => setOpen((v) => !v))}
-          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left"
+          className={cn('flex min-w-0 flex-1 items-center gap-2 text-left', compact ? 'px-2 py-2' : 'px-3 py-2.5')}
           data-testid={`sub-agent-toggle-${call.callId}`}
         >
           {open ? (
@@ -260,15 +261,15 @@ const SubAgentRow = memo(function SubAgentRow({
             <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           )}
           <StatusIcon status={status} />
-          <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+          <span className={cn('flex-none rounded bg-background/80 px-1.5 py-0.5 font-medium text-muted-foreground', compact ? 'text-[10px]' : 'text-xs')}>
             {t('chat.subAgent.label')}
           </span>
           {agentType ? (
-            <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 text-xs">
+            <span className={cn('flex-none rounded bg-background/80 px-1.5 py-0.5', compact ? 'text-[10px]' : 'text-xs')}>
               {agentType}
             </span>
           ) : null}
-          <span className="min-w-0 flex-1 truncate text-sm text-foreground/85 [overflow-wrap:anywhere]">
+          <span className={cn('min-w-0 flex-1 truncate text-foreground/85 [overflow-wrap:anywhere]', compact ? 'text-xs' : 'text-sm')}>
             {prompt ?? t('chat.subAgent.noPrompt')}
           </span>
           {model ? (
@@ -300,7 +301,7 @@ const SubAgentRow = memo(function SubAgentRow({
             <Square className="h-3 w-3" aria-hidden="true" />
           </button>
         ) : null}
-        <div className="pr-3">
+        <div className={cn(compact ? 'pr-2' : 'pr-3')}>
           <StatusBadge status={status} turns={turns} durationMs={totalMs} />
         </div>
       </div>
