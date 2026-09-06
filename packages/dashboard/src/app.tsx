@@ -1754,16 +1754,18 @@ export function App(): JSX.Element {
           <MemoPage />
         </Suspense>
       ) : (
-      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5" className="min-w-0 max-w-full overflow-hidden">
+      <ResizablePanelGroup direction="horizontal" dir="ltr" autoSaveId="ak-outer-cols-v6" className="min-w-0 max-w-full overflow-hidden">
         {wideLayout && runtimeCapabilities.workspace ? (
           <>
             {explorerOpen ? (
               <>
                 <ResizablePanel
+                  id="explorer"
+                  order={1}
                   defaultSize={20}
-                  minSize={17}
-                  maxSize={22}
-                  className="min-w-[264px] bg-transparent text-sidebar-foreground"
+                  minSize={12}
+                  maxSize={45}
+                  className="min-w-[220px] bg-transparent text-sidebar-foreground"
                   data-testid="explorer-panel"
                 >
                   <div className="ak-motion-slide-left h-full min-h-0 p-3 pr-1">
@@ -1779,14 +1781,16 @@ export function App(): JSX.Element {
                     </div>
                   </div>
                 </ResizablePanel>
-                <ResizableHandle className="w-1.5 bg-transparent after:w-2 hover:bg-transparent focus-visible:bg-transparent [&>div]:opacity-0" />
+                <ResizableHandle id="explorer-resize-handle" className="w-1.5 bg-transparent after:w-2 hover:bg-transparent focus-visible:bg-transparent [&>div]:opacity-0" />
               </>
             ) : null}
           </>
         ) : null}
         <ResizablePanel
+          id="workbench"
+          order={2}
           defaultSize={wideLayout && explorerOpen ? 80 : 100}
-          minSize={wideLayout && explorerOpen ? 78 : 100}
+          minSize={wideLayout && explorerOpen ? 55 : 100}
           className="min-w-0 bg-background"
           data-testid="workbench-panel"
         >
