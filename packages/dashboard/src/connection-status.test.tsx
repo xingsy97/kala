@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ConnectionStatus } from './app.js'
@@ -65,8 +65,12 @@ describe('ConnectionStatus', () => {
 
     await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('46 ms'))
     fireEvent.click(screen.getByTestId('connection-status'))
-    expect(screen.getByText('Device → Service')).toBeTruthy()
-    expect(screen.getByText('Service → Executor')).toBeTruthy()
+    const path = within(screen.getByTestId('connection-path'))
+    expect(screen.getByTestId('connection-segment-device-service').getAttribute('title')).toContain('Device → Service')
+    expect(screen.getByTestId('connection-segment-service-executor').getAttribute('title')).toContain('Service → Executor')
+    expect(path.getByText('Device')).toBeTruthy()
+    expect(path.getByText('Service')).toBeTruthy()
+    expect(path.getByText('Executor')).toBeTruthy()
     expect(screen.getByText('12 ms')).toBeTruthy()
     expect(screen.getByText('34 ms')).toBeTruthy()
     expect(screen.queryByText(/cursor/i)).toBeNull()
@@ -137,5 +141,36 @@ describe('ConnectionStatus', () => {
     await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('3'))
 
     expect(screen.getByTestId('connection-health-host-line').getAttribute('points')).toBe(screen.getByTestId('connection-health-executor-line').getAttribute('points'))
+  })
+
+  it('uses the full chart width before the 10 minute window is full', async () => {
+    let wallClock = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => wallClock)
+    const socket = socketWithRttSeries([100, 200], [1000, 2000])
+
+    render(<ConnectionStatus socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
+
+    await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('1100 ms'))
+    fireEvent.click(screen.getByTestId('connection-status'))
+    wallClock = 30_000
+    fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
+
+    await waitFor(() => expect(screen.getByTestId('connection-health-host-line').getAttribute('points')).toContain('320.0,'))
+  })
+
+  it('exposes per-sample hover details with time and latency', async () => {
+    let wallClock = Date.UTC(2026, 8, 6, 16, 25, 0)
+    vi.spyOn(Date, 'now').mockImplementation(() => wallClock)
+    const socket = socketWithRtt(89, 85)
+
+    render(<ConnectionStatus socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
+
+    await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('174 ms'))
+    fireEvent.click(screen.getByTestId('connection-status'))
+
+    await waitFor(() => {
+      const titles = Array.from(document.querySelectorAll('[data-testid="connection-health-sample-hit"] title')).map((node) => node.textContent ?? '')
+      expect(titles.some((title) => title.includes('Host: 89 ms') && title.includes('Executor: 85 ms'))).toBe(true)
+    })
   })
 })

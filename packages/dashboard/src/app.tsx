@@ -2926,6 +2926,8 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   const label = probeFailed ? t('connectionHealth.issue') : hostStatusLabel(status, t)
   const healthy = displayStatus === 'ready' && executorConnected
   const failed = displayStatus === 'error' || displayStatus === 'disconnected'
+  const hostTone = status === 'ready' && !hostError ? 'healthy' : hostError || status === 'disconnected' || status === 'error' ? 'failed' : 'pending'
+  const executorTone = !executorConnected || executorError ? 'failed' : 'healthy'
   const headlineLatency = executorConnected
     ? hostRtt !== null && executorRtt !== null ? hostRtt + executorRtt : null
     : hostRtt
@@ -2944,8 +2946,14 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
             <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : failed ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : failed ? 'connectionHealth.issue' : 'connectionHealth.check')}</span>
           </div>
           <div className="divide-y divide-border/30 rounded-2xl bg-muted/20 px-3">
-            <HealthRow label={t('connectionHealth.deviceHost')} state={status === 'ready' ? hostError ?? t('common.connected') : label} tone={status === 'ready' && !hostError ? 'healthy' : hostError || status === 'disconnected' || status === 'error' ? 'failed' : 'pending'} latency={hostRtt} measuring={checking && hostRtt === null && !hostError} measuringLabel={t('connectionHealth.measuring')} />
-            <HealthRow label={t('connectionHealth.hostExecutor')} state={!executorConnected ? t('connectionHealth.offline') : executorError ?? t('common.connected')} tone={!executorConnected || executorError ? 'failed' : 'healthy'} latency={executorRtt} measuring={checking && executorConnected && executorRtt === null && !executorError} measuringLabel={t('connectionHealth.measuring')} />
+            <ConnectionPath
+              deviceLabel={t('connectionHealth.device')}
+              serviceLabel={t('connectionHealth.service')}
+              executorLabel={t('connectionHealth.executor')}
+              hostSegment={{ label: t('connectionHealth.deviceHost'), state: status === 'ready' ? hostError ?? t('common.connected') : label, tone: hostTone, latency: hostRtt, measuring: checking && hostRtt === null && !hostError }}
+              executorSegment={{ label: t('connectionHealth.hostExecutor'), state: !executorConnected ? t('connectionHealth.offline') : executorError ?? t('common.connected'), tone: executorTone, latency: executorRtt, measuring: checking && executorConnected && executorRtt === null && !executorError }}
+              measuringLabel={t('connectionHealth.measuring')}
+            />
             <HealthRow label={t('connectionHealth.sessionSync')} state={displayStatus === 'ready' ? t('connectionHealth.synchronized') : label} tone={displayStatus === 'ready' ? 'healthy' : displayStatus === 'disconnected' || displayStatus === 'error' ? 'failed' : 'pending'} measuringLabel={t('connectionHealth.measuring')} />
           </div>
           <ConnectionHealthCurve samples={history} now={history[history.length - 1]?.at ?? Date.now()} t={t} />
@@ -2957,15 +2965,50 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   )
 })
 
+type HealthTone = 'healthy' | 'failed' | 'pending'
+type ConnectionSegmentInfo = { label: string; state: string; tone: HealthTone; latency?: number | null; measuring?: boolean }
+
+function ConnectionPath({ deviceLabel, serviceLabel, executorLabel, hostSegment, executorSegment, measuringLabel }: { deviceLabel: string; serviceLabel: string; executorLabel: string; hostSegment: ConnectionSegmentInfo; executorSegment: ConnectionSegmentInfo; measuringLabel: string }): JSX.Element {
+  return (
+    <div className="overflow-x-auto py-2.5" data-testid="connection-path">
+      <div className="grid min-w-[20rem] grid-cols-[auto_minmax(5.5rem,1fr)_auto_minmax(5.5rem,1fr)_auto] items-center gap-2">
+        <ConnectionEndpoint label={deviceLabel} />
+        <ConnectionSegment segment={hostSegment} measuringLabel={measuringLabel} testId="connection-segment-device-service" />
+        <ConnectionEndpoint label={serviceLabel} />
+        <ConnectionSegment segment={executorSegment} measuringLabel={measuringLabel} testId="connection-segment-service-executor" />
+        <ConnectionEndpoint label={executorLabel} />
+      </div>
+    </div>
+  )
+}
+
+function ConnectionEndpoint({ label }: { label: string }): JSX.Element {
+  return <span className="rounded-full bg-background/80 px-2 py-1 text-[10px] font-medium text-foreground ring-1 ring-border/40">{label}</span>
+}
+
+function ConnectionSegment({ segment, measuringLabel, testId }: { segment: ConnectionSegmentInfo; measuringLabel: string; testId: string }): JSX.Element {
+  const state = segment.measuring ? measuringLabel : segment.state
+  return (
+    <div className="flex min-w-0 items-center gap-1" title={`${segment.label}: ${state}${segment.latency !== null && segment.latency !== undefined ? ` · ${segment.latency} ms` : ''}`} data-testid={testId}>
+      <span className={cn('h-px min-w-3 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/70' : segment.tone === 'failed' ? 'bg-rose-500/70' : 'bg-amber-500/70')} />
+      <span className={cn('truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium', segment.tone === 'healthy' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : segment.tone === 'failed' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300')}>{state}</span>
+      {segment.latency !== null && segment.latency !== undefined ? <span className="font-mono text-[10px] tabular-nums text-foreground">{segment.latency} ms</span> : null}
+      <span className={cn('h-px min-w-3 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/70' : segment.tone === 'failed' ? 'bg-rose-500/70' : 'bg-amber-500/70')} />
+    </div>
+  )
+}
+
 function ConnectionHealthCurve({ samples, now, t }: { samples: readonly ConnectionHealthSample[]; now: number; t: ReturnType<typeof useTranslation>['t'] }): JSX.Element {
   const width = 320
   const height = 72
-  const start = now - CONNECTION_HEALTH_WINDOW_MS
-  const recent = samples.filter((sample) => sample.at >= start)
+  const windowStart = now - CONNECTION_HEALTH_WINDOW_MS
+  const recent = samples.filter((sample) => sample.at >= windowStart)
+  const domainStart = recent.length > 0 ? Math.max(windowStart, recent[0]!.at) : windowStart
+  const domainMs = Math.max(1, now - domainStart)
   const hostMax = latencyMax(recent, (sample) => sample.hostRttMs)
   const executorMax = latencyMax(recent, (sample) => sample.executorRttMs)
-  const hostPoints = sparklinePoints(recent, (sample) => sample.hostRttMs, start, hostMax, width, height)
-  const executorPoints = sparklinePoints(recent, (sample) => sample.executorRttMs, start, executorMax, width, height)
+  const hostPoints = sparklinePoints(recent, (sample) => sample.hostRttMs, domainStart, domainMs, hostMax, width, height)
+  const executorPoints = sparklinePoints(recent, (sample) => sample.executorRttMs, domainStart, domainMs, executorMax, width, height)
   const failures = recent.filter((sample) => !sample.hostOk || !sample.executorOk)
 
   return (
@@ -2973,7 +3016,6 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-medium text-foreground">{t('connectionHealth.historyTitle')}</p>
-          <p className="text-[11px] text-muted-foreground">{t('connectionHealth.historySubtitle')}</p>
         </div>
         <div className="flex flex-none items-center gap-2 text-[10px] text-muted-foreground">
           <span className="inline-flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-primary" />{t('connectionHealth.hostLegend')}</span>
@@ -2985,22 +3027,44 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
         {hostPoints ? <polyline points={hostPoints} fill="none" className="stroke-primary" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="connection-health-host-line" /> : null}
         {executorPoints ? <polyline points={executorPoints} fill="none" className="stroke-sky-400" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="connection-health-executor-line" /> : null}
         {failures.map((sample, index) => (
-          <circle key={`${sample.at}:${index}`} cx={scaleHealthX(sample.at, start, width)} cy={height - 8} r="3" className="fill-rose-500" />
+          <circle key={`${sample.at}:${index}`} cx={scaleHealthX(sample.at, domainStart, domainMs, width)} cy={height - 8} r="3" className="fill-rose-500" />
         ))}
+        {recent.map((sample, index) => {
+          const x = scaleHealthX(sample.at, domainStart, domainMs, width)
+          return (
+            <rect key={`hit:${sample.at}:${index}`} x={Math.max(0, x - 5)} y="0" width="10" height={height} fill="transparent" data-testid="connection-health-sample-hit">
+              <title>{formatHealthSampleTitle(sample, t)}</title>
+            </rect>
+          )
+        })}
       </svg>
     </div>
   )
+}
+
+function formatHealthSampleTitle(sample: ConnectionHealthSample, t: ReturnType<typeof useTranslation>['t']): string {
+  const time = new Date(sample.at).toLocaleTimeString()
+  return [
+    time,
+    `${t('connectionHealth.hostLegend')}: ${formatSampleLatency(sample.hostRttMs, sample.hostOk, t)}`,
+    `${t('connectionHealth.executorLegend')}: ${formatSampleLatency(sample.executorRttMs, sample.executorOk, t)}`,
+  ].join('\n')
+}
+
+function formatSampleLatency(value: number | null, ok: boolean, t: ReturnType<typeof useTranslation>['t']): string {
+  if (typeof value === 'number') return `${value} ms`
+  return ok ? t('connectionHealth.notMeasured') : t('connectionHealth.timedOut')
 }
 
 function latencyMax(samples: readonly ConnectionHealthSample[], select: (sample: ConnectionHealthSample) => number | null): number {
   return Math.max(50, ...samples.map(select).filter((value): value is number => typeof value === 'number'))
 }
 
-function sparklinePoints(samples: readonly ConnectionHealthSample[], select: (sample: ConnectionHealthSample) => number | null, start: number, max: number, width: number, height: number): string | null {
+function sparklinePoints(samples: readonly ConnectionHealthSample[], select: (sample: ConnectionHealthSample) => number | null, start: number, domainMs: number, max: number, width: number, height: number): string | null {
   const points = samples.flatMap((sample) => {
     const value = select(sample)
     if (value === null) return []
-    const x = scaleHealthX(sample.at, start, width)
+    const x = scaleHealthX(sample.at, start, domainMs, width)
     const y = height - 8 - value / max * (height - 16)
     return [`${x.toFixed(1)},${y.toFixed(1)}`]
   })
@@ -3009,8 +3073,8 @@ function sparklinePoints(samples: readonly ConnectionHealthSample[], select: (sa
   return points.join(' ')
 }
 
-function scaleHealthX(at: number, start: number, width: number): number {
-  return Math.max(0, Math.min(width, (at - start) / CONNECTION_HEALTH_WINDOW_MS * width))
+function scaleHealthX(at: number, start: number, domainMs: number, width: number): number {
+  return Math.max(0, Math.min(width, (at - start) / domainMs * width))
 }
 
 function HealthRow({ label, state, tone, latency, measuring = false, measuringLabel }: { label: string; state: string; tone: 'healthy' | 'failed' | 'pending'; latency?: number | null; measuring?: boolean; measuringLabel: string }): JSX.Element {
