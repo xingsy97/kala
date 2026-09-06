@@ -66,7 +66,7 @@ export function SubAgentCard(props: Props): JSX.Element {
           <span className="text-sm font-medium text-foreground">{t('chat.subAgent.groupLabel')}</span>
           <span className="rounded-full bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/40">{calls.length}</span>
         </div>
-        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-2" data-testid={`sub-agent-group-grid-${props.group.firstCallId}`}>
+        <div className="flex min-w-0 flex-wrap gap-1.5" data-testid={`sub-agent-group-list-${props.group.firstCallId}`}>
           {calls.map((call) => (
             <SubAgentRow
               key={call.callId}
@@ -202,13 +202,39 @@ const SubAgentRow = memo(function SubAgentRow({
   // 4 stays browsable.
   const [open, setOpen] = useState(
     compact
-      ? status === 'running' || status === 'idle'
+      ? status === 'running'
       : status === 'running' || status === 'idle' || status === 'failed' || status === 'cancelled',
   )
   useEffect(() => {
     if (!compact && (status === 'running' || status === 'failed' || status === 'cancelled')) setOpen(true)
     if (compact && status === 'running') setOpen(true)
+    if (compact && terminal) setOpen(false)
   }, [status, compact])
+
+  if (grouped && !open) {
+    const label = `${t('chat.subAgent.label')}${agentType ? ` · ${agentType}` : ''} · ${statusLabel(status, t)}${turns > 0 ? ` · ${t('chat.subAgent.turn', { count: turns })}` : ''}`
+    return (
+      <div className="max-w-full" data-testid={`sub-agent-row-${call.callId}`} data-sub-agent-status={status}>
+        <button
+          type="button"
+          onClick={() => withViewTransition(() => setOpen(true))}
+          className={cn(
+            'inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-background/90 px-2 text-xs text-foreground shadow-sm ring-1 ring-border/50 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            status === 'completed' ? 'ring-emerald-300/50 dark:ring-emerald-500/30' : status === 'failed' || status === 'cancelled' ? 'ring-rose-300/50 dark:ring-rose-500/30' : '',
+          )}
+          title={prompt ? `${label} · ${prompt}` : label}
+          aria-label={label}
+          data-testid={`sub-agent-chip-${call.callId}`}
+          data-sub-agent-toggle={call.callId}
+        >
+          <StatusIcon status={status} />
+          {agentType ? <span className="flex-none rounded bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium">{agentType}</span> : null}
+          <span className="min-w-0 max-w-36 truncate">{prompt ?? t('chat.subAgent.noPrompt')}</span>
+          <StatusBadge status={status} turns={turns} durationMs={totalMs} />
+        </button>
+      </div>
+    )
+  }
 
   if (dotsMode && !open && terminal) {
     const label = `${t('chat.subAgent.label')}${agentType ? ` · ${agentType}` : ''} · ${statusLabel(status, t)}${turns > 0 ? ` · ${t('chat.subAgent.turn', { count: turns })}` : ''}`
@@ -243,7 +269,7 @@ const SubAgentRow = memo(function SubAgentRow({
             : status === 'running'
               ? 'border-sky-300/50 bg-sky-50/40 dark:border-sky-500/40 dark:bg-sky-950/20'
               : 'border-border/60 bg-muted/40',
-        grouped && 'bg-background/80 shadow-sm',
+        grouped && 'w-full bg-background/80 shadow-sm',
       )}
       data-testid={`sub-agent-row-${call.callId}`}
       data-sub-agent-status={status}

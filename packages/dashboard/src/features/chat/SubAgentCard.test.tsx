@@ -547,11 +547,14 @@ describe('ChatPanel sub-agent dispatch', () => {
       />,
     )
     const grouped = screen.getByTestId(`sub-agent-group-${group.firstCallId}`)
-    expect(screen.getByTestId(`sub-agent-group-grid-${group.firstCallId}`).className).toContain('grid')
+    expect(screen.getByTestId(`sub-agent-group-list-${group.firstCallId}`).className).toContain('flex')
     expect(grouped.textContent).toContain('Subagents')
     expect(screen.getByTestId('sub-agent-row-c1')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-row-c2')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-row-c3')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-chip-c1')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-chip-c2')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-chip-c3')).toBeTruthy()
   })
 
   it('keeps single-agent groups in the stacked list layout (no matrix)', () => {
