@@ -989,6 +989,13 @@ export const resources = {
           shortcuts: 'Enter - approve - Esc - reject{{switchHint}}',
           switchHint: ' - left/right - switch',
         },
+        askUser: {
+          requiredAria: 'User choice required',
+          required: 'User choice required',
+          index: '{{current}} of {{total}}',
+          selected: 'Selected: {{value}}',
+          submit: 'Continue',
+        },
         diff: {
           modified: 'modified',
           createdOverwrite: 'created/overwrite',
@@ -2514,6 +2521,13 @@ export const resources = {
           approve: '批准',
           shortcuts: 'Enter - 批准 - Esc - 拒绝{{switchHint}}',
           switchHint: ' - 左/右 - 切换',
+        },
+        askUser: {
+          requiredAria: '需要用户选择',
+          required: '需要用户选择',
+          index: '{{current}} / {{total}}',
+          selected: '已选择：{{value}}',
+          submit: '继续',
         },
         diff: {
           modified: '已修改',

@@ -53,6 +53,11 @@ describe('wire contract — round-trip parses', () => {
       .toMatchObject({ reason: 'nope' })
   })
 
+  it('parses ClientAskUserChoice', () => {
+    expect(schema.ClientAskUserChoiceSchema.parse({ sessionId: 's', callId: 'c', value: 'safe' }))
+      .toEqual({ sessionId: 's', callId: 'c', value: 'safe' })
+  })
+
   it('parses ClientListSessions / ClientListExecutors from empty payloads', () => {
     expect(schema.ClientListSessionsSchema.parse(undefined)).toEqual({})
     expect(schema.ClientListSessionsSchema.parse({})).toEqual({})

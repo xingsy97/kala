@@ -50,6 +50,7 @@ import type {
   ClientUnsubscribeChannels,
   ChannelSubscriptionResult,
   DashboardChannel,
+  ClientAskUserChoice,
   ClientUserApprove,
   ClientUserMessage,
   ClientUserReject,
@@ -113,6 +114,7 @@ import { dashboardConnectionMeta, type ConnectionMeta } from './socket-metadata.
 import { OperationDeduper } from './operation-deduper.js'
 import type { AgentRuntimeRegistry } from '../agent-runtime/types.js'
 import { validateMessageAttachmentReferences } from '../message-attachment-resolver.js'
+import type { AskUserChoiceBroker } from '../ask-user-choice.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -209,6 +211,7 @@ export type DashboardDeps = {
   dashboardNs: DashboardNs
   messageQueues: MessageQueueManager
   agentRuntimes: AgentRuntimeRegistry
+  askUserChoice?: AskUserChoiceBroker
   executorSnapshot?(): readonly AttachedExecutor[]
   onSessionCreated?(record: SessionRecord): void | Promise<void>
   onSessionDeleted?(record: SessionRecord): void | Promise<void>
@@ -317,7 +320,7 @@ export function configureDashboardNamespace(
     }
     if (socket.data.readOnly === true) {
       const writeEvents = [
-        'client:user_message', 'client:user_approve', 'client:user_reject', 'client:cancel', 'client:interrupt_sub_agent',
+        'client:user_message', 'client:user_approve', 'client:user_reject', 'client:ask_user_choice', 'client:cancel', 'client:interrupt_sub_agent',
         'client:clear', 'client:compact', 'client:cancel_stream', 'client:set_approval_mode', 'client:fork',
         'client:create_session', 'client:delete_session', 'client:update_preferences', 'client:set_cwd',
         'client:reorder_queued_message', 'client:update_queued_message', 'client:delete_queued_message',
@@ -615,6 +618,21 @@ export function configureDashboardNamespace(
       deps.audit?.log({ action: 'dashboard.user_reject', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok', metadata: { reasonBytes: p.reason ? Buffer.byteLength(p.reason, 'utf8') : 0 } })
       await safeRuntimeAction(deps, p.sessionId, (runtime, record) => runtime.reject(record, p.callId, p.reason))
     })
+    socket.on('client:ask_user_choice', async (raw: ClientAskUserChoice, ack?: (result: RpcAck) => void) => {
+      const p = vparse(schema.ClientAskUserChoiceSchema, raw, 'client:ask_user_choice', (raw as ClientAskUserChoice | undefined)?.sessionId)
+      if (!p) { ack?.({ ok: false, error: 'invalid ask_user_choice payload' }); return }
+      const result = await operations.run(p.operationId, async () => {
+        if (!deps.askUserChoice) throw new Error('ask_user_choice is not configured on this host')
+        const resolved = deps.askUserChoice.respond(p.sessionId, p.callId, p.value)
+        if (!resolved.ok && resolved.error === 'ask_user_choice request is not pending') {
+          deps.askUserChoice.respondEarly(p.sessionId, p.callId, p.value)
+          return
+        }
+        if (!resolved.ok) throw new Error(resolved.error)
+      })
+      ack?.(result)
+      deps.audit?.log({ action: 'dashboard.ask_user_choice', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: result.ok ? 'ok' : 'error', metadata: { value: p.value }, ...(!result.ok ? { error: result.error } : {}) })
+    })
     socket.on('client:cancel', async (raw: ClientCancel) => {
       const p = vparse(schema.ClientCancelSchema, raw, 'client:cancel', (raw as ClientCancel | undefined)?.sessionId)
       if (!p) return
@@ -648,6 +666,7 @@ export function configureDashboardNamespace(
       if (!await requireRuntimeCapability(deps, p.sessionId, 'clear', 'clear')) return
       deps.audit?.log({ action: 'dashboard.session_clear', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok' })
       deps.loopDeps.tools.cancelPending(p.sessionId)
+      deps.loopDeps.askUserChoice?.cancelSession(p.sessionId, 'ask_user_choice request was cleared')
       deps.loop.cancelStream(p.sessionId)
       const evt: AgentEvent = { kind: 'clear' }
       await safeDispatch(deps, p.sessionId, evt)

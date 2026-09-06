@@ -30,6 +30,7 @@ import type { SkillManager, SkillRegistry } from './extensions/skills.js'
 import type { SessionStore } from './store/session.js'
 import type { WebSearchCredentialStore } from './web-search/index.js'
 import type { MessageAttachmentStore } from './message-attachment-store.js'
+import type { AskUserChoiceBroker } from './ask-user-choice.js'
 
 export type LoopBroadcast = {
   onEvent(
@@ -164,6 +165,7 @@ export type HostLoopDeps = {
   artifactRootDir?: string
   messageAttachments?: MessageAttachmentStore
   publishLocalImages?: (sessionId: string, record: import('./store/session.js').SessionRecord, message: import('@agent-kernel/kernel').Message) => Promise<import('@agent-kernel/kernel').Message>
+  askUserChoice?: AskUserChoiceBroker
 }
 
 export type LoopHandle = {

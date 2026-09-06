@@ -88,6 +88,7 @@ import { AgentRuntimeRegistry } from './agent-runtime/types.js'
 import { KernelAgentRuntime } from './agent-runtime/kernel-runtime.js'
 import { CopilotAgentRuntime } from './agent-runtime/copilot-runtime.js'
 import { createRuntimeToolDispatcher } from './agent-runtime/tool-dispatcher.js'
+import { AskUserChoiceBroker } from './ask-user-choice.js'
 
 export type HostServerOptions = {
   port: number
@@ -1032,6 +1033,7 @@ export async function startHostServer(
   }
 
   const skills = options.skills ?? createSkillManager(store, getDefaultConfig())
+  const askUserChoice = new AskUserChoiceBroker()
 
   const loopDeps = {
     store,
@@ -1049,6 +1051,7 @@ export async function startHostServer(
     audit,
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
     messageAttachments,
+    askUserChoice,
     publishLocalImages: createLocalImagePublisher({
       artifacts: sessionArtifacts,
       reader: async (input) => await executors.publishLocalImage(input),
@@ -1199,6 +1202,7 @@ export async function startHostServer(
     dashboardNs,
     messageQueues,
     agentRuntimes,
+    askUserChoice,
     executorSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     renameWorkspace: async (workspaceId, workspaceName) => {
       const applied = await workspaceAliases.rename(workspaceId, workspaceName)

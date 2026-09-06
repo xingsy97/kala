@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createConfig, type CallToolEffect } from '@agent-kernel/kernel'
 
 import { dispatchConfiguredTool } from './execution.js'
+import { AskUserChoiceBroker } from '../ask-user-choice.js'
 import { discoverSkills } from '../extensions/skills.js'
 import type { HostLoopDeps, ToolDispatcher } from '../loop-types.js'
 import type { LLMAdapter } from '../llm/adapter.js'
@@ -124,6 +125,39 @@ describe('configured tool execution', () => {
 
     expect(executorCalls).toBe(0)
     expect(result).toMatchObject({ ok: false, failure: { code: 'ESEARCH_CREDENTIAL' } })
+  })
+
+  it('runs ask_user_choice as a host-side user choice tool', async () => {
+    const record = await store.create({
+      sessionId: 'sess-ask-choice',
+      config: createConfig({
+        tools: [{
+          name: 'ask_user_choice',
+          description: 'ask',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'ask_user_choice',
+        }],
+      }),
+    })
+    const broker = new AskUserChoiceBroker()
+    const call = effect('ask_user_choice', {
+      message: 'Pick a mode',
+      choices: [{ value: 'fast', label: 'Fast' }, { value: 'safe', label: 'Safe' }],
+    })
+    const pending = dispatchConfiguredTool({
+      ...deps(store, {
+        async callTool() {
+          return { ok: false, content: 'wrong route' }
+        },
+        cancelPending() {},
+      }),
+      askUserChoice: broker,
+    }, record.sessionId, call, new Map())
+
+    expect(broker.respond(record.sessionId, call.callId, 'safe')).toEqual({ ok: true })
+    await expect(pending).resolves.toEqual({ ok: true, content: JSON.stringify({ value: 'safe', label: 'Safe' }) })
   })
 
   it('runs the skill host handler without calling the executor', async () => {

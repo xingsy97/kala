@@ -58,6 +58,22 @@ const AGENT = {
   executionHandler: 'agent',
 } as const
 
+const ASK_USER_CHOICE = {
+  name: 'ask_user_choice',
+  description: 'ask the user to choose',
+  inputSchema: {
+    type: 'object',
+    required: ['message', 'choices'],
+    properties: {
+      message: { type: 'string' },
+      choices: { type: 'array', items: { type: 'string' } },
+    },
+  },
+  requiresApproval: false,
+  executionKind: 'host',
+  executionHandler: 'ask_user_choice',
+} as const
+
 function scriptedLlm(): LLMAdapter {
   const queue = [
     {
@@ -272,6 +288,87 @@ describe('wire protocol', () => {
 
     expect(ack).toEqual({ ok: true })
     expect(server.store.get(sessionId)?.state.approvalMode).toBe('allow_all')
+    dashboard.close()
+  })
+
+  it('resolves an ask_user_choice tool from a dashboard choice', async () => {
+    await server.close()
+    const askConfig = createConfig({ tools: [ASK_USER_CHOICE], systemPrompt: 'sys' })
+    let secondCallMessages: unknown
+    const llm: LLMAdapter = {
+      name: 'ask-choice-test',
+      async call(input) {
+        secondCallMessages = input.messages
+        if (input.messages.some((message) => message.role === 'tool')) {
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'choice accepted' }] } }
+        }
+        return {
+          message: {
+            role: 'assistant',
+            content: [{
+              type: 'tool_call',
+              callId: 'choice-1',
+              name: 'ask_user_choice',
+              input: {
+                message: 'Pick implementation depth',
+                choices: [{ value: 'minimal', label: 'Minimal' }, { value: 'complete', label: 'Complete' }],
+              },
+            }],
+          },
+        }
+      },
+    }
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm,
+      defaultConfig: askConfig,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      detachGraceMs: 0,
+    })
+    url = `http://localhost:${server.port}`
+
+    const sessionId = 'ask-user-choice-wire'
+    await server.store.ensure({ sessionId, defaultConfig: askConfig })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const toolRequested = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('never awaited choice')), 2000)
+      dashboard.on('event:appended', (payload) => {
+        if (payload.effects.some((effect) => effect.kind === 'call_tool' && effect.callId === 'choice-1' && effect.name === 'ask_user_choice')) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+    const startAck = await dashboard.timeout(1000).emitWithAck('client:user_message', { sessionId, text: 'choose' })
+    expect(startAck).toEqual({ ok: true })
+    await toolRequested
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:ask_user_choice', {
+      sessionId,
+      callId: 'choice-1',
+      value: 'complete',
+    })
+    expect(ack).toEqual({ ok: true })
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('never finished choice turn')), 3000)
+      dashboard.on('state:changed', (payload) => {
+        if (payload.state.status === 'done') {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+    expect(JSON.stringify(secondCallMessages)).toContain('"value":"complete"')
     dashboard.close()
   })
 

@@ -563,6 +563,7 @@ export async function dispatchOne(
   // against a still-live executor.
   if (event.kind === 'cancel') {
     await interruptSubAgentsForParent(deps, aborts, sessionId)
+    deps.askUserChoice?.cancelSession(sessionId)
     deps.tools.cancelPending(sessionId)
     const inFlight = aborts.get(sessionId)
     if (inFlight) inFlight.abort()

@@ -305,6 +305,16 @@ Host → `{ kind: 'user_approve', callId }`.
 
 Host → `{ kind: 'user_reject', callId, reason }`.
 
+#### `client:ask_user_choice`
+
+```ts
+{ sessionId: string; callId: string; value: string }
+```
+
+Resolves a pending host-side `ask_user_choice` tool call. The host validates
+that the call is still pending and that `value` is one of the tool-provided
+choices, then returns the selected value to the model as a `tool_result`.
+
 #### `client:cancel`
 
 ```ts
@@ -1394,6 +1404,7 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Dashboard | `client:user_message` | Host (kernel) |
 | Dashboard | `client:user_approve` | Host (kernel) |
 | Dashboard | `client:user_reject` | Host (kernel) |
+| Dashboard | `client:ask_user_choice` | Host (human-input tool) |
 | Dashboard | `client:cancel` | Host (kernel) |
 | Dashboard | `client:clear` | Host (kernel) |
 | Dashboard | `client:cancel_stream` | Host (LLM adapter) |

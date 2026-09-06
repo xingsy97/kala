@@ -13,8 +13,11 @@ import type {
   AgentConfig,
   AgentState,
   MessageContent,
+  PendingToolCall,
 } from '@agent-kernel/kernel'
 import type {
+  AskUserChoiceOption,
+  AskUserChoiceRequest,
   ApprovalRequiredEvent,
   AttachedExecutor,
   CompactStatusEvent,
@@ -83,6 +86,7 @@ export type SessionView = {
    * disagree — they read the same source.
    */
   pendingApprovals: readonly ApprovalRequiredEvent[]
+  pendingAskUserChoices: readonly AskUserChoiceRequest[]
   queuedMessages: readonly QueuedMessagePreview[]
   lastError: SessionErrorEvent | null
   parentSessionId: string | null
@@ -649,6 +653,14 @@ export function useSession({
       }))
   }, [state, sessionId])
 
+  const pendingAskUserChoices = useMemo<readonly AskUserChoiceRequest[]>(() => {
+    if (!state || !sessionId) return []
+    return state.pendingCalls
+      .filter((c) => c.name === 'ask_user_choice' && (c.status === 'dispatched' || c.status === 'approved'))
+      .map((c) => pendingCallToAskUserChoice(sessionId, c))
+      .filter((c): c is AskUserChoiceRequest => c !== null)
+  }, [state, sessionId])
+
   const toolExecutionStartedAt = useMemo(
     () => deriveToolExecutionStartedAt(state, timeline),
     [state, timeline],
@@ -683,6 +695,7 @@ export function useSession({
       humanAttention,
       streamingText,
       pendingApprovals,
+      pendingAskUserChoices,
       queuedMessages,
       lastError,
       parentSessionId,
@@ -704,6 +717,7 @@ export function useSession({
       humanAttention,
       streamingText,
       pendingApprovals,
+      pendingAskUserChoices,
       queuedMessages,
       lastError,
       parentSessionId,
@@ -776,6 +790,49 @@ export function deriveToolExecutionStartedAt(
   return startedAt
 }
 
+function pendingCallToAskUserChoice(sessionId: string, call: PendingToolCall): AskUserChoiceRequest | null {
+  const message = typeof call.input.message === 'string' ? call.input.message.trim() : ''
+  const rawChoices = Array.isArray(call.input.choices) ? call.input.choices : []
+  if (message.length === 0 || rawChoices.length === 0) return null
+  const choices: AskUserChoiceOption[] = []
+  const values = new Set<string>()
+  for (const raw of rawChoices) {
+    const choice = normalizeAskUserChoiceOption(raw)
+    if (!choice || values.has(choice.value)) return null
+    values.add(choice.value)
+    choices.push(choice)
+  }
+  const defaultValue = typeof call.input.defaultValue === 'string' && values.has(call.input.defaultValue.trim())
+    ? call.input.defaultValue.trim()
+    : undefined
+  return {
+    sessionId,
+    callId: call.callId,
+    message,
+    choices,
+    ...(defaultValue ? { defaultValue } : {}),
+    ...(call.intent ? { intent: call.intent } : {}),
+  }
+}
+
+function normalizeAskUserChoiceOption(raw: unknown): AskUserChoiceOption | null {
+  if (typeof raw === 'string') {
+    const value = raw.trim()
+    return value.length > 0 ? { value } : null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  const value = typeof record.value === 'string' ? record.value.trim() : ''
+  if (value.length === 0) return null
+  const label = typeof record.label === 'string' && record.label.trim().length > 0 ? record.label.trim() : undefined
+  const description = typeof record.description === 'string' && record.description.trim().length > 0 ? record.description.trim() : undefined
+  return {
+    value,
+    ...(label ? { label } : {}),
+    ...(description ? { description } : {}),
+  }
+}
+
 export function respondApproval(
   socket: DashboardSocket,
   sessionId: string,
@@ -792,6 +849,15 @@ export function respondApproval(
       ...(reason !== undefined ? { reason } : {}),
     })
   }
+}
+
+export function respondAskUserChoice(
+  socket: DashboardSocket,
+  sessionId: string,
+  callId: string,
+  value: string,
+): Promise<void> {
+  return emitRpc(socket, 'client:ask_user_choice', { sessionId, callId, value })
 }
 
 export function deleteSession(

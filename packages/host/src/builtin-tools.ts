@@ -56,7 +56,7 @@ export function createBuiltinAgentModule(preset: AgentSystemPromptPreset = 'code
     version: '2026-07-15',
     label: preset === 'claude-code' ? 'Claude Code Prompt' : 'Codex Prompt',
     systemPrompt,
-    toolsets: [catalogToolset, skillToolset, filesystemToolset, shellToolset, planningToolset, agentToolset, webToolset, memoryToolset],
+    toolsets: [catalogToolset, skillToolset, humanInputToolset, filesystemToolset, shellToolset, planningToolset, agentToolset, webToolset, memoryToolset],
   }
 }
 
@@ -156,6 +156,48 @@ const skillToolset: ToolsetPlugin = {
       policy: { risk: 'read', approvalDefault: 'auto' },
       execution: { kind: 'host', handler: schema.name },
     }]
+  },
+}
+
+const humanInputToolset: ToolsetPlugin = {
+  id: 'human-input',
+  version: '2026-09-06',
+  label: 'Human input',
+  provideTools() {
+    return [
+      tool('ask_user_choice', 'host', 'read', false, 'ask_user_choice', {
+        purpose: 'Ask the user to choose one option when progress depends on a product, design, or implementation decision.',
+        whenToUse: ['Use when multiple reasonable choices exist and guessing would materially affect the outcome.', 'Use for a concise single-question choice prompt.'],
+        constraints: ['Ask only one question per call.', 'Provide clear, mutually distinct choices.', 'Do not use for tool approvals or confirmations that are already handled by the approval system.'],
+      }, {
+        type: 'object',
+        required: ['message', 'choices'],
+        properties: {
+          message: { type: 'string', minLength: 1, maxLength: 1000, description: 'Question shown to the user.' },
+          choices: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 20,
+            items: {
+              anyOf: [
+                { type: 'string', minLength: 1, maxLength: 200 },
+                {
+                  type: 'object',
+                  required: ['value'],
+                  additionalProperties: false,
+                  properties: {
+                    value: { type: 'string', minLength: 1, maxLength: 200 },
+                    label: { type: 'string', minLength: 1, maxLength: 200 },
+                    description: { type: 'string', minLength: 1, maxLength: 500 },
+                  },
+                },
+              ],
+            },
+          },
+          defaultValue: { type: 'string', description: 'Optional value to preselect. Must match one of the choices.' },
+        },
+      }),
+    ]
   },
 }
 

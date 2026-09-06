@@ -56,6 +56,7 @@ import type {
   ClientUserReject,
   ClientAddManualModel,
   ClientAddManualProvider,
+  ClientAskUserChoice,
   ClientUpdateAgentPromptSettings,
   ClientDeleteManualModel,
   ClientDeleteManualProvider,
@@ -115,6 +116,13 @@ export const ClientUserRejectSchema = z.object({
   callId: WireIdSchema,
   reason: z.string().optional(),
 }) satisfies z.ZodType<ClientUserReject>
+
+export const ClientAskUserChoiceSchema = z.object({
+  operationId: OperationIdSchema,
+  sessionId: SessionIdSchema,
+  callId: WireIdSchema,
+  value: z.string().min(1).max(500),
+}).strict() satisfies z.ZodType<ClientAskUserChoice>
 
 export const ClientCancelSchema = z.object({
   sessionId: SessionIdSchema,

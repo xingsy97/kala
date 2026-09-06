@@ -39,6 +39,9 @@ export async function dispatchConfiguredTool(
 
   const handler = effect.name === 'websearch' ? 'websearch' : (schema?.executionHandler ?? effect.name)
   switch (handler) {
+    case 'ask_user_choice':
+      if (!deps.askUserChoice) return { ok: false, content: 'ask_user_choice is not configured on this host' }
+      return await deps.askUserChoice.ask(sessionId, effect)
     case 'websearch':
       if (!deps.webSearchCredentials) {
         return { ok: false, content: 'web search credential store is not configured' }

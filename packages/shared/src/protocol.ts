@@ -463,6 +463,28 @@ export type ClientUserReject = {
   reason?: string
 }
 
+export type AskUserChoiceOption = {
+  value: string
+  label?: string
+  description?: string
+}
+
+export type AskUserChoiceRequest = {
+  sessionId: string
+  callId: string
+  message: string
+  choices: readonly AskUserChoiceOption[]
+  defaultValue?: string
+  intent?: string
+}
+
+export type ClientAskUserChoice = {
+  operationId?: string
+  sessionId: string
+  callId: string
+  value: string
+}
+
 export type ClientCancel = {
   sessionId: string
 }
@@ -1673,6 +1695,7 @@ export type DashboardClientToServerEvents = {
   'client:user_message': (payload: ClientUserMessage, ack?: (result: RpcAck) => void) => void
   'client:user_approve': (payload: ClientUserApprove, ack?: (result: RpcAck) => void) => void
   'client:user_reject': (payload: ClientUserReject, ack?: (result: RpcAck) => void) => void
+  'client:ask_user_choice': (payload: ClientAskUserChoice, ack?: (result: RpcAck) => void) => void
   'client:cancel': (payload: ClientCancel) => void
   'client:interrupt_sub_agent': (payload: ClientInterruptSubAgent) => void
   'client:clear': (payload: ClientClear) => void

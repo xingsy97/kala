@@ -53,6 +53,7 @@ import {
 import { InlineStatusRow, CompactFeedbackRow, type CompactStatus } from './features/chat/InlineStatusRow.js'
 import { deriveAgentProgress } from './features/chat/agent-progress.js'
 import { ApprovalCard } from './features/chat/ApprovalCard.js'
+import { AskUserChoiceCard } from './features/chat/AskUserChoiceCard.js'
 import { BackgroundShellsButton } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel, type WorkspaceFileTarget } from './features/chat/ChatPanel.js'
 import { APPROVAL_MODES, Composer } from './features/chat/Composer.js'
@@ -110,6 +111,7 @@ import {
   renameSession,
   renameWorkspace,
   respondApproval,
+  respondAskUserChoice,
   setSessionApprovalMode,
   updateSessionPreferences,
   updateQueuedMessage,
@@ -2002,7 +2004,7 @@ export function App(): JSX.Element {
                         <OfflineBanner />
                       </BannerStack>
                       <ComposerFlipContainer
-                        showApproval={session.pendingApprovals.length > 0}
+                        showApproval={session.pendingApprovals.length > 0 || session.pendingAskUserChoices.length > 0}
                         front={
                           <Composer
                           disabled={!controlSocket?.connected || sessionWorkspaceKnownOffline}
@@ -2193,13 +2195,23 @@ export function App(): JSX.Element {
                           />
                         }
                         back={
-                          <ApprovalCard
-                          approvals={session.pendingApprovals}
-                          onDecision={(callId, decision) => {
-                            if (!session.socket || activeSessionId === null) return
-                            respondApproval(session.socket, activeSessionId, callId, decision)
-                          }}
-                          />
+                          session.pendingApprovals.length > 0 ? (
+                            <ApprovalCard
+                            approvals={session.pendingApprovals}
+                            onDecision={(callId, decision) => {
+                              if (!session.socket || activeSessionId === null) return
+                              respondApproval(session.socket, activeSessionId, callId, decision)
+                            }}
+                            />
+                          ) : (
+                            <AskUserChoiceCard
+                              requests={session.pendingAskUserChoices}
+                              onChoose={(callId, value) => {
+                                if (!session.socket || activeSessionId === null) return
+                                void respondAskUserChoice(session.socket, activeSessionId, callId, value)
+                              }}
+                            />
+                          )
                         }
                       />
                     </div>
