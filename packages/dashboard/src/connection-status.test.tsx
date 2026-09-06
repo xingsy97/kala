@@ -100,7 +100,8 @@ describe('ConnectionStatus', () => {
     expect(screen.getByTestId('connection-headline-latency').textContent).toBe('—')
 
     fireEvent.click(screen.getByTestId('connection-status'))
-    expect(screen.getAllByText('Timed out')).toHaveLength(2)
+    expect(screen.getByTestId('connection-segment-device-service').getAttribute('title')).toContain('Timed out')
+    expect(screen.getByTestId('connection-segment-service-executor').getAttribute('title')).toContain('Timed out')
     expect(screen.getAllByText('Connection issue').length).toBeGreaterThanOrEqual(2)
   })
 
@@ -168,9 +169,15 @@ describe('ConnectionStatus', () => {
     await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('174 ms'))
     fireEvent.click(screen.getByTestId('connection-status'))
 
-    await waitFor(() => {
-      const titles = Array.from(document.querySelectorAll('[data-testid="connection-health-sample-hit"] title')).map((node) => node.textContent ?? '')
-      expect(titles.some((title) => title.includes('Host: 89 ms') && title.includes('Executor: 85 ms'))).toBe(true)
+    const hit = await waitFor(() => {
+      const hits = screen.getAllByTestId('connection-health-sample-hit')
+      const match = hits.find((node) => node.getAttribute('aria-label')?.includes('Host: 89 ms') && node.getAttribute('aria-label')?.includes('Executor: 85 ms'))
+      expect(match).toBeTruthy()
+      return match!
     })
+
+    fireEvent.mouseEnter(hit)
+    expect(screen.getByTestId('connection-health-tooltip').textContent).toContain('Host: 89 ms')
+    expect(screen.getByTestId('connection-health-tooltip').textContent).toContain('Executor: 85 ms')
   })
 })

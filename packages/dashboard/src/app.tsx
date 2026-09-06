@@ -2940,7 +2940,7 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
         <span className="hidden font-mono text-[10px] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineLatency !== null ? `${headlineLatency} ms` : checking ? t('connectionHealth.measuring') : '—'}</span>
       </button>
       {open ? (
-        <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-sm rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96" data-testid="connection-status-popover">
+        <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-md rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[28rem]" data-testid="connection-status-popover">
           <div className="flex items-start justify-between gap-3 pb-3">
             <div><h3 className="text-sm font-semibold">{t('connectionHealth.title')}</h3><p className="mt-0.5 text-[11px] text-muted-foreground">{t('connectionHealth.subtitle')}</p></div>
             <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : failed ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : failed ? 'connectionHealth.issue' : 'connectionHealth.check')}</span>
@@ -2970,8 +2970,8 @@ type ConnectionSegmentInfo = { label: string; state: string; tone: HealthTone; l
 
 function ConnectionPath({ deviceLabel, serviceLabel, executorLabel, hostSegment, executorSegment, measuringLabel }: { deviceLabel: string; serviceLabel: string; executorLabel: string; hostSegment: ConnectionSegmentInfo; executorSegment: ConnectionSegmentInfo; measuringLabel: string }): JSX.Element {
   return (
-    <div className="overflow-x-auto py-2.5" data-testid="connection-path">
-      <div className="grid min-w-[20rem] grid-cols-[auto_minmax(5.5rem,1fr)_auto_minmax(5.5rem,1fr)_auto] items-center gap-2">
+    <div className="py-2.5" data-testid="connection-path">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-1.5">
         <ConnectionEndpoint label={deviceLabel} />
         <ConnectionSegment segment={hostSegment} measuringLabel={measuringLabel} testId="connection-segment-device-service" />
         <ConnectionEndpoint label={serviceLabel} />
@@ -2988,17 +2988,22 @@ function ConnectionEndpoint({ label }: { label: string }): JSX.Element {
 
 function ConnectionSegment({ segment, measuringLabel, testId }: { segment: ConnectionSegmentInfo; measuringLabel: string; testId: string }): JSX.Element {
   const state = segment.measuring ? measuringLabel : segment.state
+  const label = segment.latency !== null && segment.latency !== undefined ? `${segment.latency} ms` : compactSegmentState(state)
   return (
     <div className="flex min-w-0 items-center gap-1" title={`${segment.label}: ${state}${segment.latency !== null && segment.latency !== undefined ? ` · ${segment.latency} ms` : ''}`} data-testid={testId}>
-      <span className={cn('h-px min-w-3 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/70' : segment.tone === 'failed' ? 'bg-rose-500/70' : 'bg-amber-500/70')} />
-      <span className={cn('truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium', segment.tone === 'healthy' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : segment.tone === 'failed' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300')}>{state}</span>
-      {segment.latency !== null && segment.latency !== undefined ? <span className="font-mono text-[10px] tabular-nums text-foreground">{segment.latency} ms</span> : null}
-      <span className={cn('h-px min-w-3 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/70' : segment.tone === 'failed' ? 'bg-rose-500/70' : 'bg-amber-500/70')} />
+      <span className={cn('h-px min-w-2 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/60' : segment.tone === 'failed' ? 'bg-rose-500/60' : 'bg-amber-500/60')} />
+      <span className={cn('whitespace-nowrap rounded-full px-1.5 py-0.5 font-mono text-[10px] tabular-nums', segment.tone === 'healthy' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : segment.tone === 'failed' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300')}>{label}</span>
+      <span className={cn('h-px min-w-2 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/60' : segment.tone === 'failed' ? 'bg-rose-500/60' : 'bg-amber-500/60')} />
     </div>
   )
 }
 
+function compactSegmentState(state: string): string {
+  return state.length > 8 ? '—' : state
+}
+
 function ConnectionHealthCurve({ samples, now, t }: { samples: readonly ConnectionHealthSample[]; now: number; t: ReturnType<typeof useTranslation>['t'] }): JSX.Element {
+  const [hovered, setHovered] = useState<{ sample: ConnectionHealthSample; x: number } | null>(null)
   const width = 320
   const height = 72
   const windowStart = now - CONNECTION_HEALTH_WINDOW_MS
@@ -3012,7 +3017,7 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
   const failures = recent.filter((sample) => !sample.hostOk || !sample.executorOk)
 
   return (
-    <div className="mt-3 rounded-2xl border border-border/35 bg-muted/10 p-3" data-testid="connection-health-curve" data-sample-count={recent.length}>
+    <div className="relative mt-3 rounded-2xl border border-border/35 bg-muted/10 p-3" data-testid="connection-health-curve" data-sample-count={recent.length}>
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-medium text-foreground">{t('connectionHealth.historyTitle')}</p>
@@ -3032,12 +3037,29 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
         {recent.map((sample, index) => {
           const x = scaleHealthX(sample.at, domainStart, domainMs, width)
           return (
-            <rect key={`hit:${sample.at}:${index}`} x={Math.max(0, x - 5)} y="0" width="10" height={height} fill="transparent" data-testid="connection-health-sample-hit">
-              <title>{formatHealthSampleTitle(sample, t)}</title>
-            </rect>
+            <rect
+              key={`hit:${sample.at}:${index}`}
+              x={Math.max(0, x - 6)}
+              y="0"
+              width="12"
+              height={height}
+              fill="transparent"
+              tabIndex={0}
+              aria-label={formatHealthSampleTitle(sample, t).replace(/\n/gu, ', ')}
+              data-testid="connection-health-sample-hit"
+              onFocus={() => setHovered({ sample, x })}
+              onBlur={() => setHovered(null)}
+              onMouseEnter={() => setHovered({ sample, x })}
+              onMouseLeave={() => setHovered(null)}
+            />
           )
         })}
       </svg>
+      {hovered ? (
+        <div className="pointer-events-none absolute top-12 z-10 min-w-32 -translate-x-1/2 rounded-lg bg-popover px-2.5 py-2 text-[11px] shadow-lg ring-1 ring-border/40" style={{ left: `calc(0.75rem + ${hovered.x / width * 100}%)` }} data-testid="connection-health-tooltip">
+          {formatHealthSampleTitle(hovered.sample, t).split('\n').map((line) => <div key={line}>{line}</div>)}
+        </div>
+      ) : null}
     </div>
   )
 }
