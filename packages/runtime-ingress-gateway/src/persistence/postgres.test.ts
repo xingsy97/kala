@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { migrateControlPlane, readControlPlaneMigrations, type ControlPlaneDatabase, type SqlExecutor, type SqlQueryResult } from './postgres.js'
+import { assertControlPlaneSchema, migrateControlPlane, readControlPlaneMigrations, type ControlPlaneDatabase, type SqlExecutor, type SqlQueryResult } from './postgres.js'
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
@@ -40,6 +40,19 @@ describe('control-plane migrations', () => {
     const database = new FakeDatabase(new Map([[1, 'old']]))
     await expect(migrateControlPlane(database, [{ version: 1, name: '0001_one.sql', checksum: 'new', sql: 'CREATE ONE' }]))
       .rejects.toThrow('checksum mismatch')
+  })
+
+  it('fails closed when the database schema version does not match the release migrations', async () => {
+    const migrations = [
+      { version: 1, name: '0001_one.sql', checksum: 'a', sql: 'CREATE ONE' },
+      { version: 2, name: '0002_two.sql', checksum: 'b', sql: 'CREATE TWO' },
+    ]
+    await expect(assertControlPlaneSchema(new FakeDatabase(new Map([[1, 'a']])), migrations))
+      .rejects.toThrow('schema version 1 is behind expected version 2')
+    await expect(assertControlPlaneSchema(new FakeDatabase(new Map([[3, 'c']])), migrations))
+      .rejects.toThrow('schema version 3 is ahead expected version 2')
+    await expect(assertControlPlaneSchema(new FakeDatabase(new Map([[1, 'a'], [2, 'b']])), migrations))
+      .resolves.toBe(2)
   })
 })
 

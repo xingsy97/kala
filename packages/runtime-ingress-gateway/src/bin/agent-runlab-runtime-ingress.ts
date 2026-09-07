@@ -10,7 +10,7 @@ import { readRequiredSecretEnv } from '../config/secret-env.js'
 import { FileLoginStateStore } from '../auth/login-state-store.js'
 import { FileBrowserSessionStore } from '../auth/browser-session-store.js'
 import { PostgresBrowserSessionStore } from '../auth/postgres-browser-session-store.js'
-import { createPostgresControlPlaneDatabase, type ControlPlaneDatabase } from '../persistence/postgres.js'
+import { assertControlPlaneSchema, createPostgresControlPlaneDatabase, readControlPlaneMigrations, type ControlPlaneDatabase } from '../persistence/postgres.js'
 import { createSessionSecretBox } from '../auth/session-secret-box.js'
 import { loadEnterpriseSsoResolver } from '../auth/enterprise-sso-config.js'
 import { SlidingWindowRateLimiter } from '../governance/rate-limit.js'
@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     ? new PostgresOrganizationStore(database = createPostgresControlPlaneDatabase({ connectionString: controlPlane.databaseUrl }))
     : new JsonOrganizationStore(resolve(controlPlane.directoryPath))
   if (organizations instanceof JsonOrganizationStore) await organizations.load()
-  else await database!.health()
+  else await assertControlPlaneSchema(database!, await readControlPlaneMigrations(resolve(process.env.RUNTIME_INGRESS_MIGRATIONS_DIR ?? 'migrations')))
   const loginStates = new FileLoginStateStore(resolve(await readRequiredSecretEnv('RUNTIME_INGRESS_LOGIN_STATE_STORE')))
   await loginStates.load()
   const sessions = database

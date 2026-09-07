@@ -101,6 +101,16 @@ export async function migrateControlPlane(database: ControlPlaneDatabase, migrat
   })
 }
 
+export async function assertControlPlaneSchema(database: ControlPlaneDatabase, migrations: readonly ControlPlaneMigration[]): Promise<number> {
+  const expected = migrations.at(-1)?.version ?? 0
+  const health = await database.health()
+  if (health.schemaVersion !== expected) {
+    const direction = health.schemaVersion < expected ? 'behind' : 'ahead'
+    throw new Error(`control-plane schema version ${health.schemaVersion} is ${direction} expected version ${expected}; run the migrator with the matching release before starting ingress`)
+  }
+  return health.schemaVersion
+}
+
 function advisoryLockKey(value: string): number {
   return createHash('sha256').update(value).digest().readInt32BE(0)
 }
