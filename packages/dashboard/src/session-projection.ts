@@ -205,18 +205,51 @@ function sameTimelineEvent(a: TimelineEntry, b: TimelineEntry): boolean {
 function reprojectContextSnapshotAfterStateChange(
   config: AgentConfig, messages: readonly Message[], prior: ContextUsageSnapshot | null,
 ): ContextUsageSnapshot {
-  const transcriptTokens = estimateMessageTokens(messages)
+  let transcriptTokens = 0
+  let userMessageTokens = 0
+  let assistantMessageTokens = 0
+  let toolResultTokens = 0
+  for (const message of messages) {
+    const tokens = estimateMessageTokens([message])
+    transcriptTokens += tokens
+    if (message.role === 'user') userMessageTokens += tokens
+    else if (message.role === 'assistant') assistantMessageTokens += tokens
+    else if (message.role === 'tool') toolResultTokens += tokens
+  }
   const toolTokens = estimateToolSchemaTokens(config.tools)
-  const system = prior?.breakdown.system ?? 0
+  const system = reserveForContext(prior?.contextWindow.tokens ?? config.contextLimit)
   const inputTokens = transcriptTokens + toolTokens + system
   return {
     model: prior?.model ?? { ref: 'unknown' },
     contextWindow: prior?.contextWindow ?? { tokens: null, source: 'unknown' },
     usage: { inputTokens, totalTokens: inputTokens },
-    breakdown: { system, transcript: transcriptTokens, tools: toolTokens, memory: prior?.breakdown.memory ?? 0,
-      attachments: prior?.breakdown.attachments ?? 0, pendingUserInput: prior?.breakdown.pendingUserInput ?? 0 },
+    breakdown: {
+      system,
+      transcript: transcriptTokens,
+      tools: toolTokens,
+      memory: prior?.breakdown.memory ?? 0,
+      attachments: prior?.breakdown.attachments ?? 0,
+      pendingUserInput: 0,
+      transcriptBreakdown: {
+        userMessages: userMessageTokens,
+        assistantMessages: assistantMessageTokens,
+        toolResults: toolResultTokens,
+      },
+    },
     estimator: prior?.estimator ?? { total: { kind: 'heuristic', confidence: 'rough' },
       breakdown: { kind: 'heuristic', confidence: 'rough' }, version: 'heuristic-v1' },
     updatedAt: Date.now(),
   }
+}
+
+function reserveForContext(limit: number | null | undefined): number {
+  const positive = positiveInt(limit)
+  if (!positive) return 16_384
+  return Math.min(16_384, Math.floor(positive * 0.1))
+}
+
+function positiveInt(value: number | null | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  const int = Math.floor(value)
+  return int > 0 ? int : undefined
 }

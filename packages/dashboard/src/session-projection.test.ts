@@ -67,6 +67,28 @@ describe('session projection reducer', () => {
     expect(next.contextSnapshot?.breakdown.pendingUserInput).toBe(0)
   })
 
+  it('does not visibly correct context usage again when authoritative state follows an appended event', () => {
+    const current = selected('session-a')
+    const appendedNext = reduceSessionProjection(current, {
+      kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 1, 'hello context'),
+    })
+    const authoritativeNext = reduceSessionProjection(appendedNext, {
+      kind: 'authoritative', generation: 1, sessionId: 'session-a',
+      payload: {
+        sessionId: 'session-a',
+        cursor: appendedNext.state!.cursor,
+        state: appendedNext.state!,
+        contextSnapshot: {
+          ...appendedNext.contextSnapshot!,
+          updatedAt: appendedNext.contextSnapshot!.updatedAt + 1,
+        },
+      },
+    })
+
+    expect(authoritativeNext.contextSnapshot?.usage).toEqual(appendedNext.contextSnapshot?.usage)
+    expect(authoritativeNext.contextSnapshot?.breakdown).toEqual(appendedNext.contextSnapshot?.breakdown)
+  })
+
   it('merges duplicate and out-of-order events without folding state twice or across a gap', () => {
     const current = selected('session-a')
     const once = reduceSessionProjection(current, {
