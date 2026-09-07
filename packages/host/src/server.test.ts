@@ -543,6 +543,107 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('enforces tenant message queue quota before persisting messages', async () => {
+    await server.close()
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      queueQuota: {
+        async assertCanEnqueueMessage(params) {
+          expect(params).toMatchObject({
+            organizationId: 'org_queue',
+            principal: 'member@example.test',
+            role: 'member',
+            sessionId: 'queue-quota-denied',
+            pendingMessages: 0,
+            mode: 'steer',
+          })
+          throw new Error('organization queued-message quota exceeded')
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({
+      sessionId: 'queue-quota-denied',
+      config,
+      organizationId: 'org_queue',
+      principal: 'member@example.test',
+      organizationRole: 'member',
+    })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'queue-quota-denied', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_queue',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      sessionId: 'queue-quota-denied',
+      text: 'must not persist',
+      mode: 'queue',
+      operationId: 'queue-quota-denied-op',
+    })
+
+    expect(ack).toEqual({ ok: false, error: 'organization queued-message quota exceeded' })
+    expect(server.store.get('queue-quota-denied')?.state.messages.some((message) => message.role === 'user')).toBe(false)
+    const log = await readSessionLog(server.store.get('queue-quota-denied')!.logPath)
+    expect(log.events.some((entry) => entry.event.kind === 'user_message')).toBe(false)
+    dashboard.close()
+  })
+
+  it('runs tenant message queue quota with current queue depth before enqueue', async () => {
+    await server.close()
+    const checks: unknown[] = []
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      queueQuota: {
+        async assertCanEnqueueMessage(params) {
+          checks.push(params)
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({
+      sessionId: 'queue-quota-allowed',
+      config,
+      organizationId: 'org_queue',
+      principal: 'member@example.test',
+      organizationRole: 'member',
+    })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'queue-quota-allowed', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_queue',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      sessionId: 'queue-quota-allowed',
+      text: 'allowed',
+      mode: 'queue',
+      operationId: 'queue-quota-allowed-op',
+    })
+
+    expect(ack).toEqual({ ok: true })
+    expect(checks).toEqual([expect.objectContaining({ organizationId: 'org_queue', pendingMessages: 0, mode: 'steer' })])
+    dashboard.close()
+  })
+
   it('rejects disallowed tenant model selection before session creation', async () => {
     await server.close()
     server = await startHostServer({

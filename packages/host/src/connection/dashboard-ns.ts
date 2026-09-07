@@ -106,6 +106,7 @@ import { readFile } from 'node:fs/promises'
 import type { AuthConfig } from '../auth-control.js'
 import { authenticateDashboardHandshake } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
+import type { DashboardActor } from '../auth-control.js'
 import { parseWire, type WireValidationContext } from '../wire-validation.js'
 import { isSkillManager } from '../extensions/skills.js'
 import { contextSnapshot, snapshotFromConfig, type ContextWindowOverride } from '../context/manager.js'
@@ -199,6 +200,7 @@ export type DashboardDeps = {
   auth?: AuthConfig
   audit?: AuditLogger
   sessionQuota?: TenantSessionQuotaEnforcer
+  queueQuota?: TenantQueueQuotaEnforcer
   modelPolicy?: TenantModelPolicyEnforcer
   allowAllApprovalMode?: boolean
   broadcastError(
@@ -227,6 +229,17 @@ export type TenantSessionQuotaEnforcer = {
     principal: string
     role: 'owner' | 'admin' | 'member' | 'viewer'
     sessionId: string
+  }): Promise<void>
+}
+
+export type TenantQueueQuotaEnforcer = {
+  assertCanEnqueueMessage(params: {
+    organizationId: string
+    principal: string
+    role: 'owner' | 'admin' | 'member' | 'viewer'
+    sessionId: string
+    pendingMessages: number
+    mode: 'steer' | 'queue'
   }): Promise<void>
 }
 
@@ -634,7 +647,7 @@ export function configureDashboardNamespace(
       if (!fileValidation.ok) { ack?.({ ok: false, error: `${fileValidation.error.code}: ${fileValidation.error.message}` }); return }
       const result = await operations.run(p.operationId, async () => {
         deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
-        await handleUserMessage(deps, p)
+        await handleUserMessage(deps, p, socket.data.dashboardActor as DashboardActor | undefined)
       })
       ack?.(result)
     })
@@ -1546,6 +1559,7 @@ async function safeDispatch(
 async function handleUserMessage(
   deps: DashboardDeps,
   p: ClientUserMessage,
+  actor?: DashboardActor,
 ): Promise<void> {
   let record = deps.store.get(p.sessionId)
   if (!record) record = await loadRecordForDashboard(deps, p.sessionId)
@@ -1597,6 +1611,22 @@ async function handleUserMessage(
   const mode = requestedMode === 'queue' && isRestingStatus(record.state.status) && messagePipelineIdle
     ? 'steer'
     : requestedMode
+  if (deps.queueQuota) {
+    if (actor?.kind !== 'ingress' || !record.organizationId) {
+      throw new Error('missing organization attribution for queue quota enforcement')
+    }
+    if (actor.organizationId !== record.organizationId) {
+      throw new Error('tenant_forbidden')
+    }
+    await deps.queueQuota.assertCanEnqueueMessage({
+      organizationId: actor.organizationId,
+      principal: actor.principal,
+      role: actor.role,
+      sessionId: p.sessionId,
+      pendingMessages: deps.messageQueues.pending(p.sessionId),
+      mode,
+    })
+  }
   const queued: QueuedUserMessage = {
     id: ulid(),
     operationId: p.operationId ?? ulid(),
