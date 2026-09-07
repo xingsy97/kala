@@ -896,6 +896,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/models' && req.method === 'POST' && payloads.addManualModel) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       void readJson(req)
         .then((body) => {
           const input = parseWire(schema.ClientAddManualModelSchema, body, { channel: 'POST /settings/models' })
@@ -912,6 +914,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/models' && req.method === 'DELETE' && payloads.deleteManualModel) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       const parsed = new URL(url, 'http://x')
       try {
         const input = parseWire(schema.ClientDeleteManualModelSchema, {
@@ -932,6 +936,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/providers' && req.method === 'POST' && payloads.addManualProvider) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       void readJson(req)
         .then((body) => {
           const input = parseWire(schema.ClientAddManualProviderSchema, body, { channel: 'POST /settings/providers' })
@@ -948,6 +954,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/providers' && req.method === 'DELETE' && payloads.deleteManualProvider) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       const parsed = new URL(url, 'http://x')
       try {
         const input = parseWire(schema.ClientDeleteManualProviderSchema, {
@@ -967,6 +975,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/default-model' && req.method === 'POST' && payloads.setDefaultModel) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       void readJson(req)
         .then((body) => {
           const input = parseWire(schema.ClientSetDefaultModelSchema, body, { channel: 'POST /settings/default-model' })
@@ -983,6 +993,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/agent-prompt' && req.method === 'POST' && payloads.updateAgentPrompt) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       void readJson(req)
         .then((body) => {
           const input = parseWire(schema.ClientUpdateAgentPromptSettingsSchema, body, { channel: 'POST /settings/agent-prompt' })
@@ -999,6 +1011,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/socket-admin/init' && req.method === 'POST' && payloads.initializeSocketAdmin) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       void readJson(req)
         .then((body) => {
           const input = typeof body === 'object' && body !== null ? body as { password?: unknown; mode?: unknown } : {}
@@ -1025,6 +1039,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/socket-admin/mode' && req.method === 'POST' && payloads.updateSocketAdminMode) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       void readJson(req)
         .then((body) => {
           const input = typeof body === 'object' && body !== null ? body as { mode?: unknown } : {}
