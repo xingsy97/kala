@@ -82,7 +82,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
       if (!id && req.method === 'POST') {
         void readJson(req).then((body) => {
           const input = schema.CreateExecutorInstallSchema.parse(body)
-          const created = options.store.create(input, header(req, 'idempotency-key'))
+          const created = options.store.create(input, scopedIdempotencyKey(header(req, 'idempotency-key'), authorization.actor), tenantAttribution(authorization.actor))
           const origin = requestOrigin(req)
           const command = installCommand(origin, input.platform, input.mode, created.setupCode)
           options.audit?.log({ action: 'executor_install.create', actor: authorization.actor, outcome: 'ok', metadata: { id: created.install.id } })
@@ -94,33 +94,67 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
       if (!action && req.method === 'GET') {
         const snapshot = options.store.get(id)
         if (!snapshot) { sendError(res, 404, 'installation_not_found'); return }
+        const accessError = executorInstallAccessError(authorization.actor, snapshot)
+        if (accessError) { sendError(res, 403, accessError); return }
         sendJson(res, 200, snapshot); return
       }
       if (!action && req.method === 'PATCH') {
         void readJson(req).then((body) => {
+          const snapshot = options.store.get(id)
+          if (!snapshot) { sendError(res, 404, 'installation_not_found'); return }
+          const accessError = executorInstallAccessError(authorization.actor, snapshot)
+          if (accessError) { sendError(res, 403, accessError); return }
           const updated = options.store.update(id, schema.UpdateExecutorInstallSchema.parse(body))
           if (!updated) { sendError(res, 409, 'installation_not_editable'); return }
           sendJson(res, 200, updated)
         }).catch((error) => handleError(res, error)); return
       }
       if (!action && req.method === 'DELETE') {
+        const snapshot = options.store.get(id)
+        if (!snapshot) { sendError(res, 404, 'installation_not_found'); return }
+        const accessError = executorInstallAccessError(authorization.actor, snapshot)
+        if (accessError) { sendError(res, 403, accessError); return }
         sendJson(res, 200, { ok: true, id, deleted: options.store.delete(id) }); return
       }
       if ((action === 'approve' || action === 'reject') && req.method === 'POST') {
+        const snapshot = options.store.get(id)
+        if (!snapshot) { sendError(res, 404, 'installation_not_found'); return }
+        const accessError = executorInstallAccessError(authorization.actor, snapshot)
+        if (accessError) { sendError(res, 403, accessError); return }
         const updated = action === 'approve' ? options.store.approve(id) : options.store.reject(id)
         if (!updated) { sendError(res, 409, 'installation_not_pending'); return }
         options.audit?.log({ action: `executor_install.${action}`, actor: authorization.actor, outcome: 'ok', metadata: { id } })
         sendJson(res, 200, updated); return
       }
       if (action === 'events' && req.method === 'GET') {
+        const snapshot = options.store.get(id)
+        if (!snapshot) { sendError(res, 404, 'installation_not_found'); return }
+        const accessError = executorInstallAccessError(authorization.actor, snapshot)
+        if (accessError) { sendError(res, 403, accessError); return }
         const after = Number(header(req, 'last-event-id') ?? url.searchParams.get('after') ?? -1)
         const events = options.store.events(id, Number.isSafeInteger(after) ? after : -1)
-        if (!events) { sendError(res, 404, 'installation_not_found'); return }
         sendJson(res, 200, { events }); return
       }
       sendError(res, 405, 'method_not_allowed')
     } catch (error) { handleError(res, error) }
   })
+}
+
+function tenantAttribution(actor: DashboardActor): { organizationId: string; principal: string; organizationRole: 'owner' | 'admin' | 'member' | 'viewer' } | undefined {
+  return actor.kind === 'ingress'
+    ? { organizationId: actor.organizationId, principal: actor.principal, organizationRole: actor.role }
+    : undefined
+}
+
+function scopedIdempotencyKey(key: string | undefined, actor: DashboardActor): string | undefined {
+  if (!key) return undefined
+  return actor.kind === 'ingress' ? `${actor.organizationId}:${key}` : key
+}
+
+function executorInstallAccessError(actor: DashboardActor, snapshot: { organizationId?: string }): string | undefined {
+  if (actor.kind !== 'ingress') return undefined
+  if (!snapshot.organizationId) return 'tenant_attribution_missing'
+  return snapshot.organizationId === actor.organizationId ? undefined : 'tenant_forbidden'
 }
 
 async function handleClientEvent(req: IncomingMessage, res: ServerResponse, store: ExecutorInstallationStore, id: string): Promise<void> {

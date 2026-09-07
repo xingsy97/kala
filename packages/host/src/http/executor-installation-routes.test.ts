@@ -82,4 +82,41 @@ describe('executor installation routes', () => {
     expect((await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })).status).toBe(403)
     expect((await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'admin' }, body })).status).toBe(201)
   })
+
+  it('scopes multi-tenant executor install management to the creating Organization', async () => {
+    const privateCloud = await start('multi-tenant')
+    const orgAHeaders = {
+      'content-type': 'application/json',
+      'x-agent-runlab-principal': 'admin-a@example.test',
+      'x-agent-runlab-organization-id': 'org_a',
+      'x-agent-runlab-organization-role': 'admin',
+    }
+    const orgBHeaders = {
+      'content-type': 'application/json',
+      'x-agent-runlab-principal': 'admin-b@example.test',
+      'x-agent-runlab-organization-id': 'org_b',
+      'x-agent-runlab-organization-role': 'admin',
+    }
+    const created = await fetch(`${privateCloud.url}/api/executor-installs`, {
+      method: 'POST',
+      headers: orgAHeaders,
+      body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' }),
+    }).then((response) => response.json()) as { id: string; organizationId: string; principal: string; organizationRole: string }
+    expect(created).toMatchObject({ organizationId: 'org_a', principal: 'admin-a@example.test', organizationRole: 'admin' })
+
+    const blockedGet = await fetch(`${privateCloud.url}/api/executor-installs/${created.id}`, { headers: orgBHeaders })
+    expect(blockedGet.status).toBe(403)
+    await expect(blockedGet.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
+
+    const blockedPatch = await fetch(`${privateCloud.url}/api/executor-installs/${created.id}`, {
+      method: 'PATCH',
+      headers: orgBHeaders,
+      body: JSON.stringify({ label: 'stolen' }),
+    })
+    expect(blockedPatch.status).toBe(403)
+
+    const allowedGet = await fetch(`${privateCloud.url}/api/executor-installs/${created.id}`, { headers: orgAHeaders })
+    expect(allowedGet.status).toBe(200)
+    await expect(allowedGet.json()).resolves.toMatchObject({ organizationId: 'org_a', id: created.id })
+  })
 })

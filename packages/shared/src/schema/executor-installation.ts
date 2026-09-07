@@ -64,6 +64,9 @@ export const UpdateExecutorInstallSchema = z.object({
 
 export const ExecutorInstallStatusSnapshotSchema = z.object({
   id: NonEmptyStringSchema,
+  organizationId: NonEmptyStringSchema.optional(),
+  principal: NonEmptyStringSchema.optional(),
+  organizationRole: z.enum(['owner', 'admin', 'member', 'viewer']).optional(),
   platform: ExecutorInstallPlatformSchema,
   mode: ExecutorInstallModeSchema,
   workspaceRoot: WorkspaceRootSchema,

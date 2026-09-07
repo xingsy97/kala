@@ -34,6 +34,9 @@ export interface UpdateExecutorInstall {
 
 export interface ExecutorInstallStatusSnapshot {
   id: string
+  organizationId?: string
+  principal?: string
+  organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   platform: ExecutorInstallPlatform
   mode: ExecutorInstallMode
   workspaceRoot: string

@@ -27,6 +27,7 @@ type FileShape = { schemaVersion: 1; installations: InstallationRecord[]; idempo
 
 export type CreatedExecutorInstallation = { install: ExecutorInstallStatusSnapshot; setupCode: string }
 export type ClaimedExecutorInstallation = { install: ExecutorInstallStatusSnapshot; bootstrap: string }
+export type ExecutorInstallationTenantAttribution = Pick<ExecutorInstallStatusSnapshot, 'organizationId' | 'principal' | 'organizationRole'>
 
 export class ExecutorInstallationStore {
   private records = new Map<string, InstallationRecord>()
@@ -42,7 +43,7 @@ export class ExecutorInstallationStore {
     this.idempotency = new Map(Object.entries(parsed.idempotency ?? {}).filter(([, id]) => this.records.has(id)))
   }
 
-  create(input: CreateExecutorInstall, idempotencyKey?: string): CreatedExecutorInstallation {
+  create(input: CreateExecutorInstall, idempotencyKey?: string, tenant?: ExecutorInstallationTenantAttribution): CreatedExecutorInstallation {
     if (idempotencyKey) {
       const existingId = this.idempotency.get(idempotencyKey)
       const existing = existingId ? this.records.get(existingId) : undefined
@@ -53,6 +54,9 @@ export class ExecutorInstallationStore {
     const setupCode = createSetupCode()
     const record: InstallationRecord = {
       id,
+      ...(tenant?.organizationId ? { organizationId: tenant.organizationId } : {}),
+      ...(tenant?.principal ? { principal: tenant.principal } : {}),
+      ...(tenant?.organizationRole ? { organizationRole: tenant.organizationRole } : {}),
       ...input,
       status: 'created',
       seq: 0,
