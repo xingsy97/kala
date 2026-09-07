@@ -9,7 +9,7 @@ describe('RetentionService', () => {
     const service = new RetentionService(database)
     const now = new Date('2026-09-07T04:00:00Z')
 
-    await expect(service.purgeOrganization('org_acme', now)).resolves.toEqual({ sessions: 2, devices: 1 })
+    await expect(service.purgeOrganization('org_acme', now)).resolves.toEqual({ sessions: 2, devices: 1, hostSessions: 0 })
 
     expect(database.transactionCount).toBe(1)
     expect(database.executed.map((entry) => entry.sql)).toEqual([
@@ -19,6 +19,21 @@ describe('RetentionService', () => {
     ])
     expect(database.executed[1]?.values).toEqual(['org_acme', now, 30])
     expect(database.executed[2]?.values).toEqual(['org_acme', now, 30])
+  })
+
+  it('purges host tenant sessions and artifacts with the same retention cutoff', async () => {
+    const database = new FakeRetentionDatabase()
+    const hostData = {
+      purgeOrganizationSessions: vi.fn(async () => ({ sessions: 3 })),
+    }
+    const service = new RetentionService(database, hostData)
+    const now = new Date('2026-09-07T04:00:00Z')
+
+    await expect(service.purgeOrganization('org_acme', now)).resolves.toEqual({ sessions: 2, devices: 1, hostSessions: 3 })
+    expect(hostData.purgeOrganizationSessions).toHaveBeenCalledWith({
+      organizationId: 'org_acme',
+      before: new Date('2026-08-08T04:00:00Z'),
+    })
   })
 
   it('fails closed when retention policy is missing', async () => {
@@ -61,7 +76,7 @@ describe('RetentionService', () => {
     const service = new RetentionService(database)
 
     await expect(service.purgeAllOrganizations(new Date('2026-09-07T04:00:00Z'))).resolves.toEqual({
-      purged: [{ organizationId: 'org_acme', sessions: 2, devices: 1 }],
+      purged: [{ organizationId: 'org_acme', sessions: 2, devices: 1, hostSessions: 0 }],
       failures: [{ organizationId: 'org_missing', error: 'retention policy not found' }],
     })
 

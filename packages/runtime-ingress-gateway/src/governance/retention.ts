@@ -4,6 +4,7 @@ export type RetentionPurgeResult = {
   organizationId: string
   sessions: number
   devices: number
+  hostSessions: number
 }
 
 export type RetentionPurgeFailure = {
@@ -12,15 +13,23 @@ export type RetentionPurgeFailure = {
 }
 
 export class RetentionService {
-  constructor(private readonly database: ControlPlaneDatabase) {}
-  async purgeOrganization(organizationId: string, now = new Date()): Promise<{ sessions: number; devices: number }> {
-    return this.database.transaction(async (transaction) => {
+  constructor(
+    private readonly database: ControlPlaneDatabase,
+    private readonly hostData?: {
+      purgeOrganizationSessions(params: { organizationId: string; before: Date }): Promise<{ sessions: number }>
+    },
+  ) {}
+  async purgeOrganization(organizationId: string, now = new Date()): Promise<{ sessions: number; devices: number; hostSessions: number }> {
+    const controlPlane = await this.database.transaction(async (transaction) => {
       const policy = await transaction.query<{ session_days: number }>('SELECT session_days FROM retention_policies WHERE organization_id=$1', [organizationId])
       if (!policy.rows[0]) throw new Error('retention policy not found')
       const devices = await transaction.query(`DELETE FROM notification_devices WHERE organization_id=$1 AND updated_at < $2::timestamptz - ($3::text || ' days')::interval`, [organizationId, now, policy.rows[0].session_days])
       const sessions = await transaction.query(`DELETE FROM browser_sessions WHERE organization_id=$1 AND COALESCE(revoked_at,absolute_expires_at) < $2::timestamptz - ($3::text || ' days')::interval`, [organizationId, now, policy.rows[0].session_days])
-      return { sessions: sessions.rowCount ?? 0, devices: devices.rowCount ?? 0 }
+      return { sessionDays: policy.rows[0].session_days, sessions: sessions.rowCount ?? 0, devices: devices.rowCount ?? 0 }
     })
+    const before = new Date(now.getTime() - controlPlane.sessionDays * 24 * 60 * 60 * 1000)
+    const hostSessions = this.hostData ? (await this.hostData.purgeOrganizationSessions({ organizationId, before })).sessions : 0
+    return { sessions: controlPlane.sessions, devices: controlPlane.devices, hostSessions }
   }
   async purgeAllOrganizations(now = new Date()): Promise<{ purged: RetentionPurgeResult[]; failures: RetentionPurgeFailure[] }> {
     const organizations = await this.database.query<{ organization_id: string }>(`
