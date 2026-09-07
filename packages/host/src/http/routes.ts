@@ -56,7 +56,7 @@ import { retrieveMemory } from '../memory-retrieval.js'
 import { auditSessionReliability, replayReliabilityChaos } from '../reliability.js'
 import { evaluateReliabilityGate, type ReliabilityGatePolicy } from '../reliability-gate.js'
 import { classifyReliability } from '../reliability-classify.js'
-import type { AuthConfig } from '../auth-control.js'
+import type { AuthConfig, DashboardActor } from '../auth-control.js'
 import {
   authenticateDashboardHandshake,
   buildGithubStart,
@@ -76,7 +76,7 @@ import type { OperationalMetrics } from '../operational-metrics.js'
 import type { MemoStore } from '../memo-store.js'
 import { diffToolCatalogs } from '../tool-catalog-diff.js'
 import { writeExecutorCapabilitySnapshot } from '../executor-capabilities.js'
-import { SessionNotFoundError, type SessionStore } from '../store/session.js'
+import { SessionNotFoundError, type SessionRecord, type SessionStore } from '../store/session.js'
 import { compareToolVersions } from '../tool-version.js'
 import { exportSubAgentGraph } from '../subagent-graph.js'
 import { runWebSearch, type WebSearchCredentialStore } from '../web-search/index.js'
@@ -347,6 +347,8 @@ export function attachJsonRoutes(
       claimRoute(req)
       const record = payloads.sessions.get(decodeURIComponent(sessionToolLockMatch[1] ?? ''))
       if (!record) { sendError(res, 404, 'session not found'); return }
+      const accessError = httpSessionAccessError(req, record)
+      if (accessError) { sendError(res, accessError.status, accessError.message); return }
       sendJson(req, res, { sessionId: record.sessionId, tools: record.toolLock })
       return
     }
@@ -654,9 +656,15 @@ export function attachJsonRoutes(
     const toolBarrier = /^\/runtime\/sessions\/([^/]+)\/tool-result\/([^/]+)$/u.exec(path)
     if (toolBarrier && payloads.toolResultPersisted && (req.method === 'GET' || req.method === 'HEAD')) {
       claimRoute(req)
-      void payloads.toolResultPersisted(decodeURIComponent(toolBarrier[1]!), decodeURIComponent(toolBarrier[2]!))
+      void (async () => {
+        const sessionId = decodeURIComponent(toolBarrier[1]!)
+        const record = payloads.sessions?.get(sessionId) ?? await payloads.sessions?.load(sessionId, { recoverDangling: false }).catch(() => undefined)
+        const accessError = httpSessionAccessError(req, record)
+        if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
+        return payloads.toolResultPersisted!(sessionId, decodeURIComponent(toolBarrier[2]!))
+      })()
         .then((persisted) => sendJson(req, res, { persisted }))
-        .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
+        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
       return
     }
     if (path === '/runtime/admission/messages' && payloads.enqueueUserMessage && req.method === 'POST') {
@@ -675,6 +683,12 @@ export function attachJsonRoutes(
         if (!fileValidation.ok) throw new HttpRouteError(400, `${fileValidation.error.code}: ${fileValidation.error.message}`)
         if (!input.data.text.trim() && !input.data.content?.length) throw new HttpRouteError(400, 'message content is required')
         validateMessageAttachmentReferences(payloads.messageAttachments, input.data.sessionId, input.data.content)
+        const session = await payloads.sessions?.load(input.data.sessionId, { recoverDangling: false }).catch((error) => {
+          if (error instanceof SessionNotFoundError) throw error
+          throw new HttpRouteError(400, error instanceof Error ? error.message : String(error))
+        })
+        const accessError = httpSessionAccessError(req, session)
+        if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
         const outcome = await payloads.enqueueUserMessage!({
           sessionId: input.data.sessionId, operationId: input.data.operationId, text: input.data.text,
           mode: input.data.mode ?? 'steer', ...(input.data.content ? { content: input.data.content } : {}),
@@ -694,7 +708,7 @@ export function attachJsonRoutes(
           })
           return
         }
-        sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error))
+        sendError(res, error instanceof HttpRouteError ? error.status : error instanceof SessionNotFoundError ? 404 : 400, error instanceof Error ? error.message : String(error))
       })
       return
     }
@@ -715,6 +729,8 @@ export function attachJsonRoutes(
           throw new HttpRouteError(413, `Attachment exceeds ${MAX_MESSAGE_ATTACHMENT_BYTES} bytes`)
         }
         const session = await payloads.sessions!.load(sessionId, { recoverDangling: false })
+        const accessError = httpSessionAccessError(req, session)
+        if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
         const data = await readBytes(req, MAX_MESSAGE_ATTACHMENT_BYTES)
         const mediaType = typeof req.headers['content-type'] === 'string'
           ? req.headers['content-type'].split(';', 1)[0]!.trim().toLowerCase()
@@ -748,6 +764,12 @@ export function attachJsonRoutes(
         if (typeof input.sessionId !== 'string' || !Array.isArray(input.attachmentIds)) {
           throw new HttpRouteError(400, 'sessionId and attachmentIds are required')
         }
+        const session = await payloads.sessions?.load(input.sessionId, { recoverDangling: false }).catch((error) => {
+          if (error instanceof SessionNotFoundError) throw error
+          throw new HttpRouteError(400, error instanceof Error ? error.message : String(error))
+        })
+        const accessError = httpSessionAccessError(req, session)
+        if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
         const attachmentIds = input.attachmentIds.filter((value): value is string => typeof value === 'string')
         if (attachmentIds.length !== input.attachmentIds.length) throw new HttpRouteError(400, 'invalid attachmentIds')
         await payloads.messageAttachments!.releasePending(input.sessionId, attachmentIds)
@@ -1030,7 +1052,9 @@ export function attachJsonRoutes(
       void readJson(req).then(async (body) => {
         const input = body as { sessionId?: string; title?: string; fileName?: string; data?: string }
         if (!input.sessionId || !input.fileName || !input.data) throw new HttpRouteError(400, 'sessionId, fileName, and base64 data are required')
-        await payloads.sessions!.load(input.sessionId)
+        const session = await payloads.sessions!.load(input.sessionId)
+        const accessError = httpSessionAccessError(req, session)
+        if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
         const record = await payloads.sessionArtifacts!.registerImage({ sessionId: input.sessionId, title: input.title, fileName: input.fileName, data: Buffer.from(input.data, 'base64') })
         sendJson(req, res, { ...record, uri: `artifact://${record.artifactId}` })
       }).catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
@@ -1046,12 +1070,15 @@ export function attachJsonRoutes(
       if (!sessionId || record.sessionId !== sessionId) { sendError(res, 403, 'artifact does not belong to this session'); return }
       void payloads.sessions.load(sessionId)
         .then(() => {
+          const session = payloads.sessions!.get(sessionId)
+          const accessError = httpSessionAccessError(req, session)
+          if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
           const headers = { 'content-type': record.mediaType, 'content-length': String(record.bytes), 'cache-control': 'private, max-age=31536000, immutable', etag: `"${record.sha256}"` }
           res.writeHead(200, headers)
           if (req.method === 'HEAD') res.end()
           else createReadStream(payloads.sessionArtifacts!.contentPath(record)).pipe(res)
         })
-        .catch(() => sendError(res, 404, 'session not found'))
+        .catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 404, error instanceof Error ? error.message : 'session not found'))
       return
     }
     if (path === '/artifacts/manifest') {
@@ -1201,6 +1228,34 @@ function authorizeDashboardHttp(req: IncomingMessage, auth: AuthConfig | undefin
 
 function dashboardActorCanWrite(actor: AuditActor): boolean {
   return actor.kind !== 'ingress' || actor.role !== 'viewer'
+}
+
+function httpSessionAccessError(
+  req: IncomingMessage,
+  record: SessionRecord | undefined,
+): { status: number; message: string } | undefined {
+  const actor = ingressActorFromHeaders(req)
+  if (!actor) return undefined
+  if (!record) return { status: 404, message: 'session not found' }
+  if (!record.organizationId) return { status: 403, message: 'tenant_attribution_missing' }
+  if (record.organizationId !== actor.organizationId) return { status: 403, message: 'tenant_forbidden' }
+  return undefined
+}
+
+function ingressActorFromHeaders(req: IncomingMessage): Extract<DashboardActor, { kind: 'ingress' }> | undefined {
+  const principal = singleHeader(req, 'x-agent-runlab-principal')
+  const organizationId = singleHeader(req, 'x-agent-runlab-organization-id')
+  const role = singleHeader(req, 'x-agent-runlab-organization-role')
+  if (!principal || !organizationId) return undefined
+  if (role !== 'owner' && role !== 'admin' && role !== 'member' && role !== 'viewer') return undefined
+  return { kind: 'ingress', principal, organizationId, role }
+}
+
+function singleHeader(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name]
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
 }
 
 function internalIngressAuthorized(req: IncomingMessage): boolean {

@@ -359,6 +359,108 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('rejects cross-tenant ingress HTTP access to session-scoped runtime routes', async () => {
+    await server.store.create({
+      sessionId: 'http-tenant-a',
+      config,
+      organizationId: 'org_a',
+      principal: 'a@example.test',
+      organizationRole: 'member',
+    })
+    await server.store.create({
+      sessionId: 'http-tenant-b',
+      config,
+      organizationId: 'org_b',
+      principal: 'b@example.test',
+      organizationRole: 'member',
+    })
+    const orgAHeaders = {
+      'x-agent-runlab-principal': 'a@example.test',
+      'x-agent-runlab-organization-id': 'org_a',
+      'x-agent-runlab-organization-role': 'member',
+    }
+
+    const toolLock = await fetch(`${url}/runtime/sessions/http-tenant-b/tool-lock`, {
+      headers: orgAHeaders,
+    })
+    expect(toolLock.status).toBe(403)
+    await expect(toolLock.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
+
+    const admission = await fetch(`${url}/runtime/admission/messages`, {
+      method: 'POST',
+      headers: { ...orgAHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'http-tenant-b',
+        operationId: 'http-cross-tenant-admission',
+        text: 'must not enqueue',
+      }),
+    })
+    expect(admission.status).toBe(403)
+    await expect(admission.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
+
+    const attachment = await fetch(`${url}/runtime/attachments?sessionId=http-tenant-b`, {
+      method: 'POST',
+      headers: {
+        ...orgAHeaders,
+        'content-type': 'text/plain',
+        'x-agent-runlab-attachment-name': encodeURIComponent('note.txt'),
+      },
+      body: 'hello',
+    })
+    expect(attachment.status).toBe(403)
+    await expect(attachment.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
+  })
+
+  it('rejects cross-tenant ingress HTTP access to session artifacts', async () => {
+    await server.store.create({
+      sessionId: 'artifact-tenant-b',
+      config,
+      organizationId: 'org_b',
+      principal: 'b@example.test',
+      organizationRole: 'member',
+    })
+    const orgBHeaders = {
+      'x-agent-runlab-principal': 'b@example.test',
+      'x-agent-runlab-organization-id': 'org_b',
+      'x-agent-runlab-organization-role': 'member',
+    }
+    const orgAHeaders = {
+      'x-agent-runlab-principal': 'a@example.test',
+      'x-agent-runlab-organization-id': 'org_a',
+      'x-agent-runlab-organization-role': 'member',
+    }
+    const png = Buffer.alloc(16)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png)
+
+    const blockedRegister = await fetch(`${url}/session-artifacts/register`, {
+      method: 'POST',
+      headers: { ...orgAHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'artifact-tenant-b',
+        fileName: 'blocked.png',
+        data: png.toString('base64'),
+      }),
+    })
+    expect(blockedRegister.status).toBe(403)
+    await expect(blockedRegister.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
+
+    const registered = await fetch(`${url}/session-artifacts/register`, {
+      method: 'POST',
+      headers: { ...orgBHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'artifact-tenant-b',
+        fileName: 'allowed.png',
+        data: png.toString('base64'),
+      }),
+    }).then((response) => response.json() as Promise<{ artifactId: string }>)
+
+    const blockedRead = await fetch(`${url}/session-artifacts/${registered.artifactId}?sessionId=artifact-tenant-b`, {
+      headers: orgAHeaders,
+    })
+    expect(blockedRead.status).toBe(403)
+    await expect(blockedRead.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
+  })
+
   it('enforces tenant LLM quota before calling the provider', async () => {
     await server.close()
     let providerCalls = 0
