@@ -790,6 +790,43 @@ export class SessionStore {
     await this.options.deleteRegisteredArtifacts?.(sessionId)
   }
 
+  async purgeOrganizationSessions(params: {
+    organizationId: string
+    /**
+     * Optional cutoff for retention jobs. The session is purged only when its
+     * latest activity (`lastEventAt` or `createdAt`) is before this instant.
+     * Omit for irreversible tenant-root deletion after the grace period.
+     */
+    before?: Date
+  }): Promise<{ sessions: number; sessionIds: string[] }> {
+    const organizationId = params.organizationId.trim()
+    if (organizationId.length === 0) throw new Error('organizationId is required')
+    const cutoffMs = params.before?.getTime()
+    if (cutoffMs !== undefined && !Number.isFinite(cutoffMs)) throw new Error('invalid retention cutoff')
+    const candidates = new Map<string, SessionRecord>()
+    for (const record of this.records.values()) {
+      if (record.organizationId === organizationId && sessionOlderThan(record, cutoffMs)) candidates.set(record.sessionId, record)
+    }
+    if (existsSync(this.sessionsDir)) {
+      for (const file of readdirSync(this.sessionsDir)) {
+        if (!file.endsWith('.jsonl')) continue
+        const path = join(this.sessionsDir, file)
+        if (loadedRecordForPath(this.records, path)) continue
+        try {
+          const header = await readSessionHeader(path)
+          const record = await this.loadFromFile(header.sessionId, path, { recoverDangling: false })
+          if (record.organizationId === organizationId && sessionOlderThan(record, cutoffMs)) candidates.set(record.sessionId, record)
+        } catch {
+          // Malformed logs are quarantined from tenant purge rather than being
+          // guessed into another tenant's deletion set.
+        }
+      }
+    }
+    const sessionIds = [...candidates.keys()].sort()
+    for (const sessionId of sessionIds) await this.delete(sessionId)
+    return { sessions: sessionIds.length, sessionIds }
+  }
+
   async updateRuntimeContextSnapshot(
     record: SessionRecord,
     contextSnapshot: ContextUsageSnapshot,
@@ -1329,6 +1366,12 @@ function summarizeRecord(record: SessionRecord): SessionSummary {
     ...(record.label ? { label: record.label } : {}),
     ...(Object.keys(record.preferences).length > 0 ? { preferences: record.preferences } : {}),
   }
+}
+
+function sessionOlderThan(record: SessionRecord, cutoffMs: number | undefined): boolean {
+  if (cutoffMs === undefined) return true
+  const activity = Date.parse(record.lastEventAt ?? record.createdAt)
+  return Number.isFinite(activity) && activity < cutoffMs
 }
 
 function needsExternalRuntimeRecovery(

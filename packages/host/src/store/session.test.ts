@@ -342,6 +342,61 @@ describe('SessionStore.ensure', () => {
     expect(existsSync(orphan)).toBe(false)
   })
 
+  it('purges only sessions attributed to the requested organization', async () => {
+    const artifactRootDir = join(dir, 'host-artifacts')
+    const deletedRegistered: string[] = []
+    const store = new SessionStore(dir, {
+      artifactRootDir,
+      deleteRegisteredArtifacts: async (sessionId) => { deletedRegistered.push(sessionId) },
+    })
+    const acme = await store.create({
+      sessionId: 'tenant-purge-acme',
+      config,
+      organizationId: 'org_acme',
+      principal: 'member@example.test',
+      organizationRole: 'member',
+    })
+    const other = await store.create({
+      sessionId: 'tenant-purge-other',
+      config,
+      organizationId: 'org_other',
+      principal: 'other@example.test',
+      organizationRole: 'member',
+    })
+    mkdirSync(join(artifactRootDir, 'message-assembly', acme.sessionId), { recursive: true })
+    writeFileSync(join(artifactRootDir, 'message-assembly', acme.sessionId, '1.json'), '{}')
+    mkdirSync(join(artifactRootDir, 'message-assembly', other.sessionId), { recursive: true })
+    writeFileSync(join(artifactRootDir, 'message-assembly', other.sessionId, '1.json'), '{}')
+
+    await expect(store.purgeOrganizationSessions({ organizationId: 'org_acme' })).resolves.toEqual({
+      sessions: 1,
+      sessionIds: ['tenant-purge-acme'],
+    })
+
+    expect(existsSync(acme.logPath)).toBe(false)
+    expect(existsSync(join(artifactRootDir, 'message-assembly', acme.sessionId))).toBe(false)
+    expect(existsSync(other.logPath)).toBe(true)
+    expect(existsSync(join(artifactRootDir, 'message-assembly', other.sessionId, '1.json'))).toBe(true)
+    expect(deletedRegistered).toEqual(['tenant-purge-acme'])
+  })
+
+  it('retention-purges only tenant sessions older than the cutoff', async () => {
+    const store = new SessionStore(dir)
+    const old = await store.create({ sessionId: 'tenant-purge-old', config, organizationId: 'org_acme' })
+    const fresh = await store.create({ sessionId: 'tenant-purge-fresh', config, organizationId: 'org_acme' })
+    ;(old as { lastEventAt?: string }).lastEventAt = '2026-01-01T00:00:00.000Z'
+    ;(fresh as { lastEventAt?: string }).lastEventAt = '2026-09-07T00:00:00.000Z'
+
+    const result = await store.purgeOrganizationSessions({
+      organizationId: 'org_acme',
+      before: new Date('2026-06-01T00:00:00.000Z'),
+    })
+
+    expect(result).toEqual({ sessions: 1, sessionIds: ['tenant-purge-old'] })
+    expect(existsSync(old.logPath)).toBe(false)
+    expect(existsSync(fresh.logPath)).toBe(true)
+  })
+
   it('backfills missing workspace and initial cwd on an existing cached session', async () => {
     const store = new SessionStore(dir)
     const first = await store.ensure({
