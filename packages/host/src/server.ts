@@ -61,7 +61,7 @@ import {
   type ExecutorNs,
 } from './connection/executor-ns.js'
 import { sessionRoom } from './connection/rooms.js'
-import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, claimRoute, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount } from './http/routes.js'
+import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, claimRoute, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount, type TenantStorageQuotaEnforcer } from './http/routes.js'
 import { SessionArtifactRegistry } from './session-artifact-registry.js'
 import { MessageAttachmentStore } from './message-attachment-store.js'
 import { validateMessageAttachmentReferences } from './message-attachment-resolver.js'
@@ -101,6 +101,7 @@ export type HostServerOptions = {
   modelPolicy?: TenantModelPolicyEnforcer
   sessionQuota?: TenantSessionQuotaEnforcer
   queueQuota?: TenantQueueQuotaEnforcer
+  storageQuota?: TenantStorageQuotaEnforcer
   copilot?: {
     enabled?: boolean
     gitHubToken?: string
@@ -380,6 +381,7 @@ export async function startHostServer(
     ...(options.embeddedDocs ? { embeddedDocs: options.embeddedDocs } : {}),
     sessionArtifacts,
     messageAttachments,
+    ...(options.storageQuota ? { storageQuota: options.storageQuota } : {}),
     ...(options.routerHealth ? { routerHealth: options.routerHealth } : {}),
     ...(auth ? { auth } : {}),
     audit,

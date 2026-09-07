@@ -232,6 +232,7 @@ export function attachJsonRoutes(
     embeddedDocs?: readonly EmbeddedStaticAsset[]
     sessionArtifacts?: SessionArtifactRegistry
     messageAttachments?: MessageAttachmentStore
+    storageQuota?: TenantStorageQuotaEnforcer
     sessions?: SessionStore
     routerHealth?: () => unknown
     executorsSnapshot?: () => readonly AttachedExecutor[]
@@ -732,6 +733,7 @@ export function attachJsonRoutes(
         const accessError = httpSessionAccessError(req, session)
         if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
         const data = await readBytes(req, MAX_MESSAGE_ATTACHMENT_BYTES)
+        await assertTenantStorageQuota(payloads.storageQuota, session, 'message_attachment', data.byteLength)
         const mediaType = typeof req.headers['content-type'] === 'string'
           ? req.headers['content-type'].split(';', 1)[0]!.trim().toLowerCase()
           : 'application/octet-stream'
@@ -1055,11 +1057,14 @@ export function attachJsonRoutes(
         const session = await payloads.sessions!.load(input.sessionId)
         const accessError = httpSessionAccessError(req, session)
         if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
-        const record = await payloads.sessionArtifacts!.registerImage({ sessionId: input.sessionId, title: input.title, fileName: input.fileName, data: Buffer.from(input.data, 'base64') })
+        const data = Buffer.from(input.data, 'base64')
+        await assertTenantStorageQuota(payloads.storageQuota, session, 'session_artifact', data.byteLength)
+        const record = await payloads.sessionArtifacts!.registerImage({ sessionId: input.sessionId, title: input.title, fileName: input.fileName, data })
         sendJson(req, res, { ...record, uri: `artifact://${record.artifactId}` })
       }).catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
       return
     }
+
     if (req.method !== 'GET' && req.method !== 'HEAD') return
     if (path.startsWith('/session-artifacts/')) {
       claimRoute(req)
@@ -1240,6 +1245,17 @@ function httpSessionAccessError(
   if (!record.organizationId) return { status: 403, message: 'tenant_attribution_missing' }
   if (record.organizationId !== actor.organizationId) return { status: 403, message: 'tenant_forbidden' }
   return undefined
+}
+
+async function assertTenantStorageQuota(
+  quota: TenantStorageQuotaEnforcer | undefined,
+  session: SessionRecord,
+  kind: 'message_attachment' | 'session_artifact',
+  bytes: number,
+): Promise<void> {
+  if (!quota) return
+  if (!session.organizationId) throw new HttpRouteError(403, 'tenant_attribution_missing')
+  await quota.assertCanStoreArtifact({ organizationId: session.organizationId, sessionId: session.sessionId, kind, bytes })
 }
 
 function ingressActorFromHeaders(req: IncomingMessage): Extract<DashboardActor, { kind: 'ingress' }> | undefined {
@@ -1898,6 +1914,15 @@ export function attachStaticHandler(server: HttpServer, staticDir: string): void
 
     void serveStatic(root, req, res)
   })
+}
+
+export type TenantStorageQuotaEnforcer = {
+  assertCanStoreArtifact(params: {
+    organizationId: string
+    sessionId: string
+    bytes: number
+    kind: 'message_attachment' | 'session_artifact'
+  }): Promise<void>
 }
 
 export type EmbeddedStaticAsset = {

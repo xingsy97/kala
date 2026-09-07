@@ -461,6 +461,102 @@ describe('wire protocol', () => {
     await expect(blockedRead.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
   })
 
+  it('enforces tenant storage quota before registering HTTP message attachments', async () => {
+    await server.close()
+    const quotaChecks: unknown[] = []
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      storageQuota: {
+        async assertCanStoreArtifact(params) {
+          quotaChecks.push(params)
+          throw new Error('organization storage quota exceeded')
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({
+      sessionId: 'attachment-quota-denied',
+      config,
+      organizationId: 'org_storage',
+      principal: 'storage@example.test',
+      organizationRole: 'member',
+    })
+
+    const response = await fetch(`${url}/runtime/attachments?sessionId=attachment-quota-denied`, {
+      method: 'POST',
+      headers: {
+        'x-agent-runlab-principal': 'storage@example.test',
+        'x-agent-runlab-organization-id': 'org_storage',
+        'x-agent-runlab-organization-role': 'member',
+        'content-type': 'text/plain',
+        'x-agent-runlab-attachment-name': encodeURIComponent('note.txt'),
+      },
+      body: 'blocked',
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({ error: 'organization storage quota exceeded' })
+    expect(quotaChecks).toEqual([expect.objectContaining({
+      organizationId: 'org_storage',
+      sessionId: 'attachment-quota-denied',
+      kind: 'message_attachment',
+      bytes: 7,
+    })])
+    await expect(readFile(join(dir, '..', 'message-attachments', 'registry.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('enforces tenant storage quota before registering session artifacts', async () => {
+    await server.close()
+    const quotaChecks: unknown[] = []
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      storageQuota: {
+        async assertCanStoreArtifact(params) {
+          quotaChecks.push(params)
+          throw new Error('organization storage quota exceeded')
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({
+      sessionId: 'artifact-quota-denied',
+      config,
+      organizationId: 'org_storage',
+      principal: 'storage@example.test',
+      organizationRole: 'member',
+    })
+    const png = Buffer.alloc(16)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png)
+
+    const response = await fetch(`${url}/session-artifacts/register`, {
+      method: 'POST',
+      headers: {
+        'x-agent-runlab-principal': 'storage@example.test',
+        'x-agent-runlab-organization-id': 'org_storage',
+        'x-agent-runlab-organization-role': 'member',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ sessionId: 'artifact-quota-denied', fileName: 'blocked.png', data: png.toString('base64') }),
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({ error: 'organization storage quota exceeded' })
+    expect(quotaChecks).toEqual([expect.objectContaining({
+      organizationId: 'org_storage',
+      sessionId: 'artifact-quota-denied',
+      kind: 'session_artifact',
+      bytes: 16,
+    })])
+    const registry = JSON.parse(await readFile(join(dir, '..', 'session-artifacts', 'registry.json'), 'utf8')) as { records: Array<{ sessionId: string }> }
+    expect(registry.records.some((record) => record.sessionId === 'artifact-quota-denied')).toBe(false)
+  })
+
   it('enforces tenant session quota before creating ingress sessions', async () => {
     await server.close()
     let checks = 0
