@@ -27,4 +27,13 @@ describe('tenant runtime control API', () => {
     expect(await command({ unitId: 'a', operationId: 's2', generation: 2, action: 'suspend' })).toBe(200); expect(service.suspendUnit).toHaveBeenCalledWith('a')
     expect(await command({ unitId: 'a', operationId: 'stale', generation: 1 })).toBe(400)
   })
+  it('persists delete tombstones and rejects stale resurrection', async () => {
+    const { port, service, store } = await setup(); const command = async (body: unknown) => call(port, '/internal/runtime-units', body, true)
+    expect(await command({ unitId: 'a', operationId: 'p1', generation: 1 })).toBe(200)
+    expect(await command({ unitId: 'a', operationId: 'd2', generation: 2, action: 'delete' })).toBe(200)
+    expect(service.suspendUnit).toHaveBeenCalledWith('a')
+    expect(store.list()[0]).toMatchObject({ unitId: 'a', desiredState: 'deleted', generation: 2 })
+    expect(await command({ unitId: 'a', operationId: 'stale-resume', generation: 1, action: 'resume' })).toBe(400)
+    expect(await command({ unitId: 'a', operationId: 'new-resume', generation: 3, action: 'resume' })).toBe(400)
+  })
 })

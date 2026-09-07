@@ -37,7 +37,10 @@ async function applyCommand(raw: string, oversized: boolean, options: Parameters
   const input = JSON.parse(raw) as { unitId: string; operationId: string; generation: number; action?: 'provision' | 'suspend' | 'resume' | 'delete' }
   if (!input.operationId || input.operationId.length > 200 || !Number.isSafeInteger(input.generation) || input.generation < 1) throw new Error('invalid provisioning request')
   const unitId = parseTenantRuntimeUnitId(input.unitId); const action = input.action ?? 'provision'
-  if (action === 'delete') { await options.service.suspendUnit(unitId); await options.store.remove(unitId, input.operationId, input.generation) }
+  if (action === 'delete') {
+    await options.service.suspendUnit(unitId)
+    await options.store.tombstone({ schemaVersion: 1, unitId, routingKeyDigest: '', routingKeyVersion: 1, generation: input.generation, desiredState: 'deleted', dataRoot: join(options.dataRoot, 'tenant-runtime-units', unitId), capabilities: options.capabilities, lastOperationId: input.operationId, updatedAt: new Date().toISOString() })
+  }
   else {
     const desiredState = action === 'suspend' ? 'suspended' : 'ready'
     await options.store.apply({ schemaVersion: 1, unitId, routingKeyDigest: '', routingKeyVersion: 1, generation: input.generation, desiredState, dataRoot: join(options.dataRoot, 'tenant-runtime-units', unitId), capabilities: options.capabilities, lastOperationId: input.operationId, updatedAt: new Date().toISOString() })

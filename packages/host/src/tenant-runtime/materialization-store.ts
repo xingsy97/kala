@@ -1,7 +1,7 @@
 import type { RuntimeCapabilities } from '@agent-kernel/shared'
 
 import { readJsonFile, writeJsonFile } from './atomic-json-file.js'
-import { parseTenantRuntimeUnitId, type TenantRuntimeUnitId, type TenantRuntimeUnitState } from './unit.js'
+import { parseTenantRuntimeUnitId, type TenantRuntimeUnitId } from './unit.js'
 
 export type RuntimeUnitMaterialization = {
   schemaVersion: 1
@@ -9,14 +9,15 @@ export type RuntimeUnitMaterialization = {
   routingKeyDigest: string
   routingKeyVersion: number
   generation: number
-  desiredState: Extract<TenantRuntimeUnitState, 'ready' | 'suspended' | 'closed'>
+  desiredState: 'ready' | 'suspended' | 'deleted'
   dataRoot: string
   capabilities: RuntimeCapabilities
   lastOperationId: string
   updatedAt: string
 }
 
-type CatalogFile = { schemaVersion: 1; units: RuntimeUnitMaterialization[] }
+type PersistedRuntimeUnitMaterialization = Omit<RuntimeUnitMaterialization, 'desiredState'> & { desiredState: RuntimeUnitMaterialization['desiredState'] | 'closed' }
+type CatalogFile = { schemaVersion: 1; units: PersistedRuntimeUnitMaterialization[] }
 
 export class RuntimeUnitMaterializationStore {
   private readonly entries = new Map<TenantRuntimeUnitId, RuntimeUnitMaterialization>()
@@ -32,7 +33,7 @@ export class RuntimeUnitMaterializationStore {
     for (const entry of parsed.units) {
       const id = parseTenantRuntimeUnitId(entry.unitId)
       if (this.entries.has(id)) throw new Error(`duplicate TenantRuntimeUnit catalog id: ${id}`)
-      this.entries.set(id, { ...entry, unitId: id })
+      this.entries.set(id, { ...entry, unitId: id, desiredState: entry.desiredState === 'closed' ? 'deleted' : entry.desiredState })
     }
   }
 
@@ -49,6 +50,7 @@ export class RuntimeUnitMaterializationStore {
       const existing = this.entries.get(entry.unitId)
       if (existing?.lastOperationId === entry.lastOperationId) return existing
       if (existing && entry.generation <= existing.generation) throw new Error('stale TenantRuntimeUnit generation')
+      if (existing?.desiredState === 'deleted' && entry.desiredState !== 'deleted') throw new Error('deleted TenantRuntimeUnit cannot be resumed')
       this.entries.set(entry.unitId, entry)
       try {
         await this.persist()
@@ -59,6 +61,19 @@ export class RuntimeUnitMaterializationStore {
       }
       return entry
     })
+  }
+
+  async tombstone(entry: RuntimeUnitMaterialization): Promise<RuntimeUnitMaterialization> {
+    await this.serialize(async () => {
+      if (entry.desiredState !== 'deleted') throw new Error('TenantRuntimeUnit tombstone must be deleted')
+      const existing = this.entries.get(entry.unitId)
+      if (existing?.lastOperationId === entry.lastOperationId) return existing
+      if (existing && entry.generation <= existing.generation) throw new Error('stale TenantRuntimeUnit generation')
+      this.entries.set(entry.unitId, entry)
+      try { await this.persist() } catch (error) { if (existing) this.entries.set(entry.unitId, existing); else this.entries.delete(entry.unitId); throw error }
+      return entry
+    })
+    return this.entries.get(entry.unitId)!
   }
 
   async remove(id: TenantRuntimeUnitId, operationId: string, generation: number): Promise<void> {

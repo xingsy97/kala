@@ -10,6 +10,7 @@ import { permits, type OrganizationStore } from '../organizations/store.js'
 import { browserDeviceFromUserAgent, browserSessionTokenHash, isLive, type BrowserSession, type BrowserSessionStore } from '../auth/browser-session-store.js'
 import type { SessionSecretBox } from '../auth/session-secret-box.js'
 import type { EnterpriseSsoResolver } from '../auth/enterprise-sso.js'
+import type { RateLimiter } from '../governance/rate-limit.js'
 
 export type RuntimeIngressGateway = { readonly http: HttpServer; readonly port: number; close(): Promise<void> }
 
@@ -44,6 +45,24 @@ function isDashboardRequest(request: IncomingMessage, pathname: string): boolean
   return /\.[A-Za-z0-9]+$/u.test(pathname)
 }
 
+function denyInactiveOrganization(response: ServerResponse, status: string): void {
+  response.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+  response.end(JSON.stringify({ error: 'organization_not_active', status }))
+}
+
+function enforceRateLimit(response: ServerResponse, limiter: RateLimiter | undefined, key: string): boolean {
+  if (!limiter) return true
+  const decision = limiter.check(key)
+  if (decision.ok) return true
+  response.writeHead(429, {
+    'content-type': 'application/json',
+    'cache-control': 'no-store',
+    'retry-after': String(Math.ceil(decision.retryAfterMs / 1_000)),
+  })
+  response.end(JSON.stringify({ error: 'rate_limited', retryAfterMs: decision.retryAfterMs }))
+  return false
+}
+
 async function readRequestBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = []
   for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
@@ -75,6 +94,7 @@ export async function startRuntimeIngressGateway(options: {
   publicOrigin: string
   listenHost?: string
   ingressSecret: string
+  rateLimiter?: RateLimiter
   provision?(unitId: string): Promise<void>
 }): Promise<RuntimeIngressGateway> {
   const proxy = httpProxy.createProxyServer({ ws: true, target: options.hostOrigin })
@@ -155,6 +175,10 @@ export async function startRuntimeIngressGateway(options: {
         }
       }
       const access = options.organizations ? await options.organizations.getOrCreateForIdentity(identity) : undefined
+      if (access && access.organization.status !== 'active') {
+        denyInactiveOrganization(response, access.organization.status)
+        return
+      }
       const assignment = access ? { unitId: access.organization.unitId, identity } : await options.directory.getOrCreateForIdentity(identity)
       await options.provision?.(assignment.unitId)
       const token = randomBytes(32).toString('base64url')
@@ -180,7 +204,7 @@ export async function startRuntimeIngressGateway(options: {
       response.end(JSON.stringify(session ? {
         authenticated: true,
         profile: publicProfile(session.identity),
-        ...(access ? { organization: { id: access.organization.id, name: access.organization.name, role: access.membership.role } } : {}),
+        ...(access ? { organization: { id: access.organization.id, name: access.organization.name, status: access.organization.status, role: access.membership.role } } : {}),
         cacheNamespace: session.cacheNamespace,
         expiresAt: new Date(Math.min(session.idleExpiresAt, session.absoluteExpiresAt)).toISOString(),
       } : { authenticated: false }))
@@ -287,11 +311,21 @@ export async function startRuntimeIngressGateway(options: {
       response.writeHead(204, { 'cache-control': 'no-store' }); response.end(); return
     }
     if ((url.pathname === '/memo' || url.pathname === '/user/session-tabs') && ['GET', 'HEAD', 'PUT'].includes(request.method ?? '') && session && organizationAccess) {
+      if (organizationAccess.organization.status !== 'active') {
+        denyInactiveOrganization(response, organizationAccess.organization.status)
+        return
+      }
+      if (!enforceRateLimit(response, options.rateLimiter, `${organizationAccess.organization.id}:${session.identity.issuer}:${session.identity.subject}`)) return
       request.headers['x-agent-runlab-principal'] = Buffer.from(`${session.identity.issuer}\0${session.identity.subject}`, 'utf8').toString('base64url')
       request.headers['x-agent-runlab-organization-id'] = organizationAccess.organization.id
       proxy.web(request, response, { target: options.hostOrigin }, () => { if (!response.headersSent) response.writeHead(502); response.end() })
       return
     }
+    if (organizationAccess && organizationAccess.organization.status !== 'active') {
+      denyInactiveOrganization(response, organizationAccess.organization.status)
+      return
+    }
+    if (session && organizationAccess && !enforceRateLimit(response, options.rateLimiter, `${organizationAccess.organization.id}:${session.identity.issuer}:${session.identity.subject}`)) return
     const assignment = organizationAccess ? { unitId: organizationAccess.organization.unitId, identity: identity! } : identity ? await options.directory.findByIdentity(identity) : undefined
     if (!identity || !assignment || identity.issuer !== assignment.identity.issuer || identity.subject !== assignment.identity.subject) {
       if (isDocumentNavigation(request)) response.writeHead(303, { location: '/auth/login', 'cache-control': 'no-store' })
@@ -369,6 +403,7 @@ export async function startRuntimeIngressGateway(options: {
     const session = await authenticate(request)
     const identity = session?.identity
     const organizationAccess = identity && options.organizations ? await options.organizations.findAccess(identity) : undefined
+    if (organizationAccess && organizationAccess.organization.status !== 'active') { socket.destroy(); return }
     const assignment = organizationAccess ? { unitId: organizationAccess.organization.unitId, identity: identity! } : identity ? await options.directory.findByIdentity(identity) : undefined
     const executorInvite = typeof request.headers['x-agent-runlab-executor-invite'] === 'string' ? request.headers['x-agent-runlab-executor-invite'] : undefined
     const inviteUnitId = !assignment && executorInvite ? await options.directory.findUnitByExecutorInvite(executorInvite) : undefined

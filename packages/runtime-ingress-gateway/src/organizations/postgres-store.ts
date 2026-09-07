@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { AuthenticatedIdentity } from '../assignments/store.js'
 import { identityKey, inviteKey } from '../assignments/store.js'
 import type { SqlExecutor } from '../persistence/postgres.js'
-import type { Organization, OrganizationAccess, OrganizationMembership, OrganizationRole, OrganizationStore } from './store.js'
+import type { Organization, OrganizationAccess, OrganizationMembership, OrganizationRole, OrganizationStatus, OrganizationStore } from './store.js'
 
 export class PostgresOrganizationStore implements OrganizationStore {
   constructor(private readonly database: SqlExecutor & { transaction<T>(operation: (transaction: SqlExecutor) => Promise<T>): Promise<T> }) {}
@@ -16,10 +16,10 @@ export class PostgresOrganizationStore implements OrganizationStore {
 
   async findAccess(identity: AuthenticatedIdentity): Promise<OrganizationAccess | undefined> {
     const result = await this.database.query<AccessRow>(`
-      SELECT o.id, o.name, o.runtime_unit_id, o.created_at, m.role, m.created_at AS membership_created_at
+      SELECT o.id, o.name, o.status, o.runtime_unit_id, o.created_at, m.role, m.created_at AS membership_created_at
       FROM principals p
       JOIN organization_memberships m ON m.principal_id = p.id AND m.status = 'active'
-      JOIN organizations o ON o.id = m.organization_id AND o.status = 'active'
+      JOIN organizations o ON o.id = m.organization_id
       WHERE p.kind = 'human' AND p.issuer = $1 AND p.subject = $2
       ORDER BY m.created_at LIMIT 1`, [identity.issuer, identity.subject])
     const row = result.rows[0]
@@ -132,12 +132,12 @@ export class PostgresOrganizationStore implements OrganizationStore {
   }
 }
 
-type AccessRow = { id: string; name: string; runtime_unit_id: string; created_at: Date; role: OrganizationRole; membership_created_at: Date }
+type AccessRow = { id: string; name: string; status: OrganizationStatus; runtime_unit_id: string; created_at: Date; role: OrganizationRole; membership_created_at: Date }
 type MemberRow = { issuer: string; subject: string; display_name: string | null; email: string | null; role: OrganizationRole; created_at: Date }
 type MemberRoleRow = { issuer: string; subject: string; role: OrganizationRole }
 
 function accessFromRow(row: AccessRow, identity: AuthenticatedIdentity): OrganizationAccess {
-  const organization: Organization = { id: row.id, name: row.name, unitId: row.runtime_unit_id, createdAt: row.created_at.toISOString() }
+  const organization: Organization = { id: row.id, name: row.name, unitId: row.runtime_unit_id, status: row.status, createdAt: row.created_at.toISOString() }
   return { organization, membership: { organizationId: row.id, identity, role: row.role, createdAt: row.membership_created_at.toISOString() } }
 }
 function membershipFromRow(organizationId: string, row: MemberRow): OrganizationMembership {

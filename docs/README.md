@@ -93,6 +93,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [architecture/control-plane-postgresql-schema.md](architecture/control-plane-postgresql-schema.md) | **Normative.** Private Cloud control-plane PostgreSQL authority |
 | [architecture/product-hardening-program.md](architecture/product-hardening-program.md) | Historical closed execution program: product foundation, refactors, Docker, Box, quality gate, then LXD |
 | [architecture/private-cloud-enterprise-benchmark-matrix.md](architecture/private-cloud-enterprise-benchmark-matrix.md) | Grafana/GitLab/GitHub/Sentry benchmark matrix and Private Cloud build-vs-integrate decisions |
+| [architecture/commercial-saas-multitenancy-priorities.md](architecture/commercial-saas-multitenancy-priorities.md) | P0/P1/P2 gap breakdown for complete commercial SaaS multitenancy |
 | [architecture/core-agent-invariants-and-fault-model.md](architecture/core-agent-invariants-and-fault-model.md) | Normative cross-component authority map, invariants, fault injections, proofs, and release blockers |
 | [architecture/browser-session-store.md](architecture/browser-session-store.md) | Accepted design for opaque, server-revocable browser Sessions, device lists, refresh, and logout-all |
 | [architecture/observability-contract.md](architecture/observability-contract.md) | Bounded metrics, structured errors, health, SLOs, redaction, alerting, and acceptance |

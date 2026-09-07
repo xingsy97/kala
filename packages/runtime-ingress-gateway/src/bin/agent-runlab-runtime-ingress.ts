@@ -13,6 +13,7 @@ import { PostgresBrowserSessionStore } from '../auth/postgres-browser-session-st
 import { createPostgresControlPlaneDatabase, type ControlPlaneDatabase } from '../persistence/postgres.js'
 import { createSessionSecretBox } from '../auth/session-secret-box.js'
 import { loadEnterpriseSsoResolver } from '../auth/enterprise-sso-config.js'
+import { SlidingWindowRateLimiter } from '../governance/rate-limit.js'
 
 async function main(): Promise<void> {
   const port = Number(process.env.RUNTIME_INGRESS_PORT ?? 13001)
@@ -45,6 +46,12 @@ async function main(): Promise<void> {
   const enterpriseSso = process.env.RUNTIME_INGRESS_ENTERPRISE_SSO_CONFIG
     ? await loadEnterpriseSsoResolver(resolve(process.env.RUNTIME_INGRESS_ENTERPRISE_SSO_CONFIG))
     : undefined
+  const rateLimiter = process.env.RUNTIME_INGRESS_RATE_LIMIT_MAX_REQUESTS
+    ? new SlidingWindowRateLimiter({
+      maxRequests: numberEnv('RUNTIME_INGRESS_RATE_LIMIT_MAX_REQUESTS'),
+      windowMs: numberEnv('RUNTIME_INGRESS_RATE_LIMIT_WINDOW_MS', 60_000),
+    })
+    : undefined
   const gateway = await startRuntimeIngressGateway({
     port,
     listenHost: process.env.RUNTIME_INGRESS_LISTEN_HOST ?? '127.0.0.1',
@@ -65,6 +72,7 @@ async function main(): Promise<void> {
     cacheNamespaceSecret,
     secretBox,
     ingressSecret,
+    ...(rateLimiter ? { rateLimiter } : {}),
     provision: async (unitId) => {
       const response = await fetch(`${await readRequiredSecretEnv('RUNTIME_HOST_ORIGIN')}/internal/runtime-units`, {
         method: 'POST',
@@ -80,3 +88,14 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => { process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`); process.exit(1) })
+
+function numberEnv(name: string, fallback?: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw.trim() === '') {
+    if (fallback !== undefined) return fallback
+    throw new Error(`${name} is required`)
+  }
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`)
+  return value
+}

@@ -5,8 +5,9 @@ import { identityKey, inviteKey } from '../assignments/store.js'
 
 export type OrganizationRole = 'owner' | 'admin' | 'member' | 'viewer'
 export type OrganizationPermission = 'runtime:read' | 'runtime:write' | 'workspace:manage' | 'organization:manage' | 'policy:manage'
+export type OrganizationStatus = 'provisioning' | 'active' | 'suspended' | 'closing' | 'closed'
 
-export type Organization = { id: string; name: string; unitId: string; createdAt: string }
+export type Organization = { id: string; name: string; unitId: string; status: OrganizationStatus; createdAt: string }
 export type OrganizationMembership = { organizationId: string; identity: AuthenticatedIdentity; role: OrganizationRole; createdAt: string }
 export type OrganizationAccess = { organization: Organization; membership: OrganizationMembership }
 
@@ -44,7 +45,7 @@ export class MemoryOrganizationStore implements OrganizationStore {
     const existing = await this.findAccess(identity)
     if (existing) return existing
     const opaque = createHash('sha256').update(identityKey(identity)).digest('hex').slice(0, 26)
-    const organization: Organization = { id: `org_${opaque}`, unitId: `tenant_${opaque}`, name: identity.displayName?.trim() || 'My organization', createdAt: new Date().toISOString() }
+    const organization: Organization = { id: `org_${opaque}`, unitId: `tenant_${opaque}`, name: identity.displayName?.trim() || 'My organization', status: 'active', createdAt: new Date().toISOString() }
     const membership: OrganizationMembership = { organizationId: organization.id, identity, role: 'owner', createdAt: organization.createdAt }
     this.organizations.set(organization.id, organization)
     this.memberships.set(identityKey(identity), membership)

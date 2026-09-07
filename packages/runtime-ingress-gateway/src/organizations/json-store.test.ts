@@ -15,7 +15,7 @@ describe('JsonOrganizationStore', () => {
     writeFileSync(path, JSON.stringify({ schemaVersion: 3, assignments: [{ unitId: 'tenant_existing', identity }] }))
     const store = new JsonOrganizationStore(path); await store.load()
     const access = await store.findAccess(identity)
-    expect(access).toMatchObject({ organization: { unitId: 'tenant_existing' }, membership: { role: 'owner' } })
+    expect(access).toMatchObject({ organization: { unitId: 'tenant_existing', status: 'active' }, membership: { role: 'owner' } })
     expect(JSON.parse(readFileSync(path, 'utf8')).schemaVersion).toBe(4)
   })
 
@@ -25,6 +25,6 @@ describe('JsonOrganizationStore', () => {
     const first = new JsonOrganizationStore(path); const access = await first.getOrCreateForIdentity(owner); await first.addMember(access.organization.id, member, 'viewer')
     const second = new JsonOrganizationStore(path); await second.load()
     expect((await second.findAccess(member))?.membership.role).toBe('viewer')
-    expect((await second.findAccess(member))?.organization.unitId).toBe(access.organization.unitId)
+    expect((await second.findAccess(member))?.organization).toMatchObject({ unitId: access.organization.unitId, status: 'active' })
   })
 })

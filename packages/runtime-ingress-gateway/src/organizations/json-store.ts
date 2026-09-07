@@ -6,7 +6,8 @@ import { readJsonFile, writeJsonFile } from '../persistence/atomic-json-file.js'
 import type { Organization, OrganizationAccess, OrganizationMembership, OrganizationRole, OrganizationStore } from './store.js'
 
 type LegacyFile = { schemaVersion: 1 | 2 | 3; assignments: Array<{ unitId: string; identity: AuthenticatedIdentity }>; executorInviteUnits?: Record<string, string> }
-type OrganizationFile = { schemaVersion: 4; organizations: Organization[]; memberships: OrganizationMembership[]; executorInviteUnits?: Record<string, string> }
+type PersistedOrganization = Omit<Organization, 'status'> & { status?: Organization['status'] }
+type OrganizationFile = { schemaVersion: 4; organizations: PersistedOrganization[]; memberships: OrganizationMembership[]; executorInviteUnits?: Record<string, string> }
 
 export class JsonOrganizationStore implements OrganizationStore {
   private readonly organizations = new Map<string, Organization>()
@@ -21,7 +22,7 @@ export class JsonOrganizationStore implements OrganizationStore {
     this.organizations.clear(); this.memberships.clear(); this.executorInviteUnits.clear()
     for (const [key, unit] of Object.entries(file.executorInviteUnits ?? {})) this.executorInviteUnits.set(key, unit)
     if (file.schemaVersion === 4) {
-      for (const organization of file.organizations) this.organizations.set(organization.id, organization)
+      for (const organization of file.organizations) this.organizations.set(organization.id, { ...organization, status: organization.status ?? 'active' })
       for (const membership of file.memberships) this.indexMembership(membership)
       for (const membership of this.memberships.values()) if (!this.organizations.has(membership.organizationId)) throw new Error('dangling organization membership')
       return
@@ -29,7 +30,7 @@ export class JsonOrganizationStore implements OrganizationStore {
     if (![1, 2, 3].includes(file.schemaVersion) || !Array.isArray(file.assignments)) throw new Error('unsupported organization directory')
     for (const assignment of file.assignments) {
       const opaque = assignment.unitId.replace(/^tenant_/u, '') || createHash('sha256').update(identityKey(assignment.identity)).digest('hex').slice(0, 26)
-      const organization: Organization = { id: `org_${opaque}`, unitId: assignment.unitId, name: assignment.identity.displayName?.trim() || 'My organization', createdAt: new Date().toISOString() }
+      const organization: Organization = { id: `org_${opaque}`, unitId: assignment.unitId, name: assignment.identity.displayName?.trim() || 'My organization', status: 'active', createdAt: new Date().toISOString() }
       this.organizations.set(organization.id, organization)
       this.indexMembership({ organizationId: organization.id, identity: assignment.identity, role: 'owner', createdAt: organization.createdAt })
     }
@@ -41,7 +42,7 @@ export class JsonOrganizationStore implements OrganizationStore {
     return this.serialize(async () => {
       const raced = await this.findAccess(identity); if (raced) return raced
       const opaque = createHash('sha256').update(identityKey(identity)).digest('hex').slice(0, 26)
-      const organization: Organization = { id: `org_${opaque}`, unitId: `tenant_${opaque}`, name: identity.displayName?.trim() || 'My organization', createdAt: new Date().toISOString() }
+      const organization: Organization = { id: `org_${opaque}`, unitId: `tenant_${opaque}`, name: identity.displayName?.trim() || 'My organization', status: 'active', createdAt: new Date().toISOString() }
       const membership: OrganizationMembership = { organizationId: organization.id, identity, role: 'owner', createdAt: organization.createdAt }
       this.organizations.set(organization.id, organization); this.indexMembership(membership)
       try { await this.persist() } catch (error) { this.organizations.delete(organization.id); this.memberships.delete(identityKey(identity)); throw error }

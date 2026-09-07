@@ -7,6 +7,8 @@ import { startRuntimeIngressGateway, type RuntimeIngressGateway } from './server
 import { FileBrowserSessionStore } from '../auth/browser-session-store.js'
 import { createSessionSecretBox } from '../auth/session-secret-box.js'
 import { MemoryEnterpriseSsoResolver } from '../auth/enterprise-sso.js'
+import { MemoryOrganizationStore, type OrganizationStore, type OrganizationStatus } from '../organizations/store.js'
+import { SlidingWindowRateLimiter } from '../governance/rate-limit.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,6 +17,14 @@ class MemoryLoginStates implements LoginStateStore {
   private readonly values = new Map<string, LoginState>()
   async put(nonce: string, state: LoginState): Promise<void> { this.values.set(nonce, state) }
   async take(nonce: string): Promise<LoginState | undefined> { const value = this.values.get(nonce); this.values.delete(nonce); return value }
+}
+
+class TestOrganizationStore extends MemoryOrganizationStore {
+  setStatus(organizationId: string, status: OrganizationStatus): void {
+    const organization = this.organizations.get(organizationId)
+    if (!organization) throw new Error('organization not found')
+    this.organizations.set(organizationId, { ...organization, status })
+  }
 }
 
 const running: Array<{ close(): Promise<void> }> = []
@@ -125,6 +135,66 @@ describe('Private Cloud edge request path', () => {
     expect(runtimePaths).toEqual(['/runtime/capabilities'])
   })
 
+  it('denies runtime access for inactive organizations without proxying upstream', async () => {
+    const runtimePaths: string[] = []
+    const runtime = createServer((request, response) => {
+      runtimePaths.push(request.url ?? '')
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end('{"runtime":true}')
+    })
+
+    await new Promise<void>((resolve) => runtime.listen(0, '127.0.0.1', resolve))
+    running.push({ close: () => new Promise<void>((resolve) => runtime.close(() => resolve())) })
+    const runtimeAddress = runtime.address()
+    const runtimePort = typeof runtimeAddress === 'object' && runtimeAddress ? runtimeAddress.port : 0
+    const organizations = new TestOrganizationStore()
+    const gateway = await createGateway(`http://127.0.0.1:${runtimePort}`, undefined, { organizations })
+
+    const login = await fetch(`http://127.0.0.1:${gateway.port}/auth/login`, { redirect: 'manual' })
+    const nonce = cookieValue(login.headers.getSetCookie(), 'ak_login')
+    const callback = await fetch(`http://127.0.0.1:${gateway.port}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${nonce}` }, redirect: 'manual' })
+    const session = cookieValue(callback.headers.getSetCookie(), 'ak_session')
+    const access = await organizations.findAccess({ issuer: 'http://identity.example', subject: 'alice' })
+    organizations.setStatus(access!.organization.id, 'suspended')
+
+    const me = await fetch(`http://127.0.0.1:${gateway.port}/auth/me`, { headers: { cookie: `ak_session=${session}` } })
+    expect(await me.json()).toMatchObject({ authenticated: true, organization: { status: 'suspended' } })
+    const runtimeResponse = await fetch(`http://127.0.0.1:${gateway.port}/runtime/capabilities`, { headers: { cookie: `ak_session=${session}` } })
+    expect(runtimeResponse.status).toBe(403)
+    expect(await runtimeResponse.json()).toEqual({ error: 'organization_not_active', status: 'suspended' })
+    expect(runtimePaths).toEqual([])
+  })
+
+  it('rate limits authenticated tenant requests before proxying upstream', async () => {
+    const runtimePaths: string[] = []
+    const runtime = createServer((request, response) => {
+      runtimePaths.push(request.url ?? '')
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end('{"runtime":true}')
+    })
+    await new Promise<void>((resolve) => runtime.listen(0, '127.0.0.1', resolve))
+    running.push({ close: () => new Promise<void>((resolve) => runtime.close(() => resolve())) })
+    const runtimeAddress = runtime.address()
+    const runtimePort = typeof runtimeAddress === 'object' && runtimeAddress ? runtimeAddress.port : 0
+    const gateway = await createGateway(`http://127.0.0.1:${runtimePort}`, undefined, {
+      organizations: new TestOrganizationStore(),
+      rateLimiter: new SlidingWindowRateLimiter({ windowMs: 60_000, maxRequests: 1 }),
+    })
+
+    const login = await fetch(`http://127.0.0.1:${gateway.port}/auth/login`, { redirect: 'manual' })
+    const nonce = cookieValue(login.headers.getSetCookie(), 'ak_login')
+    const callback = await fetch(`http://127.0.0.1:${gateway.port}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${nonce}` }, redirect: 'manual' })
+    const session = cookieValue(callback.headers.getSetCookie(), 'ak_session')
+    const headers = { cookie: `ak_session=${session}` }
+
+    expect(await fetch(`http://127.0.0.1:${gateway.port}/runtime/capabilities`, { headers }).then((response) => response.status)).toBe(200)
+    const limited = await fetch(`http://127.0.0.1:${gateway.port}/runtime/capabilities`, { headers })
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('retry-after')).toBe('60')
+    await expect(limited.json()).resolves.toMatchObject({ error: 'rate_limited' })
+    expect(runtimePaths).toEqual(['/runtime/capabilities'])
+  })
+
   it('directs enterprise login through a server-resolved IdP and rejects mismatched callbacks', async () => {
     let callbackProvider = 'idp_enterprise'
     const authorizationOptions: Array<{ idpHint?: string; loginHint?: string }> = []
@@ -192,6 +262,8 @@ async function createGateway(
     authorizationOptions?: Array<{ idpHint?: string; loginHint?: string }>
     callbackIdentity?(): { issuer: string; subject: string; upstreamProviderId?: string }
     dashboardOrigin?: string
+    organizations?: OrganizationStore
+    rateLimiter?: SlidingWindowRateLimiter
   },
 ): Promise<RuntimeIngressGateway> {
   const dir = mkdtempSync(join(tmpdir(), 'gateway-sessions-'))
@@ -207,6 +279,8 @@ async function createGateway(
     cacheNamespaceSecret: 'test-session-secret-with-sufficient-entropy',
     secretBox: createSessionSecretBox('test', [{ id: 'test', key: Buffer.alloc(32, 7) }]),
     ingressSecret: 'gateway-secret',
+    ...(auth?.organizations ? { organizations: auth.organizations } : {}),
+    ...(auth?.rateLimiter ? { rateLimiter: auth.rateLimiter } : {}),
     directory: new MemoryRuntimeAssignmentStore(),
     loginStates: new MemoryLoginStates(),
     ...(auth?.enterpriseSso ? { enterpriseSso: auth.enterpriseSso } : {}),

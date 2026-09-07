@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type AccountProfile = { displayName: string; email?: string; initials: string }
-export type AccountOrganization = { id: string; name: string; role: 'owner' | 'admin' | 'member' | 'viewer' }
+export type AccountOrganization = { id: string; name: string; status: 'provisioning' | 'active' | 'suspended' | 'closing' | 'closed'; role: 'owner' | 'admin' | 'member' | 'viewer' }
 export type AuthSession = { authenticated: true; profile: AccountProfile; organization?: AccountOrganization; cacheNamespace: string; expiresAt: string } | { authenticated: false }
 export type AuthSessionState = { loading: boolean; checked: boolean; session: AuthSession | null; error: string | null; refresh(): Promise<AuthSession>; logout(): Promise<void>; announceLogout(): void }
 const channelName = 'agent-runlab-auth', storageKey = 'ak-auth-event'
