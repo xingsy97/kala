@@ -15,6 +15,7 @@ export type ProvisionOrganizationInput = {
   graceEndsAt?: Date
   seatLimit: number
   concurrentSessionLimit: number
+  workspaceLimit?: number
   monthlyTokenLimit?: bigint
   storageBytesLimit?: bigint
 }
@@ -36,8 +37,8 @@ export class OrganizationProvisioningService {
       [ownerId, input.owner.issuer, input.owner.subject, input.owner.displayName ?? null, input.owner.email ?? null])
       await transaction.query(`INSERT INTO organizations(id,name,status,runtime_unit_id) VALUES($1,$2,'provisioning',$3)`, [organizationId, input.name.trim(), runtimeUnitId])
       await transaction.query(`INSERT INTO organization_memberships(organization_id,principal_id,role,status) VALUES($1,(SELECT id FROM principals WHERE issuer=$2 AND subject=$3),'owner','active')`, [organizationId, input.owner.issuer, input.owner.subject])
-      await transaction.query(`INSERT INTO contract_entitlements(organization_id,contract_reference,support_tier,starts_at,ends_at,grace_ends_at,seat_limit,concurrent_session_limit,monthly_token_limit,storage_bytes_limit)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [organizationId, input.contractReference, input.supportTier, input.startsAt, input.endsAt, input.graceEndsAt ?? null, input.seatLimit, input.concurrentSessionLimit, input.monthlyTokenLimit ?? null, input.storageBytesLimit ?? null])
+      await transaction.query(`INSERT INTO contract_entitlements(organization_id,contract_reference,support_tier,starts_at,ends_at,grace_ends_at,seat_limit,concurrent_session_limit,workspace_limit,monthly_token_limit,storage_bytes_limit)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [organizationId, input.contractReference, input.supportTier, input.startsAt, input.endsAt, input.graceEndsAt ?? null, input.seatLimit, input.concurrentSessionLimit, input.workspaceLimit ?? 5, input.monthlyTokenLimit ?? null, input.storageBytesLimit ?? null])
       await transaction.query(`INSERT INTO retention_policies(organization_id,session_days,artifact_days,audit_days,deleted_resource_grace_days) VALUES($1,90,90,365,30)`, [organizationId])
       await transaction.query(`INSERT INTO runtime_unit_placements(runtime_unit_id,organization_id,desired_state,generation,last_operation_id) VALUES($1,$2,'ready',1,$3)`, [runtimeUnitId, organizationId, input.operationId])
       await transaction.query(`INSERT INTO executor_pools(id,organization_id,name,mode) VALUES($1,$2,'Default organization pool','organization')`, [poolId, organizationId])
@@ -96,6 +97,7 @@ function validateProvisioning(input: ProvisionOrganizationInput): void {
   if (!input.owner.issuer || !input.owner.subject) throw new Error('invalid owner identity')
   if (!input.contractReference || input.endsAt <= input.startsAt || (input.graceEndsAt && input.graceEndsAt < input.endsAt)) throw new Error('invalid contract term')
   if (!Number.isSafeInteger(input.seatLimit) || input.seatLimit < 1 || !Number.isSafeInteger(input.concurrentSessionLimit) || input.concurrentSessionLimit < 1) throw new Error('invalid contract limits')
+  if (input.workspaceLimit !== undefined && (!Number.isSafeInteger(input.workspaceLimit) || input.workspaceLimit < 1)) throw new Error('invalid workspace limit')
 }
 function validateCloseConfirmation(organizationId: string, confirmation: string | undefined, backupReference: string | undefined): void {
   if (confirmation !== `DELETE ${organizationId}`) throw new Error('organization close confirmation required')

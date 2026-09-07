@@ -108,7 +108,7 @@ export class PostgresOrganizationStore implements OrganizationStore {
   async administrationSnapshot(organizationId: string): Promise<Record<string, unknown>> {
     const queries = await Promise.all([
       this.database.query('SELECT id,name,status,runtime_unit_id,authorization_version,created_at,updated_at FROM organizations WHERE id=$1', [organizationId]),
-      this.database.query('SELECT contract_reference,support_tier,starts_at,ends_at,grace_ends_at,seat_limit,concurrent_session_limit,monthly_token_limit,storage_bytes_limit FROM contract_entitlements WHERE organization_id=$1', [organizationId]),
+      this.database.query('SELECT contract_reference,support_tier,starts_at,ends_at,grace_ends_at,seat_limit,concurrent_session_limit,workspace_limit,monthly_token_limit,storage_bytes_limit FROM contract_entitlements WHERE organization_id=$1', [organizationId]),
       this.database.query('SELECT session_days,artifact_days,audit_days,deleted_resource_grace_days,version,updated_at FROM retention_policies WHERE organization_id=$1', [organizationId]),
       this.database.query(`SELECT COALESCE(SUM(input_tokens+output_tokens+cache_read_tokens+cache_creation_tokens),0)::text AS tokens,COUNT(DISTINCT session_id)::int AS sessions,COUNT(*)::int AS entries FROM usage_ledger WHERE organization_id=$1 AND occurred_at>=date_trunc('month',now())`, [organizationId]),
       this.database.query('SELECT id,name,status,policy_version,created_at,updated_at FROM workspaces WHERE organization_id=$1 ORDER BY name', [organizationId]),
