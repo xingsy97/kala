@@ -467,6 +467,8 @@ export function configureDashboardNamespace(
     const subscribeSession = async (targetSessionId: string): Promise<number> => {
       let target: SessionRecord | undefined
       try { target = await loadDashboardSession(deps.store, targetSessionId, getDefaultConfig()) } catch { target = undefined }
+      const tenantError = validateIngressSessionAccess(socket, target)
+      if (tenantError) throw new Error(tenantError)
       if (target) await refreshSessionSkillsIfNeeded(deps, target)
       await socket.join(sessionRoom(targetSessionId))
       subscribedSessions.add(targetSessionId)
@@ -510,7 +512,11 @@ export function configureDashboardNamespace(
           // socket was already in the room. A new client-side selection
           // generation must never wait on a one-shot ready event from an older
           // binding.
-          cursors[channel] = await subscribeSession(id); accepted.push(channel)
+          try {
+            cursors[channel] = await subscribeSession(id); accepted.push(channel)
+          } catch (err) {
+            rejected.push({ channel, code: err instanceof Error ? err.message : String(err) })
+          }
         })
       }
       return { requestId: parsed.requestId, generation: parsed.generation, accepted, rejected, cursors }
@@ -559,6 +565,12 @@ export function configureDashboardNamespace(
       desiredPreviewSessions.add(sessionId)
       let target: SessionRecord | undefined
       try { target = await loadDashboardSession(deps.store, sessionId, getDefaultConfig()) } catch { target = undefined }
+      const tenantError = validateIngressSessionAccess(socket, target)
+      if (tenantError) {
+        deps.audit?.log({ action: 'dashboard.subscribe', actor: auditActor(socket), target: { sessionId }, outcome: 'denied', error: tenantError })
+        socket.emit('session:error', { sessionId, scope: 'host', message: tenantError })
+        return
+      }
       if (target) {
         await refreshSessionSkillsIfNeeded(deps, target)
       }
@@ -1107,6 +1119,7 @@ export function configureDashboardNamespace(
           }
           p = { ...p, cwd: validation.cwd }
         }
+        const actor = auditActor(socket)
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
           agentRuntime,
@@ -1117,6 +1130,13 @@ export function configureDashboardNamespace(
           ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }
+            : {}),
+          ...(actor.kind === 'ingress'
+            ? {
+                organizationId: actor.organizationId,
+                principal: actor.principal,
+                organizationRole: actor.role,
+              }
             : {}),
           ...(p.cwd !== undefined ? { initialCwd: p.cwd } : {}),
           ...(normalizedSelectedModel !== undefined ? { preferences: { selectedModel: normalizedSelectedModel } } : {}),
@@ -1311,6 +1331,16 @@ async function refreshSessionSkillsIfNeeded(
 function auditActor(socket: { data: Record<string, unknown> }): AuditActor {
   const actor = socket.data.dashboardActor as AuditActor | undefined
   return actor ?? { kind: 'anonymous' }
+}
+
+function validateIngressSessionAccess(
+  socket: { data: Record<string, unknown> },
+  record: SessionRecord | undefined,
+): string | undefined {
+  const actor = auditActor(socket)
+  if (actor.kind !== 'ingress' || !record) return undefined
+  if (!record.organizationId) return 'tenant_attribution_missing'
+  return record.organizationId === actor.organizationId ? undefined : 'tenant_forbidden'
 }
 
 function auditConnectionMeta(meta: ConnectionMeta): Record<string, unknown> {

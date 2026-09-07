@@ -318,6 +318,174 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('rejects cross-tenant multiplexed session subscriptions from ingress actors', async () => {
+    await server.store.create({
+      sessionId: 'tenant-a-session',
+      config,
+      organizationId: 'org_a',
+      principal: 'a@example.test',
+      organizationRole: 'member',
+    })
+    await server.store.create({
+      sessionId: 'tenant-b-session',
+      config,
+      organizationId: 'org_b',
+      principal: 'b@example.test',
+      organizationRole: 'member',
+    })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { clientId: 'tenant-a-mux', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'a@example.test',
+        'x-agent-runlab-organization-id': 'org_a',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => dashboard.on('connect', () => resolve()))
+
+    const readyEvents: SessionReadyEvent[] = []
+    dashboard.on('session:ready', (event) => readyEvents.push(event))
+    const ack = await dashboard.timeout(1000).emitWithAck('client:subscribe_channels', {
+      requestId: 'cross-tenant-subscribe',
+      generation: 1,
+      channels: ['session:tenant-a-session', 'session:tenant-b-session'],
+    })
+
+    expect(ack.accepted).toEqual(['session:tenant-a-session'])
+    expect(ack.rejected).toEqual([{ channel: 'session:tenant-b-session', code: 'tenant_forbidden' }])
+    expect(readyEvents.map((event) => event.sessionId)).toEqual(['tenant-a-session'])
+    dashboard.close()
+  })
+
+  it('enforces tenant LLM quota before calling the provider', async () => {
+    await server.close()
+    let providerCalls = 0
+    const quotaChecks: unknown[] = []
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: {
+        name: 'quota-deny-test',
+        async call() {
+          providerCalls += 1
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'should not run' }] } }
+        },
+      },
+      llmQuota: {
+        async assertMonthlyTokenQuota(params) {
+          quotaChecks.push(params)
+          throw new Error('organization token quota exceeded')
+        },
+      },
+      defaultConfig: createConfig({ tools: [], systemPrompt: 'sys' }),
+    })
+    url = `http://localhost:${server.port}`
+    const sessionId = 'quota-deny-session'
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_quota',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const createAck = await dashboard.timeout(1000).emitWithAck('client:create_session', { sessionId })
+    expect(createAck).toEqual({ ok: true })
+    const appended = new Promise<EventAppendedEvent>((resolve) => {
+      dashboard.on('event:appended', (event) => {
+        if (event.event.kind === 'llm_error') resolve(event)
+      })
+    })
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'hello',
+      operationId: 'quota-deny-op',
+    })
+    expect(ack).toEqual({ ok: true })
+    expect((await appended).event).toMatchObject({ kind: 'llm_error', error: 'organization token quota exceeded' })
+    expect(providerCalls).toBe(0)
+    expect(quotaChecks).toEqual([
+      expect.objectContaining({
+        organizationId: 'org_quota',
+        sessionId,
+        requestedTokens: expect.any(Number),
+      }),
+    ])
+    expect(server.store.get(sessionId)?.organizationId).toBe('org_quota')
+    dashboard.close()
+  })
+
+  it('records tenant LLM usage after an allowed provider call', async () => {
+    await server.close()
+    const quotaChecks: unknown[] = []
+    const usageRecords: unknown[] = []
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: {
+        name: 'quota-allow-test',
+        async call() {
+          return {
+            message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'ok' }] },
+            usage: { inputTokens: 11, outputTokens: 7 },
+          }
+        },
+      },
+      llmQuota: {
+        async assertMonthlyTokenQuota(params) {
+          quotaChecks.push(params)
+        },
+        async recordUsage(params) {
+          usageRecords.push(params)
+        },
+      },
+      defaultConfig: createConfig({ tools: [], systemPrompt: 'sys' }),
+    })
+    url = `http://localhost:${server.port}`
+    const sessionId = 'quota-allow-session'
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_allow',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    await dashboard.timeout(1000).emitWithAck('client:create_session', { sessionId })
+
+    const appended = new Promise<EventAppendedEvent>((resolve) => {
+      dashboard.on('event:appended', (event) => {
+        if (event.event.kind === 'llm_response') resolve(event)
+      })
+    })
+    await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'hello',
+      operationId: 'quota-allow-op',
+    })
+    expect((await appended).event).toMatchObject({ kind: 'llm_response' })
+    expect(quotaChecks).toEqual([
+      expect.objectContaining({ organizationId: 'org_allow', sessionId }),
+    ])
+    expect(usageRecords).toEqual([
+      expect.objectContaining({
+        organizationId: 'org_allow',
+        sessionId,
+        usage: { inputTokens: 11, outputTokens: 7 },
+      }),
+    ])
+    dashboard.close()
+  })
+
   it('resolves an ask_user_choice tool from a dashboard choice', async () => {
     await server.close()
     const askConfig = createConfig({ tools: [ASK_USER_CHOICE], systemPrompt: 'sys' })

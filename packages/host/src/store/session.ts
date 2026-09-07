@@ -60,6 +60,9 @@ export type SessionRecord = {
   readonly subAgentStartedAt?: string
   readonly workspaceId?: string
   readonly workspaceName?: string
+  readonly organizationId?: string
+  readonly principal?: string
+  readonly organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   lastEventAt?: string
   state: AgentState
   /** Stable default title captured from the first persisted user_message event. */
@@ -104,6 +107,9 @@ export type CreateSessionParams = {
   sessionId?: string
   workspaceId?: string
   workspaceName?: string
+  organizationId?: string
+  principal?: string
+  organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   initialCwd?: string
   initialApprovalMode?: import('@agent-kernel/kernel').ApprovalMode
   memoryPolicy?: SessionMemoryPolicy
@@ -215,6 +221,15 @@ export class SessionStore {
       ...(params.workspaceName !== undefined
         ? { workspaceName: params.workspaceName }
         : {}),
+      ...(params.organizationId !== undefined
+        ? { organizationId: params.organizationId }
+        : {}),
+      ...(params.principal !== undefined
+        ? { principal: params.principal }
+        : {}),
+      ...(params.organizationRole !== undefined
+        ? { organizationRole: params.organizationRole }
+        : {}),
       ...(params.initialCwd !== undefined
         ? { initialCwd: params.initialCwd }
         : {}),
@@ -250,6 +265,15 @@ export class SessionStore {
         : {}),
       ...(params.workspaceName !== undefined
         ? { workspaceName: params.workspaceName }
+        : {}),
+      ...(params.organizationId !== undefined
+        ? { organizationId: params.organizationId }
+        : {}),
+      ...(params.principal !== undefined
+        ? { principal: params.principal }
+        : {}),
+      ...(params.organizationRole !== undefined
+        ? { organizationRole: params.organizationRole }
         : {}),
       ...(params.memoryPolicy !== undefined
         ? { memoryPolicy: params.memoryPolicy }
@@ -411,7 +435,11 @@ export class SessionStore {
     defaultConfig: AgentConfig
     workspaceId?: string
     workspaceName?: string
+    organizationId?: string
+    principal?: string
+    organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
     initialCwd?: string
+    preferences?: SessionPreferences
     runtimeConfig?: AgentConfig
   }): Promise<{ record: SessionRecord; created: boolean }> {
     const cached = this.records.get(params.sessionId)
@@ -433,7 +461,11 @@ export class SessionStore {
       params.defaultConfig,
       params.workspaceId,
       params.workspaceName,
+      params.organizationId,
+      params.principal,
+      params.organizationRole,
       params.initialCwd,
+      params.preferences,
       params.agentRuntime,
       params.agentRuntimeVersion,
       params.externalSessionId,
@@ -452,7 +484,11 @@ export class SessionStore {
     defaultConfig: AgentConfig,
     workspaceId: string | undefined,
     workspaceName: string | undefined,
+    organizationId: string | undefined,
+    principal: string | undefined,
+    organizationRole: 'owner' | 'admin' | 'member' | 'viewer' | undefined,
     initialCwd: string | undefined,
+    preferences: SessionPreferences | undefined,
     agentRuntime: AgentRuntimeId | undefined,
     agentRuntimeVersion: string | undefined,
     externalSessionId: string | undefined,
@@ -466,7 +502,11 @@ export class SessionStore {
         defaultConfig,
         ...(workspaceId !== undefined ? { workspaceId } : {}),
         ...(workspaceName !== undefined ? { workspaceName } : {}),
+        ...(organizationId !== undefined ? { organizationId } : {}),
+        ...(principal !== undefined ? { principal } : {}),
+        ...(organizationRole !== undefined ? { organizationRole } : {}),
         ...(initialCwd !== undefined ? { initialCwd } : {}),
+        ...(preferences !== undefined ? { preferences } : {}),
       })
       return record
     } catch {
@@ -483,7 +523,11 @@ export class SessionStore {
         ...(externalSessionId ? { externalSessionId } : {}),
         ...(workspaceId !== undefined ? { workspaceId } : {}),
         ...(workspaceName !== undefined ? { workspaceName } : {}),
+        ...(organizationId !== undefined ? { organizationId } : {}),
+        ...(principal !== undefined ? { principal } : {}),
+        ...(organizationRole !== undefined ? { organizationRole } : {}),
         ...(initialCwd !== undefined ? { initialCwd } : {}),
+        ...(preferences !== undefined ? { preferences } : {}),
       })
     }
   }
@@ -507,6 +551,9 @@ export class SessionStore {
       defaultConfig: AgentConfig
       workspaceId?: string
       workspaceName?: string
+      organizationId?: string
+      principal?: string
+      organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
       initialCwd?: string
     },
   ): Promise<void> {
@@ -520,10 +567,25 @@ export class SessionStore {
       ;(record as { workspaceName?: string }).workspaceName = params.workspaceName
       metadataChanged = true
     }
+    if (record.organizationId === undefined && params.organizationId !== undefined) {
+      ;(record as { organizationId?: string }).organizationId = params.organizationId
+      metadataChanged = true
+    }
+    if (record.principal === undefined && params.principal !== undefined) {
+      ;(record as { principal?: string }).principal = params.principal
+      metadataChanged = true
+    }
+    if (record.organizationRole === undefined && params.organizationRole !== undefined) {
+      ;(record as { organizationRole?: 'owner' | 'admin' | 'member' | 'viewer' }).organizationRole = params.organizationRole
+      metadataChanged = true
+    }
     if (metadataChanged) {
       await appendMetadataEntry(record.logPath, {
         ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
         ...(record.workspaceName !== undefined ? { workspaceName: record.workspaceName } : {}),
+        ...(record.organizationId !== undefined ? { organizationId: record.organizationId } : {}),
+        ...(record.principal !== undefined ? { principal: record.principal } : {}),
+        ...(record.organizationRole !== undefined ? { organizationRole: record.organizationRole } : {}),
       })
       this.summaryCache.delete(record.logPath)
     }
@@ -1041,6 +1103,15 @@ export class SessionStore {
       persistedSummary?.summary.workspaceName ??
       latestStringFromMetadata(parsed.metadata, 'workspaceName') ??
       parsed.header.workspaceName
+    const latestOrganizationId =
+      latestStringFromMetadata(parsed.metadata, 'organizationId') ??
+      parsed.header.organizationId
+    const latestPrincipal =
+      latestStringFromMetadata(parsed.metadata, 'principal') ??
+      parsed.header.principal
+    const latestOrganizationRole =
+      latestOrganizationRoleFromMetadata(parsed.metadata) ??
+      parsed.header.organizationRole
     const label = persistedSummary?.summary.label ??
       latestStringFromMetadata(parsed.metadata, 'label')
     const firstUserMessage = agentRuntime === 'kernel'
@@ -1093,6 +1164,15 @@ export class SessionStore {
         : {}),
       ...(latestWorkspaceName !== undefined
         ? { workspaceName: latestWorkspaceName }
+        : {}),
+      ...(latestOrganizationId !== undefined
+        ? { organizationId: latestOrganizationId }
+        : {}),
+      ...(latestPrincipal !== undefined
+        ? { principal: latestPrincipal }
+        : {}),
+      ...(latestOrganizationRole !== undefined
+        ? { organizationRole: latestOrganizationRole }
         : {}),
       ...(label
         ? { label }
@@ -1384,7 +1464,7 @@ function firstUserMessageFromState(state: AgentState): string | undefined {
 /** Walk metadata entries in reverse to find the most recent string value. */
 function latestStringFromMetadata(
   metadata: readonly Record<string, string | undefined>[],
-  key: 'label' | 'workspaceId' | 'workspaceName' | 'selectedModel',
+  key: 'label' | 'workspaceId' | 'workspaceName' | 'selectedModel' | 'organizationId' | 'principal',
 ): string | undefined {
   for (let i = metadata.length - 1; i >= 0; i--) {
     const entry = metadata[i]!
@@ -1392,6 +1472,16 @@ function latestStringFromMetadata(
     if (value === undefined) continue
     const trimmed = value.trim()
     return trimmed.length === 0 ? undefined : trimmed
+  }
+  return undefined
+}
+
+function latestOrganizationRoleFromMetadata(
+  metadata: readonly Record<string, string | undefined>[],
+): 'owner' | 'admin' | 'member' | 'viewer' | undefined {
+  for (let i = metadata.length - 1; i >= 0; i--) {
+    const value = metadata[i]!.organizationRole
+    if (value === 'owner' || value === 'admin' || value === 'member' || value === 'viewer') return value
   }
   return undefined
 }

@@ -146,6 +146,27 @@ export type ToolDispatcher = {
   cancelPending(sessionId: string): void
 }
 
+export type LlmQuotaUsage = {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+}
+
+export type LlmQuotaEnforcer = {
+  assertMonthlyTokenQuota(params: {
+    organizationId: string
+    sessionId: string
+    model?: string
+    requestedTokens: number
+  }): Promise<void>
+  recordUsage?(params: {
+    organizationId: string
+    sessionId: string
+    model?: string
+    usage: LlmQuotaUsage
+  }): Promise<void>
+}
+
 export type ModelResolver = {
   get(sessionId: string): string | undefined
   contextWindow?(sessionId: string): number | undefined
@@ -155,6 +176,7 @@ export type HostLoopDeps = {
   store: SessionStore
   llm: LLMAdapter
   tools: ToolDispatcher
+  llmQuota?: LlmQuotaEnforcer
   broadcast: LoopBroadcast
   models?: ModelResolver
   hooks?: readonly HookConfig[]

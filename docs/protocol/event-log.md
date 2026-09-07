@@ -69,6 +69,9 @@ type HeaderEntry = {
   parentCursor?: number               // fork point in the parent session's log
   workspaceId?: string                // routing key: the workspace (a machine) this session is bound to. Written once at create time; Host uses it to route `tool:call` to the executor announcing the same id. Undefined for legacy logs predating the field — treated as "unassigned".
   workspaceName?: string              // display label captured at create time. Not authoritative — the live executor's `workspaceName` is what the dashboard shows when an executor is attached.
+  organizationId?: string             // ingress tenant attribution. Required by commercial SaaS quota/isolation enforcement for tenant-scoped sessions.
+  principal?: string                   // ingress-authenticated principal that created or backfilled the session attribution.
+  organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   initialCwd?: string                 // initial working directory for the session. Validated at create time against the workspace sandbox roots and mirrored into `initialState.cwd`.
   formatVersion: 1                    // bumps on breaking log-format change
   kernelVersion: string               // e.g. "@agent-kernel/kernel@0.1.0"
@@ -131,6 +134,13 @@ type MetadataEntry = {
   seq: 0                      // metadata entries do not advance the cursor
   ts: string
   label?: string              // operator-set display label; empty string clears the override
+  workspaceId?: string
+  workspaceName?: string
+  organizationId?: string
+  principal?: string
+  organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
+  selectedModel?: string
+  toolCardMode?: 'dots' | 'standard'
 }
 ```
 

@@ -48,6 +48,9 @@ export type HeaderEntry = {
    * workspaces still render with something more useful than a bare ULID.
    */
   workspaceName?: string
+  organizationId?: string
+  principal?: string
+  organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   initialCwd?: string
   formatVersion: 2
   kernelVersion: string
@@ -237,6 +240,9 @@ export type MetadataEntry = {
   label?: string
   workspaceId?: string
   workspaceName?: string
+  organizationId?: string
+  principal?: string
+  organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   selectedModel?: string
   toolCardMode?: import('./protocol.js').ToolCardMode
 }

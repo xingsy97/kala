@@ -29,7 +29,7 @@ import { instrument } from '@socket.io/admin-ui'
 import { ulid } from 'ulid'
 
 import type { LLMAdapter } from './llm/adapter.js'
-import type { LoopBroadcast, LoopHandle } from './loop.js'
+import type { LlmQuotaEnforcer, LoopBroadcast, LoopHandle } from './loop.js'
 import { runHostLoop } from './loop.js'
 import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
 import { selectHooks } from './extensions/hooks.js'
@@ -95,6 +95,7 @@ export type HostServerOptions = {
   listenHost?: string
   sessionsDir: string
   llm: LLMAdapter
+  llmQuota?: LlmQuotaEnforcer
   copilot?: {
     enabled?: boolean
     gitHubToken?: string
@@ -1038,6 +1039,7 @@ export async function startHostServer(
   const loopDeps = {
     store,
     llm: options.llm,
+    ...(options.llmQuota !== undefined ? { llmQuota: options.llmQuota } : {}),
     tools: executors,
     broadcast,
     models: {

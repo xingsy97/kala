@@ -67,6 +67,7 @@ import type {
 export type {
   DispatchOptions,
   HostLoopDeps,
+  LlmQuotaEnforcer,
   LoopBroadcast,
   EventBroadcastExtras,
   LoopHandle,
@@ -713,7 +714,7 @@ async function performCallLlm(
     }
     let res
     try {
-      res = await callLlmOnce(callInput, messages)
+      res = await callLlmWithQuota(callInput, messages, sessionId, model)
     } catch (err) {
       // Token estimators are approximate. If a provider rejects a suddenly
       // huge user/tool item, recover this SAME turn once instead of persisting
@@ -726,7 +727,7 @@ async function performCallLlm(
         sessionId,
         emergencyTruncate(current, config, contextLimitForSession(deps, sessionId)),
       )
-      res = await callLlmOnce(callInput, retryMessages)
+      res = await callLlmWithQuota(callInput, retryMessages, sessionId, model)
     }
     assertOnlyDisclosedTools(res.message, disclosedTools)
     await maybeRecordTokenUsageObservation(deps, sessionId, res, messages, disclosedTools)
@@ -738,14 +739,14 @@ async function performCallLlm(
           sessionId,
           deps.store.get(sessionId)?.state.messages ?? persistedMessages,
         )
-        res = await callLlmOnce({
+        res = await callLlmWithQuota({
           deps,
           tools: disclosedTools,
           signal: controller.signal,
           config,
           model,
           onTextDelta,
-        }, retryMessages)
+        }, retryMessages, sessionId, model)
         assertOnlyDisclosedTools(res.message, disclosedTools)
         await maybeRecordTokenUsageObservation(deps, sessionId, res, retryMessages, disclosedTools, 'max_tokens_retry')
       } catch {
@@ -816,6 +817,36 @@ function shouldRecoverFromMaxTokens(res: Awaited<ReturnType<typeof callLlmOnce>>
   const text = res.message.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
   const toolCalls = res.message.content.some((c) => c.type === 'tool_call')
   return !toolCalls && text.length < 512
+}
+
+async function callLlmWithQuota(
+  input: Parameters<typeof callLlmOnce>[0],
+  messages: readonly Message[],
+  sessionId: string,
+  model: string | undefined,
+): Promise<Awaited<ReturnType<typeof callLlmOnce>>> {
+  const quota = input.deps.llmQuota
+  const record = input.deps.store.get(sessionId)
+  if (quota) {
+    if (!record?.organizationId) throw new Error('missing organization attribution for quota enforcement')
+    await quota.assertMonthlyTokenQuota({
+      organizationId: record.organizationId,
+      sessionId,
+      ...(model ? { model } : {}),
+      requestedTokens: estimateMessageTokens(messages) + estimateToolSchemaTokens(input.tools),
+    })
+  }
+  const res = await callLlmOnce(input, messages)
+  if (quota?.recordUsage && res.usage) {
+    if (!record?.organizationId) throw new Error('missing organization attribution for usage recording')
+    await quota.recordUsage({
+      organizationId: record.organizationId,
+      sessionId,
+      ...(res.trace?.model ?? model ? { model: res.trace?.model ?? model } : {}),
+      usage: res.usage,
+    })
+  }
+  return res
 }
 
 function assertOnlyDisclosedTools(message: Message, tools: readonly import('@agent-kernel/kernel').ToolSchema[]): void {

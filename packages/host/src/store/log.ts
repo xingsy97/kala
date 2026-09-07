@@ -50,6 +50,9 @@ export type WriteHeaderParams = {
   subAgentStartedAt?: string
   workspaceId?: string
   workspaceName?: string
+  organizationId?: string
+  principal?: string
+  organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   initialCwd?: string
 }
 
@@ -87,6 +90,15 @@ export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntr
       : {}),
     ...(params.workspaceName !== undefined
       ? { workspaceName: params.workspaceName }
+      : {}),
+    ...(params.organizationId !== undefined
+      ? { organizationId: params.organizationId }
+      : {}),
+    ...(params.principal !== undefined
+      ? { principal: params.principal }
+      : {}),
+    ...(params.organizationRole !== undefined
+      ? { organizationRole: params.organizationRole }
       : {}),
     ...(params.initialCwd !== undefined ? { initialCwd: params.initialCwd } : {}),
   }
