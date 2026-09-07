@@ -14,6 +14,7 @@ import { createPostgresControlPlaneDatabase, type ControlPlaneDatabase } from '.
 import { createSessionSecretBox } from '../auth/session-secret-box.js'
 import { loadEnterpriseSsoResolver } from '../auth/enterprise-sso-config.js'
 import { SlidingWindowRateLimiter } from '../governance/rate-limit.js'
+import { resolveRuntimeIngressControlPlaneMode } from '../config/control-plane.js'
 
 async function main(): Promise<void> {
   const port = Number(process.env.RUNTIME_INGRESS_PORT ?? 13001)
@@ -22,11 +23,10 @@ async function main(): Promise<void> {
   const ingressSecret = await readRequiredSecretEnv('RUNTIME_INGRESS_SHARED_SECRET')
   if (Buffer.byteLength(cacheNamespaceSecret) < 32 || Buffer.byteLength(ingressSecret) < 32) throw new Error('Private Cloud secrets must contain at least 32 bytes')
   let database: ControlPlaneDatabase | undefined
-  const databaseUrl = process.env.RUNTIME_INGRESS_DATABASE_URL || (process.env.RUNTIME_INGRESS_DATABASE_URL_FILE ? await readRequiredSecretEnv('RUNTIME_INGRESS_DATABASE_URL') : undefined)
-  if (!databaseUrl && process.env.NODE_ENV === 'production') throw new Error('RUNTIME_INGRESS_DATABASE_URL is required in production; JSON control stores are migration-only')
-  const organizations = databaseUrl
-    ? new PostgresOrganizationStore(database = createPostgresControlPlaneDatabase({ connectionString: databaseUrl }))
-    : new JsonOrganizationStore(resolve(await readRequiredSecretEnv('RUNTIME_INGRESS_UNIT_DIRECTORY')))
+  const controlPlane = await resolveRuntimeIngressControlPlaneMode(process.env, readRequiredSecretEnv)
+  const organizations = controlPlane.kind === 'postgres'
+    ? new PostgresOrganizationStore(database = createPostgresControlPlaneDatabase({ connectionString: controlPlane.databaseUrl }))
+    : new JsonOrganizationStore(resolve(controlPlane.directoryPath))
   if (organizations instanceof JsonOrganizationStore) await organizations.load()
   else await database!.health()
   const loginStates = new FileLoginStateStore(resolve(await readRequiredSecretEnv('RUNTIME_INGRESS_LOGIN_STATE_STORE')))
