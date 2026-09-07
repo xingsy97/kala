@@ -34,7 +34,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ulid } from 'ulid'
-import { shellArgv, type ShellSpec } from './shell-runtime.js'
+import { shellArgv, shellResourceLimitsFromEnv, type ShellSpec } from './shell-runtime.js'
 
 const TASK_DIR = join(tmpdir(), '.ak-tasks')
 
@@ -130,9 +130,10 @@ export async function startBackgroundShell(params: {
   const logPath = join(TASK_DIR, `${taskId}.log`)
   await writeFile(logPath, '', 'utf8')
 
-  const child = spawn(params.shell.executable, shellArgv(params.shell, params.command), {
+  const env = params.env ?? process.env
+  const child = spawn(params.shell.executable, shellArgv(params.shell, params.command, shellResourceLimitsFromEnv(env)), {
     cwd: params.cwd,
-    env: params.env ?? process.env,
+    env,
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   })

@@ -10,7 +10,7 @@ import {
   requireString,
 } from './schema.js'
 import { startBackgroundShell } from './background-shell.js'
-import { selectShell, shellArgv } from './shell-runtime.js'
+import { selectShell, shellArgv, shellResourceLimitsFromEnv } from './shell-runtime.js'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 const MAX_OUTPUT = 1_000_000
@@ -99,7 +99,7 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
 
       let child: ReturnType<typeof spawn>
       try {
-        child = spawn(shell.executable, shellArgv(shell, command), {
+        child = spawn(shell.executable, shellArgv(shell, command, shellResourceLimitsFromEnv(env)), {
           cwd: resolvedCwd,
           env,
           stdio: ['ignore', 'pipe', 'pipe'],

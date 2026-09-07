@@ -3,6 +3,12 @@ import { delimiter, isAbsolute, join } from 'node:path'
 
 export type ShellFamily = 'powershell' | 'cmd' | 'bash' | 'zsh' | 'sh'
 export type ShellSpec = { family: ShellFamily; executable: string }
+export type ShellResourceLimits = {
+  cpuSeconds?: number
+  memoryMb?: number
+  fileBytes?: number
+  maxProcesses?: number
+}
 
 function findExecutable(names: readonly string[], env: NodeJS.ProcessEnv = process.env): string | undefined {
   for (const name of names) {
@@ -53,9 +59,37 @@ export function selectShell(requested: string | undefined, shells = discoverShel
   return selected
 }
 
-export function shellArgv(shell: ShellSpec, command: string): string[] {
+export function shellArgv(shell: ShellSpec, command: string, limits: ShellResourceLimits = {}): string[] {
+  const limitedCommand = applyPosixResourceLimits(shell, command, limits)
   if (shell.family === 'powershell') return ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}; ${command}`]
   if (shell.family === 'cmd') return ['/d', '/s', '/c', command]
-  if (shell.family === 'sh') return ['-c', command]
-  return ['-lc', command]
+  if (shell.family === 'sh') return ['-c', limitedCommand]
+  return ['-lc', limitedCommand]
+}
+
+export function shellResourceLimitsFromEnv(env: NodeJS.ProcessEnv = process.env): ShellResourceLimits {
+  return {
+    ...positiveIntEnv(env, 'AGENT_RUNLAB_SHELL_CPU_SECONDS', 'cpuSeconds'),
+    ...positiveIntEnv(env, 'AGENT_RUNLAB_SHELL_MEMORY_MB', 'memoryMb'),
+    ...positiveIntEnv(env, 'AGENT_RUNLAB_SHELL_FILE_BYTES', 'fileBytes'),
+    ...positiveIntEnv(env, 'AGENT_RUNLAB_SHELL_MAX_PROCESSES', 'maxProcesses'),
+  }
+}
+
+function positiveIntEnv<K extends keyof ShellResourceLimits>(env: NodeJS.ProcessEnv, key: string, field: K): Pick<ShellResourceLimits, K> {
+  const raw = env[key]?.trim()
+  if (!raw) return {} as Pick<ShellResourceLimits, K>
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${key} must be a positive integer`)
+  return { [field]: value } as Pick<ShellResourceLimits, K>
+}
+
+function applyPosixResourceLimits(shell: ShellSpec, command: string, limits: ShellResourceLimits): string {
+  if (shell.family === 'powershell' || shell.family === 'cmd') return command
+  const statements: string[] = []
+  if (limits.cpuSeconds !== undefined) statements.push(`ulimit -t ${limits.cpuSeconds}`)
+  if (limits.memoryMb !== undefined) statements.push(`ulimit -v ${limits.memoryMb * 1024}`)
+  if (limits.fileBytes !== undefined) statements.push(`ulimit -f ${Math.ceil(limits.fileBytes / 512)}`)
+  if (limits.maxProcesses !== undefined) statements.push(`ulimit -u ${limits.maxProcesses}`)
+  return statements.length === 0 ? command : `set -e; ${statements.join('; ')}; set +e; ${command}`
 }
