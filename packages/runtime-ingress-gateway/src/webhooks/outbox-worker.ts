@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto'
+import { redactForPersistence } from '@agent-kernel/shared'
 import type { ControlPlaneDatabase } from '../persistence/postgres.js'
 
 export class WebhookOutboxWorker {
@@ -11,7 +12,8 @@ export class WebhookOutboxWorker {
         const endpoints = await transaction.query<{ id: string; url: string; secret_ref: unknown }>('SELECT id,url,secret_ref FROM webhook_endpoints WHERE organization_id=$1 AND enabled AND $2=ANY(topics)', [event.organization_id, event.topic])
         try {
           for (const endpoint of endpoints.rows) {
-            const body = JSON.stringify({ id: event.id, topic: event.topic, organizationId: event.organization_id, payload: event.payload })
+            const redactedPayload = redactForPersistence(event.payload, { maxStringLength: 20_000 }).value
+            const body = JSON.stringify({ id: event.id, topic: event.topic, organizationId: event.organization_id, payload: redactedPayload })
             const secret = await this.options.resolveSecret(endpoint.secret_ref, event.organization_id)
             const signature = createHmac('sha256', secret).update(body).digest('hex')
             const response = await (this.options.fetchImpl ?? fetch)(endpoint.url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-event-id': event.id, 'x-agent-runlab-signature': `sha256=${signature}` }, body })
