@@ -118,9 +118,7 @@ export function reduceSessionProjection(
       let contextSnapshot = current.contextSnapshot
       if (current.agentRuntime === 'kernel' && state && current.config && event.payload.seq === state.cursor + 1) {
         state = step(state, event.payload.event, current.config).next
-        if (event.payload.event.kind === 'messages_replaced' && event.payload.event.reason === 'compaction') {
-          contextSnapshot = reprojectContextSnapshotAfterCompaction(current.config, state.messages, contextSnapshot)
-        }
+        contextSnapshot = reprojectContextSnapshotAfterStateChange(current.config, state.messages, contextSnapshot)
       }
       return {
         ...current, state, contextSnapshot, lastError: null,
@@ -204,7 +202,7 @@ function sameTimelineEvent(a: TimelineEntry, b: TimelineEntry): boolean {
   return true
 }
 
-function reprojectContextSnapshotAfterCompaction(
+function reprojectContextSnapshotAfterStateChange(
   config: AgentConfig, messages: readonly Message[], prior: ContextUsageSnapshot | null,
 ): ContextUsageSnapshot {
   const transcriptTokens = estimateMessageTokens(messages)

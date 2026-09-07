@@ -56,6 +56,17 @@ describe('session projection reducer', () => {
     expect(next.lastError).toBeNull()
   })
 
+  it('reprojects context usage in the same transition as a sent message', () => {
+    const current = selected('session-a')
+    const next = reduceSessionProjection(current, {
+      kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 1, 'hello context'),
+    })
+
+    expect(next.contextSnapshot?.usage.inputTokens).toBeGreaterThan(current.contextSnapshot!.usage.inputTokens)
+    expect(next.contextSnapshot?.breakdown.transcript).toBeGreaterThan(current.contextSnapshot!.breakdown.transcript)
+    expect(next.contextSnapshot?.breakdown.pendingUserInput).toBe(0)
+  })
+
   it('merges duplicate and out-of-order events without folding state twice or across a gap', () => {
     const current = selected('session-a')
     const once = reduceSessionProjection(current, {
