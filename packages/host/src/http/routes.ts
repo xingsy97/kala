@@ -620,6 +620,8 @@ export function attachJsonRoutes(
         return
       }
       if (req.method === 'PUT') {
+        const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+        if (!auth.ok) { sendError(res, auth.status, auth.error); return }
         void readJson(req).then((raw) => {
           const body = typeof raw === 'object' && raw !== null ? raw as { provider?: unknown; apiKey?: unknown; key?: unknown } : {}
           if (body.provider !== 'serper') throw new HttpRouteError(400, 'provider must be serper')
@@ -633,6 +635,8 @@ export function attachJsonRoutes(
         return
       }
       if (req.method === 'DELETE') {
+        const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+        if (!auth.ok) { sendError(res, auth.status, auth.error); return }
         void Promise.resolve(payloads.webSearchCredentials.delete('serper'))
           .then((body) => sendJson(req, res, body))
           .catch((error: unknown) => sendError(res, 500, error instanceof Error ? error.message : String(error)))
@@ -643,6 +647,8 @@ export function attachJsonRoutes(
     }
     if (path === '/settings/web-search/test' && req.method === 'POST' && payloads.webSearchCredentials) {
       claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
       void runWebSearch({ query: 'Agent RunLab', limit: 1 }, { credentials: payloads.webSearchCredentials })
         .then((result) => {
           if (!result.ok) {
