@@ -1,6 +1,7 @@
 export * from './protocol.js'
 export * from './deployment.js'
 export * from './log.js'
+export * from './redaction.js'
 export * from './turn-timing.js'
 export * from './token-estimation.js'
 export * from './session-derived-state.js'

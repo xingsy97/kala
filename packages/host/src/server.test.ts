@@ -291,6 +291,33 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('rejects mutating Dashboard socket events from ingress viewers', async () => {
+    const sessionId = 'viewer-write-rejected'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'viewer@example.test',
+        'x-agent-runlab-organization-id': 'org_viewer',
+        'x-agent-runlab-organization-role': 'viewer',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'must not be accepted',
+      mode: 'queue',
+      operationId: 'viewer-write-rejected-op',
+    })
+
+    expect(ack).toEqual({ ok: false, error: 'forbidden: runtime:write required' })
+    expect(server.store.get(sessionId)?.state.messages.some((message) => message.role === 'user')).toBe(false)
+    dashboard.close()
+  })
+
   it('resolves an ask_user_choice tool from a dashboard choice', async () => {
     await server.close()
     const askConfig = createConfig({ tools: [ASK_USER_CHOICE], systemPrompt: 'sys' })

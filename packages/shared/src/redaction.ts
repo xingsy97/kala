@@ -26,7 +26,7 @@ export function redactForPersistence(
   const rules = new Set<string>()
   const maxStringLength = options.maxStringLength ?? DEFAULT_MAX_STRING_LENGTH
 
-  function visit(input: unknown, keyPath: readonly string[]): unknown {
+  function visit(input: unknown): unknown {
     if (typeof input === 'string') {
       let out = redactString(input, options.workspaceRoot, rules)
       if (out.length > maxStringLength) {
@@ -36,7 +36,7 @@ export function redactForPersistence(
       return out
     }
     if (input === null || typeof input !== 'object') return input
-    if (Array.isArray(input)) return input.map((item, i) => visit(item, [...keyPath, String(i)]))
+    if (Array.isArray(input)) return input.map((item) => visit(item))
 
     const out: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(input as Record<string, unknown>)) {
@@ -46,16 +46,16 @@ export function redactForPersistence(
         rules.add('secret.key')
         continue
       }
-      if (lower === 'url' || lower === 'baseurl' || lower === 'apiurl') {
+      if (isUrlKey(lower)) {
         out[key] = typeof child === 'string' ? redactUrl(child, rules) : child
         continue
       }
-      out[key] = visit(child, [...keyPath, key])
+      out[key] = visit(child)
     }
     return out
   }
 
-  const next = visit(value, [])
+  const next = visit(value)
   return {
     value: next,
     summary: {
@@ -79,15 +79,21 @@ function isSecretKey(lowerKey: string): boolean {
     lowerKey === 'password' ||
     lowerKey === 'secret' ||
     lowerKey.endsWith('_key') ||
-    lowerKey.endsWith('_token')
+    lowerKey.endsWith('_token') ||
+    lowerKey.endsWith('-key') ||
+    lowerKey.endsWith('-token')
   )
+}
+
+function isUrlKey(lowerKey: string): boolean {
+  return lowerKey === 'url' || lowerKey === 'baseurl' || lowerKey === 'apiurl' || lowerKey.endsWith('url') || lowerKey.endsWith('_url')
 }
 
 function redactString(input: string, workspaceRoot: string | undefined, rules: Set<string>): string {
   let out = input
   out = out.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, () => {
     rules.add('secret.bearer')
-    return `Bearer ${REDACTED}`
+    return '******'
   })
   out = out.replace(/sk-[A-Za-z0-9_-]{12,}/g, () => {
     rules.add('secret.openai_key')
