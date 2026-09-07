@@ -167,6 +167,15 @@ export type LlmQuotaEnforcer = {
   }): Promise<void>
 }
 
+export type TenantModelPolicyEnforcer = {
+  assertCanUseModel(params: {
+    organizationId: string
+    sessionId: string
+    model: string
+    principal?: string
+  }): Promise<void>
+}
+
 export type ModelResolver = {
   get(sessionId: string): string | undefined
   contextWindow?(sessionId: string): number | undefined
@@ -177,6 +186,7 @@ export type HostLoopDeps = {
   llm: LLMAdapter
   tools: ToolDispatcher
   llmQuota?: LlmQuotaEnforcer
+  modelPolicy?: TenantModelPolicyEnforcer
   broadcast: LoopBroadcast
   models?: ModelResolver
   hooks?: readonly HookConfig[]

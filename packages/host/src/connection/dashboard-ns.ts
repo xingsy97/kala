@@ -199,6 +199,7 @@ export type DashboardDeps = {
   auth?: AuthConfig
   audit?: AuditLogger
   sessionQuota?: TenantSessionQuotaEnforcer
+  modelPolicy?: TenantModelPolicyEnforcer
   allowAllApprovalMode?: boolean
   broadcastError(
     sessionId: string,
@@ -226,6 +227,15 @@ export type TenantSessionQuotaEnforcer = {
     principal: string
     role: 'owner' | 'admin' | 'member' | 'viewer'
     sessionId: string
+  }): Promise<void>
+}
+
+export type TenantModelPolicyEnforcer = {
+  assertCanUseModel(params: {
+    organizationId: string
+    sessionId: string
+    model: string
+    principal?: string
   }): Promise<void>
 }
 
@@ -1114,6 +1124,10 @@ export function configureDashboardNamespace(
           ack?.({ ok: false, error: message })
           return
         }
+        const actor = auditActor(socket)
+        if (normalizedSelectedModel) {
+          await assertTenantModelAllowed(deps, actor, p.sessionId, normalizedSelectedModel)
+        }
         const cwd = p.cwd?.trim()
         if (cwd && cwd.length > 0 && p.workspaceId) {
           const validation = await validateWorkspaceCwd(deps, p.workspaceId, cwd)
@@ -1129,7 +1143,6 @@ export function configureDashboardNamespace(
           }
           p = { ...p, cwd: validation.cwd }
         }
-        const actor = auditActor(socket)
         if (deps.sessionQuota) {
           if (actor.kind !== 'ingress') {
             throw new Error('missing organization attribution for session quota enforcement')
@@ -1317,7 +1330,7 @@ export function configureDashboardNamespace(
             throw new Error('model selection is unavailable for this Session Runtime')
           }
         }
-        await applyPreferencesUpdate(deps, p.sessionId, p.preferences)
+        await applyPreferencesUpdate(deps, p.sessionId, p.preferences, auditActor(socket))
         if ('selectedModel' in p.preferences) {
           deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: p.preferences.selectedModel?.trim() ?? '' } })
         }
@@ -1364,6 +1377,22 @@ function validateIngressSessionAccess(
   return record.organizationId === actor.organizationId ? undefined : 'tenant_forbidden'
 }
 
+async function assertTenantModelAllowed(
+  deps: DashboardDeps,
+  actor: AuditActor,
+  sessionId: string,
+  model: string,
+): Promise<void> {
+  if (!deps.modelPolicy) return
+  if (actor.kind !== 'ingress') throw new Error('missing organization attribution for model policy enforcement')
+  await deps.modelPolicy.assertCanUseModel({
+    organizationId: actor.organizationId,
+    sessionId,
+    model,
+    principal: actor.principal,
+  })
+}
+
 function auditConnectionMeta(meta: ConnectionMeta): Record<string, unknown> {
   return {
     connectionKind: meta.kind,
@@ -1380,12 +1409,14 @@ async function applyPreferencesUpdate(
   deps: DashboardDeps,
   sessionId: string,
   patch: import('@agent-kernel/shared').SessionPreferences,
+  actor: AuditActor = { kind: 'anonymous' },
 ): Promise<void> {
   const normalizedPatch = normalizePreferencesPatch(deps, sessionId, patch)
   if (!normalizedPatch) throw new Error('invalid Session preferences')
   const record = deps.store.get(sessionId)
   const previousModel = record?.preferences.selectedModel
   const requestedModel = normalizedPatch.selectedModel
+  if (requestedModel) await assertTenantModelAllowed(deps, actor, sessionId, requestedModel)
   const runtime = record?.agentRuntime === 'copilot' ? deps.agentRuntimes.require('copilot') : undefined
   if (record?.agentRuntime === 'copilot' && normalizedPatch.selectedModel) {
     await runtime?.setModel?.(record, normalizedPatch.selectedModel)

@@ -29,7 +29,7 @@ import { instrument } from '@socket.io/admin-ui'
 import { ulid } from 'ulid'
 
 import type { LLMAdapter } from './llm/adapter.js'
-import type { LlmQuotaEnforcer, LoopBroadcast, LoopHandle } from './loop.js'
+import type { LlmQuotaEnforcer, LoopBroadcast, LoopHandle, TenantModelPolicyEnforcer } from './loop.js'
 import { runHostLoop } from './loop.js'
 import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
 import { selectHooks } from './extensions/hooks.js'
@@ -97,6 +97,7 @@ export type HostServerOptions = {
   sessionsDir: string
   llm: LLMAdapter
   llmQuota?: LlmQuotaEnforcer
+  modelPolicy?: TenantModelPolicyEnforcer
   sessionQuota?: TenantSessionQuotaEnforcer
   copilot?: {
     enabled?: boolean
@@ -1042,6 +1043,7 @@ export async function startHostServer(
     store,
     llm: options.llm,
     ...(options.llmQuota !== undefined ? { llmQuota: options.llmQuota } : {}),
+    ...(options.modelPolicy !== undefined ? { modelPolicy: options.modelPolicy } : {}),
     tools: executors,
     broadcast,
     models: {
@@ -1198,6 +1200,7 @@ export async function startHostServer(
     ...(auth ? { auth } : {}),
     audit,
     ...(options.sessionQuota !== undefined ? { sessionQuota: options.sessionQuota } : {}),
+    ...(options.modelPolicy !== undefined ? { modelPolicy: options.modelPolicy } : {}),
     allowAllApprovalMode: options.allowAllApprovalMode ?? true,
     broadcastError,
     contextWindowForModel,

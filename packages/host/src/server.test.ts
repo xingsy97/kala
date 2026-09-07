@@ -543,6 +543,136 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('rejects disallowed tenant model selection before session creation', async () => {
+    await server.close()
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      models: [{ ref: 'provider:blocked', id: 'blocked', label: 'Blocked', provider: 'Provider', providerId: 'provider' }],
+      modelPolicy: {
+        async assertCanUseModel(params) {
+          expect(params).toMatchObject({ organizationId: 'org_model', sessionId: 'model-policy-create', model: 'provider:blocked' })
+          throw new Error('model is not entitled for this organization')
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'model-policy-create', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_model',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:create_session', {
+      sessionId: 'model-policy-create',
+      selectedModel: 'provider:blocked',
+    })
+
+    expect(ack).toEqual({ ok: false, error: 'model is not entitled for this organization' })
+    expect(server.store.get('model-policy-create')).toBeUndefined()
+    dashboard.close()
+  })
+
+  it('rejects disallowed tenant model preference updates without persisting them', async () => {
+    await server.close()
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      models: [{ ref: 'provider:blocked', id: 'blocked', label: 'Blocked', provider: 'Provider', providerId: 'provider' }],
+      modelPolicy: {
+        async assertCanUseModel(params) {
+          expect(params).toMatchObject({ organizationId: 'org_model', sessionId: 'model-policy-update', model: 'provider:blocked' })
+          throw new Error('model is not entitled for this organization')
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({ sessionId: 'model-policy-update', config, organizationId: 'org_model', principal: 'member@example.test', organizationRole: 'member' })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'model-policy-update', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_model',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:update_preferences', {
+      operationId: 'model-policy-update-op',
+      sessionId: 'model-policy-update',
+      preferences: { selectedModel: 'provider:blocked' },
+    })
+
+    expect(ack).toEqual({ ok: false, error: 'model is not entitled for this organization' })
+    expect(server.store.get('model-policy-update')?.preferences.selectedModel).toBeUndefined()
+    dashboard.close()
+  })
+
+  it('enforces tenant model policy before LLM provider calls', async () => {
+    await server.close()
+    let providerCalls = 0
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: {
+        name: 'model-policy-llm',
+        async call() {
+          providerCalls += 1
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'should not run' }] } }
+        },
+      },
+      defaultConfig: config,
+      defaultModel: 'provider:blocked',
+      modelPolicy: {
+        async assertCanUseModel(params) {
+          expect(params).toMatchObject({ organizationId: 'org_model', sessionId: 'model-policy-llm', model: 'provider:blocked' })
+          throw new Error('model is not entitled for this organization')
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({ sessionId: 'model-policy-llm', config, organizationId: 'org_model', principal: 'member@example.test', organizationRole: 'member' })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'model-policy-llm', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_model',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const appended = new Promise<EventAppendedEvent>((resolve) => {
+      dashboard.on('event:appended', (event) => {
+        if (event.event.kind === 'llm_error') resolve(event)
+      })
+    })
+    await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      sessionId: 'model-policy-llm',
+      text: 'hello',
+      operationId: 'model-policy-llm-op',
+    })
+
+    expect((await appended).event).toMatchObject({ kind: 'llm_error', error: 'model is not entitled for this organization' })
+    expect(providerCalls).toBe(0)
+    dashboard.close()
+  })
+
   it('enforces tenant LLM quota before calling the provider', async () => {
     await server.close()
     let providerCalls = 0

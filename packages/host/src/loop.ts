@@ -69,6 +69,7 @@ export type {
   HostLoopDeps,
   LlmQuotaEnforcer,
   LoopBroadcast,
+  TenantModelPolicyEnforcer,
   EventBroadcastExtras,
   LoopHandle,
   LoopRuntime,
@@ -826,7 +827,17 @@ async function callLlmWithQuota(
   model: string | undefined,
 ): Promise<Awaited<ReturnType<typeof callLlmOnce>>> {
   const quota = input.deps.llmQuota
+  const modelPolicy = input.deps.modelPolicy
   const record = input.deps.store.get(sessionId)
+  if (modelPolicy && model) {
+    if (!record?.organizationId) throw new Error('missing organization attribution for model policy enforcement')
+    await modelPolicy.assertCanUseModel({
+      organizationId: record.organizationId,
+      sessionId,
+      model,
+      ...(record.principal ? { principal: record.principal } : {}),
+    })
+  }
   if (quota) {
     if (!record?.organizationId) throw new Error('missing organization attribution for quota enforcement')
     await quota.assertMonthlyTokenQuota({
