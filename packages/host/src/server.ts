@@ -59,6 +59,7 @@ import {
 import {
   configureExecutorNamespace,
   type ExecutorNs,
+  type TenantExecutorQuotaEnforcer,
 } from './connection/executor-ns.js'
 import { sessionRoom } from './connection/rooms.js'
 import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, claimRoute, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount, type TenantStorageQuotaEnforcer } from './http/routes.js'
@@ -102,6 +103,7 @@ export type HostServerOptions = {
   sessionQuota?: TenantSessionQuotaEnforcer
   queueQuota?: TenantQueueQuotaEnforcer
   storageQuota?: TenantStorageQuotaEnforcer
+  executorQuota?: TenantExecutorQuotaEnforcer
   copilot?: {
     enabled?: boolean
     gitHubToken?: string
@@ -1233,6 +1235,7 @@ export async function startHostServer(
     defaultConfig: getDefaultConfig,
     ...(auth ? { auth } : {}),
     installations: executorInstallations,
+    ...(options.executorQuota ? { executorQuota: options.executorQuota } : {}),
     audit,
     broadcastError,
     dashboardNs,

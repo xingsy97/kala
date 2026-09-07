@@ -29,7 +29,7 @@ import type {
   ToolResultAck,
   ToolCallMessage,
 } from '@agent-kernel/shared'
-import { DEDICATED_DEPLOYMENT, PROTOCOL_VERSION } from '@agent-kernel/shared'
+import { DEDICATED_DEPLOYMENT, PRIVATE_CLOUD_DEPLOYMENT, PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { SESSION_ERROR_SCOPES } from '@agent-kernel/shared'
 import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 
@@ -200,6 +200,50 @@ async function postEnhancementAction(url: string, body: Record<string, unknown>)
   const payload = await response.json() as unknown
   if (!response.ok) throw new Error(JSON.stringify(payload))
   return payload
+}
+
+async function createRedeemedTenantExecutorInstall(
+  url: string,
+  organizationId: string,
+  workspaceId: string,
+): Promise<{ id: string; token: string }> {
+  const adminHeaders = {
+    'content-type': 'application/json',
+    'x-agent-runlab-principal': 'admin@example.test',
+    'x-agent-runlab-organization-id': organizationId,
+    'x-agent-runlab-organization-role': 'admin',
+  }
+  const createdResponse = await fetch(`${url}/api/executor-installs`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ platform: 'linux', mode: 'temporary', workspaceRoot: '/work' }),
+  })
+  if (!createdResponse.ok) throw new Error(`install create failed: ${createdResponse.status}`)
+  const created = await createdResponse.json() as { id: string; setupCode: string }
+  const claimedResponse = await fetch(`${url}/install/session`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ setupCode: created.setupCode }),
+  })
+  if (!claimedResponse.ok) throw new Error(`install claim failed: ${claimedResponse.status}`)
+  const claimed = await claimedResponse.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string } }
+  const bootstrap = claimed.env.EXECUTOR_INSTALL_BOOTSTRAP
+  for (const status of ['asset_verified', 'pairing_pending']) {
+    const response = await fetch(`${url}/api/executor-installs/${created.id}/events`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ bootstrap, status }),
+    })
+    if (!response.ok) throw new Error(`install event ${status} failed: ${response.status}`)
+  }
+  const redeemedResponse = await fetch(`${url}/api/executor-installs/${created.id}/redeem`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ bootstrap, workspaceId }),
+  })
+  if (!redeemedResponse.ok) throw new Error(`install redeem failed: ${redeemedResponse.status}`)
+  const redeemed = await redeemedResponse.json() as { token: string }
+  return { id: created.id, token: redeemed.token }
 }
 
 describe('wire protocol', () => {
@@ -2110,6 +2154,117 @@ describe('wire protocol', () => {
     await waitForWorkspace(dashboard, 'ws-allowed')
     dashboard.close()
     executor.close()
+  })
+
+  it('enforces tenant executor quota before attaching installed executors', async () => {
+    await server.close()
+    const identityStore = new ExecutorIdentityStore(join(dir, 'quota-executor-identities.json'))
+    identityStore.load()
+    const checks: unknown[] = []
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      auth: { executorIdentityStore: identityStore },
+      executorQuota: {
+        async assertCanAttachExecutor(params) {
+          checks.push(params)
+          throw new Error('organization executor quota exceeded')
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    const install = await createRedeemedTenantExecutorInstall(url, 'org_exec_quota', 'ws-exec-quota')
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, token: install.token, installId: install.id },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    const reject = new Promise<{ code: string; message: string }>((resolve) => executor.on('executor:host_reject', resolve))
+
+    executor.emit('executor:announce', {
+      executorId: 'exec-quota-denied',
+      workspaceId: 'ws-exec-quota',
+      workspaceName: 'quota denied',
+      tools: ['bash'],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+
+    await expect(reject).resolves.toMatchObject({ message: 'organization executor quota exceeded' })
+    expect(checks).toEqual([expect.objectContaining({
+      organizationId: 'org_exec_quota',
+      workspaceId: 'ws-exec-quota',
+      executorId: 'exec-quota-denied',
+      installId: install.id,
+    })])
+    expect(server.executorsSnapshot()).toEqual([])
+    executor.close()
+  })
+
+  it('records tenant executor runtime after quota-allowed installed executors disconnect', async () => {
+    await server.close()
+    const identityStore = new ExecutorIdentityStore(join(dir, 'runtime-executor-identities.json'))
+    identityStore.load()
+    const attaches: unknown[] = []
+    const runtimes: unknown[] = []
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      auth: { executorIdentityStore: identityStore },
+      detachGraceMs: 0,
+      executorQuota: {
+        async assertCanAttachExecutor(params) {
+          attaches.push(params)
+        },
+        async recordExecutorRuntime(params) {
+          runtimes.push(params)
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    const install = await createRedeemedTenantExecutorInstall(url, 'org_exec_quota', 'ws-exec-runtime')
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, token: install.token, installId: install.id },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+
+    executor.emit('executor:announce', {
+      executorId: 'exec-runtime',
+      workspaceId: 'ws-exec-runtime',
+      workspaceName: 'runtime',
+      tools: ['bash'],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+    await vi.waitFor(() => expect(server.executorsSnapshot().some((item) => item.executorId === 'exec-runtime')).toBe(true))
+    executor.close()
+    await vi.waitFor(() => expect(runtimes.length).toBe(1))
+
+    expect(attaches).toEqual([expect.objectContaining({ organizationId: 'org_exec_quota', workspaceId: 'ws-exec-runtime', installId: install.id })])
+    expect(runtimes).toEqual([expect.objectContaining({
+      organizationId: 'org_exec_quota',
+      workspaceId: 'ws-exec-runtime',
+      executorId: 'exec-runtime',
+      installId: install.id,
+      durationMs: expect.any(Number),
+    })])
   })
 
   it('creates permanent executor invites and binds the first announced workspace', async () => {

@@ -44,6 +44,7 @@ export type ExecutorDeps = {
   defaultConfig: AgentConfig | (() => AgentConfig)
   auth?: AuthConfig
   installations?: ExecutorInstallationStore
+  executorQuota?: TenantExecutorQuotaEnforcer
   audit?: AuditLogger
   broadcastError(
     sessionId: string,
@@ -58,12 +59,31 @@ export type ExecutorDeps = {
   dashboardNs: DashboardNs
 }
 
+export type TenantExecutorQuotaEnforcer = {
+  assertCanAttachExecutor(params: {
+    organizationId: string
+    workspaceId: string
+    executorId: string
+    installId?: string
+  }): Promise<void>
+  recordExecutorRuntime?(params: {
+    organizationId: string
+    workspaceId: string
+    executorId: string
+    startedAt: string
+    endedAt: string
+    durationMs: number
+    installId?: string
+  }): Promise<void>
+}
+
 export function configureExecutorNamespace(
   ns: ExecutorNs,
   deps: ExecutorDeps,
 ): void {
   const executorIdentities = new WeakMap<object, ExecutorIdentity>()
   const executorAnnouncements = new WeakMap<object, ExecutorAnnounce>()
+  const executorTenantRuntime = new WeakMap<object, { organizationId: string; workspaceId: string; executorId: string; startedAt: number; installId?: string }>()
   ns.use((socket, nextFn) => {
     const auth = socket.handshake.auth as HandshakeAuth | undefined
     if (!auth || auth.role !== 'executor') {
@@ -93,6 +113,7 @@ export function configureExecutorNamespace(
     // An executor is a daemon: no session binding at connect time. Host
     // routes each `tool:call` to it by sessionId when needed.
     socket.on('executor:announce', (rawPayload: ExecutorAnnounce) => {
+      void (async () => {
       const payload = parseWire(schema.ExecutorAnnounceSchema, rawPayload, {
         channel: 'executor:announce',
         peer: socket.id,
@@ -128,6 +149,38 @@ export function configureExecutorNamespace(
       } else if (identity?.token) {
         deps.auth?.executorIdentityStore?.markSeen(identity.token)
       }
+      const installId = payload.installId ?? auth.installId
+      const installSnapshot = installId ? deps.installations?.get(installId) : undefined
+      if (deps.executorQuota) {
+        if (!installSnapshot?.organizationId) {
+          const reason = 'tenant_attribution_missing'
+          deps.audit?.log({ action: 'executor.quota_reject', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: 'denied', error: reason })
+          socket.emit('executor:host_reject', { code: 'auth_failed', message: reason })
+          socket.disconnect(true)
+          return
+        }
+        try {
+          await deps.executorQuota.assertCanAttachExecutor({
+            organizationId: installSnapshot.organizationId,
+            workspaceId: payload.workspaceId,
+            executorId: payload.executorId,
+            ...(installId ? { installId } : {}),
+          })
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error)
+          deps.audit?.log({ action: 'executor.quota_reject', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: 'denied', error: reason })
+          socket.emit('executor:host_reject', { code: 'auth_failed', message: reason })
+          socket.disconnect(true)
+          return
+        }
+        executorTenantRuntime.set(socket, {
+          organizationId: installSnapshot.organizationId,
+          workspaceId: payload.workspaceId,
+          executorId: payload.executorId,
+          startedAt: Date.now(),
+          ...(installId ? { installId } : {}),
+        })
+      }
       const connectionMeta = executorAnnouncedConnectionMeta({
         current: socket.data.connectionMeta as ConnectionMeta | undefined,
         announcement: payload,
@@ -137,7 +190,6 @@ export function configureExecutorNamespace(
       deps.audit?.log({ action: 'executor.announce_accept', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'ok', metadata: { ...auditConnectionMeta(connectionMeta), workspaceName: payload.workspaceName } })
       executorAnnouncements.set(socket, payload)
       deps.executors.attach(socket, payload, auth.clientVersion)
-      const installId = payload.installId ?? auth.installId
       if (installId && identity?.token) {
         const completed = deps.installations?.markOnline(installId, payload.workspaceId, {
           executorId: payload.executorId,
@@ -147,6 +199,11 @@ export function configureExecutorNamespace(
         deps.audit?.log({ action: 'executor_install.online', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: completed ? 'ok' : 'error', metadata: { installId }, ...(completed ? {} : { error: 'installation record did not accept online transition' }) })
         if (!completed) deps.broadcastError(payload.workspaceId, 'host', `Executor connected, but installation ${installId} could not be marked complete. Re-open Add Workspace or reinstall this Executor.`)
       }
+      })().catch((error: unknown) => {
+        deps.audit?.log({ action: 'executor.announce_error', actor: { kind: 'anonymous' }, outcome: 'error', error: error instanceof Error ? error.message : String(error) })
+        socket.emit('executor:host_reject', { code: 'auth_failed', message: error instanceof Error ? error.message : String(error) })
+        socket.disconnect(true)
+      })
     })
     socket.on('executor:network_audit', async (payload, ack) => {
       const announcement = executorAnnouncements.get(socket)
@@ -216,6 +273,19 @@ export function configureExecutorNamespace(
     })
     socket.on('disconnect', () => {
       deps.executors.detach(socket)
+      const runtime = executorTenantRuntime.get(socket)
+      if (runtime && deps.executorQuota?.recordExecutorRuntime) {
+        const endedAtMs = Date.now()
+        void deps.executorQuota.recordExecutorRuntime({
+          organizationId: runtime.organizationId,
+          workspaceId: runtime.workspaceId,
+          executorId: runtime.executorId,
+          startedAt: new Date(runtime.startedAt).toISOString(),
+          endedAt: new Date(endedAtMs).toISOString(),
+          durationMs: Math.max(0, endedAtMs - runtime.startedAt),
+          ...(runtime.installId ? { installId: runtime.installId } : {}),
+        })
+      }
     })
   })
 }
