@@ -97,6 +97,13 @@ RestartSec=5s
 TimeoutStopSec=90s
 KillMode=control-group
 UMask=0077
+CPUAccounting=yes
+CPUQuota=400%
+MemoryAccounting=yes
+MemoryMax=8G
+TasksMax=512
+LimitFSIZE=1073741824
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=${session.mode === 'system' ? 'multi-user.target' : 'default.target'}

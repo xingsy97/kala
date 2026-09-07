@@ -50,6 +50,9 @@ describe('Linux service adapter', () => {
     const rendered = renderLinuxServiceFiles(session, '/home/example')
     expect(rendered.unit).not.toContain('secret-value')
     expect(rendered.unit).toContain('Restart=always')
+    expect(rendered.unit).toContain('CPUQuota=400%')
+    expect(rendered.unit).toContain('MemoryMax=8G')
+    expect(rendered.unit).toContain('TasksMax=512')
     expect(rendered.credential).toContain('secret-value')
 
     const plan = createLinuxServicePlan('install', 'system', '/home/example', session)
