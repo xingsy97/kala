@@ -41,6 +41,11 @@ export async function startDedicatedIngress(options: {
   const http = createServer((request, response) => {
     stripUntrustedIdentityHeaders(request)
     const path = (request.url ?? '/').split('?')[0] ?? '/'
+    if (path === '/healthz' && request.method === 'GET') {
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ ok: true }))
+      return
+    }
     if (path === '/runtime/admission/messages' && request.method === 'POST' && ledger) {
       void acceptAdmission(request, options.auth, ledger, currentRoute, options.ingressHandoffSecret).then((body) => {
         response.writeHead(202, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })

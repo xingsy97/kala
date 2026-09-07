@@ -49,6 +49,15 @@ async function eventually(assertion: () => Promise<void>, deadlineMs = 3000): Pr
 }
 
 describe('Stable Ingress admission', () => {
+  it('answers healthz locally without proxying to the Runtime Unit', async () => {
+    ingress = await startDedicatedIngress({ port: 0, unitOrigin: 'http://127.0.0.1:9' })
+
+    const response = await fetch(`http://127.0.0.1:${ingress.port}/healthz`)
+
+    await expect(response.json()).resolves.toEqual({ ok: true })
+    expect(response.status).toBe(200)
+  })
+
   it('proxies the authenticated raw attachment upload endpoint to the active Host', async () => {
     let received: { url?: string; authorization?: string; name?: string; principal?: string; role?: string; body?: string } = {}
     const upstream = createServer(async (request, response) => {
