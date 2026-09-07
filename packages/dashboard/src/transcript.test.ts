@@ -91,6 +91,24 @@ describe('optimistic to durable message handoff', () => {
     expect(rendered.filter((item) => item.kind === 'message' || item.kind === 'pending_user_message')).toHaveLength(1)
     expect(rendered[0]).toMatchObject({ kind: 'message', message: { role: 'user' } })
   })
+
+  it('renders queued messages as live transcript rows for otherwise empty sessions', () => {
+    const rendered = appendLiveTranscriptItems([], [], [], '', [], [{
+      id: 'optimistic-queued-1',
+      text: 'run this next',
+      mode: 'queue',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }])
+
+    expect(rendered).toEqual([{
+      kind: 'pending_user_message',
+      id: 'optimistic-queued-1',
+      text: 'run this next',
+      mode: 'queue',
+      status: 'queued',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }])
+  })
 })
 
 describe('visibleMessages', () => {

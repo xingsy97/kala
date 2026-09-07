@@ -2682,6 +2682,44 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('keeps cached runtime context snapshots during intermediate send state changes', async () => {
+    const sessionId = 'wire-runtime-context-cache'
+    const ensured = await server.store.ensure({ sessionId, defaultConfig: config })
+    const providerSnapshot = {
+      model: { ref: 'gpt-5.6-sol', provider: 'github-copilot', id: 'gpt-5.6-sol' },
+      contextWindow: { tokens: 272_000, source: 'api_reported' },
+      usage: { inputTokens: 195_742, totalTokens: 195_742 },
+      breakdown: { system: 245, transcript: 187_660, tools: 7_837, memory: 0, attachments: 0, pendingUserInput: 0 },
+      estimator: {
+        total: { kind: 'provider_reported', confidence: 'exact' },
+        breakdown: { kind: 'heuristic', confidence: 'estimated' },
+        version: 'copilot-sdk-usage-info-v1',
+      },
+      updatedAt: Date.now(),
+    } satisfies NonNullable<SessionReadyEvent['contextSnapshot']>
+    await server.store.updateRuntimeContextSnapshot(ensured.record, providerSnapshot)
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const changed = new Promise<DashboardServerToClientEvents['state:changed']>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('state:changed never emitted')), 1000)
+      dashboard.on('state:changed', (payload) => {
+        clearTimeout(timer)
+        resolve(payload)
+      })
+    })
+
+    dashboard.emit('client:user_message', { sessionId, text: 'hello' })
+
+    const payload = await changed
+    expect(payload.contextSnapshot).toEqual(providerSnapshot)
+    dashboard.close()
+  })
+
   it('persists selected model preferences and restores them on a new host instance', async () => {
     await server.close()
     const http = createServer()

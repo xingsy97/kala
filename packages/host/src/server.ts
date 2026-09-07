@@ -921,12 +921,13 @@ export async function startHostServer(
         ...(extras?.timing ? { timing: extras.timing } : {}),
         ...(extras?.compactionMetadata ? { compactionMetadata: extras.compactionMetadata } : {}),
       })
+      const recordForContext = store.get(sessionId)
       io.of('/dashboard').to(room).emit('state:changed', {
         sessionId,
         cursor: state.cursor,
         state,
-        contextSnapshot: snapshotFromConfig(
-          store.get(sessionId)?.config ?? getDefaultConfig(),
+        contextSnapshot: recordForContext?.runtimeContextSnapshot ?? snapshotFromConfig(
+          recordForContext?.config ?? getDefaultConfig(),
           state.messages,
           contextWindowForModel(effectiveModelForSession(sessionId)),
           effectiveModelForSession(sessionId),
@@ -1096,7 +1097,7 @@ export async function startHostServer(
             broadcast.onError(record.sessionId, error instanceof Error ? error.message : String(error))
           })
         }
-        const contextSnapshot = runtimeContextSnapshot ?? snapshotFromConfig(
+        const contextSnapshot = runtimeContextSnapshot ?? record.runtimeContextSnapshot ?? snapshotFromConfig(
           record.config,
           state.messages,
           contextWindowForModel(effectiveModelForSession(record.sessionId)),

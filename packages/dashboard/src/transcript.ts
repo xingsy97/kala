@@ -28,7 +28,7 @@ export type TranscriptItem =
       id: string
       text: string
       mode: 'steer' | 'queue'
-      status: 'sending'
+      status: 'sending' | 'queued'
       content?: readonly MessageContent[]
       createdAt: string
     }
@@ -238,7 +238,7 @@ export function appendLiveTranscriptItems(
   pendingUserMessages: readonly PendingUserTranscriptMessage[] = [],
   queuedMessages: readonly QueuedMessagePreview[] = [],
 ): readonly TranscriptItem[] {
-  const hasLiveTail = streamingText.length > 0 || pendingUserMessages.length > 0
+  const hasLiveTail = streamingText.length > 0 || pendingUserMessages.length > 0 || queuedMessages.length > 0
   const out: TranscriptItem[] = hasLiveTail ? [...base] : (base as TranscriptItem[])
 
   const baseTail = base.at(-1)
@@ -266,6 +266,18 @@ export function appendLiveTranscriptItems(
     })
   }
 
+  queuedMessages.filter(isOptimisticQueuedMessage).forEach((queued, index) => {
+    out.push({
+      kind: 'pending_user_message',
+      id: queued.id ?? `queued-${index}`,
+      text: queued.text,
+      mode: queued.mode,
+      status: 'queued',
+      ...(queued.content ? { content: queued.content } : {}),
+      createdAt: queued.createdAt,
+    })
+  })
+
   if (timeline.length > 0 || streamingText.length > 0 || pendingUserMessages.length > 0 || queuedMessages.length > 0) return out
   return stateMessages.flatMap((message): TranscriptItem[] => {
     if (message.metadata?.kind === 'model_changed') {
@@ -277,6 +289,10 @@ export function appendLiveTranscriptItems(
     }
     return message.role === 'system' ? [] : [{ kind: 'message', message }]
   })
+}
+
+function isOptimisticQueuedMessage(message: QueuedMessagePreview): boolean {
+  return message.id.startsWith('optimistic-')
 }
 
 export function visibleMessages(
