@@ -91,4 +91,27 @@ describe('TerminalManager', () => {
 
     manager.closeSession(base)
   })
+
+  it('caps live terminal output and terminates chatty sessions', async () => {
+    process.env.AGENT_KERNEL_TERMINAL_DISABLE_PTY = '1'
+    const emitOutput = vi.fn()
+    const manager = createTerminalManager({
+      sandbox: { roots: [], resolve: async (path) => path },
+      emitOutput,
+      emitExit: vi.fn(),
+      maxOutputBytes: 64,
+    })
+
+    const created = await manager.create({ ...base, requestId: 'capped', cwd: '/tmp' })
+    const child = vi.mocked(spawn).mock.results[0]!.value as { stdout: EventEmitter; kill: ReturnType<typeof vi.fn> }
+    child.stdout.emit('data', Buffer.from('x'.repeat(100)))
+
+    expect(emitOutput).toHaveBeenNthCalledWith(1, expect.objectContaining({ data: 'x'.repeat(64) }))
+    expect(emitOutput).toHaveBeenNthCalledWith(2, expect.objectContaining({ data: '\n[terminal output truncated after 64 bytes]\n' }))
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+
+    const reused = await manager.create({ ...base, requestId: 'replay', cwd: '/tmp' })
+    expect(reused.replay).toBe(`${'x'.repeat(64)}\n[terminal output truncated after 64 bytes]\n`)
+    manager.closeAll()
+  })
 })

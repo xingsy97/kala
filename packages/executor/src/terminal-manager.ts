@@ -133,6 +133,7 @@ export type TerminalManager = {
 }
 
 const TERMINAL_REPLAY_MAX_BYTES = 1024 * 1024
+const TERMINAL_SESSION_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 
 function appendReplay(current: Buffer, data: string): Buffer {
   const next = Buffer.concat([current, Buffer.from(data)])
@@ -145,6 +146,7 @@ export function createTerminalManager(input: {
   sandbox: Sandbox
   emitOutput(payload: ServerTerminalOutput): void
   emitExit(payload: ServerTerminalExit): void
+  maxOutputBytes?: number
 }): TerminalManager {
   type TerminalRecord = {
     workspaceId: string
@@ -154,6 +156,8 @@ export function createTerminalManager(input: {
     terminal: TerminalProcess
     exited: boolean
     replay: Buffer
+    outputBytes: number
+    outputTruncated: boolean
   }
   const terminals = new Map<string, TerminalRecord>()
   const sessionTerminals = new Map<string, TerminalRecord>()
@@ -209,12 +213,34 @@ export function createTerminalManager(input: {
             TERM: process.env.TERM || 'xterm-256color',
           },
         })
-        const record: TerminalRecord = { workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, cwd, terminal, exited: false, replay: Buffer.alloc(0) }
+        const record: TerminalRecord = { workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, cwd, terminal, exited: false, replay: Buffer.alloc(0), outputBytes: 0, outputTruncated: false }
         terminals.set(keyOf(payload.workspaceId, payload.sessionId, terminalId), record)
         sessionTerminals.set(sessionKey, record)
         terminal.onData((data) => {
-          record.replay = appendReplay(record.replay, data)
-          input.emitOutput({ workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, data })
+          const incoming = Buffer.byteLength(data)
+          const maxOutputBytes = input.maxOutputBytes ?? TERMINAL_SESSION_MAX_OUTPUT_BYTES
+          const remaining = Math.max(0, maxOutputBytes - record.outputBytes)
+          if (remaining <= 0) {
+            if (!record.outputTruncated) {
+              record.outputTruncated = true
+              const marker = `\n[terminal output truncated after ${maxOutputBytes} bytes]\n`
+              record.replay = appendReplay(record.replay, marker)
+              input.emitOutput({ workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, data: marker })
+              record.terminal.kill('SIGTERM')
+            }
+            return
+          }
+          const chunk = incoming > remaining ? Buffer.from(data).subarray(0, remaining).toString('utf8') : data
+          record.outputBytes += Buffer.byteLength(chunk)
+          record.replay = appendReplay(record.replay, chunk)
+          input.emitOutput({ workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, data: chunk })
+          if (incoming > remaining && !record.outputTruncated) {
+            record.outputTruncated = true
+            const marker = `\n[terminal output truncated after ${maxOutputBytes} bytes]\n`
+            record.replay = appendReplay(record.replay, marker)
+            input.emitOutput({ workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, data: marker })
+            record.terminal.kill('SIGTERM')
+          }
         })
         terminal.onExit(({ exitCode, signal }) => {
           record.exited = true
