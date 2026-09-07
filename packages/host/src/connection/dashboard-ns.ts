@@ -334,9 +334,26 @@ export function configureDashboardNamespace(
     const subscribedSessions = new Set<string>()
     const subscribedWorkspaces = new Set<string>()
     socket.on('client:executor_ping', async (workspaceId, ack) => {
-      if (multiplexed && !subscribedWorkspaces.has(workspaceId)) { ack({ error: 'workspace is not subscribed' }); return }
+      const error = await validateWorkspaceSocketAccess(workspaceId)
+      if (error) { ack({ error }); return }
       ack(await deps.executors.measureLatency(workspaceId))
     })
+    const subscribedWorkspaceOwner = async (workspaceId: string): Promise<SessionRecord | undefined> => {
+      const candidates = multiplexed ? [...subscribedSessions] : [sessionId]
+      for (const candidate of candidates) {
+        const record = deps.store.get(candidate) ?? (await deps.store.load(candidate, { recoverDangling: false }).catch(() => undefined))
+        if (record?.workspaceId === workspaceId) return record
+      }
+      return undefined
+    }
+    const validateWorkspaceSocketAccess = async (workspaceId: string): Promise<string | undefined> => {
+      if (multiplexed && !subscribedWorkspaces.has(workspaceId)) return 'workspace is not subscribed'
+      const owner = await subscribedWorkspaceOwner(workspaceId)
+      if (!owner) return 'workspace has no subscribed session'
+      const tenantError = validateIngressSessionAccess(socket, owner)
+      if (tenantError) return tenantError
+      return undefined
+    }
     const validateBgSessionAccess = async (targetSessionId: string, workspaceId: string): Promise<string | undefined> => {
       if (multiplexed ? !subscribedSessions.has(targetSessionId) : targetSessionId !== sessionId) {
         return 'This workspace operation belongs to an unsubscribed session.'
@@ -940,6 +957,11 @@ export function configureDashboardNamespace(
       if (multiplexed && !subscribedWorkspaces.has(raw.workspaceId)) {
         return ack?.({ requestId: raw.requestId, stdout: '', stderr: '', exitCode: null, durationMs: 0, error: { code: 'EACCES', message: 'workspace is not subscribed' } })
       }
+      const workspaceError = await validateWorkspaceSocketAccess(raw.workspaceId)
+      if (workspaceError) {
+        deps.audit?.log({ action: 'workspace.exec', actor: auditActor(socket), target: { workspaceId: raw.workspaceId }, outcome: 'denied', error: workspaceError })
+        return ack?.({ requestId: raw.requestId, stdout: '', stderr: '', exitCode: null, durationMs: 0, error: { code: 'EACCES', message: workspaceError } })
+      }
       const argvHead = raw.argv.slice(0, 3).map((arg) => typeof arg === 'string' ? arg : String(arg))
       deps.audit?.log({
         action: 'workspace.exec',
@@ -958,6 +980,11 @@ export function configureDashboardNamespace(
       }
       if (multiplexed && !subscribedWorkspaces.has(raw.workspaceId)) {
         return ack?.({ requestId: raw.requestId, base64: '', mime: 'application/octet-stream', size: 0, error: { code: 'EACCES', message: 'workspace is not subscribed' } })
+      }
+      const workspaceError = await validateWorkspaceSocketAccess(raw.workspaceId)
+      if (workspaceError) {
+        deps.audit?.log({ action: 'workspace.read_binary', actor: auditActor(socket), target: { workspaceId: raw.workspaceId }, outcome: 'denied', error: workspaceError })
+        return ack?.({ requestId: raw.requestId, base64: '', mime: 'application/octet-stream', size: 0, error: { code: 'EACCES', message: workspaceError } })
       }
       deps.audit?.log({
         action: 'workspace.read_binary',
