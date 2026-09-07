@@ -198,6 +198,7 @@ export type DashboardDeps = {
   defaultConfig: AgentConfig | (() => AgentConfig)
   auth?: AuthConfig
   audit?: AuditLogger
+  sessionQuota?: TenantSessionQuotaEnforcer
   allowAllApprovalMode?: boolean
   broadcastError(
     sessionId: string,
@@ -217,6 +218,15 @@ export type DashboardDeps = {
   onSessionDeleted?(record: SessionRecord): void | Promise<void>
   renameWorkspace?(workspaceId: string, workspaceName: string): Promise<string>
   mutableReady?(): boolean
+}
+
+export type TenantSessionQuotaEnforcer = {
+  assertCanCreateSession(params: {
+    organizationId: string
+    principal: string
+    role: 'owner' | 'admin' | 'member' | 'viewer'
+    sessionId: string
+  }): Promise<void>
 }
 
 const READ_ONLY_DASHBOARD_EVENTS = new Set([
@@ -1120,6 +1130,17 @@ export function configureDashboardNamespace(
           p = { ...p, cwd: validation.cwd }
         }
         const actor = auditActor(socket)
+        if (deps.sessionQuota) {
+          if (actor.kind !== 'ingress') {
+            throw new Error('missing organization attribution for session quota enforcement')
+          }
+          await deps.sessionQuota.assertCanCreateSession({
+            organizationId: actor.organizationId,
+            principal: actor.principal,
+            role: actor.role,
+            sessionId: p.sessionId,
+          })
+        }
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
           agentRuntime,

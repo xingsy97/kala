@@ -461,6 +461,88 @@ describe('wire protocol', () => {
     await expect(blockedRead.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
   })
 
+  it('enforces tenant session quota before creating ingress sessions', async () => {
+    await server.close()
+    let checks = 0
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      sessionQuota: {
+        async assertCanCreateSession(params) {
+          checks += 1
+          expect(params).toMatchObject({
+            organizationId: 'org_quota',
+            principal: 'member@example.test',
+            role: 'member',
+            sessionId: 'session-quota-denied',
+          })
+          throw new Error('organization concurrent session quota exceeded')
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'session-quota-denied', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_quota',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:create_session', {
+      sessionId: 'session-quota-denied',
+    })
+
+    expect(ack).toEqual({ ok: false, error: 'organization concurrent session quota exceeded' })
+    expect(checks).toBe(1)
+    expect(server.store.get('session-quota-denied')).toBeUndefined()
+    await expect(server.store.load('session-quota-denied')).rejects.toThrow('Unknown session')
+    dashboard.close()
+  })
+
+  it('creates ingress sessions after tenant session quota allows them', async () => {
+    await server.close()
+    const checks: unknown[] = []
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      sessionQuota: {
+        async assertCanCreateSession(params) {
+          checks.push(params)
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'session-quota-allowed', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'member@example.test',
+        'x-agent-runlab-organization-id': 'org_quota',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:create_session', {
+      sessionId: 'session-quota-allowed',
+    })
+
+    expect(ack).toEqual({ ok: true })
+    expect(checks).toEqual([expect.objectContaining({ organizationId: 'org_quota', sessionId: 'session-quota-allowed' })])
+    expect(server.store.get('session-quota-allowed')?.organizationId).toBe('org_quota')
+    dashboard.close()
+  })
+
   it('enforces tenant LLM quota before calling the provider', async () => {
     await server.close()
     let providerCalls = 0

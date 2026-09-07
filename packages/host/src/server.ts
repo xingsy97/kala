@@ -52,6 +52,7 @@ import {
   type DashboardNs,
   type MessageQueueManager,
   type QueuedUserMessage,
+  type TenantSessionQuotaEnforcer,
   isRestingStatus,
 } from './connection/dashboard-ns.js'
 import {
@@ -96,6 +97,7 @@ export type HostServerOptions = {
   sessionsDir: string
   llm: LLMAdapter
   llmQuota?: LlmQuotaEnforcer
+  sessionQuota?: TenantSessionQuotaEnforcer
   copilot?: {
     enabled?: boolean
     gitHubToken?: string
@@ -1195,6 +1197,7 @@ export async function startHostServer(
     defaultConfig: getDefaultConfig,
     ...(auth ? { auth } : {}),
     audit,
+    ...(options.sessionQuota !== undefined ? { sessionQuota: options.sessionQuota } : {}),
     allowAllApprovalMode: options.allowAllApprovalMode ?? true,
     broadcastError,
     contextWindowForModel,
