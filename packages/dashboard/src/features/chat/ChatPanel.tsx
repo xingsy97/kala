@@ -766,7 +766,7 @@ function PendingUserMessageRow({
   const { t } = useTranslation()
   const content = item.content ?? [{ type: 'text' as const, text: item.text }]
   const statusLabel = item.status === 'queued'
-    ? t('chat.transcript.queued.queueLabel')
+    ? t('composer.queued.queueLabel')
     : t('chat.transcript.sendingMessage')
   return (
     <div className="group relative flex min-w-0 max-w-full justify-end" data-testid={`pending-user-message-${item.id}`} data-status={item.status}>
