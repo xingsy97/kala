@@ -47,16 +47,26 @@ export class OrganizationProvisioningService {
     })
   }
 
-  async setStatus(input: { operationId: string; organizationId: string; status: 'active' | 'suspended' | 'closing' | 'closed'; actorPrincipalId: string }): Promise<{ alreadyApplied: boolean }> {
+  async setStatus(input: {
+    operationId: string
+    organizationId: string
+    status: 'active' | 'suspended' | 'closing' | 'closed'
+    actorPrincipalId: string
+    closeConfirmation?: string
+    backupReference?: string
+  }): Promise<{ alreadyApplied: boolean }> {
     return this.database.transaction(async (transaction) => {
       if (await findOperation(transaction, input.operationId)) return { alreadyApplied: true }
+      if (input.status === 'closed') validateCloseConfirmation(input.organizationId, input.closeConfirmation, input.backupReference)
       const desiredState = input.status === 'active' ? 'ready' : input.status === 'closed' ? 'deleted' : 'suspended'
       const result = await transaction.query(`UPDATE organizations SET status=$2,authorization_version=authorization_version+1,updated_at=now(),
         suspended_at=CASE WHEN $2='suspended' THEN now() ELSE suspended_at END,closed_at=CASE WHEN $2='closed' THEN now() ELSE closed_at END WHERE id=$1 AND status<>'closed'`, [input.organizationId, input.status])
       if (result.rowCount !== 1) throw new Error('organization not found or already closed')
       await transaction.query(`UPDATE runtime_unit_placements SET desired_state=$2,generation=generation+1,last_operation_id=$3,updated_at=now() WHERE organization_id=$1`, [input.organizationId, desiredState, input.operationId])
       await transaction.query(`UPDATE browser_sessions SET revoked_at=now(),revocation_reason='administrator' WHERE organization_id=$1 AND revoked_at IS NULL`, [input.organizationId])
-      await appendControlEvent(transaction, input.operationId, input.organizationId, input.actorPrincipalId, `organization.${input.status}`, {})
+      await appendControlEvent(transaction, input.operationId, input.organizationId, input.actorPrincipalId, `organization.${input.status}`, input.status === 'closed'
+        ? { backupReference: input.backupReference, closeConfirmation: 'verified' }
+        : {})
       return { alreadyApplied: false }
     })
   }
@@ -86,6 +96,10 @@ function validateProvisioning(input: ProvisionOrganizationInput): void {
   if (!input.owner.issuer || !input.owner.subject) throw new Error('invalid owner identity')
   if (!input.contractReference || input.endsAt <= input.startsAt || (input.graceEndsAt && input.graceEndsAt < input.endsAt)) throw new Error('invalid contract term')
   if (!Number.isSafeInteger(input.seatLimit) || input.seatLimit < 1 || !Number.isSafeInteger(input.concurrentSessionLimit) || input.concurrentSessionLimit < 1) throw new Error('invalid contract limits')
+}
+function validateCloseConfirmation(organizationId: string, confirmation: string | undefined, backupReference: string | undefined): void {
+  if (confirmation !== `DELETE ${organizationId}`) throw new Error('organization close confirmation required')
+  if (!backupReference?.trim() || backupReference.length > 200) throw new Error('organization close backup reference required')
 }
 function principalId(identity: AuthenticatedIdentity): string { return `prn_${createHash('sha256').update(identityKey(identity)).digest('base64url').slice(0,26)}` }
 function newId(prefix: string): string { return `${prefix}_${randomBytes(16).toString('base64url')}` }

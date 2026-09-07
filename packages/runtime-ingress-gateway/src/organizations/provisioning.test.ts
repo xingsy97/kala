@@ -66,6 +66,34 @@ describe('OrganizationProvisioningService', () => {
 
     expect(database.statements('UPDATE organizations SET status=')).toEqual([])
   })
+
+  it('requires explicit confirmation and backup reference before closing an organization', async () => {
+    const database = new FakeProvisioningDatabase()
+    const service = new OrganizationProvisioningService(database)
+
+    await expect(service.setStatus({
+      operationId: 'op-close',
+      organizationId: 'org_acme',
+      status: 'closed',
+      actorPrincipalId: 'prn_admin',
+    })).rejects.toThrow('organization close confirmation required')
+
+    expect(database.statements('UPDATE organizations SET status=')).toEqual([])
+
+    await expect(service.setStatus({
+      operationId: 'op-close-confirmed',
+      organizationId: 'org_acme',
+      status: 'closed',
+      actorPrincipalId: 'prn_admin',
+      closeConfirmation: 'DELETE org_acme',
+      backupReference: 'backup-20260907',
+    })).resolves.toEqual({ alreadyApplied: false })
+
+    expect(database.statements('UPDATE organizations SET status=')).toHaveLength(1)
+    const audit = database.statements('INSERT INTO audit_events')[0]
+    expect(audit?.values[3]).toBe('organization.closed')
+    expect(audit?.values[4]).toEqual({ backupReference: 'backup-20260907', closeConfirmation: 'verified' })
+  })
 })
 
 class FakeProvisioningDatabase implements ControlPlaneDatabase, SqlExecutor {
