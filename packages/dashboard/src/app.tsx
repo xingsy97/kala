@@ -1783,7 +1783,13 @@ export function App(): JSX.Element {
                     </div>
                   </div>
                 </ResizablePanel>
-                <ResizableHandle id="explorer-resize-handle" className="w-1.5 bg-transparent after:w-2 hover:bg-transparent focus-visible:bg-transparent [&>div]:opacity-0" />
+                <ResizableHandle
+                  id="explorer-resize-handle"
+                  withHandle
+                  aria-label={t('app.resizeExplorer')}
+                  title={t('app.resizeExplorer')}
+                  className="mx-0.5 w-2 bg-transparent after:w-3 hover:bg-sidebar-border/35 focus-visible:bg-sidebar-border/45"
+                />
               </>
             ) : null}
           </>

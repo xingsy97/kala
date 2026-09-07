@@ -113,11 +113,11 @@ type Props = {
   subscribeCachedSessionView?: (sessionId: string, listener: () => void) => () => void
 }
 
-const SESSION_ROW_HEIGHT = 44
-const WORKSPACE_ROW_HEIGHT = 34
+const SESSION_ROW_HEIGHT = 34
+const WORKSPACE_ROW_HEIGHT = 28
 const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] gap-x-2'
 const WORKSPACE_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2'
-const EXPLORER_RAIL_CELL = 'flex h-5 w-4 flex-none items-center justify-center'
+const EXPLORER_RAIL_CELL = 'flex h-4 w-4 flex-none items-center justify-center'
 
 export type SessionActivityStatus = SessionSummary['status'] | 'loading'
 
@@ -1003,7 +1003,7 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws relative min-w-0 cursor-pointer select-none rounded-lg px-3 py-2 transition-colors hover:bg-accent/40',
+        'group/ws relative min-w-0 cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-accent/40',
         WORKSPACE_ROW_GRID,
       )}
     >
@@ -1185,7 +1185,7 @@ function SessionRow({
       data-selected={selected ? 'true' : 'false'}
       aria-current={selected ? 'page' : undefined}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden rounded-xl px-3 py-1.5 transition-colors',
+        'group relative min-w-0 cursor-pointer overflow-hidden rounded-lg px-2 py-1 transition-colors',
         'hover:bg-accent/50',
         selected && 'bg-accent shadow-[inset_0_0_0_1px_hsl(var(--border)/0.35)]',
         EXPLORER_ROW_GRID,
@@ -1308,7 +1308,7 @@ function SessionRow({
             title={t('common.more')}
             aria-label={t('common.more')}
             aria-expanded={touchMenuPosition !== null}
-            className="ak-session-more-button hidden h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground"
+            className="ak-session-more-button hidden h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-6 sm:w-6"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -1353,7 +1353,7 @@ function SessionRow({
             title={t('explorer.renameSession')}
             aria-label={t('explorer.renameSessionAria', { sessionId: s.sessionId })}
             disabled={renameDisabled}
-            className="h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-7 sm:w-7"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-6 sm:w-6"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -1371,7 +1371,7 @@ function SessionRow({
               data-testid="session-info-button"
               title={t('explorer.sessionInfoTitle')}
               aria-label={t('explorer.sessionInfoAria', { sessionId: s.sessionId })}
-              className="h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-7 sm:w-7"
+              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-6 sm:w-6"
             >
               <Info className="h-3.5 w-3.5" strokeWidth={2.2} />
             </Button>
@@ -1389,7 +1389,7 @@ function SessionRow({
             data-testid="session-hide-button"
             title={t('explorer.hideSession')}
             aria-label={t('explorer.hideSessionAria', { sessionId: s.sessionId })}
-            className="h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-7 sm:w-7"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-6 sm:w-6"
           >
             <EyeOff className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -1406,7 +1406,7 @@ function SessionRow({
             data-testid="session-delete-button"
             title={t('explorer.deleteSessionTitle')}
             aria-label={t('explorer.deleteSessionAria', { sessionId: s.sessionId })}
-            className="h-9 w-9 rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground sm:h-7 sm:w-7"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground sm:h-6 sm:w-6"
           >
             <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
