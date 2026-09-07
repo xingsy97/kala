@@ -116,6 +116,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [operations/private-cloud-local-runbook.md](operations/private-cloud-local-runbook.md) | Single Docker Private Cloud stack with mandatory NFS Session storage, bootstrap, verification, backup, upgrade, and rollback |
 | [operations/dedicated-operator-cli.md](operations/dedicated-operator-cli.md) | Source-free Dedicated install, upgrade, rollback, backup, restore, and uninstall contract |
 | [operations/private-cloud-release.md](operations/private-cloud-release.md) | **Normative.** Private Cloud release and Dashboard-only lifecycle |
+| [operations/commercial-saas-tenant-lifecycle.md](operations/commercial-saas-tenant-lifecycle.md) | **Normative.** Shared SaaS tenant lifecycle, close, backup/PITR, retention, and schema gates |
 | [operations/release-evidence-contract.md](operations/release-evidence-contract.md) | **Normative.** Revision-bound release evidence requirements |
 | [operations/release-support-policy.md](operations/release-support-policy.md) | **Normative.** Supported versions, rollback and compatibility boundaries |
 | [operations/public-release-readiness.md](operations/public-release-readiness.md) | **Normative.** Public repository governance, unified version, distribution, supply-chain, operator CLI, and clean-environment release gates |
