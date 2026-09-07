@@ -345,6 +345,8 @@ export function configureDashboardNamespace(
 
       const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId, { recoverDangling: false }).catch(() => undefined))
       if (!record) return 'unknown session'
+      const tenantError = validateIngressSessionAccess(socket, record)
+      if (tenantError) return tenantError
       if (record.workspaceId !== workspaceId) return 'session does not belong to workspace'
       return undefined
     }
@@ -972,6 +974,17 @@ export function configureDashboardNamespace(
       if (!p) return
       deps.audit?.log({ action: 'internal_tool.read_overflow', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok' })
       const record = deps.store.get(p.sessionId) ?? (await deps.store.load(p.sessionId, { recoverDangling: false }).catch(() => undefined))
+      const tenantError = validateIngressSessionAccess(socket, record)
+      if (tenantError) {
+        deps.audit?.log({ action: 'internal_tool.read_overflow', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'denied', error: tenantError })
+        socket.emit('server:overflow_contents', {
+          requestId: p.requestId,
+          sessionId: p.sessionId,
+          callId: p.callId,
+          error: tenantError,
+        })
+        return
+      }
       const workspaceId = record?.workspaceId
       if (!workspaceId) {
         socket.emit('server:overflow_contents', {

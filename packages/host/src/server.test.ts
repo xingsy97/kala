@@ -359,6 +359,44 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('rejects cross-tenant ingress background and overflow socket operations', async () => {
+    await server.store.create({
+      sessionId: 'socket-bg-tenant-b',
+      workspaceId: 'workspace-tenant-b',
+      config,
+      organizationId: 'org_b',
+      principal: 'b@example.test',
+      organizationRole: 'member',
+    })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'socket-bg-tenant-b', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'a@example.test',
+        'x-agent-runlab-organization-id': 'org_a',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const bgList = await dashboard.timeout(1000).emitWithAck('bg:list', {
+      requestId: 'cross-bg-list',
+      workspaceId: 'workspace-tenant-b',
+      sessionId: 'socket-bg-tenant-b',
+    })
+    expect(bgList).toMatchObject({ error: 'tenant_forbidden', tasks: [] })
+
+    const overflow = new Promise<{ error?: string }>((resolve) => dashboard.once('server:overflow_contents', resolve))
+    dashboard.emit('client:read_overflow', {
+      requestId: 'cross-overflow',
+      sessionId: 'socket-bg-tenant-b',
+      callId: 'call-cross',
+    })
+    await expect(overflow).resolves.toMatchObject({ error: 'tenant_forbidden' })
+    dashboard.close()
+  })
+
   it('rejects cross-tenant ingress HTTP access to session-scoped runtime routes', async () => {
     await server.store.create({
       sessionId: 'http-tenant-a',
