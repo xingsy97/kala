@@ -1,5 +1,16 @@
 import type { ControlPlaneDatabase } from '../persistence/postgres.js'
 
+export type RetentionPurgeResult = {
+  organizationId: string
+  sessions: number
+  devices: number
+}
+
+export type RetentionPurgeFailure = {
+  organizationId: string
+  error: string
+}
+
 export class RetentionService {
   constructor(private readonly database: ControlPlaneDatabase) {}
   async purgeOrganization(organizationId: string, now = new Date()): Promise<{ sessions: number; devices: number }> {
@@ -11,6 +22,25 @@ export class RetentionService {
       return { sessions: sessions.rowCount ?? 0, devices: devices.rowCount ?? 0 }
     })
   }
+  async purgeAllOrganizations(now = new Date()): Promise<{ purged: RetentionPurgeResult[]; failures: RetentionPurgeFailure[] }> {
+    const organizations = await this.database.query<{ organization_id: string }>(`
+      SELECT r.organization_id
+      FROM retention_policies r
+      JOIN organizations o ON o.id=r.organization_id
+      WHERE o.status IN ('active','suspended','closing')
+      ORDER BY r.organization_id
+    `)
+    const purged: RetentionPurgeResult[] = []
+    const failures: RetentionPurgeFailure[] = []
+    for (const row of organizations.rows) {
+      try {
+        purged.push({ organizationId: row.organization_id, ...await this.purgeOrganization(row.organization_id, now) })
+      } catch (error) {
+        failures.push({ organizationId: row.organization_id, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    return { purged, failures }
+  }
   async exportOrganization(organizationId: string): Promise<Record<string, unknown>> {
     const [organization, members, usage, audit] = await Promise.all([
       this.database.query('SELECT * FROM organizations WHERE id=$1', [organizationId]),
@@ -21,4 +51,27 @@ export class RetentionService {
     if (!organization.rows[0]) throw new Error('organization not found')
     return { schemaVersion: 1, exportedAt: new Date().toISOString(), organization: organization.rows[0], memberships: members.rows, usage: usage.rows, audit: audit.rows }
   }
+}
+
+export function startRetentionScheduler(options: {
+  service: RetentionService
+  intervalMs: number
+  now?: () => Date
+  onResult?: (result: Awaited<ReturnType<RetentionService['purgeAllOrganizations']>>) => void
+  onError?: (error: Error) => void
+}): { stop(): void } {
+  if (!Number.isSafeInteger(options.intervalMs) || options.intervalMs < 60_000) throw new Error('retention scheduler interval must be at least 60000ms')
+  let running = false
+  const run = (): void => {
+    if (running) return
+    running = true
+    void options.service.purgeAllOrganizations(options.now?.() ?? new Date())
+      .then((result) => options.onResult?.(result))
+      .catch((error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error))))
+      .finally(() => { running = false })
+  }
+  const timer = setInterval(run, options.intervalMs)
+  timer.unref?.()
+  run()
+  return { stop: () => clearInterval(timer) }
 }

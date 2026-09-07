@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { RetentionService } from './retention.js'
+import { RetentionService, startRetentionScheduler } from './retention.js'
 import type { ControlPlaneDatabase, SqlExecutor, SqlQueryResult } from '../persistence/postgres.js'
 
 describe('RetentionService', () => {
@@ -49,17 +49,62 @@ describe('RetentionService', () => {
       ['org_acme'],
     ])
   })
+
+  it('orchestrates scheduled purge across tenant policies and reports per-tenant failures', async () => {
+    const database = new FakeRetentionDatabase({
+      organizationRows: [{ organization_id: 'org_acme' }, { organization_id: 'org_missing' }],
+      policyRowsByOrganization: new Map([
+        ['org_acme', [{ session_days: 30 }]],
+        ['org_missing', []],
+      ]),
+    })
+    const service = new RetentionService(database)
+
+    await expect(service.purgeAllOrganizations(new Date('2026-09-07T04:00:00Z'))).resolves.toEqual({
+      purged: [{ organizationId: 'org_acme', sessions: 2, devices: 1 }],
+      failures: [{ organizationId: 'org_missing', error: 'retention policy not found' }],
+    })
+
+    expect(database.executed[0]?.sql).toBe("SELECT r.organization_id FROM retention_policies r JOIN organizations o ON o.id=r.organization_id WHERE o.status IN ('active','suspended','closing') ORDER BY r.organization_id")
+    expect(database.transactionCount).toBe(2)
+  })
+
+  it('starts a bounded retention scheduler and rejects unsafe intervals', async () => {
+    vi.useFakeTimers()
+    const database = new FakeRetentionDatabase({ organizationRows: [{ organization_id: 'org_acme' }] })
+    const service = new RetentionService(database)
+    const results: unknown[] = []
+
+    expect(() => startRetentionScheduler({ service, intervalMs: 59_999 })).toThrow('retention scheduler interval')
+    const scheduler = startRetentionScheduler({
+      service,
+      intervalMs: 60_000,
+      now: () => new Date('2026-09-07T04:00:00Z'),
+      onResult: (result) => results.push(result),
+    })
+    await vi.runOnlyPendingTimersAsync()
+    scheduler.stop()
+
+    expect(results.length).toBeGreaterThanOrEqual(1)
+    vi.useRealTimers()
+  })
 })
 
 class FakeRetentionDatabase implements ControlPlaneDatabase, SqlExecutor {
   readonly executed: Array<{ sql: string; values: readonly unknown[] }> = []
   transactionCount = 0
 
-  constructor(private readonly options: { policyRows?: Array<{ session_days: number }> } = {}) {}
+  constructor(private readonly options: {
+    policyRows?: Array<{ session_days: number }>
+    policyRowsByOrganization?: Map<string, Array<{ session_days: number }>>
+    organizationRows?: Array<{ organization_id: string }>
+  } = {}) {}
 
   async query<Row extends Record<string, unknown> = Record<string, unknown>>(text: string, values: readonly unknown[] = []): Promise<SqlQueryResult<Row>> {
     const sql = text.trim().replace(/\s+/gu, ' ')
     this.executed.push({ sql, values })
+    if (sql.startsWith('SELECT r.organization_id FROM retention_policies')) return result((this.options.organizationRows ?? [{ organization_id: 'org_acme' }]) as unknown as Row[])
+    if (sql.startsWith('SELECT session_days FROM retention_policies') && this.options.policyRowsByOrganization) return result((this.options.policyRowsByOrganization.get(String(values[0])) ?? []) as unknown as Row[])
     if (sql.startsWith('SELECT session_days FROM retention_policies')) return result((this.options.policyRows ?? [{ session_days: 30 }]) as unknown as Row[])
     if (sql.startsWith('DELETE FROM notification_devices')) return result([], 1)
     if (sql.startsWith('DELETE FROM browser_sessions')) return result([], 2)
