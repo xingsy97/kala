@@ -16,9 +16,15 @@ describe('RetentionService', () => {
       'SELECT session_days FROM retention_policies WHERE organization_id=$1',
       "DELETE FROM notification_devices WHERE organization_id=$1 AND updated_at < $2::timestamptz - ($3::text || ' days')::interval",
       "DELETE FROM browser_sessions WHERE organization_id=$1 AND COALESCE(revoked_at,absolute_expires_at) < $2::timestamptz - ($3::text || ' days')::interval",
+      "INSERT INTO audit_events(id,organization_id,actor_principal_id,actor_kind,action,target_type,target_id,result,metadata) VALUES($1,$2,'system','system','retention.purge','organization',$2,'succeeded',$3)",
     ])
     expect(database.executed[1]?.values).toEqual(['org_acme', now, 30])
     expect(database.executed[2]?.values).toEqual(['org_acme', now, 30])
+    expect(database.executed[3]?.values).toEqual([
+      expect.any(String),
+      'org_acme',
+      { before: '2026-08-08T04:00:00.000Z', sessions: 2, devices: 1, hostSessions: 0 },
+    ])
   })
 
   it('purges host tenant sessions and artifacts with the same retention cutoff', async () => {

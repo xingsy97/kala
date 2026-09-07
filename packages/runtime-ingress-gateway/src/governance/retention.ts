@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import type { ControlPlaneDatabase } from '../persistence/postgres.js'
 
 export type RetentionPurgeResult = {
@@ -29,7 +31,9 @@ export class RetentionService {
     })
     const before = new Date(now.getTime() - controlPlane.sessionDays * 24 * 60 * 60 * 1000)
     const hostSessions = this.hostData ? (await this.hostData.purgeOrganizationSessions({ organizationId, before })).sessions : 0
-    return { sessions: controlPlane.sessions, devices: controlPlane.devices, hostSessions }
+    const result = { sessions: controlPlane.sessions, devices: controlPlane.devices, hostSessions }
+    await this.writePurgeAudit(organizationId, result, before)
+    return result
   }
   async purgeAllOrganizations(now = new Date()): Promise<{ purged: RetentionPurgeResult[]; failures: RetentionPurgeFailure[] }> {
     const organizations = await this.database.query<{ organization_id: string }>(`
@@ -59,6 +63,13 @@ export class RetentionService {
     ])
     if (!organization.rows[0]) throw new Error('organization not found')
     return { schemaVersion: 1, exportedAt: new Date().toISOString(), organization: organization.rows[0], memberships: members.rows, usage: usage.rows, audit: audit.rows }
+  }
+
+  private async writePurgeAudit(organizationId: string, result: { sessions: number; devices: number; hostSessions: number }, before: Date): Promise<void> {
+    await this.database.query(
+      `INSERT INTO audit_events(id,organization_id,actor_principal_id,actor_kind,action,target_type,target_id,result,metadata) VALUES($1,$2,'system','system','retention.purge','organization',$2,'succeeded',$3)`,
+      [randomUUID(), organizationId, { before: before.toISOString(), ...result }],
+    )
   }
 }
 
