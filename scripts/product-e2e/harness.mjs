@@ -34,7 +34,12 @@ export class ProductE2EHarness {
     page.setDefaultTimeout(60_000)
     const actor = { name, context, page, requests: [], requestFailures: [], responses: [], consoleErrors: [], pageErrors: [] }
     page.on('request', (request) => actor.requests.push({ method: request.method(), url: request.url(), navigation: request.isNavigationRequest() }))
-    page.on('requestfailed', (request) => actor.requestFailures.push({ url: request.url(), error: request.failure()?.errorText ?? 'unknown' }))
+    page.on('requestfailed', (request) => {
+      const error = request.failure()?.errorText ?? 'unknown'
+      const url = request.url()
+      if (error === 'net::ERR_ABORTED' && url.endsWith('/manifest.webmanifest')) return
+      actor.requestFailures.push({ url, error })
+    })
     page.on('response', (response) => {
       if (response.status() >= 400 && !response.url().includes('favicon')) actor.responses.push({ status: response.status(), url: response.url() })
     })
