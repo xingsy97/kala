@@ -286,6 +286,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
         ...new ToolSet().addBuiltIn('view').toArray(),
       ],
       excludedTools: ['mcp:*'],
+      additionalDirectories: [],
       onPermissionRequest: (request: { kind: string; path?: string; managedApprovalRequired?: boolean }) => {
         if (
           request.kind === 'read'
@@ -308,6 +309,13 @@ export class CopilotAgentRuntime implements AgentRuntime {
       },
       coauthorEnabled: false,
       enableExperimentalMode: false,
+      skipEmbeddingRetrieval: true,
+      embeddingCacheStorage: 'in-memory' as const,
+      enableOnDemandInstructionDiscovery: false,
+      enableFileHooks: false,
+      enableHostGitOperations: false,
+      enableSessionStore: false,
+      enableSkills: false,
     }
   }
 

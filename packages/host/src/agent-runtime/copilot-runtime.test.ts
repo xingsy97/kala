@@ -26,6 +26,7 @@ const sdk = vi.hoisted(() => ({
     workingDirectory?: string
     availableTools?: readonly string[]
     excludedTools?: readonly string[]
+    additionalDirectories?: readonly string[]
     onPermissionRequest?: (request: { kind: string; path?: string; managedApprovalRequired?: boolean }) => unknown
     remoteSession?: string
     infiniteSessions?: {
@@ -33,12 +34,20 @@ const sdk = vi.hoisted(() => ({
       backgroundCompactionThreshold?: number
       bufferExhaustionThreshold?: number
     }
+    skipEmbeddingRetrieval?: boolean
+    embeddingCacheStorage?: string
+    enableOnDemandInstructionDiscovery?: boolean
+    enableFileHooks?: boolean
+    enableHostGitOperations?: boolean
+    enableSessionStore?: boolean
+    enableSkills?: boolean
   }>,
   resumeConfigs: [] as Array<{
     tools: CapturedTool[]
     workingDirectory?: string
     availableTools?: readonly string[]
     excludedTools?: readonly string[]
+    additionalDirectories?: readonly string[]
     onPermissionRequest?: (request: { kind: string; path?: string; managedApprovalRequired?: boolean }) => unknown
     remoteSession?: string
     infiniteSessions?: {
@@ -46,6 +55,13 @@ const sdk = vi.hoisted(() => ({
       backgroundCompactionThreshold?: number
       bufferExhaustionThreshold?: number
     }
+    skipEmbeddingRetrieval?: boolean
+    embeddingCacheStorage?: string
+    enableOnDemandInstructionDiscovery?: boolean
+    enableFileHooks?: boolean
+    enableHostGitOperations?: boolean
+    enableSessionStore?: boolean
+    enableSkills?: boolean
   }>,
   resumeSucceeds: false,
   listeners: [] as Array<(event: unknown) => void>,
@@ -255,6 +271,16 @@ describe('Copilot runtime custom tools', () => {
     })
     expect(sdk.configs.at(-1)?.workingDirectory).toBe(join(dir, '..'))
     expect(sdk.configs.at(-1)?.remoteSession).toBe('off')
+    expect(sdk.configs.at(-1)).toMatchObject({
+      additionalDirectories: [],
+      skipEmbeddingRetrieval: true,
+      embeddingCacheStorage: 'in-memory',
+      enableOnDemandInstructionDiscovery: false,
+      enableFileHooks: false,
+      enableHostGitOperations: false,
+      enableSessionStore: false,
+      enableSkills: false,
+    })
     expect(sdk.configs.at(-1)?.infiniteSessions).toEqual({
       enabled: true,
       backgroundCompactionThreshold: 0.8,
