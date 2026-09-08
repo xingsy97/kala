@@ -39,13 +39,13 @@ hooks, high availability, compliance, observability, and tenant administration.
 | Abuse and noisy-neighbor protection | Complete for P0. Unit resource governor supports per-unit concurrency, queue, and artifact-byte accounting. RuntimeIngressGateway has tenant/principal sliding-window rate limiting with 429/retry-after tests. Foreground shell, background shell, file reads, and terminal live streaming have bounded output paths; terminal sessions emit a truncation marker and are killed at budget. POSIX shells support CPU, virtual-memory, file-size, and process-count `ulimit` controls. Monthly token spend monitoring emits deduplicated tenant outbox alerts. Managed Linux Executor services install with systemd cgroup controls for CPU, memory, task count, file size, and no-new-privileges. | Rate-limit, output cap, shell-runtime, service adapter, and usage alert tests. |
 
 P0 release evidence is not limited to unit tests. The current Dedicated
-deployment at route generation 77 (`release-588e81441eac1b371a8b`) completed a
+deployment at route generation 78 (`release-abfb1d724f724b4f454c`) completed a
 planned restart handoff with 87/87 continuation participants settled and zero
 failures. Product E2E evidence includes core workspace journeys, controlled
 agent journeys, and the deployed official Copilot Runtime canary:
 `/tmp/agent-runlab-program-1788878159267-2788853-b058e57c/report.json`,
 `/tmp/agent-runlab-program-1788878331826-2795417-c789a14d/report.json`, and
-`/tmp/agent-runlab-program-1788881102288-2966378-26215249/report.json`.
+`/tmp/agent-runlab-program-1788882875574-3038674-60776cd4/report.json`.
 
 ### Tenant lifecycle state machine
 
