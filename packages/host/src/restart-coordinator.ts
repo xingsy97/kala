@@ -117,6 +117,7 @@ export class RestartCoordinator {
     if (input.deployment && last && sameDeploymentOwnership(last.deployment, input.deployment)) return last
     const now = new Date().toISOString()
     const requestedMode = input.mode ?? 'checkpoint'
+    const reason = input.reason ?? 'manual'
     // A parent `agent` Tool and its child Session are one logical effect. Pausing
     // the child before completion would leave the parent's dispatched Tool
     // outcome ambiguous and replay could spawn a duplicate child. Let that group
@@ -124,12 +125,12 @@ export class RestartCoordinator {
     const hasActiveSubAgentGroup = this.options.store.recordsSnapshot().some((record) =>
       (record.state.pendingCalls ?? []).some((call) => call.name === 'agent'),
     )
-    const mode = requestedMode === 'checkpoint' && hasActiveSubAgentGroup ? 'when_idle' : requestedMode
+    const mode = requestedMode === 'checkpoint' && reason !== 'deploy' && hasActiveSubAgentGroup ? 'when_idle' : requestedMode
     const attempt: HostRestartAttempt = {
       attemptId: ulid(),
       phase: 'requested',
       mode,
-      reason: input.reason ?? 'manual',
+      reason,
       requestedAt: now,
       updatedAt: now,
       oldPid: process.pid,

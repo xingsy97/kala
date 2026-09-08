@@ -123,7 +123,7 @@ describe('RestartCoordinator', () => {
     expect(coordinator.status().current?.attemptId).toBe(active.attemptId)
   })
 
-  it('upgrades an active parent/child agent Tool group to when_idle', async () => {
+  it('upgrades a manual active parent/child agent Tool group to when_idle', async () => {
     const store = {
       recordsSnapshot: () => [{
         sessionId: 'parent',
@@ -138,6 +138,32 @@ describe('RestartCoordinator', () => {
     const result = await coordinator.request({ mode: 'checkpoint' })
     expect(result.mode).toBe('when_idle')
     expect(loop.beginDrain).toHaveBeenCalledWith('idle')
+  })
+
+  it('keeps deployment restarts at checkpoint even with an active parent/child agent Tool group', async () => {
+    const store = {
+      recordsSnapshot: () => [{
+        sessionId: 'parent',
+        state: {
+          status: 'executing_tools' as const,
+          cursor: 4,
+          pendingCalls: [{ callId: 'agent-call', name: 'agent', input: {}, status: 'dispatched' as const }],
+        },
+      }],
+    } as unknown as SessionStore
+    const { coordinator, loop } = harness({ store })
+    const result = await coordinator.request({
+      mode: 'checkpoint',
+      reason: 'deploy',
+      deployment: {
+        deploymentId: 'deployment-owner-0001',
+        targetReleaseDigest: 'a'.repeat(64),
+        expectedRouteGeneration: 1,
+        fencingToken: 'fencing-token-owner-0001',
+      },
+    })
+    expect(result.mode).toBe('checkpoint')
+    expect(loop.beginDrain).toHaveBeenCalledWith('checkpoint')
   })
 
   it('turns checkpoint rejection into a failed terminal attempt', async () => {
