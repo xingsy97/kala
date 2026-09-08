@@ -1,7 +1,7 @@
 # Commercial SaaS Multitenancy Priority Gap
 
 **Status:** planning baseline  
-**Last reviewed:** 2026-09-07
+**Last reviewed:** 2026-09-08
 
 ## Conclusion
 
@@ -37,6 +37,15 @@ hooks, high availability, compliance, observability, and tenant administration.
 | Secret isolation | Complete for P0. Browser refresh tokens use encrypted secret box; product docs require server-side credential references. Shared persistence redaction covers secret keys, bearer tokens, API keys, workspace-root paths, signed URL query stripping, and truncation. Support ticket payloads, webhook outbox payloads, LLM traces, persisted event logs, session/RL exports, artifacts, operational errors, and model-context compaction prompts have redaction tests proving raw credentials are not persisted or sent cross-boundary. | Shared redaction, support, webhook, log/export, compaction, and runtime-config tests. |
 | Control-plane persistence | Complete for P0. Production ingress requires `RUNTIME_INGRESS_DATABASE_URL`; migration/import CLIs require database URL. Startup mode resolution prevents production JSON fallback while keeping non-production JSON explicit. Runtime ingress startup reads release migrations and fails closed unless database schema version exactly matches the running release, covering both behind and ahead rolling-deploy drift. | Control-plane mode tests, migration tests, schema compatibility tests, and lifecycle runbook. |
 | Abuse and noisy-neighbor protection | Complete for P0. Unit resource governor supports per-unit concurrency, queue, and artifact-byte accounting. RuntimeIngressGateway has tenant/principal sliding-window rate limiting with 429/retry-after tests. Foreground shell, background shell, file reads, and terminal live streaming have bounded output paths; terminal sessions emit a truncation marker and are killed at budget. POSIX shells support CPU, virtual-memory, file-size, and process-count `ulimit` controls. Monthly token spend monitoring emits deduplicated tenant outbox alerts. Managed Linux Executor services install with systemd cgroup controls for CPU, memory, task count, file size, and no-new-privileges. | Rate-limit, output cap, shell-runtime, service adapter, and usage alert tests. |
+
+P0 release evidence is not limited to unit tests. The current Dedicated
+deployment at route generation 77 (`release-588e81441eac1b371a8b`) completed a
+planned restart handoff with 87/87 continuation participants settled and zero
+failures. Product E2E evidence includes core workspace journeys, controlled
+agent journeys, and the deployed official Copilot Runtime canary:
+`/tmp/agent-runlab-program-1788878159267-2788853-b058e57c/report.json`,
+`/tmp/agent-runlab-program-1788878331826-2795417-c789a14d/report.json`, and
+`/tmp/agent-runlab-program-1788881102288-2966378-26215249/report.json`.
 
 ### Tenant lifecycle state machine
 
