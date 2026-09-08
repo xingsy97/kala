@@ -1,4 +1,5 @@
 import type { CallToolEffect } from '@agent-kernel/kernel'
+import { open } from 'node:fs/promises'
 
 import type { HostLoopDeps } from '../loop-types.js'
 import { readSessionLog } from '../store/log.js'
@@ -37,6 +38,7 @@ const STATUSES = new Set<TodoGraphStatus>(['pending', 'in_progress', 'completed'
 const PRIORITIES = new Set<TodoGraphPriority>(['high', 'medium', 'low'])
 const liveGraphs = new Map<string, TodoGraphSnapshot>()
 const graphLocks = new Map<string, Promise<void>>()
+const TODO_GRAPH_SCAN_BYTES = 64 * 1024 * 1024
 
 export async function runTodoGraphTool(
   deps: HostLoopDeps,
@@ -155,7 +157,15 @@ export function parseTodoGraphSnapshot(content: string): TodoGraphSnapshot | und
 }
 
 export async function latestTodoGraph(logPath: string): Promise<TodoGraphSnapshot> {
-  const parsed = await readSessionLog(logPath)
+  let parsed: Awaited<ReturnType<typeof readSessionLog>>
+  try {
+    parsed = await readSessionLog(logPath)
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('refuses to fully read external Runtime session')) {
+      return await latestTodoGraphFromTail(logPath)
+    }
+    throw error
+  }
   const calls = new Map<string, string>()
   let snapshot = EMPTY
   for (const entry of parsed.events) {
@@ -167,6 +177,78 @@ export async function latestTodoGraph(logPath: string): Promise<TodoGraphSnapsho
     if (candidate) snapshot = candidate
   }
   return snapshot
+}
+
+async function latestTodoGraphFromTail(logPath: string): Promise<TodoGraphSnapshot> {
+  const handle = await open(logPath, 'r')
+  const needle = Buffer.from('"kind":"tool_result"')
+  const chunkSize = 4 * 1024 * 1024
+  let carry = Buffer.alloc(0)
+  try {
+    const stat = await handle.stat()
+    let end = stat.size
+    const minimumOffset = Math.max(0, stat.size - TODO_GRAPH_SCAN_BYTES)
+    while (end > minimumOffset) {
+      const start = Math.max(minimumOffset, end - chunkSize)
+      const chunk = Buffer.allocUnsafe(end - start)
+      await handle.read(chunk, 0, chunk.length, start)
+      const data = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk
+      let match = data.lastIndexOf(needle)
+      while (match >= 0 && match < chunk.length) {
+        const line = await readLineContaining(handle, start + match, stat.size)
+        if (line.startsWith('{"kind":"event"')) {
+          const entry = JSON.parse(line) as { kind?: string; event?: { kind?: string; ok?: boolean; content?: string } }
+          if (entry.kind === 'event' && entry.event?.kind === 'tool_result' && entry.event.ok === true && typeof entry.event.content === 'string') {
+            const snapshot = parseTodoGraphSnapshot(entry.event.content)
+            if (snapshot) return snapshot
+          }
+        }
+        match = data.lastIndexOf(needle, match - 1)
+      }
+      carry = chunk.subarray(0, Math.min(needle.length - 1, chunk.length))
+      end = start
+    }
+    return EMPTY
+  } finally {
+    await handle.close()
+  }
+}
+
+async function readLineContaining(
+  handle: Awaited<ReturnType<typeof open>>,
+  offset: number,
+  fileSize: number,
+): Promise<string> {
+  const blockSize = 64 * 1024
+  let lineStart = offset
+  while (lineStart > 0) {
+    const start = Math.max(0, lineStart - blockSize)
+    const chunk = Buffer.allocUnsafe(lineStart - start)
+    await handle.read(chunk, 0, chunk.length, start)
+    const newline = chunk.lastIndexOf(10)
+    if (newline >= 0) {
+      lineStart = start + newline + 1
+      break
+    }
+    lineStart = start
+  }
+
+  let lineEnd = offset
+  while (lineEnd < fileSize) {
+    const length = Math.min(blockSize, fileSize - lineEnd)
+    const chunk = Buffer.allocUnsafe(length)
+    await handle.read(chunk, 0, length, lineEnd)
+    const newline = chunk.indexOf(10)
+    if (newline >= 0) {
+      lineEnd += newline
+      break
+    }
+    lineEnd += length
+  }
+
+  const line = Buffer.allocUnsafe(lineEnd - lineStart)
+  await handle.read(line, 0, line.length, lineStart)
+  return line.toString('utf8')
 }
 
 /**

@@ -53,6 +53,7 @@ export function ComposerFlipContainer({ showApproval, front, back }: Props): JSX
           ref={frontRef}
           className={cn(
             'absolute inset-x-0 top-0 w-full [backface-visibility:hidden]',
+            showApproval ? 'pointer-events-none' : 'pointer-events-auto',
           )}
           aria-hidden={showApproval}
           // While the back face is showing, the front is not painted (via
@@ -66,6 +67,7 @@ export function ComposerFlipContainer({ showApproval, front, back }: Props): JSX
           ref={backRef}
           className={cn(
             'absolute inset-x-0 top-0 w-full [backface-visibility:hidden] [transform:rotateX(180deg)]',
+            showApproval ? 'pointer-events-auto' : 'pointer-events-none',
           )}
           aria-hidden={!showApproval}
           {...(!showApproval ? { inert: '' as unknown as boolean } : {})}

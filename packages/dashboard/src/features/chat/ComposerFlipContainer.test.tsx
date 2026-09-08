@@ -44,6 +44,8 @@ describe('ComposerFlipContainer', () => {
     expect(backWrap.getAttribute('aria-hidden')).toBe('true')
     expect(backWrap.hasAttribute('inert')).toBe(true)
     expect(frontWrap.hasAttribute('inert')).toBe(false)
+    expect(frontWrap.className).toContain('pointer-events-auto')
+    expect(backWrap.className).toContain('pointer-events-none')
 
     rerender(
       <ComposerFlipContainer
@@ -56,5 +58,7 @@ describe('ComposerFlipContainer', () => {
     expect(backWrap.getAttribute('aria-hidden')).toBe('false')
     expect(frontWrap.hasAttribute('inert')).toBe(true)
     expect(backWrap.hasAttribute('inert')).toBe(false)
+    expect(frontWrap.className).toContain('pointer-events-none')
+    expect(backWrap.className).toContain('pointer-events-auto')
   })
 })

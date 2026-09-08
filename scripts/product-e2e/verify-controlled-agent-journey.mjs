@@ -260,7 +260,7 @@ try {
       ? providerRequests[0].system.map((block) => block?.text ?? '').join('\n')
       : String(providerRequests[0]?.system ?? '')
     if (!requestSystem.includes(customPrompt)) throw new Error(`custom prompt missing from real provider request: ${requestSystem.slice(0, 1_500)}`)
-    await actor.page.waitForSelector('[data-testid="tool-card-dot-group-controlled-read-1"]')
+    await scrollTranscriptUntilSelector(actor.page, '[data-testid="tool-card-dot-group-controlled-read-1"]')
     await actor.page.waitForFunction(() => document.querySelector('[data-testid="tool-card-dot-count-controlled-read-1"]')?.textContent === '×3')
     await actor.page.waitForSelector('[data-testid="tool-card-dots-intent-controlled-read-1"]')
     const intent = await actor.page.$eval('[data-testid="tool-card-dots-intent-controlled-read-1"]', (element) => element.textContent ?? '')
@@ -403,7 +403,7 @@ try {
     await selectSession(actor.page, primarySessionId)
     const expectedFailureStart = actor.requestFailures.length
     await actor.page.reload({ waitUntil: 'networkidle2' })
-    await actor.page.waitForSelector('[data-testid="tool-card-dot-group-controlled-read-1"]')
+    await scrollTranscriptUntilSelector(actor.page, '[data-testid="tool-card-dot-group-controlled-read-1"]')
     const text = await actor.page.$eval('[data-testid="tool-card-dots-intent-controlled-read-1"]', (element) => element.textContent ?? '')
     if (!text.includes(intention)) throw new Error('persisted intention missing after reload')
     const reloadFailures = actor.requestFailures.slice(expectedFailureStart)
@@ -482,6 +482,22 @@ async function selectSession(page, id) {
   } catch (error) {
     throw new Error(`clicking visible Session ${id} hit ${hit.target} but URL stayed ${page.url()}`, { cause: error })
   }
+}
+async function scrollTranscriptUntilSelector(page, selector) {
+  const found = await waitFor(async () => {
+    const element = await page.$(selector)
+    if (element && await element.isVisible()) return true
+    return await page.evaluate((targetSelector) => {
+      const scroller = document.querySelector('.virtual-transcript-scroller')
+      if (!scroller) return false
+      const nextTop = scroller.scrollTop <= 0
+        ? scroller.scrollHeight
+        : Math.max(0, scroller.scrollTop - Math.max(160, scroller.clientHeight * 0.75))
+      scroller.scrollTo({ top: nextTop, behavior: 'auto' })
+      return Boolean(document.querySelector(targetSelector))
+    }, selector)
+  }, { timeoutMs: 30_000, name: `transcript selector ${selector}` })
+  if (!found) throw new Error(`selector not found after transcript scroll: ${selector}`)
 }
 async function findRowByText(rows, text) {
   for (const row of rows) if (await row.evaluate((element, expected) => element.textContent?.includes(expected), text)) return row

@@ -1,6 +1,10 @@
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
-import { applyTodoGraphOperations, type TodoGraphSnapshot } from './todo-graph.js'
+import { applyTodoGraphOperations, latestTodoGraph, type TodoGraphSnapshot } from './todo-graph.js'
 
 const empty: TodoGraphSnapshot = {
   version: 1,
@@ -79,5 +83,36 @@ describe('todo graph', () => {
       edges: [{ from: 'a', to: 'b' }],
     }])
     expect(graph.blocked).toEqual([{ id: 'b', waitingOn: ['a'] }])
+  })
+
+  it('recovers the latest graph from an external runtime log without a full read', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'todo-graph-external-'))
+    try {
+      const path = join(dir, 'session.jsonl')
+      const graph = applyTodoGraphOperations(empty, [{
+        op: 'replace',
+        nodes: [{ id: 'done', content: 'Done', status: 'completed' }],
+        edges: [],
+      }])
+      writeFileSync(path, `${JSON.stringify({
+        kind: 'header',
+        sessionId: 'external-todo-graph',
+        agentRuntime: 'copilot',
+        initialState: { cursor: 0 },
+      })}\n`)
+      appendFileSync(path, `${JSON.stringify({
+        kind: 'event',
+        seq: 1,
+        event: { kind: 'tool_result', callId: 'call-1', ok: true, content: JSON.stringify(graph) },
+        effects: [],
+      })}\n`)
+
+      await expect(latestTodoGraph(path)).resolves.toMatchObject({
+        revision: 1,
+        nodes: [{ id: 'done', content: 'Done', status: 'completed' }],
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

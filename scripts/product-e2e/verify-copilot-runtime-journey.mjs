@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 
 import { io } from 'socket.io-client'
 
-import { ProductE2EHarness, clickByTestId, clickElement, waitFor } from './harness.mjs'
+import { ProductE2EHarness, clickByTestId, clickElement, hoverAncestorAndClickFirst, waitFor } from './harness.mjs'
 
 const origin = process.env.RUNLAB_URL ?? process.env.DASHBOARD_URL
 const sourceRevision = process.env.RUNLAB_REVISION
@@ -87,7 +87,8 @@ try {
   })
 
   await harness.step('select Copilot, prove cwd failure, retry, and create through production UI', async () => {
-    await actor.page.goto(normalizedOrigin, { waitUntil: 'networkidle2' })
+    await actor.page.goto(normalizedOrigin, { waitUntil: 'domcontentloaded' })
+    await actor.page.waitForSelector('[data-testid="workspace-row"]', { timeout: 60_000 })
     await actor.page.evaluate(() => localStorage.removeItem('ak-agent-runtime'))
     await openNewSession(actor.page, workspaceId)
     if (await actor.page.$('[data-testid="new-session-workspace-list"]')) {
@@ -162,6 +163,7 @@ try {
     }
     await actor.page.keyboard.press('Escape')
     await actor.page.waitForSelector('[data-testid="session-metadata-dialog"]', { hidden: true })
+    await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="dialog-overlay"]').length === 0)
     return { runtimeText }
   })
 
@@ -205,7 +207,9 @@ try {
     await actor.page.waitForSelector('[data-testid="approval-card"]', { visible: true, timeout: 120_000 })
     const approvalText = await actor.page.$eval('[data-testid="approval-card"]', (element) => element.textContent ?? '')
     if (!approvalText.includes(executorMarker)) throw new Error(`approval card omitted the real Executor command: ${approvalText}`)
-    await clickByTestId(actor.page, 'approval-approve')
+    await actor.page.waitForSelector('[data-testid="approval-approve"]', { visible: true, timeout: 30_000 })
+    await actor.page.focus('[data-testid="approval-approve"]')
+    await actor.page.keyboard.press('Enter')
     const state = await waitForState(sessionId, (candidate) => (
       candidate.status === 'done'
       && toolEvidenceByInput(candidate, executorMarker)?.ok === true
@@ -378,8 +382,12 @@ if (thrown) throw thrown
 harness.assertClean(result.report)
 
 async function openNewSession(page, expectedWorkspaceId) {
-  await page.waitForSelector(`[data-testid="workspace-new-session-${expectedWorkspaceId}"]`, { timeout: 30_000 })
-  await clickByTestId(page, `workspace-new-session-${expectedWorkspaceId}`)
+  await hoverAncestorAndClickFirst(
+    page,
+    `[data-testid="workspace-new-session-${expectedWorkspaceId}"]`,
+    '[data-testid="workspace-row"]',
+    { description: `New Session for Workspace ${expectedWorkspaceId}`, timeoutMs: 30_000 },
+  )
   await page.waitForSelector('[data-testid="new-session-dialog"]')
   await page.waitForSelector('[data-testid="finder-column"]', { timeout: 30_000 })
 }
