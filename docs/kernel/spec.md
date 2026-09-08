@@ -105,7 +105,7 @@ type AgentConfig = {
   readonly contextLimit?: number        // user/session context window in tokens
   readonly softThreshold?: number       // default 0.75
   readonly hardThreshold?: number       // default 0.92
-  readonly maxAgentDepth?: number       // host-side sub-agent nesting limit
+  readonly maxAgentDepth?: number       // host-side sub-agent nesting limit; default path is hard-capped to root -> child only
   readonly thinkingBudget?: number      // host adapter hint for extended thinking
 }
 ```

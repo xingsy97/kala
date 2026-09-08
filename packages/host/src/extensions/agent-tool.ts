@@ -32,8 +32,8 @@ import type { SessionRecord, SessionStore } from '../store/session.js'
 import type { HostLoopDeps, LoopHandle, ModelResolver } from '../loop-types.js'
 import { dispatchOne } from '../loop.js'
 
-const DEFAULT_MAX_AGENT_DEPTH = 3
-const DEFAULT_MAX_AGENT_FANOUT = 4
+const DEFAULT_MAX_AGENT_DEPTH = 1
+const DEFAULT_MAX_AGENT_FANOUT = 8
 export const AGENT_TOOL_NAME = 'agent'
 
 type ActiveSubAgent = {
@@ -172,7 +172,7 @@ export async function runAgentTool(
     return { ok: false, content: 'agent prompt is required' }
   }
   const depth = depthOf(deps.store, parent)
-  const maxDepth = parent.config.maxAgentDepth ?? DEFAULT_MAX_AGENT_DEPTH
+  const maxDepth = Math.min(parent.config.maxAgentDepth ?? DEFAULT_MAX_AGENT_DEPTH, DEFAULT_MAX_AGENT_DEPTH)
   const maxFanOut = parent.config.maxAgentFanOut ?? DEFAULT_MAX_AGENT_FANOUT
   const concurrentSiblingCount = activeSubAgentsForParent(parentSessionId).length
 
@@ -527,9 +527,14 @@ function filteredAgentConfig(
   config: AgentConfig,
   requestedTools: unknown,
 ): AgentConfig {
-  if (!Array.isArray(requestedTools)) return config
-  const allowed = new Set(requestedTools.filter((t): t is string => typeof t === 'string'))
-  return { ...config, tools: config.tools.filter((t) => allowed.has(t.name)) }
+  const allowed = Array.isArray(requestedTools)
+    ? new Set(requestedTools.filter((t): t is string => typeof t === 'string'))
+    : undefined
+  return {
+    ...config,
+    maxAgentDepth: Math.min(config.maxAgentDepth ?? DEFAULT_MAX_AGENT_DEPTH, DEFAULT_MAX_AGENT_DEPTH),
+    tools: config.tools.filter((t) => t.name !== AGENT_TOOL_NAME && (!allowed || allowed.has(t.name))),
+  }
 }
 
 function depthOf(store: SessionStore, record: SessionRecord): number {

@@ -13,10 +13,10 @@ describe('resolveSubAgentPolicy', () => {
     expect(policy.reasons).toEqual([])
     expect(policy.role).toBeUndefined()
     expect(policy.allowedTools).toBeUndefined()
-    expect(policy.maxTurns).toBe(60)
-    expect(policy.idleTimeoutMs).toBe(20 * 60_000)
-    expect(policy.toolIdleTimeoutMs).toBe(45 * 60_000)
-    expect(policy.timeoutMs).toBe(90 * 60_000)
+    expect(policy.maxTurns).toBe(180)
+    expect(policy.idleTimeoutMs).toBe(45 * 60_000)
+    expect(policy.toolIdleTimeoutMs).toBe(120 * 60_000)
+    expect(policy.timeoutMs).toBe(4 * 60 * 60_000)
     expect(policy.gracePeriodMs).toBe(5 * 60_000)
   })
 
@@ -38,6 +38,7 @@ describe('resolveSubAgentPolicy', () => {
         timeoutMs: 24 * 60 * 60_000,
       },
     })
+
     expect(policy.maxTurns).toBe(SUB_AGENT_ROLE_TEMPLATES.review.maximumMaxTurns)
     expect(policy.timeoutMs).toBe(SUB_AGENT_ROLE_TEMPLATES.review.maximumTimeoutMs)
     expect(policy.reasons).toContain('policy_max_turns_capped')

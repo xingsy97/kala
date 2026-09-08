@@ -15,21 +15,23 @@ Role defaults deliberately prefer waiting over false cancellation:
 
 | Role | Max turns | Ordinary idle | Active-tool idle | Absolute deadline | Grace |
 |---|---:|---:|---:|---:|---:|
-| Review | 50 | 15 min | 30 min | 60 min | 3 min |
-| Research | 60 | 20 min | 40 min | 90 min | 5 min |
-| Test | 80 | 20 min | 60 min | 120 min | 5 min |
-| No role | 60 | 20 min | 45 min | 90 min | 5 min |
+| Review | 120 | 30 min | 90 min | 3 h | 3 min |
+| Research | 180 | 45 min | 120 min | 4 h | 5 min |
+| Test | 200 | 45 min | 120 min | 5 h | 5 min |
+| Implementation | 240 | 45 min | 120 min | 6 h | 5 min |
+| No role | 180 | 45 min | 120 min | 4 h | 5 min |
 
 Explicit caller values are bounded rather than trusted blindly:
 
 | Role | Minimum turns | Maximum turns | Minimum absolute | Maximum absolute |
 |---|---:|---:|---:|---:|
-| Review | 20 | 100 | 20 min | 180 min |
-| Research | 25 | 120 | 30 min | 240 min |
-| Test | 30 | 160 | 45 min | 360 min |
-| No role | 20 | 120 | 30 min | 240 min |
+| Review | 20 | 240 | 20 min | 6 h |
+| Research | 25 | 360 | 30 min | 8 h |
+| Test | 30 | 400 | 45 min | 10 h |
+| Implementation | 40 | 480 | 60 min | 12 h |
+| No role | 20 | 360 | 30 min | 8 h |
 
-A caller-supplied two-minute review timeout is raised to twenty minutes and records `policy_timeout_raised`. Oversized values are capped and record the existing cap reason. Normal callers should omit `timeout_ms` and use the role default.
+A caller-supplied two-minute review timeout is raised to twenty minutes and records `policy_timeout_raised`. Oversized values are capped and record the existing cap reason. Normal callers may omit `timeout_ms` and use the much larger role default, or dynamically pass a larger `max_turns` / `timeout_ms` in the `agent` tool call for complex tasks.
 
 For compatibility, the public `timeout_ms` input means the absolute deadline. Idle and grace values come from the selected role template.
 
@@ -56,7 +58,7 @@ The parent must never lose a useful partial report solely because a deadline exp
 
 ## Restart and safety
 
-The existing parent-call identity remains the idempotency fence. Host restart reuses a completed child and stops an incomplete orphan instead of creating a duplicate. Depth, fan-out, allowed-tool intersection, and headless `allow_all` rules remain unchanged.
+The existing parent-call identity remains the idempotency fence. Host restart reuses a completed child and stops an incomplete orphan instead of creating a duplicate. Depth remains root-to-child only: sub-agents do not receive the `agent` tool, and even old child configs that expose it are hard-capped at depth 1. Fan-out, allowed-tool intersection, and headless `allow_all` rules remain unchanged.
 
 ## Known limitation and follow-up
 

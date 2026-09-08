@@ -10,7 +10,7 @@ A minimum-viable sub-agent stack has been in-tree for a while:
 
 - **Tool schema** — `agent` tool in `packages/executor/src/tools/agent.ts`. Fields: `prompt` (required), `model`, `tools` (allowlist).
 - **Host-side handler** — `packages/host/src/extensions/agent-tool.ts`. Creates a *child JSONL session* via `SessionStore.create()` with `parentSessionId` + `parentCursor` set, inherits `workspaceId`/`workspaceName`/`cwd`, forces `initialApprovalMode: 'allow_all'` (see [ADR 0014](../meta/adr/0014-subagent-approval-mode.md)), then drives the child through the host loop and returns an enveloped result.
-- **Depth limit** — `AgentConfig.maxAgentDepth` (default 3) counted by walking `parentSessionId` links.
+- **Depth limit** — `AgentConfig.maxAgentDepth` is hard-capped to 1 by default: root sessions may spawn a child, but sub-agents do not receive the `agent` tool and cannot recursively spawn another sub-agent.
 - **Loop dispatch** — `packages/host/src/loop.ts:317` special-cases `AGENT_TOOL_NAME`, so a `call_tool` effect for `agent` invokes `runAgentTool()` instead of the executor bridge.
 - **Store parent-child links** — `SessionRecord` carries `parentSessionId` + `parentCursor` (`packages/host/src/store/session.ts`). `SessionReadyEvent` in `packages/shared/src/protocol.ts` propagates them to clients.
 - **Explorer + metadata dialog** — the dashboard shows "fork of `<sha>…`" in the session list and a "Parent" jump in `SessionMetadataDialog`.

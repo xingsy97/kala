@@ -314,14 +314,28 @@ const planningToolset: ToolsetPlugin = {
 
 const agentToolset: ToolsetPlugin = {
   id: 'subagents',
-  version: '2026-07-15',
+  version: '2026-09-08',
   label: 'Sub-agents',
   provideTools() {
     return [tool('agent', 'host', 'agent', false, 'agent', {
       purpose: 'Spawn a sub-agent to handle a focused sub-task.',
-      whenToUse: ['Delegate bounded research, implementation, testing, or review.', 'Use when parallel or isolated work would reduce context pressure.'],
-      constraints: ['Give a specific objective and expected output.', 'Use the implementation role when the child must edit files; research and review remain read-only.', 'Do not use for trivial single-step tasks.'],
-    }, { type: 'object', properties: { prompt: { type: 'string' }, model: { type: 'string' }, tools: { type: 'array', items: { type: 'string' } }, role: { type: 'string', enum: ['research', 'implementation', 'test', 'review'], description: 'Optional capability role. implementation includes controlled file mutation and shell tools; research/review are read-only and test runs verification without source edits. The role also selects turns and deadlines.' }, agent_type: { type: 'string', description: 'Optional child type shown in the Session graph. When role is omitted, research, implementation, test, or review also selects the matching least-privilege role.' }, objective: { type: 'string' }, max_turns: { type: 'integer', minimum: 1 }, timeout_ms: { type: 'integer', minimum: 1 }, expected_output: { type: 'string' } }, required: ['prompt'] })]
+      whenToUse: ['Delegate bounded research, implementation, testing, or review.', 'Use when parallel or isolated work would reduce context pressure.', 'For complex work, explicitly set max_turns and timeout_ms in the tool call instead of relying on the role default.'],
+      constraints: ['Give a specific objective and expected output.', 'Use the implementation role when the child must edit files; research and review remain read-only.', 'Do not use for trivial single-step tasks.', 'Set larger max_turns/timeout_ms for large codebase work, long tests, or multi-step implementation so the child is not cancelled prematurely.'],
+    }, {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string' },
+        model: { type: 'string' },
+        tools: { type: 'array', items: { type: 'string' } },
+        role: { type: 'string', enum: ['research', 'implementation', 'test', 'review'], description: 'Optional capability role. implementation includes controlled file mutation and shell tools; research/review are read-only and test runs verification without source edits. The role also selects default turns and deadlines: research 180 turns/4h, implementation 240 turns/6h, test 200 turns/5h, review 120 turns/3h.' },
+        agent_type: { type: 'string', description: 'Optional child type shown in the Session graph. When role is omitted, research, implementation, test, or review also selects the matching least-privilege role.' },
+        objective: { type: 'string' },
+        max_turns: { type: 'integer', minimum: 1, maximum: 480, description: 'Optional per-call turn budget. Use higher values for complex tasks. Role caps: review 240, research 360, test 400, implementation 480.' },
+        timeout_ms: { type: 'integer', minimum: 1, maximum: 43_200_000, description: 'Optional per-call absolute deadline in milliseconds. Use higher values for long-running work. Role caps: review 21600000, research 28800000, test 36000000, implementation 43200000.' },
+        expected_output: { type: 'string' },
+      },
+      required: ['prompt'],
+    })]
   },
 }
 

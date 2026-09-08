@@ -2167,10 +2167,10 @@ describe('host loop', () => {
     expect(artifact.policy.objective).toBe('summarize repo layout')
     expect(artifact.policy.reasons).toContain('role_template_applied')
     expect(artifact.policy.allowedTools).toContain('read_file')
-    expect(artifact.policy.maxTurns).toBe(60)
-    expect(artifact.policy.idleTimeoutMs).toBe(20 * 60_000)
-    expect(artifact.policy.toolIdleTimeoutMs).toBe(40 * 60_000)
-    expect(artifact.policy.timeoutMs).toBe(90 * 60_000)
+    expect(artifact.policy.maxTurns).toBe(180)
+    expect(artifact.policy.idleTimeoutMs).toBe(45 * 60_000)
+    expect(artifact.policy.toolIdleTimeoutMs).toBe(120 * 60_000)
+    expect(artifact.policy.timeoutMs).toBe(4 * 60 * 60_000)
     expect(artifact.policy.gracePeriodMs).toBe(5 * 60_000)
     expect(artifact.policy.expectedOutput).toMatch(/summary/i)
   })
@@ -2428,14 +2428,11 @@ describe('host loop', () => {
   })
 
   it('refuses to spawn a sub-agent once the recursive depth cap is reached', async () => {
-    // Force the cap to 1 so a single nested delegate trips the guard. We
-    // build a parent (depth 0) → child (depth 1) chain; when the child tries
-    // to spawn a grand-child, the host must return a failure envelope with
-    // `agent depth exceeded` and never create a third session.
+    // Default policy allows a root session to create one child, but the child
+    // cannot create another sub-agent.
     const parentConfig = createConfig({
       tools: [AGENT],
       systemPrompt: 'sys',
-      maxAgentDepth: 1,
     })
     const parent = await store.create({
       config: parentConfig,
@@ -2499,12 +2496,40 @@ describe('host loop', () => {
     expect(descendants).toHaveLength(1)
     const grandChildren = store.list().filter((r) => r.parentSessionId === descendants[0]!.sessionId)
     expect(grandChildren).toHaveLength(0)
+    expect(descendants[0]!.config.tools.some((tool) => tool.name === 'agent')).toBe(false)
+  })
 
-    // The child session should record a tool_result explaining the refusal.
-    const childRec = descendants[0]!
-    const childLog = await readSessionLog(childRec.logPath)
+  it('hard-caps recursive sub-agents even if an old child config still exposes agent', async () => {
+    const parent = await store.create({
+      config: createConfig({ tools: [AGENT], systemPrompt: 'sys' }),
+      sessionId: 'sess-depth-hardcap-parent',
+      workspaceId: 'ws-depth-hardcap',
+    })
+    const child = await store.create({
+      config: createConfig({ tools: [AGENT], systemPrompt: 'sys', maxAgentDepth: 6 }),
+      sessionId: 'sess-depth-hardcap-child',
+      parentSessionId: parent.sessionId,
+      parentCursor: 0,
+      workspaceId: 'ws-depth-hardcap',
+    })
+    const llm = scriptedLlm([
+      { message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'agent-child-hardcap', name: 'agent', input: { prompt: 'try nested delegate' } }] } },
+      { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(child.sessionId, { kind: 'user_message', text: 'go' })
+
+    const grandChildren = store.list().filter((r) => r.parentSessionId === child.sessionId)
+    expect(grandChildren).toHaveLength(0)
+    const childLog = await readSessionLog(child.logPath)
     const refused = childLog.events.find(
-      (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-child',
+      (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-child-hardcap',
     )
     if (refused?.event.kind !== 'tool_result') throw new Error('unreachable')
     expect(refused.event.ok).toBe(false)

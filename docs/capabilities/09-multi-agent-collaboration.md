@@ -131,8 +131,9 @@ The current implementation has the right primitive:
   so a child labelled `implementation` cannot accidentally receive a read-only
   or unbounded capability set.
 - Host-level depth and fan-out caps are enforced in `runAgentTool`:
-  `AgentConfig.maxAgentDepth` (default 3) walks the `parentSessionId` chain at
-  spawn time; `AgentConfig.maxAgentFanOut` (default 4) counts live sibling
+  `AgentConfig.maxAgentDepth` is hard-capped to 1 by default so only a root
+  session can spawn a child and sub-agents cannot recursively spawn more
+  sub-agents. `AgentConfig.maxAgentFanOut` (default 8) counts live sibling
   sub-agents under the same parent (`activeSubAgentsForParent`). When either
   cap trips, the host writes a `subagent-policies/<parentSessionId>/<callId>.json`
   artifact with the resolved `maxDepth`/`resolvedDepth`/`maxFanOut`/

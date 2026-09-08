@@ -192,7 +192,7 @@ export type AgentConfig = {
   readonly softThreshold?: number
   /** Hard threshold ratio for host context management. */
   readonly hardThreshold?: number
-  /** Maximum nested `agent` tool depth. Host default is 3. */
+  /** Maximum nested `agent` tool depth. Host hard-caps the default path to 1. */
   readonly maxAgentDepth?: number
   /**
    * Maximum concurrent sibling sub-agents under a single parent. Host default
