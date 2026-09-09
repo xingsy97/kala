@@ -4577,16 +4577,29 @@ describe('wire protocol', () => {
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
     executor.on('tool:call', (payload, ack) => {
-      if (payload.name !== '__fs_list_dirs') return
-      const input = payload.input as { requestId: string; workspaceId: string }
-      const result: DirListResult = {
-        requestId: input.requestId,
-        workspaceId: input.workspaceId,
-        path: root,
-        roots: [root],
-        entries: [{ name: 'child', path: child }],
+      if (payload.name === '__fs_list_dirs') {
+        const input = payload.input as { requestId: string; workspaceId: string }
+        const result: DirListResult = {
+          requestId: input.requestId,
+          workspaceId: input.workspaceId,
+          path: root,
+          roots: [root],
+          entries: [{ name: 'child', path: child }],
+        }
+        ack({ callId: payload.callId, ok: true, content: JSON.stringify(result) })
+        return
       }
-      ack({ callId: payload.callId, ok: true, content: JSON.stringify(result) })
+      if (payload.name === '__fs_create_directory') {
+        const input = payload.input as { requestId: string; workspaceId: string; parentPath: string; name: string }
+        ack({ callId: payload.callId, ok: true, content: JSON.stringify({
+          requestId: input.requestId,
+          workspaceId: input.workspaceId,
+          parentPath: input.parentPath,
+          path: resolve(input.parentPath, input.name),
+          roots: [root],
+          created: true,
+        }) })
+      }
     })
     executor.emit('executor:announce', {
       executorId: 'ex-list-dirs',
@@ -4617,6 +4630,20 @@ describe('wire protocol', () => {
     }
     await expect(listed).resolves.toMatchObject(expected)
     await expect(acknowledged).resolves.toMatchObject(expected)
+    await expect(new Promise<import('@agent-kernel/shared').CreateDirectoryResult>((resolve) => {
+      dashboard.emit('client:create_directory', {
+        requestId: 'mkdir-1',
+        workspaceId: 'ws-list-dirs',
+        parentPath: root,
+        name: 'created',
+      }, resolve)
+    })).resolves.toMatchObject({
+      requestId: 'mkdir-1',
+      workspaceId: 'ws-list-dirs',
+      parentPath: root,
+      path: resolve(root, 'created'),
+      created: true,
+    })
 
     dashboard.close()
     executor.close()

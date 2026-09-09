@@ -2415,6 +2415,7 @@ export function App(): JSX.Element {
         sessionId={metadataTargetSessionId ?? ''}
         summary={metadataSession}
         state={metadataIsCurrentSession ? session.state : null}
+        contextSnapshot={metadataIsCurrentSession ? session.contextSnapshot : null}
         selectedModel={metadataIsCurrentSession ? session.selectedModel : metadataSession?.preferences?.selectedModel ?? null}
         canChangeCwd={metadataIsCurrentSession && currentAgentRuntimeCapabilities.cwdMutation}
         canChangeApprovalMode={metadataIsCurrentSession && currentAgentRuntimeCapabilities.approvalMode}

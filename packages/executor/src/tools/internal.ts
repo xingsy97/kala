@@ -19,6 +19,7 @@
 
 import {
   copyOverflowSession,
+  createDirectory,
   deleteOverflowSession,
   listDirs,
   listFiles,
@@ -72,6 +73,19 @@ export const fsListFilesTool: Tool = makeTool(
   '__fs_list_files',
   async (input, { sandbox }) =>
     listFiles(input as Parameters<typeof listFiles>[0], sandbox),
+)
+
+export const fsCreateDirectoryTool: Tool = makeTool(
+  '__fs_create_directory',
+  async (input, { sandbox }) => {
+    const { requestId, workspaceId, parentPath, name } = input as {
+      requestId: string
+      workspaceId: string
+      parentPath: string
+      name: string
+    }
+    return createDirectory(requestId, workspaceId, parentPath, name, sandbox)
+  },
 )
 
 export const fsReadOverflowTool: Tool = makeTool(
@@ -145,6 +159,7 @@ export const publishLocalImageTool: Tool = makeTool(
 export const internalDirectTools: readonly Tool[] = [
   fsListDirsTool,
   fsListFilesTool,
+  fsCreateDirectoryTool,
   fsReadOverflowTool,
   fsDeleteOverflowSessionTool,
   fsCopyOverflowSessionTool,

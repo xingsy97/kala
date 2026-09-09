@@ -132,6 +132,37 @@ describe('SessionMetadataDialog', () => {
     expect(screen.getByTestId('session-metadata-label').className).toContain('text-base')
   })
 
+  it('uses provider context usage when Copilot state usage has not been populated', () => {
+    render(
+      <SessionMetadataDialog
+        open
+        onOpenChange={() => {}}
+        sessionId={baseSummary.sessionId}
+        summary={{ ...baseSummary, agentRuntime: 'copilot' }}
+        state={{ ...baseState, usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 } }}
+        contextSnapshot={{
+          model: { ref: 'gpt-5.6-sol', provider: 'github-copilot', id: 'gpt-5.6-sol' },
+          contextWindow: { tokens: 272000, source: 'api_reported' },
+          usage: { inputTokens: 137141, totalTokens: 137141 },
+          breakdown: { system: 2000, transcript: 130000, tools: 5000, memory: 141, attachments: 0, pendingUserInput: 0 },
+          estimator: {
+            total: { kind: 'provider_reported', confidence: 'exact' },
+            breakdown: { kind: 'heuristic', confidence: 'estimated' },
+            version: 'copilot-sdk-usage-info-v1',
+          },
+          updatedAt: Date.now(),
+        }}
+        selectedModel={null}
+        onRename={() => {}}
+        onOpenChangeCwdDialog={() => {}}
+        onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('session-metadata-dialog').textContent).toContain('137,141 / 0')
+  })
+
   it('shows the persisted agent runtime identity and version', () => {
     render(
       <SessionMetadataDialog

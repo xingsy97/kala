@@ -188,6 +188,15 @@ describe('Copilot runtime custom tools', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  async function waitForUsage(sessionId: string, inputTokens: number): Promise<void> {
+    const deadline = Date.now() + 1000
+    while (Date.now() < deadline) {
+      if ((store.get(sessionId)?.state.usage.inputTokens ?? 0) >= inputTokens) return
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error(`usage projection did not reach ${inputTokens}`)
+  }
+
   it('persists a model-change notice only after the SDK accepts the model', async () => {
     const runtime = new CopilotAgentRuntime({
       store,
@@ -543,6 +552,27 @@ describe('Copilot runtime custom tools', () => {
       },
     })
     emit({
+      type: 'assistant.usage',
+      id: 'assistant-usage-1',
+      parentId: null,
+      timestamp: '2026-08-30T00:00:00.500Z',
+      data: {
+        model: 'gpt-5.4-mini',
+        inputTokens: 91_000,
+        outputTokens: 1_700,
+        cacheReadTokens: 20_000,
+        cacheWriteTokens: 3_000,
+        apiCallId: 'api-usage-1',
+      },
+    })
+    await waitForUsage(record.sessionId, 91_000)
+    expect(store.get(record.sessionId)?.state.usage).toMatchObject({
+      inputTokens: 91_000,
+      outputTokens: 1_700,
+      cacheReadTokens: 20_000,
+      cacheCreationTokens: 3_000,
+    })
+    emit({
       type: 'session.compaction_start',
       id: 'compact-start-1',
       parentId: null,
@@ -566,14 +596,14 @@ describe('Copilot runtime custom tools', () => {
       },
     })
 
-    expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
+    expect(onState).toHaveBeenCalledWith(expect.objectContaining({ sessionId: record.sessionId }), expect.any(Object), expect.objectContaining({
       contextWindow: { tokens: 128_000, source: 'api_reported' },
       usage: { inputTokens: 100_000, totalTokens: 100_000 },
       estimator: expect.objectContaining({
         total: { kind: 'provider_reported', confidence: 'exact' },
       }),
     }))
-    expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
+    expect(onState).toHaveBeenCalledWith(expect.objectContaining({ sessionId: record.sessionId }), expect.any(Object), expect.objectContaining({
       contextWindow: { tokens: 128_000, source: 'api_reported' },
       usage: { inputTokens: 104_000, totalTokens: 104_000 },
     }))
@@ -593,7 +623,7 @@ describe('Copilot runtime custom tools', () => {
       tokensAfter: 32_000,
       endedAt: '2026-08-30T00:00:02.000Z',
     })
-    expect(onState).toHaveBeenCalledWith(record, record.state, expect.objectContaining({
+    expect(onState).toHaveBeenCalledWith(expect.objectContaining({ sessionId: record.sessionId }), expect.any(Object), expect.objectContaining({
       usage: { inputTokens: 38_000, totalTokens: 38_000 },
     }))
     await runtime.close()

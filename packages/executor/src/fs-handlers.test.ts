@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { listDirs, listFiles } from './fs-handlers.js'
+import { createDirectory, listDirs, listFiles } from './fs-handlers.js'
 import { createSandbox } from './sandbox.js'
 
 /**
@@ -53,5 +53,26 @@ describe('filesystem inspection handlers', () => {
     expect(result.error).toBeUndefined()
     expect(result.files).toEqual([{ path: 'src/a.ts', size: 1 }])
     expect(result.truncated).toBe(true)
+  })
+
+  it('creates a child directory inside the sandbox', async () => {
+    const result = await createDirectory('r3', 'w1', root, 'created', createSandbox({ roots: [root] }))
+
+    expect(result).toMatchObject({
+      requestId: 'r3',
+      workspaceId: 'w1',
+      parentPath: root,
+      path: join(root, 'created'),
+      created: true,
+    })
+    expect(existsSync(join(root, 'created'))).toBe(true)
+  })
+
+  it('rejects nested or traversal folder names', async () => {
+    const result = await createDirectory('r4', 'w1', root, '../outside', createSandbox({ roots: [root] }))
+
+    expect(result.created).toBe(false)
+    expect(result.error).toContain('invalid folder name')
+    expect(existsSync(join(root, '..', 'outside'))).toBe(false)
   })
 })

@@ -575,6 +575,14 @@ export type ClientListDirs = {
   path?: string
 }
 
+export type ClientCreateDirectory = {
+  requestId: string
+  workspaceId: string
+  sessionId?: string
+  parentPath: string
+  name: string
+}
+
 export type ClientSubscribe = {
   sessionId: string
 }
@@ -732,6 +740,16 @@ export type DirListResult = {
   path: string
   roots: readonly string[]
   entries: readonly DirListEntry[]
+  error?: string
+}
+
+export type CreateDirectoryResult = {
+  requestId: string
+  workspaceId: string
+  path: string
+  parentPath: string
+  roots: readonly string[]
+  created: boolean
   error?: string
 }
 
@@ -1705,6 +1723,7 @@ export type DashboardClientToServerEvents = {
   'client:fork': (payload: ClientFork) => void
   'client:create_session': (payload: ClientCreateSession, ack?: (result: RpcAck) => void) => void
   'client:list_dirs': (payload: ClientListDirs, ack?: (result: DirListResult) => void) => void
+  'client:create_directory': (payload: ClientCreateDirectory, ack?: (result: CreateDirectoryResult) => void) => void
   'client:list_files': (payload: ClientListFiles) => void
   'client:read_overflow': (payload: ClientReadOverflow) => void
   'client:list_executors': (payload: ClientListExecutors) => void

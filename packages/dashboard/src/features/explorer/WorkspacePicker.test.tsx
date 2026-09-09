@@ -297,6 +297,8 @@ describe('NewSessionDialog', () => {
 
     const copilot = screen.getByTestId('new-session-runtime-copilot')
     expect(copilot.getAttribute('role')).toBe('radio')
+    expect(copilot.className).toContain('min-h-10')
+    expect(copilot.className).not.toContain('min-h-16')
     fireEvent.click(copilot)
     expect(copilot.getAttribute('aria-checked')).toBe('true')
     expect(localStorage.getItem('ak-agent-runtime')).toBe('copilot')

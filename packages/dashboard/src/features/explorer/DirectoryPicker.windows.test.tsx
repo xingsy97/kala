@@ -41,4 +41,42 @@ describe('DirectoryPicker Windows paths',()=>{
     await waitFor(()=>expect(emit).toHaveBeenCalledTimes(2))
     expect(emit).toHaveBeenLastCalledWith('client:list_dirs',expect.objectContaining({path:root}),expect.any(Function))
   })
+
+  it('creates a child folder and opens it',async()=>{
+    const root='/workspace'
+    const child=`${root}/created`
+    const listeners=new Map<string,(value:any)=>void>()
+    const emit=vi.fn((event:string,payload:any,ack?:Function)=>{
+      if(event==='client:list_dirs')queueMicrotask(()=>listeners.get('server:dir_list')?.({
+        requestId:payload.requestId,
+        workspaceId:'ws',
+        path:payload.path??root,
+        roots:[root],
+        entries:[],
+      }))
+      if(event==='client:create_directory')queueMicrotask(()=>ack?.({
+        requestId:payload.requestId,
+        workspaceId:'ws',
+        parentPath:payload.parentPath,
+        path:child,
+        roots:[root],
+        created:true,
+      }))
+    })
+    const socket={emit,on:(event:string,fn:(value:any)=>void)=>listeners.set(event,fn),off:vi.fn()} as any
+    function Harness(){const [value,setValue]=useState(root);return <DirectoryPicker socket={socket} workspaceId="ws" initialPath={root} value={value} onChange={setValue}/>}
+    render(<Harness/>)
+    await waitFor(()=>expect(screen.getByDisplayValue(root)).toBeTruthy())
+
+    fireEvent.click(screen.getByTestId('dir-picker-new-folder'))
+    fireEvent.change(screen.getByTestId('dir-picker-new-folder-name'),{target:{value:'created'}})
+    fireEvent.click(screen.getByTestId('dir-picker-create-folder'))
+
+    await waitFor(()=>expect(emit).toHaveBeenCalledWith('client:create_directory',expect.objectContaining({
+      workspaceId:'ws',
+      parentPath:root,
+      name:'created',
+    }),expect.any(Function)))
+    await waitFor(()=>expect(screen.getByDisplayValue(child)).toBeTruthy())
+  })
 })

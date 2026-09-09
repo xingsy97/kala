@@ -18,11 +18,12 @@
  * `process.cwd()` when the executor was started without a jail.
  */
 
-import { cp, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type {
   ClientReadOverflow,
+  CreateDirectoryResult,
   CopyOverflowSession,
   CopyOverflowSessionResult,
   DeleteOverflowSession,
@@ -76,6 +77,43 @@ export async function listDirs(
       path: requested,
       roots,
       entries: [],
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+export async function createDirectory(
+  requestId: string,
+  workspaceId: string,
+  parentPath: string,
+  name: string,
+  sandbox: Sandbox,
+): Promise<CreateDirectoryResult> {
+  const roots = sandbox.roots.length > 0 ? sandbox.roots : [process.cwd()]
+  const cleanName = name.trim()
+  try {
+    if (cleanName.length === 0 || cleanName.includes('/') || cleanName.includes('\\') || cleanName === '.' || cleanName === '..' || cleanName.includes('\0')) {
+      throw new Error('invalid folder name')
+    }
+    const parent = await sandbox.resolve(parentPath)
+    const target = await sandbox.resolve(join(parent, cleanName))
+    await mkdir(target, { recursive: false })
+    return {
+      requestId,
+      workspaceId,
+      path: target,
+      parentPath: parent,
+      roots,
+      created: true,
+    }
+  } catch (err) {
+    return {
+      requestId,
+      workspaceId,
+      path: join(parentPath, cleanName),
+      parentPath,
+      roots,
+      created: false,
       error: err instanceof Error ? err.message : String(err),
     }
   }

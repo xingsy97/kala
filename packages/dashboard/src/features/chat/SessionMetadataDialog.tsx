@@ -13,7 +13,7 @@ import { X } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ApprovalMode } from '@agent-kernel/kernel'
-import type { SessionSummary, ToolCardMode } from '@agent-kernel/shared'
+import type { ContextUsageSnapshot, SessionSummary, ToolCardMode } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -46,6 +46,7 @@ type Props = {
   sessionId: string
   summary?: SessionSummary
   state: AgentState | null
+  contextSnapshot?: ContextUsageSnapshot | null
   selectedModel: string | null
   executorHost?: string
   evaluationUrl?: string
@@ -70,6 +71,7 @@ export function SessionMetadataDialog({
   sessionId,
   summary,
   state,
+  contextSnapshot,
   selectedModel,
   executorHost,
   evaluationUrl,
@@ -90,6 +92,8 @@ export function SessionMetadataDialog({
     ? 'GitHub Copilot SDK'
     : 'Agent Kernel'
   const agentRuntimeDisplay = `${agentRuntimeLabel} (${agentRuntime})${summary?.agentRuntimeVersion ? ` · v${summary.agentRuntimeVersion}` : ''}`
+  const inputTokens = contextSnapshot?.usage.inputTokens ?? state?.usage.inputTokens
+  const outputTokens = contextSnapshot?.usage.outputTokens ?? state?.usage.outputTokens
 
   const [labelDraft, setLabelDraft] = useState(initialLabel)
   const [approvalDraft, setApprovalDraft] = useState<ApprovalMode>(approvalMode)
@@ -177,10 +181,10 @@ export function SessionMetadataDialog({
             label={t('dialogs.events')}
             value={String(summary?.eventCount ?? state?.messages.length ?? 0)}
           />
-          {state?.usage ? (
+          {inputTokens !== undefined || outputTokens !== undefined ? (
             <ReadOnlyRow
               label={t('dialogs.tokensInOut')}
-              value={`${state.usage.inputTokens.toLocaleString()} / ${state.usage.outputTokens.toLocaleString()}`}
+              value={`${(inputTokens ?? 0).toLocaleString()} / ${(outputTokens ?? 0).toLocaleString()}`}
             />
           ) : null}
           <ReadOnlyRow label={t('dialogs.sessionCost')} value="—" />

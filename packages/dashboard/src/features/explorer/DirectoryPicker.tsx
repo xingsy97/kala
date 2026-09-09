@@ -1,8 +1,8 @@
 import { randomId } from '../../lib/random-id.js'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronRight, File, Folder, Home, Loader2, RefreshCw, Slash } from 'lucide-react'
+import { ArrowUp, ChevronRight, File, Folder, FolderPlus, Home, Loader2, RefreshCw, Slash } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { DirListResult } from '@agent-kernel/shared'
+import type { CreateDirectoryResult, DirListResult } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import { Input } from '../../components/ui/input.js'
@@ -42,6 +42,9 @@ export function DirectoryPicker({
   const [columns, setColumns] = useState<DirColumn[]>([])
   const [loadingPath, setLoadingPath] = useState<string | null>(null)
   const [rootPath, setRootPath] = useState<string | null>(null)
+  const [creatingFolder, setCreatingFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [createError, setCreateError] = useState<string | null>(null)
   const activeRequestIdRef = useRef<string | null>(null)
   const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestTimeoutRef = useRef<number | null>(null)
@@ -189,6 +192,29 @@ export function DirectoryPicker({
     openDir(target)
   }
 
+  const createFolder = (): void => {
+    const parent = value.trim()
+    const name = newFolderName.trim()
+    if (!socket || !workspaceId || parent.length === 0 || name.length === 0) return
+    setCreateError(null)
+    const requestId = randomId()
+    socket.emit('client:create_directory', {
+      requestId,
+      workspaceId,
+      parentPath: parent,
+      name,
+    }, (result: CreateDirectoryResult) => {
+      if (result.requestId !== requestId || result.workspaceId !== workspaceId) return
+      if (result.error) {
+        setCreateError(result.error)
+        return
+      }
+      setCreatingFolder(false)
+      setNewFolderName('')
+      openDir(result.path)
+    })
+  }
+
   const atRoot =
     rootPath !== null && (value.trim() === rootPath || !isWithinRoot(value.trim(), rootPath))
   const canGoUp = parentPath(value.trim()) !== null && !atRoot
@@ -234,6 +260,21 @@ export function DirectoryPicker({
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 px-2"
+            onClick={() => {
+              setCreatingFolder((current) => !current)
+              setCreateError(null)
+            }}
+            disabled={!socket || !workspaceId || value.trim().length === 0}
+            title={t('directory.newFolder')}
+            data-testid="dir-picker-new-folder"
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+          </Button>
           <Input
             id={inputId}
             value={value}
@@ -251,6 +292,38 @@ export function DirectoryPicker({
             className="min-w-0 flex-1 truncate font-mono"
           />
         </div>
+        {creatingFolder ? (
+          <div className="flex items-center gap-1" data-testid="dir-picker-create-folder-row">
+            <Input
+              value={newFolderName}
+              onChange={(event) => setNewFolderName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  createFolder()
+                } else if (event.key === 'Escape') {
+                  setCreatingFolder(false)
+                  setNewFolderName('')
+                  setCreateError(null)
+                }
+              }}
+              placeholder={t('directory.newFolderPlaceholder')}
+              aria-label={t('directory.newFolderName')}
+              data-testid="dir-picker-new-folder-name"
+              className="h-8 min-w-0 flex-1 text-sm"
+              autoFocus
+            />
+            <Button type="button" size="sm" className="h-8 px-2" onClick={createFolder} disabled={newFolderName.trim().length === 0} data-testid="dir-picker-create-folder">
+              {t('directory.createFolder')}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => { setCreatingFolder(false); setNewFolderName(''); setCreateError(null) }} data-testid="dir-picker-cancel-create-folder">
+              {t('common.cancel')}
+            </Button>
+          </div>
+        ) : null}
+        {createError ? (
+          <div className="text-xs text-rose-600 dark:text-rose-300" data-testid="dir-picker-create-folder-error">{createError}</div>
+        ) : null}
         {crumbs.length > 0 ? (
           <div
             className="flex min-w-0 items-center gap-0.5 overflow-x-auto"

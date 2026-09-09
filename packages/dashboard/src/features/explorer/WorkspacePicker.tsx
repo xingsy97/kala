@@ -143,11 +143,11 @@ export function NewSessionDialog({
             <X className="h-4 w-4" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
-        <section className="min-w-0 overflow-hidden border-b border-border/50 bg-muted/20 px-3 py-2" aria-labelledby="new-session-runtime-label">
+        <section className="min-w-0 overflow-hidden border-b border-border/50 bg-muted/20 px-3 py-1.5" aria-labelledby="new-session-runtime-label">
           <div id="new-session-runtime-label" className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             {t('dialogs.chooseAgentRuntime')}
           </div>
-          <div className="grid min-w-0 grid-cols-2 gap-2" role="radiogroup" aria-labelledby="new-session-runtime-label">
+          <div className="grid min-w-0 grid-cols-2 gap-1.5" role="radiogroup" aria-labelledby="new-session-runtime-label">
             {agentRuntimes.map((runtime) => {
               const selected = agentRuntime === runtime.id
               return (
@@ -160,24 +160,24 @@ export function NewSessionDialog({
                   onClick={() => selectAgentRuntime(runtime.id)}
                   data-testid={`new-session-runtime-${runtime.id}`}
                   className={cn(
-                    'relative flex min-h-14 min-w-0 items-center gap-2 rounded-lg border p-2 text-left transition-colors sm:min-h-16 sm:items-start sm:gap-3 sm:p-3',
+                    'relative flex min-h-10 min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors',
                     selected
                       ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
                       : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50',
                     !runtime.available && 'cursor-not-allowed opacity-55',
                   )}
                 >
-                  <span className={cn('flex-none rounded-md p-1.5 sm:mt-0.5 sm:rounded-lg sm:p-2', selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
+                  <span className={cn('flex-none rounded p-1', selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
                     {runtime.id === 'copilot'
-                      ? <GitHubMark className="h-4 w-4" />
-                      : <Bot className="h-4 w-4" aria-hidden="true" />}
+                      ? <GitHubMark className="h-3.5 w-3.5" />
+                      : <Bot className="h-3.5 w-3.5" aria-hidden="true" />}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex min-w-0 items-center gap-1 text-sm font-semibold">
                       <span className="truncate">{runtime.label}</span>
-                      {selected ? <Check className="h-4 w-4 text-primary" aria-hidden="true" /> : null}
+                      {selected ? <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" /> : null}
                     </span>
-                    <span className="mt-1 hidden text-xs leading-relaxed text-muted-foreground sm:block">
+                    <span className="hidden truncate text-[11px] text-muted-foreground sm:block">
                       {runtime.available ? runtime.description : runtime.reason ?? runtime.status}
                     </span>
                   </span>

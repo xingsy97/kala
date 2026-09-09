@@ -57,6 +57,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   private readonly cancelledSessions = new Set<string>()
   private readonly compactions = new Map<string, { attemptId: string; tokensBefore: number }>()
   private readonly tails = new Map<string, Promise<void>>()
+  private readonly accountedUsageCallIds = new Set<string>()
   private status: AgentRuntimeDescriptor['status']
   private reason: string | undefined
   private models: readonly ModelInfo[] = []
@@ -385,6 +386,19 @@ export class CopilotAgentRuntime implements AgentRuntime {
   }
 
   private handleEvent(record: SessionRecord, event: SessionEvent): void {
+    if (event.type === 'assistant.usage') {
+      if (event.data.apiCallId) this.accountedUsageCallIds.add(event.data.apiCallId)
+      void this.project(record, 'copilot.assistant_usage', nativeEventPayload(event), (state) => ({
+        ...state,
+        usage: {
+          inputTokens: state.usage.inputTokens + (event.data.inputTokens ?? 0),
+          outputTokens: state.usage.outputTokens + (event.data.outputTokens ?? 0),
+          cacheCreationTokens: state.usage.cacheCreationTokens + (event.data.cacheWriteTokens ?? 0),
+          cacheReadTokens: state.usage.cacheReadTokens + (event.data.cacheReadTokens ?? 0),
+        },
+      }))
+      return
+    }
     if (event.type === 'session.usage_info') {
       this.context.broadcast.onState(record, record.state, copilotContextSnapshot(record, event.data))
       return
@@ -483,9 +497,16 @@ export class CopilotAgentRuntime implements AgentRuntime {
       }
       if (response.data.content) content.push({ type: 'text', text: response.data.content })
       if (content.length === 0) throw new Error('Copilot assistant message was empty')
+      const outputTokens = response.data.apiCallId && !this.accountedUsageCallIds.has(response.data.apiCallId)
+        ? response.data.outputTokens ?? 0
+        : 0
+      if (response.data.apiCallId && outputTokens > 0) this.accountedUsageCallIds.add(response.data.apiCallId)
       await this.project(record, 'copilot.assistant_message', nativeEventPayload(response), (state) => ({
         ...state,
         messages: [...state.messages, { role: 'assistant', content }],
+        usage: outputTokens > 0
+          ? { ...state.usage, outputTokens: state.usage.outputTokens + outputTokens }
+          : state.usage,
         status: 'thinking',
         pendingCalls: [],
         error: undefined,

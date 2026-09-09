@@ -17,6 +17,7 @@ import type {
   ClientCompact,
   ClientConsolidateMemory,
   ClientCreateSession,
+  ClientCreateDirectory,
   ClientDeleteQueuedMessage,
   ClientDeleteSession,
   ClientFork,
@@ -292,6 +293,14 @@ export const ClientListDirsSchema = z.object({
   sessionId: SessionIdSchema.optional(),
   path: z.string().optional(),
 }) satisfies z.ZodType<ClientListDirs>
+
+export const ClientCreateDirectorySchema = z.object({
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema.optional(),
+  parentPath: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+}) satisfies z.ZodType<ClientCreateDirectory>
 
 export const ClientListFilesSchema = z.object({
   requestId: RequestIdSchema,

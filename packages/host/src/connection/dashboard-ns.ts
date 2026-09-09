@@ -18,6 +18,7 @@ import type {
   ClientCompact,
   ClientConsolidateMemory,
   ClientCreateSession,
+  ClientCreateDirectory,
   ClientDeleteSession,
   ClientFork,
   ClientInterruptSubAgent,
@@ -56,6 +57,7 @@ import type {
   ClientUserReject,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
+  CreateDirectoryResult,
   DirListResult,
   RpcAck,
   EventAppendedEvent,
@@ -927,6 +929,22 @@ export function configureDashboardNamespace(
       deps.audit?.log({ action: 'internal_tool.list_dirs', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)
       respond(result)
+    })
+    socket.on('client:create_directory', async (raw: ClientCreateDirectory, ack?: (result: CreateDirectoryResult) => void) => {
+      const p = vparse(schema.ClientCreateDirectorySchema, raw, 'client:create_directory') as ClientCreateDirectory | undefined
+      if (!p) return
+      const deny = (error: string): void => ack?.({ requestId: p.requestId, workspaceId: p.workspaceId, path: p.parentPath, parentPath: p.parentPath, roots: [], created: false, error })
+      if (p.sessionId) {
+        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+        if (error) {
+          auditScopedAccessDenied('internal_tool.create_directory', p.sessionId, p.workspaceId, error)
+          deny(error)
+          return
+        }
+      }
+      deps.audit?.log({ action: 'internal_tool.create_directory', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { parentPath: p.parentPath } })
+      const result = await deps.executors.createDirectory(p.workspaceId, p.parentPath, p.name, p.requestId)
+      ack?.(result)
     })
     socket.on('client:list_files', async (raw: ClientListFiles) => {
       const p = vparse(schema.ClientListFilesSchema, raw, 'client:list_files') as ClientListFiles | undefined

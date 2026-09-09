@@ -44,6 +44,7 @@ import type {
   ClientTerminalResize,
   CopyOverflowSession,
   CopyOverflowSessionResult,
+  CreateDirectoryResult,
   DeleteOverflowSession,
   DeleteOverflowSessionResult,
   DirListResult,
@@ -102,6 +103,7 @@ type PublishLocalImageResponse = { requestId: string; path: string; base64?: str
 export type ExecutorLookup = {
   executorForSession(sessionId: string): AttachedExecutor | undefined
   listDirs(workspaceId: string, path: string | undefined, requestId: string): Promise<DirListResult>
+  createDirectory(workspaceId: string, parentPath: string, name: string, requestId: string): Promise<CreateDirectoryResult>
   listFiles(payload: ClientListFiles): Promise<FileListResult>
   readOverflow(payload: ClientReadOverflow, workspaceId: string): Promise<OverflowContentsResult>
   copyOverflowSession(workspaceId: string, sourceSessionId: string, targetSessionId: string): Promise<CopyOverflowSessionResult>
@@ -635,6 +637,19 @@ export function createExecutorRegistry(
         '__fs_list_dirs',
         { requestId, workspaceId, ...(path !== undefined ? { path } : {}) },
         (msg) => defaultDirList(requestId, workspaceId, path, msg),
+      )
+    },
+    async createDirectory(workspaceId, parentPath, name, requestId) {
+      const bind = findBindByWorkspace(workspaceId)
+      if (!bind) {
+        return { requestId, workspaceId, path: parentPath, parentPath, roots: [], created: false, error: 'workspace offline' }
+      }
+      return await callInternalTool<CreateDirectoryResult>(
+        bind,
+        workspaceId,
+        '__fs_create_directory',
+        { requestId, workspaceId, parentPath, name },
+        (msg) => ({ requestId, workspaceId, path: parentPath, parentPath, roots: [], created: false, error: msg }),
       )
     },
     async listFiles(payload) {
