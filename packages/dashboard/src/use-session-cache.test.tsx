@@ -152,6 +152,70 @@ describe('useSession session view cache', () => {
     expect(socket.handlers.get('state:changed')).toHaveLength(1)
   })
 
+  it('keeps streamed text visible while the turn transitions into tool execution', async () => {
+    const frames: FrameRequestCallback[] = []
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const caf = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+    const flushFrames = async (count = 20): Promise<void> => {
+      for (let index = 0; index < count && frames.length > 0; index += 1) {
+        const callback = frames.shift()!
+        await act(async () => callback(performance.now()))
+      }
+    }
+    try {
+      window.localStorage.setItem('ak-smooth-streaming-text', 'false')
+      const { result } = renderHook(() => useSession({ host: 'http://host.test', sessionId: 's1' }))
+      await waitFor(() => expect(sockets).toHaveLength(1))
+      const socket = sockets[0]!
+      const thinking = { ...createInitialState({ sessionId: 's1' }), status: 'thinking' as const }
+      act(() => socket.serverEmit('session:ready', {
+        sessionId: 's1', reason: 'load', cursor: 1, state: thinking, config: { tools: [] }, contextSnapshot: null,
+      }))
+      act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'visible draft before tool' }))
+      await flushFrames()
+      await waitFor(() => expect(result.current.streamingText).toBe('visible draft before tool'))
+
+      act(() => socket.serverEmit('state:changed', {
+        sessionId: 's1',
+        state: {
+          ...thinking,
+          status: 'executing_tools',
+          pendingCalls: [{ callId: 'call-1', name: 'bash', input: { command: 'true' }, status: 'dispatched' }],
+        },
+        contextSnapshot: null,
+      }))
+      await flushFrames()
+
+      expect(result.current.state?.status).toBe('executing_tools')
+      expect(result.current.streamingText).toBe('visible draft before tool')
+
+      act(() => socket.serverEmit('event:appended', {
+        sessionId: 's1',
+        seq: 2,
+        ts: 't2',
+        event: {
+          kind: 'llm_response',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_call', callId: 'call-1', name: 'bash', input: { command: 'true' } }],
+          },
+        },
+        effects: [{ kind: 'call_tool', callId: 'call-1', name: 'bash', input: { command: 'true' } }],
+      }))
+      await flushFrames()
+
+      expect(result.current.timeline.at(-1)?.event.kind).toBe('llm_response')
+      expect(result.current.streamingText).toBe('visible draft before tool')
+    } finally {
+      raf.mockRestore()
+      caf.mockRestore()
+      window.localStorage.removeItem('ak-smooth-streaming-text')
+    }
+  })
+
   it('keeps a dashboard control socket independent from the selected session hook', async () => {
     const { rerender, unmount } = renderHook(
       ({ sessionId }) => ({

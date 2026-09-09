@@ -243,7 +243,10 @@ export function appendLiveTranscriptItems(
 
   const baseTail = base.at(-1)
   const authoritativeAssistantAtTail = baseTail?.kind === 'message' && baseTail.message.role === 'assistant'
-  if (streamingText.length > 0 && !authoritativeAssistantAtTail) {
+  const authoritativeAssistantTextAtTail =
+    authoritativeAssistantAtTail &&
+    baseTail.message.content.some((content) => content.type === 'text' && content.text.length > 0)
+  if (streamingText.length > 0 && !authoritativeAssistantTextAtTail) {
     out.push({
       kind: 'message',
       streaming: true,

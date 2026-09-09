@@ -234,6 +234,32 @@ describe('visibleMessages', () => {
     })
   })
 
+  it('keeps streamed text visible when a tool-only assistant response becomes the tail', () => {
+    const timeline: TimelineEntry[] = [
+      { seq: 1, ts: '2026-07-05T00:00:00.000Z', event: { kind: 'user_message', text: 'stream then tool' }, effects: [] },
+      {
+        seq: 2,
+        ts: '2026-07-05T00:00:01.000Z',
+        event: {
+          kind: 'llm_response',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_call', callId: 'call-1', name: 'bash', input: { command: 'true' } }],
+          },
+        },
+        effects: [],
+      },
+    ]
+
+    const transcript = visibleTranscript([system], timeline, 'I will inspect that first.')
+
+    expect(transcript).toContainEqual(expect.objectContaining({
+      kind: 'message',
+      streaming: true,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'I will inspect that first.' }] },
+    }))
+  })
+
   it('does not duplicate the latest assistant message while Stop hands streaming text to the authoritative response', () => {
     const response: Message = { role: 'assistant', content: [{ type: 'text', text: 'partial answer' }] }
     const timeline: TimelineEntry[] = [

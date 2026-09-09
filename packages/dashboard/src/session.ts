@@ -513,8 +513,11 @@ export function useSession({
       // to re-render the whole App synchronously.
       acceptStreamDeltas = acceptsSessionTokenDelta(p.state.status)
       enqueueProjection({ kind: 'authoritative', generation, sessionId, payload: p })
-      if (!acceptStreamDeltas) resetStream()
     })
+    const llmResponseHasText = (p: EventAppendedEvent): boolean =>
+      p.event.kind === 'llm_response' &&
+      p.event.message.content.some((content) => content.type === 'text' && content.text.length > 0)
+
     bind('event:appended', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
@@ -524,7 +527,9 @@ export function useSession({
         // briefly removing it and remounting completed Markdown/code.
         flushProjectionQueue()
         dispatchProjectionEvent({ kind: 'appended', generation, sessionId, payload: p })
-        requestAnimationFrame(() => { if (isCurrentSocket()) resetStream() })
+        if (p.event.kind === 'llm_error' || llmResponseHasText(p)) {
+          requestAnimationFrame(() => { if (isCurrentSocket()) resetStream() })
+        }
         return
       }
       // High-frequency mid-turn events (tool_call / tool_result): coalesce to
