@@ -35,6 +35,7 @@ const CHROME_DEBUG_URL = process.env.CHROME_DEBUG_URL ?? 'http://127.0.0.1:9222'
 const MODEL = process.env.VERIFY_MODEL
 const ANTHROPIC_MODEL = process.env.VERIFY_ANTHROPIC_MODEL ?? 'claude-opus-4.7-1m-internal'
 const REMOVED_ANTHROPIC_MODEL = process.env.VERIFY_REMOVED_ANTHROPIC_MODEL ?? 'claude-haiku-4-5'
+const DASHBOARD_BUILD_TIMEOUT_MS = Number(process.env.VERIFY_DASHBOARD_BUILD_TIMEOUT_MS ?? 120_000)
 const TURN_TIMEOUT_MS = Number(process.env.VERIFY_TURN_TIMEOUT_MS ?? 10_000)
 const E2E_EXECUTOR_TOKEN = `dashboard-real-token-${process.pid}`
 
@@ -54,7 +55,7 @@ function check(name, pass, detail = '') {
 try {
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], {
     name: 'dashboard build',
-    timeoutMs: 30_000,
+    timeoutMs: DASHBOARD_BUILD_TIMEOUT_MS,
   })
 
   host = spawn(

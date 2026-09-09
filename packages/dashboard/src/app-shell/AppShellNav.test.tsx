@@ -139,6 +139,8 @@ describe('AppShellNav', () => {
   it('uses a compact global navigation bar and controls', () => {
     renderNav()
     expect(screen.getByTestId('app-shell-nav').className).toContain('h-10')
+    expect(screen.getByTestId('app-shell-nav').className).toContain('ak-global-topbar')
+    expect(screen.getByTestId('app-shell-nav').className).not.toContain('bg-background/80')
     expect(screen.getByTestId('app-shell-nav-agent').className).toContain('h-8')
     expect(screen.getByTestId('app-shell-nav-settings-icon').className).toContain('h-8')
   })

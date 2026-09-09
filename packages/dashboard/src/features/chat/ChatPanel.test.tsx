@@ -65,6 +65,26 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()
   })
 
+  it('renders durable queued rows instead of the empty welcome state', () => {
+    render(
+      <ChatPanel
+        messages={[]}
+        items={[
+          {
+            kind: 'pending_user_message',
+            seq: Number.MAX_SAFE_INTEGER,
+            id: 'queued-1',
+            text: 'queued while session is empty',
+            status: 'queued',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('queued while session is empty')).toBeTruthy()
+    expect(screen.queryByText(/No messages yet/i)).toBeNull()
+  })
+
   it('renders the thinking status row even when the transcript is empty', () => {
     render(
       <ChatPanel

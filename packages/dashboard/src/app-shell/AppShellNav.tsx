@@ -104,7 +104,7 @@ export function AppShellNav({
       aria-label={t('appShell.nav.aria')}
       data-testid="app-shell-nav"
       data-collapsed="false"
-      className="sticky top-0 z-30 flex h-10 items-center gap-1 border-b border-border/45 bg-background/80 px-2 shadow-[0_1px_0_hsl(var(--card)/0.45)] backdrop-blur-xl sm:px-3"
+      className="ak-global-topbar sticky top-0 z-30 flex h-10 items-center gap-1 px-2 backdrop-blur-xl sm:px-3"
     >
       <span
         aria-label="Agent Kernel"

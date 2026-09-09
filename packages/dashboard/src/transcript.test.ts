@@ -94,7 +94,7 @@ describe('optimistic to durable message handoff', () => {
 
   it('renders queued messages as live transcript rows for otherwise empty sessions', () => {
     const rendered = appendLiveTranscriptItems([], [], [], '', [], [{
-      id: 'optimistic-queued-1',
+      id: 'server-queued-1',
       text: 'run this next',
       mode: 'queue',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -102,7 +102,7 @@ describe('optimistic to durable message handoff', () => {
 
     expect(rendered).toEqual([{
       kind: 'pending_user_message',
-      id: 'optimistic-queued-1',
+      id: 'server-queued-1',
       text: 'run this next',
       mode: 'queue',
       status: 'queued',
@@ -298,7 +298,7 @@ describe('visibleMessages', () => {
     expect(transcript).toEqual([])
   })
 
-  it('appends local sending messages but leaves server queued messages in the composer dock', () => {
+  it('appends local sending messages but leaves server queued messages in the composer dock once the transcript has live content', () => {
     const transcript = visibleTranscript(
       [system],
       [],

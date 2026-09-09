@@ -266,7 +266,12 @@ export function appendLiveTranscriptItems(
     })
   }
 
-  queuedMessages.filter(isOptimisticQueuedMessage).forEach((queued, index) => {
+  const showDurableQueuedRows =
+    base.length === 0 &&
+    timeline.length === 0 &&
+    streamingText.length === 0 &&
+    pendingUserMessages.length === 0
+  queuedMessages.filter((message) => isOptimisticQueuedMessage(message) || showDurableQueuedRows).forEach((queued, index) => {
     out.push({
       kind: 'pending_user_message',
       id: queued.id ?? `queued-${index}`,

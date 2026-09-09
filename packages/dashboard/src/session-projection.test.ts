@@ -1,6 +1,6 @@
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
 import type { ContextUsageSnapshot, EventAppendedEvent, SessionReadyEvent } from '@agent-kernel/shared'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { EMPTY_SESSION_PROJECTION, reduceSessionProjection, reduceSessionProjectionBatch } from './session-projection.js'
 
@@ -33,15 +33,21 @@ function selected(sessionId: string, generation = 1) {
 
 describe('session projection reducer', () => {
   it('reduces a queued frame in exactly the same order as individual events', () => {
-    const current = selected('session-a')
-    const events = [
-      { kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 1, 'first') } as const,
-      { kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 2, 'second') } as const,
-      { kind: 'status', generation: 1, sessionId: 'session-a', status: 'ready' } as const,
-    ]
-    const individual = events.reduce(reduceSessionProjection, current)
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-24T00:00:10.000Z'))
+    try {
+      const current = selected('session-a')
+      const events = [
+        { kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 1, 'first') } as const,
+        { kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 2, 'second') } as const,
+        { kind: 'status', generation: 1, sessionId: 'session-a', status: 'ready' } as const,
+      ]
+      const individual = events.reduce(reduceSessionProjection, current)
 
-    expect(reduceSessionProjectionBatch(current, events)).toEqual(individual)
+      expect(reduceSessionProjectionBatch(current, events)).toEqual(individual)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('folds state and appends timeline in one transition', () => {
