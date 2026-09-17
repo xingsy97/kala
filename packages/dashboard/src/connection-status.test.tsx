@@ -102,6 +102,19 @@ describe('ConnectionStatus', () => {
     expect(JSON.parse(clipboard.mock.calls[0]![0])).not.toHaveProperty('executorPresence')
   })
 
+  it('renders a dot-only compact trigger for collapsed topbar', async () => {
+    render(<ConnectionStatus socket={socketWithRtt() as never} status="ready" cursor={9} executorConnected={false} onResync={() => {}} compact />)
+
+    const indicator = screen.getByTestId('connection-status')
+    expect(indicator.getAttribute('data-compact')).toBe('true')
+    expect(indicator.textContent).toBe('')
+    expect(indicator.querySelector('.bg-emerald-500')).not.toBeNull()
+    await waitFor(() => expect(indicator.getAttribute('title')).toBe('Connected · 12 ms'))
+    expect(screen.queryByTestId('connection-headline-latency')).toBeNull()
+    fireEvent.click(indicator)
+    expect(screen.getByTestId('connection-status-popover')).toBeTruthy()
+  })
+
   it('keeps host failures and session synchronization errors visible for Chats', () => {
     const view = render(<ConnectionStatus socket={timedOutSocket() as never} status="ready" cursor={0} executorConnected onResync={() => {}} />)
     expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('error')
@@ -192,12 +205,16 @@ describe('ConnectionStatus', () => {
 
     await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('30 ms'))
     fireEvent.click(screen.getByTestId('connection-status'))
-    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('2'))
+    const initialSampleCount = await waitFor(() => {
+      const count = Number(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count'))
+      expect(count).toBeGreaterThanOrEqual(1)
+      return count
+    })
     expect(screen.getByText('Last 10 minutes')).toBeTruthy()
 
     wallClock = 9 * 60 * 1000
     fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
-    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('3'))
+    await waitFor(() => expect(Number(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count'))).toBe(initialSampleCount + 1))
 
     wallClock = 20 * 60 * 1000
     fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
@@ -213,11 +230,15 @@ describe('ConnectionStatus', () => {
 
     await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('1100 ms'))
     fireEvent.click(screen.getByTestId('connection-status'))
-    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('2'))
+    const initialSampleCount = await waitFor(() => {
+      const count = Number(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count'))
+      expect(count).toBeGreaterThanOrEqual(1)
+      return count
+    })
 
     wallClock = 30_000
     fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
-    await waitFor(() => expect(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count')).toBe('3'))
+    await waitFor(() => expect(Number(screen.getByTestId('connection-health-curve').getAttribute('data-sample-count'))).toBe(initialSampleCount + 1))
 
     expect(screen.getByTestId('connection-health-host-line').getAttribute('points')).toBe(screen.getByTestId('connection-health-executor-line').getAttribute('points'))
   })

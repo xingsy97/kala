@@ -109,7 +109,10 @@ export function AppShellNav({
         aria-label={t('appShell.nav.aria')}
         data-testid="app-shell-nav"
         data-collapsed="true"
-        className="ak-global-topbar sticky top-0 z-30 flex h-10 items-center gap-2 px-2 backdrop-blur-xl sm:px-3"
+        className={cn(
+          'ak-global-topbar sticky top-0 z-30 flex h-10 items-center backdrop-blur-xl',
+          collapsedContent ? 'gap-0 p-0' : 'gap-2 px-2 sm:px-3',
+        )}
       >
         {collapsedContent ?? (
           <span aria-label="Agent RunLab" className="group flex min-w-0 items-center gap-2 text-foreground">

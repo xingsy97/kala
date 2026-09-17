@@ -146,6 +146,8 @@ describe('AppShellNav', () => {
       />,
     )
     expect(screen.getByTestId('app-shell-nav').getAttribute('data-collapsed')).toBe('true')
+    expect(screen.getByTestId('app-shell-nav').className).toContain('p-0')
+    expect(screen.getByTestId('app-shell-nav').className).not.toContain('px-2')
     expect(screen.getByTestId('collapsed-session-header').textContent).toBe('Session A')
     expect(screen.queryByTestId('app-shell-nav-agent')).toBeNull()
   })

@@ -1729,15 +1729,57 @@ export function App(): JSX.Element {
     )
   }
 
+  const collapsedSessionTopbar = !topbarOpen && hasSelectedSession ? (
+    <WorkbenchToolbar
+      placement="topbar"
+      brand={<TopbarBrand />}
+      rightSlot={(
+        <AppShellGlobalActions
+          connectionStatus={<ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} compact />}
+          onOpenSettings={() => setSettingsOpen(true)}
+          account={account}
+          evaluationUrl={runtimeCapabilities.pipeline ? runtimeDeployment.evaluationUrl : undefined}
+          accountLoading={privateCloudMode && authSession.loading}
+          onOpenAccount={privateCloudMode ? () => setAccountCenterOpen(true) : undefined}
+          onOpenAdmin={authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined}
+          onSignOut={privateCloudMode ? () => {
+            authSession.announceLogout()
+            void sessionViewCache.clearDurable()
+          } : undefined}
+        />
+      )}
+      sessionLabel={sessionLabel}
+      sessionActivityStatus={indicatorActiveSessionStatus}
+      cwd={currentSession?.workspaceId ? currentCwd : ''}
+      simpleChat={!currentSession?.workspaceId}
+      onOpenTopbar={() => setTopbarOpen(true)}
+      topbarAvailable
+      onOpenExplorer={() => {
+        if (wideLayout) setExplorerOpen(true)
+        else setExplorerDrawerOpen(true)
+      }}
+      explorerAvailable={!wideLayout || !explorerOpen}
+      onOpenSidebar={() => {
+        if (wideLayout) setInspectorOpen(true)
+        else setInspectorDrawerOpen(true)
+      }}
+      sidebarAvailable={!wideLayout || !inspectorOpen}
+      onChangeCwd={runtimeCapabilities.workspace && currentAgentRuntimeCapabilities.cwdMutation && currentSession?.workspaceId ? openCwdDialog : undefined}
+      sessionSelected
+      sessionTabs={sessionTabsNode}
+    />
+  ) : undefined
+
   return (
     <PwaLifecycleHost>
     <div className="ak-app-shell ak-workspace-canvas flex flex-col text-foreground">
-      {topbarOpen || !hasSelectedSession ? <AppShellNav
+      {topbarOpen || !hasSelectedSession || collapsedSessionTopbar ? <AppShellNav
         section={section}
         onSelect={handleSectionSelect}
         onOpenSettings={() => setSettingsOpen(true)}
         connectionStatus={hasSelectedSession ? <ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} /> : null}
         collapsed={!topbarOpen}
+        collapsedContent={collapsedSessionTopbar}
         onCollapse={() => setTopbarOpen(false)}
         onExpand={() => setTopbarOpen(true)}
         account={account}
@@ -1831,24 +1873,7 @@ export function App(): JSX.Element {
           data-testid="workbench-panel"
         >
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
-            {topbarOpen || hasSelectedSession ? <WorkbenchToolbar
-              placement={topbarOpen ? 'rail' : 'topbar'}
-              brand={!topbarOpen ? <TopbarBrand /> : undefined}
-              rightSlot={!topbarOpen ? (
-                <AppShellGlobalActions
-                  connectionStatus={hasSelectedSession ? <ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} /> : null}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                  account={account}
-                  evaluationUrl={runtimeCapabilities.pipeline ? runtimeDeployment.evaluationUrl : undefined}
-                  accountLoading={privateCloudMode && authSession.loading}
-                  onOpenAccount={privateCloudMode ? () => setAccountCenterOpen(true) : undefined}
-                  onOpenAdmin={authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined}
-                  onSignOut={privateCloudMode ? () => {
-                    authSession.announceLogout()
-                    void sessionViewCache.clearDurable()
-                  } : undefined}
-                />
-              ) : undefined}
+            {topbarOpen ? <WorkbenchToolbar
               sessionLabel={sessionLabel}
               sessionActivityStatus={indicatorActiveSessionStatus}
               cwd={currentSession?.workspaceId ? currentCwd : ''}
@@ -3079,7 +3104,7 @@ type ConnectionHealthSample = {
   executorRequired: boolean
 }
 
-export const ConnectionStatus = memo(function ConnectionStatus({ socket, status, transport, cursor, workspaceId, executorConnected, onResync }: { socket: DashboardSocket | null; status: string; transport?: string; cursor: number; workspaceId?: string; executorConnected: boolean; onResync(): void }): JSX.Element {
+export const ConnectionStatus = memo(function ConnectionStatus({ socket, status, transport, cursor, workspaceId, executorConnected, onResync, compact = false }: { socket: DashboardSocket | null; status: string; transport?: string; cursor: number; workspaceId?: string; executorConnected: boolean; onResync(): void; compact?: boolean }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [hostRtt, setHostRtt] = useState<number | null>(null)
@@ -3187,13 +3212,14 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   const headlineLatency = executorRequired && executorConnected
     ? hostRtt !== null && executorRtt !== null ? hostRtt + executorRtt : null
     : hostRtt
+  const headlineText = headlineLatency !== null ? `${headlineLatency} ms` : checking ? t('connectionHealth.measuring') : '—'
 
   return (
     <div className="relative">
-      <button type="button" onClick={() => setOpen((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8" data-testid="connection-status" data-status={displayStatus} aria-expanded={open}>
+      <button type="button" onClick={() => setOpen((value) => !value)} className={cn('inline-flex h-9 items-center rounded-lg text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8', compact ? 'w-8 justify-center p-0' : 'gap-2 px-2')} data-testid="connection-status" data-status={displayStatus} data-compact={compact ? 'true' : undefined} aria-expanded={open} aria-label={compact ? `${label}${headlineText !== '—' ? ` · ${headlineText}` : ''}` : undefined} title={compact ? `${label}${headlineText !== '—' ? ` · ${headlineText}` : ''}` : undefined}>
         <span className={cn('h-2 w-2 rounded-full', statusDot(displayStatus))} />
-        <span className="hidden sm:inline">{label}</span>
-        <span className="hidden font-mono text-[0.625rem] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineLatency !== null ? `${headlineLatency} ms` : checking ? t('connectionHealth.measuring') : '—'}</span>
+        {compact ? null : <span className="hidden sm:inline">{label}</span>}
+        {compact ? null : <span className="hidden font-mono text-[0.625rem] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineText}</span>}
       </button>
       {open ? (
         <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-md rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[28rem]" data-testid="connection-status-popover">
