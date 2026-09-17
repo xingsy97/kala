@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { BookOpen, Bot, Boxes, ChevronUp, CircleHelp, ExternalLink, LogOut, NotebookPen, Settings as SettingsIcon, Sparkles, UserRound, Workflow } from 'lucide-react'
+import { BookOpen, Bot, Boxes, ChevronDown, ChevronUp, CircleHelp, ExternalLink, LogOut, NotebookPen, Settings as SettingsIcon, Sparkles, UserRound, Workflow } from 'lucide-react'
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import { Button } from '../components/ui/button.js'
@@ -39,7 +39,9 @@ export function AppShellNav({
   onOpenSettings,
   connectionStatus,
   collapsed,
+  collapsedContent,
   onCollapse,
+  onExpand,
   account,
   accountLoading = false,
   onSignOut,
@@ -52,6 +54,7 @@ export function AppShellNav({
   onOpenSettings(): void
   connectionStatus?: ReactNode
   collapsed: boolean
+  collapsedContent?: ReactNode
   onCollapse(): void
   onExpand(): void
   account?: AccountProfile
@@ -100,7 +103,44 @@ export function AppShellNav({
     }
   }, [collapsed, measureActivePill, section])
 
-  if (collapsed) return <></>
+  if (collapsed) {
+    return (
+      <nav
+        aria-label={t('appShell.nav.aria')}
+        data-testid="app-shell-nav"
+        data-collapsed="true"
+        className="ak-global-topbar sticky top-0 z-30 flex h-10 items-center gap-2 px-2 backdrop-blur-xl sm:px-3"
+      >
+        {collapsedContent ?? (
+          <span aria-label="Agent Kernel" className="group flex min-w-0 items-center gap-2 text-foreground">
+            <img
+              src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
+              alt=""
+              className="h-5 w-5 text-foreground/90"
+              aria-hidden
+            />
+            <span className="truncate text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">Agent Kernel</span>
+          </span>
+        )}
+        {!collapsedContent ? (
+          <>
+            <span className="min-w-0 flex-1" />
+            <Button
+              variant="ghost"
+              size="icon"
+              data-testid="app-shell-nav-expand"
+              onClick={onExpand}
+              title={t('app.expandTopbar')}
+              aria-label={t('app.expandTopbar')}
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            >
+              <ChevronDown className="h-4 w-4" aria-hidden />
+            </Button>
+          </>
+        ) : null}
+      </nav>
+    )
+  }
 
   return (
     <nav

@@ -93,7 +93,11 @@ describe('SessionFilesPanel', () => {
     revealLineInCenterMock.mockClear()
     inputListeners.length = 0
     Object.assign(navigator, { clipboard: { writeText: vi.fn() } })
-    vi.stubGlobal('URL', { ...URL, createObjectURL: createObjectURLMock, revokeObjectURL: revokeObjectURLMock })
+    class MockURL extends URL {
+      static createObjectURL = createObjectURLMock
+      static revokeObjectURL = revokeObjectURLMock
+    }
+    vi.stubGlobal('URL', MockURL)
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     createObjectURLMock.mockClear()
     revokeObjectURLMock.mockClear()

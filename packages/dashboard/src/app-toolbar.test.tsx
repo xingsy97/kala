@@ -75,13 +75,21 @@ describe('WorkbenchToolbar', () => {
     expect(screen.queryByRole('button', { name: /working directory/i })).toBeNull()
   })
 
-  it('uses an upward arrow to expand a collapsed Topbar', () => {
+  it('uses a downward arrow to expand a collapsed Topbar', () => {
     renderToolbar({ topbarAvailable: true })
 
     const toggle = screen.getByTestId('topbar-toggle')
     expect(toggle.getAttribute('aria-label')).toBe('Expand top bar')
-    expect(toggle.querySelector('.lucide-chevron-up')).toBeTruthy()
-    expect(toggle.querySelector('.lucide-chevron-down')).toBeNull()
+    expect(toggle.querySelector('.lucide-chevron-down')).toBeTruthy()
+    expect(toggle.querySelector('.lucide-chevron-up')).toBeNull()
+  })
+
+  it('can render inline inside the collapsed global topbar without its own rail surface', () => {
+    renderToolbar({ placement: 'topbar', sessionSelected: true, topbarAvailable: true })
+
+    expect(screen.queryByTestId('workbench-toolbar-rail')).toBeNull()
+    expect(screen.getByTestId('workbench-toolbar').className).not.toContain('ak-titlebar-surface')
+    expect(screen.getByTestId('session-label').textContent).toBe('Loaded session')
   })
 
   it('uses one sidebar opener and does not duplicate it with a terminal shortcut', () => {

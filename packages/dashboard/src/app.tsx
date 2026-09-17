@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronRight, ChevronUp, Clock3, Eraser, FolderOpen, GitBranch, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
+import { Archive, Boxes, ChevronDown, ChevronRight, ChevronUp, Clock3, Eraser, FolderOpen, GitBranch, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
 import { HelpHint } from './components/ui/help-hint.js'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
@@ -1367,6 +1367,33 @@ export function App(): JSX.Element {
       setSection('agent')
     },
   })
+  const sessionTabsNode = !explorerOpen ? <SessionTabStrip sessions={control.sessions} openIds={sessionTabs.state.open} pinned={sessionTabs.state.pinned} active={config.sessionId} onSelect={selectSession} onClose={sessionTabs.close} onPin={sessionTabs.pin} onReorder={sessionTabs.reorder} /> : undefined
+  const collapsedTopbarContent = hasSelectedSession || config.sessionId === null || sessionListLoading ? (
+    <WorkbenchToolbar
+      placement="topbar"
+      sessionLabel={sessionLabel}
+      sessionActivityStatus={indicatorActiveSessionStatus}
+      cwd={currentSession?.workspaceId ? currentCwd : ''}
+      simpleChat={hasSelectedSession && !currentSession?.workspaceId}
+      onOpenTopbar={() => setTopbarOpen(true)}
+      topbarAvailable
+      onOpenExplorer={() => {
+        if (wideLayout) setExplorerOpen(true)
+        else setExplorerDrawerOpen(true)
+      }}
+      explorerAvailable={!wideLayout || !explorerOpen}
+      onOpenSidebar={() => {
+        if (wideLayout) setInspectorOpen(true)
+        else setInspectorDrawerOpen(true)
+      }}
+      sidebarAvailable={hasSelectedSession && (!wideLayout || !inspectorOpen)}
+      onChangeCwd={runtimeCapabilities.workspace && currentAgentRuntimeCapabilities.cwdMutation && currentSession?.workspaceId ? openCwdDialog : undefined}
+      sessionSelected={hasSelectedSession}
+      sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
+      draft={config.sessionId === null}
+      sessionTabs={sessionTabsNode}
+    />
+  ) : undefined
   // Notification deep-links: `#/sessions/<id>` selects that session (works both
   // on cold-start openWindow and the focused-tab PUSH_NAVIGATE path).
   useSessionDeepLink(selectSession)
@@ -1737,6 +1764,7 @@ export function App(): JSX.Element {
         onOpenSettings={() => setSettingsOpen(true)}
         connectionStatus={hasSelectedSession ? <ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} /> : null}
         collapsed={!topbarOpen}
+        collapsedContent={collapsedTopbarContent}
         onCollapse={() => setTopbarOpen(false)}
         onExpand={() => setTopbarOpen(true)}
         account={account}
@@ -1830,7 +1858,7 @@ export function App(): JSX.Element {
           data-testid="workbench-panel"
         >
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
-            <WorkbenchToolbar
+            {topbarOpen ? <WorkbenchToolbar
               sessionLabel={sessionLabel}
               sessionActivityStatus={indicatorActiveSessionStatus}
               cwd={currentSession?.workspaceId ? currentCwd : ''}
@@ -1851,8 +1879,8 @@ export function App(): JSX.Element {
               sessionSelected={hasSelectedSession}
               sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
               draft={config.sessionId === null}
-              sessionTabs={!explorerOpen ? <SessionTabStrip sessions={control.sessions} openIds={sessionTabs.state.open} pinned={sessionTabs.state.pinned} active={config.sessionId} onSelect={selectSession} onClose={sessionTabs.close} onPin={sessionTabs.pin} onReorder={sessionTabs.reorder} /> : undefined}
-            />
+              sessionTabs={sessionTabsNode}
+            /> : null}
             {config.sessionId === null ? (
               <SimpleChatDraft
                 key={`${cacheNamespace}:${draftKey}`}
@@ -2605,7 +2633,7 @@ function CapabilityUnavailable({ title }: { title: string }): JSX.Element {
 }
 
 export function readInitialConfig(): Config {
-  const url = new URL(window.location.href)
+  const url = new globalThis.URL(window.location.href)
   const fromUrl = url.searchParams.get('sessionId')
   const sessionId = fromUrl || parseSessionDeepLink(url.hash)
   const explicit = sessionId !== null
@@ -2902,6 +2930,7 @@ export function WorkbenchToolbar({
   simpleChat = false,
   draft = false,
   sessionTabs,
+  placement = 'rail',
 }: {
   sessionLabel: string
   sessionActivityStatus?: SessionActivityStatus
@@ -2918,6 +2947,7 @@ export function WorkbenchToolbar({
   simpleChat?: boolean
   draft?: boolean
   sessionTabs?: React.ReactNode
+  placement?: 'rail' | 'topbar'
 }): JSX.Element {
   const { t } = useTranslation()
   const displayLabel = sessionSelected
@@ -2927,6 +2957,86 @@ export function WorkbenchToolbar({
     : sessionDirectoryLoading
       ? t('app.sessionsTitle')
       : t('app.noSessionSelected')
+  const content = (
+    <>
+      {topbarAvailable ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onOpenTopbar}
+          title={t('app.expandTopbar')}
+          aria-label={t('app.expandTopbar')}
+          data-testid="topbar-toggle"
+          className="h-8 w-8 flex-none"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </Button>
+      ) : null}
+      {explorerAvailable ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onOpenExplorer}
+          title={t('app.openExplorer')}
+          aria-label={t('app.openExplorer')}
+          data-testid="explorer-toggle"
+          className="h-8 w-8 flex-none"
+        >
+          <Menu className="h-4 w-4" />
+        </Button>
+      ) : null}
+      <span
+        className="inline-flex min-w-0 max-w-[55vw] items-center gap-1.5 sm:max-w-none"
+        title={displayLabel}
+        data-testid="session-title"
+      >
+        {sessionSelected ? (
+          <SessionStatusIndicator status={sessionActivityStatus} selected />
+        ) : null}
+        <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" data-testid="session-label">
+          {displayLabel}
+        </span>
+        {simpleChat ? <span className="flex-none rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary" data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
+      </span>
+      {sessionSelected && onChangeCwd ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onChangeCwd}
+          title={cwd ? t('app.changeSessionCwd', { cwd }) : t('app.setSessionCwd')}
+          data-testid="cwd-button"
+          className="hidden h-8 min-w-0 max-w-[34vw] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground sm:inline-flex lg:max-w-[45%]"
+        >
+          <FolderOpen className="h-3.5 w-3.5 flex-none" />
+          <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
+            {cwd || t('app.cwdUnset')}
+          </span>
+        </Button>
+      ) : null}
+      {sessionTabs ? <div className={cn('ml-2 min-w-0 flex-1 overflow-hidden', placement === 'topbar' && 'hidden md:block')}>{sessionTabs}</div> : <span className="min-w-0 flex-1" />}
+      {sidebarAvailable ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onOpenSidebar}
+          title={t('app.openSidebar')}
+          aria-label={t('app.openSidebar')}
+          data-testid="sidebar-toggle"
+          className="h-8 w-8 flex-none"
+        >
+          <PanelRight className="h-4 w-4" />
+        </Button>
+      ) : null}
+    </>
+  )
+  if (placement === 'topbar') {
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-card-foreground" data-testid="workbench-toolbar">
+        {content}
+      </div>
+    )
+  }
   return (
     <div
       className="flex-none p-1.5 sm:p-2 min-[1180px]:pl-0"
@@ -2936,75 +3046,7 @@ export function WorkbenchToolbar({
         className="ak-titlebar-surface flex min-h-9 items-center gap-1.5 px-2 py-0.5 text-sm text-card-foreground backdrop-blur sm:gap-2 sm:px-2.5"
         data-testid="workbench-toolbar"
       >
-        {topbarAvailable ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onOpenTopbar}
-            title={t('app.expandTopbar')}
-            aria-label={t('app.expandTopbar')}
-            data-testid="topbar-toggle"
-            className="h-8 w-8 flex-none"
-          >
-            <ChevronUp className="h-4 w-4" />
-          </Button>
-        ) : null}
-        {explorerAvailable ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onOpenExplorer}
-            title={t('app.openExplorer')}
-            aria-label={t('app.openExplorer')}
-            data-testid="explorer-toggle"
-            className="h-8 w-8 flex-none"
-          >
-            <Menu className="h-4 w-4" />
-          </Button>
-        ) : null}
-        <span
-          className="inline-flex min-w-0 max-w-[55vw] items-center gap-1.5 sm:max-w-none"
-          title={displayLabel}
-          data-testid="session-title"
-        >
-          {sessionSelected ? (
-            <SessionStatusIndicator status={sessionActivityStatus} selected />
-          ) : null}
-          <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" data-testid="session-label">
-            {displayLabel}
-          </span>
-          {simpleChat ? <span className="flex-none rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary" data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
-        </span>
-        {sessionSelected && onChangeCwd ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onChangeCwd}
-            title={cwd ? t('app.changeSessionCwd', { cwd }) : t('app.setSessionCwd')}
-            data-testid="cwd-button"
-            className="hidden h-8 min-w-0 max-w-[34vw] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground sm:inline-flex lg:max-w-[45%]"
-          >
-            <FolderOpen className="h-3.5 w-3.5 flex-none" />
-            <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
-              {cwd || t('app.cwdUnset')}
-            </span>
-          </Button>
-        ) : null}
-        {sessionTabs ? <div className="ml-2 min-w-0 flex-1 overflow-hidden">{sessionTabs}</div> : <span className="min-w-0 flex-1" />}
-        {sidebarAvailable ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onOpenSidebar}
-            title={t('app.openSidebar')}
-            aria-label={t('app.openSidebar')}
-            data-testid="sidebar-toggle"
-            className="h-8 w-8 flex-none"
-          >
-            <PanelRight className="h-4 w-4" />
-          </Button>
-        ) : null}
+        {content}
       </div>
     </div>
   )

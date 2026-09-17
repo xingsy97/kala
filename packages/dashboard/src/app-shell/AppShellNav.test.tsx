@@ -119,7 +119,7 @@ describe('AppShellNav', () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
-  it('calls onCollapse and renders nothing while collapsed', () => {
+  it('calls onCollapse and keeps a compact topbar while collapsed', () => {
     const onCollapse = vi.fn()
     const { rerender } = render(
       <AppShellNav
@@ -142,10 +142,22 @@ describe('AppShellNav', () => {
         collapsed
         onCollapse={onCollapse}
         onExpand={() => {}}
+        collapsedContent={<span data-testid="collapsed-session-header">Session A</span>}
       />,
     )
-    expect(screen.queryByTestId('app-shell-nav')).toBeNull()
+    expect(screen.getByTestId('app-shell-nav').getAttribute('data-collapsed')).toBe('true')
+    expect(screen.getByTestId('collapsed-session-header').textContent).toBe('Session A')
     expect(screen.queryByTestId('app-shell-nav-agent')).toBeNull()
+  })
+
+  it('keeps a minimal brand and expand control when collapsed without session content', () => {
+    const onExpand = vi.fn()
+    renderNav({ collapsed: true, onExpand })
+
+    expect(screen.getByTestId('app-shell-nav').getAttribute('data-collapsed')).toBe('true')
+    expect(screen.getByLabelText('Agent Kernel')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('app-shell-nav-expand'))
+    expect(onExpand).toHaveBeenCalledOnce()
   })
 
   it('keeps collapse as the rightmost global control', () => {
