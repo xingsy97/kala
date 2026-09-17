@@ -44,7 +44,7 @@ describe('AppShellNav', () => {
 
   it('offers web users an in-app dialog trigger instead of a navigation link', () => {
     renderNav()
-    expect(screen.getByLabelText('Agent Kernel').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-web.svg')
+    expect(screen.getByLabelText('Agent RunLab').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-web.svg')
     const trigger = screen.getByTestId('app-shell-download-desktop')
     expect(trigger.tagName).toBe('BUTTON')
     expect(trigger.getAttribute('aria-haspopup')).toBe('dialog')
@@ -57,7 +57,7 @@ describe('AppShellNav', () => {
     try {
       renderNav()
       expect(screen.queryByTestId('app-shell-download-desktop')).toBeNull()
-      expect(screen.getByLabelText('Agent Kernel').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-desktop.svg')
+      expect(screen.getByLabelText('Agent RunLab').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-desktop.svg')
     } finally {
       delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
     }
@@ -155,7 +155,7 @@ describe('AppShellNav', () => {
     renderNav({ collapsed: true, onExpand })
 
     expect(screen.getByTestId('app-shell-nav').getAttribute('data-collapsed')).toBe('true')
-    expect(screen.getByLabelText('Agent Kernel')).toBeTruthy()
+    expect(screen.getByLabelText('Agent RunLab')).toBeTruthy()
     fireEvent.click(screen.getByTestId('app-shell-nav-expand'))
     expect(onExpand).toHaveBeenCalledOnce()
   })

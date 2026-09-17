@@ -84,12 +84,22 @@ describe('WorkbenchToolbar', () => {
     expect(toggle.querySelector('.lucide-chevron-up')).toBeNull()
   })
 
-  it('can render inline inside the collapsed global topbar without its own rail surface', () => {
-    renderToolbar({ placement: 'topbar', sessionSelected: true, topbarAvailable: true })
+  it('can render inline inside the collapsed workbench topbar without its own rail surface', () => {
+    renderToolbar({
+      placement: 'topbar',
+      sessionSelected: true,
+      topbarAvailable: true,
+      brand: <span data-testid="collapsed-brand">Agent RunLab</span>,
+      rightSlot: <span data-testid="collapsed-actions">Actions</span>,
+    })
 
     expect(screen.queryByTestId('workbench-toolbar-rail')).toBeNull()
     expect(screen.getByTestId('workbench-toolbar').className).not.toContain('ak-titlebar-surface')
+    expect(screen.getByTestId('workbench-toolbar').className).toContain('ak-global-topbar')
+    expect(screen.getByTestId('collapsed-brand').textContent).toBe('Agent RunLab')
+    expect(screen.getByTestId('collapsed-actions').textContent).toBe('Actions')
     expect(screen.getByTestId('session-label').textContent).toBe('Loaded session')
+    expect(screen.getByTestId('collapsed-actions').compareDocumentPosition(screen.getByTestId('topbar-toggle')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('uses one sidebar opener and does not duplicate it with a terminal shortcut', () => {

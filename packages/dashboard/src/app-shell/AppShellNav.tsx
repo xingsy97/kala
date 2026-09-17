@@ -112,14 +112,14 @@ export function AppShellNav({
         className="ak-global-topbar sticky top-0 z-30 flex h-10 items-center gap-2 px-2 backdrop-blur-xl sm:px-3"
       >
         {collapsedContent ?? (
-          <span aria-label="Agent Kernel" className="group flex min-w-0 items-center gap-2 text-foreground">
+          <span aria-label="Agent RunLab" className="group flex min-w-0 items-center gap-2 text-foreground">
             <img
               src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
               alt=""
               className="h-5 w-5 text-foreground/90"
               aria-hidden
             />
-            <span className="truncate text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">Agent Kernel</span>
+            <span className="truncate text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">Agent RunLab</span>
           </span>
         )}
         {!collapsedContent ? (
@@ -150,7 +150,7 @@ export function AppShellNav({
       className="ak-global-topbar sticky top-0 z-30 flex h-10 items-center gap-1 px-2 backdrop-blur-xl sm:px-3"
     >
       <span
-        aria-label="Agent Kernel"
+        aria-label="Agent RunLab"
         className="group mr-4 hidden items-center gap-2.5 text-foreground sm:flex"
       >
         <img
@@ -160,7 +160,7 @@ export function AppShellNav({
           aria-hidden
         />
           <span className="text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">
-          Agent Kernel
+          Agent RunLab
         </span>
       </span>
       <div
@@ -203,39 +203,68 @@ export function AppShellNav({
           )
         })}
       </div>
-      <span className="ml-auto flex flex-none items-center gap-1">
-        {!isDesktopClient() ? <DesktopDownloadDialog /> : <DesktopUpdateEntry />}
-        {evaluationUrl ? (
-          <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-muted-foreground hover:text-foreground">
-            <a href={evaluationUrl} target="_blank" rel="noreferrer" data-testid="app-shell-open-evaluation" title={t('appShell.nav.evaluation')} aria-label={t('appShell.nav.evaluation')}><ExternalLink className="h-4 w-4" aria-hidden /></a>
-          </Button>
-        ) : null}
-        {account || accountLoading ? <AccountMenu account={account} loading={accountLoading} onSignOut={onSignOut} onOpenAccount={onOpenAccount} onOpenAdmin={onOpenAdmin} /> : null}
-        <Button
-          variant="ghost"
-          size="icon"
-          data-testid="app-shell-nav-settings-icon"
-          onClick={onOpenSettings}
-          title={t('app.openSettings')}
-          aria-label={t('app.openSettings')}
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-        >
-          <SettingsIcon className="h-4 w-4" aria-hidden />
-        </Button>
-        {connectionStatus}
-        <Button
-          variant="ghost"
-          size="icon"
-          data-testid="app-shell-nav-collapse"
-          onClick={onCollapse}
-          title={t('app.collapseTopbar')}
-          aria-label={t('app.collapseTopbar')}
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-        >
-          <ChevronUp className="h-4 w-4" aria-hidden />
-        </Button>
-      </span>
+      <AppShellGlobalActions connectionStatus={connectionStatus} onOpenSettings={onOpenSettings} account={account} accountLoading={accountLoading} onSignOut={onSignOut} onOpenAccount={onOpenAccount} onOpenAdmin={onOpenAdmin} evaluationUrl={evaluationUrl} collapseControl={{ kind: 'collapse', onClick: onCollapse }} />
     </nav>
+  )
+}
+
+export function AppShellGlobalActions({
+  connectionStatus,
+  onOpenSettings,
+  account,
+  accountLoading = false,
+  onSignOut,
+  onOpenAccount,
+  onOpenAdmin,
+  evaluationUrl,
+  collapseControl,
+}: {
+  connectionStatus?: ReactNode
+  onOpenSettings(): void
+  account?: AccountProfile
+  accountLoading?: boolean
+  onSignOut?(): void | Promise<void>
+  onOpenAccount?(): void
+  onOpenAdmin?(): void
+  evaluationUrl?: string
+  collapseControl?: { kind: 'collapse' | 'expand'; onClick(): void }
+}): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <span className="ml-auto flex flex-none items-center gap-1" data-testid="app-shell-global-actions">
+      {!isDesktopClient() ? <DesktopDownloadDialog /> : <DesktopUpdateEntry />}
+      {evaluationUrl ? (
+        <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-muted-foreground hover:text-foreground">
+          <a href={evaluationUrl} target="_blank" rel="noreferrer" data-testid="app-shell-open-evaluation" title={t('appShell.nav.evaluation')} aria-label={t('appShell.nav.evaluation')}><ExternalLink className="h-4 w-4" aria-hidden /></a>
+        </Button>
+      ) : null}
+      {account || accountLoading ? <AccountMenu account={account} loading={accountLoading} onSignOut={onSignOut} onOpenAccount={onOpenAccount} onOpenAdmin={onOpenAdmin} /> : null}
+      <Button
+        variant="ghost"
+        size="icon"
+        data-testid="app-shell-nav-settings-icon"
+        onClick={onOpenSettings}
+        title={t('app.openSettings')}
+        aria-label={t('app.openSettings')}
+        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+      >
+        <SettingsIcon className="h-4 w-4" aria-hidden />
+      </Button>
+      {connectionStatus}
+      {collapseControl ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          data-testid={collapseControl.kind === 'collapse' ? 'app-shell-nav-collapse' : 'app-shell-nav-expand'}
+          onClick={collapseControl.onClick}
+          title={t(collapseControl.kind === 'collapse' ? 'app.collapseTopbar' : 'app.expandTopbar')}
+          aria-label={t(collapseControl.kind === 'collapse' ? 'app.collapseTopbar' : 'app.expandTopbar')}
+          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+        >
+          {collapseControl.kind === 'collapse' ? <ChevronUp className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}
+        </Button>
+      ) : null}
+    </span>
   )
 }
 

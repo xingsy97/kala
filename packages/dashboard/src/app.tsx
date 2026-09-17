@@ -83,7 +83,7 @@ import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { RightPanel, type RightPanelTab } from './features/right-panel/RightPanel.js'
 import { SessionTabStrip } from './features/session-tabs/SessionTabStrip.js'
 import { useSessionTabs } from './session-tabs.js'
-import { AppShellNav } from './app-shell/AppShellNav.js'
+import { AppShellGlobalActions, AppShellNav } from './app-shell/AppShellNav.js'
 import { parseSessionDeepLink, useAppSection, useSessionDeepLink, type AppSection } from './app-shell/section.js'
 import { useRuntimeDeployment } from './runtime-capabilities.js'
 import { configureArtifactClient } from './features/artifacts/artifact-client.js'
@@ -1368,32 +1368,6 @@ export function App(): JSX.Element {
     },
   })
   const sessionTabsNode = !explorerOpen ? <SessionTabStrip sessions={control.sessions} openIds={sessionTabs.state.open} pinned={sessionTabs.state.pinned} active={config.sessionId} onSelect={selectSession} onClose={sessionTabs.close} onPin={sessionTabs.pin} onReorder={sessionTabs.reorder} /> : undefined
-  const collapsedTopbarContent = hasSelectedSession || config.sessionId === null || sessionListLoading ? (
-    <WorkbenchToolbar
-      placement="topbar"
-      sessionLabel={sessionLabel}
-      sessionActivityStatus={indicatorActiveSessionStatus}
-      cwd={currentSession?.workspaceId ? currentCwd : ''}
-      simpleChat={hasSelectedSession && !currentSession?.workspaceId}
-      onOpenTopbar={() => setTopbarOpen(true)}
-      topbarAvailable
-      onOpenExplorer={() => {
-        if (wideLayout) setExplorerOpen(true)
-        else setExplorerDrawerOpen(true)
-      }}
-      explorerAvailable={!wideLayout || !explorerOpen}
-      onOpenSidebar={() => {
-        if (wideLayout) setInspectorOpen(true)
-        else setInspectorDrawerOpen(true)
-      }}
-      sidebarAvailable={hasSelectedSession && (!wideLayout || !inspectorOpen)}
-      onChangeCwd={runtimeCapabilities.workspace && currentAgentRuntimeCapabilities.cwdMutation && currentSession?.workspaceId ? openCwdDialog : undefined}
-      sessionSelected={hasSelectedSession}
-      sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
-      draft={config.sessionId === null}
-      sessionTabs={sessionTabsNode}
-    />
-  ) : undefined
   // Notification deep-links: `#/sessions/<id>` selects that session (works both
   // on cold-start openWindow and the focused-tab PUSH_NAVIGATE path).
   useSessionDeepLink(selectSession)
@@ -1758,13 +1732,12 @@ export function App(): JSX.Element {
   return (
     <PwaLifecycleHost>
     <div className="ak-app-shell ak-workspace-canvas flex flex-col text-foreground">
-      <AppShellNav
+      {topbarOpen || !hasSelectedSession ? <AppShellNav
         section={section}
         onSelect={handleSectionSelect}
         onOpenSettings={() => setSettingsOpen(true)}
         connectionStatus={hasSelectedSession ? <ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} /> : null}
         collapsed={!topbarOpen}
-        collapsedContent={collapsedTopbarContent}
         onCollapse={() => setTopbarOpen(false)}
         onExpand={() => setTopbarOpen(true)}
         account={account}
@@ -1778,7 +1751,7 @@ export function App(): JSX.Element {
           // Native form submission owns the authoritative POST + redirect. This
           // callback is progressive enhancement for cache and cross-tab cleanup.
         } : undefined}
-      />
+      /> : null}
       {accountCenterOpen && account ? <AccountCenter profile={account} organization={authSession.session?.authenticated ? authSession.session.organization : undefined} onClose={() => setAccountCenterOpen(false)} /> : null}
       {adminCenterOpen ? <AdminCenter onClose={() => setAdminCenterOpen(false)} /> : null}
       <PwaUpdateGlobalBanner />
@@ -1858,7 +1831,24 @@ export function App(): JSX.Element {
           data-testid="workbench-panel"
         >
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
-            {topbarOpen ? <WorkbenchToolbar
+            {topbarOpen || hasSelectedSession ? <WorkbenchToolbar
+              placement={topbarOpen ? 'rail' : 'topbar'}
+              brand={!topbarOpen ? <TopbarBrand /> : undefined}
+              rightSlot={!topbarOpen ? (
+                <AppShellGlobalActions
+                  connectionStatus={hasSelectedSession ? <ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} /> : null}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                  account={account}
+                  evaluationUrl={runtimeCapabilities.pipeline ? runtimeDeployment.evaluationUrl : undefined}
+                  accountLoading={privateCloudMode && authSession.loading}
+                  onOpenAccount={privateCloudMode ? () => setAccountCenterOpen(true) : undefined}
+                  onOpenAdmin={authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined}
+                  onSignOut={privateCloudMode ? () => {
+                    authSession.announceLogout()
+                    void sessionViewCache.clearDurable()
+                  } : undefined}
+                />
+              ) : undefined}
               sessionLabel={sessionLabel}
               sessionActivityStatus={indicatorActiveSessionStatus}
               cwd={currentSession?.workspaceId ? currentCwd : ''}
@@ -2632,6 +2622,20 @@ function CapabilityUnavailable({ title }: { title: string }): JSX.Element {
   return <div className="grid h-full place-items-center p-6"><ProductState kind="degraded" title={title} description="The configured Host does not advertise this product capability." /></div>
 }
 
+function TopbarBrand(): JSX.Element {
+  return (
+    <span aria-label="Agent RunLab" className="group mr-2 hidden min-w-0 flex-none items-center gap-2 text-foreground sm:flex">
+      <img
+        src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
+        alt=""
+        className="h-5 w-5 text-foreground/90"
+        aria-hidden
+      />
+      <span className="truncate text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">Agent RunLab</span>
+    </span>
+  )
+}
+
 export function readInitialConfig(): Config {
   const url = new globalThis.URL(window.location.href)
   const fromUrl = url.searchParams.get('sessionId')
@@ -2931,6 +2935,8 @@ export function WorkbenchToolbar({
   draft = false,
   sessionTabs,
   placement = 'rail',
+  brand,
+  rightSlot,
 }: {
   sessionLabel: string
   sessionActivityStatus?: SessionActivityStatus
@@ -2948,6 +2954,8 @@ export function WorkbenchToolbar({
   draft?: boolean
   sessionTabs?: React.ReactNode
   placement?: 'rail' | 'topbar'
+  brand?: React.ReactNode
+  rightSlot?: React.ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
   const displayLabel = sessionSelected
@@ -2957,21 +2965,22 @@ export function WorkbenchToolbar({
     : sessionDirectoryLoading
       ? t('app.sessionsTitle')
       : t('app.noSessionSelected')
+  const topbarToggle = topbarAvailable ? (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onOpenTopbar}
+      title={t('app.expandTopbar')}
+      aria-label={t('app.expandTopbar')}
+      data-testid="topbar-toggle"
+      className="h-8 w-8 flex-none"
+    >
+      <ChevronDown className="h-4 w-4" />
+    </Button>
+  ) : null
   const content = (
     <>
-      {topbarAvailable ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenTopbar}
-          title={t('app.expandTopbar')}
-          aria-label={t('app.expandTopbar')}
-          data-testid="topbar-toggle"
-          className="h-8 w-8 flex-none"
-        >
-          <ChevronDown className="h-4 w-4" />
-        </Button>
-      ) : null}
+      {placement === 'rail' ? topbarToggle : null}
       {explorerAvailable ? (
         <Button
           variant="ghost"
@@ -3028,11 +3037,14 @@ export function WorkbenchToolbar({
           <PanelRight className="h-4 w-4" />
         </Button>
       ) : null}
+      {rightSlot}
+      {placement === 'topbar' ? topbarToggle : null}
     </>
   )
   if (placement === 'topbar') {
     return (
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-card-foreground" data-testid="workbench-toolbar">
+      <div className="ak-global-topbar flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2 text-sm text-card-foreground backdrop-blur-xl sm:px-3" data-testid="workbench-toolbar">
+        {brand}
         {content}
       </div>
     )
