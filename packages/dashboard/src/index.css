@@ -735,6 +735,11 @@ body {
   font-variant-ligatures: none;
   tab-size: 2;
 }
+.ak-code-snippet pre.ak-code-lines {
+  margin: 0;
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+}
 .ak-code-line {
   display: grid;
   grid-template-columns: 3rem minmax(0, 1fr);
@@ -762,6 +767,16 @@ body {
 }
 .ak-code-line-content * {
   line-height: inherit;
+}
+.ak-code-snippet pre code.ak-code-line-content {
+  display: block;
+  min-width: max-content;
+  padding: 0 0.75rem;
+  background: transparent;
+  color: inherit;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: pre;
 }
 .ak-reader-surface {
   background:
