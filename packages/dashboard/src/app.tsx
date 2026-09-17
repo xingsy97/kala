@@ -3043,7 +3043,7 @@ export function WorkbenchToolbar({
   )
   if (placement === 'topbar') {
     return (
-      <div className="ak-global-topbar flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2 text-sm text-card-foreground backdrop-blur-xl sm:px-3" data-testid="workbench-toolbar">
+      <div className="ak-global-topbar flex h-10 w-full min-w-0 flex-none items-center gap-1.5 px-2 text-sm text-card-foreground backdrop-blur-xl sm:px-3" data-testid="workbench-toolbar">
         {brand}
         {content}
       </div>

@@ -96,6 +96,8 @@ describe('WorkbenchToolbar', () => {
     expect(screen.queryByTestId('workbench-toolbar-rail')).toBeNull()
     expect(screen.getByTestId('workbench-toolbar').className).not.toContain('ak-titlebar-surface')
     expect(screen.getByTestId('workbench-toolbar').className).toContain('ak-global-topbar')
+    expect(screen.getByTestId('workbench-toolbar').className).toContain('flex-none')
+    expect(screen.getByTestId('workbench-toolbar').className).not.toContain('flex-1')
     expect(screen.getByTestId('collapsed-brand').textContent).toBe('Agent RunLab')
     expect(screen.getByTestId('collapsed-actions').textContent).toBe('Actions')
     expect(screen.getByTestId('session-label').textContent).toBe('Loaded session')
