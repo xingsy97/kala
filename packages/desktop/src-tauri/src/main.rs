@@ -1,0 +1,295 @@
+#[cfg(not(target_os = "linux"))]
+compile_error!("Agent RunLab desktop is supported only on Linux.");
+
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use gtk::prelude::*;
+mod tray;
+mod desktop;
+mod placement;
+mod connection;
+
+const DESKTOP_INIT: &str = include_str!("desktop-init.js");
+struct ConnectionOrigin(std::sync::Mutex<String>);
+
+#[derive(Debug, PartialEq)]
+enum Shortcut {
+    Reconnect,
+    Reload,
+    Quit,
+}
+
+fn shortcut(key: gtk::gdk::keys::Key, modifiers: gtk::gdk::ModifierType) -> Option<Shortcut> {
+    use gtk::gdk::{keys::constants, ModifierType};
+    let modifiers = modifiers
+        & (ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK | ModifierType::MOD1_MASK
+            | ModifierType::SUPER_MASK | ModifierType::META_MASK | ModifierType::HYPER_MASK);
+    if modifiers == (ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK)
+        && matches!(key, constants::o | constants::O)
+    {
+        Some(Shortcut::Reconnect)
+    } else if modifiers == ModifierType::CONTROL_MASK {
+        match key {
+            constants::r | constants::R => Some(Shortcut::Reload),
+            constants::q | constants::Q => Some(Shortcut::Quit),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+fn install_shortcuts(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let minimize_app = window.app_handle().clone();
+    let label = window.label().to_owned();
+    window.gtk_window()?.connect_window_state_event(move |_, event| {
+        if event.new_window_state().contains(gtk::gdk::WindowState::ICONIFIED) {
+            tray::hide_if_available(&minimize_app, &label);
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    let app = window.app_handle().clone();
+    let dashboard_window = window.label() == "dashboard";
+    // Native GTK events cannot be synthesized by an unprivileged remote page.
+    window.gtk_window()?.connect_key_press_event(move |_, event| {
+        match shortcut(event.keyval(), event.state()) {
+            Some(Shortcut::Reconnect) => {
+                tray::show_launcher(&app);
+            }
+            Some(Shortcut::Reload) if dashboard_window => {
+                if let Some(dashboard) = app.get_webview_window("dashboard") {
+                    let _ = dashboard.reload();
+                }
+            }
+            Some(Shortcut::Quit) => { placement::capture(&app); app.exit(0); }
+            _ => return gtk::glib::Propagation::Proceed,
+        }
+        gtk::glib::Propagation::Stop
+    });
+    Ok(())
+}
+
+fn endpoint_url(input: &str) -> Result<tauri::Url, String> {
+    let input = input.trim();
+    if input.chars().any(char::is_control) || input.contains('\\') {
+        return Err("Enter an HTTPS origin (HTTP is allowed only on loopback).".into());
+    }
+    let url = tauri::Url::parse(input).map_err(|_| "Enter a valid Dashboard origin.")?;
+    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if !(url.scheme() == "https" || url.scheme() == "http" && loopback)
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("Use an HTTPS origin without credentials, paths, query or fragment. HTTP requires localhost, 127.0.0.1 or [::1].".into());
+    }
+    Ok(url)
+}
+
+fn navigation_allowed(url: &tauri::Url, origin: &str) -> bool {
+    // OIDC can redirect to another HTTPS origin. It never gains native privileges.
+    url.username().is_empty()
+        && url.password().is_none()
+        && (url.scheme() == "https" || url.origin().ascii_serialization() == origin)
+}
+
+#[tauri::command]
+async fn connect(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    endpoint: String,
+) -> Result<String, String> {
+    desktop::on_ui(app, move |app| {
+        authorize_launcher(&window)?;
+        connect_dashboard(app.clone(), window, endpoint)
+    }).await
+}
+
+fn authorize_launcher(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() != "launcher" || window.url().map_err(|e| e.to_string())?.scheme() != "tauri" {
+        return Err("Only the packaged connection screen can open a Dashboard.".into());
+    }
+    Ok(())
+}
+
+fn connect_dashboard(app: tauri::AppHandle, window: tauri::WebviewWindow, endpoint: String) -> Result<String, String> {
+    let url = endpoint_url(&endpoint)?;
+    let origin = url.origin().ascii_serialization();
+    desktop::prepare_origin(&app, &origin)?;
+    if let Some(previous) = app.get_webview_window("dashboard") {
+        if connection::confirmed(&app, &origin) && previous.url().map_err(|e| e.to_string())?.origin().ascii_serialization() == origin {
+            tray::reveal(&previous);
+            window.hide().map_err(|e| e.to_string())?;
+            return Ok(origin);
+        }
+    }
+    *app.state::<ConnectionOrigin>().0.lock().map_err(|e| e.to_string())? = origin.clone();
+    connection::begin(&app, &origin);
+    if let Some(previous) = app.get_webview_window("dashboard") {
+        previous.navigate(url).map_err(|e| e.to_string())?;
+        previous.show().map_err(|e| e.to_string())?;
+        previous.set_focus().map_err(|e| e.to_string())?;
+        window.hide().map_err(|e| e.to_string())?;
+        desktop::connected(&app, &origin)?;
+        return Ok(origin);
+    }
+    let navigation_app = app.clone();
+    let (width, height) = placement::initial_size(&app, "dashboard", (1100.0, 760.0));
+    // WebKit download callbacks belong to a context, not a window. Keep the
+    // Dashboard separate from the launcher's default automatic download handler.
+    let profile = app.path().app_data_dir().map_err(|e| e.to_string())?.join("dashboard-profile");
+    std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
+    let dashboard = WebviewWindowBuilder::new(&app, "dashboard", WebviewUrl::External(url))
+        .data_directory(profile)
+        .title("Agent RunLab")
+        .inner_size(width, height)
+        .min_inner_size(800.0, 600.0)
+        .initialization_script(DESKTOP_INIT)
+        .on_page_load(|window, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                connection::loaded(window.app_handle());
+            }
+        })
+        .on_navigation(move |url| {
+            navigation_app.state::<ConnectionOrigin>().0.lock()
+                .map(|origin| navigation_allowed(url, &origin)).unwrap_or(false)
+        })
+        .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+        .on_document_title_changed(|window, _| {
+            let _ = window.set_title("Agent RunLab");
+        })
+        .on_download(|webview, event| {
+            if let tauri::webview::DownloadEvent::Requested { destination, .. } = event {
+                let parent = match webview.window().gtk_window() {
+                    Ok(parent) => parent,
+                    Err(error) => {
+                        eprintln!("Unable to show desktop save dialog: {error}");
+                        return false;
+                    }
+                };
+                let dialog = gtk::FileChooserNative::new(
+                    Some("Save Dashboard download"),
+                    Some(&parent),
+                    gtk::FileChooserAction::Save,
+                    Some("Save"),
+                    Some("Cancel"),
+                );
+                if let Some(name) = destination.file_name().and_then(|name| name.to_str()) {
+                    dialog.set_current_name(name);
+                }
+                dialog.set_do_overwrite_confirmation(true);
+                let accepted = dialog.run() == gtk::ResponseType::Accept;
+                let path = dialog.filename();
+                dialog.destroy();
+                if accepted {
+                    if let Some(path) = path {
+                        *destination = path;
+                        return true;
+                    }
+                }
+                return false;
+            }
+            true
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    install_shortcuts(&dashboard).map_err(|e| e.to_string())?;
+    connection::watch_load_failures(&dashboard)?;
+    placement::restore(&dashboard);
+    window.hide().map_err(|e| e.to_string())?;
+    desktop::connected(&app, &origin)?;
+    Ok(origin)
+}
+
+fn main() {
+    match desktop::instance() {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(error) => { eprintln!("{error}"); std::process::exit(2); }
+    }
+    tauri::Builder::default()
+        .manage(ConnectionOrigin(std::sync::Mutex::new(String::new())))
+        .manage(tray::State::default())
+        .manage(desktop::State::default())
+        .manage(connection::State::default())
+        .invoke_handler(tauri::generate_handler![connect, connection::launcher_bootstrap, desktop::desktop_ui, desktop::desktop_status, desktop::desktop_notify, desktop::desktop_connection_ready])
+        .setup(|app| {
+            if let Some(launcher) = app.get_webview_window("launcher") {
+                install_shortcuts(&launcher)?;
+            }
+            if let Err(error) = tray::setup(app) {
+                eprintln!("System tray could not be confirmed; the window will remain reachable: {error}");
+            }
+            desktop::setup(app.handle());
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Focused(_)) {
+                desktop::publish_window_state(window.app_handle());
+            }
+            if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)) {
+                placement::event(window, event);
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                placement::capture(window.app_handle());
+                if tray::hide_if_available(window.app_handle(), window.label()) {
+                    api.prevent_close();
+                } else if tray::keep_open_when_uncertain(window) {
+                    api.prevent_close();
+                } else {
+                    window.app_handle().exit(0);
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("failed to build Agent RunLab desktop")
+        .run(|_, _| {});
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_shortcuts_require_exact_modifiers_but_allow_lock_keys() {
+        use gtk::gdk::{keys::constants, ModifierType as M};
+        assert_eq!(shortcut(constants::O, M::CONTROL_MASK | M::SHIFT_MASK), Some(Shortcut::Reconnect));
+        assert_eq!(shortcut(constants::o, M::CONTROL_MASK | M::SHIFT_MASK | M::LOCK_MASK | M::MOD2_MASK), Some(Shortcut::Reconnect));
+        assert_eq!(shortcut(constants::r, M::CONTROL_MASK), Some(Shortcut::Reload));
+        assert_eq!(shortcut(constants::Q, M::CONTROL_MASK | M::LOCK_MASK), Some(Shortcut::Quit));
+        for (key, modifiers) in [
+            (constants::o, M::CONTROL_MASK),
+            (constants::O, M::SHIFT_MASK),
+            (constants::q, M::empty()),
+            (constants::r, M::CONTROL_MASK | M::SHIFT_MASK),
+            (constants::q, M::CONTROL_MASK | M::MOD1_MASK),
+            (constants::O, M::CONTROL_MASK | M::SHIFT_MASK | M::SUPER_MASK),
+            (constants::Left, M::MOD1_MASK),
+        ] {
+            assert_eq!(shortcut(key, modifiers), None);
+        }
+    }
+
+    #[test]
+    fn accepts_only_secure_remote_or_explicit_loopback_origins() {
+        for endpoint in ["https://runlab.example", "https://runlab.example:13000/", "http://127.0.0.1:13000", "http://localhost:13000", "http://[::1]:13000"] {
+            assert!(endpoint_url(endpoint).is_ok(), "{endpoint}");
+        }
+        for endpoint in ["http://remote.example", "http://192.0.2.4:13000", "https://example.org", "https://example.org/path", "https://example.org?token=secret", "https://example.org/#token", "javascript:alert(1)", "file:///etc/passwd", "https://example.org%40evil.example.invalid", "not-a-url-with-newline"] {
+            assert!(endpoint_url(endpoint).is_err(), "{endpoint}");
+        }
+    }
+
+    #[test]
+    fn navigation_preserves_https_oidc_without_allowing_local_protocols() {
+        let origin = "http://127.0.0.1:13000";
+        for endpoint in ["https://id.example.org/authorize?state=1", "http://127.0.0.1:13000/auth/callback"] {
+            assert!(navigation_allowed(&tauri::Url::parse(endpoint).unwrap(), origin));
+        }
+        for endpoint in ["http://127.0.0.1:22", "http://remote.example", "tauri://localhost", "file:///etc/passwd", "https://example.org"] {
+            assert!(!navigation_allowed(&tauri::Url::parse(endpoint).unwrap(), origin));
+        }
+    }
+}

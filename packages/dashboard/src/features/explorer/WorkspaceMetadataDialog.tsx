@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Pencil, ShieldCheck, ShieldOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { HelpHint } from '../../components/ui/help-hint.js'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AttachedExecutor, ExecutorIdentitySummary, ServerExecutorIdentitiesPayload, ServerSettingsPayload, SessionSummary } from '@agent-kernel/shared'
@@ -122,10 +123,8 @@ export function WorkspaceMetadataDialog({
         data-testid="workspace-metadata-dialog"
       >
         <DialogHeader className="border-b border-border/50 px-5 py-4">
-          <DialogTitle>{displayName || t('workspaceMetadata.workspace')}</DialogTitle>
-          <DialogDescription>
-            {t('workspaceMetadata.description')}
-          </DialogDescription>
+          <DialogTitle className="flex items-center gap-1">{displayName || t('workspaceMetadata.workspace')}<HelpHint label={t('workspaceMetadata.workspace')}>{t('workspaceMetadata.description')}</HelpHint></DialogTitle>
+          <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 space-y-4 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
           <form onSubmit={submit} className="rounded-md border border-border/50 bg-card p-3" data-testid="workspace-metadata-rename-form">
@@ -177,7 +176,7 @@ export function WorkspaceMetadataDialog({
             <dl className="divide-y divide-border/50 sm:hidden" data-testid="workspace-metadata-mobile-values">
               {rows.map(([label, value]) => (
                 <div key={label} className="min-w-0 px-3 py-2">
-                  <dt className="text-[11px] font-medium text-muted-foreground">{label}</dt>
+                  <dt className="text-[0.6875rem] font-medium text-muted-foreground">{label}</dt>
                   <dd className="mt-0.5 break-all font-mono text-xs text-foreground">{value}</dd>
                 </div>
               ))}

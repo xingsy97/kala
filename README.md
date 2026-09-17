@@ -45,7 +45,13 @@ ANTHROPIC_API_KEY=<provider-key> pnpm host:dev
 pnpm dashboard:dev
 ```
 
-Open the URL printed by Vite. To use File, Git, Shell, and Terminal tools, start
+Open the URL printed by Vite. Ordinary Dashboard opens start in a fresh Simple
+Chat draft; nothing is created until the first message is sent. Choose a runtime
+in the draft, or use **New chat** at the top of the session list to start over.
+Explicit session links still reopen that conversation. Workspace **+** buttons
+continue to create workspace-bound sessions with an initial directory.
+
+To use File, Git, Shell, and Terminal tools, start
 an Executor from a workspace directory in a third terminal:
 
 ```bash
@@ -55,6 +61,21 @@ pnpm --filter @agent-kernel/executor dev -- --host http://localhost:3000 --sandb
 `OPENAI_API_KEY` may be used instead of `ANTHROPIC_API_KEY`. Provider endpoints
 and model selection can also be configured in Dashboard Settings. Never commit
 provider credentials or local configuration.
+
+## Linux desktop client
+
+The optional Tauri client connects to the **existing** React Dashboard; it does
+not bundle a Host/Runtime, start a server, or change ports. Use the Dashboard's
+Linux download button (or `/downloads/desktop/index.html`) when its deployment
+has published an artifact. Initial support is Ubuntu 24.04 amd64-compatible
+systems. The current `.deb` is an unsigned, security-review-required candidate.
+
+See the [design](docs/design/linux-desktop-client.md),
+[build/install and signed APT runbook](docs/operations/linux-desktop-release.md),
+and [dependency assessment/blockers](docs/operations/linux-desktop-supply-chain.md).
+Native builds are explicit (`pnpm desktop:build`); normal workspace builds do
+not acquire Rust/GTK requirements. No production signing key or APT hosting is
+implicitly provisioned.
 
 ## Portable release
 

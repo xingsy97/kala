@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { CompactFeedbackRow, InlineStatusRow, formatTokensShort } from './InlineStatusRow.js'
 
@@ -20,6 +20,24 @@ describe('agent activity card', () => {
     render(<InlineStatusRow state={state} streamingActive={false} progress={{ phase: 'thinking', label: 'Thinking' }} />)
     expect(screen.getByTestId('inline-status-label').textContent).toContain('Thinking')
     expect(screen.queryByTestId('inline-status-intention')).toBeNull()
+  })
+
+  it('keeps breathing and elapsed busy feedback live and yields to streaming', () => {
+    vi.useFakeTimers()
+    try {
+      const { rerender } = render(<InlineStatusRow state={state} streamingActive={false} />)
+      const row = screen.getByTestId('inline-status-thinking')
+      expect(row.getAttribute('role')).toBe('status')
+      expect(row.getAttribute('aria-live')).toBe('polite')
+      expect(row.querySelector('.ak-thinking-dot')).toBeTruthy()
+      expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('0s')
+      act(() => vi.advanceTimersByTime(2_100))
+      expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('2s')
+      rerender(<InlineStatusRow state={state} streamingActive />)
+      expect(screen.queryByTestId('inline-status-thinking')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('expresses failure and approval without verbose lifecycle prefixes', () => {

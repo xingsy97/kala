@@ -138,14 +138,14 @@ export function BackgroundShellsButton({
             <DialogTitle className="flex flex-wrap items-center gap-2 text-sm">
               <TerminalSquare className="h-4 w-4" aria-hidden="true" />
               {t('chat.backgroundShells.dialogTitle', { scope: scopeLabel })}
-              <span className="text-[11px] font-normal text-muted-foreground">
+              <span className="text-[0.6875rem] font-normal text-muted-foreground">
                 {running > 0
                   ? t('chat.backgroundShells.summaryRunning', { running, total: rows.length })
                   : t('chat.backgroundShells.summaryTotal', { count: rows.length })}
               </span>
               {unknownFallbackCount > 0 ? (
                 <span
-                  className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                  className="rounded bg-amber-50 px-1.5 py-0.5 text-[0.625rem] font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
                   title={t('chat.backgroundShells.unknownHint')}
                   data-testid="bg-unknown-note"
                 >
@@ -277,15 +277,15 @@ function TaskList({
                     {parts.head}
                   </span>
                   {parts.tail ? (
-                    <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                    <span className="block truncate font-mono text-[0.625rem] text-muted-foreground">
                       {parts.tail}
                     </span>
                   ) : null}
-                  <span className="mt-0.5 block truncate text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <span className="mt-0.5 block truncate text-[0.625rem] uppercase tracking-wide text-muted-foreground">
                     {row.origin === 'live' ? t('chat.backgroundShells.live') : t('chat.backgroundShells.replay')} · {row.taskId}
                   </span>
                 </button>
-                <span className="mt-0.5 hidden flex-none rounded bg-secondary px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground sm:inline-flex">
+                <span className="mt-0.5 hidden flex-none rounded bg-secondary px-1.5 py-0.5 text-[0.625rem] capitalize text-muted-foreground sm:inline-flex">
                   {row.status}
                 </span>
               </div>
@@ -333,7 +333,7 @@ function OutputPane({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-col">
-      <div className="flex min-w-0 flex-none flex-col gap-2 border-b border-border/50 bg-background/50 px-3 py-2 text-[11px] text-muted-foreground">
+      <div className="flex min-w-0 flex-none flex-col gap-2 border-b border-border/50 bg-background/50 px-3 py-2 text-[0.6875rem] text-muted-foreground">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="min-w-0 truncate font-mono">task {row.taskId}</span>
           {row.pid !== undefined ? <span className="font-mono">pid {row.pid}</span> : null}
@@ -382,11 +382,11 @@ function OutputPane({
           </span>
         </div>
         <div className="rounded-md border border-border/50 bg-muted/40 px-2 py-1.5">
-          <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="mb-1 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
             {t('chat.backgroundShells.command')}
           </div>
           <pre
-            className="max-h-24 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
+            className="max-h-24 whitespace-pre-wrap break-words font-mono text-[0.6875rem] leading-relaxed text-foreground [overflow-wrap:anywhere]"
             data-testid="bg-task-command"
           >
             {row.command}
@@ -395,7 +395,7 @@ function OutputPane({
         <div className="hidden sm:block"><ProcessDetails row={row} /></div>
       </div>
       <ScrollArea className="min-h-0 flex-1 bg-background" viewportRef={viewportRef} data-testid="bg-task-output">
-        <pre className="min-w-0 whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
+        <pre className="min-w-0 whitespace-pre-wrap break-words p-3 font-mono text-[0.6875rem] leading-relaxed text-foreground [overflow-wrap:anywhere]">
           {truncatedNote}
           {output.length > 0
             ? output
@@ -413,7 +413,7 @@ function StatusPill({ status }: { status: TerminalRow['status'] }): JSX.Element 
   return (
     <span
       className={cn(
-        'mt-0.5 flex-none rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+        'mt-0.5 flex-none rounded px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide',
         statusClass(status),
       )}
       title={statusHelp(status, t)}
@@ -437,10 +437,10 @@ function ProcessDetails({ row }: { row: TerminalRow }): JSX.Element {
     <div className="grid grid-cols-2 gap-1 rounded-md border border-border/50 bg-muted/30 px-2 py-1.5 sm:grid-cols-3">
       {fields.map(([label, value]) => (
         <div key={label} className="min-w-0">
-          <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="text-[0.5625rem] font-medium uppercase tracking-wide text-muted-foreground">
             {label}
           </div>
-          <div className="truncate font-mono text-[11px] text-foreground" title={value}>
+          <div className="truncate font-mono text-[0.6875rem] text-foreground" title={value}>
             {value}
           </div>
         </div>

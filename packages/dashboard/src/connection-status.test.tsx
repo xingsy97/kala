@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ConnectionStatus } from './app.js'
@@ -11,7 +11,7 @@ function socketWithRtt(hostRttMs = 12, executorRttMs: number | null = 34) {
   })
   return {
     connected: true,
-    timeout: vi.fn(() => ({
+    timeout: vi.fn((_timeout: number) => ({
       emit: (event: string, _arg: unknown, callback: (...args: unknown[]) => void) => {
         if (event === 'client:connection_ping') callback(null)
         if (event === 'client:executor_ping') callback(null, { rttMs: executorRttMs ?? undefined })
@@ -59,6 +59,76 @@ describe('ConnectionStatus', () => {
     vi.restoreAllMocks()
   })
 
+  it('shows animated pending synchronization without confusing it with readiness', () => {
+    render(<ConnectionStatus socket={socketWithRtt() as never} status="connecting" cursor={0} executorConnected={false} onResync={() => {}} />)
+    const indicator = screen.getByTestId('connection-status')
+    expect(indicator.getAttribute('data-status')).toBe('connecting')
+    expect(indicator.textContent).toContain('Connecting')
+    expect(indicator.querySelector('.bg-amber-500')).not.toBeNull()
+    expect(indicator.querySelector('.ak-status-pulse')).toBeTruthy()
+  })
+
+  it('keeps transport on one visible row and moves the explanation to a help icon', () => {
+    render(<ConnectionStatus socket={socketWithRtt() as never} status="ready" transport="websocket" cursor={9} executorConnected={false} onResync={() => {}} />)
+    fireEvent.click(screen.getByTestId('connection-status'))
+    const popover = screen.getByTestId('connection-status-popover')
+    expect(popover.querySelector('details')).toBeNull()
+    expect(within(popover).queryByText('Diagnostics')).toBeNull()
+    expect(within(popover).queryByText('Reachability and round-trip latency')).toBeNull()
+    expect(screen.queryByText('Reachability and round-trip latency')).toBeNull()
+    fireEvent.click(screen.getByTestId('connection-health-help'))
+    expect(screen.getByRole('tooltip').textContent).toBe('Reachability and round-trip latency')
+    const row = within(screen.getByTestId('connection-transport-row'))
+    expect(row.getByText('Transport · websocket')).toBeTruthy()
+    expect(row.getByRole('button', { name: 'Copy' })).toBeTruthy()
+  })
+
+  it.each([true, false])('measures only the host for Chats regardless of executor presence (%s)', async (executorConnected) => {
+    const socket = socketWithRtt()
+    const clipboard = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } })
+    render(<ConnectionStatus socket={socket as never} status="ready" cursor={9} executorConnected={executorConnected} onResync={() => {}} />)
+    await waitFor(() => expect(screen.getByTestId('connection-headline-latency').textContent).toBe('12 ms'))
+    fireEvent.click(screen.getByTestId('connection-status'))
+    expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('ready')
+    expect(screen.getByText('Healthy')).toBeTruthy()
+    expect(screen.queryByTestId('connection-segment-service-executor')).toBeNull()
+    expect(screen.queryByTestId('connection-health-executor-line')).toBeNull()
+    expect(screen.queryByText('Executor')).toBeNull()
+    expect(screen.getByTestId('connection-health-curve').querySelectorAll('circle')).toHaveLength(0)
+    expect(screen.getAllByTestId('connection-health-sample-hit')[0]?.getAttribute('aria-label')).not.toContain('Executor')
+    expect(socket.timeout.mock.calls.every(([timeout]) => timeout === 3000)).toBe(true)
+    fireEvent.click(screen.getByText('Copy'))
+    expect(JSON.parse(clipboard.mock.calls[0]![0])).not.toHaveProperty('executorPresence')
+  })
+
+  it('keeps host failures and session synchronization errors visible for Chats', () => {
+    const view = render(<ConnectionStatus socket={timedOutSocket() as never} status="ready" cursor={0} executorConnected onResync={() => {}} />)
+    expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('error')
+    view.rerender(<ConnectionStatus socket={socketWithRtt() as never} status="error" cursor={0} executorConnected onResync={() => {}} />)
+    expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('error')
+    view.rerender(<ConnectionStatus socket={null} status="disconnected" cursor={0} executorConnected onResync={() => {}} />)
+    expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('disconnected')
+  })
+
+  it('discards pending workspace probes and history when switching to host-only Chat', () => {
+    const pending: Array<(...args: unknown[]) => void> = []
+    const socket = {
+      connected: true,
+      timeout: () => ({ emit: (_event: string, _arg: unknown, callback: (...args: unknown[]) => void) => pending.push(callback) }),
+    }
+    const view = render(<ConnectionStatus socket={socket as never} workspaceId="w1" status="ready" cursor={0} executorConnected onResync={() => {}} />)
+    const oldProbes = pending.splice(0)
+    view.rerender(<ConnectionStatus socket={socket as never} status="ready" cursor={0} executorConnected onResync={() => {}} />)
+    act(() => pending.splice(0).forEach((callback) => callback(null)))
+    act(() => oldProbes.forEach((callback) => callback(new Error('stale timeout'))))
+    fireEvent.click(screen.getByTestId('connection-status'))
+    act(() => pending.splice(0).forEach((callback) => callback(null)))
+    expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('ready')
+    expect(screen.getByTestId('connection-health-curve').querySelectorAll('circle')).toHaveLength(0)
+    expect(screen.queryByTestId('connection-segment-service-executor')).toBeNull()
+  })
+
   it('presents the complete Device to Service to Executor RTT as the headline', async () => {
     const socket = socketWithRtt()
     render(<ConnectionStatus socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
@@ -90,6 +160,14 @@ describe('ConnectionStatus', () => {
     fireEvent.click(screen.getByTestId('connection-status'))
     expect(screen.getByText('Offline')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Measure again' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('does not call a real workspace healthy when its executor is offline', () => {
+    render(<ConnectionStatus socket={socketWithRtt() as never} status="ready" cursor={0} workspaceId="w1" executorConnected={false} onResync={() => {}} />)
+    fireEvent.click(screen.getByTestId('connection-status'))
+    expect(screen.getByTestId('connection-segment-service-executor').getAttribute('title')).toContain('Offline')
+    expect(screen.queryByText('Healthy')).toBeNull()
+    expect(screen.getByText('Check connection')).toBeTruthy()
   })
 
   it('marks the overall connection as failed when both latency probes time out', async () => {

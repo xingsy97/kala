@@ -13,8 +13,10 @@ describe('session file download helpers', () => {
     expect(binary?.blob.type).toBe('application/octet-stream')
   })
 
-  it('does not download truncated text views', () => {
+  it('does not download truncated views as complete files', () => {
     expect(fileResultDownloadBlob({ requestId: 'r1', workspaceId: 'w1', path: '/repo/a.txt', kind: 'text', content: 'partial', size: 100, truncated: true })).toBeUndefined()
+    expect(fileResultDownloadBlob({ requestId: 'r1', workspaceId: 'w1', path: '/repo/a.png', kind: 'image', content: 'AAE=', mediaType: 'image/png', size: 100, truncated: true })).toBeUndefined()
+    expect(fileResultDownloadBlob({ requestId: 'r1', workspaceId: 'w1', path: '/repo/a.bin', kind: 'binary', content: 'AAE=', mediaType: 'application/octet-stream', size: 100, truncated: true })).toBeUndefined()
   })
 
   it('derives a filename without leaking parent path components', () => {

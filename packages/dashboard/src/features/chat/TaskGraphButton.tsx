@@ -59,7 +59,7 @@ function GroupedList({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
     [t('taskGraph.done'), graph.nodes.filter((node) => node.status === 'completed' || node.status === 'cancelled')],
   ] as const
   return <div className="space-y-3">{groups.map(([label, nodes]) => nodes.length ? <section key={label}>
-    <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label} ({nodes.length})</h3>
+    <h3 className="mb-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">{label} ({nodes.length})</h3>
     <div className="space-y-1">{nodes.map((node) => <NodeRow key={node.id} node={node} waitingOn={blocked.get(node.id)} />)}</div>
   </section> : null)}</div>
 }
@@ -69,7 +69,7 @@ function NodeRow({ node, waitingOn }: { node: TaskGraphNode; waitingOn?: readonl
   return <div className="flex gap-2 rounded-md bg-muted/35 px-2.5 py-2 text-sm">
     <StatusIcon status={node.status} blocked={Boolean(waitingOn?.length)} />
     <div className="min-w-0"><div className={cn('break-words', (node.status === 'completed' || node.status === 'cancelled') && 'text-muted-foreground line-through')}>{node.content}</div>
-      <div className="mt-0.5 text-[11px] text-muted-foreground"><code>{node.id}</code>{node.priority ? ` · ${node.priority}` : ''}{waitingOn?.length ? ` · ${t('taskGraph.waitingOn', { ids: waitingOn.join(', ') })}` : ''}</div>
+      <div className="mt-0.5 text-[0.6875rem] text-muted-foreground"><code>{node.id}</code>{node.priority ? ` · ${node.priority}` : ''}{waitingOn?.length ? ` · ${t('taskGraph.waitingOn', { ids: waitingOn.join(', ') })}` : ''}</div>
     </div>
   </div>
 }
@@ -122,7 +122,7 @@ function GraphView({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
           blocked && 'border-amber-500/60', node.status === 'cancelled' && 'border-dashed opacity-60', selected === node.id && 'ring-2 ring-sky-500', dimmed && 'opacity-25')}
         style={{ left: x, top: y, width: GRAPH_NODE_WIDTH, height: GRAPH_NODE_HEIGHT }} data-node-id={node.id}>
         <span className="line-clamp-2 text-xs font-medium leading-snug">{node.content}</span>
-        <span className="mt-auto flex items-center gap-1.5 text-[10px] text-muted-foreground"><StatusIcon status={node.status} blocked={blocked} /><code className="truncate">{node.id}</code></span>
+        <span className="mt-auto flex items-center gap-1.5 text-[0.625rem] text-muted-foreground"><StatusIcon status={node.status} blocked={blocked} /><code className="truncate">{node.id}</code></span>
       </button>
     })}
   </div></div>

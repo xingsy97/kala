@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListEntry, DirListResult, FileContentsResult, TerminalCreateResult, TerminalKillResult } from '@agent-kernel/shared'
 
 import { SessionFilesPanel, WorkspaceFileViewDialog } from './SessionFilesPanel.js'
+import { FILE_VIEW_FONT_SIZE_PX } from '../../lib/display-sizes.js'
 
 const setPositionMock = vi.fn()
 const revealLineInCenterMock = vi.fn()
@@ -37,6 +38,7 @@ const revokeObjectURLMock = vi.fn()
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class TerminalMock {
+    options = { fontSize: 12 }
     cols = 100
     rows = 8
     write = writeMock
@@ -113,7 +115,7 @@ describe('SessionFilesPanel', () => {
 
     expect((await screen.findByTestId('monaco-editor')).textContent).toContain('hello')
     expect(screen.getByTestId('monaco-editor').getAttribute('data-readonly')).toBe('true')
-    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('14')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('17.5')
     expect(socket.emitMock).toHaveBeenCalledWith('client:list_dirs', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo' }))
     expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ workspaceId: 'ws-1', path: '/repo/notes.txt', maxBytes: 1024 * 1024 }), expect.any(Function))
   })
@@ -129,7 +131,22 @@ describe('SessionFilesPanel', () => {
 
     fireEvent.click(await screen.findByText('notes.txt'))
 
-    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('18')
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('22.5')
+  })
+
+  it('renders the maximum file font and rescales an open view without fetching the file again', async () => {
+    localStorage.setItem('ak-file-view-font-size', String(FILE_VIEW_FONT_SIZE_PX.indexOf(48)))
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'text', content: 'hello', size: 5 },
+      entries: [{ name: 'notes.txt', path: '/repo/notes.txt', type: 'file', size: 5 }],
+    })
+    render(<SessionFilesPanel socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('notes.txt'))
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('60')
+    const reads = socket.emitMock.mock.calls.filter(([event]) => event === 'workspace:read_binary').length
+    fireEvent(window, new StorageEvent('storage', { key: 'ak-interface-scale', newValue: '200' }))
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('96')
+    expect(socket.emitMock.mock.calls.filter(([event]) => event === 'workspace:read_binary')).toHaveLength(reads)
   })
 
   it('shows large and binary files without loading full content into Monaco', async () => {
@@ -240,7 +257,66 @@ describe('SessionFilesPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: /download archive\.bin/i }))
 
     await waitFor(() => expect(createObjectURLMock).toHaveBeenCalled())
-    expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ workspaceId: 'ws-1', path: '/repo/archive.bin', maxBytes: 100 * 1024 * 1024 }), expect.any(Function))
+    expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ workspaceId: 'ws-1', path: '/repo/archive.bin', offset: 0, maxBytes: 4 * 1024 * 1024 }), expect.any(Function))
+  })
+
+  it('assembles large downloads in chunks instead of saving a truncated preview', async () => {
+    const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4]), new Uint8Array([5])]
+    const requests: Record<string, unknown>[] = []
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'binary', content: 'AAE=', size: 2, encoding: 'base64', mediaType: 'application/octet-stream' },
+      entries: [{ name: 'large.bin', path: '/repo/large.bin', type: 'file', size: 5 }],
+    })
+    socket.emitMock.mockImplementation((event: string, payload: Record<string, unknown>, ack?: (payload: unknown) => void) => {
+      if (event === 'client:list_dirs') queueMicrotask(() => socket.serverEmit('server:dir_list', dirList(String(payload.requestId), [{ name: 'large.bin', path: '/repo/large.bin', type: 'file', size: 5 }])))
+      if (event === 'workspace:read_binary') {
+        requests.push(payload)
+        const index = requests.length - 1
+        queueMicrotask(() => ack?.({
+          requestId: payload.requestId,
+          base64: btoa(String.fromCharCode(...chunks[index]!)),
+          mime: 'application/octet-stream',
+          size: 5,
+          offset: payload.offset,
+          ...(index < chunks.length - 1 ? { truncated: { maxBytes: 2 } } : {}),
+        }))
+      }
+      return undefined
+    })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: /download large\.bin/i }))
+
+    await waitFor(() => expect(createObjectURLMock).toHaveBeenCalled())
+    expect(requests.map((request) => request.offset)).toEqual([0, 2, 4])
+    expect(requests.every((request) => request.maxBytes === 4 * 1024 * 1024)).toBe(true)
+    expect(createObjectURLMock.mock.calls[0]?.[0]).toMatchObject({ size: 5, type: 'application/octet-stream' })
+  })
+
+  it('does not save corrupted chunks when a legacy executor ignores offsets', async () => {
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'binary', content: btoa('first'), size: 10, encoding: 'base64', mediaType: 'application/octet-stream' },
+      entries: [{ name: 'legacy.bin', path: '/repo/legacy.bin', type: 'file', size: 10 }],
+    })
+    socket.emitMock.mockImplementation((event: string, payload: Record<string, unknown>, ack?: (payload: unknown) => void) => {
+      if (event === 'client:list_dirs') queueMicrotask(() => socket.serverEmit('server:dir_list', dirList(String(payload.requestId), [{ name: 'legacy.bin', path: '/repo/legacy.bin', type: 'file', size: 10 }])))
+      if (event === 'workspace:read_binary') {
+        queueMicrotask(() => ack?.({
+          requestId: payload.requestId,
+          base64: btoa('first'),
+          mime: 'application/octet-stream',
+          size: 10,
+          truncated: { maxBytes: 5 },
+        }))
+      }
+      return undefined
+    })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByRole('button', { name: /download legacy\.bin/i }))
+
+    await waitFor(() => expect(socket.emitMock.mock.calls.filter(([event]) => event === 'workspace:read_binary')).toHaveLength(2))
+    expect(createObjectURLMock).not.toHaveBeenCalled()
   })
 
   it('renders GIF files through the image viewer', async () => {
@@ -415,13 +491,13 @@ describe('SessionFilesPanel', () => {
     render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
 
     fireEvent.click(await screen.findByText('notes.txt'))
-    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('14')
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('17.5')
 
     fireEvent.click(screen.getByRole('button', { name: /increase file view font size/i }))
-    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('16')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('20')
     fireEvent.click(screen.getByRole('button', { name: /decrease file view font size/i }))
     fireEvent.click(screen.getByRole('button', { name: /decrease file view font size/i }))
-    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('12')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('15')
     expect(localStorage.getItem('ak-file-view-font-size')).toBe('2')
   })
 

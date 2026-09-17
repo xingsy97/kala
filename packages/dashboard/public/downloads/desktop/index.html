@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent RunLab — Linux desktop</title>
+  <link rel="stylesheet" href="install.css" />
+</head>
+<body>
+  <main>
+    <a href="/">← Dashboard</a>
+    <h1>Agent RunLab for Linux</h1>
+    <p>A small Tauri client for your existing React Dashboard. No bundled Host or Runtime. Your server and ports stay unchanged.</p>
+    <p lang="zh">Linux 桌面客户端：复用当前 Dashboard，不启动后端，不改变端口。</p>
+    <p><strong>Unsigned release candidate — security review required.</strong> The native GTK3 dependency graph includes upstream advisory <code>RUSTSEC-2024-0429</code>. Existing Dashboard dependencies also have unresolved audit findings. This is not a production security-approved release. See the dependency manifest and <code>docs/operations/linux-desktop-supply-chain.md</code> in the source distribution.</p>
+    <div id="release" role="status">Checking this deployment's release files…</div>
+    <section id="available" hidden>
+      <h2>Download and install</h2>
+      <p id="version"></p>
+      <p><a id="deb" download>Download Linux amd64 .deb</a> · <a id="manifest" download>Dependency manifest</a> · <a id="checksums" download>SHA256SUMS.txt</a></p>
+      <h3>Download &amp; install with one copied command</h3>
+      <p>Copy the entire Bash block and run it in your Linux terminal. The browser does not execute installation.</p>
+      <button type="button" id="deb-copy">Copy download &amp; install command</button>
+      <pre id="commands"></pre>
+      <p>Already downloaded? Use the local command below instead of running APT directly on a file in your private home directory. It copies the package from Downloads or the current directory into /tmp, verifies it, installs it without the _apt permission warning, then cleans up. Your original file and home permissions stay unchanged.</p>
+      <details>
+        <summary>Install an already downloaded .deb</summary>
+        <button type="button" id="local-copy">Copy local installation command</button>
+        <pre id="local-commands"></pre>
+      </details>
+      <p>A checksum detects corruption; it is not a publisher signature. Obtain this package from a trusted deployment. This standalone .deb does not enable automatic updates.</p>
+      <details><summary>Remove the desktop application</summary><pre>sudo apt remove agent-runlab-desktop</pre><p>Your account and server remain unchanged.</p></details>
+    </section>
+    <h2>Connect securely</h2>
+    <p>Start <strong>Agent RunLab</strong> from your applications menu. Enter this Dashboard's origin, for example <code id="origin"></code>. Remote Hosts require HTTPS; HTTP is accepted only for explicit loopback such as <code>http://127.0.0.1:13000</code>.</p>
+    <p>Sign in inside the desktop client; browser cookies are not imported. Workspace paths and terminals remain on the remote Runtime. The client has no shell or filesystem API exposed to Dashboard scripts. A working network connection is required.</p>
+    <h2>Normal package updates through APT</h2>
+    <p id="apt-status">A production signed APT repository has not been configured for this build. Do not add an unsigned repository or use <code>trusted=yes</code>. Once an operator publishes a signed HTTPS repository and verifies its signing-key fingerprint independently, your regular <code>apt update</code> / <code>apt upgrade</code> workflow can update the client.</p>
+    <section id="apt-available" hidden>
+      <button type="button" id="apt-copy">Copy installation command</button>
+      <pre id="apt-commands"></pre>
+    </section>
+    <p>Operators: see <code>docs/operations/linux-desktop-release.md</code> in the source distribution for repository publishing and verification instructions.</p>
+    <h2>Supported systems</h2>
+    <p>Ubuntu 24.04 amd64 or compatible systems with GTK 3 and WebKitGTK 4.1. Debian/older Ubuntu compatibility must be verified against the package's minimum libc dependency. No Windows, macOS, Snap or AppImage package is advertised.</p>
+  </main>
+  <script type="module" src="install.js"></script>
+  <script type="module" src="install-apt.js"></script>
+</body>
+</html>

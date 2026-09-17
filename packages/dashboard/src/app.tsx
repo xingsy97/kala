@@ -1,5 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Archive, Boxes, ChevronRight, ChevronUp, Eraser, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
+import { HelpHint } from './components/ui/help-hint.js'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -57,6 +58,7 @@ import { AskUserChoiceCard } from './features/chat/AskUserChoiceCard.js'
 import { BackgroundShellsButton } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel, type WorkspaceFileTarget } from './features/chat/ChatPanel.js'
 import { APPROVAL_MODES, Composer } from './features/chat/Composer.js'
+import { SimpleChatDraft } from './features/chat/SimpleChatDraft.js'
 import { ComposerFlipContainer } from './features/chat/ComposerFlipContainer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { BannerStack, BannerSlot } from './features/chat/BannerStack.js'
@@ -73,7 +75,7 @@ import { TasksButton } from './features/chat/TasksButton.js'
 import { tasksFromMessages, tasksFromTimeline } from './features/chat/tasks-from-timeline.js'
 import { taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
 import { TaskGraphButton } from './features/chat/TaskGraphButton.js'
-import { Explorer, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
+import { Explorer, NewChatButton, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { SessionPreviewStore } from './features/explorer/session-preview-store.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
@@ -81,7 +83,7 @@ import { RightPanel, type RightPanelTab } from './features/right-panel/RightPane
 import { SessionTabStrip } from './features/session-tabs/SessionTabStrip.js'
 import { useSessionTabs } from './session-tabs.js'
 import { AppShellNav } from './app-shell/AppShellNav.js'
-import { useAppSection, useSessionDeepLink, type AppSection } from './app-shell/section.js'
+import { parseSessionDeepLink, useAppSection, useSessionDeepLink, type AppSection } from './app-shell/section.js'
 import { useRuntimeDeployment } from './runtime-capabilities.js'
 import { configureArtifactClient } from './features/artifacts/artifact-client.js'
 import { useAuthSession } from './auth-session.js'
@@ -133,6 +135,8 @@ import { coarseStatusForIndicator, deriveSelectedSessionActivity, isRunningSessi
 import { modelKey, resolveModelKey } from './app-logic/model-key.js'
 import { useModels } from './app-logic/use-models.js'
 import { useIsMobile, useMinWidth } from './app-logic/use-viewport.js'
+import { useInterfaceScale } from './lib/interface-scale.js'
+import { CHAT_FONT_SIZE_PX, SESSION_EXPLORER_FONT_SIZE_PX, FILE_EXPLORER_FONT_SIZE_PX } from './lib/display-sizes.js'
 import { deleteSessionScrollState, useSessionPinnedState } from './features/chat/session-scroll-state.js'
 import type { PendingUserTranscriptMessage } from './transcript.js'
 import type { DashboardSocket, TimelineEntry } from './session.js'
@@ -160,6 +164,8 @@ import {
   PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_TOPBAR_OPEN,
   PREF_KEEP_SCREEN_AWAKE,
+  PREF_AGENT_RUNTIME,
+  writeStringPref,
   useBooleanPref,
   useNumberPref,
 } from './lib/prefs.js'
@@ -171,6 +177,8 @@ import {
 import { createDurableSessionViewCache, sessionCacheNamespace } from './durable-session-cache.js'
 import { KERNEL_AGENT_RUNTIME_CAPABILITIES, PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
+import { useNativeDesktop } from './lib/use-native-desktop.js'
+import { isDesktopClient } from './lib/desktop.js'
 import { AccountCenter } from './features/account/AccountCenter.js'
 import { AdminCenter } from './features/admin/AdminCenter.js'
 import { usePushActivityHeartbeat } from './lib/push-activity.js'
@@ -196,10 +204,7 @@ type SlashDeleteState = {
   sessionId: string
 }
 
-const SESSION_EXPLORER_FONT_SIZE_PX = [11, 12, 13, 14, 15] as const
-const FILE_EXPLORER_FONT_SIZE_PX = [10, 11, 12, 13, 14] as const
 const COMPACT_WATCHDOG_MS = 75_000
-const SIMPLE_CHAT_TOOLS: readonly string[] = ['todowrite', 'todo_graph', 'agent', 'websearch', 'memory']
 
 /**
  * Fetch the host's advertised models on mount. The host reads them from
@@ -229,6 +234,7 @@ function PageLoadingFallback({ compact = false }: { compact?: boolean }): JSX.El
 export function App(): JSX.Element {
   const { t } = useTranslation()
   const [config, setConfig] = useState(() => readInitialConfig())
+  const [draftKey, setDraftKey] = useState(0)
   // Selection feedback is urgent and intentionally independent from the heavy
   // workspace/session hydration commit. Explorer can paint the marker first.
   const [optimisticSelectedSessionId, setOptimisticSelectedSessionId] = useState<string | null>(null)
@@ -292,7 +298,8 @@ export function App(): JSX.Element {
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     { min: 0, max: 10 },
   )
-  const [chatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, { min: 0, max: 6 })
+  const interfaceScale = useInterfaceScale()
+  const [chatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, { min: 0, max: CHAT_FONT_SIZE_PX.length - 1 })
   const [sessionExplorerFontSize] = useNumberPref(PREF_SESSION_EXPLORER_FONT_SIZE, DEFAULT_SESSION_EXPLORER_FONT_SIZE, { min: 0, max: SESSION_EXPLORER_FONT_SIZE_PX.length - 1 })
   const [fileExplorerFontSize] = useNumberPref(PREF_FILE_EXPLORER_FONT_SIZE, DEFAULT_FILE_EXPLORER_FONT_SIZE, { min: 0, max: FILE_EXPLORER_FONT_SIZE_PX.length - 1 })
   const [chatContentWidth] = useNumberPref(PREF_CHAT_CONTENT_WIDTH, DEFAULT_CHAT_CONTENT_WIDTH, { min: 0, max: 2 })
@@ -315,8 +322,8 @@ export function App(): JSX.Element {
   const [durableSessionCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
   const [appBadgeEnabled] = useBooleanPref(PREF_APP_BADGE_ENABLED, true)
   const [keepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
-  const sessionExplorerFontSizePx = SESSION_EXPLORER_FONT_SIZE_PX[sessionExplorerFontSize] ?? SESSION_EXPLORER_FONT_SIZE_PX[DEFAULT_SESSION_EXPLORER_FONT_SIZE]
-  const fileExplorerFontSizePx = FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? FILE_EXPLORER_FONT_SIZE_PX[DEFAULT_FILE_EXPLORER_FONT_SIZE]
+  const sessionExplorerFontSizePx = (SESSION_EXPLORER_FONT_SIZE_PX[sessionExplorerFontSize] ?? 13) * interfaceScale
+  const fileExplorerFontSizePx = (FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? 11) * interfaceScale
   const cachedSessionIdsRef = useRef<ReadonlySet<string>>(new Set())
   const [hostEndpoint, setHostEndpoint] = useState<ResolvedHostEndpoint>(() => resolveHostEndpoint())
   const identityCacheNamespace = privateCloudMode
@@ -392,13 +399,13 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (!config.explicit) {
       if (window.location.search !== '') {
-        window.history.replaceState(null, '', window.location.pathname)
+        window.history.replaceState(null, '', window.location.pathname + window.location.hash)
       }
       return
     }
     if (!config.sessionId) {
       if (window.location.search !== '') {
-        window.history.replaceState(null, '', window.location.pathname)
+        window.history.replaceState(null, '', window.location.pathname + window.location.hash)
       }
       return
     }
@@ -406,7 +413,7 @@ export function App(): JSX.Element {
     // memory (see readInitialConfig) so it can't leak via history/referrer.
     const next = `?${new URLSearchParams({ sessionId: config.sessionId }).toString()}`
     if (window.location.search !== next) {
-      window.history.replaceState(null, '', next)
+      window.history.replaceState(null, '', next + window.location.hash)
     }
   }, [config])
 
@@ -473,7 +480,7 @@ export function App(): JSX.Element {
     summaryStatus: currentSession?.status,
     liveStatus: session.state?.status,
     pendingCalls: session.state?.pendingCalls,
-    streamingActive: session.streamingText.length > 0,
+    streamingActive: session.streamingActive,
     awaitingAck,
     compactRunning: compactStatus.kind === 'running',
     lastError: session.lastError?.message,
@@ -484,6 +491,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     // A visible app has no unread app-level notifications. Do not immediately
     // recreate a badge from persistent session status after entry cleared it.
+    if (isDesktopClient()) return
     const count = document.visibilityState === 'visible' || !appBadgeEnabled ? 0 : deriveAppBadgeCount({
       sessions: control.sessions,
       activePendingApprovals: session.pendingApprovals.length,
@@ -493,6 +501,7 @@ export function App(): JSX.Element {
     void updateAppBadge(count)
   }, [activeSessionId, appBadgeEnabled, control.sessions, session.lastError, session.pendingApprovals.length, session.status])
   useEffect(() => {
+    if (isDesktopClient()) return
     const clearIndicators = (): void => {
       if (document.visibilityState !== 'visible') return
       void clearAppNotificationIndicators()
@@ -601,10 +610,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (!awaitingAck) return
     const status = session.state?.status
-    if ((status && status !== 'idle') || session.streamingText.length > 0) {
+    if ((status && status !== 'idle') || session.streamingActive) {
       setAwaitingAck(false)
     }
-  }, [awaitingAck, session.state, session.streamingText])
+  }, [awaitingAck, session.state, session.streamingActive])
 
   useEffect(() => {
     if (cancelPendingSessionId === null || cancelPendingSessionId !== activeSessionId) return
@@ -624,9 +633,9 @@ export function App(): JSX.Element {
       session.timeline,
       session.queuedMessages,
       session.state?.status,
-      session.streamingText,
+      session.streamingActive ? session.streamingText : '',
     ))
-  }, [session.timeline, session.queuedMessages, session.state?.status, session.streamingText])
+  }, [session.timeline, session.queuedMessages, session.state?.status, session.streamingText, session.streamingActive])
 
   useEffect(() => {
     setOptimisticQueuedMessages((prev) => reconcileOptimisticQueuedMessages(prev, session.queuedMessages, session.timeline))
@@ -867,6 +876,8 @@ export function App(): JSX.Element {
   }, [])
   const clearSessionSelection = useCallback((): void => {
     pendingCreatedSessionId.current = null
+    setOptimisticSelectedSessionId(null)
+    setDraftKey((key) => key + 1)
     suppressNextAutoSessionSelection.current = true
     setMetadataOpen(false)
     setMetadataSessionId(null)
@@ -883,11 +894,16 @@ export function App(): JSX.Element {
   const newSession = useCallback((workspaceId?: string): void => {
     setWorkspacePickError(null)
     setWorkspacePickSubmitting(false)
+    if (workspaceId === undefined) {
+      setPendingWorkspacePick(null)
+      clearSessionSelection()
+      return
+    }
     setPendingWorkspacePick({
       sessionId: randomId(),
       ...(workspaceId !== undefined ? { workspaceId } : {}),
     })
-  }, [])
+  }, [clearSessionSelection])
   const sessionTabs = useSessionTabs(control.sessions, config.sessionId, selectSession)
   useEffect(() => {
     if (!isStandalone()) return
@@ -942,30 +958,9 @@ export function App(): JSX.Element {
       setWorkspacePickSubmitting(false)
     }
   }
-  const startSimpleChat = async (agentRuntime: import('@agent-kernel/shared').AgentRuntimeId): Promise<void> => {
-    if (!pendingWorkspacePick) return
-    const { sessionId } = pendingWorkspacePick
-    if (!controlSocket) {
-      setWorkspacePickError(t('app.socketNotConnected'))
-      return
-    }
-    setWorkspacePickSubmitting(true)
-    setWorkspacePickError(null)
-    try {
-      await createSessionWithAck(controlSocket, {
-        sessionId,
-        agentRuntime,
-        tools: SIMPLE_CHAT_TOOLS,
-        ...(agentRuntime === 'kernel' ? { selectedModel: preferredModel } : {}),
-      })
-      selectCreatedSession(sessionId)
-      setPendingWorkspacePick(null)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      setWorkspacePickError(message === 'runtime_not_ready' ? t('dialogs.runtimeTemporarilyReadOnly') : message)
-    } finally {
-      setWorkspacePickSubmitting(false)
-    }
+  const startSimpleChat = (agentRuntime: import('@agent-kernel/shared').AgentRuntimeId): void => {
+    writeStringPref(PREF_AGENT_RUNTIME, agentRuntime)
+    newSession()
   }
   const deleteSessionAt = useCallback((sessionId: string): void => {
     if (!controlSocket) {
@@ -1204,10 +1199,10 @@ export function App(): JSX.Element {
       session.timeline,
       session.queuedMessages,
       session.state?.status,
-      session.streamingText,
+      session.streamingActive ? session.streamingText : '',
       currentAgentRuntime === 'kernel' ? EMPTY_MESSAGES : stateMessages,
     ),
-    [pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText, currentAgentRuntime, stateMessages],
+    [pendingUserMessages, session.timeline, session.queuedMessages, session.state?.status, session.streamingText, session.streamingActive, currentAgentRuntime, stateMessages],
   )
   const chatItems = useMemo(
     () =>
@@ -1218,8 +1213,9 @@ export function App(): JSX.Element {
         session.streamingText,
         visiblePendingUserMessages,
         visibleQueuedMessages,
+        { streamingActive: session.streamingActive, streamingAnchor: session.streamingAnchor, retainedDrafts: session.retainedDrafts },
       ),
-    [transcriptBase, stateMessages, transcriptTimeline, session.streamingText, visiblePendingUserMessages, visibleQueuedMessages],
+    [transcriptBase, stateMessages, transcriptTimeline, session.streamingText, session.streamingActive, session.streamingAnchor, session.retainedDrafts, visiblePendingUserMessages, visibleQueuedMessages],
   )
   // The header only needs the *count* of visible messages; derive it from the
   // already-built transcript instead of building a second full transcript.
@@ -1294,7 +1290,7 @@ export function App(): JSX.Element {
     session.socket?.connect()
   }, [session.socket])
   const resyncSession = useCallback(() => {
-    if (session.socket && activeSessionId) session.socket.emit('client:load_history', { sessionId: activeSessionId })
+    if (session.socket && activeSessionId) dashboardConnectionManager(session.socket).refresh(`session:${activeSessionId}`)
   }, [activeSessionId, session.socket])
   const sessionWorkspaceKnownOffline = Boolean(
     runtimeCapabilities.workspace &&
@@ -1345,6 +1341,31 @@ export function App(): JSX.Element {
   }
 
   const [section, setSection] = useAppSection()
+  const nativeSessions = useMemo(() => control.sessions.map((summary): SessionSummary => {
+    if (summary.sessionId !== activeSessionId || !sessionHydrated) return summary
+    return {
+      ...summary,
+      status: selectedSessionActivity.derived.isRunning ? 'thinking'
+        : pendingApprovalsCount > 0 && session.state?.approvalMode !== 'allow_all' ? 'awaiting_approval'
+          : session.lastError ? 'error' : session.state?.status ?? summary.status,
+      queuedCount: Math.max(summary.queuedCount ?? 0, session.queuedMessages.length),
+    }
+  }), [control.sessions, activeSessionId, sessionHydrated, selectedSessionActivity.derived.isRunning, pendingApprovalsCount, session.state?.approvalMode, session.state?.status, session.lastError, session.queuedMessages.length])
+  useNativeDesktop({
+    sessions: nativeSessions,
+    activeSessionId,
+    viewedSessionId: section === 'agent' && !accountCenterOpen && !adminCenterOpen && !settingsOpen ? activeSessionId : null,
+    socket: controlSocket,
+    ready: productAccessReady && control.sessionsLoaded,
+    workspaceOnline: hasSelectedSession && control.executorsLoaded ? sessionWorkspaceOnline : null,
+    onOpenSession: (sessionId) => {
+      selectSession(sessionId)
+      setAccountCenterOpen(false)
+      setAdminCenterOpen(false)
+      setSettingsOpen(false)
+      setSection('agent')
+    },
+  })
   // Notification deep-links: `#/sessions/<id>` selects that session (works both
   // on cold-start openWindow and the focused-tab PUSH_NAVIGATE path).
   useSessionDeepLink(selectSession)
@@ -1375,8 +1396,6 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.newSessionHint'),
         icon: Plus,
         keywords: ['create', 'start'],
-        disabled: control.executors.length === 0,
-        disabledReason: t('commandPalette.disabled.noWorkspaceOnline'),
         run: () => newSession(),
       },
       {
@@ -1577,6 +1596,7 @@ export function App(): JSX.Element {
     hasSelectedSession,
     inspectorOpen,
     models,
+    newSession,
     onModelChange,
     runCompactNow,
     runConsolidateMemory,
@@ -1714,7 +1734,7 @@ export function App(): JSX.Element {
         section={section}
         onSelect={handleSectionSelect}
         onOpenSettings={() => setSettingsOpen(true)}
-        connectionStatus={hasSelectedSession ? <ConnectionStatus socket={session.socket} status={controlSocket?.connected ? 'ready' : session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} /> : null}
+        connectionStatus={hasSelectedSession ? <ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} /> : null}
         collapsed={!topbarOpen}
         onCollapse={() => setTopbarOpen(false)}
         onExpand={() => setTopbarOpen(true)}
@@ -1757,7 +1777,7 @@ export function App(): JSX.Element {
         </Suspense>
       ) : (
       <ResizablePanelGroup direction="horizontal" dir="ltr" autoSaveId="ak-outer-cols-v6" className="min-w-0 max-w-full overflow-hidden">
-        {wideLayout && runtimeCapabilities.workspace ? (
+        {wideLayout ? (
           <>
             {explorerOpen ? (
               <>
@@ -1773,12 +1793,12 @@ export function App(): JSX.Element {
                   <div className="ak-motion-slide-left h-full min-h-0 p-3 pr-1">
                     <div className="ak-navigation-surface flex h-full min-h-0 flex-col overflow-hidden" data-testid="explorer-surface">
                       <div className="flex h-11 flex-none items-center border-b border-sidebar-border/40 bg-sidebar/65 px-2 backdrop-blur">
-                        <Menu className="h-3.5 w-3.5 flex-none" />
-                        <span className="min-w-0 flex-1 truncate text-xs font-medium">{t('app.sessionsTitle')}</span>
+                        <NewChatButton onNewChat={() => newSession()} />
+                        <span className="min-w-0 flex-1" />
                         <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
                       </div>
                       <div className="min-h-0 flex-1 overflow-hidden">
-                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={openConnectWorkspaceDialog} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} />
+                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} />
                       </div>
                     </div>
                   </div>
@@ -1814,7 +1834,7 @@ export function App(): JSX.Element {
                 if (wideLayout) setExplorerOpen(true)
                 else setExplorerDrawerOpen(true)
               }}
-              explorerAvailable={runtimeCapabilities.workspace && (!wideLayout || !explorerOpen)}
+              explorerAvailable={!wideLayout || !explorerOpen}
               onOpenSidebar={() => {
                 if (wideLayout) setInspectorOpen(true)
                 else setInspectorDrawerOpen(true)
@@ -1823,9 +1843,22 @@ export function App(): JSX.Element {
               onChangeCwd={runtimeCapabilities.workspace && currentAgentRuntimeCapabilities.cwdMutation && currentSession?.workspaceId ? openCwdDialog : undefined}
               sessionSelected={hasSelectedSession}
               sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
+              draft={config.sessionId === null}
               sessionTabs={!explorerOpen ? <SessionTabStrip sessions={control.sessions} openIds={sessionTabs.state.open} pinned={sessionTabs.state.pinned} active={config.sessionId} onSelect={selectSession} onClose={sessionTabs.close} onPin={sessionTabs.pin} onReorder={sessionTabs.reorder} /> : undefined}
             />
-            {sessionListLoading && !hasSelectedSession ? (
+            {config.sessionId === null ? (
+              <SimpleChatDraft
+                key={`${cacheNamespace}:${draftKey}`}
+                socket={controlSocket}
+                host={hostEndpoint.url}
+                token={config.token}
+                agentRuntimes={control.agentRuntimes}
+                models={models}
+                preferredModel={preferredModel}
+                displayPrefs={chatDisplayPrefs}
+                onCreated={selectCreatedSession}
+              />
+            ) : sessionListLoading && !hasSelectedSession ? (
               <SessionDirectoryPendingArea active={sessionDirectoryLoadingOwner === 'workbench'} />
             ) : !hasSelectedSession ? (
               <NoSessionArea
@@ -1937,7 +1970,7 @@ export function App(): JSX.Element {
                             <InlineStatusRow
                               state={session.state}
                               fallbackStatus={currentSession?.status}
-                              streamingActive={session.streamingText.length > 0}
+                              streamingActive={session.streamingActive}
                               toolExecutionStartedAt={session.toolExecutionStartedAt}
                               awaitingAck={awaitingAck}
                               progress={agentProgress}
@@ -1964,7 +1997,7 @@ export function App(): JSX.Element {
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium">{t('composer.delivery.failedTitle')}</div>
                                 <div className="mt-0.5 break-words">{messageDeliveryError.message}</div>
-                                {messageDeliveryError.operationId ? <div className="mt-1 font-mono text-[10px] opacity-75">{messageDeliveryError.operationId}</div> : null}
+                                {messageDeliveryError.operationId ? <div className="mt-1 font-mono text-[0.625rem] opacity-75">{messageDeliveryError.operationId}</div> : null}
                               </div>
                               <Button type="button" size="sm" variant="outline" className="h-7 shrink-0" onClick={() => { setMessageDeliveryError(null); controlSocket?.connect() }}>
                                 {t('composer.delivery.reconnect')}
@@ -2268,18 +2301,17 @@ export function App(): JSX.Element {
         </ResizablePanel>
       </ResizablePanelGroup>
       )}
-      {runtimeCapabilities.workspace ? <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
+      <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
           className="ak-drawer-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none translate-x-0 translate-y-0 gap-0 overflow-hidden border-0 bg-sidebar p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-2xl sm:w-96 sm:rounded-r-3xl"
           data-testid="explorer-drawer"
         >
-          <DialogHeader className="sr-only">
-            <DialogTitle>{t('common.explorer')}</DialogTitle>
-            <DialogDescription>{t('app.explorerDescription')}</DialogDescription>
-          </DialogHeader>
+          <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
           <div className="flex h-full min-h-0 flex-col bg-sidebar pb-[env(safe-area-inset-bottom)] text-sidebar-foreground">
             <div className="flex h-11 flex-none items-center gap-2 border-b border-sidebar-border px-3">
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{t('app.sessionsTitle')}</span>
+              <DialogTitle className="flex items-center gap-1 text-sm">{t('common.explorer')}<HelpHint label={t('common.explorer')}>{t('app.explorerDescription')}</HelpHint></DialogTitle>
+              <NewChatButton onNewChat={() => newSessionFromExplorerDrawer()} />
+              <span className="min-w-0 flex-1" />
               <Button
                 type="button"
                 variant="ghost"
@@ -2293,11 +2325,11 @@ export function App(): JSX.Element {
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden">
-              <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={connectWorkspaceFromExplorerDrawer} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} />
+              <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={runtimeCapabilities.workspace ? connectWorkspaceFromExplorerDrawer : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} />
             </div>
           </div>
         </DialogContent>
-      </Dialog> : null}
+      </Dialog>
       <Dialog open={inspectorDrawerOpen && !wideLayout && hasSelectedSession} onOpenChange={setInspectorDrawerOpen}>
         <DialogContent
           className="ak-drawer-right right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto translate-x-0 translate-y-0 gap-0 overflow-hidden border-0 bg-card p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] shadow-2xl sm:w-[26rem] sm:rounded-l-3xl"
@@ -2305,10 +2337,11 @@ export function App(): JSX.Element {
         >
           <DialogHeader className="sr-only">
             <DialogTitle>{t('app.openInspector')}</DialogTitle>
-            <DialogDescription>{t('app.inspectorDescription')}</DialogDescription>
+            <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
           </DialogHeader>
           <div className="h-full min-h-0 pb-[env(safe-area-inset-bottom)]">
             <RightPanel
+              headerHelp={<HelpHint label={t('app.openInspector')}>{t('app.inspectorDescription')}</HelpHint>}
               activeTab={rightPanelTab}
               onTabChange={setRightPanelTab}
               onCollapse={() => setInspectorDrawerOpen(false)}
@@ -2355,9 +2388,9 @@ export function App(): JSX.Element {
               <div className="space-y-3">
                 <p>{t('app.slashDelete.description')}</p>
                 <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground">
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('app.slashDelete.target')}</div>
+                  <div className="text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">{t('app.slashDelete.target')}</div>
                   <div className="mt-1 truncate font-medium" title={sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}>{sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}</div>
-                  <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{slashDelete?.sessionId}</div>
+                  <div className="mt-1 break-all font-mono text-[0.6875rem] text-muted-foreground">{slashDelete?.sessionId}</div>
                 </div>
                 {slashDeleteDescendantCount > 0 ? <p className="text-amber-700 dark:text-amber-300">{t('app.slashDelete.children', { count: slashDeleteDescendantCount })}</p> : null}
                 <p>{t('app.slashDelete.confirmDescription', { phrase: slashDeleteRequiredPhrase, label: sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '') })}</p>
@@ -2501,8 +2534,8 @@ export function App(): JSX.Element {
             toast:
               'group toast pointer-events-none border border-border/70 bg-popover text-popover-foreground shadow-md rounded-md text-xs pl-3 pr-3 py-2 border-l-2',
             title: 'text-xs font-medium',
-            description: 'text-[11px] text-muted-foreground mt-0.5',
-            actionButton: 'pointer-events-auto text-[11px] px-2 py-0.5 rounded bg-accent text-accent-foreground hover:bg-accent/80',
+            description: 'text-[0.6875rem] text-muted-foreground mt-0.5',
+            actionButton: 'pointer-events-auto text-[0.6875rem] px-2 py-0.5 rounded bg-accent text-accent-foreground hover:bg-accent/80',
             success: 'border-l-emerald-500/70',
             info: 'border-l-sky-500/70',
             warning: 'border-l-amber-500/70',
@@ -2558,11 +2591,11 @@ function CapabilityUnavailable({ title }: { title: string }): JSX.Element {
   return <div className="grid h-full place-items-center p-6"><ProductState kind="degraded" title={title} description="The configured Host does not advertise this product capability." /></div>
 }
 
-function readInitialConfig(): Config {
+export function readInitialConfig(): Config {
   const url = new URL(window.location.href)
   const fromUrl = url.searchParams.get('sessionId')
-  const sessionId = fromUrl ?? randomId()
-  const explicit = fromUrl !== null
+  const sessionId = fromUrl || parseSessionDeepLink(url.hash)
+  const explicit = sessionId !== null
   const token = url.searchParams.get('token') ?? undefined
   if (token !== undefined) {
     // Strip the bootstrap token from the address bar so it doesn't leak
@@ -2747,6 +2780,7 @@ export function WorkbenchToolbar({
   sessionSelected,
   sessionDirectoryLoading = false,
   simpleChat = false,
+  draft = false,
   sessionTabs,
 }: {
   sessionLabel: string
@@ -2762,11 +2796,14 @@ export function WorkbenchToolbar({
   sessionSelected: boolean
   sessionDirectoryLoading?: boolean
   simpleChat?: boolean
+  draft?: boolean
   sessionTabs?: React.ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
   const displayLabel = sessionSelected
     ? sessionLabel
+    : draft
+      ? t('dialogs.simpleChat')
     : sessionDirectoryLoading
       ? t('app.sessionsTitle')
       : t('app.noSessionSelected')
@@ -2816,7 +2853,7 @@ export function WorkbenchToolbar({
           <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" data-testid="session-label">
             {displayLabel}
           </span>
-          {simpleChat ? <span className="flex-none rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary" data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
+          {simpleChat ? <span className="flex-none rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary" data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
         </span>
         {sessionSelected && onChangeCwd ? (
           <Button
@@ -2861,6 +2898,7 @@ type ConnectionHealthSample = {
   executorRttMs: number | null
   hostOk: boolean
   executorOk: boolean
+  executorRequired: boolean
 }
 
 export const ConnectionStatus = memo(function ConnectionStatus({ socket, status, transport, cursor, workspaceId, executorConnected, onResync }: { socket: DashboardSocket | null; status: string; transport?: string; cursor: number; workspaceId?: string; executorConnected: boolean; onResync(): void }): JSX.Element {
@@ -2873,6 +2911,8 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   const [history, setHistory] = useState<readonly ConnectionHealthSample[]>([])
   const [checking, setChecking] = useState(false)
   const [copied, setCopied] = useState(false)
+  const executorRequired = Boolean(workspaceId)
+  const probeGeneration = useRef(0)
 
   const appendSample = useCallback((sample: ConnectionHealthSample) => {
     setHistory((previous) => {
@@ -2882,18 +2922,19 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   }, [])
 
   const measure = useCallback(() => {
+    const generation = ++probeGeneration.current
     if (!socket?.connected) {
       setHostRtt(null)
       setExecutorRtt(null)
       setHostError(t('common.disconnected'))
-      setExecutorError(t(executorConnected ? 'connectionHealth.unavailable' : 'connectionHealth.offline'))
-      appendSample({ at: Date.now(), hostRttMs: null, executorRttMs: null, hostOk: false, executorOk: false })
+      setExecutorError(executorRequired ? t(executorConnected ? 'connectionHealth.unavailable' : 'connectionHealth.offline') : null)
+      appendSample({ at: Date.now(), hostRttMs: null, executorRttMs: null, hostOk: false, executorOk: false, executorRequired })
       setChecking(false)
       return
     }
     setChecking(true)
     let pending = workspaceId && executorConnected ? 2 : 1
-    const sample: ConnectionHealthSample = { at: Date.now(), hostRttMs: null, executorRttMs: null, hostOk: false, executorOk: false }
+    const sample: ConnectionHealthSample = { at: Date.now(), hostRttMs: null, executorRttMs: null, hostOk: false, executorOk: false, executorRequired }
     const finish = (): void => {
       pending -= 1
       if (pending === 0) {
@@ -2903,6 +2944,7 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
     }
     const hostStart = performance.now()
     socket.timeout(3000).emit('client:connection_ping', Date.now(), (err: unknown) => {
+      if (generation !== probeGeneration.current) return
       const nextHostRtt = err ? null : Math.round(performance.now() - hostStart)
       sample.hostRttMs = nextHostRtt
       sample.hostOk = !err
@@ -2912,6 +2954,7 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
     })
     if (workspaceId && executorConnected) {
       socket.timeout(3500).emit('client:executor_ping', workspaceId, (err: unknown, result?: { rttMs?: number; error?: string }) => {
+        if (generation !== probeGeneration.current) return
         if (err || result?.error) {
           sample.executorRttMs = null
           sample.executorOk = false
@@ -2928,26 +2971,42 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
     } else {
       sample.executorOk = false
       setExecutorRtt(null)
-      setExecutorError(t(executorConnected ? 'connectionHealth.notMeasured' : 'connectionHealth.offline'))
+      setExecutorError(executorRequired ? t('connectionHealth.offline') : null)
     }
-  }, [appendSample, executorConnected, socket, t, workspaceId])
+  }, [appendSample, executorConnected, executorRequired, socket, t, workspaceId])
+
+  useEffect(() => {
+    setHostRtt(null)
+    setExecutorRtt(null)
+    setHostError(null)
+    setExecutorError(null)
+    setHistory([])
+  }, [socket, workspaceId])
 
   useEffect(() => {
     measure()
-    const timer = window.setInterval(measure, open ? 5_000 : 15_000)
-    return () => window.clearInterval(timer)
-  }, [measure, open])
+    const onVisible = (): void => { if (!document.hidden) measure() }
+    window.addEventListener('focus', measure)
+    window.addEventListener('online', measure)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', measure)
+      window.removeEventListener('online', measure)
+      document.removeEventListener('visibilitychange', onVisible)
+      probeGeneration.current += 1
+    }
+  }, [measure])
 
-  const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, hostError, executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline', sessionCursor: cursor }
+  const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, hostError, ...(executorRequired ? { executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline' } : {}), sessionCursor: cursor }
   const copy = (): void => { void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => setCopied(false)) }
-  const probeFailed = status === 'ready' && (hostError !== null || executorConnected && executorError !== null)
+  const probeFailed = status === 'ready' && (hostError !== null || executorRequired && executorConnected && executorError !== null)
   const displayStatus = probeFailed ? 'error' : status
   const label = probeFailed ? t('connectionHealth.issue') : hostStatusLabel(status, t)
-  const healthy = displayStatus === 'ready' && executorConnected
+  const healthy = displayStatus === 'ready' && (!executorRequired || executorConnected)
   const failed = displayStatus === 'error' || displayStatus === 'disconnected'
   const hostTone = status === 'ready' && !hostError ? 'healthy' : hostError || status === 'disconnected' || status === 'error' ? 'failed' : 'pending'
   const executorTone = !executorConnected || executorError ? 'failed' : 'healthy'
-  const headlineLatency = executorConnected
+  const headlineLatency = executorRequired && executorConnected
     ? hostRtt !== null && executorRtt !== null ? hostRtt + executorRtt : null
     : hostRtt
 
@@ -2956,13 +3015,16 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
       <button type="button" onClick={() => setOpen((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8" data-testid="connection-status" data-status={displayStatus} aria-expanded={open}>
         <span className={cn('h-2 w-2 rounded-full', statusDot(displayStatus))} />
         <span className="hidden sm:inline">{label}</span>
-        <span className="hidden font-mono text-[10px] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineLatency !== null ? `${headlineLatency} ms` : checking ? t('connectionHealth.measuring') : '—'}</span>
+        <span className="hidden font-mono text-[0.625rem] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineLatency !== null ? `${headlineLatency} ms` : checking ? t('connectionHealth.measuring') : '—'}</span>
       </button>
       {open ? (
         <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-md rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[28rem]" data-testid="connection-status-popover">
           <div className="flex items-start justify-between gap-3 pb-3">
-            <div><h3 className="text-sm font-semibold">{t('connectionHealth.title')}</h3><p className="mt-0.5 text-[11px] text-muted-foreground">{t('connectionHealth.subtitle')}</p></div>
-            <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : failed ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : failed ? 'connectionHealth.issue' : 'connectionHealth.check')}</span>
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-sm font-semibold">{t('connectionHealth.title')}</h3>
+              <HelpHint label={t('connectionHealth.title')} testId="connection-health-help">{t('connectionHealth.subtitle')}</HelpHint>
+            </div>
+            <span className={cn('inline-flex items-center gap-1.5 text-[0.6875rem] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : failed ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : failed ? 'connectionHealth.issue' : 'connectionHealth.check')}</span>
           </div>
           <div className="divide-y divide-border/30 rounded-2xl bg-muted/20 px-3">
             <ConnectionPath
@@ -2970,14 +3032,17 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
               serviceLabel={t('connectionHealth.service')}
               executorLabel={t('connectionHealth.executor')}
               hostSegment={{ label: t('connectionHealth.deviceHost'), state: status === 'ready' ? hostError ?? t('common.connected') : label, tone: hostTone, latency: hostRtt, measuring: checking && hostRtt === null && !hostError }}
-              executorSegment={{ label: t('connectionHealth.hostExecutor'), state: !executorConnected ? t('connectionHealth.offline') : executorError ?? t('common.connected'), tone: executorTone, latency: executorRtt, measuring: checking && executorConnected && executorRtt === null && !executorError }}
+              executorSegment={executorRequired ? { label: t('connectionHealth.hostExecutor'), state: !executorConnected ? t('connectionHealth.offline') : executorError ?? t('common.connected'), tone: executorTone, latency: executorRtt, measuring: checking && executorConnected && executorRtt === null && !executorError } : undefined}
               measuringLabel={t('connectionHealth.measuring')}
             />
             <HealthRow label={t('connectionHealth.sessionSync')} state={displayStatus === 'ready' ? t('connectionHealth.synchronized') : label} tone={displayStatus === 'ready' ? 'healthy' : displayStatus === 'disconnected' || displayStatus === 'error' ? 'failed' : 'pending'} measuringLabel={t('connectionHealth.measuring')} />
           </div>
-          <ConnectionHealthCurve samples={history} now={history[history.length - 1]?.at ?? Date.now()} t={t} />
+          <ConnectionHealthCurve key={workspaceId ?? 'chat'} samples={history} executorRequired={executorRequired} now={history[history.length - 1]?.at ?? Date.now()} t={t} />
           <div className="mt-3 flex items-center gap-2"><Button size="sm" variant="outline" className="h-8" disabled={checking || !socket?.connected} onClick={measure}>{t(checking ? 'connectionHealth.measuring' : 'connectionHealth.measureAgain')}</Button><Button size="sm" variant="ghost" className="h-8" onClick={onResync}>{t('connectionHealth.resync')}</Button></div>
-          <details className="mt-2 text-xs"><summary className="cursor-pointer select-none rounded-lg px-2 py-2 font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground">{t('connectionHealth.diagnostics')}</summary><div className="mt-1 flex items-center justify-between gap-3 rounded-lg bg-muted/20 px-3 py-2"><p className="min-w-0 truncate text-[11px] text-muted-foreground">{t('connectionHealth.transport')} · {transport ?? t('connectionHealth.unknown')}</p><Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy}>{t(copied ? 'common.copied' : 'common.copy')}</Button></div></details>
+          <div className="mt-2 flex min-w-0 items-center justify-between gap-3 text-[0.6875rem] text-muted-foreground" data-testid="connection-transport-row">
+            <span className="min-w-0 truncate">{t('connectionHealth.transport')} · {transport ?? t('connectionHealth.unknown')}</span>
+            <Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy} title={t('connectionHealth.diagnostics')}>{t(copied ? 'common.copied' : 'common.copy')}</Button>
+          </div>
         </div>
       ) : null}
     </div>
@@ -2987,22 +3052,21 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
 type HealthTone = 'healthy' | 'failed' | 'pending'
 type ConnectionSegmentInfo = { label: string; state: string; tone: HealthTone; latency?: number | null; measuring?: boolean }
 
-function ConnectionPath({ deviceLabel, serviceLabel, executorLabel, hostSegment, executorSegment, measuringLabel }: { deviceLabel: string; serviceLabel: string; executorLabel: string; hostSegment: ConnectionSegmentInfo; executorSegment: ConnectionSegmentInfo; measuringLabel: string }): JSX.Element {
+function ConnectionPath({ deviceLabel, serviceLabel, executorLabel, hostSegment, executorSegment, measuringLabel }: { deviceLabel: string; serviceLabel: string; executorLabel: string; hostSegment: ConnectionSegmentInfo; executorSegment?: ConnectionSegmentInfo; measuringLabel: string }): JSX.Element {
   return (
     <div className="py-2.5" data-testid="connection-path">
-      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-1.5">
+      <div className={cn('grid items-center gap-1.5', executorSegment ? 'grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto]' : 'grid-cols-[auto_minmax(0,1fr)_auto]')}>
         <ConnectionEndpoint label={deviceLabel} />
         <ConnectionSegment segment={hostSegment} measuringLabel={measuringLabel} testId="connection-segment-device-service" />
         <ConnectionEndpoint label={serviceLabel} />
-        <ConnectionSegment segment={executorSegment} measuringLabel={measuringLabel} testId="connection-segment-service-executor" />
-        <ConnectionEndpoint label={executorLabel} />
+        {executorSegment ? <><ConnectionSegment segment={executorSegment} measuringLabel={measuringLabel} testId="connection-segment-service-executor" /><ConnectionEndpoint label={executorLabel} /></> : null}
       </div>
     </div>
   )
 }
 
 function ConnectionEndpoint({ label }: { label: string }): JSX.Element {
-  return <span className="rounded-full bg-background/80 px-2 py-1 text-[10px] font-medium text-foreground ring-1 ring-border/40">{label}</span>
+  return <span className="rounded-full bg-background/80 px-2 py-1 text-[0.625rem] font-medium text-foreground ring-1 ring-border/40">{label}</span>
 }
 
 function ConnectionSegment({ segment, measuringLabel, testId }: { segment: ConnectionSegmentInfo; measuringLabel: string; testId: string }): JSX.Element {
@@ -3011,7 +3075,7 @@ function ConnectionSegment({ segment, measuringLabel, testId }: { segment: Conne
   return (
     <div className="flex min-w-0 items-center gap-1" title={`${segment.label}: ${state}${segment.latency !== null && segment.latency !== undefined ? ` · ${segment.latency} ms` : ''}`} data-testid={testId}>
       <span className={cn('h-px min-w-2 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/60' : segment.tone === 'failed' ? 'bg-rose-500/60' : 'bg-amber-500/60')} />
-      <span className={cn('whitespace-nowrap rounded-full px-1.5 py-0.5 font-mono text-[10px] tabular-nums', segment.tone === 'healthy' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : segment.tone === 'failed' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300')}>{label}</span>
+      <span className={cn('whitespace-nowrap rounded-full px-1.5 py-0.5 font-mono text-[0.625rem] tabular-nums', segment.tone === 'healthy' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : segment.tone === 'failed' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300')}>{label}</span>
       <span className={cn('h-px min-w-2 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/60' : segment.tone === 'failed' ? 'bg-rose-500/60' : 'bg-amber-500/60')} />
     </div>
   )
@@ -3021,7 +3085,7 @@ function compactSegmentState(state: string): string {
   return state.length > 8 ? '—' : state
 }
 
-function ConnectionHealthCurve({ samples, now, t }: { samples: readonly ConnectionHealthSample[]; now: number; t: ReturnType<typeof useTranslation>['t'] }): JSX.Element {
+function ConnectionHealthCurve({ samples, executorRequired, now, t }: { samples: readonly ConnectionHealthSample[]; executorRequired: boolean; now: number; t: ReturnType<typeof useTranslation>['t'] }): JSX.Element {
   const [hovered, setHovered] = useState<{ sample: ConnectionHealthSample; x: number } | null>(null)
   const width = 320
   const height = 72
@@ -3033,7 +3097,7 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
   const executorMax = latencyMax(recent, (sample) => sample.executorRttMs)
   const hostPoints = sparklinePoints(recent, (sample) => sample.hostRttMs, domainStart, domainMs, hostMax, width, height)
   const executorPoints = sparklinePoints(recent, (sample) => sample.executorRttMs, domainStart, domainMs, executorMax, width, height)
-  const failures = recent.filter((sample) => !sample.hostOk || !sample.executorOk)
+  const failures = recent.filter((sample) => !sample.hostOk || sample.executorRequired && !sample.executorOk)
 
   return (
     <div className="relative mt-3 rounded-2xl border border-border/35 bg-muted/10 p-3" data-testid="connection-health-curve" data-sample-count={recent.length}>
@@ -3041,15 +3105,15 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
         <div>
           <p className="text-xs font-medium text-foreground">{t('connectionHealth.historyTitle')}</p>
         </div>
-        <div className="flex flex-none items-center gap-2 text-[10px] text-muted-foreground">
+        <div className="flex flex-none items-center gap-2 text-[0.625rem] text-muted-foreground">
           <span className="inline-flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-primary" />{t('connectionHealth.hostLegend')}</span>
-          <span className="inline-flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-sky-400" />{t('connectionHealth.executorLegend')}</span>
+          {executorRequired ? <span className="inline-flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-sky-400" />{t('connectionHealth.executorLegend')}</span> : null}
         </div>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('connectionHealth.historyAria')} className="h-20 w-full overflow-visible">
         <line x1="0" y1={height - 8} x2={width} y2={height - 8} className="stroke-border" strokeWidth="1" />
         {hostPoints ? <polyline points={hostPoints} fill="none" className="stroke-primary" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="connection-health-host-line" /> : null}
-        {executorPoints ? <polyline points={executorPoints} fill="none" className="stroke-sky-400" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="connection-health-executor-line" /> : null}
+        {executorRequired && executorPoints ? <polyline points={executorPoints} fill="none" className="stroke-sky-400" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" data-testid="connection-health-executor-line" /> : null}
         {failures.map((sample, index) => (
           <circle key={`${sample.at}:${index}`} cx={scaleHealthX(sample.at, domainStart, domainMs, width)} cy={height - 8} r="3" className="fill-rose-500" />
         ))}
@@ -3075,7 +3139,7 @@ function ConnectionHealthCurve({ samples, now, t }: { samples: readonly Connecti
         })}
       </svg>
       {hovered ? (
-        <div className="pointer-events-none absolute top-12 z-10 min-w-32 -translate-x-1/2 rounded-lg bg-popover px-2.5 py-2 text-[11px] shadow-lg ring-1 ring-border/40" style={{ left: `calc(0.75rem + ${hovered.x / width * 100}%)` }} data-testid="connection-health-tooltip">
+        <div className="pointer-events-none absolute top-12 z-10 min-w-32 -translate-x-1/2 rounded-lg bg-popover px-2.5 py-2 text-[0.6875rem] shadow-lg ring-1 ring-border/40" style={{ left: `calc(0.75rem + ${hovered.x / width * 100}%)` }} data-testid="connection-health-tooltip">
           {formatHealthSampleTitle(hovered.sample, t).split('\n').map((line) => <div key={line}>{line}</div>)}
         </div>
       ) : null}
@@ -3088,7 +3152,7 @@ function formatHealthSampleTitle(sample: ConnectionHealthSample, t: ReturnType<t
   return [
     time,
     `${t('connectionHealth.hostLegend')}: ${formatSampleLatency(sample.hostRttMs, sample.hostOk, t)}`,
-    `${t('connectionHealth.executorLegend')}: ${formatSampleLatency(sample.executorRttMs, sample.executorOk, t)}`,
+    ...(sample.executorRequired ? [`${t('connectionHealth.executorLegend')}: ${formatSampleLatency(sample.executorRttMs, sample.executorOk, t)}`] : []),
   ].join('\n')
 }
 
@@ -3123,7 +3187,7 @@ function HealthRow({ label, state, tone, latency, measuring = false, measuringLa
     <div className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2 py-1.5">
       <span className={cn('h-2 w-2 rounded-full', tone === 'healthy' ? 'bg-emerald-500' : tone === 'failed' ? 'bg-rose-500' : 'bg-amber-500')} />
       <span className="min-w-0 truncate font-medium text-foreground">{label}</span>
-      <span className="min-w-0 truncate text-[11px] text-muted-foreground">{measuring ? measuringLabel : state}</span>
+      <span className="min-w-0 truncate text-[0.6875rem] text-muted-foreground">{measuring ? measuringLabel : state}</span>
       {latency !== null && latency !== undefined ? <span className="font-mono text-xs tabular-nums text-foreground">{latency} ms</span> : null}
     </div>
   )

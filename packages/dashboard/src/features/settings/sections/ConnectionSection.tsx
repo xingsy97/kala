@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../../components/ui/button.js'
+import { HelpHint } from '../../../components/ui/help-hint.js'
 import { getStoredHostEndpoint, resolveHostEndpoint, setStoredHostEndpoint } from '../../../host-endpoint.js'
 import { SectionHeader } from '../controls.js'
+import { isDesktopClient } from '../../../lib/desktop.js'
+import { DesktopUpdateSettings } from '../../../app-shell/DesktopUpdate.js'
 
 export function ConnectionSection(): JSX.Element {
   const { t } = useTranslation()
@@ -27,6 +30,16 @@ export function ConnectionSection(): JSX.Element {
     build: t('settings.connection.sources.build'),
     default: t('settings.connection.sources.default'),
   }
+  const crossOrigin = [current.url, draft.trim()].some((value) => {
+    try {
+      const url = new URL(value)
+      return ['http:', 'https:'].includes(url.protocol) && url.origin !== window.location.origin
+    } catch (error) {
+      if (error instanceof TypeError) return false
+      throw error
+    }
+  })
+  const crossOriginHelp = <>{t('settings.connection.crossOriginPrefix')}{' '}<code className="rounded bg-muted px-1">AGENT_KERNEL_ALLOWED_ORIGINS</code>.</>
 
   const save = () => {
     setStoredHostEndpoint(draft.trim() === '' ? null : draft.trim())
@@ -52,24 +65,31 @@ export function ConnectionSection(): JSX.Element {
     }
   }
 
+  if (isDesktopClient()) {
+    return (
+      <div className="space-y-4">
+        <SectionHeader title={t('settings.connection.title')} subtitle={`${t('settings.connection.subtitle')} ${t('common.desktopConnectionHelp')}`} />
+        <p className="break-all font-mono text-sm">{current.url}</p>
+        <DesktopUpdateSettings />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5 md:space-y-6">
-      <SectionHeader title={t('settings.connection.title')} subtitle={t('settings.connection.subtitle')} />
+      <SectionHeader title={t('settings.connection.title')} subtitle={`${t('settings.connection.subtitle')} ${t('settings.connection.priority')}`} />
 
       <div className="space-y-2.5 rounded-xl bg-card/60 p-4 text-sm ring-1 ring-border/50 md:space-y-3 md:rounded-md">
         <div>
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">{t('settings.connection.current')}</div>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="uppercase tracking-wider">{t('settings.connection.current')}</span><span>{t('settings.connection.source', { source: sourceLabel[current.source] })}</span></div>
           <div className="mt-1 break-all font-mono">{current.url || t('settings.connection.none')}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{t('settings.connection.source', { source: sourceLabel[current.source] })}</div>
-        </div>
-        <div className="text-xs text-muted-foreground">
-          {t('settings.connection.priority')}
         </div>
       </div>
 
       <div className="space-y-3 rounded-xl bg-card/30 p-4 ring-1 ring-border/40 md:rounded-none md:bg-transparent md:p-0 md:ring-0">
-        <label className="block text-sm font-medium">{t('settings.connection.override')}</label>
+        <div className="flex items-center gap-1 text-sm font-medium"><label htmlFor="settings-connection-endpoint">{t('settings.connection.override')}</label><HelpHint label={t('settings.connection.override')}>{crossOriginHelp}</HelpHint></div>
         <input
+          id="settings-connection-endpoint"
           type="url"
           data-testid="settings-connection-endpoint"
           className="h-11 w-full rounded-lg border border-input bg-background px-3 font-mono text-base outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring md:h-auto md:rounded-md md:py-2 md:text-sm"
@@ -77,10 +97,7 @@ export function ConnectionSection(): JSX.Element {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
         />
-        <div className="text-xs text-muted-foreground">
-          {t('settings.connection.crossOriginPrefix')}
-          {' '}<code className="rounded bg-muted px-1">AGENT_KERNEL_ALLOWED_ORIGINS</code>.
-        </div>
+        {crossOrigin ? <div className="text-xs text-muted-foreground" data-description-kind="notice">{crossOriginHelp}</div> : null}
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button data-testid="settings-connection-save" className="h-10 rounded-lg px-5 md:h-7 md:rounded md:px-2" onClick={save}>{t('common.save')}</Button>
           <Button data-testid="settings-connection-test" variant="outline" className="h-10 rounded-lg px-4 md:h-7 md:rounded md:px-2" onClick={() => void test()} disabled={testState.kind === 'testing'}>

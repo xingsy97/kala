@@ -1,7 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NoSessionArea, WorkbenchToolbar, resolveSessionDirectoryLoadingOwner, sessionDirectoryIsLoading } from './app.js'
+import { NoSessionArea, WorkbenchToolbar, readInitialConfig, resolveSessionDirectoryLoadingOwner, sessionDirectoryIsLoading } from './app.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity } from './app-logic/session-activity.js'
 
 function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]> = {}): void {
@@ -22,6 +24,17 @@ function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]
   )
 }
 
+describe('bounded busy-indicator rendering', () => {
+  it('keeps smooth busy feedback, breathing and sheen with reduced-motion support', () => {
+    const dashboardStyles = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+    expect(dashboardStyles).toContain('animation: ak-session-status-spin 900ms linear infinite;')
+    const reducedMotion = dashboardStyles.slice(dashboardStyles.indexOf('@media (prefers-reduced-motion: reduce)', dashboardStyles.indexOf('.ak-session-status-spinner {')))
+    expect(reducedMotion).toMatch(/\.ak-session-status-spinner,[\s\S]*?animation: none !important;/)
+    expect(dashboardStyles).toContain('@keyframes ak-thinking-dot')
+    expect(dashboardStyles).toContain('@keyframes ak-thinking-sheen')
+  })
+})
+
 describe('session directory loading', () => {
   it('depends only on the Session snapshot', () => {
     expect(sessionDirectoryIsLoading(false)).toBe(true)
@@ -38,6 +51,12 @@ describe('session directory loading', () => {
 })
 
 describe('WorkbenchToolbar', () => {
+  it('labels the unsaved draft without putting creation back in the workbench toolbar', () => {
+    renderToolbar({ draft: true })
+    expect(screen.getByTestId('session-label').textContent).toBe('New chat')
+    expect(screen.queryByTestId('workbench-new-session')).toBeNull()
+  })
+
   it('renders the title controls as one inset floating surface', () => {
     renderToolbar({ sessionSelected: true })
 
@@ -160,6 +179,20 @@ describe('NoSessionArea', () => {
 
     expect(onNewSession).toHaveBeenCalledTimes(1)
     expect(onNewSession).toHaveBeenCalledWith()
+  })
+
+  describe('initial session selection', () => {
+    it.each(['/', '/#/agent', '/#/docs'])('opens %s as an unsaved draft regardless of saved tabs', (url) => {
+      window.history.replaceState(null, '', url)
+      localStorage.setItem('ak-session-tabs-v1', JSON.stringify({ open: ['previous-session'] }))
+      expect(readInitialConfig()).toEqual({ sessionId: null, explicit: false })
+    })
+
+    it.each(['/?sessionId=selected', '/#/sessions/selected'])('preserves explicit session links: %s', (url) => {
+      window.history.replaceState(null, '', url)
+      expect(readInitialConfig()).toEqual({ sessionId: 'selected', explicit: true })
+      window.history.replaceState(null, '', '/')
+    })
   })
 
   it('keeps a simple chat entry available before any workspace is connected', () => {

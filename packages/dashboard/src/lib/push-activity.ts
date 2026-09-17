@@ -1,5 +1,6 @@
 import { randomId } from './random-id.js'
 import { useEffect } from 'react'
+import { isDesktopClient } from './desktop.js'
 
 const HEARTBEAT_MS = 15_000
 const USER_IDLE_MS = 5 * 60_000
@@ -20,14 +21,24 @@ export function pushDeviceId(): string {
  */
 export function usePushActivityHeartbeat(enabled = true): void {
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || isDesktopClient()) return
     const id = pushDeviceId()
     let lastInteractionAt = Date.now()
     let lastReported: boolean | undefined
+    let heartbeatTimer: number | undefined
 
     const isActive = (): boolean => document.visibilityState === 'visible'
       && document.hasFocus()
       && Date.now() - lastInteractionAt <= USER_IDLE_MS
+
+    const scheduleHeartbeat = (): void => {
+      if (heartbeatTimer !== undefined) window.clearTimeout(heartbeatTimer)
+      if (!isActive()) return
+      heartbeatTimer = window.setTimeout(() => {
+        heartbeatTimer = undefined
+        report(true)
+      }, HEARTBEAT_MS)
+    }
 
     const report = (force = false): void => {
       const active = isActive()
@@ -40,14 +51,21 @@ export function usePushActivityHeartbeat(enabled = true): void {
         body: JSON.stringify({ deviceId: id, active }),
         keepalive: true,
       }).catch(() => {})
+      scheduleHeartbeat()
     }
-    const reportEvent = (): void => report()
+    const reportEvent = (): void => {
+      report()
+      scheduleHeartbeat()
+    }
     const interact = (): void => {
       const wasIdle = Date.now() - lastInteractionAt > USER_IDLE_MS
       lastInteractionAt = Date.now()
       if (wasIdle) report(true)
+      else scheduleHeartbeat()
     }
     const leave = (): void => {
+      if (heartbeatTimer !== undefined) window.clearTimeout(heartbeatTimer)
+      heartbeatTimer = undefined
       lastReported = false
       const body = JSON.stringify({ deviceId: id, active: false })
       if (typeof navigator.sendBeacon === 'function') {
@@ -64,9 +82,8 @@ export function usePushActivityHeartbeat(enabled = true): void {
     window.addEventListener('blur', reportEvent)
     window.addEventListener('pagehide', leave)
     report(true)
-    const timer = window.setInterval(() => report(true), HEARTBEAT_MS)
     return () => {
-      window.clearInterval(timer)
+      if (heartbeatTimer !== undefined) window.clearTimeout(heartbeatTimer)
       activityEvents.forEach((event) => window.removeEventListener(event, interact))
       document.removeEventListener('visibilitychange', reportEvent)
       window.removeEventListener('focus', reportEvent)

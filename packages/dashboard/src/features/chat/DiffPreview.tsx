@@ -100,7 +100,7 @@ function EditDiff({ input, label }: { input: EditInput; label: string }): JSX.El
       className="mt-1.5 basis-full overflow-hidden rounded border border-amber-200 bg-card dark:border-amber-900/60"
       data-testid="diff-preview"
     >
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
         <span className="min-w-0 truncate font-mono normal-case text-foreground">{path}</span>
         <span className="flex shrink-0 items-center gap-2">
           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">{t('chat.diff.modified')}</span>
@@ -111,7 +111,7 @@ function EditDiff({ input, label }: { input: EditInput; label: string }): JSX.El
         </span>
       </div>
       <ScrollArea className="max-h-80 max-w-full">
-        <pre className="min-w-max whitespace-pre px-0 py-1 font-mono text-[11px] leading-snug">
+        <pre className="min-w-max whitespace-pre px-0 py-1 font-mono text-[0.6875rem] leading-snug">
           {rows.map((row, i) => (
             <DiffLineRow key={i} row={row} />
           ))}
@@ -134,7 +134,7 @@ function WritePreview({ input, label }: { input: WriteInput; label: string }): J
       className="mt-1.5 basis-full overflow-hidden rounded border border-emerald-200 bg-card dark:border-emerald-900/60"
       data-testid="diff-preview"
     >
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
         <span className="min-w-0 truncate font-mono normal-case text-foreground">{path}</span>
         <span className="flex shrink-0 items-center gap-2">
           <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">{t('chat.diff.createdOverwrite')}</span>
@@ -143,7 +143,7 @@ function WritePreview({ input, label }: { input: WriteInput; label: string }): J
         </span>
       </div>
       <ScrollArea className="max-h-80 max-w-full">
-        <pre className="min-w-max whitespace-pre py-1 pr-2 font-mono text-[11px] leading-snug">
+        <pre className="min-w-max whitespace-pre py-1 pr-2 font-mono text-[0.6875rem] leading-snug">
           {shown.map((line, i) => (
             <span key={i} className="flex">
               <GutterCell newNo={i + 1} />
@@ -169,7 +169,7 @@ function MultiEditDiff({ input }: { input: MultiEditInput }): JSX.Element {
   }
   return (
     <div className="mt-1.5 basis-full overflow-hidden rounded border border-amber-200 bg-card dark:border-amber-900/60" data-testid="diff-preview">
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
         <span className="min-w-0 truncate font-mono normal-case text-foreground">{path}</span>
         <span className="flex shrink-0 items-center gap-2">
           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">modified</span>
@@ -177,10 +177,10 @@ function MultiEditDiff({ input }: { input: MultiEditInput }): JSX.Element {
         </span>
       </div>
       <ScrollArea className="max-h-80 max-w-full">
-        <div className="min-w-max space-y-2 px-0 py-1 font-mono text-[11px] leading-snug">
+        <div className="min-w-max space-y-2 px-0 py-1 font-mono text-[0.6875rem] leading-snug">
           {edits.map((edit, index) => (
             <div key={index} className="border-b border-border/30 pb-1 last:border-b-0">
-              <div className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <div className="px-2 pb-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground">
                 edit {index + 1}{edit.replace_all === true ? ' · replace_all' : ''}
               </div>
               {diffLines(edit.old_string.split('\n'), edit.new_string.split('\n'), EDIT_CONTEXT_LINES).map((row, i) => (
@@ -205,7 +205,7 @@ function PatchLikePreview({ title, subtitle, text }: { title: string; subtitle: 
   const shown = truncated ? lines.slice(0, PATCH_PREVIEW_LINES) : lines
   return (
     <div className="mt-1.5 basis-full overflow-hidden rounded border border-sky-200 bg-card dark:border-sky-900/60" data-testid="diff-preview">
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
         <span className="min-w-0 truncate font-mono normal-case text-foreground">{subtitle}</span>
         <span className="flex shrink-0 items-center gap-2">
           <span className="rounded bg-sky-100 px-1.5 py-0.5 text-sky-800 dark:bg-sky-950/50 dark:text-sky-200">patch</span>
@@ -213,7 +213,7 @@ function PatchLikePreview({ title, subtitle, text }: { title: string; subtitle: 
         </span>
       </div>
       <ScrollArea className="max-h-80 max-w-full">
-        <pre className="min-w-max whitespace-pre py-1 pr-2 font-mono text-[11px] leading-snug">
+        <pre className="min-w-max whitespace-pre py-1 pr-2 font-mono text-[0.6875rem] leading-snug">
           {shown.map((line, i) => (
             <span key={i} className={cn('block px-2', patchLineClass(line))}>{line || ' '}</span>
           ))}
@@ -233,7 +233,7 @@ function DiffLineRow({ row }: { row: LineDiffRow }): JSX.Element {
   const [open, setOpen] = useState(false)
   if (row.kind === 'gap') {
     return (
-      <span className="flex flex-col border-y border-border/40 bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <span className="flex flex-col border-y border-border/40 bg-muted/40 text-[0.625rem] uppercase tracking-wider text-muted-foreground">
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
@@ -245,7 +245,7 @@ function DiffLineRow({ row }: { row: LineDiffRow }): JSX.Element {
         <span>... {t('chat.diff.unchangedLine', { count: row.count })} ...</span>
         <span className="flex-1 border-t border-dashed border-border/60" aria-hidden="true" />
         </button>
-        {open ? <span className="px-2 pb-1 text-[10px] normal-case tracking-normal">{t('chat.diff.compactNote')}</span> : null}
+        {open ? <span className="px-2 pb-1 text-[0.625rem] normal-case tracking-normal">{t('chat.diff.compactNote')}</span> : null}
       </span>
     )
   }
@@ -387,14 +387,14 @@ function GutterCell({
   return (
     <span
       className={cn(
-        'sticky left-0 z-10 flex flex-none select-none items-center gap-1 border-r border-border/40 px-1.5 text-[10px] text-muted-foreground',
+        'sticky left-0 z-10 flex flex-none select-none items-center gap-1 border-r border-border/40 px-1.5 text-[0.625rem] text-muted-foreground',
         bg,
       )}
       aria-hidden="true"
     >
       <span className="w-6 text-right tabular-nums">{oldNo ?? ''}</span>
       <span className="w-6 text-right tabular-nums">{newNo ?? ''}</span>
-      <span className="w-2 text-center font-mono text-[11px] text-foreground/70">
+      <span className="w-2 text-center font-mono text-[0.6875rem] text-foreground/70">
         {sign ?? ' '}
       </span>
     </span>

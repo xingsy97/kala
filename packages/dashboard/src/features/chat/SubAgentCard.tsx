@@ -64,7 +64,7 @@ export function SubAgentCard(props: Props): JSX.Element {
         <div className="mb-2 flex min-h-8 items-center gap-2 px-1">
           <Workflow className="h-4 w-4 flex-none text-violet-600 dark:text-violet-300" aria-hidden="true" />
           <span className="text-sm font-medium text-foreground">{t('chat.subAgent.groupLabel')}</span>
-          <span className="rounded-full bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/40">{calls.length}</span>
+          <span className="rounded-full bg-background/80 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground ring-1 ring-border/40">{calls.length}</span>
         </div>
         <div className="flex min-w-0 flex-wrap gap-1.5" data-testid={`sub-agent-group-list-${props.group.firstCallId}`}>
           {calls.map((call) => (
@@ -228,7 +228,7 @@ const SubAgentRow = memo(function SubAgentRow({
           data-sub-agent-toggle={call.callId}
         >
           <StatusIcon status={status} />
-          {agentType ? <span className="flex-none rounded bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium">{agentType}</span> : null}
+          {agentType ? <span className="flex-none rounded bg-muted/70 px-1.5 py-0.5 text-[0.625rem] font-medium">{agentType}</span> : null}
           <span className="min-w-0 max-w-36 truncate">{prompt ?? t('chat.subAgent.noPrompt')}</span>
           <StatusBadge status={status} turns={turns} durationMs={totalMs} />
         </button>
@@ -287,11 +287,11 @@ const SubAgentRow = memo(function SubAgentRow({
             <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           )}
           <StatusIcon status={status} />
-          <span className={cn('flex-none rounded bg-background/80 px-1.5 py-0.5 font-medium text-muted-foreground', compact ? 'text-[10px]' : 'text-xs')}>
+          <span className={cn('flex-none rounded bg-background/80 px-1.5 py-0.5 font-medium text-muted-foreground', compact ? 'text-[0.625rem]' : 'text-xs')}>
             {t('chat.subAgent.label')}
           </span>
           {agentType ? (
-            <span className={cn('flex-none rounded bg-background/80 px-1.5 py-0.5', compact ? 'text-[10px]' : 'text-xs')}>
+            <span className={cn('flex-none rounded bg-background/80 px-1.5 py-0.5', compact ? 'text-[0.625rem]' : 'text-xs')}>
               {agentType}
             </span>
           ) : null}
@@ -300,7 +300,7 @@ const SubAgentRow = memo(function SubAgentRow({
           </span>
           {model ? (
             <span
-              className="hidden flex-none items-center gap-1 rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:flex"
+              className="hidden flex-none items-center gap-1 rounded bg-background/80 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground sm:flex"
               title={`model=${model}`}
             >
               <Cpu className="h-3 w-3" aria-hidden="true" />
@@ -424,7 +424,7 @@ function StatusBadge({
   return (
     <span
       className={cn(
-        'flex-none rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider',
+        'flex-none rounded px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wider',
         badgeClassFor(status),
       )}
       data-testid="sub-agent-status-badge"
@@ -497,8 +497,13 @@ function useElapsedMs(startedAtMs: number | null): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (startedAtMs === null) return
-    const handle = window.setInterval(() => setNow(Date.now()), 500)
-    return () => window.clearInterval(handle)
+    let handle: number | undefined
+    const tick = (): void => {
+      setNow(Date.now())
+      handle = window.setTimeout(tick, 500)
+    }
+    handle = window.setTimeout(tick, 500)
+    return () => { if (handle !== undefined) window.clearTimeout(handle) }
   }, [startedAtMs])
   return startedAtMs === null ? 0 : Math.max(0, now - startedAtMs)
 }
@@ -601,7 +606,7 @@ function SubAgentPolicyPanel({
           {policy.reasons.map((reason) => (
             <span
               key={reason}
-              className="rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] ring-1 ring-border/50"
+              className="rounded bg-background/80 px-1.5 py-0.5 font-mono text-[0.625rem] ring-1 ring-border/50"
             >
               {reason}
             </span>
@@ -621,8 +626,8 @@ function formatPolicyDuration(ms: number): string {
 function PolicyChip({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <span className="inline-flex items-baseline gap-1">
-      <span className="uppercase tracking-wider text-[10px] text-muted-foreground/80">{label}</span>
-      <span className="font-mono text-[11px] text-foreground">{value}</span>
+      <span className="uppercase tracking-wider text-[0.625rem] text-muted-foreground/80">{label}</span>
+      <span className="font-mono text-[0.6875rem] text-foreground">{value}</span>
     </span>
   )
 }

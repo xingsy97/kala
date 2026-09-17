@@ -11,6 +11,7 @@ import type { ServerTerminalExit, ServerTerminalOutput, TerminalCreateResult, Te
 import { Button } from '../../components/ui/button.js'
 import { randomId } from '../../lib/random-id.js'
 import type { DashboardSocket } from '../../session.js'
+import { useInterfaceScale } from '../../lib/interface-scale.js'
 
 type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error'
 
@@ -28,6 +29,7 @@ export function SessionTerminalPanel({
   online?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
+  const interfaceScale = useInterfaceScale()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -78,6 +80,11 @@ export function SessionTerminalPanel({
   }, [])
 
   useEffect(() => {
+    if (terminalRef.current) terminalRef.current.options.fontSize = 12 * interfaceScale
+    fitRef.current?.fit()
+  }, [interfaceScale])
+
+  useEffect(() => {
     const identity = `${workspaceId ?? ''}:${sessionId}`
     if (identityRef.current === identity) return
     identityRef.current = identity
@@ -125,7 +132,7 @@ export function SessionTerminalPanel({
     observer.observe(host)
     fitAndResize()
     return () => observer.disconnect()
-  }, [sessionId, socket, status, workspaceId])
+  }, [interfaceScale, sessionId, socket, status, workspaceId])
 
   const start = useCallback(async (): Promise<void> => {
     if (!socket || !workspaceId || !online) return

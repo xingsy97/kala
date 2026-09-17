@@ -2,14 +2,15 @@ import { downloadBlob } from '../../lib/save-file.js'
 
 type DownloadableFileResult =
   | { kind: 'text'; content: string; truncated?: boolean }
-  | { kind: 'image' | 'pdf'; content: string; mediaType: string }
-  | { kind: 'binary'; content?: string; mediaType?: string }
+  | { kind: 'image' | 'pdf'; content: string; mediaType: string; truncated?: boolean }
+  | { kind: 'binary'; content?: string; mediaType?: string; truncated?: boolean }
 
 export function fileResultDownloadBlob(result: DownloadableFileResult): { blob: Blob } | undefined {
   if (result.kind === 'text') {
     if (result.truncated) return undefined
     return { blob: new Blob([result.content], { type: 'text/plain;charset=utf-8' }) }
   }
+  if (result.truncated) return undefined
   if (result.kind === 'image' || result.kind === 'pdf') return { blob: base64Blob(result.content, result.mediaType) }
   if (result.kind === 'binary' && result.content) return { blob: base64Blob(result.content, result.mediaType ?? 'application/octet-stream') }
   return undefined

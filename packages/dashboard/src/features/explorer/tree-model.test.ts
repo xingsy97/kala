@@ -17,6 +17,7 @@ import {
   syncSessionOrder,
   syncWorkspaceOrder,
   toStructuralSessionSummary,
+  workspaceDropIndex,
 } from './tree-model.js'
 
 function executor(overrides: Partial<AttachedExecutor> = {}): AttachedExecutor {
@@ -312,8 +313,27 @@ describe('explorer tree model helpers', () => {
     )
 
     expect(syncWorkspaceOrder(['deleted', 'ws-b'], tree)).toEqual(['ws-b', 'ws-a'])
-    expect(applyManualWorkspaceOrder(tree, ['ws-b', 'ws-a']).map((node) => node.workspaceId)).toEqual(['ws-b', 'ws-a', null])
+    expect(applyManualWorkspaceOrder(tree, ['ws-b', 'ws-a']).map((node) => node.workspaceId)).toEqual([null, 'ws-b', 'ws-a'])
     expect(reorderWorkspaceIds(['ws-a', 'ws-b'], ['ws-a', 'ws-b'], ['ws-b'], 0)).toEqual(['ws-b', 'ws-a'])
+  })
+
+  it('pins Chats ahead of saved order while translating root drop positions and preserving hidden workspaces', () => {
+    const tree = buildTree([
+      executor({ workspaceId: 'a', workspaceName: 'alpha' }),
+      executor({ workspaceId: 'b', workspaceName: 'bravo' }),
+      executor({ workspaceId: 'c', workspaceName: 'charlie' }),
+    ], [session()])
+    const order = ['a', 'b', 'c']
+    const reorder = (visible: typeof tree, moved: string[], index: number) =>
+      reorderWorkspaceIds(order, visible.flatMap((node) => node.workspaceId ? [node.workspaceId] : []), moved, workspaceDropIndex(visible, index, moved))
+    expect(reorder(tree, ['c'], 0)).toEqual(['c', 'a', 'b'])
+    expect(reorder(tree, ['c'], 1)).toEqual(['c', 'a', 'b'])
+    expect(reorder(tree, ['a'], 3)).toEqual(['b', 'a', 'c'])
+    expect(reorder(tree, ['a'], 4)).toEqual(['b', 'c', 'a'])
+    expect(reorder(tree, ['a'], 2)).toEqual(order)
+    expect(reorder(tree.filter((node) => node.workspaceId !== 'b'), ['c'], 1)).toEqual(['c', 'b', 'a'])
+    expect(reorder(tree.filter((node) => node.workspaceId !== null), ['c'], 0)).toEqual(['c', 'a', 'b'])
+    expect(applyManualWorkspaceOrder(tree, ['c', 'b', 'a']).map((node) => node.workspaceId)).toEqual([null, 'c', 'b', 'a'])
   })
 
   it('syncs and reorders sessions only inside the target workspace slice', () => {

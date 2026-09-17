@@ -1,0 +1,8 @@
+*.deb
+release.json
+dependencies.json
+SHA256SUMS
+SHA256SUMS.txt
+*.dependencies.json
+*.SHA256SUMS.txt
+*.release.json

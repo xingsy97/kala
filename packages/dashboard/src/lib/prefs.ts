@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { CHAT_FONT_SIZE_PX, SESSION_EXPLORER_FONT_SIZE_PX, FILE_EXPLORER_FONT_SIZE_PX, FILE_VIEW_FONT_SIZE_PX, DEFAULT_INTERFACE_SCALE, INTERFACE_SCALE_MIN, INTERFACE_SCALE_MAX } from './display-sizes.js'
 
 const CHANGE_EVENT = 'ak-pref-change'
 
@@ -42,19 +43,20 @@ function definePreferenceRegistry<const T extends PreferenceRegistry>(registry: 
 }
 
 export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
+  interfaceScale: { key: 'ak-interface-scale', type: 'number', defaultValue: DEFAULT_INTERFACE_SCALE, min: INTERFACE_SCALE_MIN, max: INTERFACE_SCALE_MAX },
   showToolCallTab: { key: 'ak-show-tool-call-tab', type: 'boolean', defaultValue: true },
   liveToolActivityTailCount: { key: 'ak-live-tool-activity-tail-count', type: 'number', defaultValue: 3, min: 0, max: 50 },
-  toolActivityIconScale: { key: 'ak-tool-activity-icon-scale', type: 'number', defaultValue: 150, min: 100, max: 200 },
+  toolActivityIconScale: { key: 'ak-tool-activity-icon-scale', type: 'number', defaultValue: 150, min: 100, max: 300 },
   explorerOpen: { key: 'ak-explorer-open', type: 'boolean', defaultValue: true },
   sessionExplorerSectionOpen: { key: 'ak-session-explorer-section-open', type: 'boolean', defaultValue: true },
   inspectorOpen: { key: 'ak-inspector-open', type: 'boolean', defaultValue: true },
   topbarOpen: { key: 'ak-topbar-open', type: 'boolean', defaultValue: true },
   autoHideOfflineWorkspaces: { key: 'ak-auto-hide-offline-workspaces', type: 'boolean', defaultValue: true },
   hideSubAgentSessions: { key: 'ak-hide-sub-agent-sessions', type: 'boolean', defaultValue: true },
-  chatFontSize: { key: 'ak-chat-font-size', type: 'number', defaultValue: 3, min: 0, max: 6 },
-  sessionExplorerFontSize: { key: 'ak-session-explorer-font-size', type: 'number', defaultValue: 2, min: 0, max: 4 },
-  fileExplorerFontSize: { key: 'ak-file-explorer-font-size', type: 'number', defaultValue: 1, min: 0, max: 4 },
-  fileViewFontSize: { key: 'ak-file-view-font-size', type: 'number', defaultValue: 2, min: 0, max: 4 },
+  chatFontSize: { key: 'ak-chat-font-size', type: 'number', defaultValue: 3, min: 0, max: CHAT_FONT_SIZE_PX.length - 1 },
+  sessionExplorerFontSize: { key: 'ak-session-explorer-font-size', type: 'number', defaultValue: 2, min: 0, max: SESSION_EXPLORER_FONT_SIZE_PX.length - 1 },
+  fileExplorerFontSize: { key: 'ak-file-explorer-font-size', type: 'number', defaultValue: 1, min: 0, max: FILE_EXPLORER_FONT_SIZE_PX.length - 1 },
+  fileViewFontSize: { key: 'ak-file-view-font-size', type: 'number', defaultValue: 2, min: 0, max: FILE_VIEW_FONT_SIZE_PX.length - 1 },
   chatContentWidth: { key: 'ak-chat-content-width', type: 'number', defaultValue: 1, min: 0, max: 2 },
   chatSideSpace: { key: 'ak-chat-side-space', type: 'number', defaultValue: 1, min: 0, max: 2 },
   chatLineHeight: { key: 'ak-chat-line-height', type: 'number', defaultValue: 1, min: 0, max: 2 },
@@ -71,6 +73,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   desktopNotificationConnection: { key: 'ak-desktop-notification-connection-lost', type: 'boolean', defaultValue: true },
   desktopNotificationWorkspace: { key: 'ak-desktop-notification-workspace-offline', type: 'boolean', defaultValue: true },
   desktopNotificationSound: { key: 'ak-desktop-notification-sound', type: 'boolean', defaultValue: true },
+  desktopNotificationDetails: { key: 'ak-desktop-notification-details', type: 'boolean', defaultValue: false },
   theme: { key: 'ak-theme', type: 'string', defaultValue: 'dark' },
   vscodeTheme: { key: 'ak-vscode-theme', type: 'json' },
   dashboardLanguage: { key: 'ak-dashboard-language', type: 'string', defaultValue: 'en' },
@@ -228,6 +231,7 @@ export function useNumberPref(
 }
 
 export const PREF_SHOW_TOOL_CALL_TAB = DASHBOARD_PREFERENCES.showToolCallTab.key
+export const PREF_INTERFACE_SCALE = DASHBOARD_PREFERENCES.interfaceScale.key
 export const PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT = DASHBOARD_PREFERENCES.liveToolActivityTailCount.key
 export const PREF_TOOL_ACTIVITY_ICON_SCALE = DASHBOARD_PREFERENCES.toolActivityIconScale.key
 export const PREF_EXPLORER_OPEN = DASHBOARD_PREFERENCES.explorerOpen.key

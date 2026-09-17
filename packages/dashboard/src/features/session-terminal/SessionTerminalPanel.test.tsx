@@ -12,6 +12,7 @@ const inputListeners: Array<(data: string) => void> = []
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class TerminalMock {
+    options = { fontSize: 12 }
     cols = 100
     rows = 12
     write = writeMock

@@ -134,6 +134,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
     <div>
       <SectionHeader title={t('settings.sections.executorAccess.label')} subtitle={t('settings.executorAccess.subtitle')} />
       <form onSubmit={submit} className="mb-4 max-w-full min-w-0 overflow-hidden rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+        <p className="mb-3 text-xs text-muted-foreground" data-description-kind="notice">{t('settings.executorAccess.plaintextNotice')}</p>
         <div className="grid min-w-0 gap-2 lg:grid-cols-2">
           <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.executorAccess.label')}
@@ -211,7 +212,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
                         {invite.revoked ? t('settings.executorAccess.revoked') : expired ? t('settings.executorAccess.expired') : t('settings.executorAccess.inviteActive')}
                       </span>
                     </div>
-                    <label className="block max-w-md text-[11px] font-medium text-muted-foreground">
+                    <label className="block max-w-md text-[0.6875rem] font-medium text-muted-foreground">
                       {t('settings.executorAccess.label')}
                       <input
                         className="mt-1 h-8 w-full rounded-md border-0 bg-background px-2 text-sm text-foreground outline-none ring-1 ring-border/50 focus:ring-ring/50 disabled:opacity-70"
@@ -231,6 +232,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
                     </div>
                   </div>
                   <div className="flex flex-none flex-wrap justify-end gap-1.5">
+                    <p className="w-full text-xs text-muted-foreground" data-description-kind="notice">{t('settings.executorAccess.plaintextNotice')}</p>
                     <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => regenerateInvite.mutate(invite.id)} disabled={busy} aria-label={t('settings.executorAccess.regenerate')}>
                       <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
                       {t('settings.executorAccess.regenerate')}
@@ -253,7 +255,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
 function InviteMeta({ label, value, mono = false }: { label: string; value: string; mono?: boolean }): JSX.Element {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">{label}</div>
+      <div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground/80">{label}</div>
       <div className={cn('mt-0.5 break-words text-foreground [overflow-wrap:anywhere]', mono && 'break-all font-mono')} title={value}>{value}</div>
     </div>
   )

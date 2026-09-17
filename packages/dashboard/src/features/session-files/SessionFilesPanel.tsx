@@ -33,6 +33,8 @@ import { Button } from '../../components/ui/button.js'
 import { ReadonlyImageCanvas } from '../../components/ReadonlyImagePreview.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { DEFAULT_FILE_VIEW_FONT_SIZE, PREF_FILE_VIEW_FONT_SIZE, useNumberPref } from '../../lib/prefs.js'
+import { FILE_VIEW_FONT_SIZE_PX, FONT_SIZE_MIN, FONT_SIZE_MAX } from '../../lib/display-sizes.js'
+import { useInterfaceScale } from '../../lib/interface-scale.js'
 import { workspaceReadBinary } from '../../lib/workspace-exec.js'
 import { notify } from '../../notify.js'
 import type { WorkspaceFileTarget } from '../chat/ChatPanel.js'
@@ -51,9 +53,9 @@ import { useTranslation } from 'react-i18next'
 
 type DashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 
-const FILE_VIEW_FONT_SIZE_PX = [10, 12, 14, 16, 18] as const
 const FILE_PREVIEW_MAX_BYTES = 1024 * 1024
 const FILE_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
+const FILE_DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 
 type FileNode = {
   id: string
@@ -153,7 +155,7 @@ export function WorkspaceFileViewDialog({
                 </Button>
                 <DialogTitle className="min-w-0 truncate font-mono text-xs font-medium leading-5">{viewerTitle(viewer, viewPath)}</DialogTitle>
               </div>
-              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
                 {viewerMeta(viewer).map((item) => <span key={item}>{item}</span>)}
               </div>
             </div>
@@ -169,7 +171,7 @@ export function WorkspaceFileViewDialog({
                   <WrapText className="h-3.5 w-3.5" />
                 </Button>
                 {hasRichPreview(viewer) ? (
-                  <Button variant={markdownMode === 'preview' ? 'outline' : 'ghost'} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setMarkdownMode((value) => value === 'preview' ? 'source' : 'preview')} title={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')} aria-label={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')}>
+                  <Button variant={markdownMode === 'preview' ? 'outline' : 'ghost'} size="sm" className="h-7 px-2 text-[0.6875rem]" onClick={() => setMarkdownMode((value) => value === 'preview' ? 'source' : 'preview')} title={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')} aria-label={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')}>
                     {t(markdownMode === 'preview' ? 'sessionFiles.source' : 'sessionFiles.preview')}
                   </Button>
                 ) : null}
@@ -178,7 +180,7 @@ export function WorkspaceFileViewDialog({
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta <= -2} onClick={() => setFontSizeDelta((value) => Math.max(-2, value - 1))} title={t('sessionFiles.decreaseFont')} aria-label={t('sessionFiles.decreaseFont')}>
                   <Minus className="h-3.5 w-3.5" />
                 </Button>
-                <div className="flex h-7 min-w-9 items-center justify-center rounded border border-border px-1.5 font-mono text-[11px] text-muted-foreground" title={t('sessionFiles.currentFont', { size: effectiveFontSize })} aria-label={t('sessionFiles.currentFont', { size: effectiveFontSize })} data-testid="session-file-view-font-size">
+                <div className="flex h-7 min-w-9 items-center justify-center rounded border border-border px-1.5 font-mono text-[0.6875rem] text-muted-foreground" title={t('sessionFiles.currentFont', { size: effectiveFontSize })} aria-label={t('sessionFiles.currentFont', { size: effectiveFontSize })} data-testid="session-file-view-font-size">
                   {effectiveFontSize}px
                 </div>
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta >= 2} onClick={() => setFontSizeDelta((value) => Math.min(2, value + 1))} title={t('sessionFiles.increaseFont')} aria-label={t('sessionFiles.increaseFont')}>
@@ -240,7 +242,7 @@ function SessionFilesPanelImpl({
     setLoadingPath(targetPath ?? '__root__')
     const result = await requestDir(socket, workspaceId, sessionIdRef.current ?? undefined, targetPath)
     setLoadingPath(null)
-    if (result.error) {
+    if ('error' in result) {
       setViewer({ kind: 'error', message: result.error })
       return
     }
@@ -296,7 +298,7 @@ function SessionFilesPanelImpl({
     return (
       <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="session-files-panel">
         <div className="flex h-10 flex-none items-center gap-2 border-b border-sidebar-border/40 bg-muted/15 px-3" data-testid="session-files-toolbar">
-          <span className="min-w-0 flex-1 truncate text-[11px] text-sidebar-foreground/60">{cwd || t('sessionFiles.workspaceFiles')}</span>
+          <span className="min-w-0 flex-1 truncate text-[0.6875rem] text-sidebar-foreground/60">{cwd || t('sessionFiles.workspaceFiles')}</span>
           <Button variant="ghost" size="icon" className="h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title={t('sessionFiles.refresh')} aria-label={t('sessionFiles.refresh')}>
             {loadingPath ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
@@ -309,7 +311,7 @@ function SessionFilesPanelImpl({
           ) : nodes.length === 0 ? (
             <WorkspaceToolState tone="empty" message={t('sessionFiles.noFiles')} />
           ) : (
-            <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={14} rowHeight={28} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
+            <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={fontSizePx + 2} rowHeight={Math.ceil(Math.max(28, fontSizePx * 1.5 + 12))} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
               {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} onDownload={downloadNode} downloadingPath={downloadingPath} surface="sidebar" />}
             </Tree>
           )}
@@ -342,7 +344,7 @@ function SessionFilesPanelImpl({
           ) : nodes.length === 0 && loadingPath ? (
             <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('sessionFiles.loadingFiles')}</div>
           ) : (
-            <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={16} rowHeight={30} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
+            <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={fontSizePx + 4} rowHeight={Math.ceil(Math.max(30, fontSizePx * 1.5 + 12))} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
               {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} onDownload={downloadNode} downloadingPath={downloadingPath} />}
             </Tree>
           )}
@@ -403,7 +405,7 @@ function FileTreeRow({
   const downloading = downloadingPath === item.path
   const sidebar = surface === 'sidebar'
   return (
-    <div className="flex w-full min-w-0 items-center" style={{ ...style, fontSize: fontSizePx }}>
+    <div className="flex w-full min-w-0 items-center" style={{ ...style, fontSize: fontSizePx, lineHeight: 1.4 }}>
       <button
         type="button"
         className={cn(
@@ -424,7 +426,7 @@ function FileTreeRow({
           : <span className="h-3 w-3 flex-none" />}
         {item.type === 'directory' ? <Folder className="h-3.5 w-3.5 flex-none text-sky-500" /> : <File className={cn('h-3.5 w-3.5 flex-none', sidebar ? 'text-sidebar-foreground/55' : 'text-muted-foreground')} />}
         <span className="min-w-0 truncate">{item.name}</span>
-        {item.type === 'file' && item.size !== undefined ? <span className={cn('ml-auto hidden flex-none text-[10px] sm:inline', sidebar ? 'text-sidebar-foreground/45' : 'text-muted-foreground')}>{formatBytes(item.size)}</span> : null}
+        {item.type === 'file' && item.size !== undefined ? <span className={cn('ml-auto hidden flex-none text-[0.625rem] sm:inline', sidebar ? 'text-sidebar-foreground/45' : 'text-muted-foreground')}>{formatBytes(item.size)}</span> : null}
       </button>
       {item.type === 'file' ? (
         <button
@@ -556,8 +558,9 @@ function MarkdownFileView({ content, fontSize }: { content: string; fontSize: nu
 
 function useFileViewFontSize(delta = 0): number {
   const [fontSizePref] = useNumberPref(PREF_FILE_VIEW_FONT_SIZE, DEFAULT_FILE_VIEW_FONT_SIZE, { min: 0, max: FILE_VIEW_FONT_SIZE_PX.length - 1 })
-  const fontSizeIndex = Math.min(FILE_VIEW_FONT_SIZE_PX.length - 1, Math.max(0, fontSizePref + delta))
-  return FILE_VIEW_FONT_SIZE_PX[fontSizeIndex] ?? FILE_VIEW_FONT_SIZE_PX[DEFAULT_FILE_VIEW_FONT_SIZE]
+  const scale = useInterfaceScale()
+  const pixels = FILE_VIEW_FONT_SIZE_PX[fontSizePref] ?? 14
+  return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, pixels + delta * 2)) * scale
 }
 
 function ViewerShell({ title, meta, children, chrome = true }: { title: string; meta?: string; children: ReactNode; chrome?: boolean }): JSX.Element {
@@ -601,15 +604,51 @@ async function downloadWorkspaceFile(socket: DashboardSocket, workspaceId: strin
     if (result !== 'cancelled') notify.success(result === 'saved' ? 'File saved' : 'Download started', { description: path, id: `file-download:${path}` })
     return
   }
-  const result = await requestFile(socket, workspaceId, sessionId, path, { cwd, download: true, maxBytes: FILE_DOWNLOAD_MAX_BYTES, timeoutMs: 120_000 })
-  const viewer = fileResultToViewState(result)
-  const downloadable = downloadableBlob(viewer)
-  if (!downloadable || result.truncated || result.kind === 'too_large') {
-    notify.error('File download unavailable', { description: result.error ?? 'The file is too large or cannot be read by the executor.', id: `file-download:${path}` })
+  const result = await downloadWorkspaceFileBlob(socket, workspaceId, path, cwd)
+  if ('error' in result) {
+    notify.error('File download unavailable', { description: result.error, id: `file-download:${path}` })
     return
   }
-  const saved = await saveFile({ blob: downloadable.blob, suggestedName: downloadFilename(path) })
+  const saved = await saveFile({ blob: result.blob, suggestedName: downloadFilename(path), mimeType: result.blob.type })
   if (saved !== 'cancelled') notify.success(saved === 'saved' ? 'File saved' : 'Download started', { description: path, id: `file-download:${path}` })
+}
+
+async function downloadWorkspaceFileBlob(socket: DashboardSocket, workspaceId: string, path: string, cwd?: string): Promise<{ blob: Blob } | { error: string }> {
+  const chunks: ArrayBuffer[] = []
+  let offset = 0
+  let expectedSize: number | null = null
+  let mediaType = 'application/octet-stream'
+  while (offset < FILE_DOWNLOAD_MAX_BYTES) {
+    const res = await workspaceReadBinary(socket, workspaceId, path, {
+      ...(cwd ? { cwd } : {}),
+      offset,
+      maxBytes: Math.min(FILE_DOWNLOAD_CHUNK_BYTES, FILE_DOWNLOAD_MAX_BYTES - offset),
+      ackTimeoutMs: 120_000,
+    })
+    if (res.error) return { error: res.error.message }
+    if (offset > 0 && res.offset !== offset) return { error: 'The connected Executor does not support ranged downloads yet. Update the Executor and try again.' }
+    if (expectedSize === null) {
+      expectedSize = res.size
+      mediaType = res.mime || mediaType
+      if (expectedSize > FILE_DOWNLOAD_MAX_BYTES) return { error: `The file is ${formatBytes(expectedSize)}, above the ${formatBytes(FILE_DOWNLOAD_MAX_BYTES)} download limit.` }
+    } else if (res.size !== expectedSize) {
+      return { error: 'The file changed while it was being downloaded. Try again.' }
+    }
+    const bytes = base64ToBytes(res.base64)
+    if (bytes.length === 0 && offset < expectedSize) return { error: 'The executor returned an empty file chunk. Try again.' }
+    chunks.push(copyBytesToArrayBuffer(bytes))
+    offset += bytes.length
+    if (!res.truncated || offset >= expectedSize) break
+  }
+  if (expectedSize === null) return { error: 'The executor did not return file metadata.' }
+  if (offset !== expectedSize) return { error: `Downloaded ${formatBytes(offset)} of ${formatBytes(expectedSize)}. Try again.` }
+  return { blob: new Blob(chunks, { type: mediaType }) }
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(copy).set(bytes)
+  return copy
 }
 
 function downloadableBlob(viewer: FileViewState): { blob: Blob } | undefined {
@@ -632,7 +671,7 @@ function FallbackViewer({ kind, size, message }: { kind: string; size?: number; 
     <div className="space-y-2 p-4 text-sm">
       <div className="font-medium">{diagnostic.title}</div>
       <div className="text-xs text-muted-foreground">{diagnostic.description}{size !== undefined ? ` · ${formatBytes(size)}` : ''}</div>
-      {message && message !== diagnostic.description ? <div className="max-w-full break-words rounded bg-muted/50 p-2 font-mono text-[11px] text-muted-foreground">{message}</div> : null}
+      {message && message !== diagnostic.description ? <div className="max-w-full break-words rounded bg-muted/50 p-2 font-mono text-[0.6875rem] text-muted-foreground">{message}</div> : null}
     </div>
   )
 }
@@ -670,6 +709,7 @@ function fileRequestErrorState(path: string, error: unknown): FileViewState {
 }
 
 function SessionTerminal({ socket, workspaceId, sessionId, cwd }: { socket: DashboardSocket | null; workspaceId?: string; sessionId: string; cwd?: string }): JSX.Element {
+  const interfaceScale = useInterfaceScale()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -697,6 +737,11 @@ function SessionTerminal({ socket, workspaceId, sessionId, cwd }: { socket: Dash
   }, [])
 
   useEffect(() => {
+    if (terminalRef.current) terminalRef.current.options.fontSize = 12 * interfaceScale
+    fitRef.current?.fit()
+  }, [interfaceScale])
+
+  useEffect(() => {
     const host = hostRef.current
     if (!host) return
     const fitAndResize = (): void => {
@@ -709,7 +754,7 @@ function SessionTerminal({ socket, workspaceId, sessionId, cwd }: { socket: Dash
     observer.observe(host)
     fitAndResize()
     return () => observer.disconnect()
-  }, [socket, workspaceId, sessionId, terminalId, status])
+  }, [interfaceScale, socket, workspaceId, sessionId, terminalId, status])
 
   useEffect(() => {
     return () => {

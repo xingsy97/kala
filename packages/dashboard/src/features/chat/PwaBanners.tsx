@@ -130,7 +130,7 @@ export function PwaUpdateGlobalBanner(): JSX.Element | null {
           type="button"
           onClick={onReload}
           disabled={reloading}
-          className="rounded-md border border-sky-400/60 bg-sky-500 px-3 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-sky-600 disabled:cursor-progress disabled:opacity-60 dark:border-sky-500 dark:bg-sky-600 dark:hover:bg-sky-500"
+          className="rounded-md border border-sky-400/60 bg-sky-500 px-3 py-1 text-[0.6875rem] font-semibold text-white shadow-sm transition-colors hover:bg-sky-600 disabled:cursor-progress disabled:opacity-60 dark:border-sky-500 dark:bg-sky-600 dark:hover:bg-sky-500"
           data-testid="pwa-update-reload"
         >
           {reloading ? t('pwa.reloading') : t('common.reload')}

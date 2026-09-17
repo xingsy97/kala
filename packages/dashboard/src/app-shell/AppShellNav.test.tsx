@@ -42,6 +42,27 @@ describe('AppShellNav', () => {
     expect(screen.getByTestId('app-shell-open-evaluation').getAttribute('target')).toBe('_blank')
   })
 
+  it('offers web users an in-app dialog trigger instead of a navigation link', () => {
+    renderNav()
+    expect(screen.getByLabelText('Agent Kernel').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-web.svg')
+    const trigger = screen.getByTestId('app-shell-download-desktop')
+    expect(trigger.tagName).toBe('BUTTON')
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(trigger.getAttribute('href')).toBeNull()
+    expect(trigger.getAttribute('target')).toBeNull()
+  })
+
+  it('hides browser installation entry inside the installed desktop', () => {
+    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    try {
+      renderNav()
+      expect(screen.queryByTestId('app-shell-download-desktop')).toBeNull()
+      expect(screen.getByLabelText('Agent Kernel').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-desktop.svg')
+    } finally {
+      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+    }
+  })
+
   it('shows the authenticated account and signs out from the account menu', () => {
     const onSignOut = vi.fn()
     renderNav({

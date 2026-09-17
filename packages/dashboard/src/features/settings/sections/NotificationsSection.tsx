@@ -1,6 +1,9 @@
 import type { DesktopNotificationKind, PushDevice } from '@agent-kernel/shared/push'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { HelpHint } from '../../../components/ui/help-hint.js'
+import { isDesktopClient } from '../../../lib/desktop.js'
+import { useDesktopBridge } from '../../../lib/desktop-bridge.js'
 
 import { appBadgeSupported } from '../../../lib/app-badge.js'
 import {
@@ -17,7 +20,7 @@ import {
   unsubscribeFromPush,
   type PushSupport,
 } from '../../../lib/push.js'
-import { PREF_APP_BADGE_ENABLED, useBooleanPref } from '../../../lib/prefs.js'
+import { DASHBOARD_PREFERENCES, PREF_APP_BADGE_ENABLED, useBooleanPref } from '../../../lib/prefs.js'
 import { pushDeviceId } from '../../../lib/push-activity.js'
 import { InterfaceToggle, SectionHeader, Toggle } from '../controls.js'
 
@@ -31,17 +34,40 @@ export function NotificationsSection(): JSX.Element {
         subtitle={t('settings.notifications.subtitle')}
       />
       <ul className="space-y-3 text-sm">
-        <SystemNotificationsSettings />
-        <InterfaceToggle
+        {isDesktopClient() ? <NativeNotificationsSettings /> : <SystemNotificationsSettings />}
+        {!isDesktopClient() ? <InterfaceToggle
           label={t('settings.notifications.appBadge')}
           description={appBadgeSupported() ? t('settings.notifications.appBadgeAvailable') : t('settings.notifications.appBadgeUnavailable')}
           checked={appBadgeEnabled && appBadgeSupported()}
           onChange={setAppBadgeEnabled}
           testId="settings-toggle-app-badge"
           disabled={!appBadgeSupported()}
-        />
+        /> : null}
       </ul>
     </div>
+  )
+}
+
+function NativeNotificationsSettings(): JSX.Element {
+  const { t } = useTranslation()
+  const native = useDesktopBridge()
+  const [enabled, setEnabled] = useBooleanPref(PREF_DESKTOP_NOTIFICATIONS_ENABLED, false)
+  const [details, setDetails] = useBooleanPref(DASHBOARD_PREFERENCES.desktopNotificationDetails.key, false)
+  const available = Boolean(native.bridge && native.info && native.info.notificationsAvailable !== false && !native.error)
+  return (
+    <li className="space-y-4 rounded-lg border border-border bg-card/60 p-4" data-testid="settings-native-notifications">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1 font-medium">{t('settings.notifications.system')}<HelpHint label={t('settings.notifications.system')}>{t('desktopNative.notificationHelp')}</HelpHint></div>
+        <Toggle checked={enabled && available} onChange={setEnabled} ariaLabel={t('settings.notifications.enable')} testId="settings-toggle-desktop-notifications" disabled={!available} />
+      </div>
+      {!available ? <p role="status" className="text-xs text-muted-foreground">{t(native.bridge && !native.info && !native.error ? 'desktopNative.connecting' : 'desktopNative.notificationsUnavailable')}</p> : null}
+      {native.error ? <p role="alert" className="text-xs text-destructive">{t('desktopNative.failure', { detail: native.error })}</p> : null}
+      <div className="grid gap-2">
+        {DESKTOP_NOTIFICATION_PREFS.map((pref) => <NotificationKindToggle key={pref.key} prefKey={pref.key} label={t(`settings.notifications.prefs.${notificationKindKey(pref.kind)}.label`)} disabled={!enabled || !available} />)}
+        <NotificationKindToggle prefKey={PREF_DESKTOP_NOTIFICATION_SOUND} label={t('settings.interface.sound')} disabled={!enabled || !available} />
+      </div>
+      <ul><InterfaceToggle label={t('desktopNative.details')} description={t('desktopNative.detailsHelp')} checked={details} onChange={setDetails} testId="settings-native-notification-details" disabled={!enabled || !available} /></ul>
+    </li>
   )
 }
 
@@ -131,11 +157,8 @@ function SystemNotificationsSettings(): JSX.Element {
     <li className="rounded-lg border border-border bg-card/60 p-4" data-testid="settings-push-section">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="font-medium">{t('settings.notifications.system')}</div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {t('settings.notifications.systemDescription')}
-          </p>
-          <p className="mt-1 text-[11px] text-muted-foreground" data-testid="desktop-notification-permission">
+          <div className="flex items-center gap-1 font-medium">{t('settings.notifications.system')}<HelpHint label={t('settings.notifications.system')}>{t('settings.notifications.systemDescription')}</HelpHint></div>
+          <p className="mt-1 text-[0.6875rem] text-muted-foreground" data-testid="desktop-notification-permission">
             {active
               ? endpoint ? t('settings.notifications.enabledDevice') : t('settings.notifications.enabledBrowser')
               : t('settings.notifications.permission', { value: permissionLabel(permission, t) })}
@@ -159,14 +182,13 @@ function SystemNotificationsSettings(): JSX.Element {
       ) : null}
 
       <div className="mt-4 border-t border-border/60 pt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('settings.notifications.kinds')}</div>
+        <div className="mb-2 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('settings.notifications.kinds')}<HelpHint label={t('settings.notifications.kinds')}>{DESKTOP_NOTIFICATION_PREFS.map((pref) => <span className="mb-2 block last:mb-0" key={pref.kind}><strong>{t(`settings.notifications.prefs.${notificationKindKey(pref.kind)}.label`)}</strong><br />{t(`settings.notifications.prefs.${notificationKindKey(pref.kind)}.description`)}</span>)}</HelpHint></div>
         <div className="grid gap-2">
           {DESKTOP_NOTIFICATION_PREFS.map((pref) => (
             <NotificationKindToggle
               key={pref.kind}
               prefKey={pref.key}
               label={t(`settings.notifications.prefs.${notificationKindKey(pref.kind)}.label`)}
-              description={t(`settings.notifications.prefs.${notificationKindKey(pref.kind)}.description`)}
               disabled={!active}
               onChanged={() => { void syncBackgroundDelivery() }}
             />
@@ -175,8 +197,7 @@ function SystemNotificationsSettings(): JSX.Element {
       </div>
 
       <div className="mt-4 border-t border-border/60 pt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('settings.notifications.devices')}</div>
-        <p className="mb-3 text-[11px] leading-4 text-muted-foreground">{t('settings.notifications.devicesDescription')}</p>
+        <div className="mb-2 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('settings.notifications.devices')}<HelpHint label={t('settings.notifications.devices')}>{t('settings.notifications.devicesDescription')}</HelpHint></div>
         <div className="grid gap-2" data-testid="settings-notification-devices">
           {devices.length === 0 ? (
             <div className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">{t('settings.notifications.noDevices')}</div>
@@ -253,13 +274,13 @@ function NotificationDeviceRow({ device, busy, onRefresh, onTestResult }: {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-medium text-foreground">{device.name}{device.current ? ` · ${t('settings.notifications.currentDevice')}` : ''}</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">{t('settings.notifications.lastRegistered', { value: new Date(device.lastSeenAt).toLocaleString() })}</div>
+          <div className="mt-0.5 text-[0.6875rem] text-muted-foreground">{t('settings.notifications.lastRegistered', { value: new Date(device.lastSeenAt).toLocaleString() })}</div>
         </div>
         <Toggle checked={device.enabled} onChange={(next) => { void update(next) }} ariaLabel={t('settings.notifications.deviceAria', { name: device.name })} disabled={busy} />
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
-        <button type="button" onClick={() => { void test() }} disabled={busy || !device.enabled} className="rounded border border-border px-2 py-1 text-[11px] hover:bg-muted disabled:opacity-50">{t('settings.notifications.sendTestShort')}</button>
-        {!device.current ? <button type="button" onClick={() => { void remove() }} disabled={busy} className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50">{t('settings.notifications.remove')}</button> : null}
+        <button type="button" onClick={() => { void test() }} disabled={busy || !device.enabled} className="rounded border border-border px-2 py-1 text-[0.6875rem] hover:bg-muted disabled:opacity-50">{t('settings.notifications.sendTestShort')}</button>
+        {!device.current ? <button type="button" onClick={() => { void remove() }} disabled={busy} className="rounded border border-border px-2 py-1 text-[0.6875rem] text-muted-foreground hover:bg-muted disabled:opacity-50">{t('settings.notifications.remove')}</button> : null}
       </div>
     </div>
   )
@@ -274,7 +295,7 @@ function NotificationKindToggle({
 }: {
   prefKey: string
   label: string
-  description: string
+  description?: string
   disabled: boolean
   onChanged?: () => void
 }): JSX.Element {
@@ -283,8 +304,7 @@ function NotificationKindToggle({
   return (
     <div className="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-2.5">
       <div className="min-w-0">
-        <div className="text-xs font-medium text-foreground">{label}</div>
-        <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{description}</div>
+        <div className="flex items-center gap-1 text-xs font-medium text-foreground">{label}{description ? <HelpHint label={label}>{description}</HelpHint> : null}</div>
       </div>
       <Toggle
         checked={checked}

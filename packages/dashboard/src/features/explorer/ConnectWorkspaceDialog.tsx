@@ -217,7 +217,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={cn(dialogMobileSheetClassName, 'grid min-w-0 max-w-4xl grid-rows-[auto_minmax(0,1fr)] border-0 bg-popover shadow-2xl sm:max-h-[min(var(--ak-viewport-h,92dvh),46rem)] sm:rounded-3xl')} data-testid="connect-workspace-dialog">
         <DialogHeader className="border-b border-border/35 px-5 pb-4 pt-5 pr-14 sm:px-7 sm:pb-5 sm:pt-6 sm:pr-16">
-          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground" aria-hidden="true">
+          <span className="mb-2 inline-flex items-center gap-2 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground" aria-hidden="true">
             <Terminal className="h-3.5 w-3.5" /> Workspace setup
           </span>
           <DialogTitle className="text-xl font-semibold tracking-tight sm:text-2xl">{t('explorer.connectDialog.title')}</DialogTitle>
@@ -264,7 +264,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
 }
 
 function SectionLabel({ index, label }: { index: string; label: string }): JSX.Element {
-  return <h3 className="flex items-center gap-2 text-sm font-medium text-foreground"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 font-mono text-[10px] text-primary">{index}</span>{label}</h3>
+  return <h3 className="flex items-center gap-2 text-sm font-medium text-foreground"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 font-mono text-[0.625rem] text-primary">{index}</span>{label}</h3>
 }
 
 function PlatformGroup({ label, selected, labelFor, onChange }: { label: string; selected: ExecutorInstallPlatform; labelFor(value: ExecutorInstallPlatform): string; onChange(value: ExecutorInstallPlatform): void }): JSX.Element {
@@ -287,12 +287,12 @@ function TerminalCommand({ command, copied, mode, modeLabel, transitioning, onCo
       aria-busy={transitioning}
     >
       <div className="flex items-center justify-between border-b border-border/50 bg-background/45 px-4 py-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{modeLabel}</span>
+        <span className="text-[0.625rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">{modeLabel}</span>
         {transitioning ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" data-testid="executor-command-transition" aria-hidden="true" /> : null}
       </div>
       <div className={cn('flex min-w-0 flex-col gap-3 p-4 transition-opacity duration-200 sm:flex-row sm:items-start', transitioning && 'animate-pulse opacity-55')}>
-        <span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none text-primary" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[12px] leading-5">{transitioning ? t('explorer.connectDialog.preparing') : command || t('explorer.connectDialog.preparing')}</pre></span>
-        <Button type="button" variant="outline" size="sm" className="h-9 w-full flex-none gap-1.5 rounded-lg bg-background/70 px-3 text-[11px] shadow-none hover:bg-accent sm:w-auto" onClick={onCopy} disabled={!command || transitioning} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button>
+        <span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none text-primary" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[0.75rem] leading-5">{transitioning ? t('explorer.connectDialog.preparing') : command || t('explorer.connectDialog.preparing')}</pre></span>
+        <Button type="button" variant="outline" size="sm" className="h-9 w-full flex-none gap-1.5 rounded-lg bg-background/70 px-3 text-[0.6875rem] shadow-none hover:bg-accent sm:w-auto" onClick={onCopy} disabled={!command || transitioning} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button>
       </div>
     </section>
   )

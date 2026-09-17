@@ -9,7 +9,8 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X } from 'lucide-react'
+import { HelpHint } from '../../components/ui/help-hint.js'
+import { Link2, X } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ApprovalMode } from '@agent-kernel/kernel'
@@ -30,6 +31,8 @@ import {
 } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
 import { saveFile } from '../../lib/save-file.js'
+import { getDesktopBridge, validDesktopSessionId } from '../../lib/desktop-bridge.js'
+import { notify } from '../../notify.js'
 import { evaluationReferenceUrl, explicitEvaluationReference, governedSessionTaskCandidate } from '../../evaluation-integration.js'
 import { Input } from '../../components/ui/input.js'
 import {
@@ -112,6 +115,19 @@ export function SessionMetadataDialog({
   const toolCardModeChanged = toolCardModeDraft !== toolCardMode
   const canSave = labelChanged || approvalChanged || toolCardModeChanged
   const evaluationReference = typeof window === 'undefined' ? undefined : explicitEvaluationReference(window.location, sessionId)
+  const desktopSessionLink = getDesktopBridge() && validDesktopSessionId(sessionId) ? `agent-runlab://session/${sessionId}` : null
+  const copyDesktopSessionLink = async (): Promise<void> => {
+    if (!desktopSessionLink) return
+    try {
+      await navigator.clipboard.writeText(desktopSessionLink)
+      notify.success(t('common.copied'), { id: 'desktop-session-link' })
+    } catch (error) {
+      notify.error(t('desktopNative.copyLinkFailed'), {
+        id: 'desktop-session-link',
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
   const exportTaskCandidate = async (): Promise<void> => {
     const candidate = governedSessionTaskCandidate(sessionId, summary, selectedModel)
     await saveFile({ suggestedName: 'agent-eval-task-candidate-' + sessionId.replace(/[^A-Za-z0-9._:-]/gu, '-') + '.json', blob: new Blob([JSON.stringify(candidate, null, 2) + '\n'], { type: 'application/json' }), mimeType: 'application/json' })
@@ -132,10 +148,8 @@ export function SessionMetadataDialog({
         className={cn(dialogMobileSheetClassName, 'grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl')}
       >
         <DialogHeader className="relative border-b border-border/60 px-4 py-3 pr-14 sm:px-6 sm:py-4 sm:pr-14">
-          <DialogTitle className="text-lg">{t('dialogs.sessionInfo')}</DialogTitle>
-          <DialogDescription className="hidden sm:block">
-            {t('dialogs.sessionInfoDescription')}
-          </DialogDescription>
+          <DialogTitle className="flex items-center gap-1 text-lg">{t('dialogs.sessionInfo')}<HelpHint label={t('dialogs.sessionInfo')}>{t('dialogs.sessionInfoDescription')}</HelpHint></DialogTitle>
+          <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
           <DialogClose className={dialogTouchCloseClassName} aria-label={t('common.close')}>
             <X className="h-5 w-5" aria-hidden="true" />
           </DialogClose>
@@ -143,7 +157,11 @@ export function SessionMetadataDialog({
 
         <DialogBody className="px-4 py-4 sm:px-6" data-testid="session-metadata-body">
         <div className="grid gap-3 text-sm">
-          <ReadOnlyRow label={t('dialogs.sessionId')} value={sessionId} mono />
+          <ReadOnlyRow label={t('dialogs.sessionId')} value={sessionId} mono action={desktopSessionLink ? (
+            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" data-testid="copy-desktop-session-link" aria-label={t('desktopNative.copySessionLink')} title={t('desktopNative.copySessionLink')} onClick={() => void copyDesktopSessionLink()}>
+              <Link2 className="h-3.5 w-3.5" aria-hidden />
+            </Button>
+          ) : null} />
           <ReadOnlyRow
             label={t('dialogs.agentRuntime')}
             value={agentRuntimeDisplay}
@@ -305,16 +323,19 @@ function ReadOnlyRow({
   value,
   mono = false,
   testId,
+  action,
 }: {
   label: string
   value: string
   mono?: boolean
   testId?: string
+  action?: React.ReactNode
 }): JSX.Element {
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <span className="text-xs uppercase tracking-wider text-muted-foreground">
+      <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
         {label}
+        {action}
       </span>
       <span
         data-testid={testId}

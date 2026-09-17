@@ -55,11 +55,17 @@ export async function startHeartbeat(options: StartHeartbeatOptions): Promise<He
     }
   }
 
-  const timer: NodeJS.Timeout = setInterval(() => {
-    const partial = options.provide()
-    void writeRecord({ timestamp: new Date().toISOString(), ...partial })
-  }, interval)
-  timer.unref?.()
+  let closed = false
+  let timer: NodeJS.Timeout | undefined
+  const schedule = (): void => {
+    if (closed) return
+    timer = setTimeout(() => {
+      const partial = options.provide()
+      void writeRecord({ timestamp: new Date().toISOString(), ...partial }).finally(schedule)
+    }, interval)
+    timer.unref?.()
+  }
+  schedule()
 
   return {
     path: options.path,
@@ -67,7 +73,8 @@ export async function startHeartbeat(options: StartHeartbeatOptions): Promise<He
       await writeRecord({ timestamp: new Date().toISOString(), ...partial })
     },
     close() {
-      clearInterval(timer)
+      closed = true
+      if (timer) clearTimeout(timer)
     },
   }
 }

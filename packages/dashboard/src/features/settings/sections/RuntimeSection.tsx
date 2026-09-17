@@ -52,6 +52,7 @@ export function RuntimeSection({
   useEffect(() => {
     if (!platform || !operation || ['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed', 'rejected'].includes(operation.phase)) return
     let cancelled = false
+    let timer: number | undefined
     const poll = async (): Promise<void> => {
       try {
         const res = await fetch(`/runtime/deployment/operations/${encodeURIComponent(operation.operationId)}`, { cache: 'no-store' })
@@ -60,12 +61,22 @@ export function RuntimeSection({
         if (!cancelled) {
           setOperation((current) => current?.operationId === operation.operationId ? { ...current, ...body, operationId: operation.operationId, phase: body.phase! } : current)
           if (body.error?.message) setError(body.error.message)
+          if (!['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed', 'rejected'].includes(body.phase)) {
+            timer = window.setTimeout(() => { void poll() }, 1_000)
+          }
         }
-      } catch (err) { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err))
+          timer = window.setTimeout(() => { void poll() }, 1_000)
+        }
+      }
     }
     void poll()
-    const timer = window.setInterval(() => { void poll() }, 1_000)
-    return () => { cancelled = true; window.clearInterval(timer) }
+    return () => {
+      cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
   }, [operation?.operationId, operation?.phase, platform])
   const rows: Array<[string, string]> = [
     [t('settings.runtime.anthropicSettings'), payload.paths.claudeSettings],
@@ -94,7 +105,7 @@ export function RuntimeSection({
                 {!platform && currentAttempt ? ` - ${currentAttempt.sessions.length} ${t('settings.runtime.restartSessions')}` : ''}
               </div>
               {operation?.blockers?.length ? <div className="text-xs text-amber-600">{t('settings.runtime.restartBlockers')}: {operation.blockers.join(', ')}</div> : null}
-              {operation?.operationId ? <div className="break-all font-mono text-[10px] text-muted-foreground">{operation.operationId}</div> : null}
+              {operation?.operationId ? <div className="break-all font-mono text-[0.625rem] text-muted-foreground">{operation.operationId}</div> : null}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button type="button" size="sm" className="h-9" disabled={restart.isPending || restartActive} onClick={() => restart.mutate()}>

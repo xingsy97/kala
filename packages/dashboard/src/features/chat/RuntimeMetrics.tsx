@@ -160,7 +160,7 @@ export function RuntimeMetrics({
       <button
         type="button"
         className={cn(
-          'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground',
+          'flex flex-none items-center gap-1.5 text-[0.6875rem] text-muted-foreground transition-colors hover:text-foreground',
           isSimple ? 'pointer-events-auto absolute -inset-x-px -top-px h-5 overflow-visible rounded-t-[22px] p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400/30' : 'h-9 rounded-lg px-1.5 hover:bg-accent sm:h-7 sm:px-1',
         )}
         title={title}
@@ -203,7 +203,7 @@ export function RuntimeMetrics({
         </svg> : null}
         {!isSimple ? (
           <span className={cn(
-            'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
+            'flex-none whitespace-nowrap font-mono text-[0.625rem] leading-none text-foreground',
             evaluation.tone === 'ok' && 'hidden sm:inline',
           )}>
             {percent !== null ? `${percent}%` : '?'}
@@ -254,7 +254,7 @@ export function RuntimeMetrics({
             />
           </div>
           {breakdownSegments.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground" data-testid="context-breakdown-legend">
+            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground" data-testid="context-breakdown-legend">
               {breakdownSegments.map((seg) => (
                 <span key={seg.key} className="inline-flex items-center gap-1.5">
                   <span className={cn('h-2 w-2 flex-none rounded-sm', seg.className)} aria-hidden="true" />
@@ -366,7 +366,7 @@ function SectionTitle({ children }: { children: ReactNode }): JSX.Element {
 
 function MetricRow({ label, value, muted }: { label: string; value: string; muted?: boolean }): JSX.Element {
   return (
-    <div className={cn('flex items-center justify-between gap-3', muted ? 'mt-1 text-[11px]' : 'mt-2 text-xs')}>
+    <div className={cn('flex items-center justify-between gap-3', muted ? 'mt-1 text-[0.6875rem]' : 'mt-2 text-xs')}>
       <span className={cn('min-w-0 truncate', muted ? 'text-muted-foreground' : 'text-foreground/90')}>{label}</span>
       <span className="flex-none font-mono text-muted-foreground">{value}</span>
     </div>

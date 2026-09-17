@@ -27,8 +27,9 @@ export class ModelMetadataService {
   private catalog?: LoadedModelCatalog
   private providerMetadata: readonly ProviderModelMetadata[] = []
   private providers: readonly ProviderSpec[] = []
-  private refreshTimer?: ReturnType<typeof setInterval>
+  private refreshTimer?: ReturnType<typeof setTimeout>
   private onUpdate?: () => void
+  private stopped = true
 
   constructor(options: ModelMetadataServiceOptions = {}) {
     this.catalogClient = options.catalog ?? new ModelsDevCatalog(options)
@@ -38,6 +39,7 @@ export class ModelMetadataService {
   }
 
   async start(providers: readonly ProviderSpec[]): Promise<void> {
+    this.stopped = false
     this.providers = providers
     const { catalog, stale } = await this.catalogClient.loadBestAvailable()
     this.catalog = catalog
@@ -49,12 +51,12 @@ export class ModelMetadataService {
 
     void this.refreshProviderMetadata()
     if (stale) void this.refresh()
-    this.refreshTimer = setInterval(() => void this.refresh(), this.refreshIntervalMs)
-    this.refreshTimer.unref?.()
+    this.scheduleRefresh()
   }
 
   stop(): void {
-    if (this.refreshTimer) clearInterval(this.refreshTimer)
+    this.stopped = true
+    if (this.refreshTimer) clearTimeout(this.refreshTimer)
     this.refreshTimer = undefined
   }
 
@@ -122,6 +124,17 @@ export class ModelMetadataService {
       catalogSource: this.catalog?.source,
       providerModels: this.providerMetadata.length,
     }, 'model metadata refreshed')
+  }
+
+  private scheduleRefresh(): void {
+    if (this.stopped) return
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined
+      void this.refresh().finally(() => {
+        if (!this.stopped) this.scheduleRefresh()
+      })
+    }, this.refreshIntervalMs)
+    this.refreshTimer.unref?.()
   }
 
   private async refreshProviderMetadata(): Promise<void> {

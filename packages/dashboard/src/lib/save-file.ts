@@ -36,8 +36,13 @@ export function downloadBlob(blob: Blob, filename: string, windowValue: Window =
   anchor.href = url
   anchor.download = filename
   anchor.rel = 'noopener'
+  anchor.style.display = 'none'
+  windowValue.document.body.append(anchor)
   anchor.click()
-  windowValue.setTimeout(() => URL.revokeObjectURL(url), 0)
+  windowValue.setTimeout(() => {
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }, 60_000)
 }
 
 function filePickerTypes(filename: string, mimeType: string): Array<{ description: string; accept: Record<string, string[]> }> | undefined {

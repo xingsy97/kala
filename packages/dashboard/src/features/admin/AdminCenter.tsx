@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { HelpHint } from '../../components/ui/help-hint.js'
 import { Button } from '../../components/ui/button.js'
 import { ProductState } from '../../components/ui/product-state.js'
 
@@ -31,7 +32,7 @@ export function AdminCenter({ onClose }: { onClose(): void }): JSX.Element {
   const canManage = snapshot?.permissions.includes('organization:manage') ?? false
   const canPolicy = snapshot?.permissions.includes('policy:manage') ?? false
   return <div className="fixed inset-0 z-[71] overflow-y-auto bg-background" data-testid="admin-center">
-    <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between border-b bg-background/95 px-4"><div><h1 className="font-semibold">{t('admin.title')}</h1><p className="text-xs text-muted-foreground">{t('admin.subtitle')}</p></div><Button variant="ghost" onClick={onClose}>{t('common.close')}</Button></header>
+    <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between border-b bg-background/95 px-4"><div><h1 className="flex items-center gap-1 font-semibold">{t('admin.title')}<HelpHint label={t('admin.title')}>{t('admin.subtitle')}</HelpHint></h1></div><Button variant="ghost" onClick={onClose}>{t('common.close')}</Button></header>
     <main className="mx-auto max-w-6xl p-4 md:p-6">{error ? <ProductState kind="forbidden" title={t('admin.unavailable')} description={error} primary={{ label: t('common.retry'), onClick: () => void load() }} /> : !snapshot ? <ProductState kind="loading" title={t('admin.loading')} description={t('admin.resolving')} /> : <>
       <nav className="mb-5 flex gap-1 overflow-x-auto">{tabs.map((item) => <Button key={item} size="sm" variant={tab === item ? 'outline' : 'ghost'} onClick={() => setTab(item)}>{t(`admin.tabs.${item}`)}</Button>)}</nav>
       {tab === 'overview' ? <Overview snapshot={snapshot} t={t} /> : null}

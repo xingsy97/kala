@@ -86,6 +86,7 @@ type Props = {
   onListFiles?(query: string): Promise<readonly FileListEntry[]>
   onReadFile?(path: string): Promise<{ content?: string; error?: string }>
   awaitingAck?: boolean
+  lockWhileSubmitting?: boolean
   /**
    * Extra controls rendered inline in the footer, immediately after the
    * approval-mode picker. Used e.g. by the background-shells trigger.
@@ -233,6 +234,7 @@ export function Composer({
   onListFiles,
   onReadFile,
   awaitingAck = false,
+  lockWhileSubmitting = false,
   footerExtras,
 }: Props): JSX.Element {
   const { t } = useTranslation()
@@ -297,6 +299,7 @@ export function Composer({
   const [pastedImages, setPastedImages] = useState<readonly PastedImage[]>([])
   const [attachedFiles, setAttachedFiles] = useState<readonly AttachedFile[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const submitInFlight = useRef(false)
   useEffect(() => {
     setPastedImages([])
     setAttachedFiles([])
@@ -458,7 +461,7 @@ export function Composer({
   }
 
   const submit = async (): Promise<void> => {
-    if (submitting) return
+    if (disabled || workspaceOnline === false || submitting || submitInFlight.current) return
     const trimmed = text.trim()
     if (trimmed.length === 0 && pastedImages.length === 0 && attachedFiles.length === 0) return
     const parsedCommand = parseSlashCommand(trimmed)
@@ -518,7 +521,10 @@ export function Composer({
     setMentionState(null)
     setMentionFiles([])
     const uploadingFiles = submittedFiles.length > 0
-    if (uploadingFiles) setSubmitting(true)
+    if (uploadingFiles || lockWhileSubmitting) {
+      submitInFlight.current = true
+      setSubmitting(true)
+    }
     let files: readonly ReferencedFileContent[] = []
     let admissionStarted = false
     try {
@@ -560,7 +566,10 @@ export function Composer({
       }
       setPendingToast(error instanceof Error ? error.message : String(error))
     } finally {
-      if (uploadingFiles) setSubmitting(false)
+      if (uploadingFiles || lockWhileSubmitting) {
+        submitInFlight.current = false
+        setSubmitting(false)
+      }
     }
   }
 
@@ -843,7 +852,7 @@ export function Composer({
               rows={1}
               disabled={disabled}
               placeholder={placeholderText}
-              className="max-h-[min(240px,35vh)] min-h-14 w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-3.5 text-[18px] leading-7 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+              className="max-h-[min(240px,35vh)] min-h-14 w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-3.5 text-[1.125rem] leading-7 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
               data-testid="composer-input"
               onPaste={(e) => {
                 void handlePaste(e)
@@ -894,7 +903,7 @@ export function Composer({
                 className="absolute inset-x-2 bottom-2 z-10 max-h-[min(16rem,40vh)] overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
                 data-testid="mention-menu"
               >
-                <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[0.625rem] uppercase tracking-wider text-muted-foreground">
                   <AtSign className="h-3 w-3" aria-hidden="true" />
                   <span>{t('composer.files')}</span>
                   {mentionState.query ? (
@@ -975,7 +984,7 @@ export function Composer({
                   const key = modelKey(m)
                   return (
                   <SelectItem key={key} value={key} data-testid={`model-option-${key}`}>
-                    {m.label}{m.providerId ? <span className="ml-1 text-[10px] text-muted-foreground">{m.providerId}</span> : null}
+                    {m.label}{m.providerId ? <span className="ml-1 text-[0.625rem] text-muted-foreground">{m.providerId}</span> : null}
                   </SelectItem>
                 )})}
               </SelectContent>
@@ -1011,7 +1020,7 @@ export function Composer({
                   >
                     <div className="flex flex-col">
                       <span>{display.label}</span>
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-[0.625rem] text-muted-foreground">
                         {display.hint}
                       </span>
                     </div>
@@ -1047,7 +1056,7 @@ export function Composer({
         )}
         {pendingToast ? (
           <div
-            className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+            className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-[0.6875rem] text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
             data-testid="composer-toast"
           >
             {pendingToast}
@@ -1122,7 +1131,7 @@ function AttachmentTray({
           <FileText className="h-5 w-5 flex-none text-muted-foreground" aria-hidden="true" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-medium">{file.name}</span>
-            <span className="block truncate text-[10px] text-muted-foreground">{formatAttachmentBytes(file.size)} · {file.mediaType}</span>
+            <span className="block truncate text-[0.625rem] text-muted-foreground">{formatAttachmentBytes(file.size)} · {file.mediaType}</span>
           </span>
           <button
             type="button"
@@ -1326,7 +1335,7 @@ function SendButton({
                 <Icon className="mt-0.5 h-3.5 w-3.5 flex-none" aria-hidden="true" />
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">{label}</span>
-                  <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                  <span className="mt-0.5 block text-[0.625rem] text-muted-foreground">
                     {hint}
                   </span>
                 </span>
@@ -1426,15 +1435,15 @@ function ComposerConfigButton({
           className="fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-border/60 bg-popover p-3 text-xs shadow-lg sm:absolute sm:inset-x-auto sm:bottom-full sm:left-0 sm:mb-2 sm:w-[min(20rem,calc(100vw-1rem))]"
           data-testid="composer-config-popover"
         >
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
             {t('composer.config.title')}
           </div>
           <div className="flex flex-col gap-3">
             {allowModelSelection ? <label className="flex flex-col gap-1">
-              <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+              <span className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-foreground">
                 <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                 {t('common.model')}
-                <span className="ml-auto truncate text-[10px] text-muted-foreground">{modelSummary}</span>
+                <span className="ml-auto truncate text-[0.625rem] text-muted-foreground">{modelSummary}</span>
               </span>
               <Select
                 value={activeModel ? model : ''}
@@ -1450,7 +1459,7 @@ function ComposerConfigButton({
                     return (
                       <SelectItem key={key} value={key}>
                         {m.label}
-                        {m.providerId ? <span className="ml-1 text-[10px] text-muted-foreground">{m.providerId}</span> : null}
+                        {m.providerId ? <span className="ml-1 text-[0.625rem] text-muted-foreground">{m.providerId}</span> : null}
                       </SelectItem>
                     )
                   })}
@@ -1459,10 +1468,10 @@ function ComposerConfigButton({
             </label> : null}
 
             {allowApprovalMode ? <label className="flex flex-col gap-1">
-              <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+              <span className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-foreground">
                 <ShieldCheck className={cn('h-3.5 w-3.5', approvalTone)} aria-hidden="true" />
                 {t('composer.approvalMode')}
-                <span className={cn('ml-auto truncate text-[10px]', approvalTone)}>{approvalModeLabel}</span>
+                <span className={cn('ml-auto truncate text-[0.625rem]', approvalTone)}>{approvalModeLabel}</span>
               </span>
               <select
                 value={approvalMode}
@@ -1490,7 +1499,7 @@ function ComposerConfigButton({
                         <SelectItem key={m.value} value={m.value} textValue={display.label}>
                           <div className="flex flex-col">
                             <span>{display.label}</span>
-                            <span className="text-[10px] text-muted-foreground">{display.hint}</span>
+                            <span className="text-[0.625rem] text-muted-foreground">{display.hint}</span>
                           </div>
                         </SelectItem>
                       )
@@ -1501,7 +1510,7 @@ function ComposerConfigButton({
             </label> : null}
 
             {allowQueue ? <fieldset className="flex flex-col gap-1" data-testid="composer-config-send-mode">
-              <legend className="flex w-full items-center gap-1.5 text-[11px] font-medium text-foreground">
+              <legend className="flex w-full items-center gap-1.5 text-[0.6875rem] font-medium text-foreground">
                 <Navigation className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                 {t('chat.transcript.sendMode')}
               </legend>
@@ -1515,10 +1524,10 @@ function ComposerConfigButton({
             </fieldset> : null}
 
             <label className="flex flex-col gap-1" data-testid="composer-config-mode">
-              <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+              <span className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-foreground">
                 <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                 <span>Composer layout</span>
-                <span className="ml-auto truncate text-[10px] text-muted-foreground">
+                <span className="ml-auto truncate text-[0.625rem] text-muted-foreground">
                   {composerMode === 'simple' ? t('composer.mode.toFull').replace(/[（(].*[)）]/, '').trim() : t('composer.mode.toSimple').replace(/[（(].*[)）]/, '').trim()}
                 </span>
               </span>
@@ -1529,7 +1538,7 @@ function ComposerConfigButton({
                   setOpen(false)
                 }}
                 data-testid="composer-config-mode-toggle"
-                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-border/60 bg-background px-3 text-[11px] font-medium text-foreground hover:bg-accent"
+                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-border/60 bg-background px-3 text-[0.6875rem] font-medium text-foreground hover:bg-accent"
               >
                 {composerMode === 'simple' ? (
                   <>
@@ -1638,7 +1647,7 @@ function QueuedMessagesDock({
             {t('composer.queued.pending', { count: items.length })}
           </span>
         </div>
-        <span className="flex-none text-[11px] text-muted-foreground">
+        <span className="flex-none text-[0.6875rem] text-muted-foreground">
           {t('composer.queued.sendsAfterActiveTurn')}
         </span>
       </div>
@@ -1673,12 +1682,12 @@ function QueuedMessagesDock({
               }}
               onDragEnd={() => setDraggingId(null)}
             >
-              <span className="mt-0.5 flex h-4 min-w-7 items-center justify-center gap-px rounded bg-muted font-mono text-[10px] text-muted-foreground">
+              <span className="mt-0.5 flex h-4 min-w-7 items-center justify-center gap-px rounded bg-muted font-mono text-[0.625rem] text-muted-foreground">
                 {onReorder ? <GripVertical className="h-2.5 w-2.5" aria-hidden="true" /> : null}
                 {index + 1}
               </span>
               <span className="min-w-0">
-                <span className="mb-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                <span className="mb-0.5 flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                   <CornerDownRight className="h-3 w-3" aria-hidden="true" />
                   {item.mode === 'steer' ? t('composer.queued.steerLabel') : t('composer.queued.queueLabel')}
                 </span>
@@ -1697,7 +1706,7 @@ function QueuedMessagesDock({
                     autoFocus
                   />
                   {item.content?.some((part) => part.type === 'image' || part.type === 'file') ? (
-                    <span className="truncate font-mono text-[10px] text-muted-foreground" data-testid="queued-message-edit-attachments">
+                    <span className="truncate font-mono text-[0.625rem] text-muted-foreground" data-testid="queued-message-edit-attachments">
                       {queuedMessageSummary({ ...item, text: '' }, t)}
                     </span>
                   ) : null}
@@ -1833,7 +1842,7 @@ function SlashCommandMenu({
                 <span className="font-mono text-primary">{cmd.command}</span>
                 <span className="truncate text-foreground">{cmd.label}</span>
               </span>
-              <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{cmd.description}</span>
+              <span className="mt-0.5 block truncate text-[0.625rem] text-muted-foreground">{cmd.description}</span>
             </span>
           </button>
         )

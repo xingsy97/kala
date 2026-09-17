@@ -1,12 +1,15 @@
-import { act, render, renderHook, waitFor } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 
-import { useControlPlane, useDashboardControlSocket, useSession, type TimelineEntry } from './session.js'
+import { dashboardConnectionManager, useControlPlane, useDashboardControlSocket, useSession, type TimelineEntry } from './session.js'
 import { createSessionViewCache } from './session-view-cache.js'
+import { visibleTranscript } from './transcript.js'
+import { ChatPanel } from './features/chat/ChatPanel.js'
+import { InlineStatusRow } from './features/chat/InlineStatusRow.js'
 
 type Handler = (payload: any) => void
 
@@ -22,7 +25,7 @@ vi.mock('socket.io-client', () => ({
 
 class MockSocket {
   handlers = new Map<string, Handler[]>()
-  emitted: Array<{ event: string; payload: unknown }> = []
+  emitted: Array<{ event: string; payload: unknown; ack?: (value: any) => void }> = []
   io = { on: vi.fn() }
   connected = true
 
@@ -39,8 +42,8 @@ class MockSocket {
     return this
   }
 
-  emit(event: string, payload: unknown): this {
-    this.emitted.push({ event, payload })
+  emit(event: string, payload: unknown, ack?: (value: any) => void): this {
+    this.emitted.push({ event, payload, ...(ack ? { ack } : {}) })
     return this
   }
 
@@ -87,6 +90,54 @@ afterEach(() => {
 })
 
 describe('useSession session view cache', () => {
+  it.each(['kernel', 'copilot'] as const)('hydrates a selected %s session even when preview consumed the first ready event', async (agentRuntime) => {
+    const socket = new MockSocket()
+    const manager = dashboardConnectionManager(socket as never)
+    const releasePreview = manager.acquire('session:s1')
+    const ready = { sessionId: 's1', agentRuntime, reason: 'load', cursor: 0, state: createInitialState({ sessionId: 's1' }), config: { tools: [] }, contextSnapshot: null }
+    socket.serverEmit('session:ready', ready)
+    const first = socket.emitted[0]!
+    const request = first.payload as { requestId: string; generation: number }
+    first.ack?.({ ...request, accepted: ['session:s1'], rejected: [], cursors: {} })
+    expect(manager.snapshot().get('session:s1')?.state).toBe('active')
+
+    const view = renderHook(() => useSession({ host: 'http://host', sessionId: 's1', socket: socket as never }))
+    expect(socket.emitted.filter(entry => entry.event === 'client:subscribe_channels')).toHaveLength(2)
+    expect(view.result.current.status).toBe('connecting')
+    act(() => socket.serverEmit('session:ready', ready))
+    expect(view.result.current.status).toBe('ready')
+    expect(view.result.current.hydratedSessionId).toBe('s1')
+    releasePreview()
+    expect(socket.emitted.some(entry => entry.event === 'client:unsubscribe_channels')).toBe(false)
+    view.unmount()
+    expect(socket.emitted.filter(entry => entry.event === 'client:unsubscribe_channels')).toHaveLength(1)
+  })
+
+  it('reflects shared control socket failures and waits for a fresh baseline after reconnect', () => {
+    const socket = new MockSocket()
+    const view = renderHook(() => useSession({ host: 'http://host', sessionId: 's1', socket: socket as never }))
+    const ready = { sessionId: 's1', agentRuntime: 'copilot', reason: 'load', cursor: 0, state: createInitialState({ sessionId: 's1' }), config: { tools: [] } }
+    act(() => socket.serverEmit('session:ready', ready))
+    expect(view.result.current.status).toBe('ready')
+    act(() => socket.serverEmit('disconnect', 'transport close'))
+    expect(view.result.current.status).toBe('disconnected')
+    act(() => socket.serverEmit('connect_error', new Error('network unavailable')))
+    expect(view.result.current.status).toBe('error')
+    act(() => socket.serverEmit('connect', undefined))
+    expect(view.result.current.status).toBe('connecting')
+    act(() => socket.serverEmit('session:ready', ready))
+    expect(view.result.current.status).toBe('ready')
+  })
+
+  it('does not leave a rejected shared subscription Connecting forever', () => {
+    const socket = new MockSocket()
+    const view = renderHook(() => useSession({ host: 'http://host', sessionId: 's1', socket: socket as never }))
+    const request = socket.emitted.find(entry => entry.event === 'client:subscribe_channels')!
+    act(() => request.ack?.({ ...(request.payload as object), accepted: [], rejected: [{ channel: 'session:s1', code: 'tenant_forbidden' }], cursors: {} }))
+    expect(view.result.current.status).toBe('error')
+    expect(view.result.current.lastError?.message).toContain('tenant_forbidden')
+  })
+
   it('reuses one physical control socket while switching selected sessions', async () => {
     sockets.length = 0
     const wrapper = ({ sessionId }: { sessionId: string }) => {
@@ -191,6 +242,7 @@ describe('useSession session view cache', () => {
 
       expect(result.current.state?.status).toBe('executing_tools')
       expect(result.current.streamingText).toBe('visible draft before tool')
+      expect(result.current.streamingActive).toBe(false)
 
       act(() => socket.serverEmit('event:appended', {
         sessionId: 's1',
@@ -209,11 +261,103 @@ describe('useSession session view cache', () => {
 
       expect(result.current.timeline.at(-1)?.event.kind).toBe('llm_response')
       expect(result.current.streamingText).toBe('visible draft before tool')
+      expect(result.current.streamingActive).toBe(false)
     } finally {
       raf.mockRestore()
       caf.mockRestore()
       window.localStorage.removeItem('ak-smooth-streaming-text')
     }
+  })
+
+  it.each(['done', 'idle', 'error', 'executing_tools', 'awaiting_approval'] as const)(
+    'finishes the rendered draft on %s without losing unrevealed tokens or joining the next turn',
+    async (status) => {
+      const initial = { ...createInitialState({ sessionId: 's1' }), status: 'thinking' as const }
+      let current: ReturnType<typeof useSession>
+      function Conversation() {
+        current = useSession({ host: 'http://host.test', sessionId: 's1' })
+        return <ChatPanel messages={[]} items={visibleTranscript(
+          current.state?.messages ?? [], current.timeline, current.streamingText, [], [], current,
+        )} footerSlot={<InlineStatusRow state={current.state} streamingActive={current.streamingActive} />} />
+      }
+      render(<Conversation />)
+      await waitFor(() => expect(sockets).toHaveLength(1))
+      const socket = sockets[0]!
+      act(() => socket.serverEmit('session:ready', {
+        sessionId: 's1', reason: 'load', agentRuntime: 'copilot', cursor: 0, state: initial, config: { tools: [] },
+      }))
+      act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'Retain this complete draft.' }))
+      await waitFor(() => expect(screen.queryByTestId('streaming-cursor')).not.toBeNull())
+      act(() => socket.serverEmit('state:changed', { sessionId: 's1', state: { ...initial, status }, cursor: 0 }))
+      await waitFor(() => expect(current!.state?.status).toBe(status))
+      expect(screen.queryByTestId('streaming-cursor')).toBeNull()
+      expect(screen.getByText('Retain this complete draft.')).toBeTruthy()
+      expect(current!.streamingActive).toBe(false)
+      act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'LATE_DELTA' }))
+      expect(current!.streamingText).toBe('Retain this complete draft.')
+      act(() => socket.serverEmit('state:changed', { sessionId: 's1', state: initial, cursor: 0 }))
+      await waitFor(() => expect(current!.state?.status).toBe('thinking'))
+      expect(screen.getByText('Retain this complete draft.')).toBeTruthy()
+      expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+      act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'Separate next answer.' }))
+      await waitFor(() => expect(current!.streamingText).toBe('Separate next answer.'))
+      expect(screen.getAllByTestId('streaming-cursor')).toHaveLength(1)
+      expect(screen.getByText('Retain this complete draft.')).toBeTruthy()
+      expect(current!.retainedDrafts).toHaveLength(1)
+    },
+  )
+
+  it('reconciles a state-only runtime completion and renders its authoritative history during the next stream', async () => {
+    const { result } = renderHook(() => useSession({ host: 'http://host.test', sessionId: 's1' }))
+    await waitFor(() => expect(sockets).toHaveLength(1))
+    const socket = sockets[0]!
+    const initial = { ...createInitialState({ sessionId: 's1' }), status: 'thinking' as const }
+    act(() => socket.serverEmit('session:ready', { sessionId: 's1', reason: 'load', agentRuntime: 'copilot', cursor: 0, state: initial, config: { tools: [] } }))
+    act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'draft' }))
+    const completed = { ...initial, status: 'done', messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Authoritative answer.' }] }] }
+    act(() => socket.serverEmit('state:changed', { sessionId: 's1', state: completed, cursor: 1 }))
+    await waitFor(() => expect(result.current.state?.status).toBe('done'))
+    expect(result.current.streamingText).toBe('')
+    expect(result.current.streamingActive).toBe(false)
+    act(() => socket.serverEmit('state:changed', { sessionId: 's1', state: { ...completed, status: 'thinking' }, cursor: 1 }))
+    act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'Next stream.' }))
+    await waitFor(() => expect(result.current.streamingText).toBe('Next stream.'))
+    const items = visibleTranscript(result.current.state!.messages, [], result.current.streamingText, [], [], result.current)
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({ message: { content: [{ text: 'Authoritative answer.' }] } })
+    expect(items[1]).toMatchObject({ streaming: true, message: { content: [{ text: 'Next stream.' }] } })
+    act(() => socket.serverEmit('disconnect', 'transport close'))
+    expect(result.current.streamingActive).toBe(false)
+    act(() => socket.serverEmit('session:ready', { sessionId: 's1', reason: 'load', agentRuntime: 'copilot', cursor: 1, state: { ...completed, status: 'thinking' }, config: { tools: [] } }))
+    expect(result.current.streamingActive).toBe(false)
+    expect(result.current.retainedDrafts).toHaveLength(1)
+  })
+
+  it.each(['cancel', 'llm_error'] as const)('stops a draft from the %s event even without a state correction', async (kind) => {
+    const { result } = renderHook(() => useSession({ host: 'http://host.test', sessionId: 's1' }))
+    await waitFor(() => expect(sockets).toHaveLength(1))
+    const socket = sockets[0]!
+    act(() => socket.serverEmit('session:ready', { sessionId: 's1', cursor: 0, state: { ...createInitialState({ sessionId: 's1' }), status: 'thinking' }, config: { tools: [] } }))
+    act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'Partial answer.' }))
+    act(() => socket.serverEmit('event:appended', { sessionId: 's1', seq: 1, ts: 't1', event: kind === 'cancel' ? { kind } : { kind, error: 'failed' }, effects: [] }))
+    expect(result.current.streamingActive).toBe(false)
+    expect(result.current.streamingText).toBe('Partial answer.')
+  })
+
+  it('does not let completion erase the next response when events arrive within one animation frame', async () => {
+    const { result } = renderHook(() => useSession({ host: 'http://host.test', sessionId: 's1' }))
+    await waitFor(() => expect(sockets).toHaveLength(1))
+    const socket = sockets[0]!
+    const thinking = { ...createInitialState({ sessionId: 's1' }), status: 'thinking' as const }
+    act(() => {
+      socket.serverEmit('session:ready', { sessionId: 's1', cursor: 0, state: thinking, config: { tools: [] } })
+      socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'first' })
+      socket.serverEmit('event:appended', { sessionId: 's1', seq: 1, ts: 't1', event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'first' }] } }, effects: [{ kind: 'finish' }] })
+      socket.serverEmit('state:changed', { sessionId: 's1', state: thinking })
+      socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'second' })
+    })
+    await waitFor(() => expect(result.current.streamingText).toBe('second'))
+    expect(result.current.streamingActive).toBe(true)
   })
 
   it('keeps a dashboard control socket independent from the selected session hook', async () => {

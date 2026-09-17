@@ -36,7 +36,9 @@ import { cn } from '../../lib/utils.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { ProductState } from '../../components/ui/product-state.js'
 import type { DurableSessionViewCache } from '../../durable-session-cache.js'
-import { SettingsSectionButton } from './controls.js'
+import { SettingsSectionButton, SettingsSectionHelpContext } from './controls.js'
+import { HelpHint } from '../../components/ui/help-hint.js'
+import { useMinWidth } from '../../app-logic/use-viewport.js'
 import { AgentSection } from './sections/AgentSection.js'
 import { ApprovalsSection } from './sections/ApprovalsSection.js'
 import { ConnectionSection } from './sections/ConnectionSection.js'
@@ -86,10 +88,11 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
 
 export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token }: Props): JSX.Element {
   const { t } = useTranslation()
+  const desktopLayout = useMinWidth(768)
   const queryClient = useQueryClient()
   const [section, setSection] = useState<SectionKey>('connection')
+  const [sectionHelp, setSectionHelp] = useState<string>()
   const activeSection = SECTIONS.find((item) => item.key === section) ?? SECTIONS[0]!
-  const ActiveSectionIcon = activeSection.icon
 
   const settingsQuery = useQuery({
     queryKey: ['settings'],
@@ -111,15 +114,15 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={cn(dialogMobileSheetClassName, 'h-auto grid-rows-[auto_minmax(0,1fr)] border-x-0 border-border/60 bg-background text-foreground shadow-2xl sm:h-[min(90dvh,46rem)] sm:max-w-5xl sm:overflow-hidden sm:rounded-2xl sm:border-x [&_input]:border-border [&_input]:bg-card/70 [&_input]:text-foreground [&_select]:border-border [&_select]:bg-card/70 [&_select]:text-foreground [&_table]:bg-muted/10 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-card/70 [&_textarea]:text-foreground [&_th]:bg-muted/30 [&_th]:text-foreground')}
+        className={cn(dialogMobileSheetClassName, 'h-auto grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] border-x-0 border-border/60 bg-background text-foreground shadow-2xl sm:h-[min(90dvh,46rem)] sm:max-w-5xl sm:overflow-hidden sm:rounded-2xl sm:border-x [&_input]:border-border [&_input]:bg-card/70 [&_input]:text-foreground [&_select]:border-border [&_select]:bg-card/70 [&_select]:text-foreground [&_table]:bg-muted/10 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-card/70 [&_textarea]:text-foreground [&_th]:bg-muted/30 [&_th]:text-foreground')}
         data-testid="settings-dialog"
       >
-        <DialogHeader className="relative min-h-[4.5rem] justify-center border-b border-border/40 bg-card/75 px-4 py-2 pr-14 backdrop-blur md:min-h-0 md:px-6 md:py-4 md:pr-14">
-          <div className="md:hidden">
-            <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('settings.title')}</div>
-            <label className="relative mt-0.5 inline-flex max-w-[calc(100vw-5rem)] items-center gap-2 pr-6" data-testid="settings-mobile-section-picker">
+        <DialogHeader className="relative min-h-[4.5rem] min-w-0 justify-center border-b border-border/40 bg-card/75 px-4 py-2 pr-14 backdrop-blur md:min-h-0 md:px-6 md:py-4 md:pr-14">
+          <div className={desktopLayout ? 'hidden' : undefined}>
+            <div className="text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('settings.title')}</div>
+            <div className="flex min-w-0 items-center gap-1">
+            <label className="relative mt-0.5 inline-flex min-w-0 max-w-full flex-1 items-center gap-2 pr-6" data-testid="settings-mobile-section-picker">
               <span className="sr-only">{t('settings.sectionsLabel')}</span>
-              <ActiveSectionIcon className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
               <span className="truncate text-lg font-semibold leading-6 text-foreground">{t(activeSection.label)}</span>
               <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <select
@@ -132,13 +135,13 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
                 {SECTIONS.map((item) => <option key={item.key} value={item.key}>{t(item.label)}</option>)}
               </select>
             </label>
+            <HelpHint key={section} label={t(activeSection.label)}><span className="block">{t(activeSection.hint)}</span>{sectionHelp ? <span className="mt-2 block">{sectionHelp}</span> : null}</HelpHint>
+            </div>
           </div>
-          <div className="hidden md:block">
-            <DialogTitle className="text-base font-semibold text-foreground">{t('settings.title')}</DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              {t('settings.description')}
-            </DialogDescription>
+          <div className={desktopLayout ? undefined : 'hidden'}>
+            <DialogTitle className="flex items-center gap-1 text-base font-semibold text-foreground">{t('settings.title')}<HelpHint label={t('settings.title')}>{t('settings.description')}</HelpHint></DialogTitle>
           </div>
+          <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
           <DialogClose
             className={dialogTouchCloseClassName}
             aria-label={t('common.close')}
@@ -147,12 +150,12 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
             <X className="h-5 w-5" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
-        <div className="grid min-h-0 min-w-0 md:grid-cols-[232px_minmax(0,1fr)]">
-          <aside className="hidden min-h-0 min-w-0 border-border/35 bg-muted/15 md:!block md:border-r">
+        <div className={cn('grid min-h-0 min-w-0', desktopLayout && 'grid-cols-[14.5rem_minmax(0,1fr)]')}>
+          <aside className={cn('min-h-0 min-w-0 border-r border-border/35 bg-muted/15', !desktopLayout && 'hidden')}>
             <nav className="h-full space-y-1 overflow-x-hidden overflow-y-auto px-3 py-4" aria-label={t('settings.sectionsLabel')}>
               {SECTION_GROUPS.map((group) => (
                 <div key={group} className="space-y-1" data-testid={`settings-group-${group}`}>
-                  <div className="px-3 pb-1.5 pt-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/75 first:pt-0">
+                  <div className="px-3 pb-1.5 pt-4 text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/75 first:pt-0">
                     {t(`settings.groups.${group}`)}
                   </div>
                   {SECTIONS.filter((item) => item.group === group).map((item) => (
@@ -167,6 +170,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
             viewportClassName="[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0 [&>div]:!max-w-full"
           >
             <div className="mx-auto min-w-0 max-w-full overflow-x-hidden px-4 py-5 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-foreground md:max-w-3xl md:p-8" data-testid="settings-responsive-content">
+              <SettingsSectionHelpContext.Provider value={setSectionHelp}>
               {loadError ? (
                 <ProductState kind="error" title={t('settings.loadErrorTitle')} description={t('settings.loadFailed', { error: loadError })} primary={{ label: t('common.retry'), onClick: () => { void settingsQuery.refetch() } }} />
               ) : payload === null ? (
@@ -200,6 +204,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
               ) : (
                 <McpSection payload={payload} />
               )}
+              </SettingsSectionHelpContext.Provider>
             </div>
           </ScrollArea>
         </div>

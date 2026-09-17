@@ -135,6 +135,34 @@ describe('workspaceReadBinary', () => {
     expect(res.size).toBe(4096)
   })
 
+  it('reads ranged chunks for large dashboard downloads without loading the whole file', async () => {
+    const big = Buffer.from('0123456789abcdef')
+    writeFileSync(join(root, 'big.bin'), big)
+    const sandbox = createSandbox({ roots: [root] })
+    const first = await workspaceReadBinary(
+      { requestId: 'r3a', workspaceId: 'w', path: join(root, 'big.bin'), maxBytes: 5 },
+      sandbox,
+    )
+    const second = await workspaceReadBinary(
+      { requestId: 'r3b', workspaceId: 'w', path: join(root, 'big.bin'), offset: 5, maxBytes: 5 },
+      sandbox,
+    )
+    const final = await workspaceReadBinary(
+      { requestId: 'r3c', workspaceId: 'w', path: join(root, 'big.bin'), offset: 10, maxBytes: 10 },
+      sandbox,
+    )
+    expect(Buffer.from(first.base64, 'base64').toString()).toBe('01234')
+    expect(Buffer.from(second.base64, 'base64').toString()).toBe('56789')
+    expect(Buffer.from(final.base64, 'base64').toString()).toBe('abcdef')
+    expect(first.offset).toBe(0)
+    expect(second.offset).toBe(5)
+    expect(final.offset).toBe(10)
+    expect(first.truncated).toEqual({ maxBytes: 5 })
+    expect(second.truncated).toEqual({ maxBytes: 5 })
+    expect(final.truncated).toBeUndefined()
+    expect(final.size).toBe(big.length)
+  })
+
   it('rejects paths outside the sandbox', async () => {
     const sandbox = createSandbox({ roots: [root] })
     const res = await workspaceReadBinary(

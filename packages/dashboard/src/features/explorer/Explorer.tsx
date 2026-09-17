@@ -33,6 +33,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  SquarePen,
   TriangleAlert,
   Trash2,
   Wrench,
@@ -75,10 +76,12 @@ import {
   syncSessionOrder,
   syncWorkspaceOrder,
   toStructuralSessionSummary,
+  workspaceDropIndex,
 } from './tree-model.js'
 import { useHiddenWorkspaces } from './useHiddenWorkspaces.js'
 import { useHiddenSessions } from './useHiddenSessions.js'
 import { SessionHoverPreview, type SessionPreviewAnchor } from './SessionHoverPreview.js'
+import { useSessionHoverPreview } from './use-session-hover-preview.js'
 import type { SessionPreviewStore } from './session-preview-store.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 import type {
@@ -89,6 +92,7 @@ import type {
 import { readStoredSessionChildrenOpenState, readStoredSessionOrder, readStoredWorkspaceOpenState, readStoredWorkspaceOrder, writeStoredSessionChildrenOpenState, writeStoredSessionOrder, writeStoredWorkspaceOpenState, writeStoredWorkspaceOrder } from './persistence.js'
 import { coarseSummaryStatus, isSessionWorkspaceOnline, sameExecutorListForExplorer, sameSessionListForExplorer, sameSessionStatusMap } from './comparators.js'
 import { SessionRuntimeStore, useSessionRuntime } from './session-runtime-store.js'
+import { useInterfaceScale } from '../../lib/interface-scale.js'
 
 type Props = {
   executors: readonly AttachedExecutor[]
@@ -99,7 +103,7 @@ type Props = {
   onSelect(sessionId: string): void
   onClearSelection?(): void
   onNewSession(workspaceId?: string): void
-  onConnectWorkspace(): void
+  onConnectWorkspace?(): void
   onDelete(sessionId: string): void
   onRename(sessionId: string, label: string): void
   onRenameWorkspace?(workspaceId: string, workspaceName: string): void
@@ -144,6 +148,11 @@ function ExplorerImpl({
   subscribeCachedSessionView,
 }: Props): JSX.Element {
   const { t } = useTranslation()
+  const interfaceScale = useInterfaceScale()
+  const rowHeightFor = useCallback((node: NodeApi<TreeNode>): number => Math.ceil(Math.max(
+    (node.data.kind === 'workspace' ? WORKSPACE_ROW_HEIGHT : SESSION_ROW_HEIGHT) * interfaceScale,
+    fontSizePx * 1.5 + 12 * interfaceScale,
+  )), [fontSizePx, interfaceScale])
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
@@ -151,8 +160,7 @@ function ExplorerImpl({
   const [workspaceOpenState, setWorkspaceOpenState] = useState<Record<string, boolean>>(() => readStoredWorkspaceOpenState())
   const [sessionChildrenOpenState, setSessionChildrenOpenState] = useState<Record<string, boolean>>(() => readStoredSessionChildrenOpenState())
   const [manualWorkspaceOrder, setManualWorkspaceOrder] = useState<readonly string[]>(() => readStoredWorkspaceOrder())
-  const [previewAnchor, setPreviewAnchor] = useState<SessionPreviewAnchor | null>(null)
-  const previewHoveringRef = useRef(false)
+  const preview = useSessionHoverPreview(selectedSessionId)
   const pointerActivatedSessionRef = useRef<string | null>(null)
   const hiddenWorkspaces = useHiddenWorkspaces()
   const [autoHideOfflineWorkspaces] = useBooleanPref(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, true)
@@ -249,29 +257,6 @@ function ExplorerImpl({
   const filteredEmpty = !empty && query.trim().length > 0 && visibleData.length === 0
   const hiddenEmpty = !empty && query.trim().length === 0 && visibleData.length === 0 && hiddenWorkspaces.count > 0
   const selection = selectedSessionId ? `sess:${selectedSessionId}` : undefined
-  const clearPreviewSoon = useCallback((sessionId?: string) => {
-    window.setTimeout(() => {
-      setPreviewAnchor((current) => {
-        if (previewHoveringRef.current) return current
-        if (sessionId !== undefined && current?.sessionId !== sessionId) return current
-        return null
-      })
-    }, 80)
-  }, [])
-
-  // Tear the hover preview down once a session actually becomes selected. Doing
-  // this here (reacting to the committed selection) rather than in the row's
-  // mousedown handler is important: mutating this state during mousedown
-  // re-renders the react-arborist tree mid-click and swallows the activation,
-  // which made previously-opened (preview-eligible) sessions require two
-  // clicks to load. This keeps the click path untouched while still ensuring
-  // the heavy full-ChatPanel preview never lingers over the switching pane.
-  useEffect(() => {
-    if (selectedSessionId === null) return
-    previewHoveringRef.current = false
-    setPreviewAnchor((current) => (current === null ? current : null))
-  }, [selectedSessionId])
-
   const activate = (node: NodeApi<TreeNode>): void => {
     if (node.data.kind !== 'session') return
     if (pointerActivatedSessionRef.current === node.data.sessionId) {
@@ -301,10 +286,11 @@ function ExplorerImpl({
       .filter((node): node is WorkspaceNode => node.kind === 'workspace' && node.workspaceId !== null)
     if (movedWorkspaces.length > 0) {
       if (movedWorkspaces.length !== args.dragNodes.length || !isRootDropParent(args.parentNode)) return
-      const targetIds = data
+      const targetIds = visibleData
         .filter((node) => node.workspaceId !== null)
         .map((node) => node.workspaceId as string)
-      setManualWorkspaceOrder((prev) => reorderWorkspaceIds(prev, targetIds, movedWorkspaces.map((node) => node.workspaceId as string), args.index))
+      const movedIds = movedWorkspaces.map((node) => node.workspaceId as string)
+      setManualWorkspaceOrder((prev) => reorderWorkspaceIds(prev, targetIds, movedIds, workspaceDropIndex(visibleData, args.index, movedIds)))
       return
     }
     const movedSessionIds = args.dragNodes
@@ -321,11 +307,11 @@ function ExplorerImpl({
     const movableIds = movedSessionIds.filter((id) => targetIds.includes(id))
     if (movableIds.length === 0) return
     setManualSessionOrder((prev) => reorderSessionIds(prev, targetIds, movableIds, args.index))
-  }, [data])
+  }, [visibleData])
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-transparent">
-      <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} />
+    <div ref={preview.explorerRef} className="flex h-full min-w-0 flex-col overflow-hidden bg-transparent">
+      <Header query={query} onQueryChange={setQuery} onNewSession={onNewSession} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} />
       <div
         ref={ref}
         className="flex-1 min-h-0"
@@ -340,7 +326,7 @@ function ExplorerImpl({
           <ExplorerLoading />
         ) : empty ? (
           <div className="p-4 text-xs leading-relaxed text-muted-foreground">
-            {t('explorer.noDaemons')}
+            {t('explorer.noChats')}
           </div>
         ) : filteredEmpty ? (
           <div className="p-4 text-xs leading-relaxed text-muted-foreground" data-testid="explorer-filter-empty">
@@ -436,22 +422,20 @@ function ExplorerImpl({
                 sessionRuntimeStore={sessionRuntimeStore}
                 onlineWorkspaceIds={onlineWorkspaceIds}
                 fontSizePx={fontSizePx}
-                onPreviewAnchorChange={setPreviewAnchor}
-                onPreviewLeave={clearPreviewSoon}
+                onPreviewAnchorChange={preview.enter}
+                onPreviewLeave={preview.leave}
                 onPointerActivateSession={activateSessionOnPointerDown}
               />
             )}
           </Tree>
         ) : null}
         <SessionHoverPreview
-          anchor={previewAnchor}
+          anchor={preview.anchor}
+          previewRef={preview.previewRef}
           previewStore={previewStore}
           getCachedSessionView={getCachedSessionView}
           subscribeCachedSessionView={subscribeCachedSessionView}
-          onHoverChange={(hovering) => {
-            previewHoveringRef.current = hovering
-            if (!hovering) clearPreviewSoon()
-          }}
+          onHoverChange={preview.hoverPreview}
         />
       </div>
       {hiddenWorkspaces.count > 0 ? (
@@ -608,7 +592,7 @@ function HiddenWorkspacesBar({
     <div className="flex-none border-t border-sidebar-border bg-sidebar px-1.5 py-1" data-testid="hidden-workspaces-bar">
       <button
         type="button"
-        className="flex h-6 w-full min-w-0 items-center gap-1 rounded px-1 text-left text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        className="flex h-6 w-full min-w-0 items-center gap-1 rounded px-1 text-left text-[0.6875rem] text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
         onClick={() => setOpen((value) => !value)}
         data-testid="hidden-workspaces-toggle"
         aria-expanded={open}
@@ -654,7 +638,7 @@ function HiddenWorkspaceItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" data-testid="hidden-workspace-item">
+    <div className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[0.6875rem] text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" data-testid="hidden-workspace-item">
       <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
       <button
         type="button"
@@ -683,7 +667,7 @@ function HiddenSessionsBar({
     <div className="flex-none border-t border-sidebar-border bg-sidebar px-1.5 py-1" data-testid="hidden-sessions-bar">
       <button
         type="button"
-        className="flex h-6 w-full min-w-0 items-center gap-1 rounded px-1 text-left text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        className="flex h-6 w-full min-w-0 items-center gap-1 rounded px-1 text-left text-[0.6875rem] text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
         onClick={() => setOpen((value) => !value)}
         data-testid="hidden-sessions-toggle"
         aria-expanded={open}
@@ -721,7 +705,7 @@ function HiddenSessionItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" data-testid="hidden-session-item">
+    <div className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[0.6875rem] text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" data-testid="hidden-session-item">
       <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
       <button
         type="button"
@@ -738,21 +722,34 @@ function HiddenSessionItem({
 }
 
 
-function rowHeightFor(node: NodeApi<TreeNode>): number {
-  if (node.data.kind === 'workspace') return WORKSPACE_ROW_HEIGHT
-  return SESSION_ROW_HEIGHT
+export function NewChatButton({ onNewChat }: { onNewChat(): void }): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => onNewChat()}
+      data-testid="explorer-new-chat"
+      className="h-8 gap-2 rounded-lg px-2 text-sm font-medium"
+    >
+      <SquarePen className="h-4 w-4" aria-hidden="true" />
+      {t('dialogs.simpleChat')}
+    </Button>
+  )
 }
 
 function Header({
   query,
   onQueryChange,
+  onNewSession,
   onConnectWorkspace,
   onCollapse,
   embedded,
 }: {
   query: string
   onQueryChange(query: string): void
-  onConnectWorkspace: () => void
+  onNewSession(): void
+  onConnectWorkspace?: () => void
   onCollapse?: () => void
   embedded: boolean
 }): JSX.Element {
@@ -766,7 +763,7 @@ function Header({
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder={t('explorer.searchPlaceholder')}
-            className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent text-[0.75rem] text-foreground outline-none placeholder:text-muted-foreground"
             data-testid="explorer-search"
             aria-label={t('explorer.searchLabel')}
           />
@@ -776,7 +773,7 @@ function Header({
             </button>
           ) : null}
         </label>
-        <Button
+        {onConnectWorkspace ? <Button
           variant="ghost"
           size="icon"
           onClick={onConnectWorkspace}
@@ -786,7 +783,7 @@ function Header({
           className="h-7 w-7 flex-none"
         >
           <Cable className="h-3.5 w-3.5" />
-        </Button>
+        </Button> : null}
         {onCollapse ? (
           <Button
             variant="ghost"
@@ -806,11 +803,9 @@ function Header({
   return (
     <div className="flex flex-col gap-2 bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {t('explorer.title')}
-        </span>
+        <NewChatButton onNewChat={onNewSession} />
         <div className="flex items-center gap-1">
-          <Button
+          {onConnectWorkspace ? <Button
             variant="ghost"
             size="sm"
             onClick={onConnectWorkspace}
@@ -820,7 +815,7 @@ function Header({
           >
             <Cable className="h-3 w-3" />
             {t('explorer.addWorkspace')}
-          </Button>
+          </Button> : null}
           {onCollapse ? (
             <Button
               variant="ghost"
@@ -842,7 +837,7 @@ function Header({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('explorer.searchPlaceholder')}
-          className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+          className="min-w-0 flex-1 bg-transparent text-[0.75rem] text-foreground outline-none placeholder:text-muted-foreground"
           data-testid="explorer-search"
           aria-label={t('explorer.searchLabel')}
         />
@@ -1040,7 +1035,7 @@ function WorkspaceRow({
           {w.workspaceId === null ? <span className="inline-flex flex-none items-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{meta}</span></span> : <span className={cn('h-2 w-2 flex-none rounded-full', metaBadgeCls)} data-testid="workspace-status-badge" title={meta} aria-label={meta}><span className="sr-only">{meta}</span></span>}
           <span
             className="min-w-0 truncate font-semibold leading-5 text-foreground"
-            style={{ fontSize: fontSizePx }}
+            style={{ fontSize: fontSizePx, lineHeight: 1.4 }}
             title={canRename ? t('explorer.doubleClickRename') : undefined}
             onDoubleClick={(e) => {
               if (!canRename) return
@@ -1256,9 +1251,7 @@ function SessionRow({
               <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
             )}
           </button>
-        ) : !s.parentSessionId && !s.workspaceId ? (
-          <MessageCircle className="h-3.5 w-3.5 flex-none text-primary/80" data-testid="chat-session-icon" aria-label={t('explorer.chat')} />
-        ) : !s.parentSessionId ? (
+        ) : !s.parentSessionId && !s.workspaceId ? null : !s.parentSessionId ? (
           <div
             ref={dragHandle}
             data-row-action
@@ -1293,7 +1286,7 @@ function SessionRow({
             'min-w-0 truncate font-medium leading-5',
             selected ? 'text-foreground' : 'text-foreground/90',
           )}
-          style={{ fontSize: fontSizePx }}
+          style={{ fontSize: fontSizePx, lineHeight: 1.4 }}
           title={currentCwd || t('explorer.doubleClickRename')}
         >
           <HighlightText text={s.label} query={query} />
@@ -1412,7 +1405,7 @@ function SessionRow({
           </Button>
         </div>
       )}
-      <div className="ak-touch-hide pointer-events-none col-start-4 row-start-1 flex flex-none items-center justify-end whitespace-nowrap text-[11px] leading-4 text-muted-foreground group-hover:opacity-0">
+      <div className="ak-touch-hide pointer-events-none col-start-4 row-start-1 flex flex-none items-center justify-end whitespace-nowrap text-[0.6875rem] leading-4 text-muted-foreground group-hover:opacity-0">
         <span className="inline-flex flex-none items-center gap-1 whitespace-nowrap tabular-nums opacity-70">
           <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
           {formatWhen(lastActivityIso, t, minuteNow * 60_000)}
@@ -1545,7 +1538,7 @@ function ToolbarSessionStatus({ status, label }: { status: SessionActivityStatus
           ? LoaderCircle
           : Circle
   return (
-    <span className={cn('inline-flex h-6 flex-none items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium', tone)} data-testid="session-status-indicator" data-status={status ?? 'unknown'} aria-label={label}>
+    <span className={cn('inline-flex h-6 flex-none items-center gap-1.5 rounded-md border px-2 text-[0.625rem] font-medium', tone)} data-testid="session-status-indicator" data-status={status ?? 'unknown'} aria-label={label}>
       <span className={cn('inline-flex', running && 'ak-session-status-spinner')} data-testid={running ? 'session-status-spinner' : undefined} aria-hidden="true">
         <Icon className="h-3 w-3" strokeWidth={2.3} />
       </span>
@@ -1635,7 +1628,7 @@ function RenameInput({
       data-testid={testId}
       aria-label={ariaLabel ?? t('explorer.renameSession')}
       spellCheck={false}
-      className="min-w-0 flex-1 rounded-sm bg-background px-1.5 py-0.5 text-[13px] font-medium text-foreground shadow-inner outline-none ring-1 ring-primary/40 focus:ring-2"
+      className="min-w-0 flex-1 rounded-sm bg-background px-1.5 py-0.5 text-[0.8125rem] font-medium text-foreground shadow-inner outline-none ring-1 ring-primary/40 focus:ring-2"
     />
   )
 }

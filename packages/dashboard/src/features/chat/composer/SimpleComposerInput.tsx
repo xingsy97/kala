@@ -231,7 +231,7 @@ export function SimpleComposerInput({
       data-placeholder={placeholder ?? ''}
       data-testid="composer-input-simple"
       className={cn(
-        'ak-composer-simple relative w-full whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-background/60 px-3 py-3 text-[18px] leading-7 outline-none transition-colors',
+        'ak-composer-simple relative w-full whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-background/60 px-3 py-3 text-[1.125rem] leading-7 outline-none transition-colors',
         'focus-within:border-ring/45 focus-within:bg-background focus-within:ring-0',
         'min-h-12 max-h-[min(240px,35vh)] overflow-y-auto',
         disabled ? 'cursor-not-allowed opacity-60' : '',

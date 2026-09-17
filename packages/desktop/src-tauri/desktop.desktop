@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Agent RunLab
+Comment=Connect to your existing Agent RunLab Dashboard
+Exec=agent-runlab-desktop %u
+Icon=agent-runlab-desktop
+Terminal=false
+Categories=Development;
+StartupWMClass=agent-runlab-desktop
+MimeType=x-scheme-handler/agent-runlab;
+X-GNOME-UsesNotifications=true

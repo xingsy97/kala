@@ -50,6 +50,44 @@ describe('Turn timing transcript projection', () => {
 })
 
 describe('appendTranscriptBaseItems', () => {
+  it('replaces the state fallback instead of appending duplicated history on hydration', () => {
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'Existing request' }] }]
+    const timeline: TimelineEntry[] = [{ seq: 1, ts: 't1', event: { kind: 'user_message', text: 'Existing request' }, effects: [] }]
+    expect(appendTranscriptBaseItems(transcriptBaseItems(messages, []), [], timeline)).toBeNull()
+  })
+  it('keeps retained tool prose at its original response boundary instead of merging later turns', () => {
+    const timeline: TimelineEntry[] = [
+      { seq: 1, ts: 't1', event: { kind: 'user_message', text: 'First request' }, effects: [] },
+      { seq: 2, ts: 't2', event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'c1', name: 'probe', input: {} }] } }, effects: [] },
+      { seq: 3, ts: 't3', event: { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' }, effects: [] },
+      { seq: 4, ts: 't4', event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'Final answer' }] } }, effects: [] },
+      { seq: 5, ts: 't5', event: { kind: 'user_message', text: 'Second request' }, effects: [] },
+    ]
+    const items = visibleTranscript([], timeline, 'New response', [], [], {
+      retainedDrafts: [{ afterSeq: 1, messageCount: 1, text: 'Tool preamble' }],
+      streamingAnchor: { afterSeq: 5, messageCount: 5 }, streamingActive: true,
+    })
+    expect(items[1]).toMatchObject({ streaming: false, message: { content: [{ text: 'Tool preamble' }] } })
+    expect(items[2]).toMatchObject({ seq: 2 })
+    expect(items.at(-1)).toMatchObject({ streaming: true, message: { content: [{ text: 'New response' }] } })
+    expect(items.filter((item) => item.kind === 'message' && item.streaming)).toHaveLength(1)
+  })
+
+  it('reconciles retained reconnect drafts only against their own authoritative response', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'Request' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Persisted answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'Next request' }] },
+    ]
+    const items = visibleTranscript(messages, [], 'Next draft', [], [], {
+      retainedDrafts: [{ afterSeq: 1, messageCount: 1, text: 'Old draft' }],
+      streamingAnchor: { afterSeq: 3, messageCount: 3 }, streamingActive: false,
+    })
+    expect(items).toHaveLength(4)
+    expect(items[1]).toMatchObject({ message: { content: [{ text: 'Persisted answer' }] } })
+    expect(items.at(-1)).toMatchObject({ streaming: false, message: { content: [{ text: 'Next draft' }] } })
+  })
+
   it('preserves historical item identity when timeline only appends', () => {
     const first: TimelineEntry = { seq: 1, ts: '2026-01-01T00:00:00Z', event: { kind: 'user_message', text: 'one' }, effects: [] }
     const second: TimelineEntry = { seq: 2, ts: '2026-01-01T00:00:01Z', event: { kind: 'user_message', text: 'two' }, effects: [] }

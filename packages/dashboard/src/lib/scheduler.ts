@@ -7,6 +7,28 @@ type BrowserScheduler = {
   postTask<T>(callback: () => T | Promise<T>, options?: { priority?: 'background' | 'user-visible'; signal?: AbortSignal }): Promise<T>
 }
 
+/** Logical updates must still run when an unmapped WebKit window stops painting. */
+export function scheduleFrameTask(run: () => void, maxWaitMs = 100): () => void {
+  let frame: number | null = null
+  let timeout: number | null = null
+  let finished = false
+  const cancel = (): void => {
+    finished = true
+    if (frame !== null) cancelAnimationFrame(frame)
+    if (timeout !== null) window.clearTimeout(timeout)
+    frame = null
+    timeout = null
+  }
+  const execute = (): void => {
+    if (finished) return
+    cancel()
+    run()
+  }
+  frame = requestAnimationFrame(execute)
+  timeout = window.setTimeout(execute, maxWaitMs)
+  return cancel
+}
+
 export function scheduleBackground<T>(run: (signal: AbortSignal) => T | Promise<T>): ScheduledTask<T> {
   const controller = new AbortController()
   let timeoutId: number | null = null

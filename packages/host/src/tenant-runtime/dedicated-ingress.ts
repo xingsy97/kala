@@ -1,7 +1,8 @@
 import { createServer, type Server as HttpServer } from 'node:http'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { watch, type FSWatcher } from 'node:fs'
 import { access } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { Socket } from 'node:net'
 
 import { schema, validateClientMessagePayload, validateInlineMessageFiles, validateInlineMessageImages } from '@agent-kernel/shared'
@@ -47,7 +48,7 @@ export async function startDedicatedIngress(options: {
       return
     }
     if (path === '/runtime/admission/messages' && request.method === 'POST' && ledger) {
-      void acceptAdmission(request, options.auth, ledger, currentRoute, options.ingressHandoffSecret).then((body) => {
+      void acceptAdmission(request, options.auth, ledger, currentRoute, options.ingressHandoffSecret, () => scheduleReconcile()).then((body) => {
         response.writeHead(202, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         response.end(JSON.stringify(body))
       }).catch((error) => {
@@ -193,9 +194,32 @@ export async function startDedicatedIngress(options: {
   http.prependListener('upgrade', stripUntrustedIdentityHeaders)
   ingress.attach(http)
   let reconciling = false
+  let retryRequested = false
+  let reconcileTimer: ReturnType<typeof setTimeout> | undefined
+  let reconcileDue = 0
+  const scheduleReconcile = (delayMs = 0): void => {
+    const due = Date.now() + delayMs
+    if (reconcileTimer && due >= reconcileDue) return
+    if (reconcileTimer) clearTimeout(reconcileTimer)
+    reconcileDue = due
+    reconcileTimer = setTimeout(() => {
+      reconcileTimer = undefined
+      void reconcileAdmission()
+    }, delayMs)
+    reconcileTimer.unref()
+  }
+  const watchers = watchReconcileInputs([
+    options.candidateStatePath,
+    options.routeStatePath,
+  ], scheduleReconcile)
   const reconcileAdmission = async (): Promise<void> => {
-    if (!ledger || reconciling || !options.ingressHandoffSecret) return
+    if (!ledger || !options.ingressHandoffSecret) return
+    if (reconciling) {
+      retryRequested = true
+      return
+    }
     reconciling = true
+    retryRequested = false
     const owner = `ingress-${process.pid}`
     const blockedSessionIds = new Set<string>()
     try {
@@ -228,6 +252,7 @@ export async function startDedicatedIngress(options: {
           if (outcome.committed !== true || !Number.isSafeInteger(outcome.cursor) || (outcome.cursor ?? -1) < 1) {
             await ledger.release(record.operationId, owner, 'Runtime accepted the operation but has not committed it to the Session log')
             blockedSessionIds.add(record.sessionId)
+            retryRequested = true
             continue
           }
           // Runtime has durably deduplicated operationId before responding. If
@@ -238,14 +263,16 @@ export async function startDedicatedIngress(options: {
         } catch (error) {
           await ledger.release(record.operationId, owner, error instanceof Error ? error.message : String(error))
           blockedSessionIds.add(record.sessionId)
+          retryRequested = true
           continue
         }
       }
-    } finally { reconciling = false }
+    } finally {
+      reconciling = false
+      if (retryRequested) scheduleReconcile(1000)
+    }
   }
-  const reconciliationTimer = setInterval(() => { void reconcileAdmission() }, 250)
-  reconciliationTimer.unref()
-  void reconcileAdmission()
+  scheduleReconcile()
   await new Promise<void>((resolve, reject) => {
     http.once('error', reject)
     http.listen(options.port, options.listenHost ?? '127.0.0.1', () => {
@@ -260,7 +287,8 @@ export async function startDedicatedIngress(options: {
     unitId: DEDICATED_RUNTIME_UNIT_ID,
     origin: options.unitOrigin,
     async close() {
-      clearInterval(reconciliationTimer)
+      if (reconcileTimer) clearTimeout(reconcileTimer)
+      for (const watcher of watchers) watcher.close()
       ingress.close()
       const closed = new Promise<void>((resolve, reject) => {
         http.close((error) => error ? reject(error) : resolve())
@@ -269,6 +297,22 @@ export async function startDedicatedIngress(options: {
       await closed
       http.off('connection', trackTransport)
     },
+  }
+
+  function watchReconcileInputs(paths: Array<string | undefined>, notify: () => void): FSWatcher[] {
+    const unique = [...new Set(paths.filter((path): path is string => Boolean(path)))]
+    return unique.flatMap((path) => {
+      try {
+        const filename = basename(path)
+        const watcher = watch(dirname(path), { persistent: false }, (_event, changed) => {
+          if (!changed || changed.toString() === filename) notify()
+        })
+        watcher.on('error', notify)
+        return [watcher]
+      } catch {
+        return []
+      }
+    })
   }
 }
 
@@ -282,6 +326,7 @@ async function acceptAdmission(
   ledger: DedicatedAdmissionLedger,
   route: () => Promise<{ origin: string; generation: number }>,
   ingressHandoffSecret: string | undefined,
+  onAccepted?: () => void,
 ): Promise<unknown> {
   const authenticated = ingressActor(request, auth)
   if (!authenticated.ok) throw new AdmissionHttpError(401, authenticated.reason)
@@ -310,6 +355,7 @@ async function acceptAdmission(
   const attachmentCommitSecret = ingressHandoffSecret
   const active = await route()
   const result = await ledger.append(message, active.generation)
+  onAccepted?.()
   if (hasReferencedAttachments) {
     if (!attachmentCommitSecret) throw new AdmissionHttpError(503, 'attachment admission requires the Runtime handoff channel')
     let response: Response

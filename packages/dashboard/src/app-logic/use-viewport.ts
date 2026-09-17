@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useInterfaceScale } from '../lib/interface-scale.js'
 
 /** Reactively tracks whether a min-width media query currently matches. */
 export function useMinWidth(px: number): boolean {
-  const query = `(min-width: ${px}px)`
+  const scale = useInterfaceScale()
+  const query = `(min-width: ${Math.round(px * scale)}px)`
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
   useEffect(() => {
     const media = window.matchMedia(query)

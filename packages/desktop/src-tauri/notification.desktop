@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Agent RunLab
+Exec=agent-runlab-desktop %u
+Icon=agent-runlab-desktop
+NoDisplay=true
+DBusActivatable=true
+X-GNOME-UsesNotifications=true

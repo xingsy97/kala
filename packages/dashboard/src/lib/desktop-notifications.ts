@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { ApprovalRequiredEvent, SessionErrorEvent } from '@agent-kernel/shared'
 
 import { DASHBOARD_PREFERENCES, useBooleanPref } from './prefs.js'
+import { isDesktopClient } from './desktop.js'
+import { getDesktopBridge } from './desktop-bridge.js'
 
 export type DesktopNotificationKind =
   | 'approval_required'
@@ -64,12 +66,14 @@ export type DesktopNotificationPrefs = {
 }
 
 export function notificationPermission(): NotificationPermission | 'unsupported' {
+  if (isDesktopClient()) return getDesktopBridge() ? 'granted' : 'unsupported'
   const NotificationCtor = window.Notification
   if (typeof NotificationCtor !== 'function') return 'unsupported'
   return NotificationCtor.permission
 }
 
 export async function requestNotificationPermission(): Promise<NotificationPermission | 'unsupported'> {
+  if (isDesktopClient()) return notificationPermission()
   const NotificationCtor = window.Notification
   if (typeof NotificationCtor !== 'function') return 'unsupported'
   return await NotificationCtor.requestPermission()
@@ -133,6 +137,7 @@ export function canSendDesktopNotification(
   prefs: DesktopNotificationPrefs,
   kind: DesktopNotificationKind,
 ): boolean {
+  if (isDesktopClient()) return false
   return prefs.enabled && prefs.byKind[kind] && notificationPermission() === 'granted'
 }
 
@@ -220,6 +225,8 @@ export function useInterventionDesktopNotifications({
   } | null>(null)
 
   useEffect(() => {
+    // Native owns the all-session sink; never also fire browser/PWA banners.
+    if (isDesktopClient()) return
     const prev = previous.current
     if (!ready || sessionId === null) {
       previous.current = null

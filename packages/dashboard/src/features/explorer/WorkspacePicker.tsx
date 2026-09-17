@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { HelpHint } from '../../components/ui/help-hint.js'
 import type { AgentRuntimeDescriptor, AgentRuntimeId, AttachedExecutor } from '@agent-kernel/shared'
 import { KERNEL_AGENT_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 
@@ -135,17 +136,16 @@ export function NewSessionDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!next && !submitting) onCancel() }}>
       <DialogContent className={cn(dialogMobileSheetClassName, 'h-[min(calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem),44rem)] min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-4xl')} data-testid="new-session-dialog">
         <DialogHeader className="relative border-b border-border/50 px-4 py-2 pr-14 sm:py-3">
-          <DialogTitle>{t('dialogs.newSession')}</DialogTitle>
-          <DialogDescription className="hidden sm:block">
-            {t('dialogs.newSessionDescription')}
-          </DialogDescription>
+          <DialogTitle className="flex items-center gap-1">{t('dialogs.newSession')}<HelpHint label={t('dialogs.newSession')}><span className="block">{t('dialogs.newSessionDescription')}</span><span className="mt-2 block"><strong>{t('dialogs.simpleChat')}</strong><br />{t('dialogs.simpleChatDescription')}</span></HelpHint></DialogTitle>
+          <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
           <DialogClose className={dialogTouchCloseClassName} disabled={submitting} aria-label={t('common.close')} data-testid="new-session-close">
             <X className="h-4 w-4" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
         <section className="min-w-0 overflow-hidden border-b border-border/50 bg-muted/20 px-3 py-1.5" aria-labelledby="new-session-runtime-label">
-          <div id="new-session-runtime-label" className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div id="new-session-runtime-label" className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
             {t('dialogs.chooseAgentRuntime')}
+            <HelpHint label={t('dialogs.chooseAgentRuntime')}>{agentRuntimes.map((runtime) => <span className="mb-2 block last:mb-0" key={runtime.id}><strong>{runtime.label}</strong><br />{runtime.description}</span>)}</HelpHint>
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-1.5" role="radiogroup" aria-labelledby="new-session-runtime-label">
             {agentRuntimes.map((runtime) => {
@@ -177,9 +177,7 @@ export function NewSessionDialog({
                       <span className="truncate">{runtime.label}</span>
                       {selected ? <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" /> : null}
                     </span>
-                    <span className="hidden truncate text-[11px] text-muted-foreground sm:block">
-                      {runtime.available ? runtime.description : runtime.reason ?? runtime.status}
-                    </span>
+                    {!runtime.available ? <span className="block break-words text-[0.6875rem] text-muted-foreground">{runtime.reason ?? runtime.status}</span> : null}
                   </span>
                 </button>
               )
@@ -204,12 +202,9 @@ export function NewSessionDialog({
                 <div className="truncate text-sm font-medium text-foreground">
                   {t('dialogs.simpleChat')}
                 </div>
-                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                  {t('dialogs.simpleChatDescription')}
-                </div>
               </button>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground"><span>{t('dialogs.workspaceSessions')}</span><button type="button" disabled={submitting} onClick={() => onCreateSimpleChat(agentRuntime)} className="ml-auto rounded px-2 py-1 text-primary hover:bg-primary/10 md:hidden">{t('dialogs.simpleChat')}</button></div>
+            <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground"><span>{t('dialogs.workspaceSessions')}</span><button type="button" data-testid="new-session-simple-chat-mobile" disabled={submitting} onClick={() => onCreateSimpleChat(agentRuntime)} className="ml-auto rounded px-2 py-1 text-primary hover:bg-primary/10 md:hidden">{t('dialogs.simpleChat')}</button></div>
             <ScrollArea className="min-h-0 flex-1 max-md:max-h-24">
               <div className="flex gap-2 px-2 pb-2 md:block md:space-y-1">
                 {workspaces.length === 0 ? (
@@ -241,7 +236,7 @@ export function NewSessionDialog({
                     <div className="truncate font-mono text-sm text-foreground">
                       {w.workspaceName}
                     </div>
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                    <div className="mt-0.5 truncate font-mono text-[0.6875rem] text-muted-foreground">
                       {workspaceMeta(w)}
                     </div>
                   </button>
@@ -251,9 +246,22 @@ export function NewSessionDialog({
           </aside> : null}
           <main className="flex min-h-0 min-w-0 overflow-hidden flex-col">
             {scopedWorkspace && selectedWorkspace ? (
-              <div className="border-b border-border/50 bg-muted/30 px-3 py-2" data-testid="new-session-scoped-workspace">
-                <div className="truncate font-mono text-sm font-medium">{selectedWorkspace.workspaceName}</div>
-                <div className="truncate font-mono text-[11px] text-muted-foreground">{workspaceMeta(selectedWorkspace)}</div>
+              <div className="flex items-center gap-2 border-b border-border/50 bg-muted/30 px-3 py-2" data-testid="new-session-scoped-workspace">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-sm font-medium">{selectedWorkspace.workspaceName}</div>
+                  <div className="truncate font-mono text-[0.6875rem] text-muted-foreground">{workspaceMeta(selectedWorkspace)}</div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-testid="new-session-simple-chat"
+                  disabled={submitting}
+                  onClick={() => onCreateSimpleChat(agentRuntime)}
+                  title={t('dialogs.simpleChatDescription')}
+                  className="flex-none text-primary"
+                >
+                  {t('dialogs.simpleChat')}
+                </Button>
               </div>
             ) : null}
             <label

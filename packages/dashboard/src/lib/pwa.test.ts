@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { activatePwaUpdate, isStandalone } from './pwa.js'
+import { activatePwaUpdate, initPwa, isStandalone } from './pwa.js'
 
 function serviceWorkerHarness(): {
   serviceWorker: Pick<ServiceWorkerContainer, 'addEventListener' | 'removeEventListener'>
@@ -24,6 +24,18 @@ function serviceWorkerHarness(): {
 }
 
 describe('PWA standalone detection', () => {
+  it('does not register or check service workers in the desktop webview', async () => {
+    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    try {
+      const handlers = { onNeedRefresh: vi.fn(), onOfflineReady: vi.fn(), onRegistered: vi.fn() }
+      const controller = initPwa(handlers)
+      await controller.checkForUpdate()
+      await controller.applyUpdate()
+      expect(handlers.onRegistered).not.toHaveBeenCalled()
+    } finally {
+      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+    }
+  })
   it('enables PWA-only behavior for standard and legacy iOS standalone modes', () => {
     expect(isStandalone({ matches: true })).toBe(true)
     expect(isStandalone({ navigatorStandalone: true })).toBe(true)

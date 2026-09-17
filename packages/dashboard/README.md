@@ -36,6 +36,31 @@ Five-column Finder-style shell (see [ADR 0013](../../docs/meta/adr/0013-dashboar
 - **Background terminal** (`src/features/background/`) — panel derived from `bash` / `bash_output` / `kill_shell` events.
 - **Activity bar** (`src/features/activity/`) — bottom bar: runtime status, permission banners.
 
+## App identity
+
+The original octopus mark shares one vector source in `src/brand/octopus.ts`.
+Web/PWA uses coral; desktop uses mint with a small dock underline. Generate all
+favicon, install, maskable, notification and native PNG assets with
+`pnpm --dir packages/host exec tsx ../../scripts/dashboard/generate-app-icons.mjs`
+from the repository root. New icon URLs avoid reusing cached pre-octopus assets;
+legacy asset paths remain compatible. No third-party illustration is bundled.
+
+## Interface sizing
+
+Settings > Interface controls the whole application size (75-200%, default
+125%) and individual chat, session-list, file-list and file-view font sizes
+(10-48 logical pixels). Sliders, numeric input and per-control reset are
+available; tool-activity icons support 100-300%. Individual font sizes are
+multiplied by the interface scale. Existing saved font selections keep their
+meaning.
+
+Use rem-based typography and dimensions for interface chrome, including small
+labels. Pixel-based renderers such as virtualized trees, Monaco and terminals
+must apply `useInterfaceScale()` and update their layout without recreating a
+session or PTY. The app shell and Settings navigation choose their responsive
+layout using the scaled breakpoints in `useMinWidth()`. Do not implement this
+with CSS `zoom`, which leaves viewport units and media queries inconsistent.
+
 ## What it does NOT do
 
 - Call the LLM directly — always goes through Host.
@@ -53,3 +78,20 @@ Five-column Finder-style shell (see [ADR 0013](../../docs/meta/adr/0013-dashboar
 Component tests use `@testing-library/react` with a mocked Socket.IO client, asserting user-visible behavior. Target per [`docs/meta/testing.md`](../../docs/meta/testing.md) §5.
 
 **Caveat**: mocked-socket tests do **not** prove the app connects, renders, or accepts input against a real Host. For any UI-shipping change that touches the initial connection, first paint, or theming, verify against a real browser (headless is fine) hitting the Host-served bundle — see the "verify frontend with real browser" convention.
+
+`pnpm --dir packages/host exec tsx ../../scripts/dashboard/verify-dashboard-session-connection.mjs`
+(from the repository root) exercises hover-preview → selection, resync and reconnect
+for workspace-free Kernel and Copilot sessions on an isolated Host. It records
+visible/hidden idle CPU profiles and browser-process CPU ticks under `.artifacts/`.
+`CONNECTION_DASHBOARD_DIST` selects an alternate production build. Its native bridge
+fixture verifies frontend behavior, not GTK/WebKit resource consumption.
+
+Session readiness requires a fresh `session:ready` baseline for the current
+selection, even if a preview already owns the shared room. **Resync** requests that
+baseline and then reloads Kernel history; it does not restart the Host.
+Pending connections retain their breathing indicator; Thinking retains the
+breathing dot, sheen and live elapsed/progress label. Session-busy and
+history-loading icons rotate continuously, with reduced-motion preferences
+respected. Do not use removed effects or stepped animation as a performance
+optimization. Native CPU evidence must identify the actual rendering backend:
+Xvfb with Mesa llvmpipe measures software rendering, not a user's GPU.

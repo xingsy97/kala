@@ -14,12 +14,14 @@
  *   generation can keep a page connected while its actions no longer match
  *   the served assets. Composer drafts are persisted per Session before this
  *   controlled reload.
- * - We poll `update()` frequently enough that long-open tabs converge on an
- *   independently deployed Dashboard without operator intervention.
+ * - Long-open tabs schedule a low-frequency update check so they converge on
+ *   an independently deployed Dashboard without operator intervention.
  * - We register only in production builds. In `vite dev` the plugin is
  *   disabled, so `virtual:pwa-register` synchronously returns a no-op —
  *   but we still guard on `import.meta.env.PROD` to be explicit.
  */
+
+import { isDesktopClient } from './desktop.js'
 
 export type PwaLifecycleHandlers = {
   onNeedRefresh: () => void
@@ -40,7 +42,7 @@ const NOOP_CONTROLLER: PwaController = {
   checkForUpdate: async () => {},
 }
 
-export const UPDATE_POLL_INTERVAL_MS = 15_000
+export const UPDATE_POLL_INTERVAL_MS = 30 * 60_000
 const UPDATE_DEDUPE_MS = 5_000
 export const UPDATE_RELOAD_TIMEOUT_MS = 5_000
 
@@ -81,6 +83,7 @@ export async function activatePwaUpdate(options: {
 }
 
 export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
+  if (isDesktopClient()) return NOOP_CONTROLLER
   if (typeof window === 'undefined') return NOOP_CONTROLLER
   if (!('serviceWorker' in navigator)) return NOOP_CONTROLLER
   // In dev the vite-plugin-pwa virtual module is intentionally a no-op, but
@@ -89,7 +92,7 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
   if (!import.meta.env.PROD) return NOOP_CONTROLLER
 
   let updateSW: ((reloadPage?: boolean) => Promise<void>) | undefined
-  let pollTimer: ReturnType<typeof setInterval> | undefined
+  let pollTimer: ReturnType<typeof setTimeout> | undefined
   let lastUpdateCheckAt = 0
   let updateCheck: Promise<void> | null = null
   const checkRegistration = (registration: ServiceWorkerRegistration, force = false): Promise<void> => {
@@ -113,12 +116,16 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
         onRegisteredSW: (_url: string, registration: ServiceWorkerRegistration | undefined) => {
           handlers.onRegistered?.(registration)
           if (registration) {
-            // Poll periodically for very long-lived tabs.
-            pollTimer = setInterval(() => {
-              // Ignore rejections: a transient network failure just means we
-              // retry in 30 minutes.
-              void checkRegistration(registration, true)
-            }, UPDATE_POLL_INTERVAL_MS)
+            const scheduleUpdateCheck = (): void => {
+              if (pollTimer) clearTimeout(pollTimer)
+              pollTimer = setTimeout(() => {
+                pollTimer = undefined
+                // Ignore rejections: a transient network failure just means we
+                // retry in 30 minutes.
+                void checkRegistration(registration, true).finally(scheduleUpdateCheck)
+              }, UPDATE_POLL_INTERVAL_MS)
+            }
+            scheduleUpdateCheck()
             // Trigger an immediate update check whenever the tab regains
             // visibility (returning from another app, unlocking the phone,
             // switching back from a background tab). This catches new
@@ -164,7 +171,7 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
   navigator.serviceWorker.addEventListener('message', onSwMessage)
 
   window.addEventListener('beforeunload', () => {
-    if (pollTimer) clearInterval(pollTimer)
+    if (pollTimer) clearTimeout(pollTimer)
     navigator.serviceWorker.removeEventListener('message', onSwMessage)
   })
 

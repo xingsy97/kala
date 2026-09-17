@@ -117,7 +117,7 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
         <div className="min-w-0 flex-1 truncate text-xs text-sidebar-foreground/75">
           {status?.repo?.branch ?? status?.repo?.head ?? t('sourceControl.repository')}
         </div>
-        {fileCount > 0 ? <span className="font-mono text-[10px] tabular-nums text-sidebar-foreground/55">{fileCount}</span> : null}
+        {fileCount > 0 ? <span className="font-mono text-[0.625rem] tabular-nums text-sidebar-foreground/55">{fileCount}</span> : null}
         <Button
           variant="ghost"
           size="icon"
@@ -136,7 +136,7 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-1.5" style={{ fontSize: fontSizePx }}>
+      <div className="min-h-0 flex-1 overflow-auto p-1.5" style={{ fontSize: `${fontSizePx / 16}rem` }}>
         {!online ? (
           <EmptyState message={t('sourceControl.offline')} />
         ) : loading && !status ? (
@@ -147,10 +147,10 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
           <EmptyState message={t('sourceControl.noChanges')} />
         ) : (
           <div className="space-y-2">
-            {status?.truncated ? <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-200">{t('sourceControl.truncatedFiles', { count: status.truncated.limit })}</div> : null}
+            {status?.truncated ? <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[0.6875rem] text-amber-700 dark:text-amber-200">{t('sourceControl.truncatedFiles', { count: status.truncated.limit })}</div> : null}
             {groups.map((group) => (
               <div key={group.id}>
-                <div className="px-1.5 py-1 text-[11px] font-medium uppercase tracking-normal text-sidebar-foreground/55">{group.label}</div>
+                <div className="px-1.5 py-1 text-[0.6875rem] font-medium uppercase tracking-normal text-sidebar-foreground/55">{group.label}</div>
                 <div className="space-y-0.5">
                   {viewMode === 'tree' ? (
                     <GitFileTree
@@ -263,7 +263,7 @@ function GitFileRow({ file, depth, label, onOpen }: { file: GitFileChange; depth
       title={file.oldPath ? `${file.oldPath} -> ${file.path}` : file.path}
       data-testid="source-control-file"
     >
-      <span className={cn('flex h-4 w-4 flex-none items-center justify-center rounded text-[10px] font-semibold', statusBadgeClass(file.status))}>{GIT_STATUS_LABEL[file.status]}</span>
+      <span className={cn('flex h-4 w-4 flex-none items-center justify-center rounded text-[0.625rem] font-semibold', statusBadgeClass(file.status))}>{GIT_STATUS_LABEL[file.status]}</span>
       <FileCode2 className="h-3.5 w-3.5 flex-none text-sidebar-foreground/55" />
       <span className="min-w-0 flex-1 truncate font-mono text-[0.95em]">{label === 'basename' ? basename(file.path) : file.path}</span>
     </button>

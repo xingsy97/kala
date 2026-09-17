@@ -71,7 +71,7 @@ export function ChangeCwdDialog({
                   <div className="truncate font-mono text-sm text-foreground">
                     {workspace.workspaceName ?? workspace.workspaceId}
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                  <div className="mt-0.5 truncate font-mono text-[0.6875rem] text-muted-foreground">
                     {workspaceMeta(workspace)}
                   </div>
                 </div>
@@ -80,7 +80,7 @@ export function ChangeCwdDialog({
                   {t('dialogs.workspaceOfflineBrowse')}
                 </div>
               )}
-              <p className="mt-3 px-1 text-[11px] text-muted-foreground">
+              <p className="mt-3 px-1 text-[0.6875rem] text-muted-foreground">
                 {t('dialogs.workspaceSticky')}
               </p>
             </div>

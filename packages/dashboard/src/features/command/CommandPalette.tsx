@@ -116,7 +116,7 @@ export function CommandPalette({ open, onOpenChange, commands }: Props): JSX.Ele
                 heading={isDefaultGroup(group) ? t('common.actions') : group}
                 className={cn(
                   'px-1 py-1',
-                  '[&_[cmdk-group-heading]]:mb-0.5 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground',
+                  '[&_[cmdk-group-heading]]:mb-0.5 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[0.625rem] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground',
                 )}
               >
                 {items.map((command) => (
@@ -164,10 +164,10 @@ function PaletteRow({
       {Icon ? <Icon className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" /> : null}
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium text-foreground">{command.label}</span>
-        <span className="mt-0.5 truncate text-[11px] text-muted-foreground">{hint}</span>
+        <span className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground">{hint}</span>
       </div>
       {command.shortcut && command.shortcut.length > 0 ? (
-        <span className="flex flex-none items-center gap-0.5 text-[10px] text-muted-foreground">
+        <span className="flex flex-none items-center gap-0.5 text-[0.625rem] text-muted-foreground">
           {command.shortcut.map((k, i) => (
             <kbd
               key={i}

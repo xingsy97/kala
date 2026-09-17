@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AccountOrganization, AccountProfile } from '../../auth-session.js'
 import { Button } from '../../components/ui/button.js'
 import { useTranslation } from 'react-i18next'
+import { HelpHint } from '../../components/ui/help-hint.js'
 
 export type PublicBrowserSession = {
   id: string
@@ -36,7 +37,7 @@ export function AccountCenter({ profile, organization, onClose }: { profile: Acc
   return (
     <div className="fixed inset-0 z-[70] overflow-y-auto bg-background" data-testid="account-center">
       <header className="sticky top-0 z-10 flex min-h-14 items-center justify-between border-b border-border bg-background/95 px-4 backdrop-blur">
-        <div><h1 className="text-base font-semibold">{t('account.title')}</h1><p className="text-xs text-muted-foreground">{t('account.subtitle')}</p></div>
+        <div><h1 className="flex items-center gap-1 text-base font-semibold">{t('account.title')}<HelpHint label={t('account.title')}>{t('account.subtitle')}</HelpHint></h1></div>
         <Button type="button" variant="ghost" onClick={onClose} className="h-11" data-testid="account-center-close">{t('common.close')}</Button>
       </header>
       <main className="mx-auto grid max-w-3xl gap-6 px-4 py-6">

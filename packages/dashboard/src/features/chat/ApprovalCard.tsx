@@ -146,7 +146,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
         </span>
         {total > 1 ? (
           <span
-            className="ml-1 rounded-full bg-amber-200/60 px-2 py-0.5 text-[10px] font-medium tabular-nums text-amber-900 dark:bg-amber-500/20 dark:text-amber-100"
+            className="ml-1 rounded-full bg-amber-200/60 px-2 py-0.5 text-[0.625rem] font-medium tabular-nums text-amber-900 dark:bg-amber-500/20 dark:text-amber-100"
             data-testid="approval-card-index"
           >
             {t('chat.approval.index', { current: current + 1, total })}
@@ -160,7 +160,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
               variant="ghost"
               onClick={rejectAll}
               data-testid="approval-reject-all"
-              className="h-9 px-2 text-[11px] text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20 sm:h-6"
+              className="h-9 px-2 text-[0.6875rem] text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20 sm:h-6"
             >
               {t('chat.approval.rejectAll')}
             </Button>
@@ -169,7 +169,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
               variant="ghost"
               onClick={approveAll}
               data-testid="approval-approve-all"
-              className="h-9 px-2 text-[11px] text-emerald-800 hover:bg-emerald-200/60 dark:text-emerald-200 dark:hover:bg-emerald-500/20 sm:h-6"
+              className="h-9 px-2 text-[0.6875rem] text-emerald-800 hover:bg-emerald-200/60 dark:text-emerald-200 dark:hover:bg-emerald-500/20 sm:h-6"
             >
               {t('chat.approval.approveAll')}
             </Button>
@@ -180,26 +180,26 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
       <div className="flex min-w-0 flex-col gap-2 px-3 py-2.5">
         {approval.intent ? <p className="text-sm text-amber-950 dark:text-amber-100" data-testid="approval-card-intent">{approval.intent}</p> : null}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="rounded bg-amber-200/70 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-amber-900 dark:bg-amber-500/30 dark:text-amber-100">
+          <span className="rounded bg-amber-200/70 px-1.5 py-0.5 font-mono text-[0.6875rem] font-semibold text-amber-900 dark:bg-amber-500/30 dark:text-amber-100">
             {approval.name}
           </span>
           {primary ? (
             <span
-              className="min-w-0 flex-1 truncate font-mono text-[12px] text-amber-900/90 dark:text-amber-100/90"
+              className="min-w-0 flex-1 truncate font-mono text-[0.75rem] text-amber-900/90 dark:text-amber-100/90"
               title={primary}
               data-testid="approval-card-primary"
             >
               {primary}
             </span>
           ) : (
-            <span className="text-[12px] italic text-amber-800/70 dark:text-amber-200/70">
+            <span className="text-[0.75rem] italic text-amber-800/70 dark:text-amber-200/70">
               {t('chat.approval.noArguments')}
             </span>
           )}
           <button
             type="button"
             onClick={() => setDetailsOpen((v) => !v)}
-            className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20"
+            className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 text-[0.6875rem] font-medium text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20"
             data-testid="approval-details-toggle"
             aria-expanded={detailsOpen}
           >
@@ -282,7 +282,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
           ) : null}
         </div>
 
-        <p className="text-[10px] text-amber-800/70 dark:text-amber-200/60">
+        <p className="text-[0.625rem] text-amber-800/70 dark:text-amber-200/60">
           {t('chat.approval.shortcuts', { switchHint: total > 1 ? t('chat.approval.switchHint') : '' })}
         </p>
       </div>

@@ -1,4 +1,5 @@
 import { PREF_HOST_ENDPOINT } from './lib/prefs.js'
+import { isDesktopClient } from './lib/desktop.js'
 
 const STORAGE_KEY = PREF_HOST_ENDPOINT
 
@@ -18,6 +19,7 @@ export function resolveHostEndpoint(): ResolvedHostEndpoint {
   if (typeof window === 'undefined') {
     return { url: '', source: 'default' }
   }
+  if (isDesktopClient()) return { url: window.location.origin, source: 'default' }
   const query = new URLSearchParams(window.location.search).get('host')
   if (query) return { url: normalize(query), source: 'query' }
   try {

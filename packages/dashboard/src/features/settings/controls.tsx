@@ -1,9 +1,10 @@
 import type { LucideIcon } from 'lucide-react'
 import { Check, Copy } from 'lucide-react'
-import { useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../components/ui/button.js'
+import { HelpHint } from '../../components/ui/help-hint.js'
 import { cn } from '../../lib/utils.js'
 
 /**
@@ -29,6 +30,7 @@ export function SettingsSectionButton({
   const hint = t(`settings.sections.${section.key}.hint`)
   const Icon = section.icon
   return (
+    <HelpHint label={label} trigger={
     <button
       type="button"
       onClick={onClick}
@@ -44,23 +46,34 @@ export function SettingsSectionButton({
         <Icon className={cn('h-4 w-4 flex-none', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden="true" />
         <div className="min-w-0 truncate font-medium">{label}</div>
       </div>
-      <div className="mt-1 hidden truncate pl-6 text-[11px] text-muted-foreground/80 md:block">{hint}</div>
     </button>
+    }>{hint}</HelpHint>
   )
 }
+
+export const SettingsSectionHelpContext = createContext<((help: string | undefined) => void) | null>(null)
 
 export function SectionHeader({
   title,
   subtitle,
+  descriptionKind = 'help',
 }: {
   title: string
   subtitle?: string
+  descriptionKind?: 'help' | 'notice'
 }): JSX.Element {
+  const setMobileHelp = useContext(SettingsSectionHelpContext)
+  useEffect(() => {
+    setMobileHelp?.(descriptionKind === 'help' ? subtitle : undefined)
+    return () => setMobileHelp?.(undefined)
+  }, [setMobileHelp, subtitle, descriptionKind])
   return (
-    <div className="mb-5 min-w-0 md:mb-7">
-      <h3 className="sr-only text-xl font-semibold tracking-[-0.02em] text-foreground md:not-sr-only md:text-2xl">{title}</h3>
-      {subtitle ? (
-        <p className="max-w-3xl break-words text-sm leading-5 text-muted-foreground md:mt-2 md:leading-6">{subtitle}</p>
+    <div className={cn('min-w-0 md:mb-7', descriptionKind === 'notice' ? 'mb-5' : 'hidden md:block')}>
+      <h3 className="sr-only text-xl font-semibold tracking-[-0.02em] text-foreground md:not-sr-only md:text-2xl">
+        {title} {subtitle && descriptionKind === 'help' ? <HelpHint label={title}>{subtitle}</HelpHint> : null}
+      </h3>
+      {subtitle && descriptionKind === 'notice' ? (
+        <p className="max-w-3xl break-words text-sm leading-5 text-muted-foreground md:mt-2 md:leading-6" data-description-kind="notice">{subtitle}</p>
       ) : null}
     </div>
   )
@@ -73,6 +86,7 @@ export function InterfaceToggle({
   onChange,
   testId,
   disabled = false,
+  descriptionKind = disabled ? 'notice' : 'help',
 }: {
   label: string
   description: string
@@ -80,12 +94,13 @@ export function InterfaceToggle({
   onChange(next: boolean): void
   testId: string
   disabled?: boolean
+  descriptionKind?: 'help' | 'notice'
 }): JSX.Element {
   return (
-    <li className="flex flex-col gap-4 rounded-xl bg-card/70 px-4 py-3.5 ring-1 ring-border/40 sm:flex-row sm:items-start sm:justify-between">
+    <li className="flex items-center justify-between gap-4 rounded-xl bg-card/70 px-4 py-3.5 ring-1 ring-border/40">
       <div className="min-w-0">
-        <div className="font-medium">{label}</div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        <div className="flex items-center gap-1 font-medium">{label}{descriptionKind === 'help' ? <HelpHint label={label}>{description}</HelpHint> : null}</div>
+        {descriptionKind === 'notice' ? <p className="mt-0.5 text-xs text-muted-foreground" data-description-kind="notice">{description}</p> : null}
       </div>
       <Toggle checked={checked} onChange={onChange} ariaLabel={label} testId={testId} disabled={disabled} />
     </li>
@@ -194,7 +209,7 @@ export function SettingsRecord({
     <div className="min-w-0 rounded-xl bg-card/65 p-4 ring-1 ring-border/40">
       <div className="min-w-0 border-b border-border/40 pb-2">
         <div className="break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]">{title}</div>
-        {detail ? <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{detail}</div> : null}
+        {detail ? <div className="mt-0.5 break-all font-mono text-[0.6875rem] text-muted-foreground">{detail}</div> : null}
       </div>
       <dl className="mt-2 grid min-w-0 gap-x-4 gap-y-2 sm:grid-cols-2">{children}</dl>
     </div>

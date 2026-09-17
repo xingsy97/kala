@@ -3,7 +3,8 @@ import type { Socket } from 'socket.io-client'
 
 export type ManagedDashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 export type ChannelWireState = 'desired' | 'subscribing' | 'active' | 'rejected'
-type ChannelRecord = { refs: number; generation: number; cursor?: number; state: ChannelWireState; error?: string }
+type ChannelRecord = { refs: number; generation: number; cursor?: number; state: ChannelWireState; error?: string; errorListeners: Set<(code: string) => void> }
+type AcquireOptions = { freshBaseline?: boolean; onError?(code: string): void }
 
 export class DashboardConnectionManager {
   private readonly channels = new Map<DashboardChannel, ChannelRecord>()
@@ -15,14 +16,17 @@ export class DashboardConnectionManager {
     })
   }
 
-  acquire(channel: DashboardChannel, cursor?: number): () => void {
+  acquire(channel: DashboardChannel, cursor?: number, options: AcquireOptions = {}): () => void {
     const current = this.channels.get(channel)
     if (current) {
       current.refs += 1
       if (cursor !== undefined) current.cursor = Math.max(current.cursor ?? 0, cursor)
-      if (this.socket.connected && current.state === 'desired') void this.subscribe([channel], false)
+      if (options.onError) current.errorListeners.add(options.onError)
+      // A room can outlive its UI consumer (hover preview, child card). A new
+      // selection needs a baseline delivered after its listeners were bound.
+      if (this.socket.connected && (options.freshBaseline || current.state === 'desired')) void this.subscribe([channel], false)
     } else {
-      this.channels.set(channel, { refs: 1, generation: 0, ...(cursor !== undefined ? { cursor } : {}), state: 'desired' })
+      this.channels.set(channel, { refs: 1, generation: 0, ...(cursor !== undefined ? { cursor } : {}), state: 'desired', errorListeners: new Set(options.onError ? [options.onError] : []) })
       if (this.socket.connected) void this.subscribe([channel], false)
     }
     let released = false
@@ -30,6 +34,7 @@ export class DashboardConnectionManager {
       if (released) return
       released = true
       const record = this.channels.get(channel)
+      if (options.onError) record?.errorListeners.delete(options.onError)
       if (!record || --record.refs > 0) return
       this.channels.delete(channel)
       if (this.socket.connected) this.unsubscribe([channel])
@@ -54,6 +59,12 @@ export class DashboardConnectionManager {
 
   snapshot(): ReadonlyMap<DashboardChannel, Readonly<ChannelRecord>> { return new Map(this.channels) }
 
+  refresh(channel: DashboardChannel): void {
+    if (!this.channels.has(channel)) return
+    if (this.socket.connected) void this.subscribe([channel], false)
+    else this.socket.connect()
+  }
+
   async restore(): Promise<void> {
     const desired = [...this.channels.entries()].filter(([, record]) => record.refs > 0).map(([channel]) => channel)
     if (desired.length) await this.subscribe(desired, true)
@@ -68,7 +79,16 @@ export class DashboardConnectionManager {
     const cursors = Object.fromEntries(channels.flatMap((channel) => { const cursor = this.channels.get(channel)?.cursor; return cursor === undefined ? [] : [[channel, cursor]] }))
     const event = restore ? 'client:restore_subscriptions' : 'client:subscribe_channels'
     await new Promise<void>((resolve) => {
-      const timer = window.setTimeout(() => { for (const channel of channels) { const r = this.channels.get(channel); if (r?.generation === generation) r.state = 'desired' }; resolve() }, 5_000)
+      const timer = window.setTimeout(() => {
+        for (const channel of channels) {
+          const record = this.channels.get(channel)
+          if (record?.generation !== generation) continue
+          record.state = 'desired'
+          record.error = 'subscription_timeout'
+          for (const listener of record.errorListeners) listener(record.error)
+        }
+        resolve()
+      }, 5_000)
       this.socket.emit(event, { requestId: `channels-${generation}`, generation, channels, ...(Object.keys(cursors).length ? { cursors } : {}) }, (result: ChannelSubscriptionResult) => {
         window.clearTimeout(timer)
         this.applyAck(result)
@@ -89,6 +109,7 @@ export class DashboardConnectionManager {
       const record = this.channels.get(rejection.channel)
       if (!record || record.generation !== result.generation) continue
       record.state = 'rejected'; record.error = rejection.code
+      for (const listener of record.errorListeners) listener(rejection.code)
     }
   }
 

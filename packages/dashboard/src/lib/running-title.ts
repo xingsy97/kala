@@ -1,4 +1,6 @@
 import { useEffect } from 'react'
+import { octopusSvg } from '../brand/octopus.js'
+import { isDesktopClient } from './desktop.js'
 
 const FAVICON_FRAMES = [0, 1, 2, 3] as const
 const FAVICON_INTERVAL_MS = 500
@@ -21,10 +23,17 @@ export function useRunningTitleIndicator(isRunning: boolean, baseTitle = DASHBOA
       favicon.href = renderRunningFavicon(FAVICON_FRAMES[frame]!)
       frame = (frame + 1) % FAVICON_FRAMES.length
     }
+    let timeout: number | undefined
+    const schedule = (): void => {
+      timeout = window.setTimeout(() => {
+        render()
+        schedule()
+      }, FAVICON_INTERVAL_MS)
+    }
     render()
-    const interval = window.setInterval(render, FAVICON_INTERVAL_MS)
+    schedule()
     return () => {
-      window.clearInterval(interval)
+      if (timeout !== undefined) window.clearTimeout(timeout)
       document.title = baseTitle
       if (previousHref) favicon.href = previousHref
       else favicon.remove()
@@ -37,26 +46,12 @@ function getOrCreateFaviconLink(): HTMLLinkElement {
   if (existing) return existing
   const link = document.createElement('link')
   link.rel = 'icon'
-  link.href = '/favicon.svg'
+  link.href = isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'
   document.head.appendChild(link)
   return link
 }
 
 function renderRunningFavicon(frame: number): string {
-  const arc = [
-    '<path d="M32 8a24 24 0 0 1 24 24" stroke="#22c55e" stroke-width="12" stroke-linecap="round" fill="none"/>',
-    '<path d="M56 32a24 24 0 0 1-24 24" stroke="#22c55e" stroke-width="12" stroke-linecap="round" fill="none"/>',
-    '<path d="M32 56A24 24 0 0 1 8 32" stroke="#22c55e" stroke-width="12" stroke-linecap="round" fill="none"/>',
-    '<path d="M8 32A24 24 0 0 1 32 8" stroke="#22c55e" stroke-width="12" stroke-linecap="round" fill="none"/>',
-  ][frame]!
-  const svg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">',
-    '<rect width="64" height="64" rx="12" fill="#111827"/>',
-    '<circle cx="32" cy="32" r="24" fill="#0f172a" stroke="#334155" stroke-width="4"/>',
-    arc,
-    '<circle cx="32" cy="32" r="12" fill="#f8fafc"/>',
-    '<circle cx="32" cy="32" r="5" fill="#111827"/>',
-    '</svg>',
-  ].join('')
+  const svg = octopusSvg(isDesktopClient() ? 'desktop' : 'web', { runningFrame: frame })
   return `data:image/svg+xml,${encodeURIComponent(svg)}`
 }

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { i18n, type DashboardLanguage } from '../../../i18n/index.js'
 
 import { Button } from '../../../components/ui/button.js'
+import { HelpHint } from '../../../components/ui/help-hint.js'
 import { useTheme } from '../../../lib/theme.js'
 import { wakeLockSupported } from '../../../lib/wake-lock.js'
 import {
@@ -55,6 +56,9 @@ import {
 import { cn } from '../../../lib/utils.js'
 import { InterfaceToggle, SectionHeader, Toggle } from '../controls.js'
 import { formatBytes, responseError } from '../section-utils.js'
+import { SizePreference } from '../SizePreference.js'
+import { CHAT_FONT_SIZE_PX, SESSION_EXPLORER_FONT_SIZE_PX, FILE_EXPLORER_FONT_SIZE_PX, FILE_VIEW_FONT_SIZE_PX, DEFAULT_INTERFACE_SCALE, INTERFACE_SCALE_MIN, INTERFACE_SCALE_MAX, FONT_SIZE_MIN, FONT_SIZE_MAX } from '../../../lib/display-sizes.js'
+import { DASHBOARD_PREFERENCES, PREF_INTERFACE_SCALE, numberPreferenceOptions } from '../../../lib/prefs.js'
 
 function LanguageSetting(): JSX.Element {
   const { t } = useTranslation()
@@ -62,8 +66,7 @@ function LanguageSetting(): JSX.Element {
   return (
     <li className="flex items-start justify-between gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50">
       <div className="min-w-0">
-        <div className="font-medium">{t('common.language')}</div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('language.description')}</p>
+        <div className="flex items-center gap-1 font-medium">{t('common.language')}<HelpHint label={t('common.language')}>{t('language.description')}</HelpHint></div>
       </div>
       <select
         value={language}
@@ -92,11 +95,12 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     { min: 0, max: 10 },
   )
-  const [toolActivityIconScale, setToolActivityIconScale] = useNumberPref(PREF_TOOL_ACTIVITY_ICON_SCALE, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, { min: 100, max: 200 })
-  const [chatFontSize, setChatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, { min: 0, max: 6 })
-  const [sessionExplorerFontSize, setSessionExplorerFontSize] = useNumberPref(PREF_SESSION_EXPLORER_FONT_SIZE, DEFAULT_SESSION_EXPLORER_FONT_SIZE, { min: 0, max: 4 })
-  const [fileExplorerFontSize, setFileExplorerFontSize] = useNumberPref(PREF_FILE_EXPLORER_FONT_SIZE, DEFAULT_FILE_EXPLORER_FONT_SIZE, { min: 0, max: 4 })
-  const [fileViewFontSize, setFileViewFontSize] = useNumberPref(PREF_FILE_VIEW_FONT_SIZE, DEFAULT_FILE_VIEW_FONT_SIZE, { min: 0, max: 4 })
+  const [interfaceScale, setInterfaceScale] = useNumberPref(PREF_INTERFACE_SCALE, DEFAULT_INTERFACE_SCALE, numberPreferenceOptions(DASHBOARD_PREFERENCES.interfaceScale))
+  const [toolActivityIconScale, setToolActivityIconScale] = useNumberPref(PREF_TOOL_ACTIVITY_ICON_SCALE, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, numberPreferenceOptions(DASHBOARD_PREFERENCES.toolActivityIconScale))
+  const [chatFontSize, setChatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.chatFontSize))
+  const [sessionExplorerFontSize, setSessionExplorerFontSize] = useNumberPref(PREF_SESSION_EXPLORER_FONT_SIZE, DEFAULT_SESSION_EXPLORER_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.sessionExplorerFontSize))
+  const [fileExplorerFontSize, setFileExplorerFontSize] = useNumberPref(PREF_FILE_EXPLORER_FONT_SIZE, DEFAULT_FILE_EXPLORER_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.fileExplorerFontSize))
+  const [fileViewFontSize, setFileViewFontSize] = useNumberPref(PREF_FILE_VIEW_FONT_SIZE, DEFAULT_FILE_VIEW_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.fileViewFontSize))
   const [chatContentWidth, setChatContentWidth] = useNumberPref(PREF_CHAT_CONTENT_WIDTH, DEFAULT_CHAT_CONTENT_WIDTH, { min: 0, max: 2 })
   const [chatSideSpace, setChatSideSpace] = useNumberPref(PREF_CHAT_SIDE_SPACE, DEFAULT_CHAT_SIDE_SPACE, { min: 0, max: 2 })
   const [chatLineHeight, setChatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
@@ -128,17 +132,26 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
       />
       <ul className="space-y-3 text-sm">
         <LanguageSetting />
-        <li className="flex flex-col gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50 sm:flex-row sm:items-start sm:justify-between">
+        <SizePreference
+          label={t('settings.interface.interfaceScale')}
+          description={t('settings.interface.interfaceScaleDesc')}
+          value={interfaceScale} onChange={setInterfaceScale}
+          min={INTERFACE_SCALE_MIN} max={INTERFACE_SCALE_MAX}
+          defaultValue={DEFAULT_INTERFACE_SCALE} unit="%" testId="settings-interface-scale"
+        />
+        <li className="flex items-center justify-between gap-2 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50">
           <div className="min-w-0">
-            <div className="font-medium">{t('settings.interface.theme.label')}</div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t('settings.interface.theme.desc')}
-            </p>
+            <div className="flex items-center gap-1 font-medium">{t('settings.interface.theme.label')}<HelpHint label={t('settings.interface.theme.label')}>{t('settings.interface.theme.desc')}</HelpHint></div>
           </div>
+          <select value={theme} onChange={(event) => setTheme(event.target.value as 'system' | 'dark' | 'light')} aria-label={t('settings.interface.theme.label')} className="h-9 max-w-[45%] rounded-md border border-border bg-background px-2 text-xs md:hidden">
+            <option value="system">{t('settings.interface.theme.system')}</option>
+            <option value="dark">{t('settings.interface.theme.dark')}</option>
+            <option value="light">{t('settings.interface.theme.light')}</option>
+          </select>
           <div
             role="radiogroup"
             aria-label={t('settings.interface.theme.label')}
-            className="inline-flex flex-none overflow-hidden rounded-md border border-border"
+            className="hidden flex-none overflow-hidden rounded-md border border-border md:inline-flex"
             data-testid="settings-theme-toggle"
           >
             <button
@@ -194,13 +207,12 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
         <li className="rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <div className="font-medium">{t('settings.interface.vscodeTheme.label')}</div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t('settings.interface.vscodeTheme.desc')}
-              </p>
-              <p className="mt-2 text-xs text-muted-foreground" data-testid="settings-vscode-theme-current">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <div className="flex items-center gap-1 font-medium">{t('settings.interface.vscodeTheme.label')}<HelpHint label={t('settings.interface.vscodeTheme.label')}><span className="block">{t('settings.interface.vscodeTheme.desc')}</span><span className="mt-2 block">{t('settings.interface.vscodeTheme.marketplaceDesc')}</span></HelpHint></div>
+              <p className="text-xs text-muted-foreground" data-testid="settings-vscode-theme-current">
                 {t('settings.interface.vscodeTheme.current', { theme: currentThemeLabel })}
               </p>
+              </div>
             </div>
           </div>
           <MarketplaceThemeBrowser
@@ -210,49 +222,37 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
             onApply={(next) => applyStoredTheme(next)}
           />
         </li>
-        <SegmentedNumberPref
+        <SizePreference
           label={t('settings.interface.chatFontSize')}
           description={t('settings.interface.chatFontSizeDesc')}
-          value={chatFontSize}
-          onChange={setChatFontSize}
+          value={CHAT_FONT_SIZE_PX[chatFontSize] ?? 15}
+          onChange={(pixels) => setChatFontSize(CHAT_FONT_SIZE_PX.indexOf(pixels))}
+          min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} defaultValue={CHAT_FONT_SIZE_PX[DEFAULT_CHAT_FONT_SIZE] ?? 15} unit="px"
           testId="settings-chat-font-size"
-          options={[0, 1, 2, 3, 4, 5, 6].map((value) => ({
-            value,
-            label: t(`settings.interface.chatFontSizeOptions.${value}`),
-          }))}
         />
-        <SegmentedNumberPref
+        <SizePreference
           label={t('settings.interface.fileViewFontSize')}
           description={t('settings.interface.fileViewFontSizeDesc')}
-          value={fileViewFontSize}
-          onChange={setFileViewFontSize}
+          value={FILE_VIEW_FONT_SIZE_PX[fileViewFontSize] ?? 14}
+          onChange={(pixels) => setFileViewFontSize(FILE_VIEW_FONT_SIZE_PX.indexOf(pixels))}
+          min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} defaultValue={FILE_VIEW_FONT_SIZE_PX[DEFAULT_FILE_VIEW_FONT_SIZE] ?? 14} unit="px"
           testId="settings-file-view-font-size"
-          options={[0, 1, 2, 3, 4].map((value) => ({
-            value,
-            label: t(`settings.interface.fileViewFontSizeOptions.${value}`),
-          }))}
         />
-        <SegmentedNumberPref
+        <SizePreference
           label={t('settings.interface.sessionExplorerFontSize')}
           description={t('settings.interface.sessionExplorerFontSizeDesc')}
-          value={sessionExplorerFontSize}
-          onChange={setSessionExplorerFontSize}
+          value={SESSION_EXPLORER_FONT_SIZE_PX[sessionExplorerFontSize] ?? 13}
+          onChange={(pixels) => setSessionExplorerFontSize(SESSION_EXPLORER_FONT_SIZE_PX.indexOf(pixels))}
+          min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} defaultValue={SESSION_EXPLORER_FONT_SIZE_PX[DEFAULT_SESSION_EXPLORER_FONT_SIZE] ?? 13} unit="px"
           testId="settings-session-explorer-font-size"
-          options={[0, 1, 2, 3, 4].map((value) => ({
-            value,
-            label: t(`settings.interface.explorerFontSizeOptions.${value}`),
-          }))}
         />
-        <SegmentedNumberPref
+        <SizePreference
           label={t('settings.interface.fileExplorerFontSize')}
           description={t('settings.interface.fileExplorerFontSizeDesc')}
-          value={fileExplorerFontSize}
-          onChange={setFileExplorerFontSize}
+          value={FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? 11}
+          onChange={(pixels) => setFileExplorerFontSize(FILE_EXPLORER_FONT_SIZE_PX.indexOf(pixels))}
+          min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} defaultValue={FILE_EXPLORER_FONT_SIZE_PX[DEFAULT_FILE_EXPLORER_FONT_SIZE] ?? 11} unit="px"
           testId="settings-file-explorer-font-size"
-          options={[0, 1, 2, 3, 4].map((value) => ({
-            value,
-            label: t(`settings.interface.explorerFontSizeOptions.${value}`),
-          }))}
         />
         <SegmentedNumberPref
           label={t('settings.interface.chatContentWidth')}
@@ -298,12 +298,9 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
             label: t(`settings.interface.chatMathScaleOptions.${value}`),
           }))}
         />
-        <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+        <li className="flex items-center justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
-            <div className="font-medium">{t('settings.interface.showToolCallTab')}</div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t('settings.interface.showToolCallTabDesc')}
-            </p>
+            <div className="flex items-center gap-1 font-medium">{t('settings.interface.showToolCallTab')}<HelpHint label={t('settings.interface.showToolCallTab')}>{t('settings.interface.showToolCallTabDesc')}</HelpHint></div>
           </div>
           <Toggle
             checked={showToolCallTab}
@@ -354,29 +351,24 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
           onChange={setHideSubAgentSessions}
           testId="settings-toggle-hide-sub-agent-sessions"
         />
-        <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+        <li className="flex items-center justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
-            <div className="font-medium">{t('settings.interface.liveToolActivityTail')}</div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t('settings.interface.liveToolActivityTailDesc')}
-            </p>
+            <div className="flex items-center gap-1 font-medium">{t('settings.interface.liveToolActivityTail')}<HelpHint label={t('settings.interface.liveToolActivityTail')}>{t('settings.interface.liveToolActivityTailDesc')}</HelpHint></div>
           </div>
           <select value={liveToolActivityTail} onChange={(event) => setLiveToolActivityTail(Number(event.currentTarget.value))} className="h-8 w-24 flex-none rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.liveToolActivityTail')} data-testid="settings-live-tool-activity-tail">
             {[0, 1, 2, 3, 5, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </li>
-        <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0"><div className="font-medium">{t('settings.interface.toolActivityIconSize')}</div><p className="mt-0.5 text-xs text-muted-foreground">{t('settings.interface.toolActivityIconSizeDesc')}</p></div>
-          <select value={toolActivityIconScale} onChange={(event) => setToolActivityIconScale(Number(event.currentTarget.value))} className="h-8 w-28 flex-none rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.toolActivityIconSize')} data-testid="settings-tool-activity-icon-scale">
-            {[100, 125, 150, 175, 200].map((value) => <option key={value} value={value}>{value}%</option>)}
-          </select>
-        </li>
-        <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+        <SizePreference
+          label={t('settings.interface.toolActivityIconSize')}
+          description={t('settings.interface.toolActivityIconSizeDesc')}
+          value={toolActivityIconScale} onChange={setToolActivityIconScale}
+          min={100} max={300} defaultValue={DEFAULT_TOOL_ACTIVITY_ICON_SCALE}
+          unit="%" testId="settings-tool-activity-icon-scale"
+        />
+        <li className="flex items-center justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
-            <div className="font-medium">{t('settings.interface.sessionCacheMaxMb')}</div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t('settings.interface.sessionCacheMaxMbDesc')}
-            </p>
+            <div className="flex items-center gap-1 font-medium">{t('settings.interface.sessionCacheMaxMb')}<HelpHint label={t('settings.interface.sessionCacheMaxMb')}>{t('settings.interface.sessionCacheMaxMbDesc')}</HelpHint></div>
           </div>
           <div className="flex flex-none items-center gap-2">
             <input list="session-cache-size-presets" type="number" min={0} max={4096} value={sessionCacheMaxMb} onChange={(event) => setSessionCacheMaxMb(Number(event.currentTarget.value))} className="h-8 w-24 rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.sessionCacheMaxMb')} data-testid="settings-session-cache-max-mb" />
@@ -519,7 +511,6 @@ function MarketplaceThemeBrowser({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-sm font-medium">{t('settings.interface.vscodeTheme.themeList')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.interface.vscodeTheme.marketplaceDesc')}</p>
         </div>
         <div className="flex min-w-0 gap-2">
           <input
@@ -539,7 +530,7 @@ function MarketplaceThemeBrowser({
       <div className="rounded-md border border-border bg-background/40 p-2">
         <div className="mb-2 flex items-center justify-between gap-2 text-xs">
           <div className="font-medium text-muted-foreground">{t('settings.interface.vscodeTheme.searchResults')}</div>
-          {selected ? <div className="min-w-0 truncate text-[11px] text-muted-foreground">{selected.displayName}</div> : null}
+          {selected ? <div className="min-w-0 truncate text-[0.6875rem] text-muted-foreground">{selected.displayName}</div> : null}
         </div>
         <div className="max-h-36 space-y-1 overflow-y-auto pr-1">
           {(searchQuery.data ?? []).map((result) => (
@@ -551,9 +542,9 @@ function MarketplaceThemeBrowser({
             >
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium text-foreground">{result.displayName}</div>
-                <div className="truncate text-[11px]">{result.namespace}.{result.name}</div>
+                <div className="truncate text-[0.6875rem]">{result.namespace}.{result.name}</div>
               </div>
-              {result.verified ? <span className="rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary">{t('settings.interface.vscodeTheme.verified')}</span> : null}
+              {result.verified ? <span className="rounded border border-primary/40 px-1.5 py-0.5 text-[0.625rem] text-primary">{t('settings.interface.vscodeTheme.verified')}</span> : null}
             </button>
           ))}
           {searchQuery.isLoading ? <div className="px-2 py-1 text-xs text-muted-foreground">{t('common.loading')}</div> : null}
@@ -614,8 +605,8 @@ function ThemeListRow({
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <div className="truncate text-sm font-medium">{label}</div>
-            {active ? <span className="flex-none rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary">{t('settings.interface.vscodeTheme.active')}</span> : null}
-            {previewing ? <span className="flex-none rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground">{t('settings.interface.vscodeTheme.previewing')}</span> : null}
+            {active ? <span className="flex-none rounded border border-primary/40 px-1.5 py-0.5 text-[0.625rem] text-primary">{t('settings.interface.vscodeTheme.active')}</span> : null}
+            {previewing ? <span className="flex-none rounded bg-accent px-1.5 py-0.5 text-[0.625rem] text-accent-foreground">{t('settings.interface.vscodeTheme.previewing')}</span> : null}
           </div>
           <div className="truncate text-xs text-muted-foreground">{source}</div>
         </div>
@@ -650,15 +641,17 @@ function SegmentedNumberPref({
   testId: string
 }): JSX.Element {
   return (
-    <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+    <li className="flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3">
       <div className="min-w-0 flex-1">
-        <div className="font-medium">{label}</div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        <div className="flex items-center gap-1 font-medium">{label}<HelpHint label={label}>{description}</HelpHint></div>
       </div>
+      <select aria-label={label} value={value} onChange={(event) => onChange(Number(event.target.value))} className="h-9 max-w-[45%] rounded-md border border-border bg-background px-2 text-xs md:hidden" data-testid={`${testId}-select`}>
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
       <div
         role="radiogroup"
         aria-label={label}
-        className="flex max-w-full flex-wrap gap-1 rounded-md border border-border bg-background/70 p-1"
+        className="hidden max-w-[65%] flex-wrap gap-1 rounded-md border border-border bg-background/70 p-1 md:flex"
         data-testid={testId}
       >
         {options.map((option) => (

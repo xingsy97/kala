@@ -124,6 +124,70 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Override host endpoint')).toBeTruthy()
   })
 
+  it('keeps connection help hidden but cross-origin requirements and failures visible', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    expect(screen.queryByText(i18n.t('settings.connection.priority'))).toBeNull()
+    expect(screen.queryByText('AGENT_KERNEL_ALLOWED_ORIGINS')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'About Override host endpoint' }))
+    expect(screen.getByRole('tooltip').textContent).toContain('AGENT_KERNEL_ALLOWED_ORIGINS')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.change(screen.getByTestId('settings-connection-endpoint'), { target: { value: 'https://other.example' } })
+    expect(screen.getByText('AGENT_KERNEL_ALLOWED_ORIGINS').closest('[data-description-kind="notice"]')).toBeTruthy()
+    fetchMock.mockRejectedValueOnce(new Error('Controlled connection failure'))
+    fireEvent.click(screen.getByTestId('settings-connection-test'))
+    expect((await screen.findByRole('alert')).textContent).toContain('Controlled connection failure')
+    fireEvent.change(screen.getByTestId('settings-connection-endpoint'), { target: { value: 'invalid' } })
+    expect(screen.queryByText('AGENT_KERNEL_ALLOWED_ORIGINS')).toBeNull()
+  })
+
+  it.each(['query', 'build'])('shows cross-origin requirements for the effective %s endpoint even with an empty draft', async (source) => {
+    const previousUrl = window.location.href
+    const remote = 'https://remote-host.example'
+    if (source === 'query') window.history.replaceState(null, '', `?host=${encodeURIComponent(remote)}`)
+    else vi.stubEnv('VITE_AGENT_KERNEL_HOST', remote)
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }))
+    const view = render(<SettingsDialog open onOpenChange={() => {}} />)
+    try {
+      await waitForSettingsLoaded()
+      expect(screen.getByText(remote)).toBeTruthy()
+      expect((screen.getByTestId('settings-connection-endpoint') as HTMLInputElement).value).toBe('')
+      expect(screen.getByText('AGENT_KERNEL_ALLOWED_ORIGINS').closest('[data-description-kind="notice"]')).toBeTruthy()
+      fireEvent.change(screen.getByTestId('settings-connection-endpoint'), { target: { value: window.location.origin } })
+      expect(screen.getByText('AGENT_KERNEL_ALLOWED_ORIGINS').closest('[data-description-kind="notice"]')).toBeTruthy()
+    } finally {
+      view.unmount()
+      window.history.replaceState(null, '', previousUrl)
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('preserves full interface help, mobile section explanations and direct risk notices', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    fireEvent.change(screen.getByTestId('settings-mobile-section-select'), { target: { value: 'interface' } })
+    const help = screen.getAllByRole('button', { name: 'About Interface' })[0]!
+    expect(help.closest('label')).toBeNull()
+    fireEvent.click(help)
+    expect(screen.getByRole('tooltip').textContent).toContain(i18n.t('settings.interface.subtitle'))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    for (const key of ['chatFontSize', 'fileViewFontSize', 'sessionExplorerFontSize', 'fileExplorerFontSize', 'chatContentWidth', 'chatSideSpace', 'chatLineHeight', 'chatMathScale']) {
+      const description = i18n.t(`settings.interface.${key}Desc`)
+      expect(screen.queryByText(description)).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: `About ${i18n.t(`settings.interface.${key}`)}` }))
+      expect(screen.getByRole('tooltip').textContent).toBe(description)
+      fireEvent.keyDown(document, { key: 'Escape' })
+    }
+    expect(document.querySelector('button button')).toBeNull()
+    fireEvent.click(screen.getByTestId('settings-tab-hooks'))
+    expect(screen.getByText(i18n.t('settings.hooks.subtitle')).getAttribute('data-description-kind')).toBe('notice')
+    fireEvent.click(screen.getByTestId('settings-tab-approvals'))
+    expect(screen.getByText(i18n.t('settings.approvals.subtitle')).getAttribute('data-description-kind')).toBe('notice')
+    expect(screen.getByText('AK_ALLOW_ALL_OK=1')).toBeTruthy()
+  })
+
   it('configures, tests, and removes web search', async () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
@@ -556,7 +620,9 @@ describe('SettingsDialog', () => {
     await waitForSettingsLoaded()
 
     fireEvent.click(screen.getByTestId('settings-tab-notifications'))
-    await screen.findByText(/System notifications are automatically paused while Agent RunLab is actively being used on any device\./)
+    expect(screen.queryByText(/System notifications are automatically paused/)).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'About Notifications' }).at(-1)!)
+    expect(screen.getByRole('tooltip').textContent).toContain('System notifications are automatically paused while Agent RunLab is actively being used on any device.')
     expect(screen.getByTestId('desktop-notification-permission').textContent).toContain('not requested')
 
     fireEvent.click(screen.getByTestId('settings-toggle-desktop-notifications'))
@@ -750,10 +816,10 @@ describe('SettingsDialog', () => {
     fireEvent.click(screen.getByTestId('settings-tab-interface'))
     await screen.findByTestId('settings-chat-font-size')
 
-    fireEvent.click(screen.getByTestId('settings-chat-font-size-6'))
-    fireEvent.click(screen.getByTestId('settings-file-view-font-size-4'))
-    fireEvent.click(screen.getByTestId('settings-session-explorer-font-size-3'))
-    fireEvent.click(screen.getByTestId('settings-file-explorer-font-size-2'))
+    fireEvent.change(screen.getByTestId('settings-chat-font-size'), { target: { value: '20' } })
+    fireEvent.change(screen.getByTestId('settings-file-view-font-size'), { target: { value: '18' } })
+    fireEvent.change(screen.getByTestId('settings-session-explorer-font-size'), { target: { value: '14' } })
+    fireEvent.change(screen.getByTestId('settings-file-explorer-font-size'), { target: { value: '12' } })
     fireEvent.click(screen.getByTestId('settings-chat-content-width-2'))
     fireEvent.click(screen.getByTestId('settings-chat-side-space-0'))
     fireEvent.click(screen.getByTestId('settings-chat-line-height-2'))
@@ -778,7 +844,7 @@ describe('SettingsDialog', () => {
     await waitForSettingsLoaded()
 
     fireEvent.click(screen.getByTestId('settings-tab-notifications'))
-    await screen.findByText(/System notifications are automatically paused while Agent RunLab is actively being used on any device\./)
+    expect(screen.queryByText(/System notifications are automatically paused/)).toBeNull()
     const toggle = screen.getByTestId('settings-toggle-desktop-notifications') as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
     expect(screen.getByText(/Notifications are blocked/i)).toBeTruthy()

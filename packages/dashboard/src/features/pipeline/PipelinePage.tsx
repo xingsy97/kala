@@ -102,7 +102,7 @@ export function PipelinePage(): JSX.Element {
                   <button key={i} type="button" aria-label={t('pipeline.slideNumber', { index: i + 1 })} aria-current={i === safeCursor ? 'step' : undefined} onClick={() => goto(i)} data-testid={`pipeline-dot-${i}`} className={cn('flex h-8 min-w-6 items-center justify-center rounded-full transition-colors after:block after:h-1.5 after:rounded-full', i === safeCursor ? 'after:w-5 after:bg-primary' : 'after:w-1.5 after:bg-muted-foreground/30 hover:after:bg-muted-foreground/60')} />
                 ))}
               </div>
-              <div className="max-w-[42vw] truncate text-[11px] text-muted-foreground"><span className="font-mono">{safeCursor + 1} / {total}</span><span className="mx-1.5">·</span><span>{footerLabel}</span></div>
+              <div className="max-w-[42vw] truncate text-[0.6875rem] text-muted-foreground"><span className="font-mono">{safeCursor + 1} / {total}</span><span className="mx-1.5">·</span><span>{footerLabel}</span></div>
             </div>
 
             <Button type="button" variant="ghost" size="sm" onClick={() => goto(safeCursor + 1)} disabled={safeCursor === total - 1} data-testid="pipeline-next" className="gap-1">
@@ -141,7 +141,7 @@ function StepSlide({
       <p className="mt-2 text-base text-muted-foreground sm:text-lg">{step.subtitle}</p>
       <p className="mt-4 text-sm leading-7 text-foreground/90 sm:mt-6 sm:text-base sm:leading-8">{step.detail}</p>
       <div className="mt-8 rounded-md border-l-2 border-primary/40 bg-muted/30 px-4 py-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="text-[0.6875rem] font-medium uppercase tracking-wider text-muted-foreground">
           {whereToLook.replace(/[:：]\s*$/, '')}
         </div>
         <p className="mt-1 text-sm leading-6 text-foreground/85">{step.signal}</p>

@@ -82,16 +82,29 @@ export function startRetentionScheduler(options: {
 }): { stop(): void } {
   if (!Number.isSafeInteger(options.intervalMs) || options.intervalMs < 60_000) throw new Error('retention scheduler interval must be at least 60000ms')
   let running = false
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
   const run = (): void => {
-    if (running) return
+    if (running || stopped) return
     running = true
     void options.service.purgeAllOrganizations(options.now?.() ?? new Date())
       .then((result) => options.onResult?.(result))
       .catch((error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error))))
-      .finally(() => { running = false })
+      .finally(() => {
+        running = false
+        schedule()
+      })
   }
-  const timer = setInterval(run, options.intervalMs)
-  timer.unref?.()
+  const schedule = (): void => {
+    if (stopped) return
+    timer = setTimeout(run, options.intervalMs)
+    timer.unref?.()
+  }
   run()
-  return { stop: () => clearInterval(timer) }
+  return {
+    stop: () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+    },
+  }
 }

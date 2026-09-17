@@ -37,6 +37,7 @@ import { PROTOCOL_VERSION, buildHumanAttentionTimeline } from '@agent-kernel/sha
 import { io as socketIo, type Socket } from 'socket.io-client'
 
 import { decideSessionHydration } from './session-hydration-policy.js'
+import { scheduleFrameTask } from './lib/scheduler.js'
 import { projectStatusFromEntry } from './state-flow.js'
 import {
   EMPTY_SESSION_PROJECTION,
@@ -53,6 +54,7 @@ import { readBooleanPref, PREF_SMOOTH_STREAMING_TEXT } from './lib/prefs.js'
 import { emitRpc, emitRpcInBackground } from './socket-rpc.js'
 import { SessionSummaryStore } from './app-logic/session-summary-store.js'
 import { DashboardConnectionManager } from './dashboard-connection-manager.js'
+import type { RetainedStreamedDraft, StreamedDraftAnchor } from './transcript.js'
 
 export type { ConnectionStatus, TimelineEntry } from './session-projection.js'
 
@@ -77,6 +79,9 @@ export type SessionView = {
   timeline: readonly TimelineEntry[]
   humanAttention: HumanAttentionTimeline
   streamingText: string
+  streamingActive: boolean
+  streamingAnchor: StreamedDraftAnchor | null
+  retainedDrafts: readonly RetainedStreamedDraft[]
   /**
    * Derived from `state.pendingCalls` (status='awaiting_approval'), NOT from
    * the transient `approval:required` socket emit. That emit fires once per
@@ -146,6 +151,9 @@ export function useSession({
   )
   const dispatchProjectionEvent = (event: SessionProjectionEvent): void => dispatchProjection([event])
   const [streamingText, setStreamingText] = useState('')
+  const [streamingActive, setStreamingActive] = useState(false)
+  const [streamingAnchor, setStreamingAnchor] = useState<StreamedDraftAnchor | null>(null)
+  const [retainedDrafts, setRetainedDrafts] = useState<readonly RetainedStreamedDraft[]>([])
   const [boundSocket, setBoundSocket] = useState<BoundDashboardSocket | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
   const generationRef = useRef(0)
@@ -184,12 +192,15 @@ export function useSession({
     // paint the newly selected Session and made the click look frozen. Yield one
     // frame, then checkpoint in a task; durable persistence is already scheduled
     // in the cache's background queue.
-    if (cache && pending) requestAnimationFrame(() => window.setTimeout(() => cache.set(pending.sessionId, pending.view), 0))
+    if (cache && pending) scheduleFrameTask(() => window.setTimeout(() => cache.set(pending.sessionId, pending.view), 0))
     pendingCacheCheckpointRef.current = null
   }, [cache, sessionId])
 
   useEffect(() => {
     const generation = ++generationRef.current
+    setStreamingActive(false)
+    setStreamingAnchor(null)
+    setRetainedDrafts([])
     if (sessionId === null) {
       if (!sharedSocket) socketRef.current?.close()
       socketRef.current = null
@@ -218,15 +229,15 @@ export function useSession({
     // dozens of independent re-renders of the whole App per second, which
     // starves the main thread (buttons feel dead, the hover cursor stops
     // updating). We buffer these deltas and flush them in insertion order once
-    // per frame. Discrete, order-sensitive events (ready/history/queue/error/
+    // per frame, with a bounded timer fallback when WebKit stops painting a
+    // hidden native window (even if visibilityState still says visible).
+    // Discrete, order-sensitive events (ready/history/queue/error/
     // model) flush the buffer synchronously first so ordering is never broken.
     let projectionQueue: SessionProjectionEvent[] = []
-    let projectionRaf: number | null = null
+    let cancelProjectionFlush: (() => void) | null = null
     const flushProjectionQueue = (): void => {
-      if (projectionRaf !== null) {
-        cancelAnimationFrame(projectionRaf)
-        projectionRaf = null
-      }
+      cancelProjectionFlush?.()
+      cancelProjectionFlush = null
       if (projectionQueue.length === 0) return
       const batch = projectionQueue
       projectionQueue = []
@@ -234,9 +245,9 @@ export function useSession({
     }
     const enqueueProjection = (evt: SessionProjectionEvent): void => {
       projectionQueue.push(evt)
-      if (projectionRaf === null) {
-        projectionRaf = requestAnimationFrame(() => {
-          projectionRaf = null
+      if (cancelProjectionFlush === null) {
+        cancelProjectionFlush = scheduleFrameTask(() => {
+          cancelProjectionFlush = null
           flushProjectionQueue()
         })
       }
@@ -320,6 +331,13 @@ export function useSession({
     }
 
     const pushStreamDelta = (text: string): void => {
+      if (!text) return
+      if (!draftAnchor) {
+        draftAnchor = { afterSeq: streamCursor, messageCount: streamMessageCount }
+        setStreamingAnchor(draftAnchor)
+      }
+      receivedText += text
+      setStreamingActive(true)
       streamBufferRef.current += text
       if (streamRafRef.current === null) {
         lastFrameMs = 0
@@ -350,8 +368,40 @@ export function useSession({
         streamRafRef.current = null
       }
       setStreamingText('')
+      receivedText = ''
+      draftAnchor = null
+      setStreamingAnchor(null)
+      setStreamingActive(false)
     }
 
+    let receivedText = ''
+    let draftAnchor: StreamedDraftAnchor | null = null
+    let streamCursor = cached?.timeline.at(-1)?.seq ?? 0
+    let streamMessageCount = cached?.state?.messages.length ?? 0
+    let streamStatus: AgentState['status'] | undefined
+    const finishStream = (): void => {
+      // Flush unrevealed tokens too: terminal/tool states can arrive while the
+      // smoother still has a backlog, including while this tab is hidden.
+      streamBufferRef.current = ''
+      pendingCommit = ''
+      if (streamRafRef.current !== null) cancelAnimationFrame(streamRafRef.current)
+      streamRafRef.current = null
+      setStreamingText(receivedText)
+      setStreamingActive(false)
+    }
+    const archiveStream = (): void => {
+      if (receivedText && draftAnchor) {
+        const draft = { ...draftAnchor, text: receivedText }
+        setRetainedDrafts((previous) => [...previous, draft])
+      }
+      resetStream()
+    }
+    const updateStreamStatus = (status: AgentState['status']): void => {
+      if (status === 'thinking' && streamStatus !== 'thinking') archiveStream()
+      if (!acceptsSessionTokenDelta(status)) finishStream()
+      streamStatus = status
+      acceptStreamDeltas = acceptsSessionTokenDelta(status)
+    }
     let disposed = false
     let liveBaselineReceived = false
     let acceptStreamDeltas = false
@@ -375,7 +425,14 @@ export function useSession({
         bindSocket(socket)
         setBoundSocket({ sessionId, socket })
         const cursor = cached?.timeline.at(-1)?.seq
-        const releaseChannel = dashboardConnectionManager(socket).acquire(`session:${sessionId}`, cursor)
+        const releaseChannel = dashboardConnectionManager(socket).acquire(`session:${sessionId}`, cursor, {
+          freshBaseline: true,
+          onError: (code) => {
+            if (disposed) return
+            dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
+            dispatchProjectionEvent({ kind: 'error', generation, sessionId, error: { sessionId, scope: 'host', message: `Unable to subscribe to this Session: ${code}` } })
+          },
+        })
         reconnectCleanup = releaseChannel
         return
       }
@@ -424,7 +481,7 @@ export function useSession({
 
     const bindSocket = (socket: DashboardSocket): void => {
       const listenerCleanups: Array<() => void> = []
-      const bind = <EventName extends keyof DashboardServerToClientEvents | 'connect_error' | 'disconnect'>(
+      const bind = <EventName extends keyof DashboardServerToClientEvents | 'connect' | 'connect_error' | 'disconnect'>(
         event: EventName,
         listener: EventName extends keyof DashboardServerToClientEvents
           ? DashboardServerToClientEvents[EventName]
@@ -455,8 +512,10 @@ export function useSession({
       }
       if (p.sessionId !== sessionId) return
       liveBaselineReceived = true
-      acceptStreamDeltas = acceptsSessionTokenDelta(p.state.status)
-      if (!acceptStreamDeltas) resetStream()
+      archiveStream()
+      streamCursor = p.cursor
+      streamMessageCount = p.state.messages.length
+      updateStreamStatus(p.state.status)
       flushProjectionQueue()
       dispatchProjectionEvent({ kind: 'ready', generation, sessionId, payload: p })
       if ((p.agentRuntime ?? 'kernel') !== 'kernel') {
@@ -511,25 +570,41 @@ export function useSession({
       // Coalesced to one commit per frame (see enqueueProjection): during a
       // tool-heavy turn state:changed fires very frequently and each one used
       // to re-render the whole App synchronously.
-      acceptStreamDeltas = acceptsSessionTokenDelta(p.state.status)
-      enqueueProjection({ kind: 'authoritative', generation, sessionId, payload: p })
+      const response = draftAnchor && p.state.messages.slice(draftAnchor.messageCount)
+        .find((message) => message.role === 'assistant' || message.role === 'user')
+      const replacesDraft = response && response.role === 'assistant' &&
+        response.content.some((content) => content.type === 'text' && content.text.length > 0)
+      if (replacesDraft) resetStream()
+      updateStreamStatus(p.state.status)
+      streamCursor = p.cursor ?? p.state.cursor
+      streamMessageCount = p.state.messages.length
+      if (replacesDraft) {
+        flushProjectionQueue()
+        dispatchProjectionEvent({ kind: 'authoritative', generation, sessionId, payload: p })
+      } else enqueueProjection({ kind: 'authoritative', generation, sessionId, payload: p })
     })
     const llmResponseHasText = (p: EventAppendedEvent): boolean =>
       p.event.kind === 'llm_response' &&
+      p.event.message.role === 'assistant' &&
       p.event.message.content.some((content) => content.type === 'text' && content.text.length > 0)
 
     bind('event:appended', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
+      if (p.event.kind === 'clear') {
+        resetStream()
+        setRetainedDrafts([])
+      } else if (p.event.kind === 'user_message') archiveStream()
+      const nextStatus = projectStatusFromEntry(streamStatus ?? 'idle', timelineEntry(p))
+      updateStreamStatus(nextStatus)
+      streamCursor = p.seq
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
-        // Commit the persisted response first, while the live tail still
-        // occupies the same transcript position/key. Clear the streaming tail
-        // on the next animation frame so React reuses that row instead of
-        // briefly removing it and remounting completed Markdown/code.
+        // Persisted text and its draft are replaced in the same React commit.
+        // A deferred reset can erase the *next* response's tokens.
+        finishStream()
+        acceptStreamDeltas = false
         flushProjectionQueue()
         dispatchProjectionEvent({ kind: 'appended', generation, sessionId, payload: p })
-        if (p.event.kind === 'llm_error' || llmResponseHasText(p)) {
-          requestAnimationFrame(() => { if (isCurrentSocket()) resetStream() })
-        }
+        if (llmResponseHasText(p)) resetStream()
         return
       }
       // High-frequency mid-turn events (tool_call / tool_result): coalesce to
@@ -557,7 +632,8 @@ export function useSession({
         if (historyRequestTimer !== null) { window.clearTimeout(historyRequestTimer); historyRequestTimer = null }
         dispatchProjectionEvent({ kind: 'history', generation, sessionId, entries: [] })
       }
-      resetStream()
+      finishStream()
+      acceptStreamDeltas = false
       flushProjectionQueue()
       dispatchProjectionEvent({ kind: 'error', generation, sessionId, error: p })
     })
@@ -572,7 +648,10 @@ export function useSession({
         dispatchProjectionEvent({ kind: 'model', generation, sessionId, selectedModel: model })
       }
     })
-    if (!sharedSocket) bind('connect_error', (err: Error) => {
+    bind('connect', () => {
+      if (isCurrentSocket()) dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'connecting' })
+    })
+    bind('connect_error', (err: Error) => {
       if (!isCurrentSocket()) return
       // Version / auth failures are handshake-time — no point retrying.
       // Stop the socket.io retry loop and hold in an error state so the
@@ -587,8 +666,10 @@ export function useSession({
       if (!isCurrentSocket()) return
       dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
     })
-    if (!sharedSocket) bind('disconnect', (reason: string) => {
+    bind('disconnect', (reason: string) => {
       if (!isCurrentSocket()) return
+      finishStream()
+      acceptStreamDeltas = false
       // Server-initiated disconnect (e.g. workspaceId conflict analogue on
       // dashboard side, or host shutdown) is terminal — don't let socket.io
       // keep dialing.
@@ -617,10 +698,8 @@ export function useSession({
         cancelAnimationFrame(streamRafRef.current)
         streamRafRef.current = null
       }
-      if (projectionRaf !== null) {
-        cancelAnimationFrame(projectionRaf)
-        projectionRaf = null
-      }
+      cancelProjectionFlush?.()
+      cancelProjectionFlush = null
       if (historyRequestTimer !== null) {
         window.clearTimeout(historyRequestTimer)
         historyRequestTimer = null
@@ -699,6 +778,9 @@ export function useSession({
       timeline,
       humanAttention,
       streamingText,
+      streamingActive,
+      streamingAnchor,
+      retainedDrafts,
       pendingApprovals,
       pendingAskUserChoices,
       queuedMessages,
@@ -721,6 +803,9 @@ export function useSession({
       timeline,
       humanAttention,
       streamingText,
+      streamingActive,
+      streamingAnchor,
+      retainedDrafts,
       pendingApprovals,
       pendingAskUserChoices,
       queuedMessages,
@@ -1052,14 +1137,12 @@ export function useControlPlane(
       return
     }
     let active = true
-    let summaryRaf: number | null = null
+    let cancelSummaryFlush: (() => void) | null = null
     let summaryUpdates: Array<(sessions: readonly SessionSummary[]) => readonly SessionSummary[]> = []
     const isActive = (): boolean => active
     const flushSummaryUpdates = (): void => {
-      if (summaryRaf !== null) {
-        cancelAnimationFrame(summaryRaf)
-        summaryRaf = null
-      }
+      cancelSummaryFlush?.()
+      cancelSummaryFlush = null
       if (summaryUpdates.length === 0) return
       const updates = summaryUpdates
       summaryUpdates = []
@@ -1067,9 +1150,9 @@ export function useControlPlane(
     }
     const enqueueSummaryUpdate = (update: (sessions: readonly SessionSummary[]) => readonly SessionSummary[]): void => {
       summaryUpdates.push(update)
-      if (summaryRaf !== null) return
-      summaryRaf = requestAnimationFrame(() => {
-        summaryRaf = null
+      if (cancelSummaryFlush !== null) return
+      cancelSummaryFlush = scheduleFrameTask(() => {
+        cancelSummaryFlush = null
         flushSummaryUpdates()
       })
     }
@@ -1142,12 +1225,11 @@ export function useControlPlane(
     }
     const onMessageQueue: DashboardServerToClientEvents['server:message_queue'] = (p) => {
       if (!isActive()) return
-      if (p.pending > 0) {
-        enqueueSummaryUpdate((prev) => updateSessionSummary(prev, p.sessionId, (s) => ({
-          ...s,
-          status: isRestingSessionStatus(s.status) ? 'idle' : s.status,
-        })))
-      }
+      enqueueSummaryUpdate((prev) => updateSessionSummary(prev, p.sessionId, (s) => ({
+        ...s,
+        queuedCount: p.pending,
+        status: p.pending > 0 && isRestingSessionStatus(s.status) ? 'idle' : s.status,
+      })))
     }
     socket.on('server:executors', onExecutors)
     socket.on('server:sessions', onSessions)
@@ -1174,8 +1256,8 @@ export function useControlPlane(
 
     return () => {
       active = false
-      if (summaryRaf !== null) cancelAnimationFrame(summaryRaf)
-      summaryRaf = null
+      cancelSummaryFlush?.()
+      cancelSummaryFlush = null
       summaryUpdates = []
       socket.off('server:executors', onExecutors)
       socket.off('server:sessions', onSessions)

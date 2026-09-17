@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DocsPage } from './DocsPage.js'
+import { i18n } from '../../i18n/index.js'
 
 describe('DocsPage', () => {
   const fetchMock = vi.fn<typeof fetch>()
@@ -66,6 +67,10 @@ describe('DocsPage', () => {
     })
 
     render(<DocsPage />)
+    expect(screen.queryByText(i18n.t('docs.page.subtitle'))).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('common.aboutLabel', { label: i18n.t('docs.page.title') }) }))
+    expect(screen.getByRole('tooltip').textContent).toBe(i18n.t('docs.page.subtitle'))
+    fireEvent.keyDown(document, { key: 'Escape' })
 
     expect(fetchMock).toHaveBeenCalledWith('/docs/index', { cache: 'no-store' })
     await waitFor(() => {

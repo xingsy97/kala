@@ -397,6 +397,48 @@ describe('NewSessionDialog', () => {
     expect(screen.getByTestId('new-session-scoped-workspace').textContent).toContain('linux-box')
   })
 
+  it.each([undefined, 'ws-b'])('creates workspace-free chat with the chosen runtime from scope %s', (initialWorkspaceId) => {
+    const onCreate = vi.fn()
+    const onCreateSimpleChat = vi.fn()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA, wsB]}
+        initialWorkspaceId={initialWorkspaceId}
+        agentRuntimes={['kernel', 'copilot'].map((id) => ({
+          id: id as 'kernel' | 'copilot',
+          label: id,
+          description: id,
+          available: true,
+          status: 'ready' as const,
+          capabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
+        }))}
+        socket={makeSocket().socket as never}
+        onCreate={onCreate}
+        onCreateSimpleChat={onCreateSimpleChat}
+        onCancel={() => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('new-session-runtime-copilot'))
+    fireEvent.click(screen.getByTestId('new-session-simple-chat'))
+    expect(onCreateSimpleChat).toHaveBeenCalledTimes(1)
+    expect(onCreateSimpleChat).toHaveBeenCalledWith('copilot')
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, 'ws-b'])('blocks duplicate simple chat creation while submitting from scope %s', (initialWorkspaceId) => {
+    const onCreateSimpleChat = vi.fn()
+    render(
+      <NewSessionDialog open workspaces={[wsA, wsB]} initialWorkspaceId={initialWorkspaceId}
+        socket={makeSocket().socket as never} submitting onCreate={() => {}}
+        onCreateSimpleChat={onCreateSimpleChat} onCancel={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId('new-session-simple-chat'))
+    if (!initialWorkspaceId) fireEvent.click(screen.getByTestId('new-session-simple-chat-mobile'))
+    expect(onCreateSimpleChat).not.toHaveBeenCalled()
+  })
+
   it('accepts a request-level directory acknowledgement without a broadcast event', async () => {
     const harness = makeSocket()
     render(

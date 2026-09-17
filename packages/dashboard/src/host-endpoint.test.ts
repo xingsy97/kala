@@ -25,6 +25,19 @@ describe('host-endpoint', () => {
     expect(resolveHostEndpoint()).toEqual({ url: 'http://localhost:3000', source: 'default' })
   })
 
+  it('keeps desktop HTTP and Socket.IO on the selected origin despite web overrides', () => {
+    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    vi.stubEnv('VITE_AGENT_KERNEL_HOST', 'https://build.example')
+    try {
+      localStorage.setItem(STORAGE_KEY, 'https://stored.example')
+      setLocation('https://desktop.example/?host=https://query.example')
+      expect(resolveHostEndpoint()).toEqual({ url: 'https://desktop.example', source: 'default' })
+    } finally {
+      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('reads build-time VITE_AGENT_KERNEL_HOST', () => {
     vi.stubEnv('VITE_AGENT_KERNEL_HOST', 'http://build.example:4000')
     expect(resolveHostEndpoint()).toEqual({ url: 'http://build.example:4000', source: 'build' })

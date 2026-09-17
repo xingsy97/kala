@@ -85,7 +85,7 @@ export function NestedTranscript({ messages, compact = false, virtualized = true
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col text-[13px] leading-relaxed',
+        'flex min-w-0 flex-col text-[0.8125rem] leading-relaxed',
         virtualized && 'flex-1',
         compact && 'text-xs',
       )}
@@ -286,9 +286,9 @@ function RoleColumn({
     <div className="flex min-w-0 flex-col gap-1">
       <div
         className={cn(
-          'text-[10px] font-semibold uppercase tracking-[0.08em]',
+          'text-[0.625rem] font-semibold uppercase tracking-[0.08em]',
           labelTone,
-          compact && 'text-[10px]',
+          compact && 'text-[0.625rem]',
         )}
       >
         {label}
@@ -372,10 +372,10 @@ function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
           className="flex min-w-0 items-center gap-1.5 rounded bg-muted/60 px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-muted"
           onClick={() => setOpen((v) => !v)}
         >
-          <span className="flex-none rounded bg-primary px-1 text-[9px] font-medium uppercase tracking-wider text-primary-foreground">
+          <span className="flex-none rounded bg-primary px-1 text-[0.5625rem] font-medium uppercase tracking-wider text-primary-foreground">
             Tool activity
           </span>
-          <span className="flex-none font-mono text-[10px] text-foreground">{group.calls.length} ops</span>
+          <span className="flex-none font-mono text-[0.625rem] text-foreground">{group.calls.length} ops</span>
           <span className="min-w-0 flex-1 truncate" title={toolMix}>{toolMix}</span>
           {failed > 0 ? <NestedStatusBadge tone="failed" label={`${failed} ${t('chat.transcript.failed')}`} /> : null}
           {succeeded > 0 ? <NestedStatusBadge tone="succeeded" label={`${succeeded} Succeeded`} /> : null}
@@ -406,7 +406,7 @@ function NestedToolRows({
           <div
             key={row.callId}
             className={cn(
-              'flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 font-mono text-[11px]',
+              'flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 font-mono text-[0.6875rem]',
               ok
                 ? 'text-muted-foreground'
                 : 'bg-rose-50/60 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200',
@@ -414,7 +414,7 @@ function NestedToolRows({
           >
             <span
               className={cn(
-                'flex-none rounded bg-background/70 px-1 text-[9px] uppercase tracking-wider',
+                'flex-none rounded bg-background/70 px-1 text-[0.5625rem] uppercase tracking-wider',
                 ok ? 'text-muted-foreground' : 'text-rose-700 dark:text-rose-300',
               )}
             >
@@ -424,7 +424,7 @@ function NestedToolRows({
               {group.calls.find((call) => call.callId === row.callId)?.intent ?? row.primary}
             </span>
             {!ok ? (
-              <span className="flex-none text-[9px] uppercase tracking-wider">{t('chat.transcript.failed')}</span>
+              <span className="flex-none text-[0.5625rem] uppercase tracking-wider">{t('chat.transcript.failed')}</span>
             ) : null}
           </div>
         )
@@ -446,7 +446,7 @@ function NestedStatusBadge({
       ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
       : 'bg-background/80 text-muted-foreground'
   return (
-    <span className={cn('flex-none rounded px-1 text-[9px] uppercase tracking-wider', className)}>
+    <span className={cn('flex-none rounded px-1 text-[0.5625rem] uppercase tracking-wider', className)}>
       {label}
     </span>
   )
@@ -464,8 +464,8 @@ function NestedToolCall({ call }: { call: ToolCallContent }): JSX.Element {
     .map(([k, v]) => `${k}=${truncate(previewValue(v), 40)}`)
     .join(' · ')
   return (
-    <div className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-      <span className="flex-none rounded bg-background/70 px-1 text-[9px] uppercase tracking-wider">
+    <div className="flex min-w-0 items-center gap-1.5 font-mono text-[0.625rem] text-muted-foreground">
+      <span className="flex-none rounded bg-background/70 px-1 text-[0.5625rem] uppercase tracking-wider">
         {call.name}
       </span>
       <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]" title={call.intent ?? undefined}>
@@ -480,7 +480,7 @@ function NestedToolResult({ result }: { result: ToolResultContent }): JSX.Elemen
   return (
     <div
       className={cn(
-        'flex min-w-0 items-start gap-1.5 rounded px-1.5 py-0.5 font-mono text-[10px]',
+        'flex min-w-0 items-start gap-1.5 rounded px-1.5 py-0.5 font-mono text-[0.625rem]',
         result.ok
           ? 'text-muted-foreground'
           : 'bg-rose-50/60 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200',
@@ -488,7 +488,7 @@ function NestedToolResult({ result }: { result: ToolResultContent }): JSX.Elemen
     >
       <span
         className={cn(
-          'flex-none rounded bg-background/70 px-1 text-[9px] uppercase tracking-wider',
+          'flex-none rounded bg-background/70 px-1 text-[0.5625rem] uppercase tracking-wider',
           result.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-300',
         )}
       >
@@ -505,11 +505,11 @@ function NestedPreviewText({ text, compact }: { text: string; compact: boolean }
   const { t } = useTranslation()
   const parts = useMemo(() => lightweightPreviewParts(text), [text])
   return (
-    <div className={cn('min-w-0 max-w-full space-y-1 break-words leading-snug text-foreground [overflow-wrap:anywhere]', compact ? 'text-[11px]' : 'text-[12px]')}>
+    <div className={cn('min-w-0 max-w-full space-y-1 break-words leading-snug text-foreground [overflow-wrap:anywhere]', compact ? 'text-[0.6875rem]' : 'text-[0.75rem]')}>
       {parts.map((part, index) => part.kind === 'text' ? (
         <div key={index} className="whitespace-pre-wrap">{part.text}</div>
       ) : (
-        <div key={index} className="flex items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/40 px-2 py-1.5 text-[10px] text-muted-foreground" data-testid="nested-complex-content-omitted">
+        <div key={index} className="flex items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/40 px-2 py-1.5 text-[0.625rem] text-muted-foreground" data-testid="nested-complex-content-omitted">
           <span className="rounded bg-background/80 px-1.5 py-0.5 font-medium uppercase tracking-wider">{part.label}</span>
           <span>{t('chatCommon.complexContentOmitted')}</span>
         </div>

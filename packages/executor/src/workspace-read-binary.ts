@@ -32,6 +32,7 @@ export async function workspaceReadBinary(
 ): Promise<WorkspaceReadBinaryResponse> {
   const requestId = req.requestId
   const maxBytes = clampBytes(req.maxBytes)
+  const offset = clampOffset(req.offset)
 
   let absolute: string
   try {
@@ -52,18 +53,18 @@ export async function workspaceReadBinary(
     return errorResponse(requestId, 'EIO', err instanceof Error ? err.message : String(err))
   }
 
-  const readSize = Math.min(size, maxBytes)
+  if (offset > size) return errorResponse(requestId, 'EINVAL', 'offset is beyond end of file')
+  const readSize = Math.min(size - offset, maxBytes)
   let buffer: Buffer
   try {
-    // readFile always returns the full file; for over-cap files we read the
-    // first `maxBytes` explicitly via file handle to avoid loading GB into
-    // memory just to slice it.
-    if (size > maxBytes) {
+    // readFile always returns the full file; for ranged or over-cap reads we
+    // read only the requested slice so large downloads can be assembled safely.
+    if (offset > 0 || size > maxBytes) {
       const { open } = await import('node:fs/promises')
       const fh = await open(absolute, 'r')
       try {
         const buf = Buffer.alloc(readSize)
-        await fh.read(buf, 0, readSize, 0)
+        await fh.read(buf, 0, readSize, offset)
         buffer = buf
       } finally {
         await fh.close()
@@ -76,12 +77,13 @@ export async function workspaceReadBinary(
   }
 
   const mime = sniffMime(buffer, req.path)
-  const truncated = size > maxBytes ? { maxBytes } : undefined
+  const truncated = offset + buffer.length < size ? { maxBytes } : undefined
   return {
     requestId,
     base64: buffer.toString('base64'),
     mime,
     size,
+    offset,
     ...(truncated ? { truncated } : {}),
   }
 }
@@ -89,6 +91,11 @@ export async function workspaceReadBinary(
 function clampBytes(requested: number | undefined): number {
   if (!requested || !Number.isFinite(requested)) return DEFAULT_MAX_BYTES
   return Math.max(1, Math.min(HARD_MAX_BYTES, Math.floor(requested)))
+}
+
+function clampOffset(requested: number | undefined): number {
+  if (!requested || !Number.isFinite(requested)) return 0
+  return Math.max(0, Math.floor(requested))
 }
 
 /**

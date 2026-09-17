@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { watch, type FSWatcher } from 'node:fs'
 import { chmod, copyFile, lstat, mkdir, open, readFile, readdir, readlink, rename, rm, stat } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import process from 'node:process'
@@ -22,7 +23,8 @@ async function main(): Promise<void> {
   const routeStatePath = resolve(process.env.AGENT_RUNLAB_ROUTE_STATE_PERSISTENT ?? join(root, 'route-state.json'))
   const unitService = (slot: DedicatedSlot): string => `agent-runlab-dedicated-unit@${slot}.service`
   const slotOrigin = async (slot: DedicatedSlot): Promise<string> => (await readDedicatedRouteState(routeStatePath)).slots[slot].origin
-  const pollMs = positive(process.env.AGENT_RUNLAB_DEPLOY_POLL_MS, 1000)
+  const activeDelayMs = positive(process.env.AGENT_RUNLAB_DEPLOY_ACTIVE_DELAY_MS ?? process.env.AGENT_RUNLAB_DEPLOY_POLL_MS, 1000)
+  const idleFallbackMs = positive(process.env.AGENT_RUNLAB_DEPLOY_IDLE_FALLBACK_MS, 600_000)
   const admission = new DedicatedAdmissionLedger(resolve(process.env.AGENT_RUNLAB_ADMISSION_LEDGER ?? '/var/lib/agent-runlab/admission/ledger.json'))
   const handoffHeaders = (): Record<string, string> => {
     const secret = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET?.trim()
@@ -193,15 +195,68 @@ async function main(): Promise<void> {
     switchRoute: async (state) => { await writeDedicatedRouteState(routeStatePath, state) },
   })
   let stopping = false
-  process.on('SIGTERM', () => { stopping = true })
-  process.on('SIGINT', () => { stopping = true })
   process.stdout.write(`${JSON.stringify({ event: 'deploy_supervisor_ready' })}\n`)
-  while (!stopping) {
-    await reconcileRequests(root, supervisor).catch((error) => process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`))
-    await reconcileDashboardRequests(root).catch((error) => process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`))
-    await writeOperatorStatus(root, routeStatePath, admission, unitService).catch((error) => process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`))
-    await sleep(pollMs)
+  const watchers = await watchControlPlane(root, () => schedule(0))
+  let running = false
+  let pending = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let timerDue = 0
+  async function runOnce(): Promise<void> {
+    if (running) { pending = true; return }
+    running = true
+    pending = false
+    try {
+      await reconcileRequests(root, supervisor).catch((error) => process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`))
+      await reconcileDashboardRequests(root).catch((error) => process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`))
+      await writeOperatorStatus(root, routeStatePath, admission, unitService).catch((error) => process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`))
+    } finally {
+      running = false
+      if (!stopping) schedule(pending ? 0 : await hasControlPlaneWork(root) ? activeDelayMs : idleFallbackMs)
+    }
   }
+  function schedule(delayMs: number): void {
+    const due = Date.now() + delayMs
+    if (timer && due >= timerDue) return
+    if (timer) clearTimeout(timer)
+    timerDue = due
+    timer = setTimeout(() => { timer = undefined; void runOnce() }, delayMs)
+  }
+  schedule(0)
+  await new Promise<void>((resolveStop) => {
+    const stop = (): void => {
+      stopping = true
+      if (timer) clearTimeout(timer)
+      for (const watcher of watchers) watcher.close()
+      resolveStop()
+    }
+    process.once('SIGTERM', stop)
+    process.once('SIGINT', stop)
+  })
+}
+
+async function watchControlPlane(root: string, notify: () => void): Promise<FSWatcher[]> {
+  const dirs = [join(root, 'requests'), join(root, 'receipts'), join(root, 'dashboard', 'requests'), join(root, 'dashboard', 'receipts')]
+  await Promise.all(dirs.map((dir) => mkdir(dir, { recursive: true, mode: 0o700 }).catch(() => undefined)))
+  return dirs.map((dir) => {
+    const watcher = watch(dir, notify)
+    watcher.on('error', () => notify())
+    return watcher
+  })
+}
+
+async function hasControlPlaneWork(root: string): Promise<boolean> {
+  const runtimeRequests = await readdir(join(root, 'requests')).catch(() => [])
+  if (runtimeRequests.some((name) => name.endsWith('.json') || name.endsWith('.json.accepted'))) return true
+  const dashboardRequests = await readdir(join(root, 'dashboard', 'requests')).catch(() => [])
+  if (dashboardRequests.some((name) => name.endsWith('.json') || name.endsWith('.json.accepted'))) return true
+  const receipts = await readdir(join(root, 'receipts')).catch(() => [])
+  for (const name of receipts.filter((entry) => entry.endsWith('.json'))) {
+    const value = await readFile(join(root, 'receipts', name), 'utf8').then((text) => JSON.parse(text)).catch(() => undefined)
+    if (!value) continue
+    const receipt = parseDeploymentReceipt(value)
+    if (!['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed'].includes(receipt.phase)) return true
+  }
+  return false
 }
 
 async function reconcileDashboardRequests(root: string): Promise<void> {
@@ -379,13 +434,27 @@ async function writeOperatorStatus(
     blockers: deployment.blockers, plannedRestart: deployment.plannedRestart, continuation: deployment.continuation,
     controlPlane: deployment.controlPlane, rollback: deployment.rollback, error: deployment.error,
   } : null
-  await writeAtomicFile(join(root, 'operator-status.json'), JSON.stringify({
-    schemaVersion: 1, generatedAt: new Date().toISOString(), topology: 'dedicated-slots',
+  const statusPath = join(root, 'operator-status.json')
+  const statusPayload = {
+    schemaVersion: 1, topology: 'dedicated-slots',
     services: { supervisor: { pid: process.pid } },
     route: { generation: route.generation, activeSlot: route.activeSlot, activeReleaseId: route.slots[route.activeSlot].releaseId },
     slots, writeLeaseOwnerPid,
     admission: await admission.snapshot(),
     deployment: safeDeployment,
+  }
+  const existing = await readFile(statusPath, 'utf8').catch(() => undefined)
+  if (existing) {
+    try {
+      const { generatedAt: _generatedAt, ...stableExisting } = JSON.parse(existing) as Record<string, unknown>
+      if (JSON.stringify(stableExisting) === JSON.stringify(statusPayload)) return
+    } catch {
+      // Replace malformed status below.
+    }
+  }
+  await writeAtomicFile(statusPath, JSON.stringify({
+    ...statusPayload,
+    generatedAt: new Date().toISOString(),
   }, null, 2) + '\n', 0o640)
 }
 

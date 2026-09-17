@@ -341,7 +341,7 @@ export function DirectoryPicker({
                   title={crumb.path}
                   data-testid={`dir-picker-breadcrumb-${i}`}
                   className={cn(
-                    'max-w-[14rem] truncate rounded px-1.5 py-0.5 font-mono text-[11px] transition-colors',
+                    'max-w-[14rem] truncate rounded px-1.5 py-0.5 font-mono text-[0.6875rem] transition-colors',
                     crumb.path === value.trim()
                       ? 'text-foreground'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -400,7 +400,7 @@ function DirectoryColumn({
   return (
     <div className={cn('w-full min-w-0 shrink-0 border-border/50 md:w-64 md:border-r', mobileHidden && 'hidden md:block')} data-testid="finder-column">
       <div
-        className="truncate border-b border-border/50 px-3 py-2 font-mono text-[11px] text-muted-foreground"
+        className="truncate border-b border-border/50 px-3 py-2 font-mono text-[0.6875rem] text-muted-foreground"
         title={column.path}
       >
         {column.path}

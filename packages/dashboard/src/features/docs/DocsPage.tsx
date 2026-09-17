@@ -6,6 +6,7 @@ import { ArrowLeft, BookOpen, ChevronDown, ChevronRight, ChevronsDownUp, Chevron
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
+import { HelpHint } from '../../components/ui/help-hint.js'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '../../components/ui/button.js'
@@ -211,8 +212,8 @@ export function DocsPage(): JSX.Element {
       {content ? (
         <article className="mx-auto max-w-[88rem] px-4 py-4 sm:px-6 sm:py-5">
           <div className="mb-4 border-b border-border/60 pb-3">
-            <div className="break-all font-mono text-[11px] text-muted-foreground">{content.path}</div>
-            <div className="text-[11px] text-muted-foreground">{t('docs.page.updated', { value: new Date(content.updatedAt).toLocaleString() })}</div>
+            <div className="break-all font-mono text-[0.6875rem] text-muted-foreground">{content.path}</div>
+            <div className="text-[0.6875rem] text-muted-foreground">{t('docs.page.updated', { value: new Date(content.updatedAt).toLocaleString() })}</div>
           </div>
           <DocsMarkdown body={content.body} />
         </article>
@@ -225,7 +226,7 @@ export function DocsPage(): JSX.Element {
       <header className="sticky top-0 z-20 border-b border-border/60 bg-background/95 px-4 py-2 backdrop-blur">
         <div className="flex items-center gap-2">
           <BookOpen className="h-4 w-4 text-primary" aria-hidden />
-          <h1 className="text-sm font-semibold" data-testid="docs-page-title">{t('docs.page.title')}</h1>
+          <h1 className="flex items-center gap-1 text-sm font-semibold" data-testid="docs-page-title">{t('docs.page.title')}<HelpHint label={t('docs.page.title')}>{t('docs.page.subtitle')}</HelpHint></h1>
           <Button
             type="button"
             variant="ghost"
@@ -238,7 +239,6 @@ export function DocsPage(): JSX.Element {
             <span>{t('docs.page.refresh')}</span>
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">{t('docs.page.subtitle')}</p>
       </header>
       {wideLayout ? (
         <ResizablePanelGroup direction="horizontal" dir="ltr" autoSaveId="ak-docs-cols-v2" className="min-h-0 flex-1">

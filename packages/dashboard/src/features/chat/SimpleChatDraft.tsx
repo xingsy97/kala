@@ -1,0 +1,187 @@
+import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { AgentRuntimeDescriptor, AgentRuntimeId, ModelInfo } from '@agent-kernel/shared'
+import { HelpHint } from '../../components/ui/help-hint.js'
+import type { MessageContent, ReferencedFileContent } from '@agent-kernel/kernel'
+import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage, releaseMessageAttachments, uploadMessageAttachment } from '../../admission-client.js'
+import { createSessionWithAck, type DashboardSocket } from '../../session.js'
+import { randomId } from '../../lib/random-id.js'
+import { PREF_AGENT_RUNTIME, readStringPref, writeStringPref } from '../../lib/prefs.js'
+import { Button } from '../../components/ui/button.js'
+import { Composer } from './Composer.js'
+import type { ChatDisplayPrefs } from './chatDisplayPrefs.js'
+
+const SIMPLE_CHAT_TOOLS = ['todowrite', 'todo_graph', 'agent', 'websearch', 'memory'] as const
+const EMPTY_ATTENTION = { sessionId: '', points: [], latest: null } as const
+
+type Submission = {
+  operationId: string
+  text: string
+  content?: readonly MessageContent[]
+}
+
+export function SimpleChatDraft({
+  socket, host, token, agentRuntimes, models, preferredModel, displayPrefs, onCreated,
+}: {
+  socket: DashboardSocket | null
+  host: string
+  token?: string
+  agentRuntimes: readonly AgentRuntimeDescriptor[]
+  models: readonly ModelInfo[]
+  preferredModel: string
+  displayPrefs: ChatDisplayPrefs
+  onCreated(sessionId: string): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [runtime, setRuntime] = useState(() => readStringPref(PREF_AGENT_RUNTIME, 'kernel'))
+  const descriptor = agentRuntimes.find((item) => item.id === runtime && item.available)
+    ?? agentRuntimes.find((item) => item.available)
+  const [model, setModel] = useState<string | undefined>()
+  const availableModels = descriptor?.models ?? (descriptor?.id === 'kernel' ? models : [])
+  const selectedModel = model ?? (descriptor?.id === 'kernel' ? preferredModel : '')
+  const [sessionId] = useState(randomId)
+  const creationInput = useRef<Parameters<typeof createSessionWithAck>[1] | null>(null)
+  const creating = useRef<Promise<void> | null>(null)
+  const created = useRef(false)
+  const mounted = useRef(true)
+  const inFlight = useRef<Promise<void> | null>(null)
+  const [started, setStarted] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState<Submission | null>(null)
+  const address = { host, ...(token ? { token } : {}), sessionId }
+
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  const ensureSession = async (): Promise<void> => {
+    if (created.current) return
+    if (!socket?.connected) throw new Error(t('app.socketNotConnected'))
+    if (!descriptor) throw new Error(t('dialogs.runtimeTemporarilyReadOnly'))
+    // A lost acknowledgement must retry the same session and runtime, never
+    // create a second conversation or silently change the first one's engine.
+    if (!creationInput.current) {
+      creationInput.current = {
+        sessionId, agentRuntime: descriptor.id, tools: SIMPLE_CHAT_TOOLS,
+        ...(selectedModel ? { selectedModel } : {}),
+      }
+      setStarted(true)
+    }
+    creating.current ??= createSessionWithAck(socket, creationInput.current)
+    try {
+      await creating.current
+      created.current = true
+    } finally {
+      creating.current = null
+    }
+  }
+
+  const deliver = (submission: Submission): Promise<void> => {
+    if (inFlight.current) return inFlight.current
+    setBusy(true)
+    setError(null)
+    const operation = (async () => {
+      try {
+        await ensureSession()
+        await admitUserMessage({ ...address, ...submission, mode: 'steer' })
+        if (mounted.current) onCreated(sessionId)
+      } catch (cause) {
+        if (mounted.current) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+          if (cause instanceof AdmissionDeliveryPendingError) {
+            // Keep the exact payload, uploaded references and operation id.
+            // An uncertain acceptance is not permission to send it again.
+            setPending(submission)
+          } else if (cause instanceof AdmissionDeliveryFailedError) {
+            setPending({ ...submission, operationId: randomId() })
+          }
+        }
+        throw cause
+      } finally {
+        inFlight.current = null
+        if (mounted.current) setBusy(false)
+      }
+    })()
+    inFlight.current = operation
+    return operation
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="simple-chat-draft">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto px-6 py-8 text-center">
+        <h1 className="flex items-center justify-center gap-1 text-2xl font-semibold tracking-tight sm:text-3xl">{t('chat.transcript.emptyTitle')}<HelpHint label={t('chat.transcript.emptyTitle')}>{t('chat.draft.description')}</HelpHint></h1>
+        <div className="mt-6 flex max-w-full flex-wrap justify-center gap-2" role="radiogroup" aria-label={t('dialogs.chooseAgentRuntime')}>
+          {agentRuntimes.map((item) => (
+            <Button
+              key={item.id}
+              variant={descriptor?.id === item.id ? 'outline' : 'ghost'}
+              size="sm"
+              role="radio"
+              aria-checked={descriptor?.id === item.id}
+              disabled={started || !item.available}
+              title={item.available ? item.description : item.reason}
+              data-testid={`draft-runtime-${item.id}`}
+              onClick={() => {
+                setRuntime(item.id)
+                setModel(undefined)
+                writeStringPref(PREF_AGENT_RUNTIME, item.id as AgentRuntimeId)
+              }}
+              className="rounded-full"
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      {error ? (
+        <div role="alert" className="mx-4 mb-2 rounded-lg border border-border bg-muted/50 p-3 text-sm" data-testid="draft-send-error">
+          <p>{pending ? t('chat.draft.deliveryUncertain') : error}</p>
+          {pending ? <Button
+            variant="outline" size="sm" className="mt-2" disabled={busy}
+            data-testid="draft-retry-send"
+            onClick={() => { void deliver(pending).catch(() => {}) }}
+          >{t('chat.draft.retryDelivery')}</Button> : null}
+        </div>
+      ) : null}
+      <Composer
+        disabled={!socket?.connected || !descriptor || busy || pending !== null}
+        serviceUnavailable={!socket?.connected}
+        onReconnectService={() => socket?.connect()}
+        lockWhileSubmitting
+        model={selectedModel}
+        models={availableModels}
+        onModelChange={setModel}
+        allowModelSelection={!started && descriptor?.capabilities.modelSelection === true}
+        approvalMode="auto"
+        onApprovalModeChange={() => {}}
+        allowApprovalMode={false}
+        allowQueue={false}
+        allowAttachments={descriptor?.capabilities.attachments === true}
+        state={null}
+        config={null}
+        contextSnapshot={null}
+        humanAttention={EMPTY_ATTENTION}
+        queuedMessages={[]}
+        displayPrefs={displayPrefs}
+        onUploadFiles={async (files) => {
+          await ensureSession()
+          const uploaded: ReferencedFileContent[] = []
+          try {
+            for (const file of files) uploaded.push(await uploadMessageAttachment({ ...address, file }))
+            return uploaded
+          } catch (cause) {
+            await releaseMessageAttachments({ ...address, files: uploaded }).catch(() => {})
+            throw cause
+          }
+        }}
+        onReleaseFiles={(files) => releaseMessageAttachments({ ...address, files })}
+        onSubmit={(text, _mode, attachments = [], extras = []) => {
+          const content = [...(text ? [{ type: 'text' as const, text }] : []), ...extras, ...attachments]
+          return deliver({ operationId: randomId(), text, ...(attachments.length || extras.length ? { content } : {}) })
+        }}
+      />
+    </div>
+  )
+}

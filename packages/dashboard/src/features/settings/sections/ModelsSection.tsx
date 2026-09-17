@@ -344,13 +344,13 @@ export function ModelsSection({
                       setProviderId(p.id)
                       window.setTimeout(() => document.querySelector<HTMLInputElement>('[data-testid="settings-model-id-input"]')?.focus(), 0)
                     }}
-                    className="inline-flex items-center rounded px-1.5 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="inline-flex items-center rounded px-1.5 py-1 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
                     aria-label={t('settings.models.addModelTo', { provider: p.label })}
                   >
                     <Plus className="mr-1 h-3 w-3" aria-hidden="true" />{t('settings.models.addModelShort')}
                   </button>
                   {p.models.some((m) => modelKey(m) === payload.defaultModel || m.id === payload.defaultModel) ? (
-                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground ring-1 ring-primary/40">
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-foreground ring-1 ring-primary/40">
                       {t('settings.models.defaultProvider')}
                     </span>
                   ) : null}
@@ -382,10 +382,10 @@ export function ModelsSection({
                       <span className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
                         <SourceBadge source={m.source ?? p.source ?? 'unknown'} />
                         {m.contextWindow ? (
-                          <span className="font-mono text-[10px] text-muted-foreground">{m.contextWindow.toLocaleString()}</span>
+                          <span className="font-mono text-[0.625rem] text-muted-foreground">{m.contextWindow.toLocaleString()}</span>
                         ) : null}
                         {modelKey(m) === payload.defaultModel || m.id === payload.defaultModel ? (
-                          <span className="text-[10px] font-medium uppercase tracking-wide text-primary">
+                          <span className="text-[0.625rem] font-medium uppercase tracking-wide text-primary">
                             {t('settings.models.default')}
                           </span>
                         ) : (
@@ -395,7 +395,7 @@ export function ModelsSection({
                               setError(null)
                               setDefaultModel.mutate({ model: modelKey(m) })
                             }}
-                            className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className="rounded px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
                             aria-label={t('settings.models.setDefaultModel', { model: modelKey(m) })}
                             disabled={busy}
                           >
@@ -441,7 +441,7 @@ function SourceBadge({ source }: { source: string }): JSX.Element {
           ? 'Manual'
           : 'Unknown'
   return (
-    <span className="rounded bg-background/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground ring-1 ring-border/50">
+    <span className="rounded bg-background/80 px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground ring-1 ring-border/50">
       {label}
     </span>
   )

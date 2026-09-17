@@ -85,7 +85,7 @@ export function BannerStack({ children }: { children: ReactNode }): JSX.Element 
           onClick={() => setExpanded((v) => !v)}
           data-testid="banner-stack-toggle"
           aria-expanded={expanded}
-          className="flex w-full items-center justify-center gap-1 border-t border-border/60 bg-muted/30 px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60"
+          className="flex w-full items-center justify-center gap-1 border-t border-border/60 bg-muted/30 px-3 py-1 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-muted/60"
         >
           {expanded ? (
             <>

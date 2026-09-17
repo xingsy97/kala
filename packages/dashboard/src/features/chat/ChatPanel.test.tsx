@@ -135,6 +135,8 @@ describe('ChatPanel', () => {
 
     expect(screen.queryByTestId('inline-status-thinking')).toBeNull()
     expect(screen.getByTestId('transcript-history-loading-indicator').textContent).toContain('Loading conversation history')
+    expect(screen.getByTestId('transcript-history-loading-indicator').querySelector('.ak-session-status-spinner')).toBeTruthy()
+    expect(screen.getByTestId('transcript-history-loading-indicator').querySelector('.animate-spin')).toBeNull()
     expect(screen.getByTestId('transcript-loading-state').querySelectorAll('.rounded-full')).toHaveLength(1)
     expect(screen.getByTestId('transcript-loading-state').querySelectorAll('.h-16')).toHaveLength(0)
   })
@@ -211,7 +213,7 @@ describe('ChatPanel', () => {
     )
     const root = container.querySelector('[style*="--ak-chat-font-size"]') as HTMLElement | null
 
-    expect(root?.style.getPropertyValue('--ak-chat-font-size')).toBe('20px')
+    expect(root?.style.getPropertyValue('--ak-chat-font-size')).toBe('1.25rem')
     expect(root?.style.getPropertyValue('--ak-chat-content-width')).toBe('104rem')
     expect(root?.style.getPropertyValue('--ak-chat-line-height')).toBe('1.95')
     expect(root?.style.getPropertyValue('--ak-chat-math-scale')).toBe('3em')

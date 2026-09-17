@@ -1,6 +1,51 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { scheduleBackground } from './scheduler.js'
+import { scheduleBackground, scheduleFrameTask } from './scheduler.js'
+
+describe('scheduleFrameTask', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('flushes logical state when rendering frames are suspended, regardless of page visibility', () => {
+    vi.useFakeTimers()
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => { frames.push(callback); return frames.length }))
+    const cancelFrame = vi.fn()
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame)
+    const run = vi.fn()
+    scheduleFrameTask(run)
+    vi.advanceTimersByTime(99)
+    expect(run).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(run).toHaveBeenCalledOnce()
+    expect(cancelFrame).toHaveBeenCalledWith(1)
+    frames[0]!(100)
+    expect(run).toHaveBeenCalledOnce()
+  })
+
+  it('uses normal animation-frame batching without a duplicate timeout flush', () => {
+    vi.useFakeTimers()
+    let frame: FrameRequestCallback = () => {}
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => { frame = callback; return 1 }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = vi.fn()
+    scheduleFrameTask(run)
+    frame(16)
+    vi.advanceTimersByTime(200)
+    expect(run).toHaveBeenCalledOnce()
+  })
+
+  it('cancels both channels so session switches cannot flush stale queued state', () => {
+    vi.useFakeTimers()
+    let frame: FrameRequestCallback = () => {}
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => { frame = callback; return 1 }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const run = vi.fn()
+    scheduleFrameTask(run)()
+    vi.advanceTimersByTime(200)
+    frame(200)
+    expect(run).not.toHaveBeenCalled()
+  })
+})
 
 describe('scheduleBackground', () => {
   afterEach(() => vi.useRealTimers())

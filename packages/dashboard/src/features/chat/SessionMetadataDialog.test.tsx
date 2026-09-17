@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
@@ -41,6 +41,8 @@ vi.mock('../../components/ui/select.js', async () => {
 import { SessionMetadataDialog } from './SessionMetadataDialog.js'
 import { governedSessionTaskCandidate } from '../../evaluation-integration.js'
 import { saveFile } from '../../lib/save-file.js'
+import * as desktop from '../../lib/desktop-bridge.js'
+import { notify } from '../../notify.js'
 
 vi.mock('../../lib/save-file.js', () => ({ saveFile: vi.fn(async () => 'downloaded') }))
 
@@ -72,6 +74,7 @@ const baseSummary: SessionSummary = {
 }
 
 describe('SessionMetadataDialog', () => {
+  afterEach(() => vi.restoreAllMocks())
   beforeEach(() => {
     history.replaceState({}, '', '/')
     if (!HTMLElement.prototype.hasPointerCapture) {
@@ -79,6 +82,34 @@ describe('SessionMetadataDialog', () => {
         configurable: true,
         value: () => false,
       })
+    }
+  })
+
+  it('copies a bounded desktop link without credentials and reports clipboard failures', async () => {
+    vi.spyOn(desktop, 'getDesktopBridge').mockReturnValue({
+      version: 1,
+      getInfo: async () => ({ version: '0.2.0-rc.5', focused: true, visible: true }),
+      setActivity: async () => {},
+      notify: async () => {},
+      subscribe: () => () => {},
+    })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    const success = vi.spyOn(notify, 'success').mockImplementation(() => {})
+    const failure = vi.spyOn(notify, 'error').mockImplementation(() => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    try {
+      history.replaceState({}, '', '/?token=private&sessionId=other')
+      render(<SessionMetadataDialog open onOpenChange={() => {}} sessionId="fork.1:branch" state={baseState} selectedModel={null} onRename={() => {}} onOpenChangeCwdDialog={() => {}} onChangeApprovalMode={() => {}} onChangeToolCardMode={() => {}} />)
+      fireEvent.click(screen.getByTestId('copy-desktop-session-link'))
+      await waitFor(() => expect(success).toHaveBeenCalled())
+      expect(writeText).toHaveBeenCalledWith('agent-runlab://session/fork.1:branch')
+      writeText.mockRejectedValueOnce(new Error('Clipboard denied'))
+      fireEvent.click(screen.getByTestId('copy-desktop-session-link'))
+      await waitFor(() => expect(failure).toHaveBeenCalled())
+    } finally {
+      if (previous) Object.defineProperty(navigator, 'clipboard', previous)
+      else Reflect.deleteProperty(navigator, 'clipboard')
     }
   })
 
@@ -121,6 +152,7 @@ describe('SessionMetadataDialog', () => {
       />,
     )
     const dlg = screen.getByTestId('session-metadata-dialog')
+    expect(screen.queryByTestId('copy-desktop-session-link')).toBeNull()
     expect(dlg.textContent).toContain(baseSummary.sessionId)
     expect(dlg.textContent).toContain('my-mbp')
     expect(dlg.textContent).toContain('claude-opus-4-7')

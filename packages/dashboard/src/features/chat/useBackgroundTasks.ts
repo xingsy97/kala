@@ -5,8 +5,8 @@
  *
  *  1. `bg:list` (RPC on mount / workspace change) — reset baseline.
  *  2. `server:control_update` (push) — appends output deltas, updates status.
- *  3. `bg:output` (poll every 1.5s for the *selected* task) — closes any gap
- *     between the tail we already hold and whatever the executor has now.
+ *  3. `bg:output` (on selection / push gaps / running-tail cadence) — closes
+ *     any gap between the tail we already hold and whatever the executor has now.
  *
  * When there's no socket or no workspace attached, the hook returns an empty
  * map — the panel's fallback (timeline-derived tasks) takes over from there.
@@ -42,7 +42,7 @@ type Params = {
   workspaceId: string | undefined
   sessionId: string | null
   selectedTaskId: string | null
-  /** Poll interval for the selected task's tail. Injectable for tests. */
+  /** Running-tail refresh delay for the selected task. Injectable for tests. */
   pollIntervalMs?: number
 }
 
@@ -204,12 +204,13 @@ export function useBackgroundTasks({
     }
   }, [socket, workspaceId, sessionId, setTask])
 
-  // Poll the selected task's tail. Push events fill in most updates, but the
-  // poll closes gaps (e.g. we just selected a task that had been idle) and
-  // gives users a predictable refresh cadence when the executor is quiet.
+  // Push events fill in most updates. Fetch the selected task once on
+  // selection, then keep a delayed tail refresh only while it is running or
+  // while the local offset is behind the advertised log length.
   useEffect(() => {
     if (!socket || !workspaceId || !sessionId || !selectedTaskId) return
     let disposed = false
+    let timer: number | undefined
 
     const tick = (): void => {
       const current = tasksRef.current.get(selectedTaskId)
@@ -237,15 +238,16 @@ export function useBackgroundTasks({
               killing: prev.killing && result.status === 'running',
             }
           })
+          const shouldContinue = result.status === 'running' || result.nextOffset < (current?.bytesLogged ?? result.nextOffset)
+          if (shouldContinue) timer = window.setTimeout(tick, pollIntervalMs)
         },
       )
     }
 
     tick()
-    const handle = window.setInterval(tick, pollIntervalMs)
     return () => {
       disposed = true
-      window.clearInterval(handle)
+      if (timer !== undefined) window.clearTimeout(timer)
     }
   }, [socket, workspaceId, sessionId, selectedTaskId, pollIntervalMs, setTask])
 

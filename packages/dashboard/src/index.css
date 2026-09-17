@@ -17,7 +17,7 @@
 
   .ak-chat-item,
   .ak-chat-item .ak-chat-text {
-    font-size: var(--ak-chat-font-size, 15px);
+    font-size: var(--ak-chat-font-size, 0.9375rem);
     line-height: var(--ak-chat-line-height, 1.7);
   }
 
@@ -110,6 +110,7 @@
  */
 @layer base {
   :root {
+    font-size: calc(16px * var(--ak-interface-scale, 1.25));
     --background: 215 30% 96%;
     --foreground: 0 0% 3.9%;
     --card: 0 0% 100%;
@@ -140,7 +141,7 @@
     --sidebar-ring: 221 83% 53%;
 
     --radius: 0.75rem;
-    --font-size-base: 14px;
+    --font-size-base: 0.875rem;
   }
 
   .dark {
@@ -343,6 +344,7 @@
     transform: translateX(-120%);
     background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.04), transparent);
     animation: ak-thinking-sheen 2.2s ease-in-out infinite;
+    pointer-events: none;
   }
 
   .ak-explorer-loading-row {
@@ -513,8 +515,7 @@
  * (which animates transform) with an arbitrary transform:translateZ(0)
  * utility. Both rules targeted the same property, so cascade/compositor
  * behavior could leave the icon permanently at its first frame. A dedicated
- * keyframe also keeps this indicator independent from Tailwind's generated
- * `spin` rule and stable while React preserves it across status updates.
+ * keyframe preserves continuous motion while React updates the status.
  */
 .ak-session-status-spinner {
   display: inline-flex;
@@ -548,6 +549,7 @@
   .ak-status-pulse,
   .ak-thinking-dot,
   .ak-thinking-row::after,
+  .ak-session-status-spinner,
   .ak-explorer-loading-row,
   .ak-loading-spinner {
     animation: none !important;
@@ -723,7 +725,7 @@ body {
 .shiki-host .shiki {
   padding: 0.75rem;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
 }
 

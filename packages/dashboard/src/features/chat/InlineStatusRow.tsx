@@ -1,9 +1,9 @@
 /**
  * A single inline "what is the agent doing right now" row rendered at the tail
  * of the message flow. Reads `state.status` from the kernel — no invented
- * pseudo-statuses. During `thinking` a lightweight breathing dot animates
- * until the stream begins (at which point the streaming assistant bubble takes
- * over).
+ * pseudo-statuses. During `thinking` a breathing activity dot accompanies the
+ * live elapsed/progress label until the stream begins (at which point the
+ * streaming assistant bubble takes over).
  * During `executing_tools` the currently-running tool calls are summarised
  * with an expandable parameter view. `awaiting_approval` renders a static
  * amber hint pointing to the approval card below. All other statuses render
@@ -230,8 +230,13 @@ export function useElapsedSeconds(active: boolean, startedAt?: number | null, fi
   const [now, setNow] = useState(fallbackStart)
   useEffect(() => {
     if (!active) return
-    const t = window.setInterval(() => setNow(Date.now()), 100)
-    return () => window.clearInterval(t)
+    let t: number | undefined
+    const tick = (): void => {
+      setNow(Date.now())
+      t = window.setTimeout(tick, 100)
+    }
+    t = window.setTimeout(tick, 100)
+    return () => { if (t !== undefined) window.clearTimeout(t) }
   }, [active])
   if (fixedDurationMs !== undefined) return Math.max(0, fixedDurationMs / 1000)
   return Math.max(0, (now - (startedAt ?? fallbackStart)) / 1000)
@@ -242,8 +247,13 @@ function useElapsedMs(active: boolean, startedAt?: number): number {
   useEffect(() => {
     if (!active) return
     setNow(Date.now())
-    const t = window.setInterval(() => setNow(Date.now()), 100)
-    return () => window.clearInterval(t)
+    let t: number | undefined
+    const tick = (): void => {
+      setNow(Date.now())
+      t = window.setTimeout(tick, 100)
+    }
+    t = window.setTimeout(tick, 100)
+    return () => { if (t !== undefined) window.clearTimeout(t) }
   }, [active])
   if (!startedAt) return 0
   return Math.max(0, now - startedAt)

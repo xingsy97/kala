@@ -9,6 +9,7 @@ import './i18n/index.js'
 import './index.css'
 import 'katex/dist/katex.min.css'
 import { initializeTheme } from './lib/theme.js'
+import { initializeInterfaceScale, InterfaceScale } from './lib/interface-scale.js'
 import { recoverStaleDashboard, StaleDashboardAssetError } from './lib/dashboard-version-recovery.js'
 
 window.addEventListener('vite:preloadError', (event) => {
@@ -24,6 +25,7 @@ document.getElementById('ak-splash')?.remove()
 const demo = new URLSearchParams(window.location.search).get('demo')
 
 initializeTheme()
+initializeInterfaceScale()
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,6 +42,7 @@ createRoot(root).render(
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
+        <InterfaceScale />
         {demo === 'grouped-tool-calls' ? <GroupedToolCallsDemo /> : <App />}
       </QueryClientProvider>
     </ErrorBoundary>

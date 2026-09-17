@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-desktop-ui"
+description = "Bounded activity and privacy-safe notification hints from the selected Dashboard only."
+commands.allow = ["desktop_ui", "desktop_status", "desktop_notify", "desktop_connection_ready"]

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-connect"
+description = "Open a validated Dashboard origin from the packaged launcher."
+commands.allow = ["connect", "launcher_bootstrap"]

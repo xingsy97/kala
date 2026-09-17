@@ -451,7 +451,7 @@ function DebuggerHeader({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2 text-xs">
             <span className="font-semibold text-foreground">{t('inspector.title')}</span>
-            <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+            <span className="ml-auto font-mono text-[0.6875rem] text-muted-foreground">
               #{state?.cursor ?? timeline.at(-1)?.seq ?? 0}
             </span>
           </div>
@@ -497,8 +497,8 @@ function Overview({
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }): JSX.Element {
   return (
     <div className="min-w-0 rounded bg-sidebar px-2 py-1.5 ring-1 ring-border/30">
-      <div className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={cn('mt-0.5 break-words font-mono text-[11px] leading-snug text-foreground', tone)} title={value}>
+      <div className="truncate text-[0.625rem] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn('mt-0.5 break-words font-mono text-[0.6875rem] leading-snug text-foreground', tone)} title={value}>
         {value}
       </div>
     </div>
@@ -751,31 +751,31 @@ function ReducerTraceRow({
         data-testid="timeline-row-header"
         aria-label={`select timeline event ${entry.seq}`}
       >
-        <span className="pt-px text-right font-mono text-[10px] text-muted-foreground">#{entry.seq}</span>
+        <span className="pt-px text-right font-mono text-[0.625rem] text-muted-foreground">#{entry.seq}</span>
         <span className="min-w-0 overflow-hidden">
           <span className="flex min-w-0 items-center gap-1">
-            <span className={cn('w-12 flex-none font-mono text-[10px]', inbound.tone)}>{inbound.source}</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{entry.event.kind}</span>
+            <span className={cn('w-12 flex-none font-mono text-[0.625rem]', inbound.tone)}>{inbound.source}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-foreground">{entry.event.kind}</span>
             {flow ? (
-              <span className="hidden flex-none font-mono text-[10px] text-muted-foreground xl:inline">
+              <span className="hidden flex-none font-mono text-[0.625rem] text-muted-foreground xl:inline">
                 {flow.from} → {flow.to}
               </span>
             ) : null}
           </span>
-          <span className="mt-0.5 block min-w-0 truncate text-[10px] leading-4 text-muted-foreground" data-testid="timeline-row-summary" title={summary}>
+          <span className="mt-0.5 block min-w-0 truncate text-[0.625rem] leading-4 text-muted-foreground" data-testid="timeline-row-summary" title={summary}>
             {summary}
           </span>
           {effectLabels.length > 0 ? (
             <span className="mt-0.5 flex min-w-0 max-w-full flex-wrap gap-0.5 overflow-hidden">
               {effectLabels.map(({ key, effect, target }) => (
-                <span key={key} className="inline-block max-w-full truncate rounded bg-background/80 px-1 py-px font-mono text-[9px] leading-3 text-muted-foreground ring-1 ring-border/40" title={`${target.target} · ${effect.kind}`}>
+                <span key={key} className="inline-block max-w-full truncate rounded bg-background/80 px-1 py-px font-mono text-[0.5625rem] leading-3 text-muted-foreground ring-1 ring-border/40" title={`${target.target} · ${effect.kind}`}>
                   <span className={target.tone}>{target.target}</span> · {effect.kind}
                 </span>
               ))}
             </span>
           ) : null}
           {teachingMode ? (
-            <span className="mt-1 block min-w-0 break-words rounded bg-muted/50 px-2 py-1 text-[10px] leading-4 text-muted-foreground ring-1 ring-border/30">
+            <span className="mt-1 block min-w-0 break-words rounded bg-muted/50 px-2 py-1 text-[0.625rem] leading-4 text-muted-foreground ring-1 ring-border/30">
               {teachingText(entry, flow)}
             </span>
           ) : null}
@@ -829,14 +829,14 @@ function LlmCallsView({
             >
               {isSelected ? <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded bg-primary" /> : null}
               <div className="flex min-w-0 items-center gap-1.5">
-                <span className="w-[4.75rem] flex-none font-mono text-[10px] text-muted-foreground">#{call.requestSeq} → {call.responseSeq ? `#${call.responseSeq}` : 'pending'}</span>
+                <span className="w-[4.75rem] flex-none font-mono text-[0.625rem] text-muted-foreground">#{call.requestSeq} → {call.responseSeq ? `#${call.responseSeq}` : 'pending'}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-violet-600 dark:text-violet-300">{provider} / {model}</span>
-                <span className={cn('flex-none font-mono text-[10px]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{responseLabel}</span>
+                <span className={cn('flex-none font-mono text-[0.625rem]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{responseLabel}</span>
               </div>
-              <div className="mt-0.5 min-w-0 overflow-hidden truncate pl-[4.75rem] text-[10px] text-muted-foreground" title={llmResponseSummary(call)}>
+              <div className="mt-0.5 min-w-0 overflow-hidden truncate pl-[4.75rem] text-[0.625rem] text-muted-foreground" title={llmResponseSummary(call)}>
                 {t('inspector.llm.requestSummary', { messages: call.effect.messages.length, tools: call.effect.tools.length, response: llmResponseCardSummary(call) })}
               </div>
-              <div className="mt-0.5 min-w-0 overflow-hidden truncate pl-[4.75rem] font-mono text-[10px] text-muted-foreground">
+              <div className="mt-0.5 min-w-0 overflow-hidden truncate pl-[4.75rem] font-mono text-[0.625rem] text-muted-foreground">
                 {t('inspector.llm.usageSummary', { usage: usage ? `${usage.inputTokens}/${usage.outputTokens}` : t('inspector.llm.notReported'), trace: call.trace ? t('inspector.llm.captured') : t('inspector.llm.notCaptured') })}
               </div>
             </button>
@@ -874,15 +874,15 @@ function ToolCallsView({
               {isSelected ? <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded bg-primary" /> : null}
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="min-w-0 flex-1 truncate font-mono text-foreground">{call.callId}</span>
-                <span className="flex-none font-mono text-[10px] text-emerald-600 dark:text-emerald-300">{call.name}</span>
-                <span className={cn('flex-none font-mono text-[10px]', call.result?.ok === false ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>
+                <span className="flex-none font-mono text-[0.625rem] text-emerald-600 dark:text-emerald-300">{call.name}</span>
+                <span className={cn('flex-none font-mono text-[0.625rem]', call.result?.ok === false ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>
                   {toolResultLabel(call)}
                 </span>
               </div>
-              <div className="mt-0.5 min-w-0 overflow-hidden truncate text-[10px] text-muted-foreground">
+              <div className="mt-0.5 min-w-0 overflow-hidden truncate text-[0.625rem] text-muted-foreground">
                 {toolLifecycleSummary(call)}
               </div>
-              <div className="mt-0.5 min-w-0 overflow-hidden truncate font-mono text-[10px] text-muted-foreground">
+              <div className="mt-0.5 min-w-0 overflow-hidden truncate font-mono text-[0.625rem] text-muted-foreground">
                 {toolInputSummary(call.input)}
               </div>
             </button>
@@ -923,7 +923,7 @@ function ProtocolFlowView({
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="space-y-1 px-2 pb-3 pt-1" data-testid="protocol-flow-view">
-        <div className="grid grid-cols-[2.25rem_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.1fr)] gap-1.5 rounded bg-card/70 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground ring-1 ring-border/30">
+        <div className="grid grid-cols-[2.25rem_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.1fr)] gap-1.5 rounded bg-card/70 px-2 py-1.5 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground ring-1 ring-border/30">
           <span className="text-right">{t('inspector.trace.headers.seq')}</span>
           <span>{t('inspector.trace.headers.inputEvent')}</span>
           <span>{t('inspector.trace.headers.stateMachine')}</span>
@@ -952,17 +952,17 @@ function ProtocolFlowView({
               data-testid="protocol-flow-row"
             >
               <div className="grid grid-cols-[2.25rem_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.1fr)] items-center gap-1.5">
-                <span className="text-right font-mono text-[10px] text-muted-foreground">#{entry.seq}</span>
+                <span className="text-right font-mono text-[0.625rem] text-muted-foreground">#{entry.seq}</span>
                 <FlowCell label={inbound.source} value={entry.event.kind} tone={inbound.tone} />
                 <FlowCell label={t('inspector.trace.state')} value={step ? `${step.from} -> ${step.to}` : t('inspector.trace.stateStep')} tone="text-muted-foreground" />
                 <div className="flex min-w-0 flex-wrap gap-1">
                   {entry.effects.length > 0 ? entry.effects.map((effect, index) => {
                     const target = effectTarget(effect)
-                    return <span key={`${effect.kind}-${index}`} className="rounded bg-background/80 px-1 py-px font-mono text-[9px] ring-1 ring-border/35"><span className={target.tone}>{target.target}</span> · {effect.kind}</span>
-                  }) : <span className="font-mono text-[10px] text-muted-foreground">{t('inspector.trace.noEffects')}</span>}
+                    return <span key={`${effect.kind}-${index}`} className="rounded bg-background/80 px-1 py-px font-mono text-[0.5625rem] ring-1 ring-border/35"><span className={target.tone}>{target.target}</span> · {effect.kind}</span>
+                  }) : <span className="font-mono text-[0.625rem] text-muted-foreground">{t('inspector.trace.noEffects')}</span>}
                 </div>
               </div>
-              {teachingMode ? <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/30">{teachingText(entry, step)}</div> : null}
+              {teachingMode ? <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-[0.625rem] text-muted-foreground ring-1 ring-border/30">{teachingText(entry, step)}</div> : null}
               <div className="mt-1 flex justify-end">
                 <MiniAction onClick={() => {
                   onInspectReplaySeq(entry.seq)
@@ -979,8 +979,8 @@ function ProtocolFlowView({
 function FlowCell({ label, value, tone }: { label: string; value: string; tone: string }): JSX.Element {
   return (
     <span className="min-w-0 rounded bg-background/70 px-1.5 py-1 ring-1 ring-border/25">
-      <span className={cn('mr-1 font-mono text-[9px]', tone)}>{label}</span>
-      <span className="font-mono text-[10px] text-foreground">{value}</span>
+      <span className={cn('mr-1 font-mono text-[0.5625rem]', tone)}>{label}</span>
+      <span className="font-mono text-[0.625rem] text-foreground">{value}</span>
     </span>
   )
 }
@@ -1013,7 +1013,7 @@ function ForkCompareView({
         <div className="rounded bg-background/70 p-2 text-xs ring-1 ring-border/30">
           <div className="flex min-w-0 items-center gap-2">
             <GitBranch className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-            <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{parentSessionId}{parentCursor !== null ? ` @${parentCursor}` : ''}</div>
+            <div className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-foreground">{parentSessionId}{parentCursor !== null ? ` @${parentCursor}` : ''}</div>
           </div>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
             <Metric label={t('inspector.trace.shared')} value={String(shared)} />
@@ -1032,13 +1032,13 @@ function CompareColumn({ title, entry }: { title: string; entry: TimelineEntry |
   const { t } = useTranslation()
   return (
     <div className="rounded bg-background/70 p-2 text-xs ring-1 ring-border/30">
-      <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{title}</div>
+      <div className="mb-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground">{title}</div>
       {entry ? (
         <>
-          <div className="font-mono text-[11px] text-foreground">#{entry.seq} {entry.event.kind}</div>
-          <div className="mt-1 truncate text-[10px] text-muted-foreground">{eventSummary(entry.event, null)}</div>
+          <div className="font-mono text-[0.6875rem] text-foreground">#{entry.seq} {entry.event.kind}</div>
+          <div className="mt-1 truncate text-[0.625rem] text-muted-foreground">{eventSummary(entry.event, null)}</div>
         </>
-      ) : <div className="text-[11px] text-muted-foreground">{t('inspector.trace.noDivergence')}</div>}
+      ) : <div className="text-[0.6875rem] text-muted-foreground">{t('inspector.trace.noDivergence')}</div>}
     </div>
   )
 }
@@ -1107,10 +1107,10 @@ function StatusTopology({ nodes }: { nodes: readonly StatusTopologyNode[] }): JS
         <div key={node.id} className="min-w-0 rounded bg-background/70 px-2 py-1.5 ring-1 ring-border/30" title={`${node.label}: ${node.value}`}>
           <div className="flex min-w-0 items-center gap-1.5">
             <span className={cn('h-2 w-2 flex-none rounded-full', topologyTone(node.status))} />
-            <span className="min-w-0 flex-1 text-[10px] font-medium uppercase text-muted-foreground">{node.label}</span>
+            <span className="min-w-0 flex-1 text-[0.625rem] font-medium uppercase text-muted-foreground">{node.label}</span>
             {index < nodes.length - 1 ? <ChevronRight className="h-3 w-3 flex-none text-muted-foreground/60" aria-hidden="true" /> : null}
           </div>
-          <div className="mt-1 min-w-0 break-words font-mono text-[10px] leading-snug text-foreground">{shortTopologyValue(node)}</div>
+          <div className="mt-1 min-w-0 break-words font-mono text-[0.625rem] leading-snug text-foreground">{shortTopologyValue(node)}</div>
         </div>
       ))}
     </div>
@@ -1151,7 +1151,7 @@ function StateRuntime({
           <div className="flex items-center gap-2">
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-foreground">AgentState</div>
-              <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={state.sessionId}>{replaySeq !== null ? `replay #${replaySeq}` : state.sessionId}</div>
+              <div className="mt-0.5 truncate font-mono text-[0.625rem] text-muted-foreground" title={state.sessionId}>{replaySeq !== null ? `replay #${replaySeq}` : state.sessionId}</div>
             </div>
             <Button variant="outline" size="sm" onClick={() => setJsonOpen(true)}>
               {t('inspector.runtime.viewJson')}
@@ -1223,7 +1223,7 @@ function StateRuntime({
 function StateGroup({ title, rows }: { title: string; rows: readonly (readonly [string, string])[] }): JSX.Element {
   return (
     <div className="min-w-0 overflow-hidden rounded bg-background/70 ring-1 ring-border/30">
-      <div className="border-b border-border/40 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="border-b border-border/40 px-2 py-1.5 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
         {title}
       </div>
       <KeyValueTable rows={rows} compact />
@@ -1247,7 +1247,7 @@ function SubAgentRelationPanel({ summary }: { summary: SubAgentRelationSummary }
         <Metric label={t('inspector.runtime.running')} value={String(summary.running)} />
       </div>
       {summary.failed > 0 ? (
-        <div className="mt-1.5 rounded bg-rose-500/10 px-2 py-1 text-[11px] text-rose-700 dark:text-rose-300">
+        <div className="mt-1.5 rounded bg-rose-500/10 px-2 py-1 text-[0.6875rem] text-rose-700 dark:text-rose-300">
           {t('inspector.runtime.subAgentFailed', { count: summary.failed })}
         </div>
       ) : null}
@@ -1262,9 +1262,9 @@ function RunHealthPanel({ items }: { items: readonly RunHealthItem[] }): JSX.Ele
         <div key={item.id} className="min-w-0 rounded bg-background/70 px-2 py-1.5 ring-1 ring-border/30" title={`${item.label}: ${item.value}`}>
           <div className="flex min-w-0 items-center gap-1.5">
             <HeartPulse className={cn('h-3 w-3 flex-none', healthTone(item.tone))} aria-hidden="true" />
-            <span className="min-w-0 flex-1 text-[10px] font-medium uppercase text-muted-foreground">{shortHealthLabel(item.label)}</span>
+            <span className="min-w-0 flex-1 text-[0.625rem] font-medium uppercase text-muted-foreground">{shortHealthLabel(item.label)}</span>
           </div>
-          <div className={cn('mt-1 min-w-0 break-words font-mono text-[10px] leading-snug', healthTone(item.tone))}>{item.value}</div>
+          <div className={cn('mt-1 min-w-0 break-words font-mono text-[0.625rem] leading-snug', healthTone(item.tone))}>{item.value}</div>
         </div>
       ))}
     </div>
@@ -1292,12 +1292,12 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
             >
               <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
               {tool.toolsetId ? (
-                <span className="hidden flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">{tool.toolsetId}</span>
+                <span className="hidden flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground sm:inline">{tool.toolsetId}</span>
               ) : null}
               {isSkillTool(tool) ? (
-                <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span>
+                <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[0.625rem] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span>
               ) : null}
-              <span className={cn('flex-none text-[10px]', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
+              <span className={cn('flex-none text-[0.625rem]', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
                 {tool.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')}
               </span>
             </button>
@@ -1312,27 +1312,27 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
                 <div className="flex min-w-0 items-center gap-2">
                   <div className="min-w-0 truncate font-mono text-foreground">{selectedTool.name}</div>
                   {isSkillTool(selectedTool) ? (
-                    <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skillLoader')}</span>
+                    <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[0.625rem] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skillLoader')}</span>
                   ) : null}
                 </div>
                 <div className="mt-1 text-muted-foreground">{selectedTool.requiresApproval ? t('inspector.runtime.approvalRequired') : t('inspector.runtime.autoAllowed')}</div>
-                <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+                <div className="mt-1 font-mono text-[0.6875rem] text-muted-foreground">
                   {[selectedTool.toolsetId ? `toolset ${selectedTool.toolsetId}` : null, selectedTool.risk ? `risk ${selectedTool.risk}` : null, selectedTool.executionKind ? `exec ${selectedTool.executionKind}` : null].filter(Boolean).join(' · ')}
                 </div>
                 <p className="mt-2 text-muted-foreground">{selectedTool.description || t('inspector.runtime.noDescription')}</p>
               </div>
               <div>
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t('inspector.runtime.recentCalls')}</div>
+                <div className="mb-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground">{t('inspector.runtime.recentCalls')}</div>
                 {recent.length > 0 ? (
                   <ul className="space-y-1">
                     {recent.map((call) => (
-                      <li key={`${call.callId}-${call.resultSeq ?? 'pending'}`} className="truncate rounded bg-muted/60 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                      <li key={`${call.callId}-${call.resultSeq ?? 'pending'}`} className="truncate rounded bg-muted/60 px-2 py-1 font-mono text-[0.6875rem] text-muted-foreground">
                         #{call.requestedSeq ?? '?'} {toolResultLabel(call)}
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <div className="text-[11px] text-muted-foreground">{t('inspector.runtime.noCalls')}</div>
+                  <div className="text-[0.6875rem] text-muted-foreground">{t('inspector.runtime.noCalls')}</div>
                 )}
               </div>
               <JsonBlock label={`Input schema · ${selectedTool.name}`} value={selectedTool.inputSchema} collapsed={2} className="[&>div:last-child]:max-h-56 [&_[data-radix-scroll-area-viewport]]:max-h-56" />
@@ -1362,7 +1362,7 @@ function MemoryRuntime({ state: _state }: { state: AgentState | null }): JSX.Ele
             className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted/70', scope === s ? 'bg-muted' : '')}
           >
             <span className="min-w-0 flex-1 truncate font-mono">{s}</span>
-            <span className="flex-none text-[10px] text-muted-foreground">{s === 'session' ? `${memory.length}` : 'disk'}</span>
+            <span className="flex-none text-[0.625rem] text-muted-foreground">{s === 'session' ? `${memory.length}` : 'disk'}</span>
           </button>
         ))}
       </div>
@@ -1378,7 +1378,7 @@ function MemoryRuntime({ state: _state }: { state: AgentState | null }): JSX.Ele
             <div className="space-y-2 text-muted-foreground">
               <div className="font-mono text-foreground">{scope}</div>
               <p>{t('inspector.runtime.workspaceMemoryNote', { scope })}</p>
-              <p className="font-mono text-[11px]">{scope === 'workspace' ? '<workspace>/.agent-kernel/memory/' : '~/.agent-kernel/memory/'}</p>
+              <p className="font-mono text-[0.6875rem]">{scope === 'workspace' ? '<workspace>/.agent-kernel/memory/' : '~/.agent-kernel/memory/'}</p>
             </div>
           )}
         </div>
@@ -1848,7 +1848,7 @@ function ToolRegistryContextView({
               data-highlighted={highlighted ? 'true' : 'false'}
             >
               <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
-              {tool.toolsetId ? <span className="hidden flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">{tool.toolsetId}</span> : null}
+              {tool.toolsetId ? <span className="hidden flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground sm:inline">{tool.toolsetId}</span> : null}
               {isSkillTool(tool) ? <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span> : null}
               <span className={cn('flex-none text-xs', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
                 {tool.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')}
@@ -2022,7 +2022,7 @@ function Segmented<T extends string>({ value, onChange, options, testId }: { val
             key={v}
             type="button"
             onClick={() => onChange(v)}
-            className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition-colors', value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
+            className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-[0.6875rem] transition-colors', value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
             data-testid={`${testId}-${v}`}
           >
             {Icon ? <Icon className="h-3 w-3 flex-none" aria-hidden="true" /> : null}
@@ -2044,7 +2044,7 @@ function MiniAction({ children, onClick, title, ariaLabel, testId }: { children:
       title={title}
       aria-label={ariaLabel}
       data-testid={testId}
-      className="inline-flex items-center gap-1 rounded bg-background/80 px-1.5 py-px text-[9px] uppercase tracking-wide text-muted-foreground ring-1 ring-border/30 hover:bg-accent hover:text-foreground"
+      className="inline-flex items-center gap-1 rounded bg-background/80 px-1.5 py-px text-[0.5625rem] uppercase tracking-wide text-muted-foreground ring-1 ring-border/30 hover:bg-accent hover:text-foreground"
     >
       {children}
     </button>
@@ -2125,13 +2125,13 @@ function TraceToolbar({
           ]}
           testId="trace-mode-switch"
         />
-        <label className="ml-auto flex min-w-0 flex-1 items-center gap-1 rounded bg-background/70 px-2 py-1 text-[11px] ring-1 ring-border/30 focus-within:ring-border/60">
+        <label className="ml-auto flex min-w-0 flex-1 items-center gap-1 rounded bg-background/70 px-2 py-1 text-[0.6875rem] ring-1 ring-border/30 focus-within:ring-border/60">
           <SearchCode className="h-3 w-3 flex-none text-muted-foreground" aria-hidden="true" />
           <input
             value={query}
             onChange={(event) => onQueryChange(event.currentTarget.value)}
             placeholder="kind:llm_response effect:call_tool"
-            className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[0.6875rem] text-foreground outline-none placeholder:text-muted-foreground"
             data-testid="trace-query-input"
           />
         </label>
@@ -2153,7 +2153,7 @@ function TraceToolbar({
           aria-pressed={allSelected}
           data-testid="trace-filter-chip-all"
           className={cn(
-            'rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 transition-colors',
+            'rounded-full px-2 py-0.5 text-[0.625rem] font-medium ring-1 transition-colors',
             allSelected
               ? 'bg-primary/10 text-foreground ring-primary/40'
               : 'bg-background/70 text-muted-foreground ring-border/40 hover:bg-accent hover:text-foreground',
@@ -2171,7 +2171,7 @@ function TraceToolbar({
             aria-pressed={active}
             data-testid={`trace-filter-chip-${cat}`}
             className={cn(
-              'rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 transition-colors',
+              'rounded-full px-2 py-0.5 text-[0.625rem] font-medium ring-1 transition-colors',
               active
                 ? 'bg-primary/10 ring-primary/40'
                 : 'bg-background/70 ring-border/40 hover:bg-accent',
@@ -2218,18 +2218,18 @@ function ReplayPanel({
             data-testid="state-diff-toggle"
           >
             <Diff className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-            <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{t('inspector.trace.stateDiff')}</div>
+            <div className="min-w-0 flex-1 truncate text-[0.6875rem] font-medium text-foreground">{t('inspector.trace.stateDiff')}</div>
             <ChevronDown className={cn('h-3.5 w-3.5 flex-none text-muted-foreground transition-transform', open ? '' : '-rotate-90')} aria-hidden="true" />
           </button>
-          <span className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/25">#{selected.seq}</span>
-          <span className="flex-none text-[10px] text-muted-foreground">{t('inspector.trace.changes', { count: diff.length })}</span>
+          <span className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground ring-1 ring-border/25">#{selected.seq}</span>
+          <span className="flex-none text-[0.625rem] text-muted-foreground">{t('inspector.trace.changes', { count: diff.length })}</span>
           <button type="button" disabled={!previous} onClick={() => previous && onSelect(previous.seq)} className="inline-flex h-5 w-5 items-center justify-center rounded bg-muted/55 text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground disabled:opacity-40" title={t('inspector.trace.previousEvent')}>
             <ChevronLeft className="h-3 w-3" aria-hidden="true" />
           </button>
           <button type="button" disabled={!next} onClick={() => next && onSelect(next.seq)} className="inline-flex h-5 w-5 items-center justify-center rounded bg-muted/55 text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground disabled:opacity-40" title={t('inspector.trace.nextEvent')}>
             <ChevronRight className="h-3 w-3" aria-hidden="true" />
           </button>
-          <button type="button" onClick={() => onSelect(null)} className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground">{t('inspector.trace.live')}</button>
+          <button type="button" onClick={() => onSelect(null)} className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground">{t('inspector.trace.live')}</button>
         </div>
         <div className="px-2 pb-1.5">
           <input
@@ -2244,18 +2244,18 @@ function ReplayPanel({
           />
         </div>
         {open ? <div id="state-diff-body" className="border-t border-border/30 bg-card/35 px-2 py-1.5">
-          <div className="mb-1 flex min-w-0 items-center gap-2 text-[10px]">
+          <div className="mb-1 flex min-w-0 items-center gap-2 text-[0.625rem]">
             <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={selected.event.kind}>{selected.event.kind}</span>
             <span className="flex-none text-muted-foreground">{t('inspector.trace.changes', { count: diff.length })}</span>
           </div>
           <div className="min-w-0 space-y-1.5" data-testid="state-diff-view">
-            {summary.length > 0 ? summary.map((group) => <DiffSummaryGroup key={group.id} group={group} />) : <div className="rounded bg-background/55 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/20">{t('inspector.trace.noStateChanges')}</div>}
+            {summary.length > 0 ? summary.map((group) => <DiffSummaryGroup key={group.id} group={group} />) : <div className="rounded bg-background/55 px-2 py-1 text-[0.625rem] text-muted-foreground ring-1 ring-border/20">{t('inspector.trace.noStateChanges')}</div>}
             {diff.length > 0 ? (
               <div className="rounded bg-background/45 ring-1 ring-border/20" data-testid="state-raw-diff">
                 <button
                   type="button"
                   onClick={() => setRawOpen((value) => !value)}
-                  className="flex w-full items-center gap-2 px-2 py-1 text-left text-[10px] text-muted-foreground hover:text-foreground"
+                  className="flex w-full items-center gap-2 px-2 py-1 text-left text-[0.625rem] text-muted-foreground hover:text-foreground"
                   aria-expanded={rawOpen}
                   data-testid="state-raw-diff-toggle"
                 >
@@ -2278,7 +2278,7 @@ function ReplayPanel({
 function DiffSummaryGroup({ group }: { group: StateDiffSummaryGroup }): JSX.Element {
   return (
     <div className="min-w-0 rounded bg-background/65 ring-1 ring-border/20" data-testid={`state-diff-summary-${group.id}`}>
-      <div className="border-b border-border/20 px-2 py-1 text-[10px] font-medium uppercase text-muted-foreground">{group.title}</div>
+      <div className="border-b border-border/20 px-2 py-1 text-[0.625rem] font-medium uppercase text-muted-foreground">{group.title}</div>
       <div className="divide-y divide-border/15">
         {group.items.map((item) => <DiffSummaryItem key={`${item.label}-${item.value}`} item={item} />)}
       </div>
@@ -2288,7 +2288,7 @@ function DiffSummaryGroup({ group }: { group: StateDiffSummaryGroup }): JSX.Elem
 
 function DiffSummaryItem({ item }: { item: StateDiffSummaryItem }): JSX.Element {
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(5.5rem,0.8fr)_minmax(0,1.2fr)] gap-2 px-2 py-1 font-mono text-[10px]">
+    <div className="grid min-w-0 grid-cols-[minmax(5.5rem,0.8fr)_minmax(0,1.2fr)] gap-2 px-2 py-1 font-mono text-[0.625rem]">
       <span className={cn('min-w-0 truncate', diffSummaryTone(item.tone))} title={item.label}>{item.label}</span>
       <span className="min-w-0 truncate text-foreground" title={item.value}>{item.value}</span>
       {item.detail ? <span className="col-span-2 min-w-0 truncate text-muted-foreground" title={item.detail}>{item.detail}</span> : null}
@@ -2299,7 +2299,7 @@ function DiffSummaryItem({ item }: { item: StateDiffSummaryItem }): JSX.Element 
 
 function DiffRow({ item }: { item: StateDiff }): JSX.Element {
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(4.75rem,0.8fr)_minmax(0,1.2fr)] items-center gap-1 rounded bg-background/65 px-1.5 py-1 font-mono text-[10px] ring-1 ring-border/20">
+    <div className="grid min-w-0 grid-cols-[minmax(4.75rem,0.8fr)_minmax(0,1.2fr)] items-center gap-1 rounded bg-background/65 px-1.5 py-1 font-mono text-[0.625rem] ring-1 ring-border/20">
       <span className="min-w-0 truncate text-muted-foreground" title={item.path}>{item.path}</span>
       <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1">
         <span className="truncate rounded bg-muted/45 px-1 text-muted-foreground" title={item.before}>{item.before}</span>
@@ -2386,10 +2386,10 @@ function MemoryEntryRow({ entry }: { entry: { key: string; content: string; upda
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-foreground">{entry.key}</span>
         {entry.updatedAt && entry.updatedAt !== '1970-01-01T00:00:00.000Z' ? (
-          <span className="flex-none text-[10px] text-muted-foreground">{new Date(entry.updatedAt).toLocaleString()}</span>
+          <span className="flex-none text-[0.625rem] text-muted-foreground">{new Date(entry.updatedAt).toLocaleString()}</span>
         ) : null}
       </div>
-      <pre className="mt-1 whitespace-pre-wrap break-words text-[11px] text-muted-foreground">{entry.content}</pre>
+      <pre className="mt-1 whitespace-pre-wrap break-words text-[0.6875rem] text-muted-foreground">{entry.content}</pre>
     </div>
   )
 }

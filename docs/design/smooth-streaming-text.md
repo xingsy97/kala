@@ -83,6 +83,28 @@ charsThisFrame = floor(effectiveCps * dt + carry)   // carry keeps fractional
 - **Empty frames**: if `charsThisFrame === 0`, skip `setState` (no wasted
   re-render).
 
+### Stream lifecycle and retained text
+
+`streamingText` is display content, not proof that a model is still outputting.
+`streamingActive` drives the cursor and Outputting indicator. Tool/approval,
+idle, done, error, cancellation, and disconnect boundaries stop activity and
+flush unrevealed text without dropping the visible draft. Actual `thinking`
+states remain visible; no timeout invents a completed backend turn.
+
+An authoritative assistant response replaces its draft atomically, including
+external runtimes that publish only `state:changed`. No deferred animation-frame
+reset may clear the following response. Unpersisted tool prose is retained at
+its original timeline/message boundary when another response begins, rather
+than concatenated into the next turn. Reconnect baselines reconcile those
+local drafts with authoritative messages. These display-only drafts are not
+invented durable history: a full reload uses the runtime's persisted history.
+
+The native regression command is
+`pnpm --dir packages/host exec tsx ../../scripts/dashboard/verify-dashboard-stream-lifecycle.mjs`
+after building the dashboard. It runs the real Host, Socket.IO transport, and
+production App/ChatPanel in Chromium with a controlled model and executor.
+Evidence is written under `.artifacts/outputting-browser/`.
+
 Cost note: committing per-frame (up to 60fps) instead of 15fps is fine because
 the expensive work is already gated by the block-split memoization — only the
 tail `MarkdownBody` re-renders; completed blocks never do.

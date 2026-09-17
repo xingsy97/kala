@@ -225,10 +225,10 @@ export function ArtifactInventory({
                 <Stat label={t('artifacts.inventory.bytes')} value={formatBytes(manifest.summary.totalBytes)} />
                 <Stat label={t('artifacts.inventory.hashed')} value={`${manifest.summary.hashedCount}/${manifest.summary.entryCount}`} />
                 <details className="rounded-xl bg-card/70 px-3 py-2 ring-1 ring-border/35">
-                  <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">{t('artifacts.inventory.kinds')}</summary>
+                  <summary className="cursor-pointer text-[0.6875rem] font-medium text-muted-foreground">{t('artifacts.inventory.kinds')}</summary>
                   <div className="mt-2 grid gap-1">
                     {kindRows.map(([kind, count]) => (
-                      <div key={kind} className="flex items-center justify-between gap-2 font-mono text-[11px]">
+                      <div key={kind} className="flex items-center justify-between gap-2 font-mono text-[0.6875rem]">
                         <span className="truncate">{kind}</span>
                         <span className="text-muted-foreground">{count}</span>
                       </div>
@@ -250,7 +250,7 @@ export function ArtifactInventory({
                 {manifest.entries.map((entry) => (
                   <button key={entry.path} type="button" onClick={() => onOpenArtifact({ path: entry.path, label: entry.path })} className="block w-full min-w-0 px-3 py-2 text-left hover:bg-muted/40">
                     <div className="truncate font-mono text-xs" title={entry.path}>{entry.path}</div>
-                    <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+                    <div className="mt-1 flex min-w-0 items-center gap-2 text-[0.6875rem] text-muted-foreground">
                       <span className="truncate">{entry.kind}</span><span className="flex-none">{formatBytes(entry.bytes)}</span><span className="ml-auto flex-none">{entry.sha256 ? entry.sha256.slice(0, 8) : t('artifacts.inventory.hashSkipped')}</span>
                     </div>
                   </button>
@@ -267,12 +267,12 @@ export function ArtifactInventory({
                   {manifest.entries.map((entry) => (
                     <button key={entry.path} type="button" onClick={() => onOpenArtifact({ path: entry.path, label: entry.path })} className="grid w-full grid-cols-[1.4fr_150px_100px_170px] gap-3 px-3 py-2 text-left hover:bg-muted/40">
                       <div className="min-w-0">
-                        <div className="truncate font-mono text-[11px]" title={entry.path}>{entry.path}</div>
-                        <div className="mt-0.5 text-[11px] text-muted-foreground">{entry.mediaType}</div>
+                        <div className="truncate font-mono text-[0.6875rem]" title={entry.path}>{entry.path}</div>
+                        <div className="mt-0.5 text-[0.6875rem] text-muted-foreground">{entry.mediaType}</div>
                       </div>
-                      <div className="font-mono text-[11px] text-muted-foreground">{entry.kind}</div>
-                      <div className="font-mono text-[11px]">{formatBytes(entry.bytes)}</div>
-                      <div className="min-w-0 font-mono text-[11px] text-muted-foreground">
+                      <div className="font-mono text-[0.6875rem] text-muted-foreground">{entry.kind}</div>
+                      <div className="font-mono text-[0.6875rem]">{formatBytes(entry.bytes)}</div>
+                      <div className="min-w-0 font-mono text-[0.6875rem] text-muted-foreground">
                         {entry.sha256 ? (
                           <span title={entry.sha256}>{entry.sha256.slice(0, 12)}</span>
                         ) : (
@@ -305,7 +305,7 @@ export function PaginationFooter({ manifest, loadingMore, hasMore, onLoadMore }:
 function LabeledInput({ label, value, onChange, ...props }: { label: string; value: string; onChange(value: string): void } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>): JSX.Element {
   return (
     <label className="grid gap-1">
-      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+      <span className="text-[0.6875rem] font-medium text-muted-foreground">{label}</span>
       <Input value={value} onChange={(event) => onChange(event.currentTarget.value)} {...props} />
     </label>
   )
@@ -409,12 +409,12 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
     <div className="mb-3 rounded-md border border-border bg-background/70" data-testid={`enhancement-action-panel-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
       <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-muted/30" onClick={() => setOpen((value) => !value)} data-testid={`${testIdPrefix}-toggle`}>
         <span className="font-medium">{title}</span>
-        <span className="font-mono text-[11px] text-muted-foreground">{open ? t('artifacts.actionPanel.hide') : t('artifacts.actionPanel.show')}</span>
+        <span className="font-mono text-[0.6875rem] text-muted-foreground">{open ? t('artifacts.actionPanel.hide') : t('artifacts.actionPanel.show')}</span>
       </button>
       {open ? (
         <form onSubmit={(event) => void submit(event)} className="grid gap-3 border-t border-border p-3 text-xs" data-testid={`${testIdPrefix}-form`}>
           <label className="grid gap-1">
-            <span className="text-[11px] font-medium text-muted-foreground">{t('artifacts.actionPanel.action')}</span>
+            <span className="text-[0.6875rem] font-medium text-muted-foreground">{t('artifacts.actionPanel.action')}</span>
             <select className="h-8 rounded border border-input bg-background px-2 text-sm" value={selectedAction} onChange={(event) => setSelectedAction(event.currentTarget.value)} data-testid={`${testIdPrefix}-select`}>
               {actions.map((action) => <option key={action.action} value={action.action}>{enhancementActionLabel(t, action)}</option>)}
             </select>
@@ -487,11 +487,11 @@ function UploadFieldControl({ field, value, onChange, testId }: { field: UploadE
   return (
     <div className="grid gap-1 rounded border border-border bg-background/50 p-2" data-testid={testId}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium text-muted-foreground">{label}{field.required ? ' *' : ''}</span>
+        <span className="text-[0.6875rem] font-medium text-muted-foreground">{label}{field.required ? ' *' : ''}</span>
         <div className="flex gap-1">
           <button
             type="button"
-            className={`h-6 rounded px-2 text-[11px] ${value.mode === 'paste' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
+            className={`h-6 rounded px-2 text-[0.6875rem] ${value.mode === 'paste' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
             aria-pressed={value.mode === 'paste'}
             onClick={() => onChange({ mode: 'paste', content: value.content, filename: undefined, path: value.path })}
             data-testid={`${testId}-mode-paste`}
@@ -500,7 +500,7 @@ function UploadFieldControl({ field, value, onChange, testId }: { field: UploadE
           </button>
           <button
             type="button"
-            className={`h-6 rounded px-2 text-[11px] ${value.mode === 'upload' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
+            className={`h-6 rounded px-2 text-[0.6875rem] ${value.mode === 'upload' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
             aria-pressed={value.mode === 'upload'}
             onClick={() => onChange({ mode: 'upload', content: value.mode === 'upload' ? value.content : '', filename: value.filename, path: value.path })}
             data-testid={`${testId}-mode-upload`}
@@ -511,7 +511,7 @@ function UploadFieldControl({ field, value, onChange, testId }: { field: UploadE
       </div>
       {value.mode === 'paste' ? (
         <textarea
-          className="min-h-[60px] w-full rounded border border-input bg-background px-2 py-1 font-mono text-[11px]"
+          className="min-h-[60px] w-full rounded border border-input bg-background px-2 py-1 font-mono text-[0.6875rem]"
           rows={3}
           placeholder={enhancementFieldPlaceholder(t, field) ?? t('artifacts.actionPanel.uploadPastePlaceholder')}
           value={value.content}
@@ -523,7 +523,7 @@ function UploadFieldControl({ field, value, onChange, testId }: { field: UploadE
           <input
             type="file"
             accept={field.accept}
-            className="text-[11px]"
+            className="text-[0.6875rem]"
             onChange={(event) => {
               const file = event.currentTarget.files?.[0]
               if (!file) {
@@ -539,7 +539,7 @@ function UploadFieldControl({ field, value, onChange, testId }: { field: UploadE
             }}
             data-testid={`${testId}-file`}
           />
-          {value.filename ? <span className="font-mono text-[11px] text-muted-foreground" data-testid={`${testId}-filename`}>{value.filename} ({formatBytes(new Blob([value.content]).size)})</span> : null}
+          {value.filename ? <span className="font-mono text-[0.6875rem] text-muted-foreground" data-testid={`${testId}-filename`}>{value.filename} ({formatBytes(new Blob([value.content]).size)})</span> : null}
         </div>
       )}
     </div>
@@ -739,8 +739,8 @@ export function ProfilesView({
             {rows.map((row) => (
               <div key={row.path} className="min-w-0 px-3 py-2" role={row.profile.sessionId && onOpenSession ? 'button' : undefined} tabIndex={row.profile.sessionId && onOpenSession ? 0 : undefined} onClick={() => row.profile.sessionId && onOpenSession?.(row.profile.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && row.profile.sessionId) onOpenSession?.(row.profile.sessionId) }}>
                 <div className="truncate font-mono text-xs">{row.profile.sessionId ?? row.path}</div>
-                <div className="mt-1 truncate text-[11px] text-muted-foreground">{(row.profile.models ?? []).join(', ') || t('artifacts.fallback.unknown')}</div>
-                <div className="mt-1 grid grid-cols-3 gap-2 font-mono text-[11px]"><span>LLM {row.profile.llmCalls ?? 0}</span><span>Tools {row.profile.toolCalls ?? 0}</span><span className="text-right">{formatInteger((row.profile.totalInputTokens ?? 0) + (row.profile.totalOutputTokens ?? 0))} tok</span></div>
+                <div className="mt-1 truncate text-[0.6875rem] text-muted-foreground">{(row.profile.models ?? []).join(', ') || t('artifacts.fallback.unknown')}</div>
+                <div className="mt-1 grid grid-cols-3 gap-2 font-mono text-[0.6875rem]"><span>LLM {row.profile.llmCalls ?? 0}</span><span>Tools {row.profile.toolCalls ?? 0}</span><span className="text-right">{formatInteger((row.profile.totalInputTokens ?? 0) + (row.profile.totalOutputTokens ?? 0))} tok</span></div>
               </div>
             ))}
           </div>
@@ -760,17 +760,17 @@ export function ProfilesView({
               {rows.map((row) => (
                 <div key={row.path} className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px] gap-3 px-3 py-2" role={row.profile.sessionId && onOpenSession ? 'button' : undefined} tabIndex={row.profile.sessionId && onOpenSession ? 0 : undefined} onClick={() => row.profile.sessionId && onOpenSession?.(row.profile.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && row.profile.sessionId) onOpenSession?.(row.profile.sessionId) }}>
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px]">{row.profile.sessionId ?? row.path}</div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path} · {(row.profile.models ?? []).join(', ') || t('artifacts.fallback.unknown')} · {t('artifacts.fallback.missing')} {row.profile.llmTraceMissingCalls ?? 0}</div>
+                    <div className="truncate font-mono text-[0.6875rem]">{row.profile.sessionId ?? row.path}</div>
+                    <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground">{row.path} · {(row.profile.models ?? []).join(', ') || t('artifacts.fallback.unknown')} · {t('artifacts.fallback.missing')} {row.profile.llmTraceMissingCalls ?? 0}</div>
                   </div>
-                  <div className="font-mono text-[11px]">{row.profile.llmCalls ?? 0}</div>
-                  <div className="font-mono text-[11px]">{row.profile.toolCalls ?? 0}</div>
-                  <div className="font-mono text-[11px]">{formatInteger(row.profile.totalInputTokens)}</div>
-                  <div className="font-mono text-[11px]">{formatInteger(row.profile.totalOutputTokens)}</div>
-                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.averageLlmDurationMs)}</div>
-                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.p95LlmDurationMs)}</div>
-                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.averageTimeToFirstChunkMs)}</div>
-                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.p95TimeToFirstChunkMs)}</div>
+                  <div className="font-mono text-[0.6875rem]">{row.profile.llmCalls ?? 0}</div>
+                  <div className="font-mono text-[0.6875rem]">{row.profile.toolCalls ?? 0}</div>
+                  <div className="font-mono text-[0.6875rem]">{formatInteger(row.profile.totalInputTokens)}</div>
+                  <div className="font-mono text-[0.6875rem]">{formatInteger(row.profile.totalOutputTokens)}</div>
+                  <div className="font-mono text-[0.6875rem]">{formatDurationMetric(row.profile.averageLlmDurationMs)}</div>
+                  <div className="font-mono text-[0.6875rem]">{formatDurationMetric(row.profile.p95LlmDurationMs)}</div>
+                  <div className="font-mono text-[0.6875rem]">{formatDurationMetric(row.profile.averageTimeToFirstChunkMs)}</div>
+                  <div className="font-mono text-[0.6875rem]">{formatDurationMetric(row.profile.p95TimeToFirstChunkMs)}</div>
                 </div>
               ))}
             </div>
@@ -842,8 +842,8 @@ export function MemoryView({
             {entries.map(({ row, entry }, index) => (
               <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="min-w-0 px-3 py-2" role={entry.sessionId && onOpenSession ? 'button' : undefined} tabIndex={entry.sessionId && onOpenSession ? 0 : undefined} onClick={() => entry.sessionId && onOpenSession?.(entry.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && entry.sessionId) onOpenSession?.(entry.sessionId) }}>
                 <div className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.key ?? t('artifacts.fallback.unknown')}</span><MemoryStatus status={entry.status} /></div>
-                <div className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{entry.description ?? entry.name ?? '-'}</div>
-                <div className="mt-1 flex min-w-0 gap-2 font-mono text-[11px] text-muted-foreground"><span>{entry.scope ?? t('artifacts.fallback.unknown')}</span><span>{formatConfidence(entry.confidence)}</span><span className="ml-auto max-w-[50%] truncate" title={entry.source ?? entry.path}>{entry.source ?? entry.path ?? '-'}</span></div>
+                <div className="mt-1 line-clamp-2 text-[0.6875rem] text-muted-foreground">{entry.description ?? entry.name ?? '-'}</div>
+                <div className="mt-1 flex min-w-0 gap-2 font-mono text-[0.6875rem] text-muted-foreground"><span>{entry.scope ?? t('artifacts.fallback.unknown')}</span><span>{formatConfidence(entry.confidence)}</span><span className="ml-auto max-w-[50%] truncate" title={entry.source ?? entry.path}>{entry.source ?? entry.path ?? '-'}</span></div>
               </div>
             ))}
           </div>
@@ -860,21 +860,21 @@ export function MemoryView({
               </div>
               {entries.map(({ row, entry }, index) => (
                 <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 px-3 py-2" role={entry.sessionId && onOpenSession ? 'button' : undefined} tabIndex={entry.sessionId && onOpenSession ? 0 : undefined} onClick={() => entry.sessionId && onOpenSession?.(entry.sessionId)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && entry.sessionId) onOpenSession?.(entry.sessionId) }}>
-                  <div className="font-mono text-[11px]">{entry.scope ?? t('artifacts.fallback.unknown')}</div>
+                  <div className="font-mono text-[0.6875rem]">{entry.scope ?? t('artifacts.fallback.unknown')}</div>
                   <MemoryStatus status={entry.status} />
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px]" title={entry.key}>{entry.key ?? t('artifacts.fallback.unknown')}</div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={row.path}>{row.path}</div>
+                    <div className="truncate font-mono text-[0.6875rem]" title={entry.key}>{entry.key ?? t('artifacts.fallback.unknown')}</div>
+                    <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground" title={row.path}>{row.path}</div>
                   </div>
                   <div className="min-w-0">
                     <div className="truncate" title={entry.description ?? entry.name}>{entry.description ?? entry.name ?? '-'}</div>
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{entry.type ?? t('artifacts.fallback.memory')}</div>
+                    <div className="mt-0.5 truncate font-mono text-[0.6875rem] text-muted-foreground">{entry.type ?? t('artifacts.fallback.memory')}</div>
                   </div>
-                  <div className="font-mono text-[11px]">{formatConfidence(entry.confidence)}</div>
-                  <div className="truncate font-mono text-[11px] text-muted-foreground" title={entry.sessionId}>{entry.sessionId ?? '-'}</div>
+                  <div className="font-mono text-[0.6875rem]">{formatConfidence(entry.confidence)}</div>
+                  <div className="truncate font-mono text-[0.6875rem] text-muted-foreground" title={entry.sessionId}>{entry.sessionId ?? '-'}</div>
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px]" title={entry.path}>{entry.status === 'tombstoned' ? entry.deletedAt ?? t('artifacts.fallback.deleted') : entry.source ?? t('artifacts.fallback.unknown')}</div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={entry.archivedPath ?? entry.path}>{entry.archivedPath ?? entry.path ?? '-'}</div>
+                    <div className="truncate font-mono text-[0.6875rem]" title={entry.path}>{entry.status === 'tombstoned' ? entry.deletedAt ?? t('artifacts.fallback.deleted') : entry.source ?? t('artifacts.fallback.unknown')}</div>
+                    <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground" title={entry.archivedPath ?? entry.path}>{entry.archivedPath ?? entry.path ?? '-'}</div>
                   </div>
                 </div>
               ))}
@@ -890,9 +890,9 @@ export function MemoryView({
 
 function MemoryStatus({ status }: { status: MemoryIndexEntry['status'] | undefined }): JSX.Element {
   const { t } = useTranslation()
-  if (status === 'tombstoned') return <div className="font-mono text-[11px] text-amber-700 dark:text-amber-300">{t('artifacts.memory.status.tombstoned')}</div>
-  if (status === 'active') return <div className="font-mono text-[11px] text-emerald-700 dark:text-emerald-300">{t('artifacts.memory.status.active')}</div>
-  return <div className="font-mono text-[11px] text-muted-foreground">{t('artifacts.memory.status.unknown')}</div>
+  if (status === 'tombstoned') return <div className="font-mono text-[0.6875rem] text-amber-700 dark:text-amber-300">{t('artifacts.memory.status.tombstoned')}</div>
+  if (status === 'active') return <div className="font-mono text-[0.6875rem] text-emerald-700 dark:text-emerald-300">{t('artifacts.memory.status.active')}</div>
+  return <div className="font-mono text-[0.6875rem] text-muted-foreground">{t('artifacts.memory.status.unknown')}</div>
 }
 
 export function OpsView({
@@ -948,7 +948,7 @@ export function OpsView({
                 <div key={group.label} className="grid gap-2 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-medium">{group.label}</div>
-                    <div className="font-mono text-[11px] text-muted-foreground">{group.rows.length}</div>
+                    <div className="font-mono text-[0.6875rem] text-muted-foreground">{group.rows.length}</div>
                   </div>
                   <div className="grid gap-1.5">
                     {group.rows.map((row) => (
@@ -959,16 +959,16 @@ export function OpsView({
                         className="grid min-w-0 gap-1 rounded-xl bg-background/55 px-3 py-2.5 text-left ring-1 ring-border/35 transition-all hover:bg-muted/40 hover:ring-border/60 md:grid-cols-[170px_minmax(0,1fr)_minmax(220px,0.8fr)] md:gap-3"
                       >
                         <div className="min-w-0">
-                          <div className="truncate font-mono text-[11px]">{opsKindLabel(row.kind)}</div>
-                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={row.path}>{row.path}</div>
+                          <div className="truncate font-mono text-[0.6875rem]">{opsKindLabel(row.kind)}</div>
+                          <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground" title={row.path}>{row.path}</div>
                         </div>
                         <div className="min-w-0">
                           <div className="truncate font-medium">{opsPrimary(row, t)}</div>
-                          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{opsSecondary(row, t)}</div>
+                          <div className="mt-0.5 truncate font-mono text-[0.6875rem] text-muted-foreground">{opsSecondary(row, t)}</div>
                         </div>
                         <div className="min-w-0">
-                          <div className="truncate font-mono text-[11px]">{opsMetricLine(row, t)}</div>
-                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{opsStatusLine(row, t)}</div>
+                          <div className="truncate font-mono text-[0.6875rem]">{opsMetricLine(row, t)}</div>
+                          <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground">{opsStatusLine(row, t)}</div>
                         </div>
                       </button>
                     ))}
@@ -1078,7 +1078,7 @@ function opsIssueCount(row: OpsArtifactRow): number {
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div className="flex min-h-14 flex-col justify-center rounded-xl bg-card/70 px-3 py-2 ring-1 ring-border/35">
-      <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{label}</span>
+      <span className="text-[0.625rem] font-medium uppercase tracking-[0.08em] text-muted-foreground">{label}</span>
       <span className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-foreground">{value}</span>
     </div>
   )

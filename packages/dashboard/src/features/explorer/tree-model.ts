@@ -192,7 +192,7 @@ export function applyManualWorkspaceOrder(
   return [...workspaces].sort((a, b) => {
     if (a.workspaceId === null || b.workspaceId === null) {
       if (a.workspaceId === b.workspaceId) return 0
-      return a.workspaceId === null ? 1 : -1
+      return a.workspaceId === null ? -1 : 1
     }
     const ar = rank.get(a.workspaceId) ?? Number.MAX_SAFE_INTEGER
     const br = rank.get(b.workspaceId) ?? Number.MAX_SAFE_INTEGER
@@ -206,8 +206,15 @@ export function reorderWorkspaceIds(
   movedIds: readonly string[],
   targetIndex: number,
 ): readonly string[] {
-  void order
-  return reorderContiguousIds(targetIds, movedIds, targetIndex)
+  return reorderSessionIds(order, targetIds, movedIds, targetIndex)
+}
+
+export function workspaceDropIndex(
+  visibleWorkspaces: readonly WorkspaceNode[],
+  targetIndex: number,
+  movedIds: readonly string[],
+): number {
+  return visibleWorkspaces.slice(0, targetIndex).filter((node) => node.workspaceId !== null && !movedIds.includes(node.workspaceId)).length
 }
 
 export function canDropWorkspacesAtRoot(input: {
@@ -294,21 +301,6 @@ function syncIdOrder(prev: readonly string[], ids: readonly string[]): readonly 
     if (!seen.has(id)) next.push(id)
   }
   return next
-}
-
-function reorderContiguousIds(
-  targetIds: readonly string[],
-  movedIds: readonly string[],
-  targetIndex: number,
-): readonly string[] {
-  const moved = new Set(movedIds)
-  const targetWithoutMoved = targetIds.filter((id) => !moved.has(id))
-  const insertIndex = Math.max(0, Math.min(targetIndex, targetWithoutMoved.length))
-  return [
-    ...targetWithoutMoved.slice(0, insertIndex),
-    ...movedIds,
-    ...targetWithoutMoved.slice(insertIndex),
-  ]
 }
 
 /**

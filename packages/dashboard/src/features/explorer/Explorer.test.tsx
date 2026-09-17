@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
@@ -12,8 +12,9 @@ import { Explorer } from './Explorer.js'
 import { canDropWorkspacesAtRoot, reorderWorkspaceIds } from './tree-model.js'
 import { createSessionViewCache } from '../../session-view-cache.js'
 import { HIDDEN_WORKSPACES_STORAGE_KEY } from './hidden-workspaces.js'
-import { PREF_AUTO_HIDE_OFFLINE_WORKSPACES, PREF_HIDE_SUB_AGENT_SESSIONS } from '../../lib/prefs.js'
+import { PREF_AUTO_HIDE_OFFLINE_WORKSPACES, PREF_HIDE_SUB_AGENT_SESSIONS, PREF_WORKSPACE_ORDER } from '../../lib/prefs.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
+import { SessionPreviewStore } from './session-preview-store.js'
 
 const executor: AttachedExecutor = {
   executorId: 'ex-1',
@@ -40,6 +41,15 @@ const sessionSummary: SessionSummary = {
 }
 
 describe('Explorer', () => {
+  it('starts an unscoped draft from the top-left New chat button', () => {
+    const onNewSession = vi.fn()
+    render(<Explorer executors={[executor]} sessions={[sessionSummary]} selectedSessionId={sessionSummary.sessionId}
+      onSelect={() => {}} onNewSession={onNewSession} onConnectWorkspace={() => {}} onDelete={() => {}} onRename={() => {}} />)
+    fireEvent.click(screen.getByTestId('explorer-new-chat'))
+    expect(onNewSession).toHaveBeenCalledTimes(1)
+    expect(onNewSession).toHaveBeenCalledWith()
+  })
+
   beforeEach(() => {
     localStorage.clear()
     Object.defineProperty(window, 'matchMedia', {
@@ -91,8 +101,7 @@ describe('Explorer', () => {
         onRename={() => {}}
       />,
     )
-    expect(screen.getByText(/no daemons attached/i)).toBeTruthy()
-    expect(screen.getByText(/pnpm executor:dev/i)).toBeTruthy()
+    expect(screen.getByText('Your conversations will appear here.')).toBeTruthy()
   })
 
   it('hides offline workspaces by default and reveals them when the preference is disabled', () => {
@@ -556,12 +565,31 @@ describe('Explorer', () => {
     expect(wsRow.getAttribute('data-workspace-id')).toBe('unassigned')
     expect(wsRow.textContent).toContain('Chats')
     expect(screen.getByTestId('chats-icon')).toBeTruthy()
-    expect(screen.getByTestId('chat-session-icon')).toBeTruthy()
+    expect(screen.queryByTestId('chat-session-icon')).toBeNull()
+    expect(screen.getByTestId('session-status-indicator')).toBeTruthy()
     expect(wsRow.textContent).toContain('personal conversations')
     expect(wsRow.textContent).not.toContain('no workspace')
     expect(screen.getByTestId('session-row').textContent).toContain(
       'orphan chat',
     )
+  })
+
+  it('pins Chats ahead of saved workspace order and preserves fork controls, status rails, and icons', () => {
+    localStorage.setItem(PREF_WORKSPACE_ORDER, JSON.stringify(['ws-2', 'ws-1']))
+    localStorage.setItem(PREF_HIDE_SUB_AGENT_SESSIONS, 'false')
+    const chat = { ...sessionSummary, sessionId: 'chat', workspaceId: undefined, workspaceName: undefined }
+    render(<Explorer executors={[executor, { ...executor, executorId: 'ex-2', workspaceId: 'ws-2' }]}
+      sessions={[chat, { ...chat, sessionId: 'fork', parentSessionId: 'chat' }]} selectedSessionId={null}
+      onSelect={() => {}} onNewSession={() => {}} onConnectWorkspace={() => {}} onDelete={() => {}} onRename={() => {}} />)
+    expect(screen.getAllByTestId('workspace-row').map((node) => node.getAttribute('data-workspace-id'))).toEqual(['unassigned', 'ws-2', 'ws-1'])
+    expect(screen.getByTestId('chats-icon')).toBeTruthy()
+    expect(screen.queryByTestId('chat-session-icon')).toBeNull()
+    fireEvent.click(screen.getByTestId('session-children-toggle'))
+    expect(screen.getByLabelText('forked session')).toBeTruthy()
+    expect(screen.getAllByTestId('session-status-indicator')).toHaveLength(2)
+    const [parent, child] = screen.getAllByTestId('session-row')
+    expect(parent?.children[0]?.className).toBe(child?.children[0]?.className)
+    expect(parent?.children[1]?.className).toBe(child?.children[1]?.className)
   })
 
   it('reports the clicked sessionId to onSelect', () => {
@@ -1083,6 +1111,122 @@ describe('Explorer', () => {
 
     fireEvent.change(screen.getByTestId('explorer-search'), { target: { value: 'does-not-exist' } })
     expect(screen.getByTestId('explorer-filter-empty').textContent).toContain('does-not-exist')
+  })
+
+  describe('hover dismissal lifecycle', () => {
+    const second = { ...sessionSummary, sessionId: 'second-hover', firstUserMessage: 'second request' }
+    const props = {
+      executors: [executor], sessions: [sessionSummary, second], selectedSessionId: null,
+      onSelect: vi.fn(), onNewSession: vi.fn(), onConnectWorkspace: vi.fn(),
+      onDelete: vi.fn(), onRename: vi.fn(), getCachedSessionView: cachedSessionView,
+    }
+    const row = (id = sessionSummary.sessionId) => screen.getAllByTestId('session-row').find((element) => element.dataset.sessionId === id)!
+    const advance = async (ms = 100) => act(async () => { vi.advanceTimersByTime(ms) })
+    const enter = async (id = sessionSummary.sessionId) => {
+      fireEvent.pointerEnter(row(id), { pointerType: 'mouse' })
+      await advance(50)
+      expect(screen.getByTestId('session-hover-preview')).toBeTruthy()
+    }
+    const leave = () => fireEvent.pointerLeave(row(), { relatedTarget: document.body })
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => { cleanup(); vi.useRealTimers() })
+
+    it('dismisses after leaving a row and cancels that close on quick reentry', async () => {
+      render(<Explorer {...props} />)
+      await enter()
+      leave()
+      await advance(40)
+      fireEvent.pointerEnter(row(), { pointerType: 'mouse' })
+      await advance()
+      expect(screen.getByTestId('session-hover-preview')).toBeTruthy()
+      leave()
+      await advance()
+      expect(screen.queryByTestId('session-hover-preview')).toBeNull()
+    })
+
+    it('allows crossing into and interacting with the preview, then dismisses on leaving it', async () => {
+      render(<Explorer {...props} />)
+      await enter()
+      leave()
+      await advance(40)
+      fireEvent.pointerEnter(screen.getByTestId('session-hover-preview'))
+      await advance()
+      fireEvent.scroll(screen.getByTestId('session-hover-preview-summary'))
+      fireEvent.click(screen.getByTestId('session-hover-preview-summary'))
+      expect(screen.getByTestId('session-hover-preview')).toBeTruthy()
+      fireEvent.pointerLeave(screen.getByTestId('session-hover-preview'), { relatedTarget: document.body })
+      await advance()
+      expect(screen.queryByTestId('session-hover-preview')).toBeNull()
+    })
+
+    it('does not inherit a portal hover flag or stale close when switching rows', async () => {
+      render(<Explorer {...props} />)
+      await enter()
+      fireEvent.pointerEnter(screen.getByTestId('session-hover-preview'))
+      // A removed/repositioned portal need not deliver a corresponding leave.
+      await enter(second.sessionId)
+      fireEvent.pointerLeave(row(), { relatedTarget: document.body })
+      await advance()
+      expect(screen.getByTestId('session-hover-preview')).toBeTruthy()
+      fireEvent.pointerLeave(row(second.sessionId), { relatedTarget: document.body })
+      await advance()
+      expect(screen.queryByTestId('session-hover-preview')).toBeNull()
+    })
+
+    it('recovers a missing native row leave from the document pointer target', async () => {
+      render(<Explorer {...props} />)
+      await enter()
+      fireEvent.pointerMove(document.body)
+      await advance()
+      expect(screen.queryByTestId('session-hover-preview')).toBeNull()
+    })
+
+    it('dismisses when the hovered session is removed from the tree without pointerleave', async () => {
+      const result = render(<Explorer {...props} />)
+      await enter()
+      result.rerender(<Explorer {...props} sessions={[second]} />)
+      await advance()
+      expect(screen.queryByTestId('session-hover-preview')).toBeNull()
+    })
+
+    it.each(['blur', 'resize', 'scroll', 'pointercancel', 'window-exit', 'hidden'])('cleans preview watches on %s', async (reason) => {
+      const store = new SessionPreviewStore()
+      store.set({ sessionId: sessionSummary.sessionId, view: cachedSessionView(sessionSummary.sessionId), freshness: 'cached', streamingText: '', updatedAt: 0 })
+      const release = vi.fn()
+      const watch = vi.spyOn(store, 'watch').mockReturnValue(release)
+      render(<Explorer {...props} previewStore={store} />)
+      await enter()
+      expect(watch).toHaveBeenCalledTimes(1)
+      fireEvent.pointerEnter(screen.getByTestId('session-hover-preview'))
+      if (reason === 'hidden') {
+        const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+        fireEvent(document, new Event('visibilitychange'))
+        visibility.mockRestore()
+      } else if (reason === 'window-exit') {
+        fireEvent(document.body, new MouseEvent('pointerout', { bubbles: true, relatedTarget: null }))
+      } else if (reason === 'pointercancel') {
+        fireEvent.pointerCancel(document.body)
+      } else {
+        fireEvent(window, new Event(reason))
+      }
+      await advance()
+      expect(screen.queryByTestId('session-hover-preview')).toBeNull()
+      expect(release).toHaveBeenCalledTimes(1)
+    })
+
+    it('releases watches and pending close timers on unmount', async () => {
+      const store = new SessionPreviewStore()
+      store.set({ sessionId: sessionSummary.sessionId, view: cachedSessionView(sessionSummary.sessionId), freshness: 'cached', streamingText: '', updatedAt: 0 })
+      const release = vi.fn()
+      vi.spyOn(store, 'watch').mockReturnValue(release)
+      const result = render(<Explorer {...props} previewStore={store} />)
+      await enter()
+      leave()
+      result.unmount()
+      expect(release).toHaveBeenCalledTimes(1)
+      await advance()
+      expect(screen.queryByTestId('session-hover-preview')).toBeNull()
+    })
   })
 
   it('shows a cached lightweight preview when hovering a loaded session on desktop', async () => {

@@ -1,0 +1,23 @@
+[package]
+name = "agent-runlab-desktop"
+version = "0.2.0-rc.7"
+description = "Linux desktop client for an existing Agent RunLab Dashboard"
+authors = ["Agent RunLab contributors"]
+license = "MIT"
+repository = "https://github.com/xingsy97/akernel"
+edition = "2021"
+rust-version = "1.93"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.5", features = ["tray-icon"] }
+gtk = "=0.18.2"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

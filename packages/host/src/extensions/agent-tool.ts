@@ -291,9 +291,18 @@ export async function runAgentTool(
     last: { cursor: initialState.cursor, status: initialState.status },
     lastActivityAt: startedAtMs,
   }
-  const timeoutHandle = setInterval(() => {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  const scheduleTimeoutMonitor = (): void => {
+    timeoutHandle = setTimeout(monitorTimeout, 1_000)
+    timeoutHandle.unref?.()
+  }
+  const monitorTimeout = (): void => {
     const state = deps.store.get(child.sessionId)?.state
-    if (!state || active.cancelled || state.status === 'done' || state.status === 'error') return
+    if (active.cancelled || state?.status === 'done' || state?.status === 'error') return
+    if (!state) {
+      scheduleTimeoutMonitor()
+      return
+    }
     const evaluated = evaluateSubAgentTimeout({
       now: Date.now(),
       startedAt: startedAtMs,
@@ -311,7 +320,10 @@ export async function runAgentTool(
       maxTurns: policy.maxTurns,
     })
     timeoutMonitor = evaluated.monitor
-    if (evaluated.action !== 'cancel' || timedOut) return
+    if (evaluated.action !== 'cancel' || timedOut) {
+      scheduleTimeoutMonitor()
+      return
+    }
     timedOut = true
     timeoutReason = evaluated.reason
     void interruptSubAgent(
@@ -322,8 +334,8 @@ export async function runAgentTool(
       child.sessionId,
       `sub-agent ${timeoutReason ?? 'timeout'} exceeded; absoluteTimeoutMs=${policy.timeoutMs}; idleTimeoutMs=${policy.idleTimeoutMs}; toolIdleTimeoutMs=${policy.toolIdleTimeoutMs}; gracePeriodMs=${policy.gracePeriodMs}`,
     )
-  }, 1_000)
-  timeoutHandle.unref?.()
+  }
+  scheduleTimeoutMonitor()
   let dispatchError: string | undefined
   try {
     try {
@@ -344,7 +356,7 @@ export async function runAgentTool(
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err)
     } finally {
-      clearInterval(timeoutHandle)
+      if (timeoutHandle) clearTimeout(timeoutHandle)
       if (model && isSettableModelResolver(deps.models)) {
         if (priorModel) deps.models.set(child.sessionId, priorModel)
         else deps.models.delete(child.sessionId)

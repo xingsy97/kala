@@ -6,6 +6,9 @@ import { Button } from '../components/ui/button.js'
 import { cn } from '../lib/utils.js'
 import type { AccountProfile } from '../auth-session.js'
 import type { AppSection } from './section.js'
+import { isDesktopClient } from '../lib/desktop.js'
+import { DesktopDownloadDialog } from './DesktopDownloadDialog.js'
+import { DesktopUpdateEntry } from './DesktopUpdate.js'
 
 type NavItem = {
   id: AppSection
@@ -110,25 +113,13 @@ export function AppShellNav({
         aria-label="Agent Kernel"
         className="group mr-4 hidden items-center gap-2.5 text-foreground sm:flex"
       >
-        <svg
-          viewBox="0 0 24 24"
+        <img
+          src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
+          alt=""
           className="h-5 w-5 text-foreground/90 transition-transform duration-200 ease-out group-hover:rotate-[2deg] group-hover:scale-[1.04] motion-reduce:transition-none"
-          fill="none"
           aria-hidden
-        >
-          <path
-            d="M12 3.75v16.5M3.75 12h16.5M6.15 6.15l11.7 11.7M17.85 6.15l-11.7 11.7"
-            className="stroke-foreground/25 transition-opacity duration-200 group-hover:opacity-80"
-            strokeWidth="1.1"
-            strokeLinecap="round"
-          />
-          <circle cx="12" cy="12" r="2.8" className="fill-foreground" />
-          <circle cx="12" cy="3.75" r="1.35" className="fill-foreground/70" />
-          <circle cx="20.25" cy="12" r="1.35" className="fill-foreground/70" />
-          <circle cx="12" cy="20.25" r="1.35" className="fill-foreground/70" />
-          <circle cx="3.75" cy="12" r="1.35" className="fill-foreground/70" />
-        </svg>
-          <span className="text-[13px] font-semibold tracking-[-0.025em] text-foreground/90">
+        />
+          <span className="text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">
           Agent Kernel
         </span>
       </span>
@@ -173,6 +164,7 @@ export function AppShellNav({
         })}
       </div>
       <span className="ml-auto flex flex-none items-center gap-1">
+        {!isDesktopClient() ? <DesktopDownloadDialog /> : <DesktopUpdateEntry />}
         {evaluationUrl ? (
           <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-muted-foreground hover:text-foreground">
             <a href={evaluationUrl} target="_blank" rel="noreferrer" data-testid="app-shell-open-evaluation" title={t('appShell.nav.evaluation')} aria-label={t('appShell.nav.evaluation')}><ExternalLink className="h-4 w-4" aria-hidden /></a>
@@ -220,7 +212,7 @@ function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin }
   return (
     <details ref={detailsRef} className="relative" data-testid="account-menu">
       <summary className="flex h-8 min-w-8 cursor-pointer list-none items-center justify-center gap-2 rounded-md px-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden" aria-label={account ? t('appShell.account.trigger', { name: account.displayName }) : t('appShell.account.loading')} data-testid="account-menu-trigger">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-3.5 w-3.5" aria-hidden />}</span>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-3.5 w-3.5" aria-hidden />}</span>
         {account ? <span className="hidden max-w-32 truncate lg:inline">{account.displayName}</span> : null}
       </summary>
       <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl" role="menu">
@@ -229,7 +221,7 @@ function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin }
           <a href="#/docs" role="menuitem" onClick={close} className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent"><CircleHelp className="h-4 w-4" aria-hidden />{t('appShell.account.help')}</a>
           <button type="button" role="menuitem" onClick={() => { close(); onOpenAccount?.() }} data-testid="account-details" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><UserRound className="h-4 w-4" aria-hidden />{t('appShell.account.details')}</button>
           {onOpenAdmin ? <button type="button" role="menuitem" onClick={() => { close(); onOpenAdmin() }} data-testid="organization-admin" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><SettingsIcon className="h-4 w-4" aria-hidden />{t('appShell.account.administration')}</button> : null}
-          <div className="px-3 py-2 text-[11px] text-muted-foreground">Agent RunLab · {t('appShell.account.routing')}</div>
+          <div className="px-3 py-2 text-[0.6875rem] text-muted-foreground">Agent RunLab · {t('appShell.account.routing')}</div>
           <form method="post" action="/auth/logout" onSubmit={prepareNativeSignOut}>
             <button type="submit" role="menuitem" data-testid="account-sign-out" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10"><LogOut className="h-4 w-4" aria-hidden />{t('appShell.account.signOut')}</button>
           </form>

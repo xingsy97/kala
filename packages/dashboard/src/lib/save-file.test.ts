@@ -24,9 +24,17 @@ describe('saveFile', () => {
   })
 
   it('falls back to a browser download when unsupported', async () => {
+    vi.useFakeTimers()
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     await expect(saveFile({ suggestedName: 'a.txt', blob: new Blob(['a']) })).resolves.toBe('downloaded')
     expect(click).toHaveBeenCalledOnce()
+    const anchor = document.querySelector('a[download="a.txt"]')
+    expect(anchor?.getAttribute('href')).toBe('blob:test')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(60_000)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test')
+    expect(document.querySelector('a[download="a.txt"]')).toBeNull()
+    vi.useRealTimers()
   })
 
   it('falls back to a browser download when the picker fails', async () => {

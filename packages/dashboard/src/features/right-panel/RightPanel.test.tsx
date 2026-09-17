@@ -10,8 +10,9 @@ describe('RightPanel', () => {
     const { rerender } = render(<RightPanel activeTab="inspector" onTabChange={onTabChange} onCollapse={onCollapse} files={<div>files body</div>} git={<div>git body</div>} inspector={<div>inspector body</div>} terminal={<div>terminal body</div>} />)
 
     const tablist = screen.getByRole('tablist', { name: 'Workspace tools' })
-    expect(tablist.className).toContain('bg-card/70')
-    expect(tablist.className).toContain('overflow-hidden')
+    expect(tablist.parentElement?.className).toContain('bg-card/70')
+    expect(tablist.parentElement?.className).toContain('overflow-hidden')
+    expect(tablist.contains(screen.getByTestId('right-panel-collapse'))).toBe(false)
     expect(screen.getByTestId('right-panel-tabs').className).toContain('min-w-0')
     const inspectorTab = screen.getByTestId('right-panel-inspector-tab')
     expect(inspectorTab.getAttribute('aria-selected')).toBe('true')

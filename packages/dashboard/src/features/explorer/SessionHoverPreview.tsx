@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, CheckCircle2, CircleDot, Layers3, Loader2, MessageSquareText, Wrench, XCircle } from 'lucide-react'
 
@@ -15,13 +15,14 @@ export type SessionPreviewAnchor = {
 
 type Props = {
   anchor: SessionPreviewAnchor | null
+  previewRef?: Ref<HTMLDivElement>
   previewStore?: SessionPreviewStore
   getCachedSessionView?: (sessionId: string) => CachedSessionView | null
   subscribeCachedSessionView?: (sessionId: string, listener: () => void) => () => void
   onHoverChange(hovering: boolean): void
 }
 
-export function SessionHoverPreview({ anchor, previewStore, getCachedSessionView, subscribeCachedSessionView, onHoverChange }: Props): JSX.Element | null {
+export function SessionHoverPreview({ anchor, previewRef, previewStore, getCachedSessionView, subscribeCachedSessionView, onHoverChange }: Props): JSX.Element | null {
   const [ready, setReady] = useState(false)
   const timerRef = useRef<number | null>(null)
 
@@ -67,6 +68,7 @@ export function SessionHoverPreview({ anchor, previewStore, getCachedSessionView
   const position = previewPosition(anchor.rect)
   return createPortal(
     <div
+      ref={previewRef}
       className={cn(
         'fixed z-50 flex max-h-[min(32rem,calc(100vh-2rem))] min-h-0 w-[min(30rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border/70 bg-popover text-popover-foreground shadow-2xl',
         'ring-1 ring-black/5 dark:ring-white/10',
@@ -80,7 +82,7 @@ export function SessionHoverPreview({ anchor, previewStore, getCachedSessionView
     >
       <div className="flex h-11 flex-none items-center justify-between gap-3 border-b border-border/60 bg-muted/25 px-3.5">
         <div className="min-w-0 truncate text-xs font-semibold" title={anchor.label}>{anchor.label}</div>
-        <div className="flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-2 text-[0.625rem] text-muted-foreground">
           <span className={cn('h-1.5 w-1.5 flex-none rounded-full', snapshot?.freshness === 'live' ? 'bg-emerald-500' : snapshot?.freshness === 'stale' ? 'bg-amber-500' : 'bg-slate-400')} aria-hidden="true" />
           <span className="sr-only" data-testid="session-hover-preview-freshness">{snapshot?.freshness ?? 'cached'}</span>
           <span className="max-w-32 truncate" title={cached.selectedModel ?? undefined}>{shortModel(cached.selectedModel)}</span>
@@ -113,7 +115,7 @@ function ActivitySummary({ activity }: { activity: SessionPreviewSummary['activi
     )} data-testid="session-preview-activity">
       <Icon className={cn('mt-0.5 h-4 w-4 flex-none', activity.tone === 'active' && 'animate-spin')} aria-hidden="true" />
       <div className="min-w-0">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{activity.label}</div>
+        <div className="text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{activity.label}</div>
         <div className="mt-0.5 text-xs leading-5 text-foreground/90">{activity.text}</div>
       </div>
     </div>
@@ -123,7 +125,7 @@ function ActivitySummary({ activity }: { activity: SessionPreviewSummary['activi
 function SummarySection({ icon, label, text, testId }: { icon: JSX.Element; label: string; text: string; testId: string }): JSX.Element {
   return (
     <section className="min-w-0" data-testid={testId}>
-      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{icon}{label}</div>
+      <div className="mb-1 flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{icon}{label}</div>
       <p className="m-0 line-clamp-3 break-words text-xs leading-5 text-foreground/85 [overflow-wrap:anywhere]">{text}</p>
     </section>
   )
@@ -138,7 +140,7 @@ function ActivityStats({ stats }: { stats: SessionPreviewSummary['stats'] }): JS
   ].filter(Boolean) as Array<{ icon: JSX.Element; text: string; danger?: boolean }>
   if (values.length === 0) return null
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/50 pt-2.5 text-[10px] text-muted-foreground" data-testid="session-preview-stats">
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/50 pt-2.5 text-[0.625rem] text-muted-foreground" data-testid="session-preview-stats">
       {values.map((value) => <span key={value.text} className={cn('inline-flex items-center gap-1', value.danger && 'text-rose-600 dark:text-rose-300')}>{value.icon}{value.text}</span>)}
     </div>
   )

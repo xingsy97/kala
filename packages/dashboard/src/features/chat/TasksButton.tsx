@@ -93,7 +93,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
           <div className="flex flex-none items-center gap-2 border-b border-border/50 px-3 py-2 text-xs">
             <ListChecks className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <span className="font-medium text-foreground">{t('tasks.label')}</span>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-[0.6875rem] text-muted-foreground">
               {t('tasks.done', { done, total })}
             </span>
           </div>
@@ -117,7 +117,7 @@ function TaskRow({ todo }: { todo: TaskItem }): JSX.Element {
   const strike = todo.status === 'completed' || todo.status === 'cancelled'
   return (
     <li
-      className="flex items-start gap-2 rounded px-2 py-1.5 text-[13px]"
+      className="flex items-start gap-2 rounded px-2 py-1.5 text-[0.8125rem]"
       data-testid="tasks-popover-item"
       data-status={todo.status}
     >

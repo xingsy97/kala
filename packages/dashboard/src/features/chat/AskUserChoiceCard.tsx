@@ -75,7 +75,7 @@ export function AskUserChoiceCard({ requests, onChoose }: Props): JSX.Element | 
           {t('chat.askUser.required')}
         </span>
         {requests.length > 1 ? (
-          <span className="ml-1 rounded-full bg-sky-200/60 px-2 py-0.5 text-[10px] font-medium tabular-nums text-sky-900 dark:bg-sky-500/20 dark:text-sky-100">
+          <span className="ml-1 rounded-full bg-sky-200/60 px-2 py-0.5 text-[0.625rem] font-medium tabular-nums text-sky-900 dark:bg-sky-500/20 dark:text-sky-100">
             {t('chat.askUser.index', { current: current + 1, total: requests.length })}
           </span>
         ) : null}

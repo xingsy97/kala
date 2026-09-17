@@ -45,6 +45,14 @@ export type PendingUserTranscriptMessage = {
 
 const EMPTY_TIMELINE: readonly TimelineEntry[] = []
 
+export type StreamedDraftAnchor = { afterSeq: number; messageCount: number }
+export type RetainedStreamedDraft = StreamedDraftAnchor & { text: string }
+export type TranscriptStreamOptions = {
+  streamingActive?: boolean
+  streamingAnchor?: StreamedDraftAnchor | null
+  retainedDrafts?: readonly RetainedStreamedDraft[]
+}
+
 export function transcriptTimelineForRuntime(
   agentRuntime: AgentRuntimeId,
   timeline: readonly TimelineEntry[],
@@ -133,10 +141,10 @@ export function visibleTranscript(
   streamingText: string,
   pendingUserMessages: readonly PendingUserTranscriptMessage[] = [],
   queuedMessages: readonly QueuedMessagePreview[] = [],
-  options: { includeStatePrefix?: boolean } = {},
+  options: { includeStatePrefix?: boolean } & TranscriptStreamOptions = {},
 ): readonly TranscriptItem[] {
   const base = transcriptBaseItems(stateMessages, timeline, options)
-  return appendLiveTranscriptItems(base, stateMessages, timeline, streamingText, pendingUserMessages, queuedMessages)
+  return appendLiveTranscriptItems(base, stateMessages, timeline, streamingText, pendingUserMessages, queuedMessages, options)
 }
 
 /**
@@ -154,6 +162,7 @@ export function transcriptBaseItems(
   timeline: readonly TimelineEntry[],
   options: { includeStatePrefix?: boolean } = {},
 ): readonly TranscriptItem[] {
+  if (timeline.length === 0) return stateTranscriptItems(stateMessages)
   const out: TranscriptItem[] = options.includeStatePrefix
     ? inheritedStatePrefix(stateMessages, timeline).map((message) => ({ kind: 'message' as const, message }))
     : []
@@ -213,6 +222,7 @@ export function appendTranscriptBaseItems(
   previousTimeline: readonly TimelineEntry[],
   timeline: readonly TimelineEntry[],
 ): readonly TranscriptItem[] | null {
+  if (previousTimeline.length === 0 && previousItems.length > 0 && timeline.length > 0) return null
   if (timeline.length < previousTimeline.length) return null
   for (let index = 0; index < previousTimeline.length; index++) {
     const previous = previousTimeline[index]
@@ -237,19 +247,43 @@ export function appendLiveTranscriptItems(
   streamingText: string,
   pendingUserMessages: readonly PendingUserTranscriptMessage[] = [],
   queuedMessages: readonly QueuedMessagePreview[] = [],
+  options: TranscriptStreamOptions = {},
 ): readonly TranscriptItem[] {
-  const hasLiveTail = streamingText.length > 0 || pendingUserMessages.length > 0 || queuedMessages.length > 0
-  const out: TranscriptItem[] = hasLiveTail ? [...base] : (base as TranscriptItem[])
+  // Runtime-backed sessions use state messages, not a kernel event timeline.
+  // Their authoritative transcript must remain visible even with a live tail.
+  const source = timeline.length === 0 && base.length === 0 ? stateTranscriptItems(stateMessages) : base
+  const hasLiveTail = streamingText.length > 0 || pendingUserMessages.length > 0 || queuedMessages.length > 0 || (options.retainedDrafts?.length ?? 0) > 0
+  const out: TranscriptItem[] = hasLiveTail ? [...source] : (source as TranscriptItem[])
 
-  const baseTail = base.at(-1)
+  const appendDraft = (draft: RetainedStreamedDraft, streaming: boolean): void => {
+    const following = timeline.length > 0
+      ? source.filter((item) => item.kind === 'message' && item.seq !== undefined && item.seq > draft.afterSeq)
+      : stateMessages.slice(draft.messageCount).map((message) => ({ kind: 'message' as const, message }))
+    // Only the first response at this anchor can replace this draft. A later
+    // tool iteration or user turn must not swallow earlier unpersisted prose.
+    const response = following.find((item) => item.kind === 'message' && (item.message.role === 'assistant' || item.message.role === 'user'))
+    if (response?.kind === 'message' && response.message.role === 'assistant' &&
+      response.message.content.some((content) => content.type === 'text' && content.text.length > 0)) return
+    const followingMessages = timeline.length === 0 ? new Set(stateMessages.slice(draft.messageCount)) : null
+    const next = timeline.length > 0
+      ? out.findIndex((item) => item.kind === 'message' && item.seq !== undefined && item.seq > draft.afterSeq)
+      : out.findIndex((item) => item.kind === 'message' && followingMessages!.has(item.message))
+    out.splice(next < 0 ? out.length : next, 0, {
+      kind: 'message', streaming, message: { role: 'assistant', content: [{ type: 'text', text: draft.text }] },
+    })
+  }
+  for (const draft of options.retainedDrafts ?? []) appendDraft(draft, false)
+  const baseTail = source.at(-1)
   const authoritativeAssistantAtTail = baseTail?.kind === 'message' && baseTail.message.role === 'assistant'
   const authoritativeAssistantTextAtTail =
     authoritativeAssistantAtTail &&
     baseTail.message.content.some((content) => content.type === 'text' && content.text.length > 0)
-  if (streamingText.length > 0 && !authoritativeAssistantTextAtTail) {
+  if (streamingText.length > 0 && options.streamingAnchor) {
+    appendDraft({ ...options.streamingAnchor, text: streamingText }, options.streamingActive ?? true)
+  } else if (streamingText.length > 0 && !authoritativeAssistantTextAtTail) {
     out.push({
       kind: 'message',
-      streaming: true,
+      streaming: options.streamingActive ?? true,
       message: {
         role: 'assistant',
         content: [{ type: 'text', text: streamingText }],
@@ -286,14 +320,13 @@ export function appendLiveTranscriptItems(
     })
   })
 
-  if (timeline.length > 0 || streamingText.length > 0 || pendingUserMessages.length > 0 || queuedMessages.length > 0) return out
+  return out
+}
+
+function stateTranscriptItems(stateMessages: readonly Message[]): TranscriptItem[] {
   return stateMessages.flatMap((message): TranscriptItem[] => {
     if (message.metadata?.kind === 'model_changed') {
-      return [{
-        kind: 'model_changed',
-        ...(message.metadata.from ? { from: message.metadata.from } : {}),
-        to: message.metadata.to,
-      }]
+      return [{ kind: 'model_changed', ...(message.metadata.from ? { from: message.metadata.from } : {}), to: message.metadata.to }]
     }
     return message.role === 'system' ? [] : [{ kind: 'message', message }]
   })

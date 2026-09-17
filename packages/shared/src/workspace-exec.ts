@@ -36,6 +36,7 @@ export type WorkspaceReadBinaryRequest = {
   workspaceId: string
   path: string
   cwd?: string
+  offset?: number
   maxBytes?: number
 }
 
@@ -49,6 +50,7 @@ export type WorkspaceReadBinaryResponse = {
   base64: string
   mime: string
   size: number
+  offset?: number
   truncated?: { maxBytes: number }
   error?: WorkspaceReadBinaryError
 }

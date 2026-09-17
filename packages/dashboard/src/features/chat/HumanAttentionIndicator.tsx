@@ -46,7 +46,7 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
       <button
         type="button"
         className={cn(
-          'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+          'flex flex-none items-center gap-1.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
           latest && levelTone(latest.level),
           open && 'bg-accent text-foreground',
           isSimple ? 'h-9 min-w-9 rounded-full px-2' : 'h-8 rounded px-1.5',
@@ -61,7 +61,7 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
         <Activity className="h-4 w-4 flex-none" aria-hidden="true" />
         {isSimple ? null : (
           <span className={cn(
-            'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
+            'flex-none whitespace-nowrap font-mono text-[0.625rem] leading-none text-foreground',
             latest && (latest.level === 'engaged' || latest.level === 'watching') && 'hidden sm:inline',
           )}>
             {scoreText}
@@ -180,7 +180,7 @@ function AttentionChart({ timeline }: { timeline: HumanAttentionTimeline }): JSX
           return <circle key={point.messageCursor} cx={roundCoord(x)} cy={roundCoord(y)} r="2.2" className={scoreFill(point.level)} />
         })}
       </svg>
-      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+      <div className="mt-1 flex justify-between text-[0.625rem] text-muted-foreground">
         <span>{minCursor}</span>
         <span>{t('humanAttention.messageCursor')}</span>
         <span>{maxCursor}</span>
@@ -196,7 +196,7 @@ function DimensionBar({ label, value, reverse }: { label: string; value: number;
       <div className="h-1.5 overflow-hidden rounded-full bg-muted">
         <div className={cn('h-full rounded-full', reverse ? riskBarTone(value) : qualityBarTone(value))} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
       </div>
-      <span className="text-right font-mono text-[11px] text-foreground">{value}</span>
+      <span className="text-right font-mono text-[0.6875rem] text-foreground">{value}</span>
     </div>
   )
 }

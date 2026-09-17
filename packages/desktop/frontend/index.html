@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent RunLab — Connect</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <h1>Agent RunLab</h1>
+    <form id="connect">
+      <label for="endpoint">Dashboard origin</label>
+      <input id="endpoint" type="url" required placeholder="https://runlab.example.org" value="http://127.0.0.1:13000" autocomplete="url" spellcheck="false" autofocus aria-describedby="status" />
+      <button id="submit" type="submit">Connect</button>
+      <p id="status" role="status" aria-live="polite"></p>
+    </form>
+    <details>
+      <summary>Help and shortcuts</summary>
+      <p>Remote servers require HTTPS. HTTP is accepted only on loopback. Do not include passwords, tokens, paths or query parameters.</p>
+      <p>The same React Dashboard, account sign-in, sessions and Runtime run on your existing Host. This app does not start a backend or open a port.</p>
+      <p>After a successful Dashboard connection, the server address is remembered and reused when you next open the app. Use Change server in the tray to edit it. A failed attempt does not replace your last successful server.</p>
+      <p>Workspace paths and terminals belong to the remote Runtime. Upload dialogs select files on this desktop. Your browser cookies are not imported.</p>
+      <p>Press <kbd>Ctrl+Shift+O</kbd> to reconnect, <kbd>Ctrl+R</kbd> to reload the Dashboard, or <kbd>Ctrl+Q</kbd> to quit. Closing or minimizing a window hides the app in a supported system tray; click its icon to return. If no tray host exists, closing quits and minimizing uses the normal taskbar. If tray confirmation stops responding, the window stays reachable instead of silently exiting. Tray Quit always exits. If the tray disappears, the app returns visibly. External identity-provider redirects require HTTPS.</p>
+      <p>Client package updates use your system package manager. A downloaded standalone .deb does not configure automatic updates.</p>
+    </details>
+  </main>
+  <script src="launcher.js"></script>
+</body>
+</html>
