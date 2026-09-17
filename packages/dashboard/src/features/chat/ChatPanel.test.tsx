@@ -60,6 +60,34 @@ describe('ChatPanel', () => {
     expect(document.querySelector('img[src="/tmp/activity-card.png"]')).toBeNull()
   })
 
+  it('uses the shared markdown typography layer for mixed markdown blocks', () => {
+    const { container } = render(<AssistantMarkdown text={[
+      'Paragraph text.',
+      '',
+      '1. First numbered item.',
+      '2. Second numbered item with `inline code`.',
+      '',
+      '- Bullet item.',
+      '',
+      '> Quoted text.',
+      '',
+      '| Name | Value |',
+      '| --- | --- |',
+      '| Alpha | 1 |',
+    ].join('\n')} />)
+
+    const bodies = Array.from(container.querySelectorAll('.ak-markdown-body'))
+    const orderedList = container.querySelector('ol')
+    const unorderedList = container.querySelector('ul')
+    expect(bodies.length).toBeGreaterThan(0)
+    expect(bodies.some((body) => body.className.includes('[&_ol]:list-decimal'))).toBe(true)
+    expect(bodies.some((body) => body.className.includes('[&_ul]:list-disc'))).toBe(true)
+    expect(orderedList).toBeTruthy()
+    expect(unorderedList).toBeTruthy()
+    expect(orderedList?.querySelector('li')?.textContent).toContain('First numbered item')
+    expect(container.querySelector('table')?.textContent).toContain('Alpha')
+  })
+
   it('renders empty state', () => {
     render(<ChatPanel messages={[]} />)
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()

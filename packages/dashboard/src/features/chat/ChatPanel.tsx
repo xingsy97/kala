@@ -2209,7 +2209,7 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
   return (
     <div
       className={cn(
-        'ak-chat-text min-w-0 max-w-full overflow-hidden break-words text-foreground [overflow-wrap:anywhere]',
+        'ak-markdown-body ak-chat-text min-w-0 max-w-full overflow-hidden break-words text-foreground [overflow-wrap:anywhere]',
         streaming && 'ak-streaming-markdown',
         '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',

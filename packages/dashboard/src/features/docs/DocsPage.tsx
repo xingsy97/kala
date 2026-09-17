@@ -294,7 +294,7 @@ function DocsMarkdown({ body }: { body: string }): JSX.Element {
   return (
     <div
       className={cn(
-        'min-w-0 max-w-none break-words text-sm leading-7 text-foreground [overflow-wrap:anywhere]',
+        'ak-markdown-body min-w-0 max-w-none break-words text-sm leading-7 text-foreground [overflow-wrap:anywhere]',
         '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
         '[&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border/70 [&_blockquote]:bg-muted/30 [&_blockquote]:py-1 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground',
         '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_code]:text-foreground',

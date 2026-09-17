@@ -533,7 +533,7 @@ function PdfFileView({ viewer, chrome }: { viewer: Extract<FileViewState, { kind
 
 function MarkdownFileView({ content, fontSize }: { content: string; fontSize: number }): JSX.Element {
   return (
-    <div className="ak-reader-surface h-full min-h-0 overflow-auto bg-background px-4 py-4 leading-[1.65] sm:px-6 sm:py-5" style={{ fontSize }} data-testid="session-file-markdown-preview">
+    <div className="ak-markdown-body ak-reader-surface h-full min-h-0 overflow-auto bg-background px-4 py-4 leading-[1.65] sm:px-6 sm:py-5" style={{ fontSize }} data-testid="session-file-markdown-preview">
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{
         h1: ({ children }) => <h1 className="mb-3 mt-0 text-xl font-semibold leading-tight sm:text-2xl">{children}</h1>,
         h2: ({ children }) => <h2 className="mb-2 mt-5 text-lg font-semibold leading-tight sm:text-xl">{children}</h2>,
@@ -547,7 +547,7 @@ function MarkdownFileView({ content, fontSize }: { content: string; fontSize: nu
         code: ({ className, children }) => <code className={cn('rounded-md border border-border/45 bg-muted/55 px-1 py-0.5 font-mono text-[0.9em] text-foreground', className)}>{children}</code>,
         pre: ({ children }) => <MarkdownPre>{children}</MarkdownPre>,
         blockquote: ({ children }) => <blockquote className="my-3 rounded-r-xl border-l-2 border-primary/45 bg-muted/30 px-3 py-1 text-muted-foreground">{children}</blockquote>,
-        table: ({ children }) => <div className="my-3 overflow-auto rounded-xl border border-border/55"><table className="w-full border-collapse text-left text-xs">{children}</table></div>,
+        table: ({ children }) => <div className="my-3 overflow-auto rounded-xl border border-border/55"><table className="w-full border-collapse text-left">{children}</table></div>,
         th: ({ children }) => <th className="border-b border-r border-border/45 bg-muted/55 px-2 py-1 font-semibold">{children}</th>,
         td: ({ children }) => <td className="border border-border px-2 py-1 align-top">{children}</td>,
       }}>

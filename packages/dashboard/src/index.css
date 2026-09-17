@@ -798,6 +798,29 @@ body {
 .ak-reader-surface :where(code):not(.ak-code-snippet code) {
   box-decoration-break: clone;
 }
+.ak-markdown-body :where(p, ol, ul, li, blockquote, table, th, td) {
+  font-size: inherit;
+  line-height: inherit;
+}
+.ak-markdown-body :where(ol, ul) {
+  padding-left: 1.5em;
+}
+.ak-markdown-body :where(li)::marker {
+  color: hsl(var(--muted-foreground) / 0.82);
+  font-size: 1em;
+}
+.ak-markdown-body li > p:first-child {
+  margin-top: 0.25em;
+}
+.ak-markdown-body li > p:last-child {
+  margin-bottom: 0.25em;
+}
+.ak-markdown-body blockquote > p:first-child {
+  margin-top: 0;
+}
+.ak-markdown-body blockquote > p:last-child {
+  margin-bottom: 0;
+}
 .shiki-host .shiki,
 .shiki-host .shiki span,
 .shiki-host code span {

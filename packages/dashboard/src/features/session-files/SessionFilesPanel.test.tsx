@@ -369,15 +369,31 @@ describe('SessionFilesPanel', () => {
     expect(createObjectURLMock).not.toHaveBeenCalled()
   })
 
-  it('opens Markdown files in rendered preview mode by default and can switch to source', async () => {
-    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: '# Title\n\n- item', size: 15 } })
+  it('opens Markdown files in rendered preview mode with unified typography and can switch to source', async () => {
+    const markdown = [
+      '# Title',
+      '',
+      '1. Numbered item',
+      '2. Second numbered item',
+      '',
+      '- Bullet item',
+      '',
+      '| Name | Value |',
+      '| --- | --- |',
+      '| Alpha | 1 |',
+    ].join('\n')
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: markdown, size: markdown.length } })
 
     render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
 
     fireEvent.click(await screen.findByText('README.md'))
 
     const preview = await screen.findByTestId('session-file-markdown-preview')
+    expect(preview.className).toContain('ak-markdown-body')
     expect(preview.textContent).toContain('Title')
+    expect(preview.querySelector('ol')?.className).toContain('list-decimal')
+    expect(preview.querySelector('table')?.className).not.toContain('text-xs')
+    expect(preview.textContent).toContain('Alpha')
     expect(screen.queryByTestId('monaco-editor')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /show source/i }))

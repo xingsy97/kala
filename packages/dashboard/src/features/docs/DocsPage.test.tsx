@@ -98,7 +98,9 @@ describe('DocsPage', () => {
     expect(toggleAll.textContent ?? '').toContain('Collapse all')
     expect(screen.getByRole('table')).toBeTruthy()
     expect(screen.getByText('Phase')).toBeTruthy()
-    expect(screen.getByTestId('docs-markdown').textContent).toContain('compact({ force: true })')
+    const docsMarkdown = screen.getByTestId('docs-markdown')
+    expect(docsMarkdown.className).toContain('ak-markdown-body')
+    expect(docsMarkdown.textContent).toContain('compact({ force: true })')
     expect(screen.getByText('compact()')).toBeTruthy()
 
     fireEvent.change(screen.getByPlaceholderText('Search docs'), { target: { value: 'swe' } })
