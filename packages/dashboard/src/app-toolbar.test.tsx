@@ -100,6 +100,7 @@ describe('WorkbenchToolbar', () => {
     expect(screen.getByTestId('workbench-toolbar').className).not.toContain('flex-1')
     expect(screen.getByTestId('collapsed-brand').textContent).toBe('Agent RunLab')
     expect(screen.getByTestId('collapsed-actions').textContent).toBe('Actions')
+    expect(screen.getByTestId('session-title').className).toContain('text-zinc-100')
     expect(screen.getByTestId('session-label').textContent).toBe('Loaded session')
     expect(screen.getByTestId('collapsed-actions').compareDocumentPosition(screen.getByTestId('topbar-toggle')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
