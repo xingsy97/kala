@@ -22,7 +22,7 @@ export const VSCODE_THEME_CHANGE_EVENT = 'ak-vscode-theme-change'
 export const VSCODE_THEME_STORAGE_KEY = PREF_VSCODE_THEME
 
 const FALLBACK_DARK = '#111111'
-const FALLBACK_LIGHT = '#f5f7fb'
+const FALLBACK_LIGHT = '#f8f7f3'
 
 export const BUILTIN_VSCODE_THEMES: readonly StoredVSCodeTheme[] = [
   {
@@ -69,24 +69,24 @@ export const BUILTIN_VSCODE_THEMES: readonly StoredVSCodeTheme[] = [
       type: 'light',
       colors: {
         foreground: '#111827',
-        'editor.background': '#f5f7fb',
+        'editor.background': '#f8f7f3',
         'editor.foreground': '#111827',
-        'sideBar.background': '#eef2f7',
+        'sideBar.background': '#f1f0ea',
         'sideBar.foreground': '#111827',
-        'sideBar.border': '#cbd5e1',
+        'sideBar.border': '#d5d0c6',
         'sideBarTitle.foreground': '#0f172a',
-        'sideBarSectionHeader.background': '#e5eaf2',
+        'sideBarSectionHeader.background': '#ece9e2',
         'sideBarSectionHeader.foreground': '#0f172a',
         'panel.background': '#ffffff',
-        'panel.border': '#cbd5e1',
+        'panel.border': '#d5d0c6',
         'input.background': '#ffffff',
         'input.foreground': '#111827',
-        'input.border': '#cbd5e1',
+        'input.border': '#d5d0c6',
         'button.background': '#2563eb',
         'button.foreground': '#ffffff',
         'button.hoverBackground': '#1d4ed8',
-        'list.hoverBackground': '#e2e8f0',
-        'list.activeSelectionBackground': '#dbeafe',
+        'list.hoverBackground': '#ebe8e0',
+        'list.activeSelectionBackground': '#e8e4da',
         'list.activeSelectionForeground': '#111827',
         'badge.background': '#2563eb',
         'badge.foreground': '#ffffff',
