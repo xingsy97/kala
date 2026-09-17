@@ -40,7 +40,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
   const [copied, setCopied] = useState(false)
   const language = languageLabel(lang)
   const lineCount = useMemo(() => Math.max(1, code.split('\n').length), [code])
-  const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, index) => index + 1), [lineCount])
+  const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, index) => String(index + 1)).join('\n'), [lineCount])
 
   useEffect(() => {
     if (!lang || deferEnhancement) {
@@ -81,32 +81,30 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
       data-lang={lang ?? ''}
       data-testid="code-snippet"
     >
-      <figcaption className="ak-code-snippet-header flex items-center justify-between gap-3 border-b border-border/45 px-3 py-2">
+      <figcaption className="ak-code-snippet-header flex h-7 items-center justify-between gap-2 border-b border-border/40 px-2">
         <span className="inline-flex min-w-0 items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_0_3px_hsl(142_76%_36%/0.12)]" aria-hidden />
-          <span className="truncate font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground" data-testid="code-block-language">{language}</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_0_2px_hsl(142_76%_36%/0.10)]" aria-hidden />
+          <span className="truncate font-mono text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground" data-testid="code-block-language">{language}</span>
         </span>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="h-7 gap-1.5 bg-background/65 px-2 text-[0.6875rem] text-muted-foreground hover:text-foreground"
+          className="h-5 gap-1 bg-background/55 px-1.5 text-[0.625rem] text-muted-foreground shadow-none hover:text-foreground"
           onClick={copyCode}
           aria-label={t('codeBlock.copy')}
           data-testid="code-block-copy"
         >
-          {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+          {copied ? <Check className="h-3 w-3 text-emerald-500" aria-hidden /> : <Copy className="h-3 w-3" aria-hidden />}
           {copied ? t('codeBlock.copied') : t('codeBlock.copy')}
         </Button>
       </figcaption>
       <div className="ak-code-snippet-body grid overflow-x-auto">
-        <div className="ak-code-gutter select-none border-r border-border/35 px-3 py-3 text-right font-mono text-[0.6875rem] leading-5 text-muted-foreground/65" aria-hidden>
-          {lineNumbers.map((line) => <span key={line} className="block tabular-nums">{line}</span>)}
-        </div>
+        <pre className="ak-code-gutter m-0 select-none border-r border-border/35 px-2.5 py-2.5 text-right font-mono text-xs leading-5 text-muted-foreground/55" aria-hidden data-testid="code-line-gutter">{lineNumbers}</pre>
         <pre
           data-testid={html ? 'code-block-highlighted' : 'code-block-raw'}
           data-lang={lang ?? ''}
-          className="min-w-max overflow-visible bg-transparent px-4 py-3 font-mono text-xs leading-5 text-foreground"
+          className="m-0 min-w-max overflow-visible bg-transparent px-3 py-2.5 font-mono text-xs leading-5 text-foreground"
         >
           {html
             ? <code dangerouslySetInnerHTML={{ __html: extractHighlightedCodeHtml(html) }} />

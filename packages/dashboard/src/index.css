@@ -722,11 +722,11 @@ body {
  */
 .ak-code-snippet {
   background:
-    linear-gradient(180deg, hsl(var(--muted) / 0.42), transparent 2.4rem),
+    linear-gradient(180deg, hsl(var(--muted) / 0.32), transparent 1.75rem),
     hsl(var(--card) / 0.96);
 }
 .ak-code-snippet-header {
-  background: hsl(var(--muted) / 0.36);
+  background: hsl(var(--muted) / 0.28);
   backdrop-filter: blur(12px);
 }
 .ak-code-snippet-body {
@@ -735,22 +735,37 @@ body {
 .ak-code-gutter {
   background: hsl(var(--muted) / 0.26);
 }
+.ak-reader-surface {
+  background:
+    radial-gradient(circle at 92% 0%, hsl(var(--primary) / 0.045), transparent 22rem),
+    hsl(var(--background));
+}
+.ak-reader-surface :where(p, li) {
+  color: hsl(var(--foreground) / 0.9);
+}
+.ak-reader-surface :where(code):not(.ak-code-snippet code) {
+  box-decoration-break: clone;
+}
 .shiki-host .shiki,
 .shiki-host .shiki span,
 .shiki-host code span {
   color: var(--shiki-light) !important;
-  background-color: var(--shiki-light-bg) !important;
+  background-color: transparent !important;
 }
 .dark .shiki-host .shiki,
 .dark .shiki-host .shiki span,
 .dark .shiki-host code span {
   color: var(--shiki-dark) !important;
-  background-color: var(--shiki-dark-bg) !important;
+  background-color: transparent !important;
 }
 .shiki-host .shiki {
   overflow-x: auto;
   font-size: 0.75rem;
   line-height: 1.5;
+}
+.shiki-host code .line {
+  display: block;
+  min-height: 1.25rem;
 }
 
 .virtual-transcript-scroller,

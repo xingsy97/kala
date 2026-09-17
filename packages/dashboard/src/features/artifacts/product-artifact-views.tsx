@@ -700,11 +700,11 @@ export function ArtifactContentDialog({
   return (
     <Dialog open={Boolean(request)} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(720px,86dvh)] w-[min(980px,94vw)] max-w-none flex-col overflow-hidden p-0 gap-0">
-        <DialogHeader className="border-b border-border px-4 py-3">
+        <DialogHeader className="border-b border-border/50 bg-muted/20 px-4 py-3">
           <DialogTitle>{t('artifacts.detail.title')}</DialogTitle>
           <DialogDescription className="truncate font-mono text-xs">{request?.label ?? ''}</DialogDescription>
         </DialogHeader>
-        <div className="flex min-h-0 flex-1 flex-col p-3">
+        <div className="ak-reader-surface flex min-h-0 flex-1 flex-col p-3">
           {loading ? <div className="text-xs text-muted-foreground">{t('artifacts.detail.loading')}</div> : null}
           {error ? <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
           {content ? <ArtifactBody content={content} /> : null}
@@ -720,7 +720,7 @@ function ArtifactBody({ content }: { content: ArtifactContentResponse }): JSX.El
     return <JsonBlock label={content.path} value={content.body} collapsed={2} className="h-full [&>div:last-child]:max-h-[calc(86dvh-150px)] [&_[data-radix-scroll-area-viewport]]:max-h-[calc(86dvh-150px)]" />
   }
   return (
-    <ScrollArea className="h-full rounded-md border border-border bg-muted/30 p-3">
+    <ScrollArea className="h-full rounded-xl border border-border/55 bg-background/65 p-3">
       <CodeBlock code={String(content.body)} lang={artifactLanguage(content.path, content.mediaType)} className="my-0" />
     </ScrollArea>
   )
