@@ -17,6 +17,7 @@ import { ProductState } from '../../components/ui/product-state.js'
 import { cn } from '../../lib/utils.js'
 import { arrayField, arrayLength, asRecord, booleanField, formatBytes, formatBytesMetric, formatConfidence, formatDurationMetric, formatInteger, numberField, stringField } from './artifact-model.js'
 import { artifactRequest, downloadArtifact } from './artifact-client.js'
+import { CodeBlock } from '../chat/CodeBlock.js'
 
 export type ArtifactManifestEntry = {
   path: string
@@ -719,10 +720,42 @@ function ArtifactBody({ content }: { content: ArtifactContentResponse }): JSX.El
     return <JsonBlock label={content.path} value={content.body} collapsed={2} className="h-full [&>div:last-child]:max-h-[calc(86dvh-150px)] [&_[data-radix-scroll-area-viewport]]:max-h-[calc(86dvh-150px)]" />
   }
   return (
-    <ScrollArea className="h-full rounded-md border border-border bg-muted/30">
-      <pre className="whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">{String(content.body)}</pre>
+    <ScrollArea className="h-full rounded-md border border-border bg-muted/30 p-3">
+      <CodeBlock code={String(content.body)} lang={artifactLanguage(content.path, content.mediaType)} className="my-0" />
     </ScrollArea>
   )
+}
+
+function artifactLanguage(path: string, mediaType: string): string | undefined {
+  if (mediaType.includes('yaml')) return 'yaml'
+  if (mediaType.includes('xml')) return 'xml'
+  if (mediaType.includes('markdown')) return 'markdown'
+  if (mediaType.includes('javascript')) return 'javascript'
+  if (mediaType.includes('typescript')) return 'typescript'
+  const ext = path.split('.').pop()?.toLowerCase()
+  if (!ext) return undefined
+  const map: Record<string, string> = {
+    cjs: 'javascript',
+    css: 'css',
+    diff: 'diff',
+    html: 'html',
+    js: 'javascript',
+    jsonl: 'json',
+    jsx: 'jsx',
+    log: 'log',
+    md: 'markdown',
+    mjs: 'javascript',
+    py: 'python',
+    rs: 'rust',
+    sh: 'shell',
+    ts: 'typescript',
+    tsx: 'tsx',
+    txt: 'text',
+    xml: 'xml',
+    yaml: 'yaml',
+    yml: 'yaml',
+  }
+  return map[ext]
 }
 
 export function ProfilesView({

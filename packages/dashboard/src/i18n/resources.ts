@@ -924,6 +924,10 @@ export const resources = {
           recentSessionsHint: 'Workspace activity',
         },
       },
+      codeBlock: {
+        copy: 'Copy',
+        copied: 'Copied',
+      },
       jsonBlock: {
         search: 'search',
         searchJson: 'search JSON',
@@ -2579,6 +2583,10 @@ export const resources = {
           recentSessions: '最近会话',
           recentSessionsHint: '工作区活动',
         },
+      },
+      codeBlock: {
+        copy: '复制',
+        copied: '已复制',
       },
       jsonBlock: {
         search: '搜索',

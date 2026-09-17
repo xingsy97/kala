@@ -12,8 +12,11 @@
  * `.dark` on `html`, so theme flips are instant.
  */
 
-import { memo, useEffect, useState, type ReactNode } from 'react'
+import { Check, Copy } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
+import { Button } from '../../components/ui/button.js'
 import { cn } from '../../lib/utils.js'
 import { scheduleDeferredWork } from '../../lib/deferred-work.js'
 
@@ -32,7 +35,12 @@ function extractHighlightedCodeHtml(html: string): string {
 }
 
 export const CodeBlock = memo(function CodeBlock({ code, lang, className, trailingSlot, deferEnhancement = false }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [html, setHtml] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const language = languageLabel(lang)
+  const lineCount = useMemo(() => Math.max(1, code.split('\n').length), [code])
+  const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, index) => index + 1), [lineCount])
 
   useEffect(() => {
     if (!lang || deferEnhancement) {
@@ -54,19 +62,85 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
     }
   }, [code, deferEnhancement, lang])
 
+  const copyCode = useCallback(() => {
+    if (!navigator.clipboard?.writeText) return
+    void (async () => {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1200)
+    })()
+  }, [code])
+
   return (
-    <pre
-      data-testid={html ? 'code-block-highlighted' : 'code-block-raw'}
-      data-lang={lang ?? ''}
+    <figure
       className={cn(
-        'my-3 max-w-full overflow-x-auto rounded-lg bg-muted/60 px-3 py-2 text-xs text-foreground',
+        'ak-code-snippet my-3 max-w-full overflow-hidden rounded-2xl border border-border/55 bg-card/95 text-foreground shadow-sm',
         html && 'shiki-host',
         className,
       )}
+      data-lang={lang ?? ''}
+      data-testid="code-snippet"
     >
-      {html
-        ? <code dangerouslySetInnerHTML={{ __html: extractHighlightedCodeHtml(html) }} />
-        : <code>{code}{trailingSlot}</code>}
-    </pre>
+      <figcaption className="ak-code-snippet-header flex items-center justify-between gap-3 border-b border-border/45 px-3 py-2">
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_0_3px_hsl(142_76%_36%/0.12)]" aria-hidden />
+          <span className="truncate font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground" data-testid="code-block-language">{language}</span>
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 bg-background/65 px-2 text-[0.6875rem] text-muted-foreground hover:text-foreground"
+          onClick={copyCode}
+          aria-label={t('codeBlock.copy')}
+          data-testid="code-block-copy"
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+          {copied ? t('codeBlock.copied') : t('codeBlock.copy')}
+        </Button>
+      </figcaption>
+      <div className="ak-code-snippet-body grid overflow-x-auto">
+        <div className="ak-code-gutter select-none border-r border-border/35 px-3 py-3 text-right font-mono text-[0.6875rem] leading-5 text-muted-foreground/65" aria-hidden>
+          {lineNumbers.map((line) => <span key={line} className="block tabular-nums">{line}</span>)}
+        </div>
+        <pre
+          data-testid={html ? 'code-block-highlighted' : 'code-block-raw'}
+          data-lang={lang ?? ''}
+          className="min-w-max overflow-visible bg-transparent px-4 py-3 font-mono text-xs leading-5 text-foreground"
+        >
+          {html
+            ? <code dangerouslySetInnerHTML={{ __html: extractHighlightedCodeHtml(html) }} />
+            : <code>{code}{trailingSlot}</code>}
+        </pre>
+      </div>
+    </figure>
   )
 })
+
+function languageLabel(lang: string | undefined): string {
+  const value = lang?.trim()
+  if (!value) return 'text'
+  const aliases: Record<string, string> = {
+    js: 'JavaScript',
+    javascript: 'JavaScript',
+    jsx: 'JSX',
+    ts: 'TypeScript',
+    typescript: 'TypeScript',
+    tsx: 'TSX',
+    py: 'Python',
+    rb: 'Ruby',
+    rs: 'Rust',
+    sh: 'Shell',
+    bash: 'Bash',
+    zsh: 'Zsh',
+    yml: 'YAML',
+    yaml: 'YAML',
+    json: 'JSON',
+    md: 'Markdown',
+    markdown: 'Markdown',
+    html: 'HTML',
+    css: 'CSS',
+    sql: 'SQL',
+  }
+  return aliases[value.toLowerCase()] ?? value
+}

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CodeBlock } from './CodeBlock.js'
@@ -15,6 +15,7 @@ import * as shiki from '../../lib/shiki.js'
 describe('CodeBlock', () => {
   beforeEach(() => {
     ;(shiki.highlightToHtml as ReturnType<typeof vi.fn>).mockReset()
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
   })
 
   afterEach(() => {
@@ -37,6 +38,18 @@ describe('CodeBlock', () => {
     // …then enhances the same node once the promise resolves.
     await waitFor(() => expect(screen.getByTestId('code-block-highlighted')).toBe(pre))
     expect(screen.getByTestId('code-block-highlighted').getAttribute('data-lang')).toBe('typescript')
+    expect(screen.getByTestId('code-block-language').textContent).toBe('TypeScript')
+  })
+
+  it('renders snippet chrome with line numbers and copy action', async () => {
+    render(<CodeBlock code={'const a = 1\nconst b = 2'} lang="ts" />)
+    expect(screen.getByTestId('code-snippet')).toBeTruthy()
+    expect(screen.getByTestId('code-block-language').textContent).toBe('TypeScript')
+    expect(screen.getByText('1')).toBeTruthy()
+    expect(screen.getByText('2')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('code-block-copy'))
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('const a = 1\nconst b = 2'))
+    await screen.findByText('Copied')
   })
 
   it('keeps a streaming fence raw and does not invoke Shiki until complete', () => {

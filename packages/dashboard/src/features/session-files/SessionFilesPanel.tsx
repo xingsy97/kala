@@ -1,5 +1,5 @@
 import { randomId } from '../../lib/random-id.js'
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Children, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import Editor from '../../lib/monaco.js'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -15,6 +15,7 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import { StructuredFilePreview } from './StructuredFilePreview.js'
 import { buildPreviewModel, safeExternalHref } from './file-preview-model.js'
+import { CodeBlock } from '../chat/CodeBlock.js'
 import type { Socket } from 'socket.io-client'
 
 import type {
@@ -543,8 +544,8 @@ function MarkdownFileView({ content, fontSize }: { content: string; fontSize: nu
         li: ({ children }) => <li className="my-1">{children}</li>,
         a: ({ children, href }) => safeExternalHref(href) ? <a className="text-primary underline underline-offset-2" href={safeExternalHref(href)} target="_blank" rel="noreferrer">{children}</a> : <span>{children}</span>,
         img: ({ alt }) => <span className="rounded bg-muted px-1.5 py-1 text-xs text-muted-foreground">[Image blocked in preview{alt ? `: ${alt}` : ''}]</span>,
-        code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.92em]">{children}</code>,
-        pre: ({ children }) => <pre className="my-3 overflow-auto rounded bg-muted p-3 font-mono text-xs leading-5">{children}</pre>,
+        code: ({ className, children }) => <code className={cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.92em]', className)}>{children}</code>,
+        pre: ({ children }) => <MarkdownPre>{children}</MarkdownPre>,
         blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
         table: ({ children }) => <div className="my-3 overflow-auto"><table className="w-full border-collapse text-left text-xs">{children}</table></div>,
         th: ({ children }) => <th className="border border-border bg-muted px-2 py-1 font-semibold">{children}</th>,
@@ -554,6 +555,23 @@ function MarkdownFileView({ content, fontSize }: { content: string; fontSize: nu
       </ReactMarkdown>
     </div>
   )
+}
+
+function MarkdownPre({ children }: { children?: ReactNode }): JSX.Element {
+  const code = Children.toArray(children).find((child) => isValidElement(child))
+  if (code && isValidElement<{ className?: string; children?: ReactNode }>(code)) {
+    const match = /language-([\w-]+)/u.exec(code.props.className ?? '')
+    return <CodeBlock code={reactNodeText(code.props.children).replace(/\n$/u, '')} lang={match?.[1]} />
+  }
+  return <CodeBlock code={reactNodeText(children).replace(/\n$/u, '')} />
+}
+
+function reactNodeText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(reactNodeText).join('')
+  if (isValidElement<{ children?: ReactNode }>(node)) return reactNodeText(node.props.children)
+  return ''
 }
 
 function useFileViewFontSize(delta = 0): number {

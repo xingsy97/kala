@@ -720,18 +720,34 @@ body {
  * and --shiki-dark. The rules below pick which one paints, based on the
  * `.dark` class on <html>. Result: theme toggle costs one class flip.
  */
+.ak-code-snippet {
+  background:
+    linear-gradient(180deg, hsl(var(--muted) / 0.42), transparent 2.4rem),
+    hsl(var(--card) / 0.96);
+}
+.ak-code-snippet-header {
+  background: hsl(var(--muted) / 0.36);
+  backdrop-filter: blur(12px);
+}
+.ak-code-snippet-body {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.ak-code-gutter {
+  background: hsl(var(--muted) / 0.26);
+}
 .shiki-host .shiki,
-.shiki-host .shiki span {
+.shiki-host .shiki span,
+.shiki-host code span {
   color: var(--shiki-light) !important;
   background-color: var(--shiki-light-bg) !important;
 }
 .dark .shiki-host .shiki,
-.dark .shiki-host .shiki span {
+.dark .shiki-host .shiki span,
+.dark .shiki-host code span {
   color: var(--shiki-dark) !important;
   background-color: var(--shiki-dark-bg) !important;
 }
 .shiki-host .shiki {
-  padding: 0.75rem;
   overflow-x: auto;
   font-size: 0.75rem;
   line-height: 1.5;

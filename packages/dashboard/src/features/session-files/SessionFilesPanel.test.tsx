@@ -464,7 +464,7 @@ describe('SessionFilesPanel', () => {
     expect(preview.textContent).toContain('graph TD; A-->B')
     expect(preview.textContent).toContain('[Image blocked in preview: remote]')
     expect(preview.querySelector('img')).toBeNull()
-    expect(preview.querySelector('svg')).toBeNull()
+    expect(preview.querySelector('svg:not(.lucide)')).toBeNull()
   })
 
   it('toggles word wrap for text views in the sidebar modal', async () => {

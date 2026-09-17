@@ -22,6 +22,23 @@ const DARK_THEME: BundledTheme = 'github-dark'
 let highlighterPromise: Promise<Highlighter> | null = null
 const languageLoads = new Map<string, Promise<void>>()
 
+function normalizeLanguage(lang: string): string {
+  const normalized = lang.trim().toLowerCase()
+  const aliases: Record<string, string> = {
+    cjs: 'javascript',
+    js: 'javascript',
+    mjs: 'javascript',
+    shell: 'bash',
+    sh: 'bash',
+    ts: 'typescript',
+    yml: 'yaml',
+    md: 'markdown',
+    plaintext: 'text',
+    txt: 'text',
+  }
+  return aliases[normalized] ?? normalized
+}
+
 async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = (async () => {
@@ -64,7 +81,7 @@ async function ensureLanguage(highlighter: Highlighter, lang: string): Promise<b
 export async function highlightToHtml(code: string, lang: string): Promise<string | null> {
   try {
     const highlighter = await getHighlighter()
-    const normalized = lang.toLowerCase()
+    const normalized = normalizeLanguage(lang)
     const loaded = await ensureLanguage(highlighter, normalized)
     const useLang = loaded ? normalized : 'text'
     return highlighter.codeToHtml(code, {
