@@ -114,7 +114,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
           data-lang={lang ?? ''}
           className="ak-code-lines m-0 min-w-full overflow-visible bg-transparent py-2.5 font-mono text-xs leading-5 text-foreground"
         >
-          <code className="block min-w-full">
+          <span className="block min-w-full">
             {Array.from({ length: Math.max(visualLineCount, highlightedLines?.length ?? 0) }, (_, index) => {
               const highlighted = highlightedLines?.[index]
               const raw = rawLines[index] ?? ''
@@ -122,15 +122,15 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
               return (
                 <span className="ak-code-line" key={index} data-testid="code-line">
                   <span className="ak-code-line-number" aria-hidden data-testid="code-line-gutter">{index + 1}</span>
-                  <span className="ak-code-line-content">
+                  <code className="ak-code-line-content">
                     {highlightedLines
                       ? <span dangerouslySetInnerHTML={{ __html: highlighted && highlighted.length ? highlighted : '&nbsp;' }} />
                       : <>{raw || '\u00a0'}{isLastLine ? trailingSlot : null}</>}
-                  </span>
+                  </code>
                 </span>
               )
             })}
-          </code>
+          </span>
         </pre>
       </div>
     </figure>
