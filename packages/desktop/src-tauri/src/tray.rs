@@ -7,6 +7,7 @@ pub struct State {
     uncertain: AtomicBool,
     hidden_window: Mutex<Option<String>>,
     item_path: Mutex<Option<String>>,
+    status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
 }
 
 impl Default for State {
@@ -16,6 +17,7 @@ impl Default for State {
             uncertain: AtomicBool::new(true),
             hidden_window: Mutex::new(None),
             item_path: Mutex::new(None),
+            status_item: Mutex::new(None),
         }
     }
 }
@@ -66,6 +68,21 @@ pub fn hide_if_available(app: &tauri::AppHandle, label: &str) -> bool {
     let state = app.state::<State>();
     if !state.available.load(Ordering::Acquire) {
         return false;
+    }
+
+    pub fn set_status(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
+        let bounded = if label.chars().count() > 96 {
+            label.chars().take(96).collect::<String>()
+        } else {
+            label.to_owned()
+        };
+        if let Some(item) = app.state::<State>().status_item.lock().unwrap().as_ref() {
+            item.set_text(&bounded).map_err(|error| error.to_string())?;
+        }
+        if let Some(tray) = app.tray_by_id("runlab") {
+            tray.set_tooltip(Some(format!("Agent RunLab - {bounded}"))).map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
     crate::placement::capture(app);
     *state.hidden_window.lock().unwrap() = Some(label.to_owned());
@@ -174,10 +191,12 @@ fn is_item_activation(interface: Option<&str>, member: Option<&str>, path: Optio
 
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let connection = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE)?;
+    let status = MenuItem::with_id(app, "tray-status", "Idle", false, None::<&str>)?;
     let open = MenuItem::with_id(app, "tray-open", "Open Agent RunLab", true, None::<&str>)?;
     let change = MenuItem::with_id(app, "tray-change-server", "Change server…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "tray-quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &change, &quit])?;
+    let menu = Menu::with_items(app, &[&status, &open, &change, &quit])?;
+    *app.state::<State>().status_item.lock().unwrap() = Some(status);
     let icon = app.default_window_icon().ok_or("Missing application icon")?.clone();
     TrayIconBuilder::with_id("runlab")
         .icon(icon)

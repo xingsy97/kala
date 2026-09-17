@@ -190,6 +190,14 @@
     box-shadow: 0 1px 2px hsl(220 30% 10% / 0.04), 0 14px 38px hsl(220 30% 10% / 0.035);
   }
 
+  .ak-hero-surface {
+    background:
+      linear-gradient(135deg, hsl(var(--primary) / 0.12), transparent 28rem),
+      radial-gradient(circle at 92% 8%, hsl(173 68% 48% / 0.14), transparent 18rem),
+      hsl(var(--card) / 0.78);
+    backdrop-filter: blur(18px);
+  }
+
   .dark .ak-workspace-surface {
     box-shadow: 0 1px 2px hsl(0 0% 0% / 0.22), 0 18px 45px hsl(0 0% 0% / 0.12);
   }

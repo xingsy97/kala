@@ -23,6 +23,7 @@ type Props = {
   executor?: AttachedExecutor
   sessions: readonly SessionSummary[]
   onRename?(workspaceName: string): void
+  onOpenSession?(sessionId: string): void
 }
 
 export function WorkspaceMetadataDialog({
@@ -33,6 +34,7 @@ export function WorkspaceMetadataDialog({
   executor,
   sessions,
   onRename,
+  onOpenSession,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -79,6 +81,9 @@ export function WorkspaceMetadataDialog({
     },
   })
   const revoking = revokeMutation.isPending
+  const recentSessions = [...sessions]
+    .sort((a, b) => Date.parse(b.lastEventAt ?? b.createdAt) - Date.parse(a.lastEventAt ?? a.createdAt))
+    .slice(0, 4)
   const identityError =
     (revokeMutation.error as Error | undefined)?.message ??
     (identitiesQuery.error as Error | undefined)?.message ??
@@ -127,6 +132,36 @@ export function WorkspaceMetadataDialog({
           <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 space-y-4 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
+          <section className="grid gap-3 sm:grid-cols-3" data-testid="workspace-home-summary">
+            <WorkspaceHomeMetric label={t('workspaceMetadata.home.status')} value={executor ? t('workspaceMetadata.home.online') : t('workspaceMetadata.home.offline')} tone={executor ? 'good' : 'neutral'} />
+            <WorkspaceHomeMetric label={t('workspaceMetadata.home.sessions')} value={String(sessions.length)} tone={sessions.length ? 'info' : 'neutral'} />
+            <WorkspaceHomeMetric label={t('workspaceMetadata.home.sandboxRoots')} value={String(executor?.sandboxRoots?.length ?? 0)} tone={executor?.sandboxRoots?.length ? 'good' : 'neutral'} />
+          </section>
+          {recentSessions.length ? (
+            <section className="rounded-2xl border border-border/50 bg-card/80 p-3" data-testid="workspace-home-recent-sessions">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-medium">{t('workspaceMetadata.home.recentSessions')}</h3>
+                <span className="text-[0.6875rem] text-muted-foreground">{t('workspaceMetadata.home.recentSessionsHint')}</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {recentSessions.map((session) => (
+                  <button
+                    key={session.sessionId}
+                    type="button"
+                    onClick={() => {
+                      onOpenChange(false)
+                      onOpenSession?.(session.sessionId)
+                    }}
+                    className="min-w-0 rounded-xl border border-border/35 bg-background/50 px-3 py-2 text-left transition-colors hover:bg-muted/35"
+                    data-testid="workspace-home-session"
+                  >
+                    <span className="block truncate text-xs font-medium">{session.label ?? session.firstUserMessage ?? session.sessionId}</span>
+                    <span className="mt-1 block truncate text-[0.6875rem] text-muted-foreground">{session.status} · {session.eventCount} events</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
           <form onSubmit={submit} className="rounded-md border border-border/50 bg-card p-3" data-testid="workspace-metadata-rename-form">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="workspace-display-name">
               {t('workspaceMetadata.displayName')}
@@ -200,5 +235,14 @@ export function WorkspaceMetadataDialog({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function WorkspaceHomeMetric({ label, value, tone }: { label: string; value: string; tone: 'neutral' | 'good' | 'info' }): JSX.Element {
+  return (
+    <div className="rounded-2xl border border-border/45 bg-card/80 p-3">
+      <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
+      <div className={tone === 'good' ? 'mt-2 truncate text-lg font-semibold text-emerald-600 dark:text-emerald-400' : tone === 'info' ? 'mt-2 truncate text-lg font-semibold text-sky-600 dark:text-sky-400' : 'mt-2 truncate text-lg font-semibold text-foreground'}>{value}</div>
+    </div>
   )
 }

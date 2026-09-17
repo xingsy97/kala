@@ -32,6 +32,15 @@ pub struct UiState {
     completed: u32,
 }
 
+fn activity_label(state: &UiState) -> String {
+    match state.status {
+        Activity::Idle => "Idle".to_owned(),
+        Activity::Running => format!("Running: {} active · {} queued/completed", state.running, state.completed),
+        Activity::Attention => format!("Needs attention: {} · {} active", state.attention, state.running),
+        Activity::Completed => format!("Completed: {} · {} active", state.completed, state.running),
+    }
+}
+
 pub struct State {
     activity: Mutex<Activity>,
     delivered: Mutex<VecDeque<String>>,
@@ -308,6 +317,7 @@ pub async fn desktop_ui(app: tauri::AppHandle, window: tauri::WebviewWindow, sta
         let data = app.state::<State>();
         let mut previous = data.activity.lock().unwrap();
         if *previous != state.status { badge(app, state.status)?; *previous = state.status; }
+        crate::tray::set_status(app, &activity_label(&state))?;
         Ok(())
     }).await
 }

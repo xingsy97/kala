@@ -246,6 +246,7 @@ export function ArtifactInventory({
             {loading && !manifest ? <ProductState compact kind="loading" title={t('artifacts.state.loadingTitle')} description={t('artifacts.inventory.loadingManifest')} /> : null}
             {manifest ? (
               <>
+              <ArtifactGallery entries={manifest.entries} onOpenArtifact={onOpenArtifact} />
               <div className="divide-y divide-border/35 overflow-hidden rounded-xl bg-card/70 ring-1 ring-border/40 md:hidden" data-testid="artifact-inventory-mobile-list">
                 {manifest.entries.map((entry) => (
                   <button key={entry.path} type="button" onClick={() => onOpenArtifact({ path: entry.path, label: entry.path })} className="block w-full min-w-0 px-3 py-2 text-left hover:bg-muted/40">
@@ -289,6 +290,45 @@ export function ArtifactInventory({
           </div>
         </div>
   )
+}
+
+function ArtifactGallery({ entries, onOpenArtifact }: { entries: readonly ArtifactManifestEntry[]; onOpenArtifact(request: ArtifactDetailRequest): void }): JSX.Element | null {
+  const featured = entries
+    .filter((entry) => entry.mediaType.startsWith('text/') || entry.mediaType.includes('json') || entry.mediaType.startsWith('image/') || entry.kind.includes('report') || entry.kind.includes('profile'))
+    .slice(0, 6)
+  if (featured.length === 0) return null
+  return (
+    <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="artifact-gallery">
+      {featured.map((entry) => (
+        <button
+          key={`gallery:${entry.path}`}
+          type="button"
+          onClick={() => onOpenArtifact({ path: entry.path, label: entry.path })}
+          className="group relative overflow-hidden rounded-2xl border border-border/45 bg-card/70 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-md motion-reduce:transform-none"
+          data-testid="artifact-gallery-card"
+        >
+          <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+          <div className="flex items-start justify-between gap-3">
+            <span className="rounded-full bg-primary/10 px-2 py-1 text-[0.625rem] font-semibold uppercase tracking-wide text-primary">{artifactGalleryKind(entry)}</span>
+            <span className="font-mono text-[0.625rem] text-muted-foreground">{formatBytes(entry.bytes)}</span>
+          </div>
+          <div className="mt-3 line-clamp-2 break-words font-mono text-xs font-medium text-foreground">{entry.path}</div>
+          <div className="mt-2 flex min-w-0 items-center gap-2 text-[0.6875rem] text-muted-foreground">
+            <span className="truncate">{entry.mediaType}</span>
+            <span className="ml-auto flex-none font-mono">{entry.sha256 ? entry.sha256.slice(0, 8) : 'open'}</span>
+          </div>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function artifactGalleryKind(entry: ArtifactManifestEntry): string {
+  if (entry.mediaType.startsWith('image/')) return 'image'
+  if (entry.kind.includes('profile')) return 'profile'
+  if (entry.kind.includes('report')) return 'report'
+  if (entry.mediaType.includes('json')) return 'json'
+  return entry.kind || 'artifact'
 }
 
 export function PaginationFooter({ manifest, loadingMore, hasMore, onLoadMore }: { manifest: ArtifactManifest; loadingMore: boolean; hasMore: boolean; onLoadMore(): void }): JSX.Element {

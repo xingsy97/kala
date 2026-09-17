@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronRight, ChevronUp, Eraser, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
+import { Archive, Boxes, ChevronRight, ChevronUp, Clock3, Eraser, FolderOpen, GitBranch, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
 import { HelpHint } from './components/ui/help-hint.js'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
@@ -21,6 +21,7 @@ import type {
   ServerModelsPayload,
   SessionErrorEvent,
   SessionSummary,
+  AttachedExecutor,
   ToolCardMode,
 } from '@agent-kernel/shared'
 import { isSessionResting } from '@agent-kernel/shared'
@@ -1757,7 +1758,13 @@ export function App(): JSX.Element {
       <div className="hidden" data-testid="login-column-hidden" />
       {section === 'operations' ? (
         runtimeCapabilities.operations ? <Suspense fallback={<PageLoadingFallback />}>
-          <OperationsPage onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }} />
+          <OperationsPage
+            deployment={runtimeDeployment}
+            executors={control.executors}
+            sessions={control.sessions}
+            sessionStatuses={sessionStatuses}
+            onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }}
+          />
         </Suspense> : <CapabilityUnavailable title={t('app.operationsUnavailable')} />
       ) : section === 'artifacts' ? (
         runtimeCapabilities.artifacts ? <Suspense fallback={<PageLoadingFallback />}>
@@ -1864,6 +1871,11 @@ export function App(): JSX.Element {
               <NoSessionArea
                 onNewSession={newSession}
                 onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined}
+                onOpenSession={selectSession}
+                onOpenWorkspace={setWorkspaceInfoId}
+                sessions={control.sessions}
+                executors={control.executors}
+                sessionStatuses={sessionStatuses}
                 hasSessions={control.sessions.length > 0}
                 hasWorkspace={control.executors.length > 0}
                 data-testid="no-session-placeholder"
@@ -2500,6 +2512,7 @@ export function App(): JSX.Element {
         executor={workspaceInfoExecutor}
         sessions={workspaceInfoSessions}
         onRename={(name) => renameWorkspaceAt(workspaceInfoId ?? '', name)}
+        onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }}
       />
       <Suspense fallback={null}>
         <WorkspaceFileViewDialog
@@ -2637,48 +2650,155 @@ export function resolveSessionDirectoryLoadingOwner({
 export function NoSessionArea({
   onNewSession,
   onConnectWorkspace,
+  onOpenSession,
+  onOpenWorkspace,
+  sessions = [],
+  executors = [],
+  sessionStatuses,
   hasSessions,
   hasWorkspace = true,
 }: {
   onNewSession(): void
   onConnectWorkspace?(): void
+  onOpenSession?(sessionId: string): void
+  onOpenWorkspace?(workspaceId: string): void
+  sessions?: readonly SessionSummary[]
+  executors?: readonly AttachedExecutor[]
+  sessionStatuses?: ReadonlyMap<string, SessionActivityStatus>
   hasSessions: boolean
   hasWorkspace?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
+  const recentSessions = [...sessions]
+    .sort((a, b) => Date.parse(b.lastEventAt ?? b.createdAt) - Date.parse(a.lastEventAt ?? a.createdAt))
+    .slice(0, 5)
+  const waiting = sessions.filter((item) => (sessionStatuses?.get(item.sessionId) ?? item.status) === 'awaiting_approval').length
+  const running = sessions.filter((item) => isRunningSessionActivity(sessionStatuses?.get(item.sessionId) ?? item.status)).length
+  const queued = sessions.reduce((sum, item) => sum + (item.queuedCount ?? 0), 0)
+  const onlineWorkspaceIds = new Set(executors.map((executor) => executor.workspaceId).filter(Boolean))
+  const workspaceCount = new Set([
+    ...executors.map((executor) => executor.workspaceId).filter(Boolean),
+    ...sessions.map((session) => session.workspaceId).filter(Boolean),
+  ]).size
   return (
     <div
-      className="flex-1 min-h-0 flex items-center justify-center bg-background"
+      className="ak-workspace-canvas min-h-0 flex-1 overflow-auto bg-background"
       data-testid="no-session-placeholder"
     >
-      <div className="ak-motion-scale-in flex max-w-md flex-col items-center gap-4 px-6 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted/60">
-          <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
-        </div>
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          {t('app.noSessionTitle')}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {hasSessions
-            ? t('app.noSessionWithSessions')
-            : t('app.noSessionEmpty')}
-        </p>
-        <div className="flex flex-wrap justify-center gap-2">
-          <Button type="button" onClick={() => onNewSession()} data-testid="no-session-new-button">
-            {hasWorkspace ? t('app.newSessionButton') : t('dialogs.simpleChat')}
-          </Button>
-          {!hasWorkspace && onConnectWorkspace ? (
-            <Button type="button" variant="outline" onClick={onConnectWorkspace} data-testid="no-session-connect-workspace">
-              {t('app.connectFirstWorkspace')}
-            </Button>
-          ) : null}
-          <Button type="button" variant="outline" asChild>
-            <a href="#/docs">{t('app.viewSetupGuide')}</a>
-          </Button>
+      <div className="ak-motion-scale-in mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center gap-5 px-4 py-8 sm:px-6 lg:px-8">
+        <section className="ak-hero-surface overflow-hidden rounded-3xl border border-border/60 bg-card/70 p-5 shadow-sm sm:p-7" data-testid="session-cockpit-hero">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-primary">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                {t('app.cockpit.eyebrow')}
+              </div>
+              <h1 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground sm:text-3xl">
+                {t('app.noSessionTitle')}
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                {hasSessions ? t('app.noSessionWithSessions') : t('app.noSessionEmpty')}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" onClick={() => onNewSession()} data-testid="no-session-new-button">
+                {hasWorkspace ? t('app.newSessionButton') : t('dialogs.simpleChat')}
+              </Button>
+              {onConnectWorkspace ? (
+                <Button type="button" variant="outline" onClick={onConnectWorkspace} data-testid="no-session-connect-workspace">
+                  {hasWorkspace ? t('app.cockpit.connectWorkspace') : t('app.connectFirstWorkspace')}
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" asChild>
+                <a href="#/docs">{t('app.viewSetupGuide')}</a>
+              </Button>
+            </div>
+          </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <CockpitMetric icon={Workflow} label={t('app.cockpit.running')} value={String(running)} tone={running ? 'info' : 'neutral'} />
+            <CockpitMetric icon={ShieldCheck} label={t('app.cockpit.waiting')} value={String(waiting)} tone={waiting ? 'warn' : 'neutral'} />
+            <CockpitMetric icon={ListChecks} label={t('app.cockpit.queued')} value={String(queued)} tone={queued ? 'info' : 'neutral'} />
+            <CockpitMetric icon={FolderOpen} label={t('app.cockpit.workspaces')} value={`${onlineWorkspaceIds.size}/${workspaceCount}`} tone={onlineWorkspaceIds.size ? 'good' : 'neutral'} />
+          </div>
+        </section>
+        <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
+          <section className="ak-workspace-surface overflow-hidden" data-testid="session-cockpit-recent">
+            <div className="flex items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
+              <div>
+                <h2 className="text-sm font-semibold">{t('app.cockpit.recentSessions')}</h2>
+                <p className="text-xs text-muted-foreground">{t('app.cockpit.recentSessionsHint')}</p>
+              </div>
+              <Clock3 className="h-4 w-4 text-muted-foreground" aria-hidden />
+            </div>
+            <div className="divide-y divide-border/35">
+              {recentSessions.length ? recentSessions.map((item) => {
+                const status = sessionStatuses?.get(item.sessionId) ?? item.status
+                return (
+                  <button key={item.sessionId} type="button" onClick={() => onOpenSession?.(item.sessionId)} className="grid w-full min-w-0 gap-1 px-4 py-3 text-left transition-colors hover:bg-muted/35" data-testid="session-cockpit-session">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <SessionStatusIndicator status={status} />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{sessionDisplayLabel(item, item.sessionId)}</span>
+                      <span className="flex-none text-[0.6875rem] text-muted-foreground">{formatRelativeTime(item.lastEventAt ?? item.createdAt)}</span>
+                    </div>
+                    <div className="truncate pl-5 text-xs text-muted-foreground">{item.workspaceName ?? item.workspaceId ?? t('app.cockpit.simpleChat')} · {item.eventCount} events</div>
+                  </button>
+                )
+              }) : (
+                <div className="px-4 py-8 text-sm text-muted-foreground">{t('app.cockpit.noRecentSessions')}</div>
+              )}
+            </div>
+          </section>
+          <section className="ak-workspace-surface overflow-hidden" data-testid="session-cockpit-workspaces">
+            <div className="flex items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
+              <div>
+                <h2 className="text-sm font-semibold">{t('app.cockpit.workspaceHome')}</h2>
+                <p className="text-xs text-muted-foreground">{t('app.cockpit.workspaceHomeHint')}</p>
+              </div>
+              <GitBranch className="h-4 w-4 text-muted-foreground" aria-hidden />
+            </div>
+            <div className="divide-y divide-border/35">
+              {executors.length ? executors.slice(0, 5).map((executor) => (
+                <button key={executor.executorId} type="button" onClick={() => executor.workspaceId && onOpenWorkspace?.(executor.workspaceId)} className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-muted/35" data-testid="session-cockpit-workspace">
+                  <span className="h-2.5 w-2.5 flex-none rounded-full bg-emerald-500 shadow-[0_0_0_3px_hsl(142_76%_36%/0.12)]" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{executor.workspaceName ?? executor.workspaceId}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{[executor.hostname, executor.os, executor.executorVersion].filter(Boolean).join(' · ')}</span>
+                  </span>
+                  <span className="text-[0.6875rem] text-muted-foreground">{sessions.filter((item) => item.workspaceId === executor.workspaceId).length}</span>
+                </button>
+              )) : (
+                <div className="px-4 py-8 text-sm text-muted-foreground">{t('app.cockpit.noWorkspaces')}</div>
+              )}
+            </div>
+          </section>
         </div>
       </div>
     </div>
   )
+}
+
+function CockpitMetric({ icon: Icon, label, value, tone }: { icon: typeof Workflow; label: string; value: string; tone: 'neutral' | 'good' | 'warn' | 'info' }): JSX.Element {
+  return (
+    <div className="rounded-2xl border border-border/45 bg-background/55 p-3 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.06)]">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Icon className={cn('h-4 w-4', tone === 'good' && 'text-emerald-500', tone === 'warn' && 'text-amber-500', tone === 'info' && 'text-sky-500')} aria-hidden />
+        {label}
+      </div>
+      <div className="mt-2 font-mono text-2xl font-semibold tracking-tight">{value}</div>
+    </div>
+  )
+}
+
+function formatRelativeTime(value: string): string {
+  const ts = Date.parse(value)
+  if (!Number.isFinite(ts)) return value
+  const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000))
+  if (seconds < 60) return 'now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `${hours}h`
+  return new Date(ts).toLocaleDateString()
 }
 
 
