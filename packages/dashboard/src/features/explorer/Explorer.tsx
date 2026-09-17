@@ -757,7 +757,7 @@ function Header({
   if (embedded) {
     return (
       <div className="flex h-9 flex-none items-center gap-1.5 border-b border-sidebar-border bg-sidebar px-2">
-        <label className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded bg-background/70 px-2 text-xs ring-1 ring-border/50 focus-within:ring-primary/40">
+        <label className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded bg-background/45 px-2 text-xs ring-1 ring-border/30 focus-within:ring-primary/30">
           <Search className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           <input
             value={query}
@@ -801,7 +801,7 @@ function Header({
     )
   }
   return (
-    <div className="flex flex-col gap-2 bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
+    <div className="flex flex-col gap-2 bg-sidebar-accent/35 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/25">
       <div className="flex items-center justify-between gap-2">
         <NewChatButton onNewChat={onNewSession} />
         <div className="flex items-center gap-1">
@@ -831,7 +831,7 @@ function Header({
           ) : null}
         </div>
       </div>
-      <label className="flex h-7 min-w-0 items-center gap-1.5 rounded bg-background/70 px-2 text-xs ring-1 ring-border/50 focus-within:ring-primary/40">
+      <label className="flex h-7 min-w-0 items-center gap-1.5 rounded bg-background/45 px-2 text-xs ring-1 ring-border/30 focus-within:ring-primary/30">
         <Search className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
         <input
           value={query}
@@ -998,7 +998,7 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws relative min-w-0 cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-accent/40',
+        'group/ws relative min-w-0 cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-accent/28',
         WORKSPACE_ROW_GRID,
       )}
     >
@@ -1181,8 +1181,8 @@ function SessionRow({
       aria-current={selected ? 'page' : undefined}
       className={cn(
         'group relative min-w-0 cursor-pointer overflow-hidden rounded-lg px-2 py-1 transition-colors',
-        'hover:bg-accent/50',
-        selected && 'bg-accent shadow-[inset_0_0_0_1px_hsl(var(--border)/0.35)]',
+        'hover:bg-accent/32',
+        selected && 'bg-accent/60',
         EXPLORER_ROW_GRID,
       )}
       onClick={() => {
@@ -1301,7 +1301,7 @@ function SessionRow({
             title={t('common.more')}
             aria-label={t('common.more')}
             aria-expanded={touchMenuPosition !== null}
-            className="ak-session-more-button hidden h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-6 sm:w-6"
+            className="ak-session-more-button hidden h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/45 hover:text-foreground sm:h-6 sm:w-6"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -1346,7 +1346,7 @@ function SessionRow({
             title={t('explorer.renameSession')}
             aria-label={t('explorer.renameSessionAria', { sessionId: s.sessionId })}
             disabled={renameDisabled}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-6 sm:w-6"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/45 hover:text-foreground sm:h-6 sm:w-6"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -1364,7 +1364,7 @@ function SessionRow({
               data-testid="session-info-button"
               title={t('explorer.sessionInfoTitle')}
               aria-label={t('explorer.sessionInfoAria', { sessionId: s.sessionId })}
-              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-6 sm:w-6"
+              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/45 hover:text-foreground sm:h-6 sm:w-6"
             >
               <Info className="h-3.5 w-3.5" strokeWidth={2.2} />
             </Button>
@@ -1382,7 +1382,7 @@ function SessionRow({
             data-testid="session-hide-button"
             title={t('explorer.hideSession')}
             aria-label={t('explorer.hideSessionAria', { sessionId: s.sessionId })}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-6 sm:w-6"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/45 hover:text-foreground sm:h-6 sm:w-6"
           >
             <EyeOff className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>

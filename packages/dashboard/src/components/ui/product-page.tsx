@@ -8,9 +8,9 @@ export function ProductPage({ children, className, testId }: { children: ReactNo
 
 export function ProductPageHeader({ eyebrow = 'Agent RunLab', title, description, actions, titleTestId }: { eyebrow?: ReactNode; title: ReactNode; description?: ReactNode; actions?: ReactNode; titleTestId?: string }): JSX.Element {
   return (
-    <header className="mx-auto flex w-full max-w-[96rem] flex-none flex-col gap-4 px-4 pb-4 pt-5 sm:px-6 sm:pt-6 lg:flex-row lg:items-end lg:justify-between lg:px-8">
+    <header className="mx-auto flex w-full max-w-[96rem] flex-none flex-col gap-4 px-4 pb-3 pt-5 sm:px-6 sm:pt-6 lg:flex-row lg:items-end lg:justify-between lg:px-8">
       <div className="min-w-0">
-        {eyebrow ? <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-primary/80">{eyebrow}</div> : null}
+        {eyebrow ? <div className="text-[0.6875rem] font-medium uppercase tracking-[0.16em] text-muted-foreground">{eyebrow}</div> : null}
         <h1 className={cn('text-2xl font-semibold tracking-[-0.025em]', eyebrow && 'mt-1')} data-testid={titleTestId}>{title}</h1>
         {description ? <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
       </div>
@@ -29,7 +29,7 @@ export function ProductPanel({ children, active = true, testId, className }: { c
 
 export function ProductPanelHeader({ title, description, actions }: { title: ReactNode; description?: ReactNode; actions?: ReactNode }): JSX.Element {
   return (
-    <div className="flex flex-none items-start justify-between gap-4 border-b border-border/35 px-5 py-4 sm:px-6">
+    <div className="flex flex-none items-start justify-between gap-4 border-b border-border/25 px-5 py-4 sm:px-6">
       <div className="min-w-0"><h2 className="text-base font-semibold tracking-[-0.01em]">{title}</h2>{description ? <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{description}</p> : null}</div>
       {actions}
     </div>
@@ -41,5 +41,5 @@ export function ProductSegmentedControl({ label, children }: { label: string; ch
 }
 
 export function ProductSegment({ active, onClick, testId, children }: { active: boolean; onClick(): void; testId?: string; children: ReactNode }): JSX.Element {
-  return <button type="button" aria-pressed={active} onClick={onClick} data-testid={testId} className={cn('h-10 rounded-lg px-4 text-sm font-medium transition-[background-color,color,box-shadow]', active ? 'bg-card text-foreground shadow-sm ring-1 ring-border/40' : 'text-muted-foreground hover:bg-card/50 hover:text-foreground')}>{children}</button>
+  return <button type="button" aria-pressed={active} onClick={onClick} data-testid={testId} className={cn('h-10 rounded-lg px-4 text-sm font-medium transition-[background-color,color,box-shadow]', active ? 'bg-card/80 text-foreground shadow-[0_1px_2px_hsl(var(--foreground)/0.04)] ring-1 ring-border/25' : 'text-muted-foreground hover:bg-card/35 hover:text-foreground')}>{children}</button>
 }

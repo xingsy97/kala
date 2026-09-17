@@ -111,7 +111,7 @@
 @layer base {
   :root {
     font-size: calc(16px * var(--ak-interface-scale, 1.25));
-    --background: 215 30% 96%;
+    --background: 45 22% 97%;
     --foreground: 0 0% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 3.9%;
@@ -119,25 +119,25 @@
     --popover-foreground: 0 0% 3.9%;
     --primary: 221 83% 53%;
     --primary-foreground: 0 0% 98%;
-    --secondary: 213 30% 91%;
+    --secondary: 42 18% 93%;
     --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 214 24% 92%;
-    --muted-foreground: 215 13% 41%;
-    --accent: 214 28% 89%;
+    --muted: 42 16% 92%;
+    --muted-foreground: 220 9% 42%;
+    --accent: 42 16% 90%;
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 214 20% 83%;
-    --input: 214 20% 81%;
+    --border: 38 13% 82%;
+    --input: 38 13% 80%;
     --ring: 221 83% 53%;
 
-    --sidebar: 215 25% 95%;
+    --sidebar: 45 18% 95%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-primary: 221 83% 53%;
     --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 214 24% 90%;
+    --sidebar-accent: 42 15% 90%;
     --sidebar-accent-foreground: 222.2 47.4% 11.2%;
-    --sidebar-border: 214 20% 84%;
+    --sidebar-border: 38 13% 82%;
     --sidebar-ring: 221 83% 53%;
 
     --radius: 0.75rem;
@@ -145,9 +145,9 @@
   }
 
   .dark {
-    --background: 220 12% 8%;
+    --background: 220 10% 8%;
     --foreground: 220 12% 92%;
-    --card: 220 10% 13%;
+    --card: 220 9% 13%;
     --card-foreground: 220 12% 92%;
     --popover: 220 9% 16%;
     --popover-foreground: 220 12% 92%;
@@ -155,14 +155,14 @@
     --primary-foreground: 0 0% 98%;
     --secondary: 220 8% 19%;
     --secondary-foreground: 220 12% 92%;
-    --muted: 220 8% 18%;
+    --muted: 220 7% 18%;
     --muted-foreground: 220 8% 62%;
     --accent: 220 9% 22%;
     --accent-foreground: 220 12% 92%;
     --destructive: 0 62.8% 55%;
     --destructive-foreground: 0 0% 98%;
-    --border: 220 8% 22%;
-    --input: 220 8% 24%;
+    --border: 220 7% 24%;
+    --input: 220 7% 25%;
     --ring: 221 83% 60%;
 
     --sidebar: 220 10% 10%;
@@ -178,50 +178,61 @@
 
 @layer components {
   .ak-workspace-canvas {
-    background:
-      radial-gradient(circle at 50% -20%, hsl(var(--primary) / 0.055), transparent 36rem),
-      hsl(var(--background));
+    background: hsl(var(--background));
   }
 
   .ak-workspace-surface {
-    border: 1px solid hsl(var(--border) / 0.62);
+    border: 1px solid hsl(var(--border) / 0.38);
     border-radius: calc(var(--radius) + 0.35rem);
-    background: hsl(var(--card) / 0.9);
-    box-shadow: 0 1px 2px hsl(220 30% 10% / 0.04), 0 14px 38px hsl(220 30% 10% / 0.035);
+    background: hsl(var(--card) / 0.82);
+    box-shadow: 0 1px 2px hsl(220 20% 12% / 0.035);
   }
 
   .ak-hero-surface {
     background:
-      linear-gradient(135deg, hsl(var(--primary) / 0.12), transparent 28rem),
-      radial-gradient(circle at 92% 8%, hsl(173 68% 48% / 0.14), transparent 18rem),
-      hsl(var(--card) / 0.78);
+      linear-gradient(135deg, hsl(var(--primary) / 0.045), transparent 30rem),
+      radial-gradient(circle at 92% 8%, hsl(173 48% 48% / 0.055), transparent 18rem),
+      hsl(var(--card) / 0.72);
     backdrop-filter: blur(18px);
   }
 
   .dark .ak-workspace-surface {
-    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.22), 0 18px 45px hsl(0 0% 0% / 0.12);
+    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.18);
   }
 
   .ak-navigation-surface {
-    border: 1px solid hsl(var(--sidebar-border) / 0.62);
+    border: 1px solid hsl(var(--sidebar-border) / 0.34);
     border-radius: calc(var(--radius) + 0.35rem);
-    background: hsl(var(--sidebar) / 0.92);
-    box-shadow: 0 1px 2px hsl(220 30% 10% / 0.045), 0 12px 32px hsl(220 30% 10% / 0.055);
+    background: hsl(var(--sidebar) / 0.78);
+    box-shadow: 0 1px 2px hsl(220 20% 12% / 0.025);
   }
 
   .dark .ak-navigation-surface {
-    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.24), 0 14px 36px hsl(0 0% 0% / 0.16);
+    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.18);
   }
 
   .ak-titlebar-surface {
-    border: 1px solid hsl(var(--border) / 0.58);
+    border: 1px solid hsl(var(--border) / 0.36);
     border-radius: calc(var(--radius) + 0.35rem);
-    background: hsl(var(--card) / 0.82);
-    box-shadow: 0 1px 2px hsl(220 30% 10% / 0.04), 0 10px 28px hsl(220 30% 10% / 0.045);
+    background: hsl(var(--card) / 0.74);
+    box-shadow: 0 1px 2px hsl(220 20% 12% / 0.025);
   }
 
   .dark .ak-titlebar-surface {
-    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.2), 0 12px 30px hsl(0 0% 0% / 0.14);
+    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.16);
+  }
+
+  .ak-composer-surface {
+    border: 1px solid hsl(var(--border) / 0.42);
+    background: hsl(var(--card) / 0.88);
+    box-shadow: 0 1px 2px hsl(220 20% 12% / 0.055);
+    backdrop-filter: blur(14px);
+  }
+
+  .ak-composer-surface:focus-within {
+    border-color: hsl(var(--ring) / 0.42);
+    background: hsl(var(--card) / 0.94);
+    box-shadow: 0 1px 2px hsl(220 20% 12% / 0.06), 0 0 0 1px hsl(var(--ring) / 0.08);
   }
 
   .ak-global-topbar {
@@ -233,9 +244,9 @@
     --accent-foreground: 220 12% 92%;
     --border: 220 8% 22%;
     color: hsl(var(--foreground));
-    border-bottom: 1px solid hsl(var(--border) / 0.72);
+    border-bottom: 1px solid hsl(var(--border) / 0.58);
     background: hsl(220 12% 8% / 0.94);
-    box-shadow: 0 1px 0 hsl(0 0% 100% / 0.05), 0 10px 28px hsl(0 0% 0% / 0.16);
+    box-shadow: 0 1px 0 hsl(0 0% 100% / 0.04);
   }
 
   .ak-segmented-control {
@@ -721,13 +732,11 @@ body {
  * `.dark` class on <html>. Result: theme toggle costs one class flip.
  */
 .ak-code-snippet {
-  background:
-    linear-gradient(180deg, hsl(var(--muted) / 0.32), transparent 1.75rem),
-    hsl(var(--card) / 0.96);
+  background: hsl(var(--card) / 0.9);
 }
 .ak-code-snippet-header {
-  background: hsl(var(--muted) / 0.28);
-  backdrop-filter: blur(12px);
+  background: hsl(var(--muted) / 0.18);
+  backdrop-filter: blur(8px);
 }
 .ak-code-lines {
   font-size: 0.75rem;
@@ -750,11 +759,11 @@ body {
 .ak-code-line-number {
   display: block;
   user-select: none;
-  border-right: 1px solid hsl(var(--border) / 0.35);
-  background: hsl(var(--muted) / 0.26);
+  border-right: 1px solid hsl(var(--border) / 0.22);
+  background: hsl(var(--muted) / 0.14);
   padding: 0 0.625rem 0 0.5rem;
   text-align: right;
-  color: hsl(var(--muted-foreground) / 0.55);
+  color: hsl(var(--muted-foreground) / 0.48);
   line-height: inherit;
 }
 .ak-code-line-content {

@@ -305,10 +305,10 @@ function ArtifactGallery({ entries, onOpenArtifact }: { entries: readonly Artifa
           key={`gallery:${entry.path}`}
           type="button"
           onClick={() => onOpenArtifact({ path: entry.path, label: entry.path })}
-          className="group relative overflow-hidden rounded-2xl border border-border/45 bg-card/70 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-md motion-reduce:transform-none"
+          className="group relative overflow-hidden rounded-2xl border border-border/30 bg-card/60 p-4 text-left transition-colors hover:border-primary/25 hover:bg-card/78 motion-reduce:transform-none"
           data-testid="artifact-gallery-card"
         >
-          <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+          <span className="absolute inset-x-0 top-0 h-px bg-primary/20 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
           <div className="flex items-start justify-between gap-3">
             <span className="rounded-full bg-primary/10 px-2 py-1 text-[0.625rem] font-semibold uppercase tracking-wide text-primary">{artifactGalleryKind(entry)}</span>
             <span className="font-mono text-[0.625rem] text-muted-foreground">{formatBytes(entry.bytes)}</span>

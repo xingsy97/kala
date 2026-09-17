@@ -172,7 +172,7 @@ export function AppShellNav({
       >
         {activePill ? (
           <span
-            className="pointer-events-none absolute z-0 rounded-xl bg-card shadow-[0_1px_2px_hsl(220_30%_10%/0.08),inset_0_0_0_1px_hsl(var(--border)/0.55)] transition-[transform,width,height,opacity] duration-200 ease-out motion-reduce:transition-none"
+            className="pointer-events-none absolute z-0 rounded-xl bg-card/80 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.32)] transition-[transform,width,height,opacity] duration-200 ease-out motion-reduce:transition-none"
             style={{
               width: activePill.width,
               height: activePill.height,
@@ -287,7 +287,7 @@ function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin }
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-3.5 w-3.5" aria-hidden />}</span>
         {account ? <span className="hidden max-w-32 truncate lg:inline">{account.displayName}</span> : null}
       </summary>
-      <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl" role="menu">
+      <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-border/45 bg-popover text-popover-foreground shadow-lg" role="menu">
         <div className="border-b border-border/60 px-4 py-3" data-testid="account-identity-summary"><div className="truncate text-sm font-semibold">{account?.displayName ?? t('appShell.account.loadingLong')}</div>{account?.email ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{account.email}</div> : null}</div>
         <div className="p-1.5">
           <a href="#/docs" role="menuitem" onClick={close} className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent"><CircleHelp className="h-4 w-4" aria-hidden />{t('appShell.account.help')}</a>

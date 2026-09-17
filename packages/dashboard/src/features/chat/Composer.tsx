@@ -688,7 +688,7 @@ export function Composer({
   if (serviceUnavailable) {
     return (
       <div
-        className="ak-composer-container mx-auto flex h-14 w-full items-center gap-3 rounded-2xl border border-border/60 bg-card/95 px-4 shadow-[0_5px_16px_hsl(var(--foreground)/0.08)] backdrop-blur-xl"
+        className="ak-composer-container ak-composer-surface mx-auto flex h-14 w-full items-center gap-3 rounded-2xl px-4"
         style={displayStyle}
         data-testid="service-connection-state"
         role="status"
@@ -760,7 +760,7 @@ export function Composer({
           <div className="flex flex-col gap-1" data-testid="composer-simple-frame">
             <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} />
             <div
-              className="relative flex min-h-14 items-center gap-1 rounded-[22px] border border-border/70 bg-card/95 px-1.5 py-1 shadow-[0_5px_16px_hsl(var(--foreground)/0.09),0_1px_4px_hsl(var(--foreground)/0.04)] backdrop-blur-xl transition-[border-color,background-color,box-shadow] focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_7px_19px_hsl(var(--foreground)/0.11),0_2px_5px_hsl(var(--foreground)/0.05)] sm:min-h-14 sm:px-1.5"
+              className="ak-composer-surface relative flex min-h-14 items-center gap-1 rounded-[22px] px-1.5 py-1 transition-[border-color,background-color,box-shadow] sm:min-h-14 sm:px-1.5"
               data-testid="composer-simple-shell"
             >
             <RuntimeMetrics
@@ -831,8 +831,7 @@ export function Composer({
         <div className="flex items-stretch" data-testid="composer-full-shell">
         <div
           className={cn(
-            'relative min-w-0 flex-1 rounded-2xl border border-border/70 bg-card/95 shadow-[0_6px_18px_hsl(var(--foreground)/0.09),0_1px_4px_hsl(var(--foreground)/0.04)] backdrop-blur-xl transition-[border-color,background-color,box-shadow]',
-            'focus-within:border-ring/55 focus-within:bg-card focus-within:shadow-[0_8px_21px_hsl(var(--foreground)/0.11),0_2px_5px_hsl(var(--foreground)/0.05)]',
+            'ak-composer-surface relative min-w-0 flex-1 rounded-2xl transition-[border-color,background-color,box-shadow]',
           )}
         >
           <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
@@ -940,7 +939,7 @@ export function Composer({
             ) : null}
           </div>
           <div
-            className="flex min-w-0 flex-row flex-wrap items-center gap-x-1 gap-y-1 min-h-12 border-t border-border/40 px-2 py-1.5 sm:gap-x-1 sm:py-1.5"
+            className="flex min-w-0 flex-row flex-wrap items-center gap-x-1 gap-y-1 min-h-12 border-t border-border/25 px-2 py-1.5 sm:gap-x-1 sm:py-1.5"
             data-testid="composer-footer"
           >
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
@@ -968,7 +967,7 @@ export function Composer({
               disabled={models.length === 0}
             >
               <SelectTrigger
-                className="h-9 w-10 flex-none gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent md:w-24 xl:w-36"
+                className="h-9 w-10 flex-none gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent/55 md:w-24 xl:w-36"
                 data-testid="model-picker"
                 aria-label={t('common.model')}
               >
@@ -995,7 +994,7 @@ export function Composer({
             >
               <SelectTrigger
                 className={cn(
-                  'h-9 w-10 flex-none rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent md:w-16 xl:w-28',
+                  'h-9 w-10 flex-none rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent/55 md:w-16 xl:w-28',
                   approvalMode === 'allow_all'
                     ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
                     : approvalMode === 'ask'

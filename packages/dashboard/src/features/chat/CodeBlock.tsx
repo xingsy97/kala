@@ -83,23 +83,22 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
   return (
     <figure
       className={cn(
-        'ak-code-snippet my-3 max-w-full overflow-hidden rounded-2xl border border-border/55 bg-card/95 text-foreground shadow-sm',
+        'ak-code-snippet my-3 max-w-full overflow-hidden rounded-2xl border border-border/35 bg-card/90 text-foreground',
         html && 'shiki-host',
         className,
       )}
       data-lang={lang ?? ''}
       data-testid="code-snippet"
     >
-      <figcaption className="ak-code-snippet-header flex h-7 items-center justify-between gap-2 border-b border-border/40 px-2">
+      <figcaption className="ak-code-snippet-header flex h-7 items-center justify-between gap-2 border-b border-border/25 px-2">
         <span className="inline-flex min-w-0 items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_0_2px_hsl(142_76%_36%/0.10)]" aria-hidden />
-          <span className="truncate font-mono text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground" data-testid="code-block-language">{language}</span>
+          <span className="truncate font-mono text-[0.6875rem] font-medium text-muted-foreground" data-testid="code-block-language">{language}</span>
         </span>
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="h-5 gap-1 bg-background/55 px-1.5 text-[0.625rem] text-muted-foreground shadow-none hover:text-foreground"
+          className="h-5 gap-1 rounded-md bg-transparent px-1.5 text-[0.625rem] text-muted-foreground shadow-none hover:bg-accent/45 hover:text-foreground"
           onClick={copyCode}
           aria-label={t('codeBlock.copy')}
           data-testid="code-block-copy"

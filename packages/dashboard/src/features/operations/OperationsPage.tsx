@@ -72,7 +72,7 @@ function RuntimeOperationsDashboard({ product, deploymentMode, capabilities, exe
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="runtime-operations-dashboard">
+    <section className="ak-workspace-surface mb-4 grid gap-px overflow-hidden bg-border/20 p-px md:grid-cols-2 xl:grid-cols-4" data-testid="runtime-operations-dashboard">
       <OpsMetric icon={RadioTower} label={t('operations.dashboard.runtime')} value={product ?? 'local'} detail={deploymentMode ?? t('operations.dashboard.loaded')} tone="info" />
       <OpsMetric icon={Boxes} label={t('operations.dashboard.executors')} value={String(executorCount)} detail={t('operations.dashboard.sessions', { count: sessionCount })} tone={executorCount ? 'good' : 'neutral'} />
       <OpsMetric icon={Activity} label={t('operations.dashboard.activeWork')} value={String(running)} detail={t('operations.dashboard.queued', { count: queued })} tone={running || queued ? 'info' : 'neutral'} />
@@ -83,12 +83,12 @@ function RuntimeOperationsDashboard({ product, deploymentMode, capabilities, exe
 
 function OpsMetric({ icon: Icon, label, value, detail, tone }: { icon: typeof Route; label: string; value: string; detail: string; tone: 'neutral' | 'good' | 'warn' | 'info' }): JSX.Element {
   return (
-    <div className="ak-workspace-surface relative overflow-hidden p-4">
+    <div className="relative overflow-hidden bg-card/[0.82] p-4">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">{label}</span>
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <Icon className={tone === 'good' ? 'h-4 w-4 text-emerald-500' : tone === 'warn' ? 'h-4 w-4 text-amber-500' : tone === 'info' ? 'h-4 w-4 text-sky-500' : 'h-4 w-4 text-muted-foreground'} aria-hidden />
       </div>
-      <div className="mt-3 truncate font-mono text-2xl font-semibold tracking-tight">{value}</div>
+      <div className="mt-2 truncate text-lg font-semibold tracking-tight">{value}</div>
       <div className="mt-1 truncate text-xs text-muted-foreground">{detail}</div>
     </div>
   )

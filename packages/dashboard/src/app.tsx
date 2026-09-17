@@ -2743,7 +2743,7 @@ export function NoSessionArea({
       data-testid="no-session-placeholder"
     >
       <div className="ak-motion-scale-in mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center gap-5 px-4 py-8 sm:px-6 lg:px-8">
-        <section className="ak-hero-surface overflow-hidden rounded-3xl border border-border/60 bg-card/70 p-5 shadow-sm sm:p-7" data-testid="session-cockpit-hero">
+        <section className="ak-hero-surface overflow-hidden rounded-3xl border border-border/35 bg-card/60 p-5 sm:p-7" data-testid="session-cockpit-hero">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-primary">
@@ -2780,14 +2780,14 @@ export function NoSessionArea({
         </section>
         <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
           <section className="ak-workspace-surface overflow-hidden" data-testid="session-cockpit-recent">
-            <div className="flex items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 border-b border-border/25 px-4 py-3">
               <div>
                 <h2 className="text-sm font-semibold">{t('app.cockpit.recentSessions')}</h2>
                 <p className="text-xs text-muted-foreground">{t('app.cockpit.recentSessionsHint')}</p>
               </div>
               <Clock3 className="h-4 w-4 text-muted-foreground" aria-hidden />
             </div>
-            <div className="divide-y divide-border/35">
+            <div className="divide-y divide-border/25">
               {recentSessions.length ? recentSessions.map((item) => {
                 const status = sessionStatuses?.get(item.sessionId) ?? item.status
                 return (
@@ -2806,14 +2806,14 @@ export function NoSessionArea({
             </div>
           </section>
           <section className="ak-workspace-surface overflow-hidden" data-testid="session-cockpit-workspaces">
-            <div className="flex items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 border-b border-border/25 px-4 py-3">
               <div>
                 <h2 className="text-sm font-semibold">{t('app.cockpit.workspaceHome')}</h2>
                 <p className="text-xs text-muted-foreground">{t('app.cockpit.workspaceHomeHint')}</p>
               </div>
               <GitBranch className="h-4 w-4 text-muted-foreground" aria-hidden />
             </div>
-            <div className="divide-y divide-border/35">
+            <div className="divide-y divide-border/25">
               {executors.length ? executors.slice(0, 5).map((executor) => (
                 <button key={executor.executorId} type="button" onClick={() => executor.workspaceId && onOpenWorkspace?.(executor.workspaceId)} className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-muted/35" data-testid="session-cockpit-workspace">
                   <span className="h-2.5 w-2.5 flex-none rounded-full bg-emerald-500 shadow-[0_0_0_3px_hsl(142_76%_36%/0.12)]" />
