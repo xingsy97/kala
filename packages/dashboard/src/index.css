@@ -730,6 +730,8 @@ body {
   backdrop-filter: blur(12px);
 }
 .ak-code-lines {
+  font-size: 0.75rem;
+  line-height: 1.25rem;
   font-variant-ligatures: none;
   tab-size: 2;
 }
@@ -737,6 +739,8 @@ body {
   display: grid;
   grid-template-columns: 3rem minmax(0, 1fr);
   min-width: max-content;
+  min-height: 1.25rem;
+  line-height: 1.25rem;
 }
 .ak-code-line-number {
   display: block;
@@ -746,12 +750,18 @@ body {
   padding: 0 0.625rem 0 0.5rem;
   text-align: right;
   color: hsl(var(--muted-foreground) / 0.55);
+  line-height: inherit;
 }
 .ak-code-line-content {
   display: block;
   min-width: max-content;
   padding: 0 0.75rem;
   white-space: pre;
+  font-size: inherit;
+  line-height: inherit;
+}
+.ak-code-line-content * {
+  line-height: inherit;
 }
 .ak-reader-surface {
   background:
