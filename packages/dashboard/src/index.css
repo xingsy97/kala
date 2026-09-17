@@ -729,11 +729,29 @@ body {
   background: hsl(var(--muted) / 0.28);
   backdrop-filter: blur(12px);
 }
-.ak-code-snippet-body {
-  grid-template-columns: auto minmax(0, 1fr);
+.ak-code-lines {
+  font-variant-ligatures: none;
+  tab-size: 2;
 }
-.ak-code-gutter {
+.ak-code-line {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  min-width: max-content;
+}
+.ak-code-line-number {
+  display: block;
+  user-select: none;
+  border-right: 1px solid hsl(var(--border) / 0.35);
   background: hsl(var(--muted) / 0.26);
+  padding: 0 0.625rem 0 0.5rem;
+  text-align: right;
+  color: hsl(var(--muted-foreground) / 0.55);
+}
+.ak-code-line-content {
+  display: block;
+  min-width: max-content;
+  padding: 0 0.75rem;
+  white-space: pre;
 }
 .ak-reader-surface {
   background:
@@ -757,15 +775,6 @@ body {
 .dark .shiki-host code span {
   color: var(--shiki-dark) !important;
   background-color: transparent !important;
-}
-.shiki-host .shiki {
-  overflow-x: auto;
-  font-size: 0.75rem;
-  line-height: 1.5;
-}
-.shiki-host code .line {
-  display: block;
-  min-height: 1.25rem;
 }
 
 .virtual-transcript-scroller,

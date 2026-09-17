@@ -15,7 +15,7 @@ import * as shiki from '../../lib/shiki.js'
 describe('CodeBlock', () => {
   beforeEach(() => {
     ;(shiki.highlightToHtml as ReturnType<typeof vi.fn>).mockReset()
-    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
   })
 
   afterEach(() => {
@@ -24,7 +24,7 @@ describe('CodeBlock', () => {
 
   it('renders a plain <pre> when no language is provided (never calls shiki)', () => {
     render(<CodeBlock code="hello world" />)
-    expect(screen.getByTestId('code-block-raw').textContent).toBe('hello world')
+    expect(screen.getByTestId('code-block-raw').querySelector('.ak-code-line-content')?.textContent).toBe('hello world')
     expect(shiki.highlightToHtml).not.toHaveBeenCalled()
   })
 
@@ -45,7 +45,8 @@ describe('CodeBlock', () => {
     render(<CodeBlock code={'const a = 1\nconst b = 2'} lang="ts" />)
     expect(screen.getByTestId('code-snippet')).toBeTruthy()
     expect(screen.getByTestId('code-block-language').textContent).toBe('TypeScript')
-    expect(screen.getByTestId('code-line-gutter').textContent).toBe('1\n2')
+    expect(screen.getAllByTestId('code-line-gutter').map((node) => node.textContent)).toEqual(['1', '2'])
+    expect(screen.getAllByTestId('code-line').map((node) => node.querySelector('.ak-code-line-content')?.textContent)).toEqual(['const a = 1', 'const b = 2'])
     fireEvent.click(screen.getByTestId('code-block-copy'))
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('const a = 1\nconst b = 2'))
     await screen.findByText('Copied')
@@ -53,7 +54,7 @@ describe('CodeBlock', () => {
 
   it('keeps a streaming fence raw and does not invoke Shiki until complete', () => {
     render(<CodeBlock code="const x =" lang="typescript" deferEnhancement />)
-    expect(screen.getByTestId('code-block-raw').textContent).toBe('const x =')
+    expect(screen.getByTestId('code-block-raw').querySelector('.ak-code-line-content')?.textContent).toBe('const x =')
     expect(shiki.highlightToHtml).not.toHaveBeenCalled()
   })
 
@@ -63,6 +64,6 @@ describe('CodeBlock', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    expect(screen.getByTestId('code-block-raw').textContent).toBe('???')
+    expect(screen.getByTestId('code-block-raw').querySelector('.ak-code-line-content')?.textContent).toBe('???')
   })
 })

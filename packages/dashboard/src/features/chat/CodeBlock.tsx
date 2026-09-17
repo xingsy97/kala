@@ -34,13 +34,22 @@ function extractHighlightedCodeHtml(html: string): string {
   return match?.[1] ?? html
 }
 
+function splitHighlightedLines(html: string): string[] {
+  if (typeof document === 'undefined') return []
+  const template = document.createElement('template')
+  template.innerHTML = extractHighlightedCodeHtml(html)
+  const lines = Array.from(template.content.querySelectorAll('.line')).map((line) => line.innerHTML)
+  return lines.length ? lines : [template.innerHTML]
+}
+
 export const CodeBlock = memo(function CodeBlock({ code, lang, className, trailingSlot, deferEnhancement = false }: Props): JSX.Element {
   const { t } = useTranslation()
   const [html, setHtml] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const language = languageLabel(lang)
-  const lineCount = useMemo(() => Math.max(1, code.split('\n').length), [code])
-  const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, index) => String(index + 1)).join('\n'), [lineCount])
+  const rawLines = useMemo(() => code.split('\n'), [code])
+  const visualLineCount = Math.max(1, rawLines.length)
+  const highlightedLines = useMemo(() => (html ? splitHighlightedLines(html) : null), [html])
 
   useEffect(() => {
     if (!lang || deferEnhancement) {
@@ -99,16 +108,29 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
           {copied ? t('codeBlock.copied') : t('codeBlock.copy')}
         </Button>
       </figcaption>
-      <div className="ak-code-snippet-body grid overflow-x-auto">
-        <pre className="ak-code-gutter m-0 select-none border-r border-border/35 px-2.5 py-2.5 text-right font-mono text-xs leading-5 text-muted-foreground/55" aria-hidden data-testid="code-line-gutter">{lineNumbers}</pre>
+      <div className="ak-code-snippet-body overflow-x-auto">
         <pre
           data-testid={html ? 'code-block-highlighted' : 'code-block-raw'}
           data-lang={lang ?? ''}
-          className="m-0 min-w-max overflow-visible bg-transparent px-3 py-2.5 font-mono text-xs leading-5 text-foreground"
+          className="ak-code-lines m-0 min-w-full overflow-visible bg-transparent py-2.5 font-mono text-xs leading-5 text-foreground"
         >
-          {html
-            ? <code dangerouslySetInnerHTML={{ __html: extractHighlightedCodeHtml(html) }} />
-            : <code>{code}{trailingSlot}</code>}
+          <code className="block min-w-full">
+            {Array.from({ length: Math.max(visualLineCount, highlightedLines?.length ?? 0) }, (_, index) => {
+              const highlighted = highlightedLines?.[index]
+              const raw = rawLines[index] ?? ''
+              const isLastLine = index === visualLineCount - 1
+              return (
+                <span className="ak-code-line" key={index} data-testid="code-line">
+                  <span className="ak-code-line-number" aria-hidden data-testid="code-line-gutter">{index + 1}</span>
+                  <span className="ak-code-line-content">
+                    {highlightedLines
+                      ? <span dangerouslySetInnerHTML={{ __html: highlighted && highlighted.length ? highlighted : '&nbsp;' }} />
+                      : <>{raw || '\u00a0'}{isLastLine ? trailingSlot : null}</>}
+                  </span>
+                </span>
+              )
+            })}
+          </code>
         </pre>
       </div>
     </figure>

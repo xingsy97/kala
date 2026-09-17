@@ -33,7 +33,7 @@ export function SimpleChatDraft({
   onCreated(sessionId: string): void
 }): JSX.Element {
   const { t } = useTranslation()
-  const [runtime, setRuntime] = useState(() => readStringPref(PREF_AGENT_RUNTIME, 'kernel'))
+  const [runtime, setRuntime] = useState(() => initialSimpleChatRuntime(agentRuntimes))
   const descriptor = agentRuntimes.find((item) => item.id === runtime && item.available)
     ?? agentRuntimes.find((item) => item.available)
   const [model, setModel] = useState<string | undefined>()
@@ -55,6 +55,14 @@ export function SimpleChatDraft({
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
+
+  useEffect(() => {
+    if (started) return
+    const stored = readStringPref(PREF_AGENT_RUNTIME, '')
+    if ((stored === 'kernel' || stored === 'copilot') && agentRuntimes.some((item) => item.id === stored && item.available)) return
+    const next = initialSimpleChatRuntime(agentRuntimes)
+    setRuntime((current) => current === next ? current : next)
+  }, [agentRuntimes, started])
 
   const ensureSession = async (): Promise<void> => {
     if (created.current) return
@@ -184,4 +192,14 @@ export function SimpleChatDraft({
       />
     </div>
   )
+}
+
+function initialSimpleChatRuntime(agentRuntimes: readonly AgentRuntimeDescriptor[]): AgentRuntimeId {
+  const stored = readStringPref(PREF_AGENT_RUNTIME, '')
+  if (stored === 'kernel' || stored === 'copilot') {
+    if (agentRuntimes.some((item) => item.id === stored && item.available)) return stored
+  }
+  const copilot = agentRuntimes.find((item) => item.id === 'copilot' && item.available)
+  if (copilot) return copilot.id
+  return agentRuntimes.find((item) => item.available)?.id ?? 'kernel'
 }

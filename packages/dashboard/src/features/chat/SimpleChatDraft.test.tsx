@@ -46,6 +46,15 @@ beforeEach(() => {
 })
 
 describe('SimpleChatDraft', () => {
+  it('defaults new workspace-free chats to Copilot when the user has no runtime preference', async () => {
+    const { onCreated } = draft()
+    expect(screen.getByTestId('draft-runtime-copilot').getAttribute('aria-checked')).toBe('true')
+    send()
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
+    expect(vi.mocked(createSessionWithAck).mock.calls[0]![1]).toMatchObject({ agentRuntime: 'copilot' })
+    expect(vi.mocked(createSessionWithAck).mock.calls[0]![1]).not.toHaveProperty('selectedModel')
+  })
+
   it('does not create or upload while opening, typing, choosing a runtime, or attaching a file', async () => {
     draft()
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'unsent' } })
