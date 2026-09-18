@@ -1007,7 +1007,10 @@ describe('ChatPanel', () => {
     expect(sticky.textContent).not.toContain('second question')
     expect(sticky.querySelector('.line-clamp-2')).toBeTruthy()
     expect(sticky.querySelector('.sm\\:line-clamp-3')).toBeTruthy()
-    expect(within(sticky).getByRole('button').className).toContain('ak-sticky-user-prompt-surface')
+    const buttonClass = within(sticky).getByRole('button').className
+    expect(buttonClass).toContain('ak-sticky-user-prompt-surface')
+    expect(buttonClass).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
+    expect(buttonClass).toContain('items-center')
     expect(sticky.querySelector('.text-\\[0\\.9375rem\\]')).toBeTruthy()
 
     fireEvent.click(within(sticky).getByRole('button'))
