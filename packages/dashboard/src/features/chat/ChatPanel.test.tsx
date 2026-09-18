@@ -1002,12 +1002,13 @@ describe('ChatPanel', () => {
     fireEvent.scroll(scroller)
 
     const sticky = await screen.findByTestId('sticky-user-prompt')
-    expect(sticky.textContent).toContain('Current prompt')
+    expect(sticky.textContent).not.toContain('Current prompt')
     expect(sticky.textContent).toContain('first question')
     expect(sticky.textContent).not.toContain('second question')
     expect(sticky.querySelector('.line-clamp-2')).toBeTruthy()
     expect(sticky.querySelector('.sm\\:line-clamp-3')).toBeTruthy()
     expect(within(sticky).getByRole('button').className).toContain('ak-sticky-user-prompt-surface')
+    expect(sticky.querySelector('.text-\\[0\\.9375rem\\]')).toBeTruthy()
 
     fireEvent.click(within(sticky).getByRole('button'))
     expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 0, align: 'start', behavior: 'auto' })
