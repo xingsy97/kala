@@ -3096,6 +3096,7 @@ export function WorkbenchToolbar({
 }
 
 const CONNECTION_HEALTH_WINDOW_MS = 10 * 60 * 1000
+const CONNECTION_HEALTH_FAILURES_BEFORE_ISSUE = 2
 
 type ConnectionHealthSample = {
   at: number
@@ -3114,6 +3115,7 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   const [hostError, setHostError] = useState<string | null>(null)
   const [executorError, setExecutorError] = useState<string | null>(null)
   const [history, setHistory] = useState<readonly ConnectionHealthSample[]>([])
+  const [probeFailureStreak, setProbeFailureStreak] = useState(0)
   const [checking, setChecking] = useState(false)
   const [copied, setCopied] = useState(false)
   const executorRequired = Boolean(workspaceId)
@@ -3144,6 +3146,10 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
       pending -= 1
       if (pending === 0) {
         appendSample(sample)
+        setProbeFailureStreak((previous) => {
+          const failed = !sample.hostOk || (sample.executorRequired && executorConnected && !sample.executorOk)
+          return failed ? previous + 1 : 0
+        })
         setChecking(false)
       }
     }
@@ -3186,6 +3192,7 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
     setHostError(null)
     setExecutorError(null)
     setHistory([])
+    setProbeFailureStreak(0)
   }, [socket, workspaceId])
 
   useEffect(() => {
@@ -3204,7 +3211,8 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
 
   const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, hostError, ...(executorRequired ? { executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline' } : {}), sessionCursor: cursor }
   const copy = (): void => { void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => setCopied(false)) }
-  const probeFailed = status === 'ready' && (hostError !== null || executorRequired && executorConnected && executorError !== null)
+  const transientProbeFailed = hostError !== null || executorRequired && executorConnected && executorError !== null
+  const probeFailed = status === 'ready' && transientProbeFailed && probeFailureStreak >= CONNECTION_HEALTH_FAILURES_BEFORE_ISSUE
   const displayStatus = probeFailed ? 'error' : status
   const label = probeFailed ? t('connectionHealth.issue') : hostStatusLabel(status, t)
   const healthy = displayStatus === 'ready' && (!executorRequired || executorConnected)

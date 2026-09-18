@@ -115,9 +115,9 @@ describe('ConnectionStatus', () => {
     expect(screen.getByTestId('connection-status-popover')).toBeTruthy()
   })
 
-  it('keeps host failures and session synchronization errors visible for Chats', () => {
+  it('softens single host probe failures while keeping session synchronization errors visible for Chats', () => {
     const view = render(<ConnectionStatus socket={timedOutSocket() as never} status="ready" cursor={0} executorConnected onResync={() => {}} />)
-    expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('error')
+    expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('ready')
     view.rerender(<ConnectionStatus socket={socketWithRtt() as never} status="error" cursor={0} executorConnected onResync={() => {}} />)
     expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('error')
     view.rerender(<ConnectionStatus socket={null} status="disconnected" cursor={0} executorConnected onResync={() => {}} />)
@@ -183,14 +183,17 @@ describe('ConnectionStatus', () => {
     expect(screen.getByText('Check connection')).toBeTruthy()
   })
 
-  it('marks the overall connection as failed when both latency probes time out', async () => {
+  it('marks the overall connection as failed after repeated latency probe timeouts', async () => {
     render(<ConnectionStatus socket={timedOutSocket() as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected onResync={() => {}} />)
 
+    await waitFor(() => expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('ready'))
+    fireEvent.click(screen.getByTestId('connection-status'))
+    expect(screen.queryByText('Connection issue')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Measure again' }))
     await waitFor(() => expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('error'))
-    expect(screen.getByText('Connection issue')).toBeTruthy()
+    expect(screen.getAllByText('Connection issue').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByTestId('connection-headline-latency').textContent).toBe('—')
 
-    fireEvent.click(screen.getByTestId('connection-status'))
     expect(screen.getByTestId('connection-segment-device-service').getAttribute('title')).toContain('Timed out')
     expect(screen.getByTestId('connection-segment-service-executor').getAttribute('title')).toContain('Timed out')
     expect(screen.getAllByText('Connection issue').length).toBeGreaterThanOrEqual(2)
