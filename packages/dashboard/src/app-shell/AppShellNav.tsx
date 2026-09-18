@@ -110,7 +110,8 @@ export function AppShellNav({
         data-testid="app-shell-nav"
         data-collapsed="true"
         className={cn(
-          'ak-global-topbar sticky top-0 z-30 flex h-10 items-center backdrop-blur-xl',
+          'sticky top-0 z-30 flex h-10 items-center backdrop-blur-xl',
+          collapsedContent ? 'ak-fused-topbar' : 'ak-global-topbar',
           collapsedContent ? 'gap-0 p-0' : 'gap-2 px-2 sm:px-3',
         )}
       >
