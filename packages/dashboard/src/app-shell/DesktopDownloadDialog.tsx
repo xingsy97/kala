@@ -101,7 +101,7 @@ export function DesktopDownloadDialog({ trigger, update = false }: { trigger?: R
   return (
     <Dialog>
       <DialogTrigger asChild>
-        {trigger ?? <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" data-testid="app-shell-download-desktop" title={t('desktopDownload.title')} aria-label={t('desktopDownload.open')}>
+        {trigger ?? <Button variant="ghost" size="icon" className="hidden h-8 w-8 text-muted-foreground hover:text-foreground sm:inline-flex" data-testid="app-shell-download-desktop" title={t('desktopDownload.title')} aria-label={t('desktopDownload.open')}>
           <Download className="h-4 w-4" aria-hidden />
         </Button>}
       </DialogTrigger>

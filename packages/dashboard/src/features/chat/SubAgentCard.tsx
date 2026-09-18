@@ -58,13 +58,13 @@ export function SubAgentCard(props: Props): JSX.Element {
   if (calls.length >= 2) {
     return (
       <div
-        className="min-w-0 overflow-hidden rounded-xl border border-violet-200/60 bg-violet-50/20 p-2 dark:border-violet-500/30 dark:bg-violet-950/10"
+        className="ak-subagent-card-surface min-w-0 overflow-hidden rounded-2xl border border-border/60 p-2.5"
         data-testid={`sub-agent-group-${props.group.firstCallId}`}
       >
         <div className="mb-2 flex min-h-8 items-center gap-2 px-1">
-          <Workflow className="h-4 w-4 flex-none text-violet-600 dark:text-violet-300" aria-hidden="true" />
+          <Workflow className="h-4 w-4 flex-none text-primary/80" aria-hidden="true" />
           <span className="text-sm font-medium text-foreground">{t('chat.subAgent.groupLabel')}</span>
-          <span className="rounded-full bg-background/80 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground ring-1 ring-border/40">{calls.length}</span>
+          <span className="rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground ring-1 ring-border/50">{calls.length}</span>
         </div>
         <div className="flex min-w-0 flex-wrap gap-1.5" data-testid={`sub-agent-group-list-${props.group.firstCallId}`}>
           {calls.map((call) => (
@@ -261,20 +261,20 @@ const SubAgentRow = memo(function SubAgentRow({
   return (
     <div
       className={cn(
-        'relative min-w-0 max-w-full overflow-hidden rounded-lg border transition-colors',
+        'ak-subagent-card-surface relative min-w-0 max-w-full overflow-hidden rounded-2xl border border-border/60 border-l-2 transition-colors',
         status === 'failed'
-          ? 'border-rose-300/60 bg-rose-50/40 dark:border-rose-500/40 dark:bg-rose-950/20'
+          ? 'border-l-rose-400/70'
           : status === 'completed'
-            ? 'border-emerald-300/40 bg-emerald-50/30 dark:border-emerald-500/30 dark:bg-emerald-950/10'
+            ? 'border-l-emerald-400/70'
             : status === 'running'
-              ? 'border-sky-300/50 bg-sky-50/40 dark:border-sky-500/40 dark:bg-sky-950/20'
-              : 'border-border/60 bg-muted/40',
-        grouped && 'w-full bg-background/80 shadow-sm',
+              ? 'border-l-sky-400/70'
+              : 'border-l-border/70',
+        grouped && 'w-full',
       )}
       data-testid={`sub-agent-row-${call.callId}`}
       data-sub-agent-status={status}
     >
-      <div className="flex min-w-0 items-center rounded-lg text-sm text-foreground transition-colors hover:bg-muted/60">
+      <div className="flex min-w-0 items-center rounded-2xl text-sm text-foreground transition-colors hover:bg-accent/35">
         <button
           type="button"
           onClick={() => withViewTransition(() => setOpen((v) => !v))}
@@ -287,11 +287,11 @@ const SubAgentRow = memo(function SubAgentRow({
             <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           )}
           <StatusIcon status={status} />
-          <span className={cn('flex-none rounded bg-background/80 px-1.5 py-0.5 font-medium text-muted-foreground', compact ? 'text-[0.625rem]' : 'text-xs')}>
+          <span className={cn('flex-none rounded-full bg-background/65 px-1.5 py-0.5 font-medium text-muted-foreground ring-1 ring-border/45', compact ? 'text-[0.625rem]' : 'text-xs')}>
             {t('chat.subAgent.label')}
           </span>
           {agentType ? (
-            <span className={cn('flex-none rounded bg-background/80 px-1.5 py-0.5', compact ? 'text-[0.625rem]' : 'text-xs')}>
+            <span className={cn('flex-none rounded-full bg-primary/10 px-1.5 py-0.5 text-primary ring-1 ring-primary/20', compact ? 'text-[0.625rem]' : 'text-xs')}>
               {agentType}
             </span>
           ) : null}
@@ -300,7 +300,7 @@ const SubAgentRow = memo(function SubAgentRow({
           </span>
           {model ? (
             <span
-              className="hidden flex-none items-center gap-1 rounded bg-background/80 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground sm:flex"
+              className="hidden flex-none items-center gap-1 rounded-full bg-background/65 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground ring-1 ring-border/45 sm:flex"
               title={`model=${model}`}
             >
               <Cpu className="h-3 w-3" aria-hidden="true" />
@@ -319,7 +319,7 @@ const SubAgentRow = memo(function SubAgentRow({
                 childSessionId: runningChildSessionId,
               })
             }}
-            className="mr-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded bg-background/80 text-muted-foreground ring-1 ring-border/50 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
+            className="mr-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-background/65 text-muted-foreground ring-1 ring-border/50 hover:bg-rose-500/10 hover:text-rose-700 dark:hover:text-rose-300"
             title={t('chat.subAgent.interrupt')}
             aria-label={t('chat.subAgent.interrupt')}
             data-testid={`sub-agent-interrupt-${call.callId}`}
@@ -333,7 +333,7 @@ const SubAgentRow = memo(function SubAgentRow({
       </div>
 
       {open ? (
-        <div className="border-t border-border/50 bg-background/60">
+        <div className="border-t border-border/45 bg-background/45">
           {failureText ? (
             <div className="border-b border-rose-200/60 bg-rose-50/60 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/30 dark:text-rose-200">
               <strong className="font-semibold">{status === 'cancelled' ? t('chat.subAgent.cancelled') : t('chat.subAgent.failed')}</strong> {failureText}

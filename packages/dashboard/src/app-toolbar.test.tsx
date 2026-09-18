@@ -84,10 +84,11 @@ describe('WorkbenchToolbar', () => {
     expect(toggle.querySelector('.lucide-chevron-up')).toBeNull()
   })
 
-  it('can render inline inside the collapsed workbench topbar without its own rail surface', () => {
+  it('can render as a capsule inside the collapsed workbench topbar', () => {
     renderToolbar({
       placement: 'topbar',
       sessionSelected: true,
+      simpleChat: true,
       topbarAvailable: true,
       brand: <span data-testid="collapsed-brand">Agent RunLab</span>,
       rightSlot: <span data-testid="collapsed-actions">Actions</span>,
@@ -95,14 +96,21 @@ describe('WorkbenchToolbar', () => {
 
     expect(screen.queryByTestId('workbench-toolbar-rail')).toBeNull()
     expect(screen.getByTestId('workbench-toolbar').className).not.toContain('ak-titlebar-surface')
-    expect(screen.getByTestId('workbench-toolbar').className).toContain('ak-fused-topbar')
+    expect(screen.getByTestId('workbench-toolbar').className).not.toContain('ak-fused-topbar')
     expect(screen.getByTestId('workbench-toolbar').className).not.toContain('ak-global-topbar')
     expect(screen.getByTestId('workbench-toolbar').className).toContain('flex-none')
     expect(screen.getByTestId('workbench-toolbar').className).not.toContain('flex-1')
+    expect(screen.getByTestId('workbench-toolbar').querySelector('.ak-fused-topbar-capsule')).toBeTruthy()
     expect(screen.getByTestId('collapsed-brand').textContent).toBe('Agent RunLab')
     expect(screen.getByTestId('collapsed-actions').textContent).toBe('Actions')
     expect(screen.getByTestId('session-title').className).not.toContain('text-zinc-100')
+    expect(screen.getByTestId('session-title').className).toContain('max-w-[36vw]')
+    expect(screen.getByTestId('session-status-indicator').className).toContain('w-6')
+    expect(screen.getByTestId('session-status-indicator').textContent).toBe('Unknown')
+    expect(screen.getByTestId('session-status-indicator').querySelector('span:last-child')?.className).toContain('sr-only')
     expect(screen.getByTestId('session-label').textContent).toBe('Loaded session')
+    expect(screen.getByTestId('simple-chat-badge').className).toContain('hidden')
+    expect(screen.getByTestId('simple-chat-badge').className).toContain('sm:inline-flex')
     expect(screen.getByTestId('collapsed-actions').compareDocumentPosition(screen.getByTestId('topbar-toggle')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 

@@ -1418,13 +1418,15 @@ function SessionRow({
 export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   status,
   selected = false,
+  compact = false,
 }: {
   status: SessionActivityStatus | undefined
   selected?: boolean
+  compact?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const label = statusIndicatorLabel(status, t)
-  if (selected) return <ToolbarSessionStatus status={status} label={label} />
+  if (selected) return <ToolbarSessionStatus status={status} label={label} compact={compact} />
   const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
   if (status === 'loading' || status === 'thinking' || status === 'executing_tools') {
     return (
@@ -1515,7 +1517,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   )
 })
 
-function ToolbarSessionStatus({ status, label }: { status: SessionActivityStatus | undefined; label: string }): JSX.Element {
+function ToolbarSessionStatus({ status, label, compact }: { status: SessionActivityStatus | undefined; label: string; compact?: boolean }): JSX.Element {
   const running = status === 'thinking' || status === 'executing_tools' || status === 'loading'
   const tone = status === 'error'
     ? 'border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300'
@@ -1538,11 +1540,11 @@ function ToolbarSessionStatus({ status, label }: { status: SessionActivityStatus
           ? LoaderCircle
           : Circle
   return (
-    <span className={cn('inline-flex h-6 flex-none items-center gap-1.5 rounded-md border px-2 text-[0.625rem] font-medium', tone)} data-testid="session-status-indicator" data-status={status ?? 'unknown'} aria-label={label}>
+    <span className={cn('inline-flex h-6 flex-none items-center gap-1.5 rounded-md border text-[0.625rem] font-medium', compact ? 'w-6 justify-center px-0 sm:w-auto sm:justify-start sm:px-2' : 'px-2', tone)} data-testid="session-status-indicator" data-status={status ?? 'unknown'} aria-label={label}>
       <span className={cn('inline-flex', running && 'ak-session-status-spinner')} data-testid={running ? 'session-status-spinner' : undefined} aria-hidden="true">
         <Icon className="h-3 w-3" strokeWidth={2.3} />
       </span>
-      <span>{label}</span>
+      <span className={cn(compact && 'sr-only sm:not-sr-only')}>{label}</span>
     </span>
   )
 }

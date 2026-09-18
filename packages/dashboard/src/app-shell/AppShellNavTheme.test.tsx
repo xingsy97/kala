@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { AppShellNav } from './AppShellNav.js'
 
 describe('AppShellNav theme-aware collapsed surfaces', () => {
-  it('uses the theme-aware fused topbar when collapsed session content is present', () => {
+  it('uses the theme-aware fused topbar shell when collapsed session content is present', () => {
     render(
       <AppShellNav
         section="agent"
@@ -18,8 +18,9 @@ describe('AppShellNav theme-aware collapsed surfaces', () => {
     )
 
     const nav = screen.getByTestId('app-shell-nav')
-    expect(nav.className).toContain('ak-fused-topbar')
+    expect(nav.className).toContain('ak-fused-topbar-shell')
     expect(nav.className).not.toContain('ak-global-topbar')
+    expect(nav.className).toContain('h-14')
   })
 
   it('keeps the minimal collapsed brand on the dark global topbar', () => {
@@ -36,6 +37,6 @@ describe('AppShellNav theme-aware collapsed surfaces', () => {
 
     const nav = screen.getByTestId('app-shell-nav')
     expect(nav.className).toContain('ak-global-topbar')
-    expect(nav.className).not.toContain('ak-fused-topbar')
+    expect(nav.className).not.toContain('ak-fused-topbar-shell')
   })
 })

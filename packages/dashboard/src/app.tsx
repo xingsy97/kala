@@ -3022,18 +3022,19 @@ export function WorkbenchToolbar({
       ) : null}
       <span
         className={cn(
-          'inline-flex min-w-0 max-w-[55vw] items-center gap-1.5 sm:max-w-none',
+          'inline-flex min-w-0 items-center gap-1.5',
+          isTopbarPlacement ? 'max-w-[36vw] sm:max-w-[46vw] md:max-w-none' : 'max-w-[55vw] sm:max-w-none',
         )}
         title={displayLabel}
         data-testid="session-title"
       >
         {sessionSelected ? (
-          <SessionStatusIndicator status={sessionActivityStatus} selected />
+          <SessionStatusIndicator status={sessionActivityStatus} selected compact={isTopbarPlacement} />
         ) : null}
         <span className="min-w-0 truncate font-semibold tracking-[-0.01em] text-inherit" data-testid="session-label">
           {displayLabel}
         </span>
-        {simpleChat ? <span className="flex-none rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary" data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
+        {simpleChat ? <span className={cn('flex-none rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary', isTopbarPlacement && 'hidden sm:inline-flex')} data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
       </span>
       {sessionSelected && onChangeCwd ? (
         <Button
@@ -3071,9 +3072,11 @@ export function WorkbenchToolbar({
   )
   if (isTopbarPlacement) {
     return (
-      <div className="ak-fused-topbar flex h-10 w-full min-w-0 flex-none items-center gap-1.5 px-2 text-sm text-card-foreground backdrop-blur-xl sm:px-3" data-testid="workbench-toolbar">
-        {brand}
-        {content}
+      <div className="flex h-full w-full min-w-0 flex-none items-center" data-testid="workbench-toolbar">
+        <div className="ak-fused-topbar-capsule flex h-full w-full min-w-0 items-center gap-1.5 px-2 text-sm text-card-foreground backdrop-blur-xl sm:px-3">
+          {brand}
+          {content}
+        </div>
       </div>
     )
   }

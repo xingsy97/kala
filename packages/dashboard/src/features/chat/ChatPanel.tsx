@@ -45,6 +45,7 @@ import {
   Wrench,
   X,
   XCircle,
+  UserRound,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -802,10 +803,10 @@ function StickyUserPrompt({
         className="ak-chat-container ak-sticky-user-prompt-surface pointer-events-auto mx-auto grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-2xl border border-border/70 px-3.5 py-2.5 text-left text-card-foreground shadow-[0_14px_34px_hsl(var(--foreground)/0.11)] ring-1 ring-background/60 backdrop-blur-xl transition-colors hover:border-border sm:max-w-[min(var(--ak-chat-content-width,84rem),calc(100%-2rem))] sm:px-4 sm:py-3"
         aria-label={t('chat.transcript.currentPromptJump')}
       >
-        <span className="flex h-7 w-7 flex-none items-center justify-center self-center rounded-full bg-primary/12 text-primary ring-1 ring-primary/15">
-          <PenLine className="h-3.5 w-3.5" aria-hidden="true" />
+        <span className="flex h-7 w-7 flex-none items-center justify-center self-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
+          <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
-        <span className="min-w-0 border-l border-primary/18 py-0.5 pl-3">
+        <span className="min-w-0 border-l border-primary/20 py-0.5 pl-3">
           {prompt.text ? (
             <span className="ak-chat-text line-clamp-2 whitespace-pre-wrap break-words text-[0.9375rem] font-medium leading-6 tracking-[-0.01em] [overflow-wrap:anywhere] sm:line-clamp-3 sm:text-base">
               {prompt.text}

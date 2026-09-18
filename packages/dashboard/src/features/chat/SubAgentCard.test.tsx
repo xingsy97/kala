@@ -46,6 +46,9 @@ describe('SubAgentCard', () => {
     expect(badge.textContent).toContain('Pending')
     expect(screen.getByText('Explore')).toBeTruthy()
     expect(screen.getAllByText('find the bug').length).toBeGreaterThan(0)
+    const row = screen.getByTestId('sub-agent-row-c1')
+    expect(row.className).toContain('ak-subagent-card-surface')
+    expect(row.className).toContain('rounded-2xl')
     // Beam is only drawn when a child session is actively running.
     expect(screen.queryByTestId('border-beam')).toBeNull()
   })

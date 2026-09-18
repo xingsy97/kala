@@ -1012,6 +1012,8 @@ describe('ChatPanel', () => {
     expect(buttonClass).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
     expect(buttonClass).toContain('items-center')
     expect(sticky.querySelector('.text-\\[0\\.9375rem\\]')).toBeTruthy()
+    expect(sticky.querySelector('.lucide-user-round')).toBeTruthy()
+    expect(sticky.querySelector('.lucide-pen-line')).toBeNull()
 
     fireEvent.click(within(sticky).getByRole('button'))
     expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 0, align: 'start', behavior: 'auto' })
