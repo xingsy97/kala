@@ -51,6 +51,10 @@ class MockSocket {
     this.connected = false
   }
 
+  disconnect(): void {
+    this.connected = false
+  }
+
   serverEmit(event: string, payload: unknown): void {
     for (const handler of this.handlers.get(event) ?? []) handler(payload)
   }
@@ -122,11 +126,39 @@ describe('useSession session view cache', () => {
     act(() => socket.serverEmit('disconnect', 'transport close'))
     expect(view.result.current.status).toBe('disconnected')
     act(() => socket.serverEmit('connect_error', new Error('network unavailable')))
-    expect(view.result.current.status).toBe('error')
+    expect(view.result.current.status).toBe('disconnected')
     act(() => socket.serverEmit('connect', undefined))
     expect(view.result.current.status).toBe('connecting')
     act(() => socket.serverEmit('session:ready', ready))
     expect(view.result.current.status).toBe('ready')
+  })
+
+  it('keeps transient initial shared socket errors in the connecting state', () => {
+    const socket = new MockSocket()
+    const view = renderHook(() => useSession({ host: 'http://host', sessionId: 's1', socket: socket as never }))
+    expect(view.result.current.status).toBe('connecting')
+    act(() => socket.serverEmit('connect_error', new Error('websocket error')))
+    expect(view.result.current.status).toBe('connecting')
+  })
+
+  it('keeps transient reconnect errors disconnected after a ready session drops', () => {
+    const socket = new MockSocket()
+    const view = renderHook(() => useSession({ host: 'http://host', sessionId: 's1', socket: socket as never }))
+    const ready = { sessionId: 's1', agentRuntime: 'copilot', reason: 'load', cursor: 0, state: createInitialState({ sessionId: 's1' }), config: { tools: [] } }
+    act(() => socket.serverEmit('session:ready', ready))
+    expect(view.result.current.status).toBe('ready')
+    act(() => socket.serverEmit('disconnect', 'transport close'))
+    expect(view.result.current.status).toBe('disconnected')
+    act(() => socket.serverEmit('connect_error', new Error('websocket error')))
+    expect(view.result.current.status).toBe('disconnected')
+  })
+
+  it('still surfaces permanent shared socket auth failures as errors', () => {
+    const socket = new MockSocket()
+    const view = renderHook(() => useSession({ host: 'http://host', sessionId: 's1', socket: socket as never }))
+    act(() => socket.serverEmit('connect_error', new Error('auth_failed')))
+    expect(view.result.current.status).toBe('error')
+    expect(socket.connected).toBe(false)
   })
 
   it('does not leave a rejected shared subscription Connecting forever', () => {

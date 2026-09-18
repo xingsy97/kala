@@ -408,6 +408,11 @@ export function useSession({
     let socket: DashboardSocket | null = null
     let reconnectCleanup: (() => void) | null = null
     let socketListenerCleanup: (() => void) | null = null
+    let liveConnectionStatus: ConnectionStatus = 'connecting'
+    const dispatchStatus = (status: ConnectionStatus): void => {
+      liveConnectionStatus = status
+      dispatchProjectionEvent({ kind: 'status', generation, sessionId, status })
+    }
     // Durable hydration and the live socket race independently. IndexedDB is a
     // paint optimization; it must never delay the authoritative connection.
     if (!cached && cache?.hydrate) {
@@ -429,7 +434,7 @@ export function useSession({
           freshBaseline: true,
           onError: (code) => {
             if (disposed) return
-            dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
+            dispatchStatus('error')
             dispatchProjectionEvent({ kind: 'error', generation, sessionId, error: { sessionId, scope: 'host', message: `Unable to subscribe to this Session: ${code}` } })
           },
         })
@@ -517,6 +522,7 @@ export function useSession({
       streamMessageCount = p.state.messages.length
       updateStreamStatus(p.state.status)
       flushProjectionQueue()
+      liveConnectionStatus = 'ready'
       dispatchProjectionEvent({ kind: 'ready', generation, sessionId, payload: p })
       if ((p.agentRuntime ?? 'kernel') !== 'kernel') {
         latestHistoryRequest = null
@@ -649,7 +655,7 @@ export function useSession({
       }
     })
     bind('connect', () => {
-      if (isCurrentSocket()) dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'connecting' })
+      if (isCurrentSocket()) dispatchStatus('connecting')
     })
     bind('connect_error', (err: Error) => {
       if (!isCurrentSocket()) return
@@ -659,12 +665,14 @@ export function useSession({
       const msg = (err as Error | undefined)?.message ?? ''
       if (msg === 'version_incompatible' || msg === 'auth_failed') {
         socket.disconnect()
+        dispatchStatus('error')
+        return
       }
-      dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
+      dispatchStatus(liveConnectionStatus === 'ready' || liveConnectionStatus === 'disconnected' ? 'disconnected' : 'connecting')
     })
     if (!sharedSocket) socket.io.on('reconnect_failed', () => {
       if (!isCurrentSocket()) return
-      dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
+      dispatchStatus('error')
     })
     bind('disconnect', (reason: string) => {
       if (!isCurrentSocket()) return
@@ -675,14 +683,14 @@ export function useSession({
       // keep dialing.
       if (reason === 'io server disconnect') {
         if (Date.now() < plannedRestartUntil) {
-          dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'disconnected' })
+          dispatchStatus('disconnected')
           return
         }
         socket.disconnect()
-        dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'error' })
+        dispatchStatus('error')
         return
       }
-      dispatchProjectionEvent({ kind: 'status', generation, sessionId, status: 'disconnected' })
+      dispatchStatus('disconnected')
     })
     bind('server:compact_status', (p: CompactStatusEvent) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
