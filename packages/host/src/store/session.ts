@@ -13,6 +13,8 @@ import type {
   AgentEvent,
   AgentState,
   Effect,
+  Message,
+  MessageContent,
   UsageTotal,
 } from '@agent-kernel/kernel'
 import type {
@@ -85,6 +87,156 @@ export type SessionRecord = {
    * `CreateSessionParams.memoryPolicy`.
    */
   memoryPolicy?: SessionMemoryPolicy
+}
+
+const EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024
+const EXTERNAL_RUNTIME_CONTENT_MAX_BYTES = 32 * 1024
+const EXTERNAL_RUNTIME_TEXT_MAX_BYTES = 128 * 1024
+const EXTERNAL_RUNTIME_INPUT_MAX_BYTES = 32 * 1024
+const EXTERNAL_RUNTIME_RECENT_MESSAGE_WINDOW = 80
+const EXTERNAL_RUNTIME_MIN_MESSAGE_WINDOW = 20
+
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, 'utf8')
+}
+
+function jsonBytes(value: unknown): number {
+  return utf8Bytes(JSON.stringify(value))
+}
+
+function truncateUtf8(value: string, maxBytes: number, suffix: string): string {
+  if (utf8Bytes(value) <= maxBytes) return value
+  const suffixBytes = utf8Bytes(suffix)
+  const headBytes = Math.max(0, maxBytes - suffixBytes)
+  return Buffer.from(value, 'utf8').subarray(0, headBytes).toString('utf8') + suffix
+}
+
+function compactLargeString(value: string, maxBytes: number, label: string): string {
+  const bytes = utf8Bytes(value)
+  if (bytes <= maxBytes) return value
+  const overflowIndex = value.lastIndexOf('--- output truncated:')
+  const overflowMarker = overflowIndex >= 0 ? value.slice(overflowIndex) : undefined
+  const suffix = overflowMarker && utf8Bytes(overflowMarker) < 4096
+    ? `\n\n${overflowMarker}`
+    : `\n\n--- ${label} compacted in projection snapshot: original ${bytes} bytes ---`
+  const body = overflowMarker ? value.slice(0, overflowIndex).trimEnd() : value
+  return truncateUtf8(body, maxBytes, suffix)
+}
+
+function compactToolInput(input: Record<string, unknown>): Record<string, unknown> {
+  const bytes = jsonBytes(input)
+  if (bytes <= EXTERNAL_RUNTIME_INPUT_MAX_BYTES) return input
+  return {
+    __snapshotCompacted: true,
+    originalBytes: bytes,
+    preview: truncateUtf8(
+      JSON.stringify(input),
+      EXTERNAL_RUNTIME_INPUT_MAX_BYTES,
+      `\n--- tool input compacted in projection snapshot: original ${bytes} bytes ---`,
+    ),
+  }
+}
+
+function compactSnapshotContent(content: MessageContent, aggressive: boolean): MessageContent {
+  if (content.type === 'tool_result') {
+    const maxBytes = aggressive ? 4096 : EXTERNAL_RUNTIME_CONTENT_MAX_BYTES
+    return {
+      ...content,
+      content: compactLargeString(content.content, maxBytes, 'tool result'),
+    }
+  }
+  if (content.type === 'tool_call') {
+    return {
+      ...content,
+      input: compactToolInput(content.input),
+    }
+  }
+  if (content.type === 'text') {
+    const maxBytes = aggressive ? 8192 : EXTERNAL_RUNTIME_TEXT_MAX_BYTES
+    return {
+      ...content,
+      text: compactLargeString(content.text, maxBytes, 'text content'),
+    }
+  }
+  if (content.type === 'thinking') {
+    const maxBytes = aggressive ? 4096 : EXTERNAL_RUNTIME_TEXT_MAX_BYTES
+    return {
+      ...content,
+      text: compactLargeString(content.text, maxBytes, 'reasoning content'),
+    }
+  }
+  if (content.type === 'file' && 'data' in content && utf8Bytes(content.data) > EXTERNAL_RUNTIME_CONTENT_MAX_BYTES) {
+    return {
+      ...content,
+      data: '',
+      mediaType: 'text/plain',
+      name: `${content.name}.snapshot-compacted`,
+    }
+  }
+  if (content.type === 'image' && content.source.kind === 'base64' && utf8Bytes(content.source.data) > EXTERNAL_RUNTIME_CONTENT_MAX_BYTES) {
+    return {
+      ...content,
+      source: {
+        ...content.source,
+        data: '',
+      },
+    }
+  }
+  return content
+}
+
+function compactSnapshotMessage(message: Message, aggressive: boolean): Message {
+  return {
+    ...message,
+    content: message.content.map((content) => compactSnapshotContent(content, aggressive)),
+  }
+}
+
+function placeholderMessage(message: Message, index: number): Message {
+  const bytes = jsonBytes(message)
+  if (message.role === 'tool') {
+    const first = message.content.find((content) => content.type === 'tool_result')
+    return {
+      role: 'tool',
+      content: [{
+        type: 'tool_result',
+        callId: first?.type === 'tool_result' ? first.callId : `compacted-${index}`,
+        ok: first?.type === 'tool_result' ? first.ok : true,
+        content: `--- older tool result compacted in projection snapshot: original ${bytes} bytes ---`,
+        ...(first?.type === 'tool_result' && first.failure ? { failure: first.failure } : {}),
+      }],
+      ...(message.metadata ? { metadata: message.metadata } : {}),
+    }
+  }
+  return {
+    role: message.role,
+    content: [{
+      type: 'text',
+      text: `--- older ${message.role} message compacted in projection snapshot: original ${bytes} bytes ---`,
+    }],
+    ...(message.metadata ? { metadata: message.metadata } : {}),
+  }
+}
+
+export function compactExternalRuntimeSnapshotState(state: AgentState): AgentState {
+  let messages = state.messages.map((message) => compactSnapshotMessage(message, false))
+  let candidate = { ...state, messages } as AgentState
+  if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES) return candidate
+
+  messages = messages.map((message) => compactSnapshotMessage(message, true))
+  candidate = { ...state, messages } as AgentState
+  if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES) return candidate
+
+  for (const window of [EXTERNAL_RUNTIME_RECENT_MESSAGE_WINDOW, 50, EXTERNAL_RUNTIME_MIN_MESSAGE_WINDOW]) {
+    const keepFrom = Math.max(0, messages.length - window)
+    const nextMessages = messages.map((message, index) =>
+      index === 0 || index >= keepFrom ? message : placeholderMessage(message, index),
+    )
+    candidate = { ...state, messages: nextMessages } as AgentState
+    if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES) return candidate
+  }
+
+  return candidate
 }
 
 async function optionalSnapshot(path: string): Promise<SnapshotEntry[]> {
@@ -671,7 +823,7 @@ export class SessionStore {
         )
       }
       await appendRuntimeMetadataEntry(rec.logPath, { sessionId, action, payload })
-      const entry = await appendSnapshotEntry(rec.logPath, nextState.cursor, nextState)
+      const entry = await appendSnapshotEntry(rec.logPath, nextState.cursor, compactExternalRuntimeSnapshotState(nextState))
       rec.state = nextState
       rec.lastEventAt = entry.ts
       this.locallyProjectedExternalSessions.add(sessionId)

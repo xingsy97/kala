@@ -70,6 +70,87 @@ describe('SessionStore.ensure', () => {
     expect(log.runtimeMetadata.at(-1)?.action).toBe('copilot.recovered_interrupted_turn')
   })
 
+  it('compacts large Copilot projection snapshots without mutating live state', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-large-projection',
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: 'copilot-large-projection',
+      config,
+    })
+    const largeToolOutput = `${'x'.repeat(512 * 1024)}\n\n--- output truncated: 10 / 1000 lines, 32768 / 524288 bytes stored at overflow://call-large\n--- use \`read { path: '/tmp/call-large.txt' }\` to read more`
+    const projected = {
+      ...record.state,
+      cursor: 1,
+      status: 'done' as const,
+      pendingCalls: [] as const,
+      messages: [
+        ...record.state.messages,
+        {
+          role: 'assistant' as const,
+          content: [{ type: 'tool_call' as const, callId: 'call-large', name: 'shell', input: { command: 'node build.js' } }],
+        },
+        {
+          role: 'tool' as const,
+          content: [{ type: 'tool_result' as const, callId: 'call-large', ok: true, content: largeToolOutput }],
+        },
+      ],
+    }
+
+    await store.recordRuntimeProjection(record.sessionId, projected, 'copilot.tool_result', { callId: 'call-large' })
+
+    expect(record.state.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool_result', content: largeToolOutput })
+    const log = await readSessionLog(record.logPath, { allowExternalRuntime: true })
+    const snapshotJson = JSON.stringify(log.snapshots.at(-1))
+    const toolResult = log.snapshots.at(-1)?.state.messages.at(-1)?.content[0]
+    expect(Buffer.byteLength(snapshotJson)).toBeLessThan(2 * 1024 * 1024)
+    expect(toolResult).toMatchObject({ type: 'tool_result', callId: 'call-large', ok: true })
+    expect(toolResult?.type === 'tool_result' ? toolResult.content : '').toContain('overflow://call-large')
+    expect(toolResult?.type === 'tool_result' ? toolResult.content.length : 0).toBeLessThan(64 * 1024)
+  })
+
+  it('replaces old Copilot projection messages when a snapshot would exceed the hard cap', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-long-projection',
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: 'copilot-long-projection',
+      config,
+    })
+    const projected = {
+      ...record.state,
+      cursor: 1,
+      status: 'done' as const,
+      pendingCalls: [] as const,
+      messages: [
+        ...record.state.messages,
+        ...Array.from({ length: 700 }, (_, index) => ({
+          role: 'tool' as const,
+          content: [{
+            type: 'tool_result' as const,
+            callId: `call-${index}`,
+            ok: true,
+            content: `tool ${index}\n${'x'.repeat(40 * 1024)}`,
+          }],
+        })),
+      ],
+    }
+
+    await store.recordRuntimeProjection(record.sessionId, projected, 'copilot.bulk_projection', { count: 700 })
+
+    const log = await readSessionLog(record.logPath, { allowExternalRuntime: true })
+    const snapshot = log.snapshots.at(-1)
+    const snapshotJson = JSON.stringify(snapshot)
+    const compactedMessages = snapshot?.state.messages.filter((message) =>
+      message.content.some((content) => content.type === 'tool_result' && content.content.includes('older tool result compacted')),
+    ) ?? []
+    expect(Buffer.byteLength(snapshotJson)).toBeLessThan(2 * 1024 * 1024)
+    expect(compactedMessages.length).toBeGreaterThan(0)
+    expect(snapshot?.state.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool_result', callId: 'call-699' })
+  })
+
   it.runIf(process.platform === 'linux')('loads a large Copilot projection log without summary cache or full replay', async () => {
     const store = new SessionStore(dir)
     const record = await store.create({
