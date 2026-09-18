@@ -455,6 +455,25 @@ describe('Composer', () => {
     expect(fullToggle.className).toContain('bg-transparent')
   })
 
+  it('keeps the standard composer footer on one mobile row', () => {
+    renderComposer({
+      state: createInitialState({ sessionId: 'mobile-standard', systemPrompt: 'sys' }),
+    })
+
+    const footer = screen.getByTestId('composer-footer')
+    const rail = screen.getByTestId('composer-footer-rail')
+    const actions = screen.getByTestId('composer-footer-actions')
+
+    expect(footer.className).toContain('flex-nowrap')
+    expect(footer.className).not.toContain('flex-wrap')
+    expect(footer.className).toContain('overflow-hidden')
+    expect(rail.className).toContain('overflow-x-auto')
+    expect(rail.className).toContain('flex-nowrap')
+    expect(actions.className).toContain('flex-none')
+    expect(rail.contains(screen.getByTestId('composer-mode-toggle'))).toBe(true)
+    expect(actions.contains(screen.getByTestId('composer-send'))).toBe(true)
+  })
+
   it('supports slash commands in simple mode', () => {
     const onCompact = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')

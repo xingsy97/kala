@@ -939,97 +939,102 @@ export function Composer({
             ) : null}
           </div>
           <div
-            className="flex min-w-0 flex-row flex-wrap items-center gap-x-1 gap-y-1 min-h-12 border-t border-border/25 px-2 py-1.5 sm:gap-x-1 sm:py-1.5"
+            className="flex min-h-12 min-w-0 flex-row flex-nowrap items-center gap-1 overflow-hidden border-t border-border/25 px-2 py-1.5 sm:py-1.5"
             data-testid="composer-footer"
           >
-            <ComposerModeToggle mode={mode} onToggle={toggleMode} />
-            {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
-            <ComposerConfigButton
-              model={model}
-              models={models}
-              onModelChange={onModelChange}
-              approvalMode={approvalMode}
-              approvalModeLabel={approvalModeLabel}
-              onApprovalModeChange={onApprovalModeChange}
-              composerMode={mode}
-              onComposerModeChange={toggleMode}
-              sendMode={sendMode}
-              onSendModeChange={updateSendMode}
-              allowModelSelection={allowModelSelection}
-              allowApprovalMode={allowApprovalMode}
-              allowQueue={allowQueue}
-              className="flex sm:hidden"
-            />
-            <div className="hidden min-w-0 items-center gap-1.5 sm:flex" data-testid="composer-footer-config">
-            {allowModelSelection ? <Select
-              value={modelInfoFor(models, model ?? '') ? model : ''}
-              onValueChange={onModelChange}
-              disabled={models.length === 0}
+            <div
+              className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              data-testid="composer-footer-rail"
             >
-              <SelectTrigger
-                className="h-9 w-10 flex-none gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent/55 md:w-24 xl:w-36"
-                data-testid="model-picker"
-                aria-label={t('common.model')}
+              <ComposerModeToggle mode={mode} onToggle={toggleMode} />
+              {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
+              <ComposerConfigButton
+                model={model}
+                models={models}
+                onModelChange={onModelChange}
+                approvalMode={approvalMode}
+                approvalModeLabel={approvalModeLabel}
+                onApprovalModeChange={onApprovalModeChange}
+                composerMode={mode}
+                onComposerModeChange={toggleMode}
+                sendMode={sendMode}
+                onSendModeChange={updateSendMode}
+                allowModelSelection={allowModelSelection}
+                allowApprovalMode={allowApprovalMode}
+                allowQueue={allowQueue}
+                className="flex sm:hidden"
+              />
+              <div className="hidden min-w-0 flex-none items-center gap-1.5 sm:flex" data-testid="composer-footer-config">
+              {allowModelSelection ? <Select
+                value={modelInfoFor(models, model ?? '') ? model : ''}
+                onValueChange={onModelChange}
+                disabled={models.length === 0}
               >
-                <Bot className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-                <span className="hidden min-w-0 truncate md:inline">
-                  <SelectValue
-                    placeholder={models.length === 0 ? t('common.noModels') : t('common.model')}
-                  />
-                </span>
-              </SelectTrigger>
-              <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
-                {models.map((m) => {
-                  const key = modelKey(m)
-                  return (
-                  <SelectItem key={key} value={key} data-testid={`model-option-${key}`}>
-                    {m.label}{m.providerId ? <span className="ml-1 text-[0.625rem] text-muted-foreground">{m.providerId}</span> : null}
-                  </SelectItem>
-                )})}
-              </SelectContent>
-            </Select> : null}
-            {allowApprovalMode ? <Select
-              value={approvalMode}
-              onValueChange={(v) => onApprovalModeChange(v as ApprovalMode)}
-            >
-              <SelectTrigger
-                className={cn(
-                  'h-9 w-10 flex-none rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent/55 md:w-16 xl:w-28',
-                  approvalMode === 'allow_all'
-                    ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
-                    : approvalMode === 'ask'
-                      ? 'text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40'
-                      : '',
-                )}
-                data-testid="approval-mode-picker"
-                aria-label={t('composer.approvalMode')}
+                <SelectTrigger
+                  className="h-9 w-10 flex-none gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent/55 md:w-24 xl:w-36"
+                  data-testid="model-picker"
+                  aria-label={t('common.model')}
+                >
+                  <Bot className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+                  <span className="hidden min-w-0 truncate md:inline">
+                    <SelectValue
+                      placeholder={models.length === 0 ? t('common.noModels') : t('common.model')}
+                    />
+                  </span>
+                </SelectTrigger>
+                <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
+                  {models.map((m) => {
+                    const key = modelKey(m)
+                    return (
+                    <SelectItem key={key} value={key} data-testid={`model-option-${key}`}>
+                      {m.label}{m.providerId ? <span className="ml-1 text-[0.625rem] text-muted-foreground">{m.providerId}</span> : null}
+                    </SelectItem>
+                  )})}
+                </SelectContent>
+              </Select> : null}
+              {allowApprovalMode ? <Select
+                value={approvalMode}
+                onValueChange={(v) => onApprovalModeChange(v as ApprovalMode)}
               >
-                <ShieldCheck className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-                <span className="hidden min-w-0 truncate md:inline">{approvalModeLabel}</span>
-              </SelectTrigger>
-              <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
-                {APPROVAL_MODES.map((m) => {
-                  const display = approvalModeDisplay(m.value, t)
-                  return (
-                  <SelectItem
-                    key={m.value}
-                    value={m.value}
-                    textValue={display.label}
-                    data-testid={`approval-mode-option-${m.value}`}
-                  >
-                    <div className="flex flex-col">
-                      <span>{display.label}</span>
-                      <span className="text-[0.625rem] text-muted-foreground">
-                        {display.hint}
-                      </span>
-                    </div>
-                  </SelectItem>
-                )})}
-              </SelectContent>
-            </Select> : null}
+                <SelectTrigger
+                  className={cn(
+                    'h-9 w-10 flex-none rounded-md border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent/55 md:w-16 xl:w-28',
+                    approvalMode === 'allow_all'
+                      ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
+                      : approvalMode === 'ask'
+                        ? 'text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40'
+                        : '',
+                  )}
+                  data-testid="approval-mode-picker"
+                  aria-label={t('composer.approvalMode')}
+                >
+                  <ShieldCheck className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+                  <span className="hidden min-w-0 truncate md:inline">{approvalModeLabel}</span>
+                </SelectTrigger>
+                <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
+                  {APPROVAL_MODES.map((m) => {
+                    const display = approvalModeDisplay(m.value, t)
+                    return (
+                    <SelectItem
+                      key={m.value}
+                      value={m.value}
+                      textValue={display.label}
+                      data-testid={`approval-mode-option-${m.value}`}
+                    >
+                      <div className="flex flex-col">
+                        <span>{display.label}</span>
+                        <span className="text-[0.625rem] text-muted-foreground">
+                          {display.hint}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  )})}
+                </SelectContent>
+              </Select> : null}
+              </div>
+              {footerExtras}
             </div>
-            {footerExtras}
-            <div className="ml-auto flex min-w-0 max-w-full items-center gap-0.5 max-sm:justify-end" data-testid="composer-footer-actions">
+            <div className="flex flex-none items-center gap-0.5 max-sm:justify-end" data-testid="composer-footer-actions">
               <RuntimeMetrics
                 state={state}
                 config={config}
