@@ -556,6 +556,10 @@ export function ChatPanel({
     index < viewportIndex || (index === viewportIndex && !viewportAnchor.firstVisibleAligned)
   )
   const nextUserAnchor = viewportIndex === null ? undefined : userMessageAnchors.find((index) => index > viewportIndex)
+  const stickyPrompt = useMemo(
+    () => currentStickyUserPrompt(transcriptItems, viewportAnchor),
+    [transcriptItems, viewportAnchor],
+  )
   const navigateUserMessage = useCallback((target: number | undefined) => {
     if (target === undefined) return
     effectiveOnPinnedChange(false)
@@ -616,6 +620,12 @@ export function ChatPanel({
             onViewportAnchorChange={setViewportAnchor}
           />
         )}
+        {!searchOpen && stickyPrompt ? (
+          <StickyUserPrompt
+            prompt={stickyPrompt}
+            onClick={() => navigateUserMessage(stickyPrompt.itemIndex)}
+          />
+        ) : null}
         {!isEmpty && userMessageAnchors.length > 1 ? (
           <div className="absolute left-2 top-1/2 z-20 flex -translate-y-1/2 flex-col gap-1.5 sm:left-3" data-testid="user-message-navigation">
             <Button
@@ -723,6 +733,115 @@ function TranscriptSearchBar({
         ))}
         {active ? <span className="ml-2 min-w-0 truncate text-[0.6875rem] text-muted-foreground" title={active.text}>{searchMatchSnippet(active)}</span> : null}
       </div>
+    </div>
+  )
+}
+
+type StickyUserPromptModel = {
+  itemIndex: number
+  text: string
+  imageCount: number
+  fileNames: readonly string[]
+  extraFileCount: number
+}
+
+function currentStickyUserPrompt(
+  items: readonly RenderTranscriptItem[],
+  viewportAnchor: TranscriptViewportAnchor,
+): StickyUserPromptModel | null {
+  const viewportIndex = viewportAnchor.firstVisibleIndex
+  if (viewportIndex == null || viewportIndex <= 0) return null
+  let promptIndex: number | null = null
+  for (let index = Math.min(viewportIndex, items.length - 1); index >= 0; index -= 1) {
+    const item = items[index]
+    if (!item || item.kind !== 'message' || item.message.role !== 'user') continue
+    promptIndex = index
+    break
+  }
+  if (promptIndex == null) return null
+  // Avoid duplicating the original bubble while any part of that user row is
+  // the first visible transcript item. Once the reader is in the assistant/tool
+  // portion of the turn, the prompt becomes a useful context anchor.
+  if (promptIndex === viewportIndex) return null
+  const item = items[promptIndex]
+  if (!item || item.kind !== 'message') return null
+  return summarizeStickyUserPrompt(item.message, promptIndex)
+}
+
+function summarizeStickyUserPrompt(message: Message, itemIndex: number): StickyUserPromptModel | null {
+  const text = message.content
+    .filter((content): content is Extract<MessageContent, { type: 'text' }> => content.type === 'text')
+    .map((content) => content.text.trim())
+    .filter(Boolean)
+    .join('\n\n')
+  const imageCount = message.content.filter((content) => content.type === 'image').length
+  const files = message.content.filter((content): content is import('@agent-kernel/kernel').FileContent => content.type === 'file')
+  const fileNames = files.slice(0, 2).map((file) => file.name)
+  const extraFileCount = Math.max(0, files.length - fileNames.length)
+  if (!text && imageCount === 0 && files.length === 0) return null
+  return { itemIndex, text, imageCount, fileNames, extraFileCount }
+}
+
+function StickyUserPrompt({
+  prompt,
+  onClick,
+}: {
+  prompt: StickyUserPromptModel
+  onClick: () => void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const hasAttachments = prompt.imageCount > 0 || prompt.fileNames.length > 0 || prompt.extraFileCount > 0
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 px-2 pt-2 sm:px-4 sm:pt-3"
+      data-testid="sticky-user-prompt"
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className="ak-chat-container ak-sticky-user-prompt-surface pointer-events-auto mx-auto flex w-full min-w-0 items-start gap-2 rounded-2xl border border-border/60 px-3 py-2 text-left text-card-foreground shadow-[0_10px_30px_hsl(var(--foreground)/0.08)] ring-1 ring-background/50 backdrop-blur-xl transition-colors hover:border-border sm:max-w-[min(var(--ak-chat-content-width,84rem),calc(100%-2rem))] sm:px-3.5"
+        aria-label={t('chat.transcript.currentPromptJump')}
+      >
+        <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-primary/10 text-primary">
+          <PenLine className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="mb-0.5 block text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            {t('chat.transcript.currentPrompt')}
+          </span>
+          {prompt.text ? (
+            <span className="ak-chat-text line-clamp-2 whitespace-pre-wrap break-words text-sm leading-5 [overflow-wrap:anywhere] sm:line-clamp-3">
+              {prompt.text}
+            </span>
+          ) : (
+            <span className="block truncate text-sm text-muted-foreground">
+              {t('chat.transcript.attachmentOnlyPrompt')}
+            </span>
+          )}
+          {hasAttachments ? (
+            <span className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
+              {prompt.imageCount > 0 ? (
+                <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-[0.6875rem] text-muted-foreground">
+                  <Image className="h-3 w-3 flex-none" aria-hidden="true" />
+                  {t('chat.transcript.imageAttachmentCount', { count: prompt.imageCount })}
+                </span>
+              ) : null}
+              {prompt.fileNames.map((name) => (
+                <span key={name} className="inline-flex max-w-[11rem] items-center gap-1 rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-[0.6875rem] text-muted-foreground">
+                  <FileText className="h-3 w-3 flex-none" aria-hidden="true" />
+                  <span className="truncate">{name}</span>
+                </span>
+              ))}
+              {prompt.extraFileCount > 0 ? (
+                <span className="inline-flex items-center rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-[0.6875rem] text-muted-foreground">
+                  {t('chat.transcript.moreAttachments', { count: prompt.extraFileCount })}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </span>
+        <ArrowRight className="mt-1 h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
+      </button>
     </div>
   )
 }

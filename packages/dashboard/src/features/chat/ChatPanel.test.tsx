@@ -976,6 +976,146 @@ describe('ChatPanel', () => {
     expect(onPinnedChange).toHaveBeenCalledWith(false)
   })
 
+  it('pins the user prompt that owns the currently viewed response', async () => {
+    const bridge = globalThis as typeof globalThis & {
+      __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
+    }
+    bridge.__virtuosoScrollToIndexMock?.mockClear()
+    const onPinnedChange = vi.fn()
+    render(
+      <ChatPanel
+        pinnedToBottom={false}
+        onPinnedChange={onPinnedChange}
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'first question\nwith enough detail to span the compact prompt preview' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+          { role: 'user', content: [{ type: 'text', text: 'second question' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+        ]}
+      />,
+    )
+
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-virt-index]')]
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100, bottom: 500, left: 0, right: 800, width: 800, height: 400, x: 0, y: 100, toJSON() {} }) })
+    rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: index === 0 ? -80 : 100 + (index - 1) * 100, bottom: index === 0 ? 0 : 180 + (index - 1) * 100, left: 0, right: 800, width: 800, height: 80, x: 0, y: index === 0 ? -80 : 100 + (index - 1) * 100, toJSON() {} }) }))
+    fireEvent.scroll(scroller)
+
+    const sticky = await screen.findByTestId('sticky-user-prompt')
+    expect(sticky.textContent).toContain('Current prompt')
+    expect(sticky.textContent).toContain('first question')
+    expect(sticky.textContent).not.toContain('second question')
+    expect(sticky.querySelector('.line-clamp-2')).toBeTruthy()
+    expect(sticky.querySelector('.sm\\:line-clamp-3')).toBeTruthy()
+    expect(within(sticky).getByRole('button').className).toContain('ak-sticky-user-prompt-surface')
+
+    fireEvent.click(within(sticky).getByRole('button'))
+    expect(bridge.__virtuosoScrollToIndexMock).toHaveBeenLastCalledWith({ index: 0, align: 'start', behavior: 'auto' })
+    expect(onPinnedChange).toHaveBeenCalledWith(false)
+  })
+
+  it('switches the pinned prompt as the reader scrolls into another turn', async () => {
+    render(
+      <ChatPanel
+        pinnedToBottom={false}
+        onPinnedChange={() => {}}
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'first question' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+          { role: 'user', content: [{ type: 'text', text: 'second question' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+        ]}
+      />,
+    )
+
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-virt-index]')]
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100, bottom: 500, left: 0, right: 800, width: 800, height: 400, x: 0, y: 100, toJSON() {} }) })
+    rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: index === 3 ? 100 : -300 + index * 40, bottom: index === 3 ? 180 : -260 + index * 40, left: 0, right: 800, width: 800, height: 80, x: 0, y: index === 3 ? 100 : -300 + index * 40, toJSON() {} }) }))
+    fireEvent.scroll(scroller)
+
+    const sticky = await screen.findByTestId('sticky-user-prompt')
+    expect(sticky.textContent).toContain('second question')
+    expect(sticky.textContent).not.toContain('first question')
+  })
+
+  it('summarizes image and file-only prompts in the sticky preview', async () => {
+    render(
+      <ChatPanel
+        pinnedToBottom={false}
+        onPinnedChange={() => {}}
+        messages={[
+          {
+            role: 'user',
+            content: [
+              { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: 'iVBORw0KGgo=' } },
+              { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: 'iVBORw0KGgo=' } },
+              { type: 'file', name: 'report.csv', mediaType: 'text/csv', data: 'YSxi' },
+              { type: 'file', name: 'notes.md', mediaType: 'text/markdown', data: 'IyA=' },
+              { type: 'file', name: 'extra.log', mediaType: 'text/plain', data: 'bG9n' },
+            ],
+          },
+          { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+        ]}
+      />,
+    )
+
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-virt-index]')]
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100, bottom: 500, left: 0, right: 800, width: 800, height: 400, x: 0, y: 100, toJSON() {} }) })
+    rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: index === 0 ? -80 : 100, bottom: index === 0 ? 0 : 180, left: 0, right: 800, width: 800, height: 80, x: 0, y: index === 0 ? -80 : 100, toJSON() {} }) }))
+    fireEvent.scroll(scroller)
+
+    const sticky = await screen.findByTestId('sticky-user-prompt')
+    expect(sticky.textContent).toContain('Prompt contains attachments')
+    expect(sticky.textContent).toContain('2 images')
+    expect(sticky.textContent).toContain('report.csv')
+    expect(sticky.textContent).toContain('notes.md')
+    expect(sticky.textContent).toContain('+1 file')
+  })
+
+  it('does not duplicate the prompt while the user message row is still visible first', () => {
+    render(
+      <ChatPanel
+        pinnedToBottom={false}
+        onPinnedChange={() => {}}
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'visible user prompt' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+        ]}
+      />,
+    )
+
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-virt-index]')]
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100, bottom: 500, left: 0, right: 800, width: 800, height: 400, x: 0, y: 100, toJSON() {} }) })
+    rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: index === 0 ? 80 : 180, bottom: index === 0 ? 180 : 260, left: 0, right: 800, width: 800, height: 80, x: 0, y: index === 0 ? 80 : 180, toJSON() {} }) }))
+    fireEvent.scroll(scroller)
+    expect(screen.queryByTestId('sticky-user-prompt')).toBeNull()
+  })
+
+  it('hides the pinned prompt while transcript search is open', () => {
+    render(
+      <ChatPanel
+        searchOpen
+        pinnedToBottom={false}
+        onPinnedChange={() => {}}
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'search should own the top edge' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+        ]}
+      />,
+    )
+
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-virt-index]')]
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100, bottom: 500, left: 0, right: 800, width: 800, height: 400, x: 0, y: 100, toJSON() {} }) })
+    rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: index === 0 ? -80 : 100, bottom: index === 0 ? 0 : 180, left: 0, right: 800, width: 800, height: 80, x: 0, y: index === 0 ? -80 : 100, toJSON() {} }) }))
+    fireEvent.scroll(scroller)
+    expect(screen.getByTestId('transcript-search')).toBeTruthy()
+    expect(screen.queryByTestId('sticky-user-prompt')).toBeNull()
+  })
+
   it('disables user-message navigation at transcript boundaries', () => {
     render(
       <ChatPanel
