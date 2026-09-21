@@ -16,10 +16,11 @@ trigger rules, bundled references, scripts, and optional assets. What exists
 today is lower-level infrastructure that could host such a system:
 
 - A fixed executor tool registry: `read`, `ls`, `glob`, `grep`, `write`,
-  `edit`, `bash`, background shell controls, `todowrite`, `websearch`, and
+  `edit`, `bash`, background shell controls, `websearch`, and
   memory tools.
 - Host-declared tool schemas in `builtinTools`, including the host-side
-  `agent` builtin for child sessions.
+  `agent` builtin for child sessions and `todo_graph` as the sole default
+  planning tool.
 - Session, workspace, and global memory tools. Session memory is lifted
   into kernel state; workspace/global memory lives on executor-owned disk.
 - Git-hook-like host hooks for `pre_tool_use`, `post_tool_use`,

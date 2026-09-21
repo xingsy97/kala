@@ -64,7 +64,6 @@ The message content the LLM sees:
 
 **Exemptions:**
 
-- `todowrite` — output is a short ack, never overflows.
 - `memory` write/delete operations — ack strings.
 - `bash_output` — the caller is polling for the *next* chunk; if a poll returns overflow-sized data, that's a real problem worth surfacing (bash output is already capped at 1 MB inside `bash.ts`).
 

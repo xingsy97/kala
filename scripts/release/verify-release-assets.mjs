@@ -31,7 +31,7 @@ if (sbom.bomFormat !== 'CycloneDX' || sbom.specVersion !== '1.6' || sbom.metadat
 }
 if (sbom.components.some((component) => component.licenses?.some((entry) => entry.license?.id === 'Unknown'))) fail('release SBOM contains an unknown license')
 const notices = readFileSync(join(releaseDir, 'THIRD_PARTY_NOTICES.txt'), 'utf8')
-if (!notices.includes(`Agent RunLab ${manifest.version}`) || !notices.includes('third-party dependency inventory')) fail('release third-party notices are invalid')
+if (!notices.includes(`Kala ${manifest.version}`) || !notices.includes('third-party dependency inventory')) fail('release third-party notices are invalid')
 const expectedReleaseFiles = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort()
 const actualReleaseEntries = readdirSync(releaseDir, { withFileTypes: true })
 if (actualReleaseEntries.some((entry) => !entry.isFile())
@@ -126,7 +126,7 @@ for (const asset of manifest.assets) {
     if (!text.includes('[ "$runtime" = "auto" ] && has_node22')) {
       fail(`${asset} must prefer compact .cjs assets when Node.js 22+ is available`)
     }
-    if (!text.includes('Agent RunLab bootstrap | %s')) {
+    if (!text.includes('Kala bootstrap | %s')) {
       fail(`${asset} must use the compact bootstrap log prefix`)
     }
     if (!text.includes('wget -q --tries=3 --timeout=30 --retry-connrefused')) {
@@ -237,7 +237,7 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   })
   if (executorHelp.status !== 0) fail('executor --help smoke test should exit 0')
   const helpOutput = `${executorHelp.stdout}\n${executorHelp.stderr}`
-  if (!helpOutput.includes('Agent RunLab Executor') || !helpOutput.includes('Usage:') || !helpOutput.includes('runlab-executor --host <url>') || !helpOutput.includes('--sandbox-root <path>') || !helpOutput.includes('service status|logs|start|stop|restart|uninstall')) {
+  if (!helpOutput.includes('Kala Executor') || !helpOutput.includes('Usage:') || !helpOutput.includes('runlab-executor --host <url>') || !helpOutput.includes('--sandbox-root <path>') || !helpOutput.includes('service status|logs|start|stop|restart|uninstall')) {
     fail('executor --help smoke test did not print daemon and service lifecycle usage')
   }
   if (helpOutput.includes('connecting to')) {
@@ -249,7 +249,7 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
     encoding: 'utf8',
   })
   if (executorVersion.status !== 0) fail('executor --version smoke test should exit 0')
-  const reportedVersion = executorVersion.stdout.match(/^Agent RunLab Executor (\S+)$/m)?.[1]
+  const reportedVersion = executorVersion.stdout.match(/^Kala Executor (\S+)$/m)?.[1]
   if (!reportedVersion || reportedVersion !== manifest.version) {
     fail(`executor --version must equal the release product version ${manifest.version}`)
   }
@@ -273,7 +273,7 @@ if (manifest.assets.includes('bundle-dashboard-with-runtime.cjs')) {
   })
   if (hostHelp.status !== 0) fail('host --help smoke test should exit 0')
   const output = `${hostHelp.stdout}\n${hostHelp.stderr}`
-  if (!output.includes('Agent RunLab Runtime') || !output.includes('Usage:') || !output.includes('bundle-dashboard-with-runtime.cjs [options]') || !output.includes('--port <port>')) {
+  if (!output.includes('Kala Runtime') || !output.includes('Usage:') || !output.includes('bundle-dashboard-with-runtime.cjs [options]') || !output.includes('--port <port>')) {
     fail('host --help smoke test did not print CLI usage')
   }
   if (output.includes('host listening')) {
@@ -285,7 +285,7 @@ if (manifest.assets.includes('bundle-dashboard-with-runtime.cjs')) {
     encoding: 'utf8',
   })
   if (hostVersion.status !== 0) fail('host -v smoke test should exit 0')
-  if (!/^Agent RunLab Runtime \d+\.\d+\.\d+/m.test(hostVersion.stdout)) {
+  if (!/^Kala Runtime \d+\.\d+\.\d+/m.test(hostVersion.stdout)) {
     fail('host -v smoke test did not print version')
   }
 }

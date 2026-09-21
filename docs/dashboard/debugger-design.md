@@ -282,9 +282,9 @@ Tools uses a list/detail object inspector. The list stays compact; the selected 
 │ │ bash          gated        │ a workspace file.                  │ │
 │ │ edit        ▌ gated        │ Recent calls                       │ │
 │ │ write         gated        │ #121 requested                     │ │
-│ │ todowrite     auto         │ #122 approved                      │ │
+│ │ todo_graph     auto         │ #122 approved                      │ │
 │ │ memory        auto         │ #123 result ok                     │ │
-│ │ todowrite     auto         │ Input Schema                       │ │
+│ │ todo_graph     auto         │ Input Schema                       │ │
 │ │ agent         gated        │ { "type": "object", "required": ["path"] }
 │ └────────────────────────────┴───────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────────┘

@@ -41,7 +41,7 @@ Plus `packages/shared/src/protocol.ts` — wire protocol types shared across hos
 
 Node daemon that dials out to Host. No inbound port required (see [ADR 0002](../meta/adr/0002-reverse-websocket.md)).
 
-- `src/tools/` — one file per tool from [tools.md](../executor/tools.md): `read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash`, `todowrite`, `memory`, `web_search`, `bash_output`, `kill_shell`.
+- `src/tools/` — one file per tool from [tools.md](../executor/tools.md): `read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash`, `memory`, `web_search`, `bash_output`, `kill_shell`.
 - `src/tools/index.ts` — tool registry + input-schema validation (ajv).
 - `src/sandbox.ts` — workspace whitelist enforcement (symlink-aware).
 - `src/client.ts` — Socket.IO client to Host; announces `workspaceId` / `workspaceName` / `os` / `runtime` / `sandboxRoots` / tool names; handles `tool:call` / `fs:list_dirs` / cancel.

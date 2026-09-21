@@ -3,7 +3,7 @@
 Status: standalone adapter and fresh-run acceptance implemented
 Owner: `adapters/benchmarks/swe-bench`
 
-SWE-Bench runs belong to the standalone evaluation platform. Product Host routes, product Dashboard actions, old legacy-runner scripts, historical artifact readers, and compatibility shims are not entry points. Every accepted result is produced by a newly submitted canonical run.
+SWE-Bench runs belong to the standalone evaluation platform. Product Host routes, product Dashboard actions, legacy benchmark scripts, historical artifact readers, and compatibility shims are not entry points. Every accepted result is produced by a newly submitted canonical run.
 
 ## Architecture
 

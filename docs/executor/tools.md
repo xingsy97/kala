@@ -3,7 +3,7 @@
 **Status**: Normative for the executor tool surface.
 
 The model-visible Tool catalog is owned by the Host. Executor announcements declare
-RPC implementations; Host builtins such as `agent`, `todo_graph`, `todowrite`, and
+RPC implementations; Host builtins such as `agent`, `todo_graph`, and
 `websearch` do not imply an Executor handler.
 
 At disclosure time the Host augments every model-visible input schema with required
@@ -28,7 +28,7 @@ not contain presentation metadata.
 | `write_file`, `replace_in_file`, `replace_many_in_file`, `apply_file_patch` | Executor | File mutation RPCs |
 | `shell` | Executor | Cross-platform public name mapped to the shell handler; `bash` remains an internal/compatibility implementation name |
 | `memory`, `webfetch` | Executor | Scoped memory and network fetch handlers |
-| `todowrite`, `todo_graph`, `agent`, `websearch`, discovery tools | Host | Host lifecycle/control-plane implementations |
+| `todo_graph`, `agent`, `websearch`, discovery tools | Host | Host lifecycle/control-plane implementations; Task Graph is the only default planning tool |
 | `__*` internal tools | Executor | Host-initiated direct RPCs; never disclosed to the model |
 
 `read`, `write`, `edit`, and ordinary public `grep` are not part of the current

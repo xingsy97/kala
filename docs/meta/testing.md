@@ -198,7 +198,7 @@ The checked-in browser scripts are intentionally narrow and production-shaped:
 - `pnpm run verify:dashboard-debugger`: debugger tabs, trace teaching mode, LLM API detail modal, runtime state/tools, theme contrast screenshots.
 - `pnpm run verify:dashboard-layout-scroll`: responsive layout, drawer sizing, controlled scroll surfaces, modal sizing, screenshot coverage.
 - `pnpm run verify:dashboard-subagent-scroll`: nested sub-agent transcript layout and virtual scroller width.
-- `pnpm run verify:tasks-button`: real `todowrite` tool call round-trip and derived Tasks button state. This script may use a real configured LLM.
+- Legacy Task List compatibility is covered by the dashboard timeline parser and tool-summary renderer tests; current planning E2E coverage uses `todo_graph`.
 - `pnpm run verify:dashboard-real`: full real-host / real-executor / real-provider smoke. This is the broadest and slowest check.
 
 The default browser automation stack is `puppeteer-core` against a local Chrome/Chromium. Scripts that need real LLM output must say so in their header and should stay out of routine fast CI unless credentials and cost policy are explicit.

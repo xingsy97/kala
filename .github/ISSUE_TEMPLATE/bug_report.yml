@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible Agent RunLab defect
+description: Report a reproducible Kala defect
 title: "bug: "
 labels: [bug]
 body:

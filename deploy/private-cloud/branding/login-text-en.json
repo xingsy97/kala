@@ -10,7 +10,7 @@
     "userMustBeMemberOfOrg": "The user must be a member of the {{.OrgName}} organization."
   },
   "loginText": {
-    "title": "Sign in to Agent RunLab",
+    "title": "Sign in to Kala",
     "description": "Continue to your private agent workspace.",
     "titleLinkingProcess": "Login for user linking",
     "descriptionLinkingProcess": "Enter your login details to link your external user.",
@@ -24,7 +24,7 @@
   },
   "passwordText": {
     "title": "Welcome back",
-    "description": "Enter your password to continue to Agent RunLab.",
+    "description": "Enter your password to continue to Kala.",
     "passwordLabel": "Password",
     "resetLinkText": "Reset Password",
     "backButtonText": "Back",
@@ -169,7 +169,7 @@
     "nextButtonText": "Next"
   },
   "registrationOptionText": {
-    "title": "Create your Agent RunLab account",
+    "title": "Create your Kala account",
     "description": "Choose how you want to create your private agent workspace.",
     "userNameButtonText": "Continue with email and password",
     "externalLoginDescription": "or register with an external user",
@@ -177,7 +177,7 @@
   },
   "registrationUserText": {
     "title": "Create your account",
-    "description": "Set up your private Agent RunLab workspace.",
+    "description": "Set up your private Kala workspace.",
     "descriptionOrgRegister": "Enter your Userdata.",
     "firstnameLabel": "First name",
     "lastnameLabel": "Last name",
@@ -230,7 +230,7 @@
     "privacyConfirm": "I accept the"
   },
   "successLoginText": {
-    "title": "Welcome to Agent RunLab",
+    "title": "Welcome to Kala",
     "autoRedirectDescription": "Opening your private agent workspace…",
     "redirectedDescription": "You may now close this window.",
     "nextButtonText": "Next"

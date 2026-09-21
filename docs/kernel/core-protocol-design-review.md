@@ -23,7 +23,7 @@ The current architecture is fundamentally sound:
 The main risks are not conceptual, but operational:
 
 - Spec drift has already appeared between docs and implementation (`ask` approval mode, `file_ref`, cache token fields, compact legality, old FSM state names). This is the highest-priority documentation/process issue.
-- session-scope `memory` is the only current reducer-lifted tool exception. `todowrite` is intentionally ordinary tool protocol; Dashboard derives task UI from the trace.
+- session-scope `memory` is the only current reducer-lifted tool exception. Historical `todowrite` calls remain ordinary protocol so Dashboard can derive the legacy Task List UI during replay; new sessions use Host `todo_graph`.
 - The wire protocol surface is growing. `packages/shared/src/protocol.ts` must be treated as the implementation contract, with `docs/protocol/wire-protocol.md` updated in the same change.
 - Host loop policy features such as preflight compaction and post-compaction loop guard are correctly outside the kernel, but should remain visibly host-owned and tested as host behavior.
 

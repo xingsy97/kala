@@ -1,6 +1,11 @@
-# Agent RunLab
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="packages/dashboard/public/brand/kala-wordmark-light.svg">
+  <img src="packages/dashboard/public/brand/kala-wordmark.svg" alt="Kala" width="220">
+</picture>
 
-Agent RunLab is a self-hosted coding-agent runtime and product UI built around a
+# Kala
+
+Kala is a self-hosted coding-agent runtime and product UI built around a
 replayable pure-function kernel. The kernel maps `(state, input)` to
 `{ nextState, effects }`; the Runtime persists Sessions, calls model providers,
 and routes tools to outbound-connected Executors.
@@ -167,5 +172,5 @@ backup/restore evidence defined in the
 
 ## License
 
-Agent RunLab source is available under the [MIT License](LICENSE). Third-party
+Kala source is available under the [MIT License](LICENSE). Third-party
 components remain governed by their own licenses and notices.

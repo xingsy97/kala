@@ -122,7 +122,7 @@ pnpm --filter @agent-kernel/dashboard verify:real
 pnpm --filter @agent-kernel/dashboard verify:layout-scroll
 pnpm --filter @agent-kernel/dashboard verify:mobile-pwa
 pnpm --filter @agent-kernel/dashboard verify:subagent-scroll
-pnpm run verify:tasks-button
+pnpm --filter @agent-kernel/dashboard exec vitest run src/features/chat/tasks-from-timeline.test.ts src/features/chat/toolSummaries/renderers.test.ts
 ```
 
 Additional focused scripts are selected when their feature is touched: `verify-column-resize.mjs`, `verify-model-switch.mjs`, `verify-session-label.mjs`, `verify-folder-picker-depth.mjs`, `verify-timeline-expand.mjs`, and `verify-tool-call.mjs`.

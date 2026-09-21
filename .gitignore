@@ -65,6 +65,7 @@ references/
 .claude/
 .agent-home/
 .claude-home/
+.artifacts/
 
 # Experiment-local heavy/raw evidence. Small summaries, reports, diagnostics,
 # and plans live outside artifacts so gitignore stays simple.

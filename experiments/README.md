@@ -12,7 +12,7 @@ and post-run analysis.
 Experiment run directories use date-first names:
 
 - `YYYY-MM-DD-<short-slug>` for a specific dated run.
-- `YYYY-MM-<short-slug>` for a month-scoped comparison or legacy-runner.
+- `YYYY-MM-<short-slug>` for a month-scoped comparison set.
 
 Raw run records, diagnostics, generated benchmark outputs, local workspaces,
 sessions, virtualenvs, and secrets stay local-only under the relevant experiment

@@ -26,9 +26,9 @@ The kernel owns `approvalMode`: `auto`, `ask`, `deny`, and `allow_all`. `client:
 
 The `edit` tool performs exact string replacement with an optional `replace_all` flag. Approval cards render unified diffs for `edit` and `write`; old file content is fetched through the executor `read` path.
 
-### 1.6 TODO tracking
+### 1.6 Task planning
 
-`todowrite` is a normal executor built-in. The kernel records ordinary `call_tool` and `tool_result` transitions. The dashboard derives Tasks UI from the latest successful `todowrite` trace entry instead of storing todos in `AgentState`.
+Host `todo_graph` is the only default planning tool. Its durable results drive the current Task Graph UI and autonomous-work recovery. The dashboard still parses historical `todowrite` calls and renders the legacy Task List UI so existing sessions remain replayable; that compatibility path is not a catalog registration or executable handler.
 
 ### 1.7 Token and context accounting
 

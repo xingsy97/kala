@@ -17,7 +17,7 @@ The value of MCP is leverage: one runtime integration lets users add many ecosys
 
 ## 2. Why Runtime Support Is Deferred
 
-This project already covers most coding-agent workflows with built-in tools: `read`, `write`, `edit`, `bash`, `grep`, `web_search`, `todowrite`, and `agent`. MCP's strongest marginal value is in non-local integrations such as Slack, Notion, and Jira. Those are useful, but they are not the core reference coding-agent path.
+This project already covers most coding-agent workflows with built-in tools: `read`, `write`, `edit`, `bash`, `grep`, `web_search`, `todo_graph`, and `agent`. MCP's strongest marginal value is in non-local integrations such as Slack, Notion, and Jira. Those are useful, but they are not the core reference coding-agent path.
 
 This document exists because the design choices are already settled. Future implementation should follow the checklist below rather than reopen the architecture discussion.
 
