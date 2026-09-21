@@ -4,7 +4,7 @@ export const desktopDownloadBase = '/downloads/desktop/'
 
 export async function loadDesktopUpdateMetadata() {
   const data: typeof import('../../public/downloads/desktop/release-data.js') =
-    await import(/* @vite-ignore */ `${desktopDownloadBase}release-data.js`)
+    await import(/* @vite-ignore */ `${desktopDownloadBase}release-data.js?metadata=${Date.now()}`)
   const response = await fetch(`${desktopDownloadBase}release.json`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
   if (!response.ok) throw new Error(`Desktop release metadata: HTTP ${response.status}`)
   return data.validateDesktopRelease(await response.json())
@@ -13,7 +13,7 @@ export async function loadDesktopUpdateMetadata() {
 // Load the same browser modules as the backwards-compatible standalone page.
 export async function loadDesktopDownload() {
   const data: typeof import('../../public/downloads/desktop/release-data.js') =
-    await import(/* @vite-ignore */ `${desktopDownloadBase}release-data.js`)
+    await import(/* @vite-ignore */ `${desktopDownloadBase}release-data.js?metadata=${Date.now()}`)
   const release = await data.loadDesktopRelease()
   return { release, commands: data.desktopInstallCommands(release, window.location.origin), localCommands: data.desktopLocalInstallCommands(release) }
 }

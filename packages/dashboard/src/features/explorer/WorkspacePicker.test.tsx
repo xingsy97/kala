@@ -273,7 +273,7 @@ describe('NewSessionDialog', () => {
         agentRuntimes={[
           {
             id: 'kernel',
-            label: 'Agent RunLab',
+            label: 'Kala',
             description: 'RunLab kernel',
             available: true,
             status: 'ready',
@@ -318,7 +318,7 @@ describe('NewSessionDialog', () => {
         agentRuntimes={[
           {
             id: 'kernel',
-            label: 'Agent RunLab',
+            label: 'Kala',
             description: 'RunLab kernel',
             available: true,
             status: 'ready',

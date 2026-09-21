@@ -25,6 +25,7 @@
 export type SubAgentEnvelope = {
   sessionId: string
   agentType?: string
+  intention?: string
   status: 'completed' | 'failed' | 'cancelled' | 'timed_out_with_partial_result'
   turns: number
   durationMs: number
@@ -54,6 +55,7 @@ export function parseSubAgentEnvelope(content: string): SubAgentEnvelope | null 
   return {
     sessionId,
     ...(attrs.agent_type ? { agentType: attrs.agent_type } : {}),
+    ...(attrs.intention ? { intention: attrs.intention } : {}),
     status,
     turns,
     durationMs,

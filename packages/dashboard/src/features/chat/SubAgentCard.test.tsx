@@ -53,6 +53,44 @@ describe('SubAgentCard', () => {
     expect(screen.queryByTestId('border-beam')).toBeNull()
   })
 
+  it('shows explicit intention first without leaking a large prompt into the card summary', () => {
+    const largePrompt = `/workspace/private/file.ts\n${'implementation detail '.repeat(30)}`
+    const group = makeGroup([makeCall('c-intent', {
+      prompt: largePrompt,
+      intention: 'Explain the user-visible session behavior.',
+      objective: 'legacy objective must not win',
+      _intent: 'tool intention must not win',
+    })])
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={null}
+        group={group}
+        approvalByCallId={new Map()}
+      />,
+    )
+
+    const row = screen.getByTestId('sub-agent-row-c-intent')
+    expect(row.textContent).toContain('Explain the user-visible session behavior.')
+    expect(row.textContent).not.toContain('/workspace/private/file.ts')
+    expect(screen.getByTestId('sub-agent-intention-c-intent').textContent).toContain('Intention:')
+  })
+
+  it('uses a generic historical fallback instead of exposing a path or giant prompt', () => {
+    const group = makeGroup([makeCall('c-legacy', { prompt: '/workspace/private/very-secret-plan.md', agent_type: 'review' })])
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={null}
+        group={group}
+        approvalByCallId={new Map()}
+      />,
+    )
+    const row = screen.getByTestId('sub-agent-row-c-legacy')
+    expect(row.textContent).toContain('Delegated review task')
+    expect(row.textContent).not.toContain('/workspace/private')
+  })
+
   it('uses status styling without a decorative border beam while the sub-agent is running', async () => {
     const call = makeCall('c1', { prompt: 'search', agent_type: 'Explore' })
     const group = makeGroup([call])
@@ -537,9 +575,9 @@ describe('ChatPanel sub-agent dispatch', () => {
 
   it('uses one grouped activity container when a single assistant message spawns multiple sub-agents', () => {
     const group = makeGroup([
-      makeCall('c1', { prompt: 'search A', agent_type: 'Explore' }),
-      makeCall('c2', { prompt: 'search B', agent_type: 'Explore' }),
-      makeCall('c3', { prompt: 'search C', agent_type: 'Explore' }),
+      makeCall('c1', { prompt: 'search A', intention: 'Find the source of behavior A.', agent_type: 'Explore' }),
+      makeCall('c2', { prompt: 'search B', intention: 'Find the source of behavior B.', agent_type: 'Explore' }),
+      makeCall('c3', { prompt: 'search C', intention: 'Find the source of behavior C.', agent_type: 'Explore' }),
     ])
     render(
       <SubAgentCard
@@ -550,7 +588,9 @@ describe('ChatPanel sub-agent dispatch', () => {
       />,
     )
     const grouped = screen.getByTestId(`sub-agent-group-${group.firstCallId}`)
-    expect(screen.getByTestId(`sub-agent-group-list-${group.firstCallId}`).className).toContain('flex')
+    const groupList = screen.getByTestId(`sub-agent-group-list-${group.firstCallId}`)
+    expect(groupList.className).toContain('grid')
+    expect(groupList.className).toContain('lg:grid-cols-2')
     expect(grouped.textContent).toContain('Subagents')
     expect(screen.getByTestId('sub-agent-row-c1')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-row-c2')).toBeTruthy()
@@ -558,6 +598,41 @@ describe('ChatPanel sub-agent dispatch', () => {
     expect(screen.getByTestId('sub-agent-chip-c1')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-chip-c2')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-chip-c3')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-chip-c1').textContent).toContain('Find the source of behavior A.')
+    expect(screen.queryByTestId('sub-agent-intention-c1')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('sub-agent-chip-c1'))
+    expect(screen.getByTestId('sub-agent-intention-c1').textContent).toContain('Find the source of behavior A.')
+    expect(screen.getByTestId('sub-agent-chip-c2')).toBeTruthy()
+  })
+
+  it('keeps grouped children collapsed when one starts running until the user expands it', async () => {
+    const socket = makeControlledSocket()
+    const group = makeGroup([
+      makeCall('c-running', { prompt: 'large internal prompt', intention: 'Trace the live child lifecycle.' }),
+      makeCall('c-waiting', { prompt: 'other prompt', intention: 'Review the resulting lifecycle state.' }),
+    ])
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={socket.socket}
+        group={group}
+        approvalByCallId={new Map()}
+      />,
+    )
+
+    act(() => socket.emitStarted({
+      parentSessionId: 'parent-1',
+      parentCallId: 'c-running',
+      childSessionId: 'child-running',
+      intention: 'Trace the live child lifecycle.',
+      prompt: 'large internal prompt',
+      startedAt: new Date().toISOString(),
+    }))
+
+    await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-running').getAttribute('data-sub-agent-status')).toBe('running'))
+    expect(screen.getByTestId('sub-agent-chip-c-running').textContent).toContain('Trace the live child lifecycle.')
+    expect(screen.queryByTestId('sub-agent-intention-c-running')).toBeNull()
   })
 
   it('keeps single-agent groups in the stacked list layout (no matrix)', () => {

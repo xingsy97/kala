@@ -94,6 +94,15 @@ describe('SessionTerminalPanel', () => {
     expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('auto-starts a temporary terminal and kills it when the modal unmounts', async () => {
+    const mock = makeSocket()
+    const { unmount } = render(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" autoStart destroyOnUnmount />)
+    await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:create', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', cwd: '/repo' }), expect.any(Function)))
+    await screen.findByText('Running')
+    unmount()
+    await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:kill', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', terminalId: 'term-1' }), expect.any(Function)))
+  })
+
   it('kills explicitly and can restart with a new create request', async () => {
     const mock = makeSocket()
     render(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" />)

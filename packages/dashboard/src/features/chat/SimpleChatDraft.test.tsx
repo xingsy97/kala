@@ -48,7 +48,14 @@ beforeEach(() => {
 describe('SimpleChatDraft', () => {
   it('defaults new workspace-free chats to Copilot when the user has no runtime preference', async () => {
     const { onCreated } = draft()
-    expect(screen.getByTestId('draft-runtime-copilot').getAttribute('aria-checked')).toBe('true')
+    const selected = screen.getByTestId('draft-runtime-copilot')
+    const unselected = screen.getByTestId('draft-runtime-kernel')
+    expect(selected.getAttribute('aria-checked')).toBe('true')
+    expect(selected.className).toContain('ring-2')
+    expect(selected.className).toContain('border-primary/65')
+    expect(selected.querySelector('.lucide-check')).toBeTruthy()
+    expect(unselected.getAttribute('aria-checked')).toBe('false')
+    expect(unselected.querySelector('.lucide-check')).toBeNull()
     send()
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
     expect(vi.mocked(createSessionWithAck).mock.calls[0]![1]).toMatchObject({ agentRuntime: 'copilot' })
@@ -72,7 +79,7 @@ describe('SimpleChatDraft', () => {
     send()
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce())
     const creation = vi.mocked(createSessionWithAck).mock.calls[0]![1]
-    expect(creation).toMatchObject({ agentRuntime: runtime, tools: ['todowrite', 'todo_graph', 'agent', 'websearch', 'memory'] })
+    expect(creation).toMatchObject({ agentRuntime: runtime, tools: ['todo_graph', 'agent', 'websearch', 'memory'] })
     expect(creation).not.toHaveProperty('workspaceId')
     expect(creation).not.toHaveProperty('cwd')
     expect(admitUserMessage).toHaveBeenCalledWith(expect.objectContaining({ sessionId: creation.sessionId, text: 'Hello', mode: 'steer' }))

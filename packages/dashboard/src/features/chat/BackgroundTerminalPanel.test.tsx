@@ -38,9 +38,10 @@ describe('BackgroundShellsButton', () => {
     )
 
     const trigger = await screen.findByTestId('background-shells-trigger')
-    expect(trigger.textContent ?? '').toContain('Shell')
-    expect(trigger.textContent ?? '').not.toContain('Workspace Shell')
+    expect(trigger.textContent).toBe('')
     expect(trigger.getAttribute('aria-label') ?? '').toContain('workspace background shell')
+    expect(trigger.className).toContain('h-11')
+    expect(trigger.className).toContain('w-11')
 
     fireEvent.click(trigger)
     expect(await screen.findByText('Workspace shells')).toBeTruthy()
@@ -81,8 +82,7 @@ describe('BackgroundShellsButton', () => {
     )
 
     const trigger = screen.getByTestId('background-shells-trigger')
-    expect(trigger.textContent ?? '').toContain('Shell')
-    expect(trigger.textContent ?? '').not.toContain('Session replay Shell')
+    expect(trigger.textContent).toBe('')
     expect(trigger.getAttribute('aria-label') ?? '').toContain('session replay background shell')
 
     fireEvent.click(trigger)
@@ -125,9 +125,7 @@ describe('BackgroundShellsButton', () => {
     )
 
     const trigger = await screen.findByTestId('background-shells-trigger')
-    expect(trigger.textContent ?? '').toContain('Shells')
-    expect(trigger.textContent ?? '').not.toContain('0 Shells')
-    expect(trigger.textContent ?? '').not.toContain('Workspace Shells')
+    expect(trigger.textContent).toBe('')
     expect(trigger.getAttribute('aria-label') ?? '').toContain('0 running workspace background shells')
 
     fireEvent.click(trigger)
@@ -154,9 +152,7 @@ describe('BackgroundShellsButton', () => {
     )
 
     const trigger = await screen.findByTestId('background-shells-trigger')
-    expect(trigger.textContent ?? '').toContain('Shells')
-    expect(trigger.textContent ?? '').not.toContain('0 Shells')
-    expect(trigger.textContent ?? '').not.toContain('Workspace Shells')
+    expect(trigger.textContent).toBe('')
 
     fireEvent.click(trigger)
     expect(await screen.findByText('Workspace shells')).toBeTruthy()

@@ -126,7 +126,10 @@ export function builtinThemeForScheme(scheme: 'dark' | 'light'): StoredVSCodeThe
 }
 
 export function currentVSCodeTheme(scheme: 'dark' | 'light'): StoredVSCodeTheme {
-  return readStoredVSCodeTheme() ?? builtinThemeForScheme(scheme)
+  const stored = readStoredVSCodeTheme()
+  return stored && themeScheme(stored.theme, scheme) === scheme
+    ? stored
+    : builtinThemeForScheme(scheme)
 }
 
 export function applyCurrentVSCodeTheme(scheme: 'dark' | 'light'): StoredVSCodeTheme {
@@ -135,16 +138,30 @@ export function applyCurrentVSCodeTheme(scheme: 'dark' | 'light'): StoredVSCodeT
   return theme
 }
 
-export function applyVSCodeTheme(theme: VSCodeColorTheme, fallbackScheme: 'dark' | 'light' = 'dark'): void {
+/**
+ * Apply VS Code color tokens without allowing the theme metadata to change the
+ * app's selected color scheme. An opposite-scheme custom theme remains stored
+ * and becomes active again when the user selects its compatible app scheme.
+ */
+export function applyVSCodeTheme(theme: VSCodeColorTheme, scheme: 'dark' | 'light' = 'dark'): void {
   const root = document.documentElement
-  const kind = normalizeKind(theme.type, fallbackScheme)
-  root.classList.toggle('dark', kind === 'dark' || kind === 'hc')
+  const compatibleTheme = themeScheme(theme, scheme) === scheme
+    ? theme
+    : builtinThemeForScheme(scheme).theme
+  const kind = normalizeKind(compatibleTheme.type, scheme)
+  root.classList.toggle('dark', scheme === 'dark')
+  root.style.colorScheme = scheme
   root.dataset.vscodeThemeKind = kind
-  const colors = theme.colors ?? {}
+  const colors = compatibleTheme.colors ?? {}
   for (const [token, value] of Object.entries(colors)) {
     if (typeof value === 'string' && value.trim()) root.style.setProperty(themeCssVarName(token), value.trim())
   }
   applySemanticTokens(root, colors, kind)
+}
+
+export function themeScheme(theme: VSCodeColorTheme, fallbackScheme: 'dark' | 'light'): 'dark' | 'light' {
+  const kind = normalizeKind(theme.type, fallbackScheme)
+  return kind === 'dark' || kind === 'hc' ? 'dark' : 'light'
 }
 
 export function normalizeKind(value: unknown, fallbackScheme: 'dark' | 'light' = 'dark'): VSCodeThemeKind {

@@ -622,7 +622,7 @@ describe('SettingsDialog', () => {
     fireEvent.click(screen.getByTestId('settings-tab-notifications'))
     expect(screen.queryByText(/System notifications are automatically paused/)).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'About Notifications' }).at(-1)!)
-    expect(screen.getByRole('tooltip').textContent).toContain('System notifications are automatically paused while Agent RunLab is actively being used on any device.')
+    expect(screen.getByRole('tooltip').textContent).toContain('System notifications are automatically paused while Kala is actively being used on any device.')
     expect(screen.getByTestId('desktop-notification-permission').textContent).toContain('not requested')
 
     fireEvent.click(screen.getByTestId('settings-toggle-desktop-notifications'))

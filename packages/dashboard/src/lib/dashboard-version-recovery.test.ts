@@ -32,4 +32,18 @@ describe('Dashboard version recovery', () => {
     await expect(recoverStaleDashboard(new StaleDashboardAssetError('feature'), { identity: { generation: 3 }, fetchStatus: async () => ({ generation: 4 }), storage: memoryStorage(), serviceWorker, reload })).resolves.toBe('reloading')
     expect(postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' }); expect(reload).toHaveBeenCalledTimes(1)
   })
+
+  it('recovers ordinary render failures only when the served dashboard version changed', async () => {
+    const storage = memoryStorage(); const reload = vi.fn()
+    const error = new Error('Rendered more hooks than during the previous render')
+    await expect(recoverStaleDashboard(error, { recoverWhenVersionChanged: true, identity: { generation: 9, releaseId: 'old' }, fetchStatus: async () => ({ generation: 10, releaseId: 'new' }), storage, reload })).resolves.toBe('reloading')
+    await expect(recoverStaleDashboard(error, { recoverWhenVersionChanged: true, identity: { generation: 9, releaseId: 'old' }, fetchStatus: async () => ({ generation: 10, releaseId: 'new' }), storage, reload })).resolves.toBe('already-attempted')
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reload ordinary render failures when the dashboard version is current', async () => {
+    const reload = vi.fn()
+    await expect(recoverStaleDashboard(new Error('render failed'), { recoverWhenVersionChanged: true, identity: { generation: 12, releaseId: 'same' }, fetchStatus: async () => ({ generation: 12, releaseId: 'same' }), storage: memoryStorage(), reload })).resolves.toBe('not-stale')
+    expect(reload).not.toHaveBeenCalled()
+  })
 })

@@ -8,6 +8,7 @@ describe('parseSubAgentEnvelope', () => {
       '<sub_agent',
       '  session_id="child-42"',
       '  agent_type="Explore"',
+      '  intention="Inspect &amp; summarize the relevant behavior."',
       '  status="completed"',
       '  turns="7"',
       '  duration_ms="12345"',
@@ -21,6 +22,7 @@ describe('parseSubAgentEnvelope', () => {
     expect(parsed).toEqual({
       sessionId: 'child-42',
       agentType: 'Explore',
+      intention: 'Inspect & summarize the relevant behavior.',
       status: 'completed',
       turns: 7,
       durationMs: 12345,

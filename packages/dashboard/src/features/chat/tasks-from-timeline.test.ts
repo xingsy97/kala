@@ -4,7 +4,7 @@ import type { TimelineEntry } from '../../session.js'
 import { parseTasksFromInput, tasksFromMessages, tasksFromTimeline } from './tasks-from-timeline.js'
 
 describe('tasksFromTimeline', () => {
-  it('derives the latest successful todowrite list from ordinary tool calls', () => {
+  it('derives a legacy Task List from historical successful todowrite calls', () => {
     const timeline: TimelineEntry[] = [
       {
         seq: 1,
@@ -38,7 +38,7 @@ describe('tasksFromTimeline', () => {
     ])
   })
 
-  it('ignores failed todowrite results and malformed entries', () => {
+  it('ignores failed historical todowrite results and malformed entries', () => {
     const timeline: TimelineEntry[] = [
       {
         seq: 1,

@@ -30,14 +30,13 @@ export function TaskGraphButton({ graph }: Props): JSX.Element | null {
   const allDone = done === summary.total
   const allBlocked = summary.blocked > 0 && summary.active === 0 && summary.ready === 0
   return <div className="relative flex-none" ref={root}>
-    <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-haspopup="dialog" data-testid="task-graph-trigger"
+    <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-haspopup="dialog" aria-label={t('taskGraph.summary', summary)} data-testid="task-graph-trigger"
       title={t('taskGraph.summary', summary)}
-      className={cn('inline-flex h-9 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent sm:h-7', open && 'bg-accent text-foreground', allDone && 'text-emerald-700 dark:text-emerald-300', allBlocked && 'text-amber-700 dark:text-amber-300')}>
-      <GitBranch className="h-3.5 w-3.5" /><span>{done}/{summary.total}</span>
-      <span className="hidden sm:inline">· {t('taskGraph.readyCount', { count: summary.ready })}</span>
-      {summary.active > 0 ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" /> : null}
+      className={cn('inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent sm:h-9 sm:w-9', open && 'bg-accent text-foreground', allDone && 'text-emerald-700 dark:text-emerald-300', allBlocked && 'text-amber-700 dark:text-amber-300')}>
+      <GitBranch className="h-4 w-4" aria-hidden="true" />
+      {summary.active > 0 ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" aria-hidden="true" /> : null}
     </button>
-    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label={t('taskGraph.aria')} data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-30 flex max-h-[76dvh] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-xl md:inset-x-4 md:bottom-4 md:top-16 md:max-h-none lg:left-1/2 lg:right-auto lg:top-auto lg:bottom-20 lg:max-h-[76dvh] lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
+    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label={t('taskGraph.aria')} data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-[70] flex h-[min(76dvh,42rem)] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-2xl md:inset-x-4 md:bottom-4 lg:left-1/2 lg:right-auto lg:bottom-20 lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
       <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
         <GitBranch className="h-4 w-4" /><span className="text-sm font-medium">{t('taskGraph.title')}</span><span className="text-xs text-muted-foreground">{t('taskGraph.revision', { revision: graph.revision })}</span>
         <button className="ml-auto rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => setGraphView((value) => !value)}>{graphView ? t('taskGraph.listView') : t('taskGraph.graphView')}</button>

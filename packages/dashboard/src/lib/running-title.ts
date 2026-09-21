@@ -5,7 +5,7 @@ import { isDesktopClient } from './desktop.js'
 const FAVICON_FRAMES = [0, 1, 2, 3] as const
 const FAVICON_INTERVAL_MS = 500
 
-export const DASHBOARD_TITLE = 'Agent RunLab'
+export const DASHBOARD_TITLE = 'Kala'
 
 export function useRunningTitleIndicator(isRunning: boolean, baseTitle = DASHBOARD_TITLE): void {
   useEffect(() => {

@@ -44,7 +44,8 @@ export function deriveAgentProgress(state: AgentState | null, timeline: readonly
         ...(previous.durationMs !== undefined ? { durationMs: previous.durationMs } : {}),
       }
     }
-    return { phase: 'thinking', label: 'Thinking' }
+    const startedAt = currentTurnStartedAt(timeline)
+    return { phase: 'thinking', label: 'Thinking', ...(startedAt !== undefined ? { startedAt } : {}) }
   }
 
   if (status === 'error') return { phase: 'error', label: 'The turn needs attention' }
@@ -115,6 +116,16 @@ function toolStartedAt(timeline: readonly TimelineEntry[], callId: string): numb
     startedAt = startedAt === undefined ? parsed : Math.min(startedAt, parsed)
   }
   return startedAt
+}
+
+function currentTurnStartedAt(timeline: readonly TimelineEntry[]): number | undefined {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const entry = timeline[index]
+    if (entry?.event.kind !== 'user_message') continue
+    const parsed = Date.parse(entry.ts)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
 }
 
 function durationBetween(startedAt: number | undefined, completedAt: number): number | undefined {

@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 
 export type SubAgentPolicyView = {
   role?: 'research' | 'implementation' | 'test' | 'review'
+  intention?: string
   objective?: string
   allowedTools?: readonly string[]
   maxTurns?: number
@@ -28,6 +29,7 @@ type PolicyArtifact = {
   schemaVersion?: number
   policy?: {
     role?: string
+    intention?: string
     objective?: string
     allowedTools?: unknown
     maxTurns?: unknown
@@ -82,6 +84,7 @@ function normalize(raw: Required<PolicyArtifact>['policy']): SubAgentPolicyView 
     : undefined
   const view: SubAgentPolicyView = { reasons }
   if (isRole(raw.role)) view.role = raw.role
+  if (typeof raw.intention === 'string' && raw.intention.length > 0) view.intention = raw.intention
   if (typeof raw.objective === 'string' && raw.objective.length > 0) view.objective = raw.objective
   if (allowedTools && allowedTools.length > 0) view.allowedTools = allowedTools
   if (typeof raw.maxTurns === 'number' && Number.isFinite(raw.maxTurns)) view.maxTurns = raw.maxTurns

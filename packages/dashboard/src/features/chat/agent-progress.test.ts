@@ -42,6 +42,18 @@ describe('deriveAgentProgress', () => {
     expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking' })
   })
 
+  it('recovers thinking elapsed start from the current user turn', () => {
+    const timeline = [
+      { seq: 1, ts: new Date(1000).toISOString(), event: { kind: 'user_message' as const, text: 'start work' }, effects: [] },
+      { seq: 2, ts: new Date(1500).toISOString(), event: { kind: 'llm_response' as const, message: { role: 'assistant' as const, content: [] } }, effects: [] },
+    ]
+    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({
+      phase: 'thinking',
+      label: 'Thinking',
+      startedAt: Date.parse(new Date(1000).toISOString()),
+    })
+  })
+
   it('matches the running pending call instead of using the latest lifetime intention', () => {
     const timeline = [
       toolCall(1, 'running', 'Identify why the activity surfaces duplicate the current business objective.'),
@@ -118,7 +130,7 @@ describe('deriveAgentProgress', () => {
       toolResult(2, 'old', true),
       { seq: 3, ts: new Date(3).toISOString(), effects: [], event: { kind: 'user_message' as const, text: 'start a different task' } },
     ]
-    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking' })
+    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking', startedAt: Date.parse(new Date(3).toISOString()) })
   })
 
   it('ignores a result that has no persisted model-authored Intention', () => {

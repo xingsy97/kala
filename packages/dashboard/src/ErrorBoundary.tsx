@@ -2,7 +2,7 @@ import { Component, useEffect, useMemo, useState, type ErrorInfo, type ReactNode
 import { useTranslation } from 'react-i18next'
 
 import { ProductState } from './components/ui/product-state.js'
-import { isStaleDashboardAssetError, recoverStaleDashboard } from './lib/dashboard-version-recovery.js'
+import { dashboardBootIdentity, isStaleDashboardAssetError, recoverStaleDashboard } from './lib/dashboard-version-recovery.js'
 
 type Props = {
   children: ReactNode
@@ -32,18 +32,22 @@ export class ErrorBoundary extends Component<Props, State> {
 export function ErrorBoundaryFallback({ error }: { error: Error }): JSX.Element {
   const { t } = useTranslation()
   const stale = isStaleDashboardAssetError(error)
-  const [recovery, setRecovery] = useState<'checking' | 'failed'>(stale ? 'checking' : 'failed')
-  const diagnostics = useMemo(() => `Agent RunLab dashboard render failure\n${error.name}: ${error.message}`, [error])
+  const canCheckVersion = useMemo(() => {
+    const identity = dashboardBootIdentity()
+    return identity.generation !== undefined || identity.releaseId !== undefined
+  }, [])
+  const [recovery, setRecovery] = useState<'checking' | 'failed'>(stale || canCheckVersion ? 'checking' : 'failed')
+  const diagnostics = useMemo(() => `Kala dashboard render failure\n${error.name}: ${error.message}`, [error])
   useEffect(() => {
-    if (!stale) return
+    if (!stale && !canCheckVersion) return
     let mounted = true
-    void recoverStaleDashboard(error).then((result) => {
+    void recoverStaleDashboard(error, { recoverWhenVersionChanged: true }).then((result) => {
       if (mounted && result !== 'reloading') setRecovery('failed')
     }, () => {
       if (mounted) setRecovery('failed')
     })
     return () => { mounted = false }
-  }, [error, stale])
+  }, [canCheckVersion, error, stale])
   if (recovery === 'checking') {
     return (
       <main className="grid min-h-screen place-items-center bg-background px-4 text-foreground">

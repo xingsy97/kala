@@ -576,10 +576,9 @@ export function useSession({
       // Coalesced to one commit per frame (see enqueueProjection): during a
       // tool-heavy turn state:changed fires very frequently and each one used
       // to re-render the whole App synchronously.
-      const response = draftAnchor && p.state.messages.slice(draftAnchor.messageCount)
-        .find((message) => message.role === 'assistant' || message.role === 'user')
-      const replacesDraft = response && response.role === 'assistant' &&
-        response.content.some((content) => content.type === 'text' && content.text.length > 0)
+      const replacesDraft = Boolean(draftAnchor && p.state.messages.slice(draftAnchor.messageCount)
+        .some((message) => message.role === 'assistant' &&
+          message.content.some((content) => content.type === 'text' && content.text.length > 0)))
       if (replacesDraft) resetStream()
       updateStreamStatus(p.state.status)
       streamCursor = p.cursor ?? p.state.cursor
@@ -953,9 +952,9 @@ export function respondAskUserChoice(
   socket: DashboardSocket,
   sessionId: string,
   callId: string,
-  value: string,
+  response: { value: string } | { customText: string },
 ): Promise<void> {
-  return emitRpc(socket, 'client:ask_user_choice', { sessionId, callId, value })
+  return emitRpc(socket, 'client:ask_user_choice', { sessionId, callId, ...response })
 }
 
 export function deleteSession(

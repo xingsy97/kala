@@ -13,6 +13,7 @@ export type TaskItem = {
 const STATUSES: readonly TaskStatus[] = ['pending', 'in_progress', 'completed', 'cancelled']
 const PRIORITIES: readonly TaskPriority[] = ['high', 'medium', 'low']
 
+/** Legacy/history compatibility for sessions that recorded todowrite before its retirement. */
 export function tasksFromTimeline(timeline: readonly TimelineEntry[]): readonly TaskItem[] {
   const inputsByCallId = new Map<string, Record<string, unknown>>()
   let current: readonly TaskItem[] = []

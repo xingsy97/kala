@@ -12,6 +12,15 @@ function result(callId: string, ok = true, content = 'ok'): ToolResultContent {
 }
 
 describe('tool summary renderers', () => {
+  it('renders historical todowrite calls for legacy session compatibility', () => {
+    const rows = pickRenderer('todowrite')({
+      calls: [call('todowrite', { todos: [{ content: 'Ship legacy work', status: 'in_progress' }, { content: 'Verify', status: 'completed' }] }, 'legacy-todo')],
+      results: new Map([['legacy-todo', result('legacy-todo')]]),
+    })
+
+    expect(rows).toEqual([{ callId: 'legacy-todo', primary: 'Ship legacy work', secondary: '1/2 done', ok: true }])
+  })
+
   it('summarizes shell with the command instead of generic key-value input', () => {
     const rows = pickRenderer('shell')({
       calls: [call('shell', { command: 'git status --short && git diff --check' }, 'c1')],

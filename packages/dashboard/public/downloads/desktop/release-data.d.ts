@@ -11,4 +11,5 @@ export function validateDesktopRelease(manifest: unknown): DesktopRelease
 export function loadDesktopRelease(): Promise<DesktopRelease>
 export function validateDesktopOrigin(origin: unknown): string
 export function desktopInstallCommands(manifest: unknown, origin: string): string
+export function desktopBootstrapScript(manifest: unknown): string
 export function desktopLocalInstallCommands(manifest: unknown): string

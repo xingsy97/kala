@@ -227,6 +227,7 @@ const isTodoItem = (v: unknown): v is TodoItem =>
   typeof (v as Record<string, unknown>).content === 'string' &&
   typeof (v as Record<string, unknown>).status === 'string'
 
+/** Legacy/history compatibility for rendering pre-retirement tool calls. */
 export const todowriteRenderer: GroupedToolRenderer = ({ calls, results }) => {
   return calls.map((c) => {
     const todos = Array.isArray(c.input.todos)

@@ -28,6 +28,6 @@ describe('product page primitives', () => {
   it('can hide the product eyebrow for focused pages', () => {
     render(<ProductPageHeader eyebrow={null} title="Memo" titleTestId="memo-title" />)
     expect(screen.getByTestId('memo-title').textContent).toBe('Memo')
-    expect(screen.queryByText('Agent RunLab')).toBeNull()
+    expect(screen.queryByText('Kala')).toBeNull()
   })
 })

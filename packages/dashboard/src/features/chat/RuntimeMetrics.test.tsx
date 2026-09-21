@@ -156,6 +156,21 @@ describe('RuntimeMetrics', () => {
     expect(popover.textContent ?? '').toContain('unknown')
   })
 
+  it('does not paint a colored endpoint before any context is used', () => {
+    render(
+      <RuntimeMetrics
+        state={createInitialState({ sessionId: 'sess-empty-context' })}
+        config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
+        contextSnapshot={contextSnapshot(0, 4_000)}
+        modelInfo={{ id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 }}
+        queuedMessages={0}
+        density="simple"
+      />,
+    )
+
+    expect(screen.getByTestId('context-usage-track').querySelector('[data-context-usage-tone]')).toBeNull()
+  })
+
   it('uses a full-width simple usage bar while keeping tooltip and popover details', () => {
     render(
       <RuntimeMetrics
@@ -194,7 +209,7 @@ describe('RuntimeMetrics', () => {
     expect(usage?.getAttribute('class')).toContain('stroke-sky-500/85')
     expect(usage?.getAttribute('class')).not.toContain('border-')
     expect(usage?.getAttribute('stroke-linecap')).toBe('round')
-    expect(usage?.getAttribute('stroke-dasharray')).toBe('30 70')
+    expect(usage?.getAttribute('stroke-dasharray')).toBe('30 71')
     // Chromium repeats normalized dashes in device units when pathLength is
     // combined with non-scaling-stroke, producing many visible breaks. The
     // Composer SVG has a 1:1 viewBox, so vector-effect is unnecessary here.

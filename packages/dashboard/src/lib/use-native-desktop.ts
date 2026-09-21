@@ -118,7 +118,7 @@ export function useNativeDesktop(input: {
       delivered.current.add(signal.id)
       if (delivered.current.size > 2048) delivered.current.delete(delivered.current.values().next().value!)
       void bridge.notify({
-        id: signal.id, sessionId: signal.session.sessionId, title: 'Agent RunLab',
+        id: signal.id, sessionId: signal.session.sessionId, title: 'Kala',
         body: showDetails
           ? t(`desktopNative.${signal.kind}`, { session: (signal.session.label?.trim() || signal.session.firstUserMessage?.trim() || signal.session.sessionId).slice(0, 80) })
           : t(`desktopNative.generic.${signal.kind}`),
@@ -142,7 +142,7 @@ export function useNativeDesktop(input: {
       ] as const
       for (const [changed, kind] of kinds) {
         if (changed && prefs.enabled && prefs.byKind[kind]) {
-          void bridge.notify({ id: `${kind}:${Date.now()}`, sessionId: active.sessionId, title: 'Agent RunLab', body: t(`desktopNative.generic.${kind}`), silent: !prefs.sound }).catch(fail)
+          void bridge.notify({ id: `${kind}:${Date.now()}`, sessionId: active.sessionId, title: 'Kala', body: t(`desktopNative.generic.${kind}`), silent: !prefs.sound }).catch(fail)
         }
       }
     }

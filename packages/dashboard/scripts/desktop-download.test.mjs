@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { desktopInstallCommands, desktopLocalInstallCommands, loadDesktopRelease, validateDesktopOrigin, validateDesktopRelease } from '../public/downloads/desktop/release-data.js'
+import { desktopBootstrapScript, desktopInstallCommands, desktopLocalInstallCommands, loadDesktopRelease, validateDesktopOrigin, validateDesktopRelease } from '../public/downloads/desktop/release-data.js'
 import { aptInstallSnippet } from '../public/downloads/desktop/apt-snippet.js'
 
 const base = new URL('../public/downloads/desktop/', import.meta.url)
@@ -60,35 +60,64 @@ test('shared loader fails closed on absent metadata, missing files, HTML fallbac
   assert.equal((await loadDesktopRelease()).artifact.file, release.artifact.file)
 })
 
-test('shared commands strictly check the named package and immutable checksum list before install', () => {
-  const commands = desktopInstallCommands(release, 'https://runlab.example.org')
+test('shared install command is one curl line backed by a checksum-verifying bootstrap script', () => {
+  const command = desktopInstallCommands(release, 'https://runlab.example.org')
+  assert(command.includes("curl --proto '=https' --tlsv1.2 --fail --show-error --silent --location 'https://runlab.example.org/install/assets/desktop-install.sh' | bash -s -- 'https://runlab.example.org'"))
+  assert(command.includes('Cloudflare Access must allow /install/assets/*'))
+  assert(command.startsWith('bash -o pipefail -c '))
+  assert(!command.includes('\n'))
+  const script = desktopBootstrapScript(release)
   for (const item of [release.artifact, release.dependencies, release.checksums]) {
-    assert(commands.includes(`'${item.sha256}  ${item.file}'`))
-    assert(commands.includes(`'https://runlab.example.org/downloads/desktop/${item.file}'`))
+    assert(script.includes(`'${item.sha256}  ${item.file}'`))
   }
-  assert(commands.includes(`sha256sum --strict --check '${release.checksums.file}'`))
-  const verified = commands.indexOf(`sha256sum --strict --check '${release.checksums.file}'`)
-  const readable = commands.indexOf(`chmod 644 -- "$tmp/${release.artifact.file}"`)
-  const traversable = commands.indexOf('chmod 755 -- "$tmp"')
-  const installed = commands.indexOf(`sudo apt install -y -- "$tmp/${release.artifact.file}"`)
+  for (const name of ['desktop-package.deb', 'desktop-dependencies.json', 'desktop-SHA256SUMS.txt']) {
+    assert(script.includes(`$origin/install/assets/${name}`))
+  }
+  assert(script.includes(`sha256sum --strict --check '${release.checksums.file}'`))
+  const verified = script.indexOf(`sha256sum --strict --check '${release.checksums.file}'`)
+  const readable = script.indexOf(`chmod 644 -- "$tmp/${release.artifact.file}"`)
+  const traversable = script.indexOf('chmod 755 -- "$tmp"')
+  const installed = script.indexOf(`sudo apt install -y -- "$tmp/${release.artifact.file}"`)
   assert(verified < readable && readable < traversable && traversable < installed)
-  assert(!commands.includes('APT::Sandbox::User'))
-  assert(commands.includes("curl --proto '=https' --tlsv1.2 --fail"))
-  assert(commands.includes('not publisher identity'))
-  assert(!commands.includes('apt remove'))
-  assert(!commands.includes('curl |'))
-  assert(!commands.includes('--insecure'))
-  assert(!commands.includes('--location'))
-  assert(!commands.includes('trusted=yes'))
-  assert(commands.includes('mktemp -d /tmp/agent-runlab-install.XXXXXXXXXX'))
-  assert(!commands.includes('$HOME'))
-  assert(!commands.includes('$PWD'))
+  assert(!script.includes('APT::Sandbox::User'))
+  assert(!script.includes('--insecure'))
+  assert(script.startsWith('# KALA_DESKTOP_INSTALLER_V1\n'))
+  assert(!script.includes('trusted=yes'))
+  assert(script.includes('mktemp -d /tmp/agent-runlab-install.XXXXXXXXXX'))
+})
+
+test('one-line installer reports blocked endpoints and unexpected HTML clearly', async (t) => {
+  const directory = resolve('.artifacts', `desktop-command-errors-${randomUUID()}`)
+  await mkdir(directory, { recursive: true })
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const curl = resolve(directory, 'curl')
+  const command = desktopInstallCommands(release, 'https://runlab.example.org')
+  const run = () => spawnSync('bash', ['-c', command], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+  })
+  await writeFile(curl, '#!/bin/sh\necho "curl: (22) HTTP 403" >&2\nexit 22\n')
+  await chmod(curl, 0o755)
+  let result = run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /HTTP 403/)
+  assert.match(result.stderr, /Cloudflare Access must allow \/install\/assets\/\*/)
+  const parentShell = spawnSync('bash', ['--noprofile', '--norc', '-c', `${command}\nstatus=$?\nprintf '__CALLER_SURVIVED__:%s\\n' "$status"\n`], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+  })
+  assert.equal(parentShell.status, 0)
+  assert.match(parentShell.stdout, /__CALLER_SURVIVED__:22/)
+  await writeFile(curl, '#!/bin/sh\nprintf "<!DOCTYPE html><title>Cloudflare Access</title>"\n')
+  result = run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /Cloudflare Access must allow \/install\/assets\/\*/)
 })
 
 test('installation command accepts only canonical trusted HTTPS origins or explicit loopback HTTP', () => {
   for (const origin of ['https://runlab.example.org', 'https://runlab.example.org:8443', 'http://127.0.0.1:13000', 'http://localhost:13000', 'http://[::1]:13000']) {
     assert.equal(validateDesktopOrigin(origin), origin)
-    assert(desktopInstallCommands(release, origin).includes(`${origin}/downloads/desktop/`))
+    assert(desktopInstallCommands(release, origin).includes(`${origin}/install/assets/desktop-install.sh`))
   }
   for (const origin of [null, '', 'http://runlab.example.org', 'https://credentials.example.invalid', 'https://runlab.example.org/path',
     'https://runlab.example.org/', 'https://runlab.example.org?query', 'https://runlab.example.org#fragment',
@@ -111,8 +140,15 @@ test('full copied Bash downloads and verifies all files, fails on tamper, and cl
     assert(target, `Missing test prerequisite ${tool}`)
     await symlink(target, resolve(bin, tool))
   }
-  for (const item of [release.artifact, release.dependencies, release.checksums]) {
-    await writeFile(resolve(fixtures, item.file), await readFile(new URL(item.file, base)))
+  const publicAliases = [
+    [release.artifact, 'desktop-package.deb'],
+    [release.dependencies, 'desktop-dependencies.json'],
+    [release.checksums, 'desktop-SHA256SUMS.txt'],
+  ]
+  for (const [item, alias] of publicAliases) {
+    const bytes = await readFile(new URL(item.file, base))
+    await writeFile(resolve(fixtures, item.file), bytes)
+    await writeFile(resolve(fixtures, alias), bytes)
   }
   const executable = async (name, content) => {
     await writeFile(resolve(bin, name), content)
@@ -151,8 +187,8 @@ fs.writeFileSync(args[args.indexOf('--output') + 1], bytes)
   const installLog = resolve(directory, 'installed.json')
   const bootstrapLog = resolve(directory, 'bootstrap.jsonl')
   const downloadLog = resolve(directory, 'downloads.jsonl')
-  const run = (extra = {}, commands = desktopInstallCommands(release, 'https://runlab.example.org')) => spawnSync(resolve(bin, 'bash'), [], {
-    cwd: fixtures, input: commands, encoding: 'utf8',
+  const run = (extra = {}, commands = desktopBootstrapScript(release)) => spawnSync(resolve(bin, 'bash'), [], {
+    cwd: fixtures, input: `set -- 'https://runlab.example.org'\n${commands}`, encoding: 'utf8',
     env: { ...process.env, HOME: directory, TMPDIR: fixtures, PATH: bin, TEST_BIN: bin, FIXTURES: fixtures, INSTALL_LOG: installLog, BOOTSTRAP_LOG: bootstrapLog, DOWNLOAD_LOG: downloadLog, ...extra },
   })
   const assertTemporaryDownloadsCleaned = async () => {
@@ -175,8 +211,8 @@ fs.writeFileSync(args[args.indexOf('--output') + 1], bytes)
   assert(args[4].endsWith(`/${release.artifact.file}`))
   await assertTemporaryDownloadsCleaned()
   await rm(installLog)
-  for (const item of [release.artifact, release.dependencies, release.checksums]) {
-    for (const extra of [{ TAMPER_FILE: item.file }, { FAIL_FILE: item.file }]) {
+  for (const [, alias] of publicAliases) {
+    for (const extra of [{ TAMPER_FILE: alias }, { FAIL_FILE: alias }]) {
       const failed = run(extra)
       assert.notEqual(failed.status, 0)
       await assert.rejects(readFile(installLog), { code: 'ENOENT' })
@@ -245,7 +281,7 @@ test('APT uses existing approved URL/key validation and complete one-paste block
   assert(command.startsWith("bash <<'RUNLAB_DESKTOP_INSTALL'\nset -euo pipefail"))
   assert(command.endsWith('\nRUNLAB_DESKTOP_INSTALL'))
   assert(command.includes(config.fingerprint.toUpperCase()))
-  assert(command.includes('Signed-By: /etc/apt/keyrings/agent-runlab-desktop.gpg'))
+  assert(command.includes('Signed-By: /etc/apt/keyrings/kala-desktop.gpg'))
   for (const invalid of [null, {}, { ...config, url: 'http://packages.example.org' }, { ...config, fingerprint: 'bad' },
     { ...config, url: 'https://packages.example.org/../bad' }]) assert.throws(() => aptInstallSnippet(invalid))
 })

@@ -72,7 +72,7 @@ describe('native desktop runtime signals', () => {
     expect(bridge.notify).toHaveBeenCalledTimes(2)
     const calls = vi.mocked(bridge.notify).mock.calls.map(([value]) => value)
     expect(calls.map((value) => value.sessionId)).toEqual(['active', 'background'])
-    expect(calls.every((value) => !value.body.includes('Private') && value.title === 'Agent RunLab')).toBe(true)
+    expect(calls.every((value) => !value.body.includes('Private') && value.title === 'Kala')).toBe(true)
     hook.rerender({ ...initial, sessions: [summary('active', 'done', 2), summary('background', 'done', 2)] })
     act(() => { socket.emit('disconnect'); socket.emit('connect'); socket.emit('server:sessions') })
     await act(async () => { vi.advanceTimersByTime(3000) })

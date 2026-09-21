@@ -51,19 +51,35 @@ export function validateDesktopOrigin(origin) {
 }
 
 export function desktopInstallCommands(input, origin) {
+  validateDesktopRelease(input)
+  const trustedOrigin = validateDesktopOrigin(origin)
+  const protocol = trustedOrigin.startsWith('https:') ? '=https' : '=http,https'
+  const installer = `${trustedOrigin}/install/assets/desktop-install.sh`
+  return `bash -o pipefail -c "curl --proto '${protocol}' --tlsv1.2 --fail --show-error --silent --location '${installer}' | bash -s -- '${trustedOrigin}'" || { status=$?; printf '%s\\n' 'Kala Desktop installation failed. Check the error above. If the response was HTML or HTTP 302/403, Cloudflare Access must allow /install/assets/* for command-line downloads.' >&2; (exit "$status"); }`
+}
+
+export function desktopBootstrapScript(input) {
   const manifest = validateDesktopRelease(input)
-  const base = `${validateDesktopOrigin(origin)}${desktopDownloadBase}`
   const files = [manifest.artifact, manifest.dependencies, manifest.checksums]
-  const protocol = origin.startsWith('https:') ? '=https' : '=http,https'
-  const setup = `if ! command -v curl >/dev/null; then
+  const setup = `origin="\${1:-}"
+case "$origin" in
+  https://*|http://localhost:*|http://127.0.0.1:*|http://\\[::1\\]:*) ;;
+  *) printf '%s\\n' 'A trusted HTTPS origin is required.' >&2; exit 1 ;;
+esac
+if ! command -v curl >/dev/null; then
   sudo apt-get -o APT::Update::Error-Mode=any update
   sudo apt-get install -y ca-certificates curl
 fi`
-  const acquire = files.map(({ file }) => `curl --proto '${protocol}' --tlsv1.2 --fail --show-error --silent \\
+  const publicNames = new Map([
+    [manifest.artifact.file, 'desktop-package.deb'],
+    [manifest.dependencies.file, 'desktop-dependencies.json'],
+    [manifest.checksums.file, 'desktop-SHA256SUMS.txt'],
+  ])
+  const acquire = files.map(({ file }) => `curl --proto '=http,https' --tlsv1.2 --fail --show-error --silent \\
   --connect-timeout 15 --max-time 120 \\
   --output "$tmp/${file}" \\
-  '${base}${file}'`).join('\n')
-  return desktopInstallerScript(manifest, files, setup, acquire, true)
+  "$origin/install/assets/${publicNames.get(file)}"`).join('\n')
+  return desktopInstallerScript(manifest, files, setup, acquire, true, false)
 }
 
 export function desktopLocalInstallCommands(input) {
@@ -88,8 +104,8 @@ fi`
     `install -m 600 -- "$source" "$tmp/${manifest.artifact.file}"`, false)
 }
 
-function desktopInstallerScript(manifest, files, setup, acquire, verifyList) {
-  return `bash <<'RUNLAB_DESKTOP_INSTALL'
+function desktopInstallerScript(manifest, files, setup, acquire, verifyList, heredoc = true) {
+  const script = `# KALA_DESKTOP_INSTALLER_V1
 set -euo pipefail
 # Checksums detect corruption, not publisher identity. Trust this deployment.
 # This unsigned .deb does not configure automatic updates.
@@ -121,6 +137,6 @@ ${verifyList ? `sha256sum --strict --check '${manifest.checksums.file}'\n` : ''}
 # Let APT's unprivileged _apt user read only the verified public package.
 chmod 644 -- "$tmp/${manifest.artifact.file}"
 chmod 755 -- "$tmp"
-sudo apt install -y -- "$tmp/${manifest.artifact.file}"
-RUNLAB_DESKTOP_INSTALL`
+sudo apt install -y -- "$tmp/${manifest.artifact.file}"`
+  return heredoc ? `bash <<'RUNLAB_DESKTOP_INSTALL'\n${script}\nRUNLAB_DESKTOP_INSTALL` : script
 }

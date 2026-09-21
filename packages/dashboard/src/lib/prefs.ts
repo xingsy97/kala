@@ -74,7 +74,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   desktopNotificationWorkspace: { key: 'ak-desktop-notification-workspace-offline', type: 'boolean', defaultValue: true },
   desktopNotificationSound: { key: 'ak-desktop-notification-sound', type: 'boolean', defaultValue: true },
   desktopNotificationDetails: { key: 'ak-desktop-notification-details', type: 'boolean', defaultValue: false },
-  theme: { key: 'ak-theme', type: 'string', defaultValue: 'dark' },
+  theme: { key: 'ak-theme', type: 'string', defaultValue: 'system' },
   vscodeTheme: { key: 'ak-vscode-theme', type: 'json' },
   dashboardLanguage: { key: 'ak-dashboard-language', type: 'string', defaultValue: 'en' },
   hostEndpoint: { key: 'agent-kernel:host-endpoint', type: 'string', defaultValue: '' },

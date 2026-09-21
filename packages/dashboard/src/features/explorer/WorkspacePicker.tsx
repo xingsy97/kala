@@ -47,7 +47,7 @@ export function NewSessionDialog({
   workspaces,
   agentRuntimes = [{
     id: 'kernel',
-    label: 'Agent RunLab',
+    label: 'Kala',
     description: 'Agent Kernel',
     available: true,
     status: 'ready',

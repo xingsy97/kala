@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { i18n } from '../i18n/index.js'
-import { AppShellNav } from './AppShellNav.js'
+import { AppShellNav, ProductSwitcher, SidebarBrand, SidebarGlobalActions } from './AppShellNav.js'
 
 function renderNav(overrides: Partial<Parameters<typeof AppShellNav>[0]> = {}): void {
   render(
@@ -17,6 +17,58 @@ function renderNav(overrides: Partial<Parameters<typeof AppShellNav>[0]> = {}): 
     />,
   )
 }
+
+describe('sidebar shell controls', () => {
+  it('switches products from an expanded dropdown and marks the current route', () => {
+    const onSelect = vi.fn()
+    render(<ProductSwitcher section="operations" onSelect={onSelect} />)
+    expect(screen.getByTestId('product-switcher-operations').getAttribute('aria-current')).toBe('page')
+    fireEvent.click(screen.getByTestId('product-switcher-docs'))
+    expect(onSelect).toHaveBeenCalledWith('docs')
+  })
+
+  it('exposes adaptive hooks and portals its menu outside the overflow owner', async () => {
+    const { container } = render(<div className="ak-explorer-surface"><ProductSwitcher section="agent" onSelect={() => {}} adaptive /></div>)
+    expect(container.querySelector('.ak-product-switcher-adaptive')).toBeTruthy()
+    expect(container.querySelector('.ak-product-switcher-label')).toBeTruthy()
+    expect(container.querySelector('.ak-product-switcher-chevron')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('product-switcher-trigger'))
+    await waitFor(() => expect(screen.getByTestId('product-switcher-menu').parentElement).toBe(document.body))
+    expect(container.contains(screen.getByTestId('product-switcher-menu'))).toBe(false)
+  })
+
+  it('uses the complete Kala wordmark in the sidebar brand', () => {
+    const { container } = render(<SidebarBrand />)
+    expect(screen.getByLabelText('Kala')).toBeTruthy()
+    expect(container.querySelector('.ak-sidebar-brand')).toBeTruthy()
+    expect(container.querySelector('.ak-sidebar-wordmark')).toBeTruthy()
+    const marks = Array.from(container.querySelectorAll<HTMLImageElement>('img'))
+    expect(marks.some((mark) => mark.src.endsWith('/brand/kala-wordmark.svg'))).toBe(true)
+    expect(marks.some((mark) => mark.src.endsWith('/brand/kala-wordmark-light.svg'))).toBe(true)
+  })
+
+  it('keeps settings in the vertical global action owner', () => {
+    const onOpenSettings = vi.fn()
+    render(<SidebarGlobalActions orientation="vertical" onOpenSettings={onOpenSettings} />)
+    expect(screen.getByTestId('sidebar-global-actions').getAttribute('data-orientation')).toBe('vertical')
+    expect(screen.getByTestId('app-shell-download-desktop').className).not.toContain('hidden')
+    fireEvent.click(screen.getByTestId('app-shell-nav-settings-icon'))
+    expect(onOpenSettings).toHaveBeenCalledOnce()
+  })
+
+  it('renders Download and Settings as labeled buttons in one expanded footer row', () => {
+    render(<SidebarGlobalActions accountPlacement="footer" onOpenSettings={() => {}} />)
+    const actions = screen.getByTestId('app-shell-global-actions')
+    const download = screen.getByTestId('app-shell-download-desktop')
+    const settings = screen.getByTestId('app-shell-nav-settings-icon')
+
+    expect(actions.getAttribute('data-presentation')).toBe('expanded-footer')
+    expect(actions.className).toContain('w-full')
+    expect(download.textContent).toBe('Download')
+    expect(settings.textContent).toBe('Settings')
+    expect(download.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
 
 describe('AppShellNav', () => {
   afterEach(async () => {
@@ -44,7 +96,7 @@ describe('AppShellNav', () => {
 
   it('offers web users an in-app dialog trigger instead of a navigation link', () => {
     renderNav()
-    expect(screen.getByLabelText('Agent RunLab').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-web.svg')
+    expect(screen.getByLabelText('Kala').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-web.svg')
     const trigger = screen.getByTestId('app-shell-download-desktop')
     expect(trigger.tagName).toBe('BUTTON')
     expect(trigger.className).toContain('hidden')
@@ -59,7 +111,7 @@ describe('AppShellNav', () => {
     try {
       renderNav()
       expect(screen.queryByTestId('app-shell-download-desktop')).toBeNull()
-      expect(screen.getByLabelText('Agent RunLab').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-desktop.svg')
+      expect(screen.getByLabelText('Kala').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-desktop.svg')
     } finally {
       delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
     }
@@ -160,7 +212,7 @@ describe('AppShellNav', () => {
     renderNav({ collapsed: true, onExpand })
 
     expect(screen.getByTestId('app-shell-nav').getAttribute('data-collapsed')).toBe('true')
-    expect(screen.getByLabelText('Agent RunLab')).toBeTruthy()
+    expect(screen.getByLabelText('Kala')).toBeTruthy()
     fireEvent.click(screen.getByTestId('app-shell-nav-expand'))
     expect(onExpand).toHaveBeenCalledOnce()
   })

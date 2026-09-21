@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react'
 import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, FileText, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Paperclip, Pencil, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
@@ -40,6 +39,7 @@ import {
 import { Textarea } from '../../components/ui/textarea.js'
 import { cn } from '../../lib/utils.js'
 import { PREF_COMPOSER_DRAFT_PREFIX, PREF_COMPOSER_SEND_MODE_PREFIX } from '../../lib/prefs.js'
+import { getDesktopBridge } from '../../lib/desktop-bridge.js'
 import { RuntimeMetrics } from './RuntimeMetrics.js'
 import { HumanAttentionIndicator, shouldShowLowAttentionHint } from './HumanAttentionIndicator.js'
 import type { TimelineEntry } from '../../session.js'
@@ -91,7 +91,11 @@ type Props = {
    * Extra controls rendered inline in the footer, immediately after the
    * approval-mode picker. Used e.g. by the background-shells trigger.
    */
-  footerExtras?: React.ReactNode
+  footerExtras?: ReactNode
+  /** Compact controls shown beside Attach in simple mode. */
+  simpleFooterExtras?: ReactNode
+  /** Controls rendered in the side space immediately left of the Composer surface. */
+  leftAccessory?: ReactNode
 }
 
 export type SendMode = 'steer' | 'queue'
@@ -236,6 +240,8 @@ export function Composer({
   awaitingAck = false,
   lockWhileSubmitting = false,
   footerExtras,
+  simpleFooterExtras,
+  leftAccessory,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const isNarrow = useIsNarrow()
@@ -520,7 +526,8 @@ export function Composer({
     setAttachedFiles([])
     setMentionState(null)
     setMentionFiles([])
-    const uploadingFiles = submittedFiles.length > 0
+    const uploadImages = submittedImages.length > 0 && Boolean(onUploadFiles)
+    const uploadingFiles = submittedFiles.length > 0 || uploadImages
     if (uploadingFiles || lockWhileSubmitting) {
       submitInFlight.current = true
       setSubmitting(true)
@@ -528,12 +535,17 @@ export function Composer({
     let files: readonly ReferencedFileContent[] = []
     let admissionStarted = false
     try {
-      const uploadedFiles = submittedFiles.length > 0
-        ? await onUploadFiles?.(submittedFiles.map((file) => file.file))
+      const imageFiles = uploadImages
+        ? submittedImages.map((image, index) => pastedImageAsFile(image, index))
         : []
+      const filesToUpload = [...imageFiles, ...submittedFiles.map((file) => file.file)]
+      const uploadedFiles = filesToUpload.length > 0 ? await onUploadFiles?.(filesToUpload) : []
       if (!uploadedFiles) throw new Error('File attachment upload is unavailable')
       files = uploadedFiles
-      const attachments = [...images, ...(files ?? [])]
+      // Host references keep screenshots durable without copying base64 into
+      // every external-runtime snapshot. Demos without an upload endpoint keep
+      // the legacy inline representation.
+      const attachments = [...(uploadImages ? [] : images), ...files]
       const payloadError = validateClientMessagePayload({ text: trimmed, mode: sendMode, content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...extraBlocks, ...attachments] })
       if (payloadError) throw new Error(payloadError.message)
       admissionStarted = true
@@ -644,28 +656,58 @@ export function Composer({
     }
   }
 
-  async function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
-    const clipboardFiles = Array.from(e.clipboardData?.files ?? [])
-    if (clipboardFiles.some((file) => !file.type.startsWith('image/'))) {
-      if (await addFiles(clipboardFiles)) e.preventDefault()
-      return
+  async function addNativeClipboardImage(): Promise<boolean> {
+    const readClipboardImage = getDesktopBridge()?.readClipboardImage
+    if (!readClipboardImage) return false
+    try {
+      const dataUrl = await readClipboardImage()
+      if (!dataUrl) return false
+      const response = await fetch(dataUrl)
+      const blob = await response.blob()
+      if (blob.type !== 'image/png') throw new Error('Desktop clipboard returned an unsupported image format.')
+      return addFiles([new File([blob], 'pasted-image.png', { type: 'image/png' })])
+    } catch (error) {
+      setPendingToast(error instanceof Error ? error.message : String(error))
+      return false
     }
-    const added = await extractImagesFromClipboardData(e.clipboardData)
-    if (added.length === 0) return
-    e.preventDefault()
-    setPastedImages((prev) => [...prev, ...added])
   }
 
-  async function handleSimplePaste(e: ClipboardEvent<HTMLDivElement>): Promise<void> {
-    const clipboardFiles = Array.from(e.clipboardData?.files ?? [])
-    if (clipboardFiles.some((file) => !file.type.startsWith('image/'))) {
-      if (await addFiles(clipboardFiles)) e.preventDefault()
+  async function pasteAttachments(data: DataTransfer | null): Promise<boolean> {
+    const clipboardFiles = Array.from(data?.files ?? [])
+    if (clipboardFiles.length > 0) return addFiles(clipboardFiles)
+    const added = await extractImagesFromClipboardData(data)
+    if (added.length > 0) {
+      setPastedImages((prev) => [...prev, ...added])
+      return true
+    }
+    return addNativeClipboardImage()
+  }
+
+  async function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
+    const hasFileRepresentation = Array.from(e.clipboardData?.items ?? []).some((item) => item.kind === 'file')
+      || (e.clipboardData?.files?.length ?? 0) > 0
+    if (hasFileRepresentation) {
+      e.preventDefault()
+      await pasteAttachments(e.clipboardData)
       return
     }
-    const added = await extractImagesFromClipboardData(e.clipboardData)
-    if (added.length === 0) return
+    // Native clipboard inspection is asynchronous, while preventDefault only
+    // works during this event. Intercept synchronously and restore plain text
+    // ourselves when the native clipboard contains no image.
+    if (!getDesktopBridge()?.readClipboardImage) return
     e.preventDefault()
-    setPastedImages((prev) => [...prev, ...added])
+    const target = e.currentTarget
+    const plainText = e.clipboardData?.getData('text/plain') ?? ''
+    const start = target.selectionStart ?? target.value.length
+    const end = target.selectionEnd ?? start
+    if (await addNativeClipboardImage() || !plainText) return
+    const next = `${target.value.slice(0, start)}${plainText}${target.value.slice(end)}`
+    updateText(next, start + plainText.length)
+    window.requestAnimationFrame(() => target.setSelectionRange(start + plainText.length, start + plainText.length))
+  }
+
+  async function handleSimplePaste(e: ClipboardEvent<HTMLDivElement>): Promise<boolean> {
+    return pasteAttachments(e.clipboardData)
   }
 
   function removeImage(id: string): void {
@@ -749,7 +791,7 @@ export function Composer({
           void addFiles(files)
         }}
       />
-      <motion.div layout transition={{ type: 'spring', stiffness: 320, damping: 30 }} className="ak-composer-container relative mx-auto w-full">
+      <div className="ak-composer-container relative mx-auto w-full">
         <QueuedMessagesDock
           items={queuedMessages}
           onReorder={onQueuedReorder}
@@ -757,11 +799,14 @@ export function Composer({
           onDelete={onQueuedDelete}
         />
         {mode === 'simple' ? (
-          <div className="flex flex-col gap-1" data-testid="composer-simple-frame">
+          <div className="flex min-w-0 flex-col gap-1" data-testid="composer-simple-frame">
             <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} />
-            <div
-              className="ak-composer-surface relative flex min-h-14 items-center gap-1 rounded-[22px] px-1.5 py-1 transition-[border-color,background-color,box-shadow] sm:min-h-14 sm:px-1.5"
+            <div className="flex min-w-0 items-center gap-2">
+              <ComposerLeftAccessory mode={mode}>{leftAccessory}</ComposerLeftAccessory>
+              <div
+              className="ak-composer-surface relative flex min-h-14 min-w-0 flex-1 items-center gap-1 rounded-[22px] px-1.5 py-1 transition-[border-color,background-color,box-shadow] sm:min-h-14 sm:px-1.5"
               data-testid="composer-simple-shell"
+              data-layout="single-row-tools"
             >
             <RuntimeMetrics
               state={state}
@@ -775,7 +820,6 @@ export function Composer({
               compactDisabled={disabled}
             />
             <ComposerModeToggle mode={mode} onToggle={toggleMode} />
-            {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
             <SlashCommandMenu
               commands={matchingCommands}
               disabled={disabled}
@@ -794,7 +838,7 @@ export function Composer({
                 ariaLabel={t('composer.placeholder')}
                 onTextChange={(next) => setText(next)}
                 onRemoveImage={(id) => removeImage(id)}
-                onPaste={(e) => { void handleSimplePaste(e) }}
+                onPaste={handleSimplePaste}
                 onEnterSubmit={() => { void submit() }}
                 className="border-0 bg-transparent shadow-none focus-within:border-0 focus-within:bg-transparent focus-within:ring-0"
               />
@@ -814,21 +858,30 @@ export function Composer({
               allowApprovalMode={allowApprovalMode}
               allowQueue={allowQueue}
             />
-            <span className="hidden sm:inline-flex">
-              <HumanAttentionIndicator timeline={humanAttention} density="simple" />
-            </span>
-            <SendButton
-              disabled={!canSubmit}
-              sendMode={sendMode}
-              onSendModeChange={updateSendMode}
-              density="simple"
-              allowQueue={allowQueue}
-              stop={showStopButton ? { onClick: onCancel } : undefined}
-            />
+            {(allowAttachments || simpleFooterExtras) ? <div
+              className="flex min-w-0 flex-none flex-row items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              data-layout="horizontal"
+              data-testid="composer-simple-footer-extras"
+            >
+              {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
+              {simpleFooterExtras}
+            </div> : null}
+            <div className="flex flex-none items-center justify-center" data-testid="composer-simple-send-column">
+              <SendButton
+                disabled={!canSubmit}
+                sendMode={sendMode}
+                onSendModeChange={updateSendMode}
+                density="simple"
+                allowQueue={allowQueue}
+                stop={showStopButton ? { onClick: onCancel } : undefined}
+              />
+            </div>
+              </div>
             </div>
           </div>
         ) : (
-        <div className="flex items-stretch" data-testid="composer-full-shell">
+        <div className="flex min-w-0 items-stretch gap-2" data-testid="composer-full-shell">
+        <ComposerLeftAccessory mode={mode}>{leftAccessory}</ComposerLeftAccessory>
         <div
           className={cn(
             'ak-composer-surface relative min-w-0 flex-1 rounded-2xl transition-[border-color,background-color,box-shadow]',
@@ -1066,8 +1119,23 @@ export function Composer({
             {pendingToast}
           </div>
         ) : null}
-      </motion.div>
+      </div>
     </form>
+  )
+}
+
+function ComposerLeftAccessory({ mode, children }: { mode: 'simple' | 'full'; children?: ReactNode }): JSX.Element | null {
+  if (!children) return null
+  return (
+    <div
+      className={cn(
+        'hidden flex-none items-center justify-center sm:flex',
+        mode === 'simple' ? 'self-center' : 'self-stretch py-1',
+      )}
+      data-testid="composer-left-accessory"
+    >
+      {children}
+    </div>
   )
 }
 
@@ -1154,6 +1222,14 @@ function AttachmentTray({
 
 function attachmentId(prefix: 'img' | 'file'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function pastedImageAsFile(image: PastedImage, index: number): File {
+  const binary = window.atob(image.base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let offset = 0; offset < binary.length; offset += 1) bytes[offset] = binary.charCodeAt(offset)
+  const extension = image.mediaType === 'image/jpeg' ? 'jpg' : image.mediaType.slice('image/'.length)
+  return new File([bytes], `pasted-image-${index + 1}.${extension}`, { type: image.mediaType })
 }
 
 function validateSelectedFiles(files: readonly AttachedFile[]): string | undefined {
@@ -1272,7 +1348,7 @@ function SendButton({
         disabled={disabled}
         data-testid="composer-send"
         className={cn(
-          isSimple || !allowQueue
+          !allowQueue
             ? 'h-11 min-w-11 rounded-xl p-0 text-sm font-medium shadow-sm'
             : 'h-11 min-w-11 rounded-r-none rounded-l-xl p-0 text-sm font-medium',
           disabled ? 'opacity-50' : '',
@@ -1283,7 +1359,7 @@ function SendButton({
         <ModeIcon className={cn('h-[18px] w-[18px]', 'sm:mr-1.5')} aria-hidden="true" />
         <span className="sr-only">{t('composer.send')}</span>
       </Button>
-      {!isSimple && allowQueue ? <button
+      {allowQueue ? <button
         type="button"
         onClick={() => setMenuOpen((v) => !v)}
         className={cn(
@@ -1326,9 +1402,17 @@ function SendButton({
                 role="option"
                 aria-selected={selected}
                 title={longHint}
-                onClick={() => {
+                onPointerDown={(event) => {
+                  event.preventDefault()
                   onSendModeChange(mode)
                   setMenuOpen(false)
+                }}
+                onClick={(event) => {
+                  event.preventDefault()
+                  if (event.detail === 0) {
+                    onSendModeChange(mode)
+                    setMenuOpen(false)
+                  }
                 }}
                 className={cn(
                   'flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground',
@@ -1520,7 +1604,7 @@ function ComposerConfigButton({
               </legend>
               <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/50 p-1">
                 {(['steer', 'queue'] as const).map((value) => (
-                  <button key={value} type="button" onClick={() => onSendModeChange(value)} className={cn('min-h-9 rounded-md px-2 text-xs font-medium', sendMode === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} aria-pressed={sendMode === value} data-testid={`composer-config-send-${value}`}>
+                  <button key={value} type="button" onPointerDown={(event) => { event.preventDefault(); onSendModeChange(value) }} onClick={(event) => { event.preventDefault(); if (event.detail === 0) onSendModeChange(value) }} className={cn('min-h-9 rounded-md px-2 text-xs font-medium', sendMode === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} aria-pressed={sendMode === value} data-testid={`composer-config-send-${value}`}>
                     {value === 'steer' ? t('composer.steerActiveTurn') : t('composer.queueFollowUp')}
                   </button>
                 ))}

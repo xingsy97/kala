@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState, type FileContent, type ImageContent, type ReferencedFileContent, type TextContent } from '@agent-kernel/kernel'
@@ -38,6 +38,8 @@ function renderComposer(props?: {
   awaitingAck?: boolean
   approvalMode?: React.ComponentProps<typeof Composer>['approvalMode']
   onApprovalModeChange?: React.ComponentProps<typeof Composer>['onApprovalModeChange']
+  footerExtras?: React.ReactNode
+  simpleFooterExtras?: React.ReactNode
 }) {
   return render(
     <Composer
@@ -68,6 +70,8 @@ function renderComposer(props?: {
       {...(props?.onListFiles ? { onListFiles: props.onListFiles } : {})}
       {...(props?.onReadFile ? { onReadFile: props.onReadFile } : {})}
       awaitingAck={props?.awaitingAck}
+      footerExtras={props?.footerExtras}
+      simpleFooterExtras={props?.simpleFooterExtras}
     />,
   )
 }
@@ -376,15 +380,17 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'new draft')
   })
 
-  it('keeps send mode selection in the simple-mode config without a separate arrow button', () => {
+  it('offers working send mode selection in simple mode', () => {
     const onSubmit = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
     try {
       renderComposer({ onSubmit })
-      expect(screen.queryByTestId('send-mode-toggle')).toBeNull()
-      fireEvent.click(screen.getByTestId('composer-config-trigger'))
-      fireEvent.click(screen.getByTestId('composer-config-send-queue'))
+      fireEvent.click(screen.getByTestId('send-mode-toggle'))
+      fireEvent.click(screen.getByTestId('send-mode-queue'))
+      fireEvent.click(screen.getByTestId('send-mode-toggle'))
+      expect(screen.getByTestId('send-mode-queue').getAttribute('aria-selected')).toBe('true')
+      fireEvent.click(screen.getByTestId('send-mode-toggle'))
       const input = screen.getByTestId('composer-input-simple')
       input.textContent = 'follow up'
       fireEvent.input(input)
@@ -474,6 +480,27 @@ describe('Composer', () => {
     expect(actions.contains(screen.getByTestId('composer-send'))).toBe(true)
   })
 
+  it('renders only the simple Task Graph accessory beside Attach', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({
+      footerExtras: <button data-testid="shell-trigger">Shell</button>,
+      simpleFooterExtras: <button data-testid="task-graph-trigger">Graph</button>,
+    })
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    const extras = screen.getByTestId('composer-simple-footer-extras')
+    const attachment = screen.getByTestId('composer-attach-file')
+    const graph = screen.getByTestId('task-graph-trigger')
+    expect(extras.contains(attachment)).toBe(true)
+    expect(extras.contains(graph)).toBe(true)
+    expect(attachment.compareDocumentPosition(graph) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByTestId('shell-trigger')).toBeNull()
+    expect(screen.queryByTestId('human-attention-indicator')).toBeNull()
+    expect(screen.getByTestId('composer-simple-shell').contains(extras)).toBe(true)
+  })
+
   it('supports slash commands in simple mode', () => {
     const onCompact = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')
@@ -492,7 +519,7 @@ describe('Composer', () => {
     expect(onCompact).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps simple mode placeholder visual-only and replaces it on paste', () => {
+  it('keeps simple mode placeholder visual-only and replaces it on paste', async () => {
     const onSubmit = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
@@ -512,8 +539,8 @@ describe('Composer', () => {
       },
     })
 
+    await waitFor(() => expect(input.textContent).toBe('pasted text'))
     expect(input.getAttribute('data-empty')).toBeNull()
-    expect(input.textContent).toBe('pasted text')
     fireEvent.click(screen.getByTestId('composer-send'))
     expect(onSubmit).toHaveBeenCalledWith('pasted text', 'steer', undefined, undefined)
   })
@@ -547,7 +574,7 @@ describe('Composer', () => {
     expect(indicator.className).toContain('h-5')
     expect(indicator.className).toContain('rounded-t-[22px]')
     expect(send.className).toContain('h-11')
-    expect(screen.queryByTestId('send-mode-toggle')).toBeNull()
+    expect(screen.getByTestId('send-mode-toggle')).toBeTruthy()
 
     // The mode switch is a quiet control inside the shared Composer surface,
     // not a bordered segment that makes the capsule visually heavier.
@@ -562,6 +589,40 @@ describe('Composer', () => {
     expect(shell.contains(modeToggle)).toBe(true)
     expect(modeToggle.compareDocumentPosition(shell.querySelector('textarea, [contenteditable="true"]') ?? indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByTestId('composer-mode-toggle-menuitem')).toBeNull()
+  })
+
+  it('keeps simple accessories on one row when multiline and keeps Send separate', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    try {
+      renderComposer({
+        footerExtras: <button type="button" data-testid="hidden-shell-tool">Shell tool</button>,
+        simpleFooterExtras: <button type="button">Graph tool</button>,
+      })
+
+      const shell = screen.getByTestId('composer-simple-shell')
+      const tools = screen.getByTestId('composer-simple-footer-extras')
+      const sendColumn = screen.getByTestId('composer-simple-send-column')
+      expect(shell.getAttribute('data-layout')).toBe('single-row-tools')
+      expect(tools.getAttribute('data-layout')).toBe('horizontal')
+      expect(tools.className).toContain('flex-row')
+      expect(sendColumn.contains(screen.getByTestId('composer-send'))).toBe(true)
+      expect(tools.contains(screen.getByTestId('composer-send'))).toBe(false)
+
+      const input = screen.getByTestId('composer-input-simple')
+      input.textContent = 'first line\nsecond line'
+      fireEvent.input(input)
+
+      expect(shell.getAttribute('data-layout')).toBe('single-row-tools')
+      expect(tools.getAttribute('data-layout')).toBe('horizontal')
+      expect(tools.className).toContain('flex-row')
+      expect(tools.className).not.toContain('flex-col')
+      expect(screen.queryByTestId('hidden-shell-tool')).toBeNull()
+      expect(sendColumn.contains(screen.getByTestId('composer-send'))).toBe(true)
+    } finally {
+      if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+      else window.localStorage.setItem('ak-composer-mode', previousMode)
+    }
   })
 
   it('shows compact image tokens and preserves attachments while editing queued messages', () => {
@@ -730,7 +791,7 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-input-simple').className).toContain('min-h-12')
     expect(screen.getByTestId('composer-mode-toggle').className).toContain('h-11')
     expect(screen.getByTestId('composer-send').className).toContain('h-11')
-    expect(screen.queryByTestId('send-mode-toggle')).toBeNull()
+    expect(screen.getByTestId('send-mode-toggle')).toBeTruthy()
     unmount()
 
     window.localStorage.setItem('ak-composer-mode', 'full')
@@ -840,9 +901,14 @@ describe('Composer', () => {
     expect(picker.textContent ?? '').not.toContain('danger')
   })
 
-  it('attaches pasted image as an image content block on submit', async () => {
+  it('uploads a pasted image as a durable Host reference before submit', async () => {
     const onSubmit = vi.fn()
-    renderComposer({ onSubmit })
+    const imageReference: ReferencedFileContent = {
+      type: 'file', name: 'pasted-image-1.png', mediaType: 'image/png',
+      source: { kind: 'host_ref', attachmentId: '00000000-0000-4000-8000-000000000001', sha256: 'a'.repeat(64), bytes: 8 },
+    }
+    const onUploadFiles = vi.fn(async () => [imageReference])
+    renderComposer({ onSubmit, onUploadFiles })
 
     const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'pasted.png', { type: 'image/png' })
     const clipboardData = {
@@ -866,23 +932,86 @@ describe('Composer', () => {
 
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
-    expect(onSubmit).toHaveBeenCalledTimes(1)
-    const [text, mode, images] = onSubmit.mock.calls[0] as [
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onUploadFiles).toHaveBeenCalledTimes(1)
+    const uploaded = onUploadFiles.mock.calls[0]?.[0]
+    expect(uploaded).toHaveLength(1)
+    expect(uploaded?.[0]?.type).toBe('image/png')
+    expect(uploaded?.[0]?.size).toBe(8)
+    const [text, mode, attachments] = onSubmit.mock.calls[0] as [
       string,
       'steer' | 'queue',
-      readonly ImageContent[] | undefined,
+      readonly (ImageContent | FileContent)[] | undefined,
     ]
     expect(text).toBe('look at this')
     expect(mode).toBe('steer')
-    expect(images).toBeDefined()
-    expect(images).toHaveLength(1)
-    expect(images?.[0]?.type).toBe('image')
-    expect(images?.[0]?.source.kind).toBe('base64')
-    if (images?.[0]?.source.kind === 'base64') {
-      expect(images[0].source.mediaType).toBe('image/png')
-      expect(images[0].source.data.length).toBeGreaterThan(0)
-    }
+    expect(attachments).toEqual([imageReference])
     await waitFor(() => expect(screen.queryByTestId('pasted-image-tray')).toBeNull())
+  })
+
+  it('accepts WebKit clipboard images exposed only through clipboardData.files', async () => {
+    renderComposer()
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'webkit.png', { type: 'image/png' })
+    fireEvent.paste(screen.getByTestId('composer-input'), { clipboardData: { items: [], files: [file] } })
+    expect(await screen.findByTestId('pasted-image-tray')).toBeTruthy()
+  })
+
+  it('uses the native Desktop image clipboard when WebKit exposes no file representation', async () => {
+    const readClipboardImage = vi.fn(async () => 'data:image/png;base64,iVBORw0KGgo=')
+    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    Object.defineProperty(window, '__RUNLAB_DESKTOP_BRIDGE__', {
+      value: {
+        version: 1,
+        getInfo: async () => ({ version: 'test', focused: true, visible: true }),
+        setActivity: async () => {},
+        notify: async () => {},
+        subscribe: () => () => {},
+        readClipboardImage,
+      },
+      configurable: true,
+    })
+    try {
+      renderComposer()
+      const input = screen.getByTestId('composer-input')
+      const event = createEvent.paste(input, {
+        clipboardData: { items: [], files: [], getData: () => 'clipboard URI that must not be inserted' },
+      })
+      fireEvent(input, event)
+      expect(event.defaultPrevented).toBe(true)
+      expect(await screen.findByTestId('pasted-image-tray')).toBeTruthy()
+      expect((input as HTMLTextAreaElement).value).toBe('')
+      expect(readClipboardImage).toHaveBeenCalledOnce()
+    } finally {
+      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+      delete (window as Window & { __RUNLAB_DESKTOP_BRIDGE__?: unknown }).__RUNLAB_DESKTOP_BRIDGE__
+    }
+  })
+
+  it('restores plain text when the Desktop native clipboard contains no image', async () => {
+    const readClipboardImage = vi.fn(async () => null)
+    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    Object.defineProperty(window, '__RUNLAB_DESKTOP_BRIDGE__', {
+      value: {
+        version: 1,
+        getInfo: async () => ({ version: 'test', focused: true, visible: true }),
+        setActivity: async () => {}, notify: async () => {}, subscribe: () => () => {}, readClipboardImage,
+      },
+      configurable: true,
+    })
+    try {
+      renderComposer()
+      const input = screen.getByTestId('composer-input')
+      const event = createEvent.paste(input, {
+        clipboardData: { items: [], files: [], getData: () => 'ordinary pasted text' },
+      })
+      fireEvent(input, event)
+      expect(event.defaultPrevented).toBe(true)
+      await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe('ordinary pasted text'))
+      expect(readClipboardImage).toHaveBeenCalledOnce()
+    } finally {
+      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+      delete (window as Window & { __RUNLAB_DESKTOP_BRIDGE__?: unknown }).__RUNLAB_DESKTOP_BRIDGE__
+    }
   })
 
   it('selects, previews, removes, and submits generic file attachments', async () => {

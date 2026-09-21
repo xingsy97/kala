@@ -21,12 +21,16 @@ export function SessionTerminalPanel({
   sessionId,
   cwd,
   online = true,
+  autoStart = false,
+  destroyOnUnmount = false,
 }: {
   socket: DashboardSocket | null
   workspaceId?: string
   sessionId: string
   cwd?: string
   online?: boolean
+  autoStart?: boolean
+  destroyOnUnmount?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const interfaceScale = useInterfaceScale()
@@ -39,6 +43,8 @@ export function SessionTerminalPanel({
   const [status, setStatus] = useState<TerminalStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const inputContextRef = useRef({ socket, workspaceId, sessionId, status })
+  const autoStartedRef = useRef(false)
+  const disposedRef = useRef(false)
   inputContextRef.current = { socket, workspaceId, sessionId, status }
 
   const setTerminalId = useCallback((value: string | null): void => {
@@ -141,6 +147,12 @@ export function SessionTerminalPanel({
     fitRef.current?.fit()
     const term = terminalRef.current
     const result = await createTerminal(socket, { workspaceId, sessionId, cwd, cols: term?.cols ?? 100, rows: term?.rows ?? 12 })
+    if (disposedRef.current) {
+      if (result.terminalId && destroyOnUnmount) {
+        void killTerminal(socket, { workspaceId, sessionId, terminalId: result.terminalId })
+      }
+      return
+    }
     if (result.error || !result.terminalId) {
       setStatus('error')
       setError(result.error ?? t('terminal.startFailed'))
@@ -152,7 +164,21 @@ export function SessionTerminalPanel({
     if (!result.reused && result.cwd) term?.writeln(t('terminal.connected', { cwd: result.cwd }))
     fitRef.current?.fit()
     term?.focus()
-  }, [cwd, online, sessionId, setTerminalId, socket, t, workspaceId])
+  }, [cwd, destroyOnUnmount, online, sessionId, setTerminalId, socket, t, workspaceId])
+
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current || !socket || !workspaceId || !online) return
+    autoStartedRef.current = true
+    void start()
+  }, [autoStart, online, socket, start, workspaceId])
+
+  useEffect(() => () => {
+    disposedRef.current = true
+    const id = terminalIdRef.current
+    if (destroyOnUnmount && socket && workspaceId && id) {
+      void killTerminal(socket, { workspaceId, sessionId, terminalId: id })
+    }
+  }, [destroyOnUnmount, sessionId, socket, workspaceId])
 
   const kill = useCallback(async (): Promise<boolean> => {
     if (!socket || !workspaceId || !terminalIdRef.current) return false

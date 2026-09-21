@@ -93,50 +93,19 @@ The pending tool-call card in the transcript no longer owns the decision buttons
 
 ## 4. Tasks Button
 
-### Previous Problem
+### Legacy/history compatibility
 
-Placing a task list permanently between the transcript scroll area and composer consumed vertical chat space. Tasks are runtime work items surfaced by a normal tool, not a primary chat transcript surface.
+Host `todo_graph` is the only default planning tool and drives the current Task Graph surface. `todowrite` is no longer registered by Host or Executor and cannot be called by new sessions.
 
-### Data Boundary
+The dashboard intentionally retains a read-only compatibility path for existing session history:
 
-`todowrite` is a normal executor tool. The kernel reducer does not contain `state.todos` and does not know a special todo protocol.
-
-When the dashboard needs to show tasks, it derives them from the timeline:
-
-1. Find successful `call_tool(name: "todowrite")` calls.
+1. Find historical successful `call_tool(name: "todowrite")` calls.
 2. Match them with corresponding `tool_result(ok: true)` events.
-3. Parse the `todos` array from the tool input for the latest successful call.
+3. Parse the latest valid `todos` input and render the legacy Task List button/popover.
 
-Failed calls, pending calls, and malformed inputs do not update the task display.
+Failed calls, pending calls, and malformed inputs do not update the legacy display. The parser, summary renderer, activity glyph classification, and Task List UI are history renderers only; they must not be reused as a catalog, default-tool, allowlist, or execution registration.
 
-This boundary keeps the core state machine focused on protocol facts and prevents one tool's semantics from becoming reducer state.
-
-### Design
-
-The composer utility area shows a compact `TasksButton`. It displays a task icon plus `N/M`, where `N` is completed count and `M` is total count. It does not render when there are no tasks.
-
-Clicking opens a popover with the full task list:
-
-- Primary row: task content and status icon.
-- Secondary row: priority, only when priority exists.
-- Completed tasks use lower contrast.
-- In-progress tasks use light emphasis.
-- Pending tasks stay neutral.
-
-The popover is a temporary inspection layer. It does not push the transcript layout, consume persistent vertical space, or provide editing and drag behavior.
-
-### Interaction
-
-- Click `TasksButton` to open or close the popover.
-- Press `Escape` to close.
-- Popover content uses the project's unified `ScrollArea`, not a raw native scrollbar.
-- Task updates follow the derived timeline result; the dashboard does not persist separate task state.
-
-### Non-Goals
-
-- Do not write tasks into kernel reducer state.
-- Do not edit tasks directly in the UI. The next `todowrite` call is the source of truth; UI edits would create conflicting ownership.
-- Do not add reducer lifts, protocol special cases, or compatibility shims for `todowrite`.
+The compatibility UI remains read-only and does not add task state to the Kernel reducer. This keeps old sessions replayable without creating a second current planning model alongside Task Graph.
 
 ## 5. Image Content Preview
 

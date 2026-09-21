@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ConnectionStatus } from './app.js'
+import { ConnectionStatus, ConnectionStatusEntry, ConnectionStatusProvider } from './app.js'
+import { SidebarBrand } from './app-shell/AppShellNav.js'
 
 function socketWithRtt(hostRttMs = 12, executorRttMs: number | null = 34) {
   let now = 0
@@ -177,10 +178,73 @@ describe('ConnectionStatus', () => {
 
   it('does not call a real workspace healthy when its executor is offline', () => {
     render(<ConnectionStatus socket={socketWithRtt() as never} status="ready" cursor={0} workspaceId="w1" executorConnected={false} onResync={() => {}} />)
+    expect(screen.getByTestId('connection-status').getAttribute('data-status')).toBe('error')
+    expect(screen.getByTestId('connection-status').querySelector('.bg-rose-500')).not.toBeNull()
     fireEvent.click(screen.getByTestId('connection-status'))
     expect(screen.getByTestId('connection-segment-service-executor').getAttribute('title')).toContain('Offline')
     expect(screen.queryByText('Healthy')).toBeNull()
-    expect(screen.getByText('Check connection')).toBeTruthy()
+    expect(screen.getAllByText('Connection issue').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it.each([
+    ['ready', 'border-emerald-500'],
+    ['connecting', 'border-amber-500'],
+    ['disconnected', 'border-rose-500'],
+  ])('maps %s to the same semantic brand-ring color', (status, ringClass) => {
+    const socket = status === 'disconnected' ? null : socketWithRtt()
+    render(
+      <ConnectionStatusProvider socket={socket as never} status={status} cursor={0} executorConnected={false} onResync={() => {}}>
+        <SidebarBrand connectionStatus={<ConnectionStatusEntry appearance="brand" triggerId="desktop-sidebar" />} />
+      </ConnectionStatusProvider>,
+    )
+
+    const trigger = screen.getByTestId('sidebar-connection-status')
+    expect(trigger.getAttribute('data-status')).toBe(status)
+    expect(screen.getByTestId('sidebar-connection-status-ring').classList.contains(ringClass)).toBe(true)
+  })
+
+  it('shares one probe, title, and details popover across desktop sidebar and mobile drawer entries', async () => {
+    const socket = socketWithRtt()
+    render(
+      <ConnectionStatusProvider socket={socket as never} status="ready" transport="websocket" cursor={9} workspaceId="w1" executorConnected={false} onResync={() => {}}>
+        <ConnectionStatusEntry triggerId="topbar" />
+        <div data-testid="desktop-sidebar"><SidebarBrand connectionStatus={<ConnectionStatusEntry appearance="brand" triggerId="desktop-sidebar" />} /></div>
+        <div data-testid="mobile-drawer"><SidebarBrand connectionStatus={<ConnectionStatusEntry appearance="brand" triggerId="mobile-drawer" />} /></div>
+      </ConnectionStatusProvider>,
+    )
+
+    const ordinary = screen.getByTestId('connection-status')
+    const desktop = within(screen.getByTestId('desktop-sidebar')).getByTestId('sidebar-connection-status')
+    const mobile = within(screen.getByTestId('mobile-drawer')).getByTestId('sidebar-connection-status')
+    await waitFor(() => expect(socket.timeout).toHaveBeenCalledTimes(1))
+    fireEvent.focus(window)
+    fireEvent(document, new Event('visibilitychange'))
+    await waitFor(() => expect(socket.timeout).toHaveBeenCalledTimes(2))
+    expect(ordinary.getAttribute('data-status')).toBe('error')
+    expect(desktop.getAttribute('data-status')).toBe('error')
+    expect(mobile.getAttribute('data-status')).toBe('error')
+    expect(desktop.getAttribute('title')).toBe(ordinary.getAttribute('title'))
+    expect(mobile.getAttribute('title')).toBe(ordinary.getAttribute('title'))
+    fireEvent.mouseEnter(desktop)
+    expect(desktop.getAttribute('title')).toContain('Connection issue')
+
+    fireEvent.click(desktop)
+    let popover = screen.getByTestId('connection-status-popover')
+    expect(within(popover).getByText('Connection health')).toBeTruthy()
+    expect(popover.parentElement).toBe(document.body)
+    expect(screen.getByTestId('desktop-sidebar').contains(popover)).toBe(false)
+    expect(popover.className).toContain('safe-area-inset-left')
+    fireEvent.click(desktop)
+    fireEvent.click(mobile)
+    popover = screen.getByTestId('connection-status-popover')
+    expect(within(popover).getByText('Connection health')).toBeTruthy()
+    expect(popover.className).toContain('sm:w-[22.5rem]')
+    expect(screen.getAllByTestId('connection-status-popover')).toHaveLength(1)
+  })
+
+  it('keeps an unselected sidebar brand free of a replacement status entry', () => {
+    render(<SidebarBrand />)
+    expect(screen.queryByTestId('sidebar-connection-status')).toBeNull()
   })
 
   it('marks the overall connection as failed after repeated latency probe timeouts', async () => {

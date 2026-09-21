@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent RunLab — Linux desktop</title>
+  <title>Kala — Linux desktop</title>
   <link rel="stylesheet" href="install.css" />
 </head>
 <body>
   <main>
     <a href="/">← Dashboard</a>
-    <h1>Agent RunLab for Linux</h1>
+    <h1>Kala for Linux</h1>
     <p>A small Tauri client for your existing React Dashboard. No bundled Host or Runtime. Your server and ports stay unchanged.</p>
     <p lang="zh">Linux 桌面客户端：复用当前 Dashboard，不启动后端，不改变端口。</p>
     <p><strong>Unsigned release candidate — security review required.</strong> The native GTK3 dependency graph includes upstream advisory <code>RUSTSEC-2024-0429</code>. Existing Dashboard dependencies also have unresolved audit findings. This is not a production security-approved release. See the dependency manifest and <code>docs/operations/linux-desktop-supply-chain.md</code> in the source distribution.</p>
@@ -29,10 +29,10 @@
         <pre id="local-commands"></pre>
       </details>
       <p>A checksum detects corruption; it is not a publisher signature. Obtain this package from a trusted deployment. This standalone .deb does not enable automatic updates.</p>
-      <details><summary>Remove the desktop application</summary><pre>sudo apt remove agent-runlab-desktop</pre><p>Your account and server remain unchanged.</p></details>
+      <details><summary>Remove the desktop application</summary><pre>sudo apt remove kala-desktop</pre><p>Your account and server remain unchanged.</p></details>
     </section>
     <h2>Connect securely</h2>
-    <p>Start <strong>Agent RunLab</strong> from your applications menu. Enter this Dashboard's origin, for example <code id="origin"></code>. Remote Hosts require HTTPS; HTTP is accepted only for explicit loopback such as <code>http://127.0.0.1:13000</code>.</p>
+    <p>Start <strong>Kala</strong> from your applications menu. Enter this Dashboard's origin, for example <code id="origin"></code>. Remote Hosts require HTTPS; HTTP is accepted only for explicit loopback such as <code>http://127.0.0.1:13000</code>.</p>
     <p>Sign in inside the desktop client; browser cookies are not imported. Workspace paths and terminals remain on the remote Runtime. The client has no shell or filesystem API exposed to Dashboard scripts. A working network connection is required.</p>
     <h2>Normal package updates through APT</h2>
     <p id="apt-status">A production signed APT repository has not been configured for this build. Do not add an unsigned repository or use <code>trusted=yes</code>. Once an operator publishes a signed HTTPS repository and verifies its signing-key fingerprint independently, your regular <code>apt update</code> / <code>apt upgrade</code> workflow can update the client.</p>

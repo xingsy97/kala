@@ -346,7 +346,11 @@ describe('useSession session view cache', () => {
     const initial = { ...createInitialState({ sessionId: 's1' }), status: 'thinking' as const }
     act(() => socket.serverEmit('session:ready', { sessionId: 's1', reason: 'load', agentRuntime: 'copilot', cursor: 0, state: initial, config: { tools: [] } }))
     act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'draft' }))
-    const completed = { ...initial, status: 'done', messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Authoritative answer.' }] }] }
+    const completed = { ...initial, status: 'done', messages: [
+      { role: 'user', content: [{ type: 'text', text: 'Current turn request.' }] },
+      { role: 'assistant', content: [{ type: 'tool_call', callId: 'call-1', name: 'bash', input: {} }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Authoritative answer.' }] },
+    ] }
     act(() => socket.serverEmit('state:changed', { sessionId: 's1', state: completed, cursor: 1 }))
     await waitFor(() => expect(result.current.state?.status).toBe('done'))
     expect(result.current.streamingText).toBe('')
@@ -355,9 +359,9 @@ describe('useSession session view cache', () => {
     act(() => socket.serverEmit('session:token_delta', { sessionId: 's1', text: 'Next stream.' }))
     await waitFor(() => expect(result.current.streamingText).toBe('Next stream.'))
     const items = visibleTranscript(result.current.state!.messages, [], result.current.streamingText, [], [], result.current)
-    expect(items).toHaveLength(2)
-    expect(items[0]).toMatchObject({ message: { content: [{ text: 'Authoritative answer.' }] } })
-    expect(items[1]).toMatchObject({ streaming: true, message: { content: [{ text: 'Next stream.' }] } })
+    expect(items).toHaveLength(4)
+    expect(items[2]).toMatchObject({ message: { content: [{ text: 'Authoritative answer.' }] } })
+    expect(items[3]).toMatchObject({ streaming: true, message: { content: [{ text: 'Next stream.' }] } })
     act(() => socket.serverEmit('disconnect', 'transport close'))
     expect(result.current.streamingActive).toBe(false)
     act(() => socket.serverEmit('session:ready', { sessionId: 's1', reason: 'load', agentRuntime: 'copilot', cursor: 1, state: { ...completed, status: 'thinking' }, config: { tools: [] } }))

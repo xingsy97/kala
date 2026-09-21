@@ -25,7 +25,7 @@ tmp="$(mktemp -d)"
 trap 'rm -f -- "$tmp/key.gpg" "$tmp/key-info"; rmdir -- "$tmp"' EXIT
 curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --show-error --silent \\
   --connect-timeout 15 --max-time 120 \\
-  '${url}/agent-runlab-desktop-archive-keyring.gpg' -o "$tmp/key.gpg"
+  '${url}/kala-desktop-archive-keyring.gpg' -o "$tmp/key.gpg"
 gpg --no-options --batch --homedir "$tmp" --no-default-keyring \\
   --keyring /dev/null --trust-model always --no-auto-check-trustdb \\
   --lock-never --with-colons --show-keys \\
@@ -41,16 +41,16 @@ if [ "$actual" != '${fingerprint}' ]; then
   exit 1
 fi
 sudo install -d -m 0755 /etc/apt/keyrings
-sudo install -m 0644 "$tmp/key.gpg" /etc/apt/keyrings/agent-runlab-desktop.gpg
+sudo install -m 0644 "$tmp/key.gpg" /etc/apt/keyrings/kala-desktop.gpg
 printf '%s\\n' \\
   'Types: deb' \\
   'URIs: ${url}/' \\
   'Suites: stable' \\
   'Components: main' \\
   'Architectures: amd64' \\
-  'Signed-By: /etc/apt/keyrings/agent-runlab-desktop.gpg' \\
-  | sudo tee /etc/apt/sources.list.d/agent-runlab-desktop.sources >/dev/null
+  'Signed-By: /etc/apt/keyrings/kala-desktop.gpg' \\
+  | sudo tee /etc/apt/sources.list.d/kala-desktop.sources >/dev/null
 sudo apt-get -o APT::Update::Error-Mode=any update
-sudo apt-get install -y agent-runlab-desktop
+sudo apt-get install -y kala-desktop
 RUNLAB_DESKTOP_INSTALL`
 }

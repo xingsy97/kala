@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAutoAnimate } from '@formkit/auto-animate/react'
 import { Check, Circle, CircleDashed, ListChecks, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { createPortal } from 'react-dom'
 
 import { cn } from '../../lib/utils.js'
 import type { TaskItem, TaskStatus } from './tasks-from-timeline.js'
@@ -23,13 +24,14 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const popoverRef = useRef<HTMLDivElement | null>(null)
   const [listRef] = useAutoAnimate<HTMLUListElement>()
 
   useEffect(() => {
     if (!open) return
     const onDocClick = (e: MouseEvent): void => {
-      if (!containerRef.current) return
-      if (!containerRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (!containerRef.current?.contains(target) && !popoverRef.current?.contains(target)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setOpen(false)
@@ -83,11 +85,12 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
         ) : null}
       </button>
 
-      {open ? (
+      {open && typeof document !== 'undefined' ? createPortal(
         <div
+          ref={popoverRef}
           role="dialog"
           aria-label={t('tasks.label')}
-          className="fixed inset-x-2 bottom-[5.5rem] z-20 flex max-h-[min(60dvh,28rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg sm:absolute sm:inset-x-auto sm:bottom-full sm:mb-2 sm:max-h-[min(60vh,28rem)] sm:w-[min(22rem,calc(100vw-1rem))] sm:right-auto sm:left-0"
+          className="fixed inset-x-2 bottom-[5.5rem] z-[70] flex max-h-[min(60dvh,28rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-2xl sm:inset-x-auto sm:bottom-20 sm:left-1/2 sm:w-[min(22rem,calc(100vw-1rem))] sm:-translate-x-1/2"
           data-testid="tasks-popover"
         >
           <div className="flex flex-none items-center gap-2 border-b border-border/50 px-3 py-2 text-xs">
@@ -107,7 +110,8 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
               ))}
             </ul>
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   )

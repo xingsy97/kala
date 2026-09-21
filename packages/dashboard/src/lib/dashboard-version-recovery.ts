@@ -41,6 +41,7 @@ type RecoveryDependencies = {
   storage?: Pick<Storage, 'getItem' | 'setItem'>
   serviceWorker?: ServiceWorkerContainer
   reload?: () => void
+  recoverWhenVersionChanged?: boolean
 }
 
 export type DashboardRecoveryResult = 'reloading' | 'not-stale' | 'already-attempted'
@@ -64,7 +65,8 @@ export async function recoverStaleDashboard(
   error: unknown,
   dependencies: RecoveryDependencies = {},
 ): Promise<DashboardRecoveryResult> {
-  if (!isStaleDashboardAssetError(error)) return 'not-stale'
+  const staleAsset = isStaleDashboardAssetError(error)
+  if (!staleAsset && !dependencies.recoverWhenVersionChanged) return 'not-stale'
   const identity = dependencies.identity ?? dashboardBootIdentity()
   const storage = dependencies.storage ?? safeSessionStorage()
   const recoveryIdentity = identity.generation ? `generation-${identity.generation}` : identity.releaseId ?? 'unknown'
@@ -77,6 +79,7 @@ export async function recoverStaleDashboard(
     (identity.generation !== undefined && current.generation !== identity.generation)
     || (identity.releaseId !== undefined && current.releaseId !== identity.releaseId)
   )
+  if (!staleAsset && !changed) return 'not-stale'
   // An explicit lazy-module contract error is itself sufficient evidence of
   // mixed assets. A status failure must not strand the user on a fatal page.
   if (!changed && current && identity.generation === undefined && identity.releaseId === undefined) {

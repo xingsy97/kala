@@ -47,8 +47,9 @@ import {
   BUILTIN_VSCODE_THEMES,
   applyCurrentVSCodeTheme,
   applyVSCodeTheme,
-  builtinThemeForScheme,
+  currentVSCodeTheme,
   readStoredVSCodeTheme,
+  themeScheme,
   validateVSCodeTheme,
   writeStoredVSCodeTheme,
   type StoredVSCodeTheme,
@@ -110,18 +111,20 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
   const [keepScreenAwake, setKeepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
   const [smoothStreamingText, setSmoothStreamingText] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
   const [theme, , setTheme, effectiveTheme] = useTheme()
-  const [storedVSCodeTheme, setStoredVSCodeTheme] = useState<StoredVSCodeTheme | null>(() => readStoredVSCodeTheme())
-  const currentThemeLabel = storedVSCodeTheme?.label ?? builtinThemeForScheme(effectiveTheme).label
+  const [, setStoredVSCodeTheme] = useState<StoredVSCodeTheme | null>(() => readStoredVSCodeTheme())
+  const activeVSCodeTheme = currentVSCodeTheme(effectiveTheme)
+  const currentThemeLabel = activeVSCodeTheme.label
   const restoreSavedTheme = (): void => {
     applyCurrentVSCodeTheme(effectiveTheme)
     setStoredVSCodeTheme(readStoredVSCodeTheme())
   }
   const applyStoredTheme = (next: StoredVSCodeTheme | null): void => {
+    if (next) setTheme(themeScheme(next.theme, effectiveTheme))
     writeStoredVSCodeTheme(next)
     setStoredVSCodeTheme(next)
   }
   const previewTheme = (next: StoredVSCodeTheme): void => {
-    applyVSCodeTheme(next.theme, effectiveTheme)
+    applyVSCodeTheme(next.theme, themeScheme(next.theme, effectiveTheme))
   }
   useEffect(() => restoreSavedTheme, [effectiveTheme])
   return (
@@ -216,7 +219,7 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
             </div>
           </div>
           <MarketplaceThemeBrowser
-            activeThemeId={storedVSCodeTheme?.id ?? `agent-kernel-${effectiveTheme}`}
+            activeThemeId={activeVSCodeTheme.id}
             effectiveTheme={effectiveTheme}
             onPreview={previewTheme}
             onApply={(next) => applyStoredTheme(next)}

@@ -186,6 +186,126 @@ describe('Explorer', () => {
     expect(onCollapse).toHaveBeenCalledTimes(1)
   })
 
+  it('switches the default action row to a full-width focused search box', () => {
+    render(
+      <Explorer
+        executors={[]}
+        sessions={[]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+        onCollapse={() => {}}
+      />,
+    )
+
+    const actions = screen.getByTestId('explorer-header-actions')
+    expect(within(actions).getByTestId('explorer-new-chat').className).toContain('flex-1')
+    expect(within(actions).getByTestId('explorer-search-button')).toBeTruthy()
+    expect(within(actions).getByTestId('connect-workspace-button')).toBeTruthy()
+    expect(within(actions).getByTestId('explorer-collapse-button')).toBeTruthy()
+    expect(screen.queryByTestId('explorer-search')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('explorer-search-button'))
+
+    const input = screen.getByTestId('explorer-search')
+    expect(input).toBe(document.activeElement)
+    expect(input.parentElement?.className).toContain('w-full')
+    expect(screen.queryByTestId('explorer-header-actions')).toBeNull()
+    expect(screen.queryByTestId('explorer-new-chat')).toBeNull()
+    expect(screen.queryByTestId('connect-workspace-button')).toBeNull()
+    expect(screen.queryByTestId('explorer-collapse-button')).toBeNull()
+  })
+
+  it('keeps the product selector and New Chat inside one non-wrapping primary control', () => {
+    render(
+      <Explorer
+        executors={[]}
+        sessions={[]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+        embeddedHeader
+        headerLeading={<button type="button" data-testid="test-product-selector">Products</button>}
+      />,
+    )
+
+    const actions = screen.getByTestId('explorer-header-actions')
+    const group = screen.getByTestId('explorer-primary-action-group')
+    expect(group.parentElement).toBe(actions)
+    expect(group.className).toContain('flex-nowrap')
+    expect(within(group).getByTestId('test-product-selector')).toBeTruthy()
+    expect(within(group).getByTestId('explorer-new-chat')).toBeTruthy()
+  })
+
+  it('clears and closes search with Escape or the close button', () => {
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('explorer-search-button'))
+    fireEvent.change(screen.getByTestId('explorer-search'), { target: { value: 'missing' } })
+    fireEvent.keyDown(screen.getByTestId('explorer-search'), { key: 'Escape' })
+    expect(screen.queryByTestId('explorer-search')).toBeNull()
+    expect(screen.getByTestId('explorer-header-actions')).toBeTruthy()
+    expect(screen.queryByTestId('explorer-filter-empty')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('explorer-search-button'))
+    fireEvent.change(screen.getByTestId('explorer-search'), { target: { value: 'missing' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear explorer search' }))
+    expect(screen.queryByTestId('explorer-search')).toBeNull()
+    expect(screen.getByTestId('explorer-header-actions')).toBeTruthy()
+    expect(screen.queryByTestId('explorer-filter-empty')).toBeNull()
+  })
+
+  it('uses the same non-overflowing compact action layout in an embedded mobile header', () => {
+    render(
+      <Explorer
+        executors={[]}
+        sessions={[]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+        onCollapse={() => {}}
+        embeddedHeader
+      />,
+    )
+
+    const actions = screen.getByTestId('explorer-header-actions')
+    expect(actions.className).toContain('min-w-0')
+    expect(actions.className).toContain('w-full')
+    expect(screen.getByTestId('explorer-new-chat').className).toContain('min-w-0')
+    for (const testId of ['explorer-search-button', 'connect-workspace-button', 'explorer-collapse-button']) {
+      const button = screen.getByTestId(testId)
+      expect(button.parentElement).toBe(actions)
+      expect(button.className).toContain('h-9')
+      expect(button.className).toContain('w-9')
+      expect(button.className).toContain('flex-none')
+    }
+
+    fireEvent.click(screen.getByTestId('explorer-search-button'))
+    const search = screen.getByTestId('explorer-search')
+    expect(search.parentElement?.className).toContain('w-full')
+    expect(search.parentElement?.className).toContain('min-w-0')
+    expect(screen.queryByTestId('connect-workspace-button')).toBeNull()
+  })
+
   it('starts a new session from a workspace row', () => {
     const onNewSession = vi.fn()
     render(
@@ -202,6 +322,27 @@ describe('Explorer', () => {
     )
     fireEvent.click(screen.getByTestId('workspace-new-session-ws-1'))
     expect(onNewSession).toHaveBeenCalledWith('ws-1')
+  })
+
+  it('opens a temporary terminal from the workspace hover actions', () => {
+    const onOpenWorkspaceTerminal = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+        onOpenWorkspaceTerminal={onOpenWorkspaceTerminal}
+      />,
+    )
+    const button = screen.getByTestId('workspace-terminal-ws-1')
+    expect(button.getAttribute('title')).toBe('Open workspace terminal')
+    fireEvent.click(button)
+    expect(onOpenWorkspaceTerminal).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'ws-1', online: true }))
   })
 
   it('renders a workspace row for an attached executor', () => {
@@ -1060,7 +1201,7 @@ describe('Explorer', () => {
       />,
     )
     const sessionRow = screen.getByTestId('session-row')
-    expect(sessionRow.className).toMatch(/bg-accent/)
+    expect(sessionRow.className).toContain('bg-muted/60')
     expect(sessionRow.className).toContain('grid-cols-[1rem_1rem_minmax(0,1fr)_auto]')
     expect(sessionRow.className).not.toMatch(/border-l-primary/)
     expect(sessionRow.className).not.toContain('shadow-[inset_0_0_0_1px')
@@ -1087,6 +1228,7 @@ describe('Explorer', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('explorer-search-button'))
     fireEvent.change(screen.getByTestId('explorer-search'), { target: { value: 'auth' } })
 
     expect(screen.getByTestId('workspace-row').textContent).toContain('my-mbp')
@@ -1109,6 +1251,7 @@ describe('Explorer', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('explorer-search-button'))
     fireEvent.change(screen.getByTestId('explorer-search'), { target: { value: 'does-not-exist' } })
     expect(screen.getByTestId('explorer-filter-empty').textContent).toContain('does-not-exist')
   })

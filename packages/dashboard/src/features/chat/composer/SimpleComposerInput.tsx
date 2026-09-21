@@ -14,7 +14,7 @@ type Props = {
   placeholder?: string
   onTextChange(next: string): void
   onRemoveImage(id: string): void
-  onPaste?(e: ClipboardEvent<HTMLDivElement>): void
+  onPaste?(e: ClipboardEvent<HTMLDivElement>): boolean | Promise<boolean>
   onEnterSubmit?(): void
   onSelectionChange?(caret: number): void
   ariaLabel?: string
@@ -196,21 +196,23 @@ export function SimpleComposerInput({
   }, [])
 
   const handlePaste = useCallback((e: ClipboardEvent<HTMLDivElement>): void => {
-    if (onPaste) {
-      onPaste(e)
-      if (e.defaultPrevented) return
-    }
+    // Always cancel synchronously: native image inspection may complete after
+    // the browser has otherwise inserted a URI/text representation.
     e.preventDefault()
     const plain = e.clipboardData?.getData('text/plain') ?? ''
-    if (!plain) return
-    const el = ref.current
-    if (!el) return
-    setEmptyAttr(el, false)
-    insertPlainTextAtSelection(el, plain)
-    const { text: nextText, imageIds, caret } = serializeDom(el)
-    lastSerialized.current = { text: nextText, imageIds }
-    onTextChange(nextText)
-    if (caret !== null && onSelectionChange) onSelectionChange(caret)
+    const restorePlainText = async (): Promise<void> => {
+      if (onPaste && await onPaste(e)) return
+      if (!plain) return
+      const el = ref.current
+      if (!el) return
+      setEmptyAttr(el, false)
+      insertPlainTextAtSelection(el, plain)
+      const { text: nextText, imageIds, caret } = serializeDom(el)
+      lastSerialized.current = { text: nextText, imageIds }
+      onTextChange(nextText)
+      if (caret !== null && onSelectionChange) onSelectionChange(caret)
+    }
+    void restorePlainText()
   }, [onPaste, onSelectionChange, onTextChange])
 
   useEffect(() => {

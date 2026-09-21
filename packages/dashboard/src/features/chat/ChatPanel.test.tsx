@@ -60,6 +60,13 @@ describe('ChatPanel', () => {
     expect(document.querySelector('img[src="/tmp/activity-card.png"]')).toBeNull()
   })
 
+  it('keeps unsafe assistant markdown protocols out of rendered links', () => {
+    const { container } = render(<AssistantMarkdown text={'[unsafe](javascript:alert(1)) [safe](https://example.com)'} />)
+    const links = container.querySelectorAll('a')
+    expect(links[0]?.getAttribute('href')).not.toContain('javascript:')
+    expect(links[1]?.getAttribute('href')).toBe('https://example.com')
+  })
+
   it('uses the shared markdown typography layer for mixed markdown blocks', () => {
     const { container } = render(<AssistantMarkdown text={[
       'Paragraph text.',
@@ -986,6 +993,7 @@ describe('ChatPanel', () => {
       <ChatPanel
         pinnedToBottom={false}
         onPinnedChange={onPinnedChange}
+        topRightAccessory={<button type="button" data-testid="pinned-row-inspector">Inspector</button>}
         messages={[
           { role: 'user', content: [{ type: 'text', text: 'first question\nwith enough detail to span the compact prompt preview' }] },
           { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
@@ -1002,6 +1010,11 @@ describe('ChatPanel', () => {
     fireEvent.scroll(scroller)
 
     const sticky = await screen.findByTestId('sticky-user-prompt')
+    const overlayRow = screen.getByTestId('chat-top-overlay-row')
+    const inspector = screen.getByTestId('pinned-row-inspector')
+    expect(overlayRow.contains(sticky)).toBe(true)
+    expect(overlayRow.contains(inspector)).toBe(true)
+    expect(sticky.contains(inspector)).toBe(false)
     expect(sticky.textContent).not.toContain('Current prompt')
     expect(sticky.textContent).toContain('first question')
     expect(sticky.textContent).not.toContain('second question')
@@ -1159,6 +1172,67 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('artifact-image-preview-close').className).toContain('h-11 w-11')
     expect(screen.getByTestId('readonly-image-preview-controls')).toBeTruthy()
     expect(screen.getByTestId('artifact-image-preview-full')).toBeTruthy()
+  })
+
+  it('renders Host-referenced image attachments from the session-scoped durable endpoint', () => {
+    render(<ChatPanel sessionId="session-1" messages={[{
+      role: 'user',
+      content: [{
+        type: 'file', name: 'pasted-image-1.png', mediaType: 'image/png',
+        source: { kind: 'host_ref', attachmentId: 'image-attachment-1', sha256: 'a'.repeat(64), bytes: 8 },
+      }],
+    }]} />)
+    const preview = screen.getByTestId('message-image-preview-trigger')
+    expect(preview.querySelector('img')?.getAttribute('src')).toBe('/runtime/attachments/image-attachment-1?sessionId=session-1')
+  })
+
+  it('loads Host-referenced images with the configured bearer token', async () => {
+    const originalFetch = globalThis.fetch
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Blob(['png'], { type: 'image/png' }), { status: 200 }))
+    globalThis.fetch = fetchMock
+    URL.createObjectURL = vi.fn(() => 'blob:durable-image')
+    URL.revokeObjectURL = vi.fn()
+    try {
+      const rendered = render(<ChatPanel
+        sessionId="session-1"
+        attachmentHost="https://host.example/"
+        attachmentToken="image-token"
+        messages={[{
+          role: 'user',
+          content: [{
+            type: 'file', name: 'pasted-image-1.png', mediaType: 'image/png',
+            source: { kind: 'host_ref', attachmentId: 'image attachment', sha256: 'a'.repeat(64), bytes: 3 },
+          }],
+        }]}
+      />)
+      expect(screen.getByTestId('message-image-preview-loading')).toBeTruthy()
+      await waitFor(() => expect(screen.getByTestId('message-image-preview-trigger').querySelector('img')?.getAttribute('src')).toBe('blob:durable-image'))
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://host.example/runtime/attachments/image%20attachment?sessionId=session-1',
+        expect.objectContaining({ credentials: 'include', headers: { authorization: 'Bearer image-token' } }),
+      )
+      rendered.unmount()
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:durable-image')
+    } finally {
+      globalThis.fetch = originalFetch
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+    }
+  })
+
+  it('asks for confirmation before rendering an SVG session artifact', () => {
+    render(<ChatPanel sessionId="session-1" messages={[{ role: 'assistant', content: [{ type: 'text', text: '![Diagram](artifact://artifact-svg?mediaType=image%2Fsvg%2Bxml)' }] }]} />)
+    expect(screen.getByTestId('svg-image-warning').textContent).toContain('SVG files can contain embedded content')
+    expect(screen.queryByTestId('artifact-markdown-image')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+
+    const button = screen.getByTestId('artifact-markdown-image')
+    expect(button.querySelector('img')?.getAttribute('src')).toBe('/session-artifacts/artifact-svg?sessionId=session-1&allowSvg=1')
+    fireEvent.click(button)
+    expect(screen.getByTestId('artifact-image-preview-dialog')).toBeTruthy()
   })
 
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
@@ -2278,7 +2352,7 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-card-dot-count-reason-dot-1').textContent).toBe('×2')
     expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
     expect(screen.queryByText('Tool activity')).toBeNull()
-    expect(screen.queryByText('Thinking')).toBeNull()
+    expect(screen.getAllByText('Thinking')).toHaveLength(2)
 
     rerender(<DashboardChatPanel messages={messages} toolCardMode="standard" />)
 
@@ -2328,7 +2402,7 @@ describe('ChatPanel', () => {
     expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
     expect(screen.getByTestId('tool-card-dot-count-rail-1').textContent).toBe('×2')
     expect(screen.getByTestId('tool-card-dot-rail-3')).toBeTruthy()
-    expect(screen.queryByText('Thinking')).toBeNull()
+    expect(screen.getAllByText('Thinking')).toHaveLength(2)
   })
 
   it('keeps one compact dots rail when narration and blank protocol content separate tool turns', () => {
@@ -2393,7 +2467,7 @@ describe('ChatPanel', () => {
     expect(textlessRows).toHaveLength(1)
     expect(textlessRows[0]?.querySelector('[data-testid="tool-activity-rail"]')).toBeTruthy()
     expect(
-      screen.getByText('Everything is complete.').compareDocumentPosition(rail)
+      rail.compareDocumentPosition(screen.getByText('Everything is complete.'))
         & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
   })

@@ -29,7 +29,7 @@ function Commands({ commands, label, testId, help }: { commands: string; label: 
       {failed ? <p role="alert" className="px-3 pt-3 text-sm text-destructive">{t('desktopDownload.copyFailed')}</p> : null}
       <div className="flex min-w-0 items-start gap-2 p-3">
         <Terminal className="mt-0.5 h-4 w-4 flex-none text-primary" aria-hidden="true" />
-        <pre tabIndex={0} className="max-h-[min(calc(var(--ak-viewport-h,100dvh)*0.4),24rem)] min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all font-mono text-[0.75rem] leading-5 select-text">{commands}</pre>
+        <pre tabIndex={0} className={cn('max-h-[min(calc(var(--ak-viewport-h,100dvh)*0.4),24rem)] min-w-0 flex-1 overflow-auto font-mono text-[0.8125rem] leading-5 select-text', commands.includes('\n') ? 'whitespace-pre-wrap break-all' : 'whitespace-nowrap')}>{commands}</pre>
       </div>
     </section>
   )

@@ -65,6 +65,7 @@ export type SubAgentView = {
   lifecycle: SubAgentLifecycle
   messages: readonly Message[]
   agentType?: string
+  intention?: string
   prompt?: string
   model?: string
 }
@@ -86,6 +87,7 @@ type Params = {
    */
   initialLifecycle?: SubAgentLifecycle
   initialAgentType?: string
+  initialIntention?: string
 }
 
 export function useSubAgentSession({
@@ -95,6 +97,7 @@ export function useSubAgentSession({
   initialChildSessionId,
   initialLifecycle,
   initialAgentType,
+  initialIntention,
 }: Params): SubAgentView {
   const [lifecycle, setLifecycle] = useState<SubAgentLifecycle>(
     initialLifecycle ??
@@ -104,6 +107,7 @@ export function useSubAgentSession({
   )
   const [messages, setMessages] = useState<readonly Message[]>([])
   const [agentType, setAgentType] = useState<string | undefined>(initialAgentType)
+  const [intention, setIntention] = useState<string | undefined>(initialIntention)
   const [prompt, setPrompt] = useState<string | undefined>(undefined)
   const [model, setModel] = useState<string | undefined>(undefined)
 
@@ -172,6 +176,7 @@ export function useSubAgentSession({
         startedAt: payload.startedAt,
       })
       if (payload.agentType) setAgentType(payload.agentType)
+      if (payload.intention) setIntention(payload.intention)
       setPrompt(payload.prompt)
       setModel(payload.model)
     }
@@ -247,6 +252,7 @@ export function useSubAgentSession({
     lifecycle,
     messages,
     ...(agentType !== undefined ? { agentType } : {}),
+    ...(intention !== undefined ? { intention } : {}),
     ...(prompt !== undefined ? { prompt } : {}),
     ...(model !== undefined ? { model } : {}),
   }

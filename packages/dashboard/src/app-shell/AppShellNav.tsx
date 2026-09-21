@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
-import { BookOpen, Bot, Boxes, ChevronDown, ChevronUp, CircleHelp, ExternalLink, LogOut, NotebookPen, Settings as SettingsIcon, Sparkles, UserRound, Workflow } from 'lucide-react'
+import { BookOpen, Bot, Boxes, ChevronDown, ChevronUp, CircleHelp, Download, ExternalLink, FolderOpen, LogOut, NotebookPen, PanelLeftClose, PanelLeftOpen, Plus, Settings as SettingsIcon, Sparkles, UserRound, Workflow } from 'lucide-react'
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { Button } from '../components/ui/button.js'
 import { cn } from '../lib/utils.js'
@@ -25,6 +26,146 @@ const NAV_ITEMS: readonly NavItem[] = [
   { id: 'docs', labelKey: 'appShell.nav.docs', Icon: BookOpen, testid: 'app-shell-nav-docs' },
   { id: 'memo', labelKey: 'appShell.nav.memo', Icon: NotebookPen, testid: 'app-shell-nav-memo' },
 ]
+
+export function ProductSwitcher({
+  section,
+  onSelect,
+  compact = false,
+  adaptive = false,
+}: {
+  section: AppSection
+  onSelect(section: AppSection): void
+  compact?: boolean
+  adaptive?: boolean
+}): JSX.Element {
+  const { t } = useTranslation()
+  const detailsRef = useRef<HTMLDetailsElement | null>(null)
+  const triggerRef = useRef<HTMLElement | null>(null)
+  const [adaptiveOpen, setAdaptiveOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number; width: number } | null>(null)
+  const activeItem = NAV_ITEMS.find((item) => item.id === section) ?? NAV_ITEMS[0]!
+  const ActiveIcon = activeItem.Icon
+  const select = (next: AppSection): void => {
+    if (detailsRef.current) detailsRef.current.open = false
+    setAdaptiveOpen(false)
+    onSelect(next)
+  }
+  const positionAdaptiveMenu = useCallback(() => {
+    const trigger = triggerRef.current
+    if (!adaptive || !trigger) return
+    const triggerRect = trigger.getBoundingClientRect()
+    const surfaceRect = trigger.closest('.ak-explorer-surface')?.getBoundingClientRect()
+    const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+    const availableWidth = Math.max(160, (surfaceRect?.right ?? window.innerWidth) - triggerRect.left - rootFontSize)
+    setMenuPosition({ left: triggerRect.left, top: triggerRect.bottom + rootFontSize * 0.5, width: Math.min(rootFontSize * 16, availableWidth) })
+  }, [adaptive])
+  useLayoutEffect(() => {
+    if (!adaptiveOpen) return
+    positionAdaptiveMenu()
+    window.addEventListener('resize', positionAdaptiveMenu)
+    window.addEventListener('scroll', positionAdaptiveMenu, true)
+    return () => {
+      window.removeEventListener('resize', positionAdaptiveMenu)
+      window.removeEventListener('scroll', positionAdaptiveMenu, true)
+    }
+  }, [adaptiveOpen, positionAdaptiveMenu])
+  const menu = (
+    <div
+      role="menu"
+      className={cn('ak-product-switcher-menu z-50 overflow-hidden rounded-2xl border border-border/55 bg-popover p-1.5 text-popover-foreground shadow-xl', adaptive ? 'fixed' : 'absolute', compact ? 'left-full top-0 ml-2' : adaptive ? '' : 'left-0 top-full mt-2')}
+      style={adaptive && menuPosition ? menuPosition : undefined}
+      data-testid="product-switcher-menu"
+    >
+      <div className="px-2.5 pb-1.5 pt-1 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">Kala</div>
+      {NAV_ITEMS.map(({ id, labelKey, Icon }) => (
+        <button key={id} type="button" role="menuitem" aria-current={section === id ? 'page' : undefined} data-testid={`product-switcher-${id}`} onClick={() => select(id)} className={cn('flex min-h-10 w-full items-center gap-3 rounded-xl px-2.5 text-left text-sm hover:bg-accent', section === id && 'bg-accent/70 font-medium')}>
+          <Icon className="h-4 w-4 flex-none text-muted-foreground" aria-hidden />
+          <span>{t(labelKey)}</span>
+        </button>
+      ))}
+    </div>
+  )
+  return (
+    <>
+      <details ref={detailsRef} onToggle={(event) => { if (adaptive) setAdaptiveOpen(event.currentTarget.open) }} className={cn('relative', compact ? '' : adaptive ? 'ak-product-switcher-adaptive z-50 flex-none' : 'w-full')} data-testid="product-switcher">
+        <summary
+          ref={triggerRef}
+          className={cn(
+            'flex cursor-pointer list-none items-center text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden',
+            compact ? 'h-10 w-10 justify-center rounded-xl hover:bg-accent' : adaptive ? 'h-9 gap-1.5 rounded-xl px-0.5 text-muted-foreground hover:bg-muted hover:text-foreground' : 'h-11 w-full gap-3 rounded-xl border border-border/45 bg-background/45 px-3 shadow-sm hover:bg-accent',
+          )}
+          title={compact ? t(activeItem.labelKey) : t('appShell.nav.aria')}
+          aria-label={t('appShell.nav.aria')}
+          data-testid="product-switcher-trigger"
+        >
+          <span className={cn('grid h-8 w-8 flex-none place-items-center rounded-lg', adaptive ? 'bg-transparent text-current' : 'bg-primary/10 text-primary')}><ActiveIcon className="h-4 w-4" aria-hidden /></span>
+          {!compact ? <><span className="ak-product-switcher-label min-w-0 flex-1 truncate text-left text-sm font-medium">{t(activeItem.labelKey)}</span><ChevronDown className="ak-product-switcher-chevron h-4 w-4 text-muted-foreground" aria-hidden /></> : null}
+        </summary>
+        {!adaptive ? menu : null}
+      </details>
+      {adaptiveOpen && menuPosition ? createPortal(menu, document.body) : null}
+    </>
+  )
+}
+
+export function SidebarBrand({ connectionStatus }: { connectionStatus?: ReactNode }): JSX.Element {
+  return (
+    <span aria-label="Kala" className="ak-sidebar-brand flex min-w-0 flex-none items-center gap-2 text-foreground">
+      {connectionStatus ?? <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="h-6 w-6 flex-none" aria-hidden />}
+      <span className="ak-sidebar-wordmark relative h-5 flex-none" aria-hidden="true">
+        <img src="/brand/kala-wordmark.svg" alt="" className="h-5 w-full object-contain dark:hidden" />
+        <img src="/brand/kala-wordmark-light.svg" alt="" className="hidden h-5 w-full object-contain dark:block" />
+      </span>
+    </span>
+  )
+}
+
+export function DesktopSessionRail({
+  section,
+  onSelectSection,
+  connectionStatus,
+  onExpand,
+  onNewSession,
+  onConnectWorkspace,
+  globalActions,
+}: {
+  section: AppSection
+  onSelectSection(section: AppSection): void
+  connectionStatus?: ReactNode
+  onExpand?: () => void
+  onNewSession(): void
+  onConnectWorkspace?: () => void
+  globalActions: ReactNode
+}): JSX.Element {
+  const { t } = useTranslation()
+  const actionClass = 'h-10 w-10 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
+  return (
+    <aside
+      className={cn('flex h-full w-14 flex-none flex-col items-center border-r border-border/35 bg-card/80 py-2 text-foreground', onExpand && 'cursor-pointer')}
+      data-testid="desktop-session-rail"
+      aria-label={t('appShell.nav.aria')}
+      onClick={(event) => {
+        if (!onExpand) return
+        const target = event.target
+        if (target instanceof Element && target.closest('button, a, summary, input, select, textarea, [role="menuitem"]')) return
+        onExpand()
+      }}
+    >
+      <div className="mb-2 grid h-10 w-10 place-items-center" data-testid="desktop-rail-brand">
+        {connectionStatus ?? <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="h-6 w-6" aria-hidden />}
+      </div>
+      <ProductSwitcher section={section} onSelect={onSelectSection} compact />
+      {section === 'agent' ? (
+        <div className="mt-3 flex flex-col items-center gap-1.5" data-testid="desktop-rail-agent-actions">
+          {onExpand ? <Button type="button" variant="ghost" size="icon" className={actionClass} title={t('app.openExplorer')} aria-label={t('app.openExplorer')} data-testid="desktop-rail-expand" onClick={onExpand}><PanelLeftOpen className="h-4 w-4" aria-hidden /></Button> : null}
+          <Button type="button" variant="ghost" size="icon" className={actionClass} title={t('app.newSessionButton')} aria-label={t('app.newSessionButton')} data-testid="desktop-rail-new-session" onClick={onNewSession}><Plus className="h-4 w-4" aria-hidden /></Button>
+          {onConnectWorkspace ? <Button type="button" variant="ghost" size="icon" className={actionClass} title={t('app.cockpit.connectWorkspace')} aria-label={t('app.cockpit.connectWorkspace')} data-testid="desktop-rail-connect-workspace" onClick={onConnectWorkspace}><FolderOpen className="h-4 w-4" aria-hidden /></Button> : null}
+        </div>
+      ) : null}
+      <div className="mt-auto" data-testid="desktop-rail-footer">{globalActions}</div>
+    </aside>
+  )
+}
 
 type ActivePill = {
   left: number
@@ -115,14 +256,14 @@ export function AppShellNav({
         )}
       >
         {collapsedContent ?? (
-          <span aria-label="Agent RunLab" className="group flex min-w-0 items-center gap-2 text-foreground">
+          <span aria-label="Kala" className="group flex min-w-0 items-center gap-2 text-foreground">
             <img
               src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
               alt=""
               className="h-5 w-5 text-foreground/90"
               aria-hidden
             />
-            <span className="truncate text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">Agent RunLab</span>
+            <span className="truncate text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">Kala</span>
           </span>
         )}
         {!collapsedContent ? (
@@ -153,7 +294,7 @@ export function AppShellNav({
       className="ak-global-topbar sticky top-0 z-30 flex h-10 items-center gap-1 px-2 backdrop-blur-xl sm:px-3"
     >
       <span
-        aria-label="Agent RunLab"
+        aria-label="Kala"
         className="group mr-4 hidden items-center gap-2.5 text-foreground sm:flex"
       >
         <img
@@ -163,7 +304,7 @@ export function AppShellNav({
           aria-hidden
         />
           <span className="text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">
-          Agent RunLab
+          Kala
         </span>
       </span>
       <div
@@ -211,7 +352,23 @@ export function AppShellNav({
   )
 }
 
-export function AppShellGlobalActions({
+type GlobalActionProps = {
+  connectionStatus?: ReactNode
+  onOpenSettings(): void
+  account?: AccountProfile
+  accountLoading?: boolean
+  onSignOut?(): void | Promise<void>
+  onOpenAccount?(): void
+  onOpenAdmin?(): void
+  evaluationUrl?: string
+  collapseControl?: { kind: 'collapse' | 'expand'; onClick(): void; sidebar?: boolean }
+}
+
+export function AppShellGlobalActions(props: GlobalActionProps): JSX.Element {
+  return <SidebarGlobalActions {...props} orientation="horizontal" legacyTopbar />
+}
+
+export function SidebarGlobalActions({
   connectionStatus,
   onOpenSettings,
   account,
@@ -221,38 +378,39 @@ export function AppShellGlobalActions({
   onOpenAdmin,
   evaluationUrl,
   collapseControl,
-}: {
-  connectionStatus?: ReactNode
-  onOpenSettings(): void
-  account?: AccountProfile
-  accountLoading?: boolean
-  onSignOut?(): void | Promise<void>
-  onOpenAccount?(): void
-  onOpenAdmin?(): void
-  evaluationUrl?: string
-  collapseControl?: { kind: 'collapse' | 'expand'; onClick(): void }
-}): JSX.Element {
+  orientation = 'horizontal',
+  accountPlacement,
+  legacyTopbar = false,
+}: GlobalActionProps & { orientation?: 'horizontal' | 'vertical'; accountPlacement?: 'default' | 'rail' | 'footer'; legacyTopbar?: boolean }): JSX.Element {
   const { t } = useTranslation()
+  const vertical = orientation === 'vertical'
+  const expandedFooter = accountPlacement === 'footer' && !legacyTopbar
+  const actionClass = cn(
+    vertical ? 'h-10 w-10 rounded-xl' : expandedFooter ? 'h-9 min-w-0 flex-1 gap-2 rounded-lg border border-border/40 bg-background/30 px-3' : 'h-8 w-8',
+    'text-muted-foreground hover:text-foreground',
+  )
+  const iconActionClass = cn(vertical ? 'h-10 w-10 rounded-xl' : 'h-8 w-8', 'text-muted-foreground hover:text-foreground')
   return (
-    <span className="ml-auto flex flex-none items-center gap-1" data-testid="app-shell-global-actions">
-      {!isDesktopClient() ? <DesktopDownloadDialog /> : <DesktopUpdateEntry />}
+    <div className={cn('flex flex-none gap-1', vertical ? 'flex-col items-center' : expandedFooter ? 'w-full items-center' : 'ml-auto items-center')} data-testid={vertical ? 'sidebar-global-actions' : 'app-shell-global-actions'} data-orientation={orientation} data-presentation={expandedFooter ? 'expanded-footer' : undefined}>
+      {!isDesktopClient() ? legacyTopbar ? <DesktopDownloadDialog /> : <DesktopDownloadDialog trigger={<Button variant="ghost" size={expandedFooter ? 'sm' : 'icon'} className={actionClass} data-testid="app-shell-download-desktop" title={t('desktopDownload.title')} aria-label={t('desktopDownload.open')}><Download className="h-4 w-4 flex-none" aria-hidden />{expandedFooter ? <span className="truncate">{t('desktopDownload.action')}</span> : null}</Button>} /> : <DesktopUpdateEntry />}
       {evaluationUrl ? (
-        <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-muted-foreground hover:text-foreground">
+        <Button variant="ghost" size="icon" asChild className={iconActionClass}>
           <a href={evaluationUrl} target="_blank" rel="noreferrer" data-testid="app-shell-open-evaluation" title={t('appShell.nav.evaluation')} aria-label={t('appShell.nav.evaluation')}><ExternalLink className="h-4 w-4" aria-hidden /></a>
         </Button>
       ) : null}
-      {account || accountLoading ? <AccountMenu account={account} loading={accountLoading} onSignOut={onSignOut} onOpenAccount={onOpenAccount} onOpenAdmin={onOpenAdmin} /> : null}
       <Button
         variant="ghost"
-        size="icon"
+        size={expandedFooter ? 'sm' : 'icon'}
         data-testid="app-shell-nav-settings-icon"
         onClick={onOpenSettings}
         title={t('app.openSettings')}
         aria-label={t('app.openSettings')}
-        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+        className={actionClass}
       >
-        <SettingsIcon className="h-4 w-4" aria-hidden />
+        <SettingsIcon className="h-4 w-4 flex-none" aria-hidden />
+        {expandedFooter ? <span className="truncate">{t('common.settings')}</span> : null}
       </Button>
+      {account || accountLoading ? <AccountMenu account={account} loading={accountLoading} onSignOut={onSignOut} onOpenAccount={onOpenAccount} onOpenAdmin={onOpenAdmin} placement={accountPlacement ?? (vertical ? 'rail' : 'default')} /> : null}
       {connectionStatus}
       {collapseControl ? (
         <Button
@@ -260,18 +418,18 @@ export function AppShellGlobalActions({
           size="icon"
           data-testid={collapseControl.kind === 'collapse' ? 'app-shell-nav-collapse' : 'app-shell-nav-expand'}
           onClick={collapseControl.onClick}
-          title={t(collapseControl.kind === 'collapse' ? 'app.collapseTopbar' : 'app.expandTopbar')}
-          aria-label={t(collapseControl.kind === 'collapse' ? 'app.collapseTopbar' : 'app.expandTopbar')}
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+          title={t(collapseControl.sidebar ? 'app.hideSidebar' : collapseControl.kind === 'collapse' ? 'app.collapseTopbar' : 'app.expandTopbar')}
+          aria-label={t(collapseControl.sidebar ? 'app.hideSidebar' : collapseControl.kind === 'collapse' ? 'app.collapseTopbar' : 'app.expandTopbar')}
+          className={actionClass}
         >
-          {collapseControl.kind === 'collapse' ? <ChevronUp className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}
+          {collapseControl.sidebar ? <PanelLeftClose className="h-4 w-4" aria-hidden /> : collapseControl.kind === 'collapse' ? <ChevronUp className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}
         </Button>
       ) : null}
-    </span>
+    </div>
   )
 }
 
-function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin }: { account?: AccountProfile; loading: boolean; onSignOut?(): void | Promise<void>; onOpenAccount?(): void; onOpenAdmin?(): void }): JSX.Element {
+function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin, placement = 'default' }: { account?: AccountProfile; loading: boolean; onSignOut?(): void | Promise<void>; onOpenAccount?(): void; onOpenAdmin?(): void; placement?: 'default' | 'rail' | 'footer' }): JSX.Element {
   const { t } = useTranslation()
   const detailsRef = useRef<HTMLDetailsElement | null>(null)
   const close = (): void => { if (detailsRef.current) detailsRef.current.open = false }
@@ -287,13 +445,13 @@ function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin }
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-3.5 w-3.5" aria-hidden />}</span>
         {account ? <span className="hidden max-w-32 truncate lg:inline">{account.displayName}</span> : null}
       </summary>
-      <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-border/45 bg-popover text-popover-foreground shadow-lg" role="menu">
+      <div className={cn('absolute z-50 w-72 overflow-hidden rounded-xl border border-border/45 bg-popover text-popover-foreground shadow-lg', placement === 'rail' ? 'bottom-0 left-full ml-2' : placement === 'footer' ? 'bottom-full right-0 mb-2' : 'right-0 top-full mt-2')} role="menu">
         <div className="border-b border-border/60 px-4 py-3" data-testid="account-identity-summary"><div className="truncate text-sm font-semibold">{account?.displayName ?? t('appShell.account.loadingLong')}</div>{account?.email ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{account.email}</div> : null}</div>
         <div className="p-1.5">
           <a href="#/docs" role="menuitem" onClick={close} className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent"><CircleHelp className="h-4 w-4" aria-hidden />{t('appShell.account.help')}</a>
           <button type="button" role="menuitem" onClick={() => { close(); onOpenAccount?.() }} data-testid="account-details" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><UserRound className="h-4 w-4" aria-hidden />{t('appShell.account.details')}</button>
           {onOpenAdmin ? <button type="button" role="menuitem" onClick={() => { close(); onOpenAdmin() }} data-testid="organization-admin" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><SettingsIcon className="h-4 w-4" aria-hidden />{t('appShell.account.administration')}</button> : null}
-          <div className="px-3 py-2 text-[0.6875rem] text-muted-foreground">Agent RunLab · {t('appShell.account.routing')}</div>
+          <div className="px-3 py-2 text-[0.6875rem] text-muted-foreground">Kala · {t('appShell.account.routing')}</div>
           <form method="post" action="/auth/logout" onSubmit={prepareNativeSignOut}>
             <button type="submit" role="menuitem" data-testid="account-sign-out" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10"><LogOut className="h-4 w-4" aria-hidden />{t('appShell.account.signOut')}</button>
           </form>

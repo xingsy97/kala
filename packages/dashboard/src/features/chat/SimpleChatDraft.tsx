@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AgentRuntimeDescriptor, AgentRuntimeId, ModelInfo } from '@agent-kernel/shared'
 import { HelpHint } from '../../components/ui/help-hint.js'
@@ -11,7 +12,7 @@ import { Button } from '../../components/ui/button.js'
 import { Composer } from './Composer.js'
 import type { ChatDisplayPrefs } from './chatDisplayPrefs.js'
 
-const SIMPLE_CHAT_TOOLS = ['todowrite', 'todo_graph', 'agent', 'websearch', 'memory'] as const
+const SIMPLE_CHAT_TOOLS = ['todo_graph', 'agent', 'websearch', 'memory'] as const
 const EMPTY_ATTENTION = { sessionId: '', points: [], latest: null } as const
 
 type Submission = {
@@ -121,13 +122,14 @@ export function SimpleChatDraft({
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto px-6 py-8 text-center">
         <h1 className="flex items-center justify-center gap-1 text-2xl font-semibold tracking-tight sm:text-3xl">{t('chat.transcript.emptyTitle')}<HelpHint label={t('chat.transcript.emptyTitle')}>{t('chat.draft.description')}</HelpHint></h1>
         <div className="mt-6 flex max-w-full flex-wrap justify-center gap-2" role="radiogroup" aria-label={t('dialogs.chooseAgentRuntime')}>
-          {agentRuntimes.map((item) => (
-            <Button
+          {agentRuntimes.map((item) => {
+            const selected = descriptor?.id === item.id
+            return <Button
               key={item.id}
-              variant={descriptor?.id === item.id ? 'outline' : 'ghost'}
+              variant="ghost"
               size="sm"
               role="radio"
-              aria-checked={descriptor?.id === item.id}
+              aria-checked={selected}
               disabled={started || !item.available}
               title={item.available ? item.description : item.reason}
               data-testid={`draft-runtime-${item.id}`}
@@ -136,11 +138,14 @@ export function SimpleChatDraft({
                 setModel(undefined)
                 writeStringPref(PREF_AGENT_RUNTIME, item.id as AgentRuntimeId)
               }}
-              className="rounded-full"
+              className={selected
+                ? 'gap-1.5 rounded-full border border-primary/65 bg-primary/15 px-3 text-primary shadow-sm ring-2 ring-primary/25 ring-offset-2 ring-offset-background hover:bg-primary/20 hover:text-primary'
+                : 'rounded-full border border-transparent px-3 text-muted-foreground hover:border-border/50 hover:bg-accent hover:text-foreground'}
             >
+              {selected ? <Check className="h-3.5 w-3.5" aria-hidden /> : null}
               {item.label}
             </Button>
-          ))}
+          })}
         </div>
       </div>
       {error ? (

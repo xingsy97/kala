@@ -34,6 +34,7 @@ import {
   RotateCcw,
   Search,
   SquarePen,
+  SquareTerminal,
   TriangleAlert,
   Trash2,
   Wrench,
@@ -109,16 +110,18 @@ type Props = {
   onRenameWorkspace?(workspaceId: string, workspaceName: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
+  onOpenWorkspaceTerminal?(workspace: WorkspaceNode): void
   onCollapse?(): void
   embeddedHeader?: boolean
+  headerLeading?: ReactElement
   fontSizePx?: number
   previewStore?: SessionPreviewStore
   getCachedSessionView?: (sessionId: string) => CachedSessionView | null
   subscribeCachedSessionView?: (sessionId: string, listener: () => void) => () => void
 }
 
-const SESSION_ROW_HEIGHT = 34
-const WORKSPACE_ROW_HEIGHT = 28
+const SESSION_ROW_HEIGHT = 44
+const WORKSPACE_ROW_HEIGHT = 40
 const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] gap-x-2'
 const WORKSPACE_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2'
 const EXPLORER_RAIL_CELL = 'flex h-4 w-4 flex-none items-center justify-center'
@@ -140,8 +143,10 @@ function ExplorerImpl({
   onRenameWorkspace,
   onOpenSessionInfo,
   onWorkspaceInfo,
+  onOpenWorkspaceTerminal,
   onCollapse,
   embeddedHeader = false,
+  headerLeading,
   fontSizePx = 13,
   previewStore,
   getCachedSessionView,
@@ -310,8 +315,8 @@ function ExplorerImpl({
   }, [visibleData])
 
   return (
-    <div ref={preview.explorerRef} className="flex h-full min-w-0 flex-col overflow-hidden bg-transparent">
-      <Header query={query} onQueryChange={setQuery} onNewSession={onNewSession} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} />
+    <div ref={preview.explorerRef} className="flex h-full min-w-0 flex-col overflow-hidden bg-transparent text-foreground">
+      <Header query={query} onQueryChange={setQuery} onNewSession={onNewSession} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} leading={headerLeading} />
       <div
         ref={ref}
         className="flex-1 min-h-0"
@@ -407,6 +412,7 @@ function ExplorerImpl({
                 onOpenSessionInfo={onOpenSessionInfo}
                 onHideSession={hiddenSessions.hide}
                 onWorkspaceInfo={onWorkspaceInfo}
+                onOpenWorkspaceTerminal={onOpenWorkspaceTerminal}
                 onHideWorkspace={hiddenWorkspaces.hide}
                 editingWorkspaceId={editingWorkspaceId}
                 onStartWorkspaceEdit={(workspace) => setEditingWorkspaceId(workspace.workspaceId)}
@@ -589,10 +595,10 @@ function HiddenWorkspacesBar({
   const missingIds = Array.from(hiddenIds).filter((id) => !restoredIds.has(id))
   const hiddenCount = workspaces.length + missingIds.length
   return (
-    <div className="flex-none border-t border-sidebar-border bg-sidebar px-1.5 py-1" data-testid="hidden-workspaces-bar">
+    <div className="flex-none border-t border-border/35 bg-card/35 px-1.5 py-1" data-testid="hidden-workspaces-bar">
       <button
         type="button"
-        className="flex h-6 w-full min-w-0 items-center gap-1 rounded px-1 text-left text-[0.6875rem] text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        className="flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-[0.6875rem] text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => setOpen((value) => !value)}
         data-testid="hidden-workspaces-toggle"
         aria-expanded={open}
@@ -638,11 +644,11 @@ function HiddenWorkspaceItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[0.6875rem] text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" data-testid="hidden-workspace-item">
+    <div className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-[0.6875rem] text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-workspace-item">
       <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
       <button
         type="button"
-        className="flex-none rounded p-0.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => onUnhide(workspaceId)}
         data-testid={`workspace-unhide-${workspaceId}`}
         title={t('explorer.unhideWorkspace')}
@@ -664,10 +670,10 @@ function HiddenSessionsBar({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   return (
-    <div className="flex-none border-t border-sidebar-border bg-sidebar px-1.5 py-1" data-testid="hidden-sessions-bar">
+    <div className="flex-none border-t border-border/35 bg-card/35 px-1.5 py-1" data-testid="hidden-sessions-bar">
       <button
         type="button"
-        className="flex h-6 w-full min-w-0 items-center gap-1 rounded px-1 text-left text-[0.6875rem] text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        className="flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-[0.6875rem] text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => setOpen((value) => !value)}
         data-testid="hidden-sessions-toggle"
         aria-expanded={open}
@@ -705,11 +711,11 @@ function HiddenSessionItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[0.6875rem] text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" data-testid="hidden-session-item">
+    <div className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-[0.6875rem] text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-session-item">
       <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
       <button
         type="button"
-        className="flex-none rounded p-0.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => onUnhide(sessionId)}
         data-testid={`session-unhide-${sessionId}`}
         title={t('explorer.unhideSession')}
@@ -722,7 +728,7 @@ function HiddenSessionItem({
 }
 
 
-export function NewChatButton({ onNewChat }: { onNewChat(): void }): JSX.Element {
+export function NewChatButton({ onNewChat, className }: { onNewChat(): void; className?: string }): JSX.Element {
   const { t } = useTranslation()
   return (
     <Button
@@ -730,10 +736,10 @@ export function NewChatButton({ onNewChat }: { onNewChat(): void }): JSX.Element
       size="sm"
       onClick={() => onNewChat()}
       data-testid="explorer-new-chat"
-      className="h-8 gap-2 rounded-lg px-2 text-sm font-medium"
+      className={cn('ak-new-chat-button h-9 justify-start gap-2.5 rounded-xl bg-muted/55 px-3 text-sm font-medium text-foreground hover:bg-muted', className)}
     >
-      <SquarePen className="h-4 w-4" aria-hidden="true" />
-      {t('dialogs.simpleChat')}
+      <SquarePen className="h-4 w-4 flex-none" aria-hidden="true" />
+      <span className="ak-new-chat-label min-w-0 truncate">{t('dialogs.simpleChat')}</span>
     </Button>
   )
 }
@@ -745,6 +751,7 @@ function Header({
   onConnectWorkspace,
   onCollapse,
   embedded,
+  leading,
 }: {
   query: string
   onQueryChange(query: string): void
@@ -752,70 +759,82 @@ function Header({
   onConnectWorkspace?: () => void
   onCollapse?: () => void
   embedded: boolean
+  leading?: ReactElement
 }): JSX.Element {
   const { t } = useTranslation()
-  if (embedded) {
-    return (
-      <div className="flex h-9 flex-none items-center gap-1.5 border-b border-sidebar-border bg-sidebar px-2">
-        <label className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded bg-background/45 px-2 text-xs ring-1 ring-border/30 focus-within:ring-primary/30">
-          <Search className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus()
+  }, [searchOpen])
+
+  const closeSearch = (): void => {
+    onQueryChange('')
+    setSearchOpen(false)
+  }
+
+  return (
+    <div className={cn(
+      'relative z-30 flex flex-none items-center border-b px-3',
+      embedded
+        ? 'h-12 border-border/25 bg-card/20'
+        : 'border-border/35 bg-card/30 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-card/25',
+    )}>
+      {searchOpen ? (
+        <label className="flex h-10 w-full min-w-0 items-center gap-2 rounded-2xl bg-background/55 pl-3 text-sm ring-1 ring-border/35 transition-shadow focus-within:ring-primary/35">
+          <Search className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
           <input
+            ref={searchInputRef}
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') closeSearch()
+            }}
             placeholder={t('explorer.searchPlaceholder')}
-            className="min-w-0 flex-1 bg-transparent text-[0.75rem] text-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             data-testid="explorer-search"
             aria-label={t('explorer.searchLabel')}
           />
-          {query ? (
-            <button type="button" onClick={() => onQueryChange('')} className="rounded text-muted-foreground hover:text-foreground" aria-label={t('explorer.clearSearch')}>
-              <X className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={closeSearch}
+            className="flex h-10 w-10 flex-none items-center justify-center rounded-2xl text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label={t('explorer.clearSearch')}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
         </label>
-        {onConnectWorkspace ? <Button
-          variant="ghost"
-          size="icon"
-          onClick={onConnectWorkspace}
-          data-testid="connect-workspace-button"
-          title={t('explorer.connectWorkspace')}
-          aria-label={t('explorer.connectWorkspace')}
-          className="h-7 w-7 flex-none"
-        >
-          <Cable className="h-3.5 w-3.5" />
-        </Button> : null}
-        {onCollapse ? (
+      ) : (
+        <div className="flex w-full min-w-0 flex-nowrap items-center gap-1.5" data-testid="explorer-header-actions">
+          <div className="ak-primary-action-group flex min-w-0 flex-1 flex-nowrap items-center rounded-xl bg-muted/55" data-testid="explorer-primary-action-group">
+            {leading ? <div className="flex flex-none items-center border-r border-border/35" data-testid="explorer-header-leading">{leading}</div> : null}
+            <NewChatButton onNewChat={onNewSession} className={cn('min-w-0 flex-1 bg-transparent hover:bg-muted/80', leading && 'rounded-l-none')} />
+          </div>
           <Button
             variant="ghost"
             size="icon"
-            onClick={onCollapse}
-            data-testid="explorer-collapse-button"
-            title={t('explorer.collapsePanel')}
-            aria-label={t('explorer.collapsePanel')}
-            className="h-7 w-7 flex-none text-muted-foreground hover:text-foreground"
+            onClick={() => setSearchOpen(true)}
+            data-testid="explorer-search-button"
+            title={t('explorer.searchPlaceholder')}
+            aria-label={t('explorer.searchLabel')}
+            className="ak-explorer-utility-action h-9 w-9 flex-none rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            <Search className="h-4 w-4" aria-hidden="true" />
           </Button>
-        ) : null}
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-col gap-2 bg-sidebar-accent/35 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/25">
-      <div className="flex items-center justify-between gap-2">
-        <NewChatButton onNewChat={onNewSession} />
-        <div className="flex items-center gap-1">
-          {onConnectWorkspace ? <Button
-            variant="ghost"
-            size="sm"
-            onClick={onConnectWorkspace}
-            data-testid="connect-workspace-button"
-            title={t('explorer.connectWorkspace')}
-            className="h-7 gap-1 rounded-full px-2.5 text-xs"
-          >
-            <Cable className="h-3 w-3" />
-            {t('explorer.addWorkspace')}
-          </Button> : null}
+          {onConnectWorkspace ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onConnectWorkspace}
+              data-testid="connect-workspace-button"
+              title={t('explorer.connectWorkspace')}
+              aria-label={t('explorer.connectWorkspace')}
+              className="ak-explorer-utility-action h-9 w-9 flex-none rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Cable className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          ) : null}
           {onCollapse ? (
             <Button
               variant="ghost"
@@ -824,29 +843,13 @@ function Header({
               data-testid="explorer-collapse-button"
               title={t('explorer.collapsePanel')}
               aria-label={t('explorer.collapsePanel')}
-              className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground sm:h-7 sm:w-7"
+              className="ak-explorer-utility-action h-9 w-9 flex-none rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
             >
-              <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </Button>
           ) : null}
         </div>
-      </div>
-      <label className="flex h-7 min-w-0 items-center gap-1.5 rounded bg-background/45 px-2 text-xs ring-1 ring-border/30 focus-within:ring-primary/30">
-        <Search className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-        <input
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder={t('explorer.searchPlaceholder')}
-          className="min-w-0 flex-1 bg-transparent text-[0.75rem] text-foreground outline-none placeholder:text-muted-foreground"
-          data-testid="explorer-search"
-          aria-label={t('explorer.searchLabel')}
-        />
-        {query ? (
-          <button type="button" onClick={() => onQueryChange('')} className="rounded text-muted-foreground hover:text-foreground" aria-label={t('explorer.clearSearch')}>
-            <X className="h-3.5 w-3.5" />
-          </button>
-        ) : null}
-      </label>
+      )}
     </div>
   )
 }
@@ -862,6 +865,7 @@ function Row({
   onSubmitEdit,
   onOpenSessionInfo,
   onWorkspaceInfo,
+  onOpenWorkspaceTerminal,
   onHideWorkspace,
   onHideSession,
   editingWorkspaceId,
@@ -887,6 +891,7 @@ function Row({
   onSubmitEdit(sess: SessionNode, label: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
+  onOpenWorkspaceTerminal?(workspace: WorkspaceNode): void
   onHideWorkspace(workspaceId: string): void
   onHideSession(sessionId: string): void
   editingWorkspaceId: string | null
@@ -909,6 +914,7 @@ function Row({
           style={style}
           dragHandle={dragHandle}
           onWorkspaceInfo={onWorkspaceInfo}
+          onOpenWorkspaceTerminal={onOpenWorkspaceTerminal}
           onHideWorkspace={onHideWorkspace}
         editing={node.data.workspaceId !== null && editingWorkspaceId === node.data.workspaceId}
         onStartEdit={onStartWorkspaceEdit}
@@ -949,6 +955,7 @@ function WorkspaceRow({
   style,
   dragHandle,
   onWorkspaceInfo,
+  onOpenWorkspaceTerminal,
   onHideWorkspace,
   editing,
   onStartEdit,
@@ -962,6 +969,7 @@ function WorkspaceRow({
   style: React.CSSProperties
   dragHandle?: (el: HTMLDivElement | null) => void
   onWorkspaceInfo?(workspaceId: string): void
+  onOpenWorkspaceTerminal?(workspace: WorkspaceNode): void
   onHideWorkspace(workspaceId: string): void
   editing: boolean
   onStartEdit(workspace: WorkspaceNode): void
@@ -984,6 +992,7 @@ function WorkspaceRow({
       ? 'bg-emerald-500'
       : 'bg-muted-foreground/45'
   const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
+  const canOpenTerminal = w.workspaceId !== null && onOpenWorkspaceTerminal
   const canCreateSession = w.workspaceId !== null
   const canRename = w.workspaceId !== null
   const canReorder = w.workspaceId !== null
@@ -998,7 +1007,7 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws relative min-w-0 cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-accent/28',
+        'group/ws relative min-w-0 cursor-pointer select-none rounded-2xl px-3 py-2 transition-colors hover:bg-muted/45',
         WORKSPACE_ROW_GRID,
       )}
     >
@@ -1031,8 +1040,8 @@ function WorkspaceRow({
           ariaLabel={t('explorer.renameWorkspace')}
         />
       ) : (
-        <div className="flex min-w-0 items-center gap-2">
-          {w.workspaceId === null ? <span className="inline-flex flex-none items-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{meta}</span></span> : <span className={cn('h-2 w-2 flex-none rounded-full', metaBadgeCls)} data-testid="workspace-status-badge" title={meta} aria-label={meta}><span className="sr-only">{meta}</span></span>}
+        <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2">
+          {w.workspaceId === null ? <span className="inline-flex h-4 w-4 flex-none items-center justify-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{meta}</span></span> : <span className="inline-flex h-4 w-4 flex-none items-center justify-center"><span className={cn('h-2 w-2 rounded-full', metaBadgeCls)} data-testid="workspace-status-badge" title={meta} aria-label={meta}><span className="sr-only">{meta}</span></span></span>}
           <span
             className="min-w-0 truncate font-semibold leading-5 text-foreground"
             style={{ fontSize: fontSizePx, lineHeight: 1.4 }}
@@ -1049,13 +1058,29 @@ function WorkspaceRow({
         </div>
       )}
       <div data-row-action className="ak-touch-reveal pointer-events-none flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/ws:pointer-events-auto group-hover/ws:opacity-100">
+        {canOpenTerminal && !editing ? (
+          <button
+            type="button"
+            data-testid={`workspace-terminal-${w.workspaceId}`}
+            title={w.online ? t('terminal.workspaceOpen') : t('explorer.workspaceOffline')}
+            aria-label={t('terminal.workspaceOpen')}
+            disabled={!w.online || w.children.length === 0}
+            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (w.online && w.children.length > 0) onOpenWorkspaceTerminal?.(w)
+            }}
+          >
+            <SquareTerminal className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         {canRename && !editing ? (
           <button
             type="button"
             data-testid={`workspace-rename-${w.workspaceId}`}
             title={t('explorer.renameWorkspace')}
             aria-label={t('explorer.renameWorkspaceAria', { workspaceId: w.workspaceId })}
-            className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation()
               onStartEdit(w)
@@ -1071,7 +1096,7 @@ function WorkspaceRow({
             title={w.online ? t('explorer.newSessionInWorkspace') : t('explorer.workspaceOffline')}
             aria-label={t('explorer.newSessionInWorkspace')}
             disabled={!w.online}
-            className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
             onClick={(e) => {
               e.stopPropagation()
               if (!w.online) return
@@ -1087,7 +1112,7 @@ function WorkspaceRow({
             data-testid={`workspace-info-${w.workspaceId}`}
             title={t('explorer.workspaceInfo')}
             aria-label={t('explorer.workspaceInfo')}
-            className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation()
               if (w.workspaceId !== null) onWorkspaceInfo?.(w.workspaceId)
@@ -1102,7 +1127,7 @@ function WorkspaceRow({
             data-testid={`workspace-hide-${w.workspaceId}`}
             title={t('explorer.hideWorkspace')}
             aria-label={t('explorer.hideWorkspaceAria', { workspaceId: w.workspaceId })}
-            className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation()
               if (w.workspaceId !== null) onHideWorkspace(w.workspaceId)
@@ -1180,9 +1205,9 @@ function SessionRow({
       data-selected={selected ? 'true' : 'false'}
       aria-current={selected ? 'page' : undefined}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden rounded-lg px-2 py-1 transition-colors',
-        'hover:bg-accent/32',
-        selected && 'bg-accent/60',
+        'group relative min-w-0 cursor-pointer overflow-hidden rounded-2xl px-3 py-2 transition-[background-color,box-shadow,color]',
+        'hover:bg-muted/45',
+        selected && 'bg-muted/60',
         EXPLORER_ROW_GRID,
       )}
       onClick={() => {
@@ -1234,7 +1259,7 @@ function SessionRow({
         {s.children.length > 0 ? (
           <button
             type="button"
-            className="flex h-5 w-4 flex-none items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex h-5 w-4 flex-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
             title={node.isOpen ? t('explorer.collapseSubAgents') : t('explorer.expandSubAgents')}
             aria-label={node.isOpen ? t('explorer.collapseSubAgents') : t('explorer.expandSubAgents')}
             data-testid="session-children-toggle"
@@ -1284,7 +1309,7 @@ function SessionRow({
         <div
           className={cn(
             'min-w-0 truncate font-medium leading-5',
-            selected ? 'text-foreground' : 'text-foreground/90',
+            selected ? 'text-foreground' : 'text-foreground/88',
           )}
           style={{ fontSize: fontSizePx, lineHeight: 1.4 }}
           title={currentCwd || t('explorer.doubleClickRename')}
@@ -1301,7 +1326,7 @@ function SessionRow({
             title={t('common.more')}
             aria-label={t('common.more')}
             aria-expanded={touchMenuPosition !== null}
-            className="ak-session-more-button hidden h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/45 hover:text-foreground sm:h-6 sm:w-6"
+            className="ak-session-more-button hidden h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -1323,10 +1348,10 @@ function SessionRow({
                 data-testid="session-action-menu"
                 onClick={(e) => e.stopPropagation()}
               >
-                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-sm hover:bg-accent" onClick={() => { setTouchMenuPosition(null); if (!renameDisabled) onStartEdit(s) }}><Pencil className="h-4 w-4" />{t('explorer.renameSession')}</button>
-                {onOpenSessionInfo ? <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-sm hover:bg-accent" onClick={() => { setTouchMenuPosition(null); onOpenSessionInfo(s.sessionId) }}><Info className="h-4 w-4" />{t('explorer.sessionInfoTitle')}</button> : null}
-                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-sm hover:bg-accent" onClick={() => { setTouchMenuPosition(null); onHideSession(s.sessionId) }}><EyeOff className="h-4 w-4" />{t('explorer.hideSession')}</button>
-                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-sm text-destructive hover:bg-destructive/10" onClick={() => { setTouchMenuPosition(null); onDeleteRequest(s) }}><Trash2 className="h-4 w-4" />{t('explorer.deleteSessionTitle')}</button>
+                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); if (!renameDisabled) onStartEdit(s) }}><Pencil className="h-4 w-4" />{t('explorer.renameSession')}</button>
+                {onOpenSessionInfo ? <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onOpenSessionInfo(s.sessionId) }}><Info className="h-4 w-4" />{t('explorer.sessionInfoTitle')}</button> : null}
+                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onHideSession(s.sessionId) }}><EyeOff className="h-4 w-4" />{t('explorer.hideSession')}</button>
+                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10" onClick={() => { setTouchMenuPosition(null); onDeleteRequest(s) }}><Trash2 className="h-4 w-4" />{t('explorer.deleteSessionTitle')}</button>
               </div>
             </>,
             document.body,
@@ -1346,7 +1371,7 @@ function SessionRow({
             title={t('explorer.renameSession')}
             aria-label={t('explorer.renameSessionAria', { sessionId: s.sessionId })}
             disabled={renameDisabled}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/45 hover:text-foreground sm:h-6 sm:w-6"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -1364,7 +1389,7 @@ function SessionRow({
               data-testid="session-info-button"
               title={t('explorer.sessionInfoTitle')}
               aria-label={t('explorer.sessionInfoAria', { sessionId: s.sessionId })}
-              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/45 hover:text-foreground sm:h-6 sm:w-6"
+              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
             >
               <Info className="h-3.5 w-3.5" strokeWidth={2.2} />
             </Button>
@@ -1382,7 +1407,7 @@ function SessionRow({
             data-testid="session-hide-button"
             title={t('explorer.hideSession')}
             aria-label={t('explorer.hideSessionAria', { sessionId: s.sessionId })}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/45 hover:text-foreground sm:h-6 sm:w-6"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
           >
             <EyeOff className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -1405,7 +1430,7 @@ function SessionRow({
           </Button>
         </div>
       )}
-      <div className="ak-touch-hide pointer-events-none col-start-4 row-start-1 flex flex-none items-center justify-end whitespace-nowrap text-[0.6875rem] leading-4 text-muted-foreground group-hover:opacity-0">
+      <div className="ak-touch-hide pointer-events-none col-start-4 row-start-1 flex flex-none items-center justify-end whitespace-nowrap text-[0.6875rem] leading-4 text-muted-foreground/85 group-hover:opacity-0">
         <span className="inline-flex flex-none items-center gap-1 whitespace-nowrap tabular-nums opacity-70">
           <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
           {formatWhen(lastActivityIso, t, minuteNow * 60_000)}
@@ -1647,6 +1672,7 @@ function areExplorerPropsEqual(prev: Props, next: Props): boolean {
   return prev.loading === next.loading &&
     prev.selectedSessionId === next.selectedSessionId &&
     prev.embeddedHeader === next.embeddedHeader &&
+    prev.headerLeading === next.headerLeading &&
     prev.fontSizePx === next.fontSizePx &&
     prev.onSelect === next.onSelect &&
     prev.onClearSelection === next.onClearSelection &&
@@ -1657,6 +1683,7 @@ function areExplorerPropsEqual(prev: Props, next: Props): boolean {
     prev.onRenameWorkspace === next.onRenameWorkspace &&
     prev.onOpenSessionInfo === next.onOpenSessionInfo &&
     prev.onWorkspaceInfo === next.onWorkspaceInfo &&
+    prev.onOpenWorkspaceTerminal === next.onOpenWorkspaceTerminal &&
     prev.onCollapse === next.onCollapse &&
     prev.previewStore === next.previewStore &&
     prev.getCachedSessionView === next.getCachedSessionView &&

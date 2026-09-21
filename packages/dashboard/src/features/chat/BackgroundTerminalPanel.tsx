@@ -108,18 +108,11 @@ export function BackgroundShellsButton({
               : t('chat.backgroundShells.titleTotal', { scope: scopeLabel, total: rows.length })
           }
           className={cn(
-            'inline-flex h-9 flex-none items-center gap-1.5 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none transition-colors hover:bg-accent sm:h-7',
+            'inline-flex h-11 w-11 flex-none items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground shadow-none transition-colors hover:bg-accent sm:h-9 sm:w-9',
             running > 0 && 'text-sky-700 dark:text-sky-300',
           )}
         >
-          <TerminalSquare className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-          {visibleRows.length > 0 ? (
-            <span className="tabular-nums">
-              {visibleRows.length} <span className="hidden sm:inline">{t('chat.backgroundShells.shell', { count: visibleRows.length }).replace(/^\d+\s*/, '')}</span>
-            </span>
-          ) : (
-            <span className="hidden sm:inline">{t('chat.backgroundShells.shell', { count: 0 }).replace(/^\d+\s*/, '')}</span>
-          )}
+          <TerminalSquare className="h-4 w-4 flex-none" aria-hidden="true" />
           {running > 0 ? (
             <span
               className="h-1.5 w-1.5 flex-none rounded-full bg-sky-500 shadow-[0_0_0_2px_hsl(var(--background))]"

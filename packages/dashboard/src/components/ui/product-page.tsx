@@ -6,7 +6,7 @@ export function ProductPage({ children, className, testId }: { children: ReactNo
   return <main className={cn('ak-workspace-canvas flex h-full min-h-0 flex-col overflow-auto', className)} data-testid={testId}>{children}</main>
 }
 
-export function ProductPageHeader({ eyebrow = 'Agent RunLab', title, description, actions, titleTestId }: { eyebrow?: ReactNode; title: ReactNode; description?: ReactNode; actions?: ReactNode; titleTestId?: string }): JSX.Element {
+export function ProductPageHeader({ eyebrow = 'Kala', title, description, actions, titleTestId }: { eyebrow?: ReactNode; title: ReactNode; description?: ReactNode; actions?: ReactNode; titleTestId?: string }): JSX.Element {
   return (
     <header className="mx-auto flex w-full max-w-[96rem] flex-none flex-col gap-4 px-4 pb-3 pt-5 sm:px-6 sm:pt-6 lg:flex-row lg:items-end lg:justify-between lg:px-8">
       <div className="min-w-0">

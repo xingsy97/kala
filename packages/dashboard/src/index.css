@@ -3,6 +3,64 @@
 @tailwind utilities;
 
 @layer components {
+  .ak-explorer-surface {
+    container-type: inline-size;
+  }
+
+  .ak-sidebar-wordmark {
+    width: clamp(2.5rem, 14cqi, 4rem);
+  }
+
+  .ak-product-switcher-menu {
+    width: min(16rem, calc(100cqi - 1.5rem));
+  }
+
+  .ak-product-switcher-adaptive > summary {
+    width: 2.25rem;
+    justify-content: center;
+  }
+
+  .ak-product-switcher-adaptive .ak-product-switcher-label,
+  .ak-product-switcher-adaptive .ak-product-switcher-chevron {
+    display: none;
+  }
+
+  /* Preserve the primary New Chat label at normal sidebar widths. */
+  @container (max-width: 16rem) {
+    .ak-primary-action-group {
+      flex: 0 0 auto !important;
+    }
+
+    .ak-product-switcher-adaptive > summary,
+    .ak-new-chat-button,
+    .ak-explorer-utility-action {
+      width: 36px !important;
+      height: 36px !important;
+      flex: 0 0 36px !important;
+    }
+
+    .ak-new-chat-button {
+      justify-content: center;
+      padding-inline: 0;
+    }
+
+    .ak-new-chat-label {
+      display: none;
+    }
+  }
+
+  @container (min-width: 34rem) {
+    .ak-product-switcher-adaptive > summary {
+      width: 7.5rem;
+      justify-content: flex-start;
+    }
+
+    .ak-product-switcher-adaptive .ak-product-switcher-label,
+    .ak-product-switcher-adaptive .ak-product-switcher-chevron {
+      display: block;
+    }
+  }
+
   .ak-chat-container {
     max-width: min(var(--ak-chat-content-width, 84rem), 100%);
     padding-left: var(--ak-chat-side-space, 1rem);
@@ -201,13 +259,15 @@
   }
 
   .ak-navigation-surface {
-    border: 1px solid hsl(var(--sidebar-border) / 0.34);
+    border: 1px solid hsl(var(--border) / 0.36);
     border-radius: calc(var(--radius) + 0.35rem);
-    background: hsl(var(--sidebar) / 0.78);
-    box-shadow: 0 1px 2px hsl(220 20% 12% / 0.025);
+    background: hsl(var(--card) / 0.78);
+    box-shadow: 0 1px 2px hsl(220 20% 12% / 0.035);
+    backdrop-filter: blur(16px);
   }
 
   .dark .ak-navigation-surface {
+    background: hsl(var(--card) / 0.74);
     box-shadow: 0 1px 2px hsl(0 0% 0% / 0.18);
   }
 
@@ -236,16 +296,13 @@
   }
 
   .ak-global-topbar {
-    --background: 220 12% 8%;
-    --foreground: 220 12% 92%;
-    --card: 220 10% 13%;
-    --muted-foreground: 220 8% 68%;
-    --accent: 220 9% 22%;
-    --accent-foreground: 220 12% 92%;
-    --border: 220 8% 22%;
     color: hsl(var(--foreground));
     border-bottom: 1px solid hsl(var(--border) / 0.58);
-    background: hsl(220 12% 8% / 0.94);
+    background: hsl(var(--card) / 0.94);
+    box-shadow: 0 1px 2px hsl(220 20% 12% / 0.045);
+  }
+
+  .dark .ak-global-topbar {
     box-shadow: 0 1px 0 hsl(0 0% 100% / 0.04);
   }
 

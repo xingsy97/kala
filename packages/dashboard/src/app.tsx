@@ -1,5 +1,6 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, ChevronRight, ChevronUp, Clock3, Eraser, FolderOpen, GitBranch, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
+import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Archive, Boxes, ChevronDown, ChevronRight, ChevronUp, Clock3, Eraser, FolderOpen, GitBranch, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, SquareTerminal, Sun, Workflow, X } from 'lucide-react'
 import { HelpHint } from './components/ui/help-hint.js'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
@@ -72,18 +73,17 @@ import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
 import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDialog.js'
 import { ExecutorPairingPrompt } from './features/explorer/ExecutorPairingPrompt.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
-import { TasksButton } from './features/chat/TasksButton.js'
-import { tasksFromMessages, tasksFromTimeline } from './features/chat/tasks-from-timeline.js'
-import { taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
+import { taskGraphFromMessages, taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
 import { TaskGraphButton } from './features/chat/TaskGraphButton.js'
-import { Explorer, NewChatButton, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
+import { Explorer, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
+import type { WorkspaceNode } from './features/explorer/tree-model.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { SessionPreviewStore } from './features/explorer/session-preview-store.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { RightPanel, type RightPanelTab } from './features/right-panel/RightPanel.js'
 import { SessionTabStrip } from './features/session-tabs/SessionTabStrip.js'
 import { useSessionTabs } from './session-tabs.js'
-import { AppShellGlobalActions, AppShellNav } from './app-shell/AppShellNav.js'
+import { DesktopSessionRail, ProductSwitcher, SidebarBrand, SidebarGlobalActions } from './app-shell/AppShellNav.js'
 import { parseSessionDeepLink, useAppSection, useSessionDeepLink, type AppSection } from './app-shell/section.js'
 import { useRuntimeDeployment } from './runtime-capabilities.js'
 import { configureArtifactClient } from './features/artifacts/artifact-client.js'
@@ -163,7 +163,6 @@ import {
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   PREF_MODEL,
   PREF_SESSION_EXPLORER_FONT_SIZE,
-  PREF_TOPBAR_OPEN,
   PREF_KEEP_SCREEN_AWAKE,
   PREF_AGENT_RUNTIME,
   writeStringPref,
@@ -252,7 +251,6 @@ export function App(): JSX.Element {
   }, [authSession.checked, authSession.session, privateCloudMode])
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
   const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
-  const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string; workspaceId?: string } | null
   >(null)
@@ -272,7 +270,9 @@ export function App(): JSX.Element {
   const [slashDeletePhrase, setSlashDeletePhrase] = useState('')
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false)
+  const [userMessageNavigationPortalTarget, setUserMessageNavigationPortalTarget] = useState<HTMLDivElement | null>(null)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
+  const [workspaceTerminal, setWorkspaceTerminal] = useState<{ workspaceId: string; workspaceName: string; sessionId: string; cwd?: string } | null>(null)
   const [workspaceFileViewTarget, setWorkspaceFileViewTarget] = useState<WorkspaceFileTarget | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const [awaitingAck, setAwaitingAck] = useState(false)
@@ -1228,12 +1228,11 @@ export function App(): JSX.Element {
     () => backgroundTerminalTasks(session.timeline),
     [session.timeline],
   )
-  const taskItems = useMemo(
-    () => tasksFromMessages(session.state?.messages ?? [], tasksFromTimeline(session.timeline)),
+  const agentProgress = useMemo(() => deriveAgentProgress(session.state, session.timeline), [session.state, session.timeline])
+  const taskGraph = useMemo(
+    () => taskGraphFromMessages(session.state?.messages ?? [], taskGraphFromTimeline(session.timeline)),
     [session.state?.messages, session.timeline],
   )
-  const agentProgress = useMemo(() => deriveAgentProgress(session.state, session.timeline), [session.state, session.timeline])
-  const taskGraph = useMemo(() => taskGraphFromTimeline(session.timeline), [session.timeline])
   useRunningTitleIndicator(selectedSessionActivity.derived.isRunning)
   // Coarse status for the indicators (sidebar + title): collapses the rapid
   // thinking↔executing_tools flips within a running turn so those indicators
@@ -1729,71 +1728,44 @@ export function App(): JSX.Element {
     )
   }
 
-  const collapsedSessionTopbar = !topbarOpen && hasSelectedSession ? (
-    <WorkbenchToolbar
-      placement="topbar"
-      brand={<TopbarBrand />}
-      rightSlot={(
-        <AppShellGlobalActions
-          connectionStatus={<ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} compact />}
-          onOpenSettings={() => setSettingsOpen(true)}
-          account={account}
-          evaluationUrl={runtimeCapabilities.pipeline ? runtimeDeployment.evaluationUrl : undefined}
-          accountLoading={privateCloudMode && authSession.loading}
-          onOpenAccount={privateCloudMode ? () => setAccountCenterOpen(true) : undefined}
-          onOpenAdmin={authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined}
-          onSignOut={privateCloudMode ? () => {
-            authSession.announceLogout()
-            void sessionViewCache.clearDurable()
-          } : undefined}
-        />
-      )}
-      sessionLabel={sessionLabel}
-      sessionActivityStatus={indicatorActiveSessionStatus}
-      cwd={currentSession?.workspaceId ? currentCwd : ''}
-      simpleChat={!currentSession?.workspaceId}
-      onOpenTopbar={() => setTopbarOpen(true)}
-      topbarAvailable
-      onOpenExplorer={() => {
-        if (wideLayout) setExplorerOpen(true)
-        else setExplorerDrawerOpen(true)
-      }}
-      explorerAvailable={!wideLayout || !explorerOpen}
-      onOpenSidebar={() => {
-        if (wideLayout) setInspectorOpen(true)
-        else setInspectorDrawerOpen(true)
-      }}
-      sidebarAvailable={!wideLayout || !inspectorOpen}
-      onChangeCwd={runtimeCapabilities.workspace && currentAgentRuntimeCapabilities.cwdMutation && currentSession?.workspaceId ? openCwdDialog : undefined}
-      sessionSelected
-      sessionTabs={sessionTabsNode}
-    />
-  ) : undefined
+  const openAccount = privateCloudMode ? () => setAccountCenterOpen(true) : undefined
+  const openAdmin = authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined
+  const announceSignOut = privateCloudMode ? () => {
+    authSession.announceLogout()
+    void sessionViewCache.clearDurable()
+  } : undefined
+  const evaluationUrl = runtimeCapabilities.pipeline ? runtimeDeployment.evaluationUrl : undefined
+  const openWorkspaceTerminal = (workspace: WorkspaceNode): void => {
+    if (!workspace.workspaceId || !workspace.online) return
+    const owner = workspace.children[0]
+    if (!owner) return
+    setWorkspaceTerminal({
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.name,
+      sessionId: `workspace-terminal:${owner.sessionId}:${randomId()}`,
+      cwd: owner.currentCwd ?? workspace.workingDir,
+    })
+  }
 
   return (
     <PwaLifecycleHost>
-    <div className="ak-app-shell ak-workspace-canvas flex flex-col text-foreground">
-      {topbarOpen || !hasSelectedSession || collapsedSessionTopbar ? <AppShellNav
-        section={section}
-        onSelect={handleSectionSelect}
-        onOpenSettings={() => setSettingsOpen(true)}
-        connectionStatus={hasSelectedSession ? <ConnectionStatus key={activeSessionId} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession} /> : null}
-        collapsed={!topbarOpen}
-        collapsedContent={collapsedSessionTopbar}
-        onCollapse={() => setTopbarOpen(false)}
-        onExpand={() => setTopbarOpen(true)}
-        account={account}
-        evaluationUrl={runtimeCapabilities.pipeline ? runtimeDeployment.evaluationUrl : undefined}
-        accountLoading={privateCloudMode && authSession.loading}
-        onOpenAccount={privateCloudMode ? () => setAccountCenterOpen(true) : undefined}
-        onOpenAdmin={authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined}
-        onSignOut={privateCloudMode ? () => {
-          authSession.announceLogout()
-          void sessionViewCache.clearDurable()
-          // Native form submission owns the authoritative POST + redirect. This
-          // callback is progressive enhancement for cache and cross-tab cleanup.
-        } : undefined}
-      /> : null}
+    <ConnectionStatusProvider enabled={hasSelectedSession} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession}>
+    <div className="ak-app-shell ak-workspace-canvas flex flex-row text-foreground">
+      {wideLayout && (section !== 'agent' || !explorerOpen) ? (
+        <DesktopSessionRail
+          section={section}
+          onSelectSection={handleSectionSelect}
+          connectionStatus={hasSelectedSession ? <ConnectionStatusEntry appearance="brand" triggerId="desktop-rail" /> : undefined}
+          onExpand={section === 'agent' ? () => setExplorerOpen(true) : undefined}
+          onNewSession={newSession}
+          onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined}
+          globalActions={<SidebarGlobalActions orientation="vertical" onOpenSettings={() => setSettingsOpen(true)} account={account} accountLoading={privateCloudMode && authSession.loading} onOpenAccount={openAccount} onOpenAdmin={openAdmin} onSignOut={announceSignOut} evaluationUrl={evaluationUrl} />}
+        />
+      ) : null}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {!wideLayout && section !== 'agent' ? (
+        <NarrowContextualRow section={section} onOpenNavigation={() => setExplorerDrawerOpen(true)} />
+      ) : null}
       {accountCenterOpen && account ? <AccountCenter profile={account} organization={authSession.session?.authenticated ? authSession.session.organization : undefined} onClose={() => setAccountCenterOpen(false)} /> : null}
       {adminCenterOpen ? <AdminCenter onClose={() => setAdminCenterOpen(false)} /> : null}
       <PwaUpdateGlobalBanner />
@@ -1826,7 +1798,8 @@ export function App(): JSX.Element {
           <MemoPage />
         </Suspense>
       ) : (
-      <ResizablePanelGroup direction="horizontal" dir="ltr" autoSaveId="ak-outer-cols-v6" className="min-w-0 max-w-full overflow-hidden">
+      <div className="flex h-full min-h-0 min-w-0 max-w-full overflow-hidden">
+        <ResizablePanelGroup direction="horizontal" dir="ltr" autoSaveId="ak-outer-cols-v6" className="min-w-0 max-w-full flex-1 overflow-hidden">
         {wideLayout ? (
           <>
             {explorerOpen ? (
@@ -1837,18 +1810,23 @@ export function App(): JSX.Element {
                   defaultSize={20}
                   minSize={12}
                   maxSize={45}
-                  className="min-w-[220px] bg-transparent text-sidebar-foreground"
+                  className="min-w-[240px] bg-card/80 text-foreground"
                   data-testid="explorer-panel"
                 >
-                  <div className="ak-motion-slide-left h-full min-h-0 p-3 pr-1">
-                    <div className="ak-navigation-surface flex h-full min-h-0 flex-col overflow-hidden" data-testid="explorer-surface">
-                      <div className="flex h-11 flex-none items-center border-b border-sidebar-border/40 bg-sidebar/65 px-2 backdrop-blur">
-                        <NewChatButton onNewChat={() => newSession()} />
-                        <span className="min-w-0 flex-1" />
-                        <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
+                  <div className="ak-motion-slide-left h-full min-h-0">
+                    <div className="ak-explorer-surface flex h-full min-h-0 flex-col overflow-hidden border-r border-border/35 bg-card/80" data-testid="explorer-surface">
+                      <div className="flex flex-none flex-col px-3 py-2">
+                        <div className="flex h-9 items-center gap-2">
+                          <SidebarBrand connectionStatus={hasSelectedSession ? <ConnectionStatusEntry appearance="brand" triggerId="desktop-sidebar" /> : null} />
+                          <span className="min-w-0 flex-1" />
+                          <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
+                        </div>
                       </div>
                       <div className="min-h-0 flex-1 overflow-hidden">
-                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} />
+                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader headerLeading={<ProductSwitcher section={section} onSelect={handleSectionSelect} adaptive />} fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} onOpenWorkspaceTerminal={openWorkspaceTerminal} />
+                      </div>
+                      <div className="flex flex-none justify-end border-t border-border/35 px-3 py-2" data-testid="desktop-sidebar-footer">
+                        <SidebarGlobalActions accountPlacement="footer" onOpenSettings={() => setSettingsOpen(true)} account={account} accountLoading={privateCloudMode && authSession.loading} onOpenAccount={openAccount} onOpenAdmin={openAdmin} onSignOut={announceSignOut} evaluationUrl={evaluationUrl} />
                       </div>
                     </div>
                   </div>
@@ -1858,7 +1836,7 @@ export function App(): JSX.Element {
                   withHandle
                   aria-label={t('app.resizeExplorer')}
                   title={t('app.resizeExplorer')}
-                  className="mx-0.5 w-2 bg-transparent after:w-3 hover:bg-sidebar-border/35 focus-visible:bg-sidebar-border/45"
+                  className="w-2 bg-transparent after:w-3 hover:bg-border/35 focus-visible:bg-border/45"
                 />
               </>
             ) : null}
@@ -1872,19 +1850,19 @@ export function App(): JSX.Element {
           className="min-w-0 bg-background"
           data-testid="workbench-panel"
         >
-          <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
-            {topbarOpen ? <WorkbenchToolbar
+          <div className="relative h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
+            {shouldRenderWorkbenchToolbar(wideLayout, explorerOpen) ? <WorkbenchToolbar
               sessionLabel={sessionLabel}
               sessionActivityStatus={indicatorActiveSessionStatus}
               cwd={currentSession?.workspaceId ? currentCwd : ''}
               simpleChat={hasSelectedSession && !currentSession?.workspaceId}
-              onOpenTopbar={() => setTopbarOpen(true)}
-              topbarAvailable={!topbarOpen}
+              onOpenTopbar={() => {}}
+              topbarAvailable={false}
               onOpenExplorer={() => {
                 if (wideLayout) setExplorerOpen(true)
                 else setExplorerDrawerOpen(true)
               }}
-              explorerAvailable={!wideLayout || !explorerOpen}
+              explorerAvailable={!wideLayout}
               onOpenSidebar={() => {
                 if (wideLayout) setInspectorOpen(true)
                 else setInspectorDrawerOpen(true)
@@ -1953,11 +1931,24 @@ export function App(): JSX.Element {
                     >
                       <ChatPanel
                         sessionId={activeSessionId}
+                        attachmentHost={hostEndpoint.url}
+                        attachmentToken={config.token}
                         items={chatItems}
                         highlightIndex={highlightIndex}
                         pinnedToBottom={chatPinnedToBottom}
                         onPinnedChange={setChatPinnedToBottom}
                         scrollToBottomToken={chatScrollToBottomToken}
+                        userMessageNavigationPortalTarget={userMessageNavigationPortalTarget}
+                        topRightAccessory={wideLayout && explorerOpen && (isDesktopClient() || !inspectorOpen) ? (
+                          <div className="flex items-center gap-2">
+                            {!inspectorOpen ? (
+                              <Button variant="outline" size="icon" onClick={() => setInspectorOpen(true)} title={t('app.openInspector')} aria-label={t('app.openInspector')} data-testid="sidebar-toggle" className="h-9 w-9 rounded-full border-border/55 bg-background/90 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground">
+                                <PanelRight className="h-4 w-4" aria-hidden />
+                              </Button>
+                            ) : null}
+                            {isDesktopClient() ? <DesktopWindowControlsSlot /> : null}
+                          </div>
+                        ) : null}
                         compactStatus={compactStatus}
                         liveToolActivityTailCount={liveToolActivityTailCount}
                         toolExecutionStartedAt={session.toolExecutionStartedAt}
@@ -2151,6 +2142,12 @@ export function App(): JSX.Element {
                           onListFiles={listWorkspaceFiles}
                           onReadFile={readWorkspaceFile}
                           awaitingAck={awaitingAck}
+                          leftAccessory={
+                            <div
+                              ref={setUserMessageNavigationPortalTarget}
+                              data-testid="composer-user-message-navigation-slot"
+                            />
+                          }
                           footerExtras={
                             <>
                               <BackgroundShellsButton
@@ -2160,9 +2157,9 @@ export function App(): JSX.Element {
                                 fallbackTasks={backgroundTasks}
                               />
                               <TaskGraphButton graph={taskGraph} />
-                              {!taskGraph ? <TasksButton todos={taskItems} /> : null}
                             </>
                           }
+                          simpleFooterExtras={<TaskGraphButton graph={taskGraph} />}
                           onUploadFiles={async (files) => {
                             if (activeSessionId === null) throw new Error('No active Session for attachment upload')
                             const uploaded: ReferencedFileContent[] = []
@@ -2302,7 +2299,15 @@ export function App(): JSX.Element {
                               requests={session.pendingAskUserChoices}
                               onChoose={(callId, value) => {
                                 if (!session.socket || activeSessionId === null) return
-                                void respondAskUserChoice(session.socket, activeSessionId, callId, value)
+                                void respondAskUserChoice(session.socket, activeSessionId, callId, { value })
+                              }}
+                              onCustomText={(callId, customText) => {
+                                if (!session.socket || activeSessionId === null) return
+                                void respondAskUserChoice(session.socket, activeSessionId, callId, { customText })
+                              }}
+                              onRejectAll={() => {
+                                if (!session.socket || activeSessionId === null) return
+                                cancelSession(session.socket, activeSessionId)
                               }}
                             />
                           )
@@ -2354,33 +2359,41 @@ export function App(): JSX.Element {
             ) : null}
           </div>
         </ResizablePanel>
-      </ResizablePanelGroup>
+        </ResizablePanelGroup>
+      </div>
       )}
-      <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
+      <Dialog open={explorerDrawerOpen && !wideLayout} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
-          className="ak-drawer-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none translate-x-0 translate-y-0 gap-0 overflow-hidden border-0 bg-sidebar p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-2xl sm:w-96 sm:rounded-r-3xl"
+          className="ak-drawer-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-[calc(100vw-1rem)] max-w-none translate-x-0 translate-y-0 gap-0 overflow-hidden border-0 bg-card p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-2xl sm:w-96 sm:rounded-r-3xl"
           data-testid="explorer-drawer"
         >
           <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
-          <div className="flex h-full min-h-0 flex-col bg-sidebar pb-[env(safe-area-inset-bottom)] text-sidebar-foreground">
-            <div className="flex h-11 flex-none items-center gap-2 border-b border-sidebar-border px-3">
-              <DialogTitle className="flex items-center gap-1 text-sm">{t('common.explorer')}<HelpHint label={t('common.explorer')}>{t('app.explorerDescription')}</HelpHint></DialogTitle>
-              <NewChatButton onNewChat={() => newSessionFromExplorerDrawer()} />
-              <span className="min-w-0 flex-1" />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 flex-none text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                title={t('app.closeExplorer')}
-                aria-label={t('app.closeExplorer')}
-                onClick={() => setExplorerDrawerOpen(false)}
-              >
-                <PanelLeftClose className="h-4 w-4" />
-              </Button>
+          <div className="flex h-full min-h-0 flex-col bg-card pb-[env(safe-area-inset-bottom)] text-foreground">
+            <div className="flex flex-none flex-col gap-3 border-b border-border/25 bg-card/35 px-3 pb-3 pt-3">
+              <div className="flex h-11 items-center gap-2">
+                <DialogTitle asChild><SidebarBrand connectionStatus={hasSelectedSession ? <ConnectionStatusEntry appearance="brand" triggerId="mobile-drawer" /> : null} /></DialogTitle>
+                <span className="min-w-0 flex-1" />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-11 w-11 flex-none rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title={t('app.closeExplorer')}
+                  aria-label={t('app.closeExplorer')}
+                  onClick={() => setExplorerDrawerOpen(false)}
+                >
+                  <PanelLeftClose className="h-5 w-5" />
+                </Button>
+              </div>
+              <ProductSwitcher section={section} onSelect={(next) => { handleSectionSelect(next); setExplorerDrawerOpen(false) }} />
             </div>
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={runtimeCapabilities.workspace ? connectWorkspaceFromExplorerDrawer : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} />
+            {section === 'agent' ? (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={runtimeCapabilities.workspace ? connectWorkspaceFromExplorerDrawer : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} />
+              </div>
+            ) : <div className="min-h-0 flex-1" />}
+            <div className="flex min-h-14 flex-none items-center justify-end border-t border-border/35 px-3 py-2" data-testid="narrow-drawer-footer">
+              <SidebarGlobalActions accountPlacement="footer" onOpenSettings={() => { setExplorerDrawerOpen(false); setSettingsOpen(true) }} account={account} accountLoading={privateCloudMode && authSession.loading} onOpenAccount={openAccount} onOpenAdmin={openAdmin} onSignOut={announceSignOut} evaluationUrl={evaluationUrl} />
             </div>
           </div>
         </DialogContent>
@@ -2557,6 +2570,30 @@ export function App(): JSX.Element {
         onRename={(name) => renameWorkspaceAt(workspaceInfoId ?? '', name)}
         onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }}
       />
+      <Dialog open={workspaceTerminal !== null} onOpenChange={(open) => { if (!open) setWorkspaceTerminal(null) }}>
+        <DialogContent className="flex h-[min(78vh,720px)] w-[min(92vw,1100px)] max-w-none flex-col overflow-hidden p-0" data-testid="workspace-terminal-dialog">
+          <DialogHeader className="flex-none border-b border-border/35 px-4 py-3">
+            <DialogTitle>{t('terminal.workspaceTitle', { workspace: workspaceTerminal?.workspaceName ?? '' })}</DialogTitle>
+            <DialogDescription>{workspaceTerminal?.cwd ?? ''}</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1">
+            {workspaceTerminal ? (
+              <Suspense fallback={<PageLoadingFallback />}>
+                <SessionTerminalPanel
+                  key={`${workspaceTerminal.workspaceId}:${workspaceTerminal.sessionId}`}
+                  socket={session.socket}
+                  workspaceId={workspaceTerminal.workspaceId}
+                  sessionId={workspaceTerminal.sessionId}
+                  cwd={workspaceTerminal.cwd}
+                  online
+                  autoStart
+                  destroyOnUnmount
+                />
+              </Suspense>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Suspense fallback={null}>
         <WorkspaceFileViewDialog
           open={workspaceFileViewTarget !== null}
@@ -2600,7 +2637,9 @@ export function App(): JSX.Element {
         }}
       />
       </div>
+      </div>
     </div>
+    </ConnectionStatusProvider>
     </PwaLifecycleHost>
   )
 }
@@ -2647,17 +2686,15 @@ function CapabilityUnavailable({ title }: { title: string }): JSX.Element {
   return <div className="grid h-full place-items-center p-6"><ProductState kind="degraded" title={title} description="The configured Host does not advertise this product capability." /></div>
 }
 
-function TopbarBrand(): JSX.Element {
+export function NarrowContextualRow({ section, onOpenNavigation }: { section: AppSection; onOpenNavigation(): void }): JSX.Element {
+  const { t } = useTranslation()
   return (
-    <span aria-label="Agent RunLab" className="group mr-2 hidden min-w-0 flex-none items-center gap-2 text-foreground sm:flex">
-      <img
-        src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
-        alt=""
-        className="h-5 w-5 text-foreground/90"
-        aria-hidden
-      />
-      <span className="truncate text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">Agent RunLab</span>
-    </span>
+    <header className="flex min-h-14 flex-none items-center gap-2 border-b border-border/30 bg-card/70 px-2 backdrop-blur-xl sm:px-3" data-testid="narrow-contextual-row">
+      <Button type="button" variant="ghost" size="icon" className="h-11 w-11 flex-none rounded-full border border-border/45 bg-background/55 shadow-sm" onClick={onOpenNavigation} title={t('appShell.nav.aria')} aria-label={t('appShell.nav.aria')} data-testid="narrow-navigation-opener">
+        <Menu className="h-5 w-5" aria-hidden />
+      </Button>
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{t(`appShell.nav.${section}`)}</span>
+    </header>
   )
 }
 
@@ -2681,6 +2718,10 @@ export function sessionDirectoryIsLoading(sessionsLoaded: boolean): boolean {
 }
 
 export type SessionDirectoryLoadingOwner = 'explorer' | 'workbench' | null
+
+export function shouldRenderWorkbenchToolbar(wideLayout: boolean, explorerOpen: boolean): boolean {
+  return !wideLayout || !explorerOpen
+}
 
 /**
  * Gives the cold directory load one visible owner. The Explorer owns it while
@@ -2866,7 +2907,7 @@ function SidebarCollapseButton({ onCollapse }: { onCollapse(): void }): JSX.Elem
       type="button"
       variant="ghost"
       size="icon"
-      className="h-7 w-7 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+      className="h-9 w-9 rounded-2xl text-muted-foreground hover:bg-muted hover:text-foreground"
       title={t('app.hideSidebar')}
       aria-label={t('app.hideSidebar')}
       data-testid="sidebar-collapse-button"
@@ -2943,6 +2984,10 @@ function SessionDirectoryPendingArea({ active }: { active: boolean }): JSX.Eleme
   )
 }
 
+function DesktopWindowControlsSlot(): JSX.Element {
+  return <div className="h-8 w-[132px] flex-none" data-kala-desktop-window-controls-slot="true" data-testid="desktop-window-controls-slot" />
+}
+
 export function WorkbenchToolbar({
   sessionLabel,
   sessionActivityStatus,
@@ -3004,22 +3049,23 @@ export function WorkbenchToolbar({
     </Button>
   ) : null
   const isTopbarPlacement = placement === 'topbar'
+  const explorerToggle = explorerAvailable ? (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onOpenExplorer}
+      title={t('app.openExplorer')}
+      aria-label={t('app.openExplorer')}
+      data-testid="explorer-toggle"
+      className="h-10 w-10 flex-none rounded-full border border-border/45 bg-background/55 shadow-sm hover:bg-accent min-[1180px]:h-9 min-[1180px]:w-9"
+    >
+      <Menu className="h-4 w-4" />
+    </Button>
+  ) : null
   const content = (
     <>
       {!isTopbarPlacement ? topbarToggle : null}
-      {explorerAvailable ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenExplorer}
-          title={t('app.openExplorer')}
-          aria-label={t('app.openExplorer')}
-          data-testid="explorer-toggle"
-          className="h-8 w-8 flex-none"
-        >
-          <Menu className="h-4 w-4" />
-        </Button>
-      ) : null}
+      {!isTopbarPlacement ? explorerToggle : null}
       <span
         className={cn(
           'inline-flex min-w-0 items-center gap-1.5',
@@ -3053,16 +3099,8 @@ export function WorkbenchToolbar({
         </Button>
       ) : null}
       {sessionTabs ? <div className={cn('ml-2 min-w-0 flex-1 overflow-hidden', placement === 'topbar' && 'hidden md:block')}>{sessionTabs}</div> : <span className="min-w-0 flex-1" />}
-      {sidebarAvailable ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onOpenSidebar}
-          title={t('app.openSidebar')}
-          aria-label={t('app.openSidebar')}
-          data-testid="sidebar-toggle"
-          className="h-8 w-8 flex-none"
-        >
+      {isTopbarPlacement && sidebarAvailable ? (
+        <Button variant="ghost" size="icon" onClick={onOpenSidebar} title={t('app.openInspector')} aria-label={t('app.openInspector')} data-testid="sidebar-toggle" className="h-9 w-9 flex-none rounded-full">
           <PanelRight className="h-4 w-4" />
         </Button>
       ) : null}
@@ -3074,23 +3112,39 @@ export function WorkbenchToolbar({
     return (
       <div className="flex h-full w-full min-w-0 flex-none items-center" data-testid="workbench-toolbar">
         <div className="ak-fused-topbar-capsule flex h-full w-full min-w-0 items-center gap-1.5 px-2 text-sm text-card-foreground backdrop-blur-xl sm:px-3">
+          {explorerToggle}
           {brand}
           {content}
+          {isDesktopClient() ? <DesktopWindowControlsSlot /> : null}
         </div>
       </div>
     )
   }
   return (
     <div
-      className="flex-none p-1.5 sm:p-2 min-[1180px]:pl-0"
+      className="flex flex-none items-start gap-1.5 p-1.5 sm:gap-2 sm:p-2 min-[1180px]:pl-0"
       data-testid="workbench-toolbar-rail"
     >
       <div
-        className="ak-titlebar-surface flex min-h-9 items-center gap-1.5 px-2 py-0.5 text-sm text-card-foreground backdrop-blur sm:gap-2 sm:px-2.5"
+        className="ak-titlebar-surface flex min-h-9 min-w-0 flex-1 items-center gap-1.5 px-2 py-0.5 text-sm text-card-foreground backdrop-blur sm:gap-2 sm:px-2.5"
         data-testid="workbench-toolbar"
       >
         {content}
+        {isDesktopClient() ? <DesktopWindowControlsSlot /> : null}
       </div>
+      {sidebarAvailable ? (
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={onOpenSidebar}
+          title={t('app.openInspector')}
+          aria-label={t('app.openInspector')}
+          data-testid="sidebar-toggle"
+          className="h-10 w-10 flex-none rounded-full border-border/55 bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground min-[1180px]:h-9 min-[1180px]:w-9"
+        >
+          <PanelRight className="h-4 w-4" />
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -3107,9 +3161,25 @@ type ConnectionHealthSample = {
   executorRequired: boolean
 }
 
-export const ConnectionStatus = memo(function ConnectionStatus({ socket, status, transport, cursor, workspaceId, executorConnected, onResync, compact = false }: { socket: DashboardSocket | null; status: string; transport?: string; cursor: number; workspaceId?: string; executorConnected: boolean; onResync(): void; compact?: boolean }): JSX.Element {
+type ConnectionStatusProps = { socket: DashboardSocket | null; status: string; transport?: string; cursor: number; workspaceId?: string; executorConnected: boolean; onResync(): void; compact?: boolean; appearance?: 'default' | 'brand'; triggerId?: string }
+type ConnectionStatusEntryOptions = Pick<ConnectionStatusProps, 'compact' | 'appearance' | 'triggerId'>
+type ConnectionStatusRenderer = (options: ConnectionStatusEntryOptions) => JSX.Element
+
+const ConnectionStatusContext = createContext<ConnectionStatusRenderer | null>(null)
+
+export const ConnectionStatus = memo(function ConnectionStatus(props: ConnectionStatusProps): JSX.Element {
+  return <ConnectionStatusProvider {...props}><ConnectionStatusEntry compact={props.compact} appearance={props.appearance} triggerId={props.triggerId} /></ConnectionStatusProvider>
+})
+
+export function ConnectionStatusEntry(options: ConnectionStatusEntryOptions): JSX.Element {
+  const sharedRenderer = useContext(ConnectionStatusContext)
+  if (!sharedRenderer) throw new Error('ConnectionStatusEntry must be rendered inside ConnectionStatusProvider')
+  return sharedRenderer(options)
+}
+
+export function ConnectionStatusProvider({ socket, status, transport, cursor, workspaceId, executorConnected, onResync, children, enabled = true }: ConnectionStatusProps & { children: ReactNode; enabled?: boolean }): JSX.Element {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
+  const [openTrigger, setOpenTrigger] = useState<string | null>(null)
   const [hostRtt, setHostRtt] = useState<number | null>(null)
   const [executorRtt, setExecutorRtt] = useState<number | null>(null)
   const [hostError, setHostError] = useState<string | null>(null)
@@ -3196,25 +3266,36 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
   }, [socket, workspaceId])
 
   useEffect(() => {
+    if (!enabled) return
     measure()
-    const onVisible = (): void => { if (!document.hidden) measure() }
-    window.addEventListener('focus', measure)
-    window.addEventListener('online', measure)
+    let scheduledProbe: number | null = null
+    const scheduleMeasure = (): void => {
+      if (scheduledProbe !== null) return
+      scheduledProbe = window.setTimeout(() => {
+        scheduledProbe = null
+        measure()
+      }, 0)
+    }
+    const onVisible = (): void => { if (!document.hidden) scheduleMeasure() }
+    window.addEventListener('focus', scheduleMeasure)
+    window.addEventListener('online', scheduleMeasure)
     document.addEventListener('visibilitychange', onVisible)
     return () => {
-      window.removeEventListener('focus', measure)
-      window.removeEventListener('online', measure)
+      window.removeEventListener('focus', scheduleMeasure)
+      window.removeEventListener('online', scheduleMeasure)
       document.removeEventListener('visibilitychange', onVisible)
+      if (scheduledProbe !== null) window.clearTimeout(scheduledProbe)
       probeGeneration.current += 1
     }
-  }, [measure])
+  }, [enabled, measure])
 
   const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, hostError, ...(executorRequired ? { executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline' } : {}), sessionCursor: cursor }
   const copy = (): void => { void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => setCopied(false)) }
   const transientProbeFailed = hostError !== null || executorRequired && executorConnected && executorError !== null
   const probeFailed = status === 'ready' && transientProbeFailed && probeFailureStreak >= CONNECTION_HEALTH_FAILURES_BEFORE_ISSUE
-  const displayStatus = probeFailed ? 'error' : status
-  const label = probeFailed ? t('connectionHealth.issue') : hostStatusLabel(status, t)
+  const executorOffline = status === 'ready' && executorRequired && !executorConnected
+  const displayStatus = probeFailed || executorOffline ? 'error' : status
+  const label = probeFailed || executorOffline ? t('connectionHealth.issue') : hostStatusLabel(status, t)
   const healthy = displayStatus === 'ready' && (!executorRequired || executorConnected)
   const failed = displayStatus === 'error' || displayStatus === 'disconnected'
   const hostTone = status === 'ready' && !hostError ? 'healthy' : hostError || status === 'disconnected' || status === 'error' ? 'failed' : 'pending'
@@ -3224,15 +3305,23 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
     : hostRtt
   const headlineText = headlineLatency !== null ? `${headlineLatency} ms` : checking ? t('connectionHealth.measuring') : '—'
 
-  return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((value) => !value)} className={cn('inline-flex h-9 items-center rounded-lg text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8', compact ? 'w-8 justify-center p-0' : 'gap-2 px-2')} data-testid="connection-status" data-status={displayStatus} data-compact={compact ? 'true' : undefined} aria-expanded={open} aria-label={compact ? `${label}${headlineText !== '—' ? ` · ${headlineText}` : ''}` : undefined} title={compact ? `${label}${headlineText !== '—' ? ` · ${headlineText}` : ''}` : undefined}>
-        <span className={cn('h-2 w-2 rounded-full', statusDot(displayStatus))} />
-        {compact ? null : <span className="hidden sm:inline">{label}</span>}
-        {compact ? null : <span className="hidden font-mono text-[0.625rem] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineText}</span>}
-      </button>
-      {open ? (
-        <div className="fixed inset-x-2 top-14 z-50 mx-auto max-w-md rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[28rem]" data-testid="connection-status-popover">
+  const renderEntry: ConnectionStatusRenderer = ({ compact = false, appearance = 'default', triggerId = 'connection-status' }) => {
+    const open = openTrigger === triggerId
+    const triggerTitle = `${label}${headlineText !== '—' ? ` · ${headlineText}` : ''}`
+    const brand = appearance === 'brand'
+    return (
+      <div className="relative flex-none">
+        <button type="button" onClick={() => setOpenTrigger((value) => value === triggerId ? null : triggerId)} className={brand ? 'inline-flex h-9 w-9 touch-manipulation items-center justify-center rounded-full transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' : cn('inline-flex h-9 items-center rounded-lg text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8', compact ? 'w-8 justify-center p-0' : 'gap-2 px-2')} data-testid={brand ? 'sidebar-connection-status' : 'connection-status'} data-trigger-id={triggerId} data-status={displayStatus} data-compact={compact ? 'true' : undefined} aria-expanded={open} aria-label={brand || compact ? triggerTitle : undefined} title={triggerTitle}>
+          {brand ? (
+            <span className={cn('flex h-8 w-8 items-center justify-center rounded-full border-2', statusRing(displayStatus))} data-testid="sidebar-connection-status-ring">
+              <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="h-6 w-6" aria-hidden />
+            </span>
+          ) : <span className={cn('h-2 w-2 rounded-full', statusDot(displayStatus))} />}
+          {brand || compact ? null : <span className="hidden sm:inline">{label}</span>}
+          {brand || compact ? null : <span className="hidden font-mono text-[0.625rem] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineText}</span>}
+        </button>
+        {open && typeof document !== 'undefined' ? createPortal(
+          <div className={cn('fixed left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] top-[max(3.5rem,calc(env(safe-area-inset-top)+3rem))] z-[100] mx-auto max-h-[calc(var(--ak-viewport-h,100dvh)-max(4rem,calc(env(safe-area-inset-top)+3.5rem))-max(0.5rem,env(safe-area-inset-bottom)))] max-w-md overflow-y-auto rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:mt-2 sm:max-h-[min(42rem,calc(100vh-5rem))] sm:w-[28rem]', brand ? cn('sm:left-3 sm:right-auto sm:top-12 sm:mx-0', triggerId === 'mobile-drawer' && 'sm:w-[22.5rem]') : 'sm:left-auto sm:right-3 sm:top-12 sm:mx-0')} data-testid="connection-status-popover">
           <div className="flex items-start justify-between gap-3 pb-3">
             <div className="flex items-center gap-1.5">
               <h3 className="text-sm font-semibold">{t('connectionHealth.title')}</h3>
@@ -3257,11 +3346,15 @@ export const ConnectionStatus = memo(function ConnectionStatus({ socket, status,
             <span className="min-w-0 truncate">{t('connectionHealth.transport')} · {transport ?? t('connectionHealth.unknown')}</span>
             <Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy} title={t('connectionHealth.diagnostics')}>{t(copied ? 'common.copied' : 'common.copy')}</Button>
           </div>
-        </div>
-      ) : null}
-    </div>
-  )
-})
+          </div>,
+          document.body,
+        ) : null}
+      </div>
+    )
+  }
+
+  return <ConnectionStatusContext.Provider value={renderEntry}>{children}</ConnectionStatusContext.Provider>
+}
 
 type HealthTone = 'healthy' | 'failed' | 'pending'
 type ConnectionSegmentInfo = { label: string; state: string; tone: HealthTone; latency?: number | null; measuring?: boolean }
@@ -3420,6 +3513,13 @@ function statusDot(status: string): string {
   if (status === 'error' || status === 'disconnected') return 'bg-rose-500'
   if (status === 'connecting') return 'bg-amber-500 ak-status-pulse'
   return 'bg-muted'
+}
+
+function statusRing(status: string): string {
+  if (status === 'ready') return 'border-emerald-500'
+  if (status === 'error' || status === 'disconnected') return 'border-rose-500'
+  if (status === 'connecting') return 'border-amber-500 ak-status-pulse'
+  return 'border-muted'
 }
 
 function newPendingMessageId(): string {

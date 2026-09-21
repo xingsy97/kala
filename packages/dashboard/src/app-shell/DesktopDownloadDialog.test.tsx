@@ -13,7 +13,7 @@ vi.mock('../lib/desktop-download.js', () => ({
 const download = {
   release: {
     schemaVersion: 2 as const, platform: 'linux-amd64' as const, version: '0.2.0~rc.1',
-    artifact: { file: 'agent-runlab-desktop_0.2.0~rc.1_amd64.deb', sha256: 'a'.repeat(64), size: 1574988 },
+    artifact: { file: 'kala-desktop_0.2.0~rc.1_amd64.deb', sha256: 'a'.repeat(64), size: 1574988 },
     dependencies: { file: 'immutable.dependencies.json', sha256: 'b'.repeat(64) },
     checksums: { file: 'immutable.SHA256SUMS.txt', sha256: 'c'.repeat(64) },
   },

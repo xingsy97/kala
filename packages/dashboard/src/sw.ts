@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 /**
- * Agent RunLab service worker.
+ * Kala service worker.
  *
  * Scope + strategy (see docs/planning/roadmap-notes/pwa-mobile-and-push.md
  * §3.4 and §4.1):
@@ -135,14 +135,14 @@ self.addEventListener('push', (event) => {
   } catch {
     payload = {
       kind: 'unknown',
-      title: 'Agent RunLab',
+      title: 'Kala',
       body: 'You have a new notification.',
       url: '/',
     }
   }
   const tag = payload.tag ?? payload.kind
   event.waitUntil(
-    self.registration.showNotification(payload.title || 'Agent RunLab', {
+    self.registration.showNotification(payload.title || 'Kala', {
       body: payload.body ?? '',
       tag,
       // renotify + requireInteraction are widely supported but not in the

@@ -64,9 +64,9 @@ export function SubAgentCard(props: Props): JSX.Element {
         <div className="mb-2 flex min-h-8 items-center gap-2 px-1">
           <Workflow className="h-4 w-4 flex-none text-primary/80" aria-hidden="true" />
           <span className="text-sm font-medium text-foreground">{t('chat.subAgent.groupLabel')}</span>
-          <span className="rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground ring-1 ring-border/50">{calls.length}</span>
+          <span className="rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[0.75rem] text-muted-foreground ring-1 ring-border/50">{calls.length}</span>
         </div>
-        <div className="flex min-w-0 flex-wrap gap-1.5" data-testid={`sub-agent-group-list-${props.group.firstCallId}`}>
+        <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2" data-testid={`sub-agent-group-list-${props.group.firstCallId}`}>
           {calls.map((call) => (
             <SubAgentRow
               key={call.callId}
@@ -130,12 +130,13 @@ const SubAgentRow = memo(function SubAgentRow({
   const { t } = useTranslation()
   const envelope = result ? parseSubAgentEnvelope(result.content) : null
   const promptInput = readPrompt(call)
+  const intentionInput = readIntention(call)
   const agentTypeInput = readAgentType(call)
   const modelInput = readModel(call)
   const roleInput = readRole(call)
 
   const seededLifecycle: SubAgentLifecycle | undefined = envelope
-    ? envelope.status === 'completed' || envelope.status === 'timed_out_with_partial_result'
+    ? envelope.status === 'completed'
       ? {
           status: 'completed',
           childSessionId: envelope.sessionId,
@@ -144,9 +145,11 @@ const SubAgentRow = memo(function SubAgentRow({
           finishedAt: '',
         }
       : {
-          status: envelope.status,
+          status: envelope.status === 'timed_out_with_partial_result' ? 'failed' : envelope.status,
           childSessionId: envelope.sessionId,
-          error: envelope.body || 'sub-agent failed',
+          error: envelope.status === 'timed_out_with_partial_result'
+            ? t('chat.subAgent.timedOutPartial')
+            : envelope.body || 'sub-agent failed',
           turns: envelope.turns,
           durationMs: envelope.durationMs,
           finishedAt: '',
@@ -160,6 +163,7 @@ const SubAgentRow = memo(function SubAgentRow({
     ...(envelope ? { initialChildSessionId: envelope.sessionId } : {}),
     ...(seededLifecycle ? { initialLifecycle: seededLifecycle } : {}),
     ...(envelope?.agentType ? { initialAgentType: envelope.agentType } : {}),
+    ...(envelope?.intention ? { initialIntention: envelope.intention } : {}),
   })
 
   const policy = useSubAgentPolicy({
@@ -173,6 +177,13 @@ const SubAgentRow = memo(function SubAgentRow({
   const agentType = view.agentType ?? agentTypeInput
   const prompt = view.prompt ?? promptInput
   const model = view.model ?? modelInput
+  const intention = readableIntention(view.intention)
+    ?? readableIntention(policy?.intention)
+    ?? readableIntention(policy?.objective)
+    ?? readableIntention(envelope?.intention)
+    ?? intentionInput
+    ?? readableHistoricalPrompt(prompt)
+    ?? t('chat.subAgent.fallbackIntention', { type: agentType ?? roleInput ?? t('chat.subAgent.label').toLowerCase() })
 
   const startedAtMs = startedAtOf(view.lifecycle)
   const elapsedMs = useElapsedMs(status === 'running' ? startedAtMs : null)
@@ -195,42 +206,48 @@ const SubAgentRow = memo(function SubAgentRow({
   const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
   const useCompactTranscript = displayedMessages.length <= 12
 
-  // Default open for live rows and for failed ones (so the error is
-  // visible without a click). Completed rows collapse to the header to
-  // keep long parent timelines skimmable; in compact/matrix mode we
-  // collapse *all* rows other than the still-running one so a grid of
-  // 4 stays browsable.
+  // Grouped rows always start collapsed so a new fan-out remains
+  // skimmable and expansion is user-controlled. Standalone live/failed
+  // rows keep the existing eager detail behavior.
   const [open, setOpen] = useState(
-    compact
-      ? status === 'running'
-      : status === 'running' || status === 'idle' || status === 'failed' || status === 'cancelled',
+    grouped
+      ? false
+      : compact
+        ? status === 'running'
+        : status === 'running' || status === 'idle' || status === 'failed' || status === 'cancelled',
   )
   useEffect(() => {
+    if (grouped) return
     if (!compact && (status === 'running' || status === 'failed' || status === 'cancelled')) setOpen(true)
     if (compact && status === 'running') setOpen(true)
     if (compact && terminal) setOpen(false)
-  }, [status, compact])
+  }, [status, compact, grouped])
 
   if (grouped && !open) {
     const label = `${t('chat.subAgent.label')}${agentType ? ` · ${agentType}` : ''} · ${statusLabel(status, t)}${turns > 0 ? ` · ${t('chat.subAgent.turn', { count: turns })}` : ''}`
     return (
-      <div className="max-w-full" data-testid={`sub-agent-row-${call.callId}`} data-sub-agent-status={status}>
+      <div className="min-w-0 max-w-full" data-testid={`sub-agent-row-${call.callId}`} data-sub-agent-status={status}>
         <button
           type="button"
           onClick={() => withViewTransition(() => setOpen(true))}
           className={cn(
-            'inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-background/90 px-2 text-xs text-foreground shadow-sm ring-1 ring-border/50 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            status === 'completed' ? 'ring-emerald-300/50 dark:ring-emerald-500/30' : status === 'failed' || status === 'cancelled' ? 'ring-rose-300/50 dark:ring-rose-500/30' : '',
+            'grid min-h-20 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] items-start gap-x-2 gap-y-1.5 rounded-2xl bg-background/80 px-3 py-2.5 text-left text-sm text-foreground shadow-sm ring-1 ring-border/50 transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            status === 'completed' ? 'ring-emerald-300/45 dark:ring-emerald-500/25' : status === 'failed' || status === 'cancelled' ? 'ring-rose-300/45 dark:ring-rose-500/25' : '',
           )}
-          title={prompt ? `${label} · ${prompt}` : label}
-          aria-label={label}
+          title={`${label} · ${intention}`}
+          aria-label={`${label} · ${intention}`}
           data-testid={`sub-agent-chip-${call.callId}`}
           data-sub-agent-toggle={call.callId}
         >
-          <StatusIcon status={status} />
-          {agentType ? <span className="flex-none rounded bg-muted/70 px-1.5 py-0.5 text-[0.625rem] font-medium">{agentType}</span> : null}
-          <span className="min-w-0 max-w-36 truncate">{prompt ?? t('chat.subAgent.noPrompt')}</span>
-          <StatusBadge status={status} turns={turns} durationMs={totalMs} />
+          <span className="row-span-2 mt-0.5 flex h-5 w-5 items-center justify-center">
+            <StatusIcon status={status} />
+          </span>
+          <span className="flex min-w-0 items-center gap-2">
+            {agentType ? <span className="flex-none rounded-md bg-muted/70 px-1.5 py-0.5 text-[0.8125rem] font-medium text-muted-foreground">{agentType}</span> : null}
+            <span className="truncate text-[0.8125rem] font-medium uppercase tracking-wide text-muted-foreground">{t('chat.subAgent.label')}</span>
+          </span>
+          <span className="justify-self-end"><StatusBadge status={status} turns={turns} durationMs={totalMs} /></span>
+          <span className="col-start-2 col-end-4 line-clamp-2 min-w-0 break-words text-[0.9375rem] leading-snug text-foreground/90 [overflow-wrap:anywhere]">{intention}</span>
         </button>
       </div>
     )
@@ -287,20 +304,20 @@ const SubAgentRow = memo(function SubAgentRow({
             <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           )}
           <StatusIcon status={status} />
-          <span className={cn('flex-none rounded-full bg-background/65 px-1.5 py-0.5 font-medium text-muted-foreground ring-1 ring-border/45', compact ? 'text-[0.625rem]' : 'text-xs')}>
+          <span className={cn('flex-none rounded-full bg-background/65 px-1.5 py-0.5 font-medium text-muted-foreground ring-1 ring-border/45', compact ? 'text-[0.75rem]' : 'text-[0.8125rem]')}>
             {t('chat.subAgent.label')}
           </span>
           {agentType ? (
-            <span className={cn('flex-none rounded-full bg-primary/10 px-1.5 py-0.5 text-primary ring-1 ring-primary/20', compact ? 'text-[0.625rem]' : 'text-xs')}>
+            <span className={cn('flex-none rounded-full bg-primary/10 px-1.5 py-0.5 text-primary ring-1 ring-primary/20', compact ? 'text-[0.75rem]' : 'text-[0.8125rem]')}>
               {agentType}
             </span>
           ) : null}
-          <span className={cn('min-w-0 flex-1 truncate text-foreground/85 [overflow-wrap:anywhere]', compact ? 'text-xs' : 'text-sm')}>
-            {prompt ?? t('chat.subAgent.noPrompt')}
+          <span className={cn('line-clamp-2 min-w-0 flex-1 break-words text-foreground/85 [overflow-wrap:anywhere]', compact ? 'text-sm leading-snug' : 'text-sm leading-snug')}>
+            {intention}
           </span>
           {model ? (
             <span
-              className="hidden flex-none items-center gap-1 rounded-full bg-background/65 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground ring-1 ring-border/45 sm:flex"
+              className="hidden flex-none items-center gap-1 rounded-full bg-background/65 px-1.5 py-0.5 font-mono text-[0.75rem] text-muted-foreground ring-1 ring-border/45 sm:flex"
               title={`model=${model}`}
             >
               <Cpu className="h-3 w-3" aria-hidden="true" />
@@ -334,6 +351,10 @@ const SubAgentRow = memo(function SubAgentRow({
 
       {open ? (
         <div className="border-t border-border/45 bg-background/45">
+          <div className="border-b border-border/40 px-4 py-3 text-[0.9375rem] leading-6 text-foreground" data-testid={`sub-agent-intention-${call.callId}`}>
+            <span className="mr-1 font-medium text-muted-foreground">{t('chat.subAgent.intention')}</span>
+            <span>{intention}</span>
+          </div>
           {failureText ? (
             <div className="border-b border-rose-200/60 bg-rose-50/60 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/30 dark:text-rose-200">
               <strong className="font-semibold">{status === 'cancelled' ? t('chat.subAgent.cancelled') : t('chat.subAgent.failed')}</strong> {failureText}
@@ -344,15 +365,15 @@ const SubAgentRow = memo(function SubAgentRow({
               className={cn(
                 'flex min-h-0 flex-col',
                 useCompactTranscript
-                  ? compact ? 'max-h-64 overflow-y-auto' : 'max-h-96 overflow-y-auto'
-                  : compact ? 'h-56' : 'h-[min(28rem,55dvh)]',
+                  ? compact ? 'max-h-[22rem] overflow-y-auto' : 'max-h-96 overflow-y-auto'
+                  : compact ? 'h-[min(28rem,55dvh)]' : 'h-[min(28rem,55dvh)]',
               )}
               data-testid={`sub-agent-transcript-frame-${call.callId}`}
               data-layout={useCompactTranscript ? 'content' : 'viewport'}
             >
               <NestedTranscript
                 messages={displayedMessages}
-                compact={compact}
+                compact={false}
                 virtualized={!useCompactTranscript}
               />
             </div>
@@ -424,7 +445,7 @@ function StatusBadge({
   return (
     <span
       className={cn(
-        'flex-none rounded px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wider',
+        'flex-none rounded px-1.5 py-0.5 text-[0.75rem] font-medium uppercase tracking-wider',
         badgeClassFor(status),
       )}
       data-testid="sub-agent-status-badge"
@@ -513,6 +534,30 @@ function readPrompt(call: ToolCallContent): string | undefined {
   return typeof raw === 'string' ? raw : undefined
 }
 
+function readIntention(call: ToolCallContent): string | undefined {
+  const input = call.input as Record<string, unknown>
+  for (const key of ['intention', 'objective', '_intent'] as const) {
+    const raw = input[key]
+    const intention = readableIntention(raw)
+    if (intention) return intention
+  }
+  return undefined
+}
+
+function readableIntention(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 && trimmed.length <= 240 && !/[\r\n]/.test(trimmed) ? trimmed : undefined
+}
+
+function readableHistoricalPrompt(prompt: string | undefined): string | undefined {
+  if (!prompt) return undefined
+  const trimmed = prompt.trim()
+  if (trimmed.length === 0 || trimmed.length > 160 || /[\r\n]/.test(trimmed)) return undefined
+  if (/^(?:[a-z]:[\\/]|[\\/]|file:|\.\.?[\\/])/i.test(trimmed)) return undefined
+  return trimmed
+}
+
 function readAgentType(call: ToolCallContent): string | undefined {
   const raw = (call.input as Record<string, unknown>)['agent_type']
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined
@@ -538,14 +583,14 @@ function SubAgentPolicyPanel({
   const { t } = useTranslation()
   return (
     <details
-      className="border-t border-border/40 bg-muted/20 text-xs text-muted-foreground"
+      className="border-t border-border/40 bg-muted/20 text-sm leading-6 text-muted-foreground"
       data-testid={`sub-agent-policy-${callId}`}
     >
-      <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 font-medium text-muted-foreground hover:text-foreground">
-        <Shield className="h-3 w-3" aria-hidden="true" />
+      <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 font-medium text-muted-foreground hover:text-foreground">
+        <Shield className="h-4 w-4" aria-hidden="true" />
         {t('chat.subAgent.executionDetails')}
       </summary>
-      <div className="border-t border-border/30 px-3 py-2">
+      <div className="border-t border-border/30 px-4 py-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
         {policy.role ? (
           <PolicyChip label={t('chat.subAgent.role')} value={policy.role} />
@@ -589,14 +634,14 @@ function SubAgentPolicyPanel({
           <PolicyChip label={t('chat.subAgent.tools')} value={policy.allowedTools.join(', ')} />
         ) : null}
         </div>
-        {policy.objective ? (
-        <div className="mt-2 text-xs">
-          <span className="font-medium text-foreground/80">{t('chat.subAgent.objective')}</span>{' '}
-          <span className="italic">{policy.objective}</span>
+        {policy.intention ?? policy.objective ? (
+        <div className="mt-3 text-sm leading-6">
+          <span className="font-medium text-foreground/80">{t('chat.subAgent.intention')}</span>{' '}
+          <span className="italic">{policy.intention ?? policy.objective}</span>
         </div>
         ) : null}
         {policy.expectedOutput ? (
-        <div className="mt-1 text-xs">
+        <div className="mt-2 text-sm leading-6">
           <span className="font-medium text-foreground/80">{t('chat.subAgent.expectedOutput')}</span>{' '}
           <span className="italic">{policy.expectedOutput}</span>
         </div>
@@ -606,7 +651,7 @@ function SubAgentPolicyPanel({
           {policy.reasons.map((reason) => (
             <span
               key={reason}
-              className="rounded bg-background/80 px-1.5 py-0.5 font-mono text-[0.625rem] ring-1 ring-border/50"
+              className="rounded-md bg-background/80 px-2 py-1 font-mono text-[0.8125rem] ring-1 ring-border/50"
             >
               {reason}
             </span>
@@ -626,8 +671,8 @@ function formatPolicyDuration(ms: number): string {
 function PolicyChip({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <span className="inline-flex items-baseline gap-1">
-      <span className="uppercase tracking-wider text-[0.625rem] text-muted-foreground/80">{label}</span>
-      <span className="font-mono text-[0.6875rem] text-foreground">{value}</span>
+      <span className="text-xs uppercase tracking-wider text-muted-foreground/80">{label}</span>
+      <span className="font-mono text-sm text-foreground">{value}</span>
     </span>
   )
 }

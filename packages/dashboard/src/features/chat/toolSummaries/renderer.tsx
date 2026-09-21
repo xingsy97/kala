@@ -123,48 +123,48 @@ export function GroupSummaryRow({
     <button
       type="button"
       onClick={onClick}
-      className="group/summary grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 rounded-lg px-2 py-2 text-left text-xs transition-colors hover:bg-muted/70 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-y-0.5"
+      className="group/summary grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1 rounded-lg px-2.5 py-3 text-left text-base transition-colors hover:bg-muted/70 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-y-1"
       data-testid={`grouped-tool-row-${row.callId}`}
     >
-      <Icon className={cn('h-3 w-3 flex-none', toneClass)} aria-hidden="true" />
+      <Icon className={cn('h-4 w-4 flex-none', toneClass)} aria-hidden="true" />
       <span className="min-w-0">
         <span className="flex min-w-0 items-baseline gap-1.5 text-muted-foreground">
-          <span className="flex-none font-mono text-[0.625rem] font-medium">{toolName}</span>
+          <span className="flex-none font-mono text-[0.875rem] font-medium">{toolName}</span>
           <span className="flex-none text-muted-foreground/60" aria-hidden="true">·</span>
           {hideTechnicalSummary ? (
             semanticSummary ? (
-              <span className={cn('min-w-0 whitespace-pre-wrap break-words text-[0.6875rem] leading-5 text-foreground', !intent && 'truncate')} title={intent ?? undefined}>
+              <span className={cn('min-w-0 whitespace-pre-wrap break-words text-[1rem] leading-6 text-foreground', !intent && 'truncate')} title={intent ?? undefined}>
                 {semanticSummary}
               </span>
             ) : null
           ) : (
-            <span className="min-w-0 truncate font-mono text-[0.625rem]" title={row.primary}>
+            <span className="min-w-0 truncate font-mono text-[0.875rem]" title={row.primary}>
               {row.primary}
             </span>
           )}
         </span>
         {semanticSummary ? (
-          <span className="mt-0.5 block min-w-0 truncate text-[0.6875rem] leading-4 text-foreground/90" title={semanticSummary} data-testid={`grouped-tool-primary-${row.callId}`}>
+          <span className="mt-1 block min-w-0 truncate text-[1rem] leading-6 text-foreground/90" title={semanticSummary} data-testid={`grouped-tool-primary-${row.callId}`}>
             {semanticSummary}
           </span>
         ) : null}
         {!hideTechnicalSummary && text ? (
-          <span className="mt-0.5 block truncate text-[0.625rem] leading-4 text-muted-foreground sm:hidden" title={text}>{text}</span>
+          <span className="mt-1 block truncate text-[0.875rem] leading-5 text-muted-foreground sm:hidden" title={text}>{text}</span>
         ) : null}
       </span>
       {delta ? (
-        <span className="col-start-2 inline-flex h-5 w-fit flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[0.6875rem] leading-none sm:col-start-3 sm:row-start-1" aria-label={`${delta.additions} additions, ${delta.deletions} deletions`}>
+        <span className="col-start-2 inline-flex h-5 w-fit flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[0.8125rem] leading-none sm:col-start-3 sm:row-start-1" aria-label={`${delta.additions} additions, ${delta.deletions} deletions`}>
           <span className="inline-flex h-5 items-center gap-1 border-r border-border/50 px-1.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300">
-            <span className="text-[0.625rem] text-emerald-600/80 dark:text-emerald-300/80">+</span>
+            <span className="text-[0.75rem] text-emerald-600/80 dark:text-emerald-300/80">+</span>
             {delta.additions}
           </span>
           <span className="inline-flex h-5 items-center gap-1 px-1.5 font-mono font-semibold text-rose-700 dark:text-rose-300">
-            <span className="text-[0.625rem] text-rose-600/80 dark:text-rose-300/80">-</span>
+            <span className="text-[0.75rem] text-rose-600/80 dark:text-rose-300/80">-</span>
             {delta.deletions}
           </span>
         </span>
       ) : !hideTechnicalSummary && text ? (
-        <span className="hidden h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[0.6875rem] leading-none text-muted-foreground sm:inline-flex" title={text}>
+        <span className="hidden h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[0.8125rem] leading-none text-muted-foreground sm:inline-flex" title={text}>
           {text}
         </span>
       ) : null}
@@ -198,26 +198,26 @@ export function GroupSummaryPreview({
 
   return (
     <div
-      className="ak-expand-in grid min-h-7 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-muted/40 px-2 py-1 text-left text-xs"
+      className="ak-expand-in grid min-h-7 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-muted/40 px-3 py-2.5 text-left text-base"
       data-testid={`tool-card-preview-${row.callId}`}
     >
-      <Icon className={cn('h-3 w-3 flex-none', toneClass)} aria-hidden="true" />
-      <span className="min-w-0 truncate font-mono text-[0.6875rem] text-foreground [overflow-wrap:anywhere]" title={row.primary}>
+      <Icon className={cn('h-4 w-4 flex-none', toneClass)} aria-hidden="true" />
+      <span className="min-w-0 truncate font-mono text-[0.9375rem] text-foreground [overflow-wrap:anywhere]" title={row.primary}>
         {row.primary}
       </span>
       {delta ? (
-        <span className="col-start-2 inline-flex h-5 w-fit flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[0.6875rem] leading-none sm:col-start-3 sm:row-start-1" aria-label={`${delta.additions} additions, ${delta.deletions} deletions`}>
+        <span className="col-start-2 inline-flex h-5 w-fit flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[0.8125rem] leading-none sm:col-start-3 sm:row-start-1" aria-label={`${delta.additions} additions, ${delta.deletions} deletions`}>
           <span className="inline-flex h-5 items-center gap-1 border-r border-border/50 px-1.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300">
-            <span className="text-[0.625rem] text-emerald-600/80 dark:text-emerald-300/80">+</span>
+            <span className="text-[0.75rem] text-emerald-600/80 dark:text-emerald-300/80">+</span>
             {delta.additions}
           </span>
           <span className="inline-flex h-5 items-center gap-1 px-1.5 font-mono font-semibold text-rose-700 dark:text-rose-300">
-            <span className="text-[0.625rem] text-rose-600/80 dark:text-rose-300/80">-</span>
+            <span className="text-[0.75rem] text-rose-600/80 dark:text-rose-300/80">-</span>
             {delta.deletions}
           </span>
         </span>
       ) : secondaryText ? (
-        <span className="inline-flex h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[0.6875rem] leading-none text-muted-foreground" title={secondaryText}>
+        <span className="inline-flex h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[0.8125rem] leading-none text-muted-foreground" title={secondaryText}>
           {secondaryText}
         </span>
       ) : null}

@@ -45,6 +45,10 @@ export class AdmissionDeliveryFailedError extends Error {
   }
 }
 
+export function messageAttachmentUrl(host: string, sessionId: string, attachmentId: string): string {
+  return `${host.replace(/\/$/u, '')}/runtime/attachments/${encodeURIComponent(attachmentId)}?sessionId=${encodeURIComponent(sessionId)}`
+}
+
 export async function uploadMessageAttachment(input: {
   host: string
   token?: string

@@ -112,6 +112,9 @@ export function RuntimeMetrics({
   const ringOffset = ringCircumference * (1 - visualRatio)
   const usedPercent = userContextWindow && userContextWindow > 0 ? Math.min(100, visualRatio * 100) : 0
   const usedWidth = `${usedPercent}%`
+  // Keep the dash pattern longer than pathLength so the next repeated dash
+  // cannot paint a colored cap at the far-right endpoint.
+  const contextUsageGap = Math.max(1, 101 - usedPercent)
   const reservedStart = `${Math.max(0, Math.min(100, (1 - reservedRatio) * 100))}%`
   const reservedWidth = `${Math.max(0, Math.min(100, reservedRatio * 100))}%`
   const isSimple = density === 'simple'
@@ -154,7 +157,7 @@ export function RuntimeMetrics({
       {isSimple ? (
         <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${simpleGeometry.width} ${simpleGeometry.height}`} aria-hidden="true" data-testid="context-usage-track">
           <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" />
-          <path d={contextBorderPath} pathLength="100" fill="none" className={cn('opacity-90 transition-[filter,opacity] duration-[240ms] ease-out', contextStrokeTone)} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${usedPercent} ${100 - usedPercent}`} data-context-usage-tone={evaluation.tone} />
+          {usedPercent > 0 ? <path d={contextBorderPath} pathLength="100" fill="none" className={cn('opacity-90 transition-[filter,opacity] duration-[240ms] ease-out', contextStrokeTone)} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${usedPercent} ${contextUsageGap}`} data-context-usage-tone={evaluation.tone} /> : null}
         </svg>
       ) : null}
       <button

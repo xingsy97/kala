@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { applyCurrentVSCodeTheme, VSCODE_THEME_CHANGE_EVENT } from '../theme/vscode-theme.js'
+import { applyCurrentVSCodeTheme, VSCODE_THEME_CHANGE_EVENT, VSCODE_THEME_STORAGE_KEY } from '../theme/vscode-theme.js'
 import { PREF_THEME } from './prefs.js'
 
 export type Theme = 'dark' | 'light'
@@ -28,10 +28,13 @@ export function useTheme(): [ThemePreference, () => void, (theme: ThemePreferenc
 
   useEffect(() => {
     const onThemePreferenceChange = (): void => setPreference(readThemePreference())
-    window.addEventListener('storage', onThemePreferenceChange)
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === null || event.key === THEME_STORAGE_KEY) onThemePreferenceChange()
+    }
+    window.addEventListener('storage', onStorage)
     window.addEventListener(THEME_CHANGE_EVENT, onThemePreferenceChange)
     return () => {
-      window.removeEventListener('storage', onThemePreferenceChange)
+      window.removeEventListener('storage', onStorage)
       window.removeEventListener(THEME_CHANGE_EVENT, onThemePreferenceChange)
     }
   }, [])
@@ -49,8 +52,15 @@ export function useTheme(): [ThemePreference, () => void, (theme: ThemePreferenc
     const onVSCodeThemeChange = (): void => {
       applyCurrentVSCodeTheme(effectiveTheme)
     }
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === null || event.key === VSCODE_THEME_STORAGE_KEY) onVSCodeThemeChange()
+    }
     window.addEventListener(VSCODE_THEME_CHANGE_EVENT, onVSCodeThemeChange)
-    return () => window.removeEventListener(VSCODE_THEME_CHANGE_EVENT, onVSCodeThemeChange)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(VSCODE_THEME_CHANGE_EVENT, onVSCodeThemeChange)
+      window.removeEventListener('storage', onStorage)
+    }
   }, [effectiveTheme])
 
   const setThemePreference = (next: ThemePreference): void => {

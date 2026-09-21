@@ -62,7 +62,7 @@ export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolEx
 function ThinkingRow({ progress, startedAt }: { progress?: AgentProgress; startedAt?: number | null }): JSX.Element {
   const { t } = useTranslation()
   const running = progress?.outcome === 'running' || (!progress?.outcome && progress?.phase !== 'approval')
-  const elapsed = useElapsedSeconds(running, startedAt, progress?.durationMs)
+  const elapsed = useElapsedSeconds(running, startedAt ?? progress?.startedAt, progress?.durationMs)
   const label = progress?.label ?? t('chatStatus.thinking')
   const completed = progress?.outcome === 'succeeded'
   const failed = progress?.outcome === 'failed'

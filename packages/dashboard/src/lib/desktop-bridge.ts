@@ -14,6 +14,7 @@ export interface DesktopBridge {
   confirmConnection?(): Promise<void>
   setActivity(activity: DesktopActivity): Promise<void>
   notify(notification: DesktopNotification): Promise<void>
+  readClipboardImage?(): Promise<string | null>
   subscribe(listener: (event: DesktopEvent) => void): () => void
 }
 

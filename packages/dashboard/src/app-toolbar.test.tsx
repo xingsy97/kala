@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NoSessionArea, WorkbenchToolbar, readInitialConfig, resolveSessionDirectoryLoadingOwner, sessionDirectoryIsLoading } from './app.js'
+import { NarrowContextualRow, NoSessionArea, WorkbenchToolbar, readInitialConfig, resolveSessionDirectoryLoadingOwner, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar } from './app.js'
+import { DesktopSessionRail } from './app-shell/AppShellNav.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity } from './app-logic/session-activity.js'
 
 function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]> = {}): void {
@@ -35,6 +36,17 @@ describe('bounded busy-indicator rendering', () => {
   })
 })
 
+describe('App hook ordering', () => {
+  it('keeps hooks before loading and access-error early returns', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/app.tsx'), 'utf8')
+    const loadingReturn = source.indexOf("if (!runtimeDeployment.loaded")
+    const mainRender = source.indexOf('<PwaLifecycleHost>', loadingReturn)
+    expect(loadingReturn).toBeGreaterThan(0)
+    expect(mainRender).toBeGreaterThan(loadingReturn)
+    expect(source.slice(loadingReturn, mainRender)).not.toMatch(/\buse[A-Z][A-Za-z0-9_]*\s*\(/)
+  })
+})
+
 describe('session directory loading', () => {
   it('depends only on the Session snapshot', () => {
     expect(sessionDirectoryIsLoading(false)).toBe(true)
@@ -50,7 +62,107 @@ describe('session directory loading', () => {
   })
 })
 
+describe('desktop sidebar controls', () => {
+  it('renders a fixed narrow rail with the essential actions', () => {
+    const onExpand = vi.fn()
+    const onNewSession = vi.fn()
+    const onConnectWorkspace = vi.fn()
+    const onSelectSection = vi.fn()
+    render(
+      <DesktopSessionRail
+        section="agent"
+        onSelectSection={onSelectSection}
+        connectionStatus={<span data-testid="rail-status">status</span>}
+        onExpand={onExpand}
+        onNewSession={onNewSession}
+        onConnectWorkspace={onConnectWorkspace}
+        globalActions={<button data-testid="rail-global-actions">Settings</button>}
+      />,
+    )
+
+    expect(screen.getByTestId('desktop-session-rail').className).toContain('w-14')
+    expect(screen.getByTestId('rail-status')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('desktop-rail-expand'))
+    fireEvent.click(screen.getByTestId('desktop-rail-new-session'))
+    fireEvent.click(screen.getByTestId('desktop-rail-connect-workspace'))
+    fireEvent.click(screen.getByTestId('product-switcher-artifacts'))
+    expect(onExpand).toHaveBeenCalledOnce()
+    expect(onNewSession).toHaveBeenCalledOnce()
+    expect(onConnectWorkspace).toHaveBeenCalledOnce()
+    expect(onSelectSection).toHaveBeenCalledWith('artifacts')
+    expect(screen.getByTestId('desktop-rail-footer').contains(screen.getByTestId('rail-global-actions'))).toBe(true)
+  })
+
+  it('expands when the collapsed rail blank surface is clicked without hijacking its controls', () => {
+    const onExpand = vi.fn()
+    const onNewSession = vi.fn()
+    render(
+      <DesktopSessionRail
+        section="agent"
+        onSelectSection={() => {}}
+        onExpand={onExpand}
+        onNewSession={onNewSession}
+        globalActions={<button data-testid="rail-settings">Settings</button>}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('desktop-session-rail'))
+    expect(onExpand).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByTestId('desktop-rail-new-session'))
+    expect(onNewSession).toHaveBeenCalledOnce()
+    expect(onExpand).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByTestId('rail-settings'))
+    expect(onExpand).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the Inspector circle beside the session bar instead of inside it or overlaying content', () => {
+    const onOpen = vi.fn()
+    renderToolbar({ sessionSelected: true, sidebarAvailable: true, onOpenSidebar: onOpen })
+
+    const surface = screen.getByTestId('workbench-toolbar')
+    const button = screen.getByTestId('sidebar-toggle')
+    expect(surface.contains(button)).toBe(false)
+    expect(screen.getByTestId('workbench-toolbar-rail').contains(button)).toBe(true)
+    expect(button.className).toContain('rounded-full')
+    expect(button.className).not.toContain('absolute')
+    fireEvent.click(button)
+    expect(onOpen).toHaveBeenCalledOnce()
+  })
+
+  it('uses a separate circular navigation opener on narrow product pages', () => {
+    const onOpen = vi.fn()
+    render(<NarrowContextualRow section="docs" onOpenNavigation={onOpen} />)
+    const button = screen.getByTestId('narrow-navigation-opener')
+    expect(button.className).toContain('rounded-full')
+    fireEvent.click(button)
+    expect(onOpen).toHaveBeenCalledOnce()
+  })
+})
+
 describe('WorkbenchToolbar', () => {
+  it('provides one in-row mount slot for native Desktop window controls in both placements', () => {
+    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    try {
+      renderToolbar({ sessionSelected: true })
+      renderToolbar({ sessionSelected: true, placement: 'topbar' })
+      const slots = screen.getAllByTestId('desktop-window-controls-slot')
+      expect(slots).toHaveLength(2)
+      for (const slot of slots) {
+        expect(slot.getAttribute('data-kala-desktop-window-controls-slot')).toBe('true')
+        expect(slot.className).toContain('w-[132px]')
+      }
+    } finally {
+      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+    }
+  })
+
+  it('hides the session bar while the full desktop Session sidebar is expanded', () => {
+    expect(shouldRenderWorkbenchToolbar(true, true)).toBe(false)
+    expect(shouldRenderWorkbenchToolbar(true, false)).toBe(true)
+    expect(shouldRenderWorkbenchToolbar(false, true)).toBe(true)
+    expect(shouldRenderWorkbenchToolbar(false, false)).toBe(true)
+  })
+
   it('labels the unsaved draft without putting creation back in the workbench toolbar', () => {
     renderToolbar({ draft: true })
     expect(screen.getByTestId('session-label').textContent).toBe('New chat')
@@ -90,7 +202,9 @@ describe('WorkbenchToolbar', () => {
       sessionSelected: true,
       simpleChat: true,
       topbarAvailable: true,
-      brand: <span data-testid="collapsed-brand">Agent RunLab</span>,
+      explorerAvailable: true,
+      sidebarAvailable: true,
+      brand: <span data-testid="collapsed-brand">Kala</span>,
       rightSlot: <span data-testid="collapsed-actions">Actions</span>,
     })
 
@@ -101,7 +215,10 @@ describe('WorkbenchToolbar', () => {
     expect(screen.getByTestId('workbench-toolbar').className).toContain('flex-none')
     expect(screen.getByTestId('workbench-toolbar').className).not.toContain('flex-1')
     expect(screen.getByTestId('workbench-toolbar').querySelector('.ak-fused-topbar-capsule')).toBeTruthy()
-    expect(screen.getByTestId('collapsed-brand').textContent).toBe('Agent RunLab')
+    expect(screen.getByTestId('collapsed-brand').textContent).toBe('Kala')
+    expect(screen.getByTestId('explorer-toggle').className).toContain('rounded-full')
+    expect(screen.getByTestId('sidebar-toggle').className).toContain('rounded-full')
+    expect(screen.getByTestId('explorer-toggle').compareDocumentPosition(screen.getByTestId('collapsed-brand')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByTestId('collapsed-actions').textContent).toBe('Actions')
     expect(screen.getByTestId('session-title').className).not.toContain('text-zinc-100')
     expect(screen.getByTestId('session-title').className).toContain('max-w-[36vw]')
@@ -118,7 +235,7 @@ describe('WorkbenchToolbar', () => {
     const onOpenSidebar = vi.fn()
     renderToolbar({ sessionSelected: true, onOpenSidebar, sidebarAvailable: true })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open inspector' }))
     expect(onOpenSidebar).toHaveBeenCalledOnce()
     expect(screen.getByTestId('sidebar-toggle')).toBeTruthy()
     expect(screen.queryByTestId('terminal-toggle')).toBeNull()

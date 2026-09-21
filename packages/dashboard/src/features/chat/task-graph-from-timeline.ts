@@ -1,3 +1,4 @@
+import type { Message } from '@agent-kernel/kernel'
 import type { TimelineEntry } from '../../session.js'
 
 export type TaskGraphStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
@@ -23,6 +24,23 @@ export function taskGraphFromTimeline(timeline: readonly TimelineEntry[]): TaskG
     if (entry.event.kind !== 'tool_result' || !entry.event.ok || calls.get(entry.event.callId) !== 'todo_graph') continue
     const parsed = parseTaskGraphSnapshot(entry.event.content)
     if (parsed) current = parsed
+  }
+  return current
+}
+
+export function taskGraphFromMessages(
+  messages: readonly Message[],
+  fallback: TaskGraphSnapshot | null = null,
+): TaskGraphSnapshot | null {
+  const calls = new Map<string, string>()
+  let current = fallback
+  for (const message of messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call') calls.set(content.callId, content.name)
+      if (content.type !== 'tool_result' || !content.ok || calls.get(content.callId) !== 'todo_graph') continue
+      const parsed = parseTaskGraphSnapshot(content.content)
+      if (parsed) current = parsed
+    }
   }
   return current
 }
