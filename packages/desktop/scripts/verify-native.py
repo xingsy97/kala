@@ -66,7 +66,7 @@ def main():
                 time.sleep(0.25)
         result = request("POST", "/session", {
             "capabilities": {"alwaysMatch": {"webkitgtk:browserOptions": {
-                "binary": os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/agent-runlab-desktop")
+                "binary": os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")
             }}}
         })
         session = result["sessionId"]
@@ -79,7 +79,7 @@ def main():
             return request("POST", f"{prefix}/execute/async", {"script": script, "args": []})
 
         launcher = request("GET", f"{prefix}/window")
-        assert execute("return document.title").startswith("Agent RunLab")
+        assert execute("return document.title").startswith("Kala")
         invalid = async_execute("""
             const done = arguments[arguments.length - 1];
             window.__TAURI__.core.invoke('connect', {endpoint:'http://remote.example'})
@@ -156,7 +156,7 @@ def main():
         assert execute("return location.origin") == "http://127.0.0.1:13000"
         evidence = {
             "testedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "binary": "/usr/bin/agent-runlab-desktop",
+            "binary": "/usr/bin/kala-desktop",
             "driver": "distribution WebKitWebDriver (real GTK/WebKit)",
             "origin": state["origin"],
             "desktopMarker": state["desktop"],

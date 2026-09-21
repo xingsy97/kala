@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=Agent RunLab
-Comment=Connect to your existing Agent RunLab Dashboard
-Exec=agent-runlab-desktop %u
-Icon=agent-runlab-desktop
+Name=Kala
+Comment=Connect to your existing Kala Dashboard
+Exec=kala-desktop %u
+Icon=kala-desktop
 Terminal=false
 Categories=Development;
-StartupWMClass=agent-runlab-desktop
+StartupWMClass=kala-desktop
 MimeType=x-scheme-handler/agent-runlab;
 X-GNOME-UsesNotifications=true

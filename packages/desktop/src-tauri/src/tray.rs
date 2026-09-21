@@ -7,6 +7,7 @@ pub struct State {
     uncertain: AtomicBool,
     hidden_window: Mutex<Option<String>>,
     item_path: Mutex<Option<String>>,
+    menu_opened: Mutex<Option<std::time::Instant>>,
     status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
 }
 
@@ -17,6 +18,7 @@ impl Default for State {
             uncertain: AtomicBool::new(true),
             hidden_window: Mutex::new(None),
             item_path: Mutex::new(None),
+            menu_opened: Mutex::new(None),
             status_item: Mutex::new(None),
         }
     }
@@ -34,7 +36,7 @@ pub fn keep_open_when_uncertain(window: &tauri::Window) -> bool {
         let dialog = gtk::MessageDialog::new(
             Some(&parent), gtk::DialogFlags::MODAL, gtk::MessageType::Info,
             gtk::ButtonsType::Ok,
-            "The system tray is not responding. Agent RunLab will stay open so it remains reachable. Try again, or press Ctrl+Q to quit.",
+            "The system tray is not responding. Kala will stay open so it remains reachable. Try again, or press Ctrl+Q to quit.",
         );
         dialog.connect_response(|dialog, _| dialog.close());
         dialog.show();
@@ -64,26 +66,27 @@ pub fn restore(app: &tauri::AppHandle) {
     }
 }
 
+pub fn set_status(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
+    let bounded = if label.chars().count() > 96 {
+        label.chars().take(96).collect::<String>()
+    } else {
+        label.to_owned()
+    };
+    if let Some(item) = app.state::<State>().status_item.lock().unwrap().as_ref() {
+        item.set_text(&bounded).map_err(|error| error.to_string())?;
+    }
+    if let Some(tray) = app.tray_by_id("runlab") {
+        tray.set_tooltip(Some(format!("Kala - {bounded}"))).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 pub fn hide_if_available(app: &tauri::AppHandle, label: &str) -> bool {
     let state = app.state::<State>();
     if !state.available.load(Ordering::Acquire) {
         return false;
     }
 
-    pub fn set_status(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
-        let bounded = if label.chars().count() > 96 {
-            label.chars().take(96).collect::<String>()
-        } else {
-            label.to_owned()
-        };
-        if let Some(item) = app.state::<State>().status_item.lock().unwrap().as_ref() {
-            item.set_text(&bounded).map_err(|error| error.to_string())?;
-        }
-        if let Some(tray) = app.tray_by_id("runlab") {
-            tray.set_tooltip(Some(format!("Agent RunLab - {bounded}"))).map_err(|error| error.to_string())?;
-        }
-        Ok(())
-    }
     crate::placement::capture(app);
     *state.hidden_window.lock().unwrap() = Some(label.to_owned());
     for window in app.webview_windows().values() {
@@ -192,7 +195,7 @@ fn is_item_activation(interface: Option<&str>, member: Option<&str>, path: Optio
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let connection = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE)?;
     let status = MenuItem::with_id(app, "tray-status", "Idle", false, None::<&str>)?;
-    let open = MenuItem::with_id(app, "tray-open", "Open Agent RunLab", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "tray-open", "Open Kala", true, None::<&str>)?;
     let change = MenuItem::with_id(app, "tray-change-server", "Change server…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "tray-quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&status, &open, &change, &quit])?;
@@ -218,8 +221,26 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let our_path = state.item_path.lock().unwrap().clone();
         let item_activation = is_item_activation(message.interface().as_deref(),
             message.member().as_deref(), message.path().as_deref(), our_path.as_deref());
+        let our_menu_path = our_path.as_deref().map(|path| format!("{path}/Menu"));
+        let menu_event = incoming && message.message_type() == gio::DBusMessageType::MethodCall
+            && message.interface().as_deref() == Some("com.canonical.dbusmenu")
+            && message.member().as_deref() == Some("Event")
+            && message.path().as_deref() == our_menu_path.as_deref();
+        let mut restore_from_double_click = false;
+        if menu_event {
+            if let Some((id, name, _, _)) = message.body()
+                .and_then(|body| body.get::<(i32, String, glib::Variant, u32)>())
+            {
+                if id == 0 && name == "opened" {
+                    *state.menu_opened.lock().unwrap() = Some(std::time::Instant::now());
+                } else if id == 0 && name == "closed" {
+                    restore_from_double_click = state.menu_opened.lock().unwrap().take()
+                        .is_some_and(|opened| opened.elapsed() <= std::time::Duration::from_millis(700));
+                }
+            }
+        }
         if incoming && message.message_type() == gio::DBusMessageType::MethodCall
-            && item_activation
+            && (item_activation || restore_from_double_click)
         {
             let restore_handle = handle.clone();
             let _ = handle.run_on_main_thread(move || restore(&restore_handle));

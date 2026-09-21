@@ -1,5 +1,5 @@
 [Unit]
-Description=Agent RunLab Dedicated Runtime Slot %i for logical Unit local
+Description=Kala Dedicated Runtime Slot %i for logical Unit local
 After=network-online.target
 Wants=network-online.target
 

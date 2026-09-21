@@ -91,7 +91,7 @@ pub fn instance() -> Result<bool, String> {
         [uri] => Some(session_link(uri).ok_or("Only canonical agent-runlab://session/<id> links are accepted.")?),
         _ => return Err("Unexpected desktop arguments.".into()),
     };
-    glib::set_application_name("Agent RunLab");
+    glib::set_application_name("Kala");
     let app = gio::Application::new(Some("io.github.xingsy97.akernel.desktop"), gio::ApplicationFlags::empty());
     app.connect_activate(|_| HANDLE.with(|h| {
         if let Some(app) = h.borrow().as_ref() { crate::tray::restore(app); }
@@ -144,7 +144,7 @@ pub fn setup(app: &tauri::AppHandle) {
             last_services = Some(Instant::now());
         }
         if let Some(window) = app.get_webview_window("dashboard") {
-            if authorize(&app, &window).is_ok() {
+            if authorize_dashboard(&app, &window).is_ok() {
                 let state = status(&app, &window);
                 let current = (state.focused, state.visible);
                 if previous != Some(current) {
@@ -167,7 +167,7 @@ fn notification_service_available() -> bool {
     })
 }
 
-fn authorize(app: &tauri::AppHandle, window: &tauri::WebviewWindow) -> Result<String, String> {
+pub(crate) fn authorize_dashboard(app: &tauri::AppHandle, window: &tauri::WebviewWindow) -> Result<String, String> {
     let origin = app.state::<crate::ConnectionOrigin>().0.lock().unwrap().clone();
     if window.label() != "dashboard" || window.url().map_err(|e| e.to_string())?.origin().ascii_serialization() != origin
         || crate::endpoint_url(&origin).is_err() {
@@ -201,7 +201,7 @@ pub(crate) async fn on_ui<T: Send + 'static>(
 #[tauri::command]
 pub async fn desktop_status(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<DesktopStatus, String> {
     on_ui(app, move |app| {
-        authorize(app, &window)?;
+        authorize_dashboard(app, &window)?;
         app.state::<State>().notifications_available.store(notification_service_available(), Ordering::Release);
         Ok(status(app, &window))
     }).await
@@ -210,14 +210,14 @@ pub async fn desktop_status(app: tauri::AppHandle, window: tauri::WebviewWindow)
 #[tauri::command]
 pub async fn desktop_connection_ready(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
     on_ui(app, move |app| {
-        let origin = authorize(app, &window)?;
+        let origin = authorize_dashboard(app, &window)?;
         crate::connection::confirm(app, &origin)
     }).await
 }
 
 pub fn publish_window_state(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("dashboard") {
-        if authorize(app, &window).is_ok() {
+        if authorize_dashboard(app, &window).is_ok() {
             let state = status(app, &window);
             let payload = serde_json::json!({"focused": state.focused, "visible": state.visible});
             if let Err(error) = window.eval(&format!("window.dispatchEvent(new CustomEvent('runlab:window-state',{{detail:{payload}}}));")) {
@@ -313,7 +313,7 @@ pub async fn desktop_ui(app: tauri::AppHandle, window: tauri::WebviewWindow, sta
         return Err("Invalid bounded desktop activity count.".into());
     }
     on_ui(app, move |app| {
-        authorize(app, &window)?;
+        authorize_dashboard(app, &window)?;
         let data = app.state::<State>();
         let mut previous = data.activity.lock().unwrap();
         if *previous != state.status { badge(app, state.status)?; *previous = state.status; }
@@ -324,7 +324,7 @@ pub async fn desktop_ui(app: tauri::AppHandle, window: tauri::WebviewWindow, sta
 
 fn validate_notice(notice: &Notice) -> Result<(), String> {
     if !valid_bounded_id(&notice.id, 256) || !valid_id(&notice.session_id)
-        || notice.title != "Agent RunLab" || notice.body.chars().count() > 512
+        || notice.title != "Kala" || notice.body.chars().count() > 512
         || notice.body.chars().any(|character| character.is_control() && character != '\n') {
         return Err("Invalid bounded desktop notification.".into());
     }
@@ -335,7 +335,7 @@ fn validate_notice(notice: &Notice) -> Result<(), String> {
 pub async fn desktop_notify(app: tauri::AppHandle, window: tauri::WebviewWindow, notification: Notice) -> Result<(), String> {
     validate_notice(&notification)?;
     on_ui(app, move |app| {
-        let origin = authorize(app, &window)?;
+        let origin = authorize_dashboard(app, &window)?;
         let notice = notification;
         let data = app.state::<State>();
         let mut delivered = data.delivered.lock().unwrap();
@@ -346,13 +346,13 @@ pub async fn desktop_notify(app: tauri::AppHandle, window: tauri::WebviewWindow,
         if rate.len() >= 30 { return Err("Desktop notification rate limit reached; retry later.".into()); }
         let bus = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE).map_err(|error| error.to_string())?;
         let hints = std::collections::HashMap::from([
-            ("desktop-entry", "agent-runlab-desktop".to_variant()),
+            ("desktop-entry", "kala-desktop".to_variant()),
             ("suppress-sound", notice.silent.to_variant()),
         ]);
         let reply = bus.call_sync(Some("org.freedesktop.Notifications"), "/org/freedesktop/Notifications",
             "org.freedesktop.Notifications", "Notify",
-            Some(&("Agent RunLab", 0u32, "agent-runlab-desktop", "Agent RunLab",
-                glib::markup_escape_text(&notice.body).as_str(), vec!["default", "Open Agent RunLab"], hints, -1i32).to_variant()),
+            Some(&("Kala", 0u32, "kala-desktop", "Kala",
+                glib::markup_escape_text(&notice.body).as_str(), vec!["default", "Open Kala"], hints, -1i32).to_variant()),
             None, gio::DBusCallFlags::NONE, 3000, gio::Cancellable::NONE).map_err(|error| error.to_string())?;
         let (id,) = reply.get::<(u32,)>().ok_or("Invalid desktop notification response")?;
         let mut notifications = data.notifications.lock().unwrap();
@@ -402,7 +402,7 @@ mod tests {
         assert!(!valid_id(&"a".repeat(129)));
         assert!(serde_json::from_str::<Notice>(r#"{"id":"a","sessionId":"b","kind":"complete","body":"secret"}"#).is_err());
         assert!(valid_id("fork.1:branch-2"));
-        let valid = Notice { id: "session:42:completed".into(), session_id: "session".into(), title: "Agent RunLab".into(), body: "Task completed".into(), silent: true };
+        let valid = Notice { id: "session:42:completed".into(), session_id: "session".into(), title: "Kala".into(), body: "Task completed".into(), silent: true };
         assert!(validate_notice(&valid).is_ok());
         assert!(validate_notice(&Notice { body: "x".repeat(513), ..valid.clone() }).is_err());
         assert!(validate_notice(&Notice { title: "Unexpected".into(), ..valid }).is_err());
@@ -429,7 +429,7 @@ mod tests {
     fn notification_identifiers_and_plain_body_obey_public_boundaries() {
         let notice = Notice {
             id: "a".repeat(256), session_id: "b".repeat(128),
-            title: "Agent RunLab".into(), body: "x".repeat(512), silent: true,
+            title: "Kala".into(), body: "x".repeat(512), silent: true,
         };
         assert!(validate_notice(&notice).is_ok());
         assert!(validate_notice(&Notice { id: "a".repeat(257), ..notice.clone() }).is_err());

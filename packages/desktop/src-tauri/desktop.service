@@ -1,3 +1,3 @@
 [D-BUS Service]
 Name=io.github.xingsy97.akernel.desktop
-Exec=/usr/bin/agent-runlab-desktop
+Exec=/usr/bin/kala-desktop

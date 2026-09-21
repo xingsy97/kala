@@ -216,6 +216,7 @@ function finalizeRelease() {
     return { ...entry, cjs: exists(cjs) ? cjs : undefined, natives }
   })
   const executorProductNatives = nativeTargets.map(executorNativeAssetName).filter((asset) => exists(asset))
+  const desktopPublicAssets = ['desktop-install.sh', 'desktop-package.deb', 'desktop-dependencies.json', 'desktop-SHA256SUMS.txt'].filter((name) => exists(name))
   writeDependencyMetadata()
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
     .concat(executorProductNatives)
@@ -225,6 +226,7 @@ function finalizeRelease() {
     .concat(includeDashboard && exists('agent-runlab-docs.tar.gz') ? ['agent-runlab-docs.tar.gz'] : [])
     .concat(includeDashboard && exists('agent-runlab-model-catalog-seed.json') ? ['agent-runlab-model-catalog-seed.json'] : [])
     .concat(bootstrapAssets)
+    .concat(desktopPublicAssets)
     .concat(['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt'])
     .concat(entries.some((entry) => entry.name === 'agent-kernel-executor') && exists('executor-update-manifest.json') ? ['executor-update-manifest.json', 'executor-update-public-key.pem'] : [])
   const hasNativeAssets = builtEntries.some((entry) => entry.natives.length > 0)
@@ -318,7 +320,7 @@ function writeDependencyMetadata() {
   }
   writeFileSync(join(outDir, 'sbom.cdx.json'), `${JSON.stringify(sbom, null, 2)}\n`)
   const notices = [
-    `Agent RunLab ${packageJson.version} third-party dependency inventory`,
+    `Kala ${packageJson.version} third-party dependency inventory`,
     '',
     'The packages below retain their own copyright and license terms.',
     'Consult each upstream package for the complete license text and notices.',
@@ -520,7 +522,24 @@ function prepareEmbeddedReleaseAssetsForHost() {
   }
   const nativeExecutor = currentNativeTarget ? executorNativeAssetName(currentNativeTarget) : undefined
   if (nativeExecutor && exists(nativeExecutor)) writeExecutorUpdateManifest()
-  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', 'install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json', 'executor-update-public-key.pem']
+  const desktopDownloadDir = join(dashboardDist, 'downloads', 'desktop')
+  const desktopManifestPath = join(desktopDownloadDir, 'release.json')
+  const desktopNames = []
+  if (existsSync(desktopManifestPath)) {
+    const desktopManifest = JSON.parse(readFileSync(desktopManifestPath, 'utf8'))
+    const assets = [
+      [desktopManifest.artifact?.file, 'desktop-package.deb'],
+      [desktopManifest.dependencies?.file, 'desktop-dependencies.json'],
+      [desktopManifest.checksums?.file, 'desktop-SHA256SUMS.txt'],
+      ['install.sh', 'desktop-install.sh'],
+    ]
+    for (const [source, target] of assets) {
+      if (typeof source !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+~-]*$/u.test(source)) throw new Error('invalid Desktop release asset name')
+      copyFileSync(join(desktopDownloadDir, source), join(outDir, target))
+      desktopNames.push(target)
+    }
+  }
+  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', 'install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json', 'executor-update-public-key.pem', ...desktopNames]
     .filter((name) => name && exists(name))
   writeSha256Sums(embeddedNames)
   return embeddedReleaseAssetsBanner(outDir, [...embeddedNames, 'SHA256SUMS'])
@@ -760,7 +779,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     'require_cmd wget',
     '',
     'log() {',
-    '  printf "Agent RunLab bootstrap | %s\\n" "$*" >&2',
+    '  printf "Kala bootstrap | %s\\n" "$*" >&2',
     '}',
     '',
     'debug() {',
@@ -964,11 +983,11 @@ function releaseNotes(manifest) {
   }
   const hasNativeAssets = Object.values(manifest.nativeAssets ?? {}).some((assets) => Array.isArray(assets) && assets.length > 0)
   const lines = [
-    `# Agent RunLab ${manifest.tag}`,
+    `# Kala ${manifest.tag}`,
     '',
     hasNativeAssets
-      ? 'Agent RunLab ships a self-contained host + dashboard bundle, a separately deployable Executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component. By default, `run.sh` uses Node.js 22 `.cjs` assets when Node.js 22+ is available and falls back to native binaries when Node is missing or too old.'
-      : 'Agent RunLab ships a self-contained host + dashboard bundle, a separately deployable Executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component.',
+      ? 'Kala ships a self-contained host + dashboard bundle, a separately deployable Executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component. By default, `run.sh` uses Node.js 22 `.cjs` assets when Node.js 22+ is available and falls back to native binaries when Node is missing or too old.'
+      : 'Kala ships a self-contained host + dashboard bundle, a separately deployable Executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component.',
     '',
     '## Quick Start',
     '',

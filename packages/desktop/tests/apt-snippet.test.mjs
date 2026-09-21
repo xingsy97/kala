@@ -57,9 +57,9 @@ test('one pasted block validates key, writes scoped source, updates and installs
   const result = exercise()
   assert.equal(result.status, 0, result.stderr)
   assert.match(result.source, /URIs: https:\/\/packages.example.org\/runlab\//)
-  assert.match(result.source, /Signed-By: \/etc\/apt\/keyrings\/agent-runlab-desktop.gpg/)
+  assert.match(result.source, /Signed-By: \/etc\/apt\/keyrings\/kala-desktop.gpg/)
   assert.ok(result.log.indexOf('install -m 0644') < result.log.lastIndexOf('apt-get -o APT::Update::Error-Mode=any update'))
-  assert.match(result.log, /apt-get install -y agent-runlab-desktop/)
+  assert.match(result.log, /apt-get install -y kala-desktop/)
   assert.doesNotMatch(result.log, /apt-key|trusted=yes|allow-unauthenticated/)
 })
 
@@ -68,11 +68,11 @@ test('wrong or multiple keys cannot change sources; failed apt update cannot ins
     const result = exercise(options)
     assert.notEqual(result.status, 0)
     assert.equal(result.source, '')
-    assert.doesNotMatch(result.log, /install -m 0644|install -y agent-runlab-desktop/)
+    assert.doesNotMatch(result.log, /install -m 0644|install -y kala-desktop/)
   }
   const failedUpdate = exercise({ failUpdate: true })
   assert.notEqual(failedUpdate.status, 0)
-  assert.doesNotMatch(failedUpdate.log, /install -y agent-runlab-desktop/)
+  assert.doesNotMatch(failedUpdate.log, /install -y kala-desktop/)
 })
 
 test('real GPG inspection does not create a trust database or alter user keyrings', {

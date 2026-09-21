@@ -2,6 +2,16 @@ const endpoint = document.getElementById('endpoint')
 const status = document.getElementById('status')
 const submit = document.getElementById('submit')
 const invoke = (command, args) => window.__TAURI__.core.invoke(command, args)
+for (const button of document.querySelectorAll('[data-window-action]')) {
+  button.addEventListener('click', () => void invoke('desktop_window', { action: button.dataset.windowAction }))
+}
+const heading = document.querySelector('.launcher-heading')
+heading.addEventListener('mousedown', (event) => {
+  if (event.button === 0 && !event.target.closest('button')) void invoke('desktop_window', { action: 'start-dragging' })
+})
+heading.addEventListener('dblclick', (event) => {
+  if (!event.target.closest('button')) void invoke('desktop_window', { action: 'toggle-maximize' })
+})
 window.addEventListener('runlab:connection-error', (event) => {
   status.textContent = String(event.detail)
   submit.disabled = false

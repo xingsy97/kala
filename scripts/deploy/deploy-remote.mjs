@@ -11,7 +11,7 @@ import { assertSafeDeploymentInvocation } from './self-host-guard.mjs'
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const rawArgs = process.argv.slice(2)
 if (rawArgs.includes('--help') || rawArgs.includes('-h')) {
-  process.stdout.write(`Agent RunLab transactional deployment
+  process.stdout.write(`Kala transactional deployment
 
 Usage:
   pnpm run deploy:remote -- --lxd <container> [options]

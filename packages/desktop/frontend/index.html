@@ -3,12 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent RunLab — Connect</title>
+  <title>Kala — Connect</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <main>
-    <h1>Agent RunLab</h1>
+    <div class="launcher-heading">
+      <h1>Kala</h1>
+      <nav class="window-controls" aria-label="Window controls">
+        <button type="button" data-window-action="minimize" aria-label="Minimize">−</button>
+        <button type="button" data-window-action="toggle-maximize" aria-label="Maximize or restore">□</button>
+        <button type="button" class="window-close" data-window-action="close" aria-label="Close">×</button>
+      </nav>
+    </div>
     <form id="connect">
       <label for="endpoint">Dashboard origin</label>
       <input id="endpoint" type="url" required placeholder="https://runlab.example.org" value="http://127.0.0.1:13000" autocomplete="url" spellcheck="false" autofocus aria-describedby="status" />

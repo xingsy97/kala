@@ -34,8 +34,8 @@ async function post(path, body) {
   const text = await response.text(); if (!response.ok) throw new Error(`${path} ${response.status}: ${text}`)
   return JSON.parse(text)
 }
-const projectName = process.env.ZITADEL_PROJECT_NAME ?? 'Agent RunLab Private Cloud'
-const applicationName = process.env.ZITADEL_APPLICATION_NAME ?? 'Agent RunLab Gateway'
+const projectName = process.env.ZITADEL_PROJECT_NAME ?? 'Kala Private Cloud'
+const applicationName = process.env.ZITADEL_APPLICATION_NAME ?? 'Kala Gateway'
 const project = await post('/management/v1/projects', { name: projectName, projectRoleAssertion: false, projectRoleCheck: false, hasProjectCheck: false })
 const app = await post(`/management/v1/projects/${project.id}/apps/oidc`, {
   name: applicationName,

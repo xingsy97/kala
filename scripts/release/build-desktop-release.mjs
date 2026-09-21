@@ -58,7 +58,16 @@ try {
   const control = resolve(work, 'package/DEBIAN/control')
   const text = readFileSync(control, 'utf8')
   if ((text.match(/^Version: .+$/gm) ?? []).length !== 1) throw new Error('Ambiguous Debian Version field')
-  writeFileSync(control, text.replace(/^Version: .+$/m, `Version: ${version}`))
+  for (const field of ['Provides', 'Conflicts', 'Replaces']) {
+    if (new RegExp(`^${field}:`, 'm').test(text)) throw new Error(`Unexpected pre-existing Debian ${field} field`)
+  }
+  const compatibility = 'Provides: agent-runlab-desktop\nConflicts: agent-runlab-desktop\nReplaces: agent-runlab-desktop\n'
+  writeFileSync(control, text.replace(/^Version: .+$/m, `Version: ${version}\n${compatibility.trimEnd()}`))
+  const md5sums = resolve(work, 'package/DEBIAN/md5sums')
+  if (existsSync(md5sums)) {
+    const entries = readFileSync(md5sums, 'utf8').split('\n').filter(Boolean).sort()
+    writeFileSync(md5sums, `${entries.join('\n')}\n`)
+  }
   const normalize = (path) => {
     const info = statSync(path)
     if (info.isDirectory()) for (const entry of readdirSync(path, { withFileTypes: true })) {
@@ -68,7 +77,7 @@ try {
     utimesSync(path, epoch, epoch)
   }
   normalize(resolve(work, 'package'))
-  artifact = resolve(desktop, `.artifacts/agent-runlab-desktop_${version}_amd64.deb`)
+  artifact = resolve(desktop, `.artifacts/kala-desktop_${version}_amd64.deb`)
   const pending = resolve(work, basename(artifact))
   run('dpkg-deb', ['--root-owner-group', '-Zxz', '-z9', '--threads-max=1', '--build', resolve(work, 'package'), pending], root, { env })
   if (existsSync(artifact) && sha(readFileSync(artifact)) !== sha(readFileSync(pending))) throw new Error('Refusing to overwrite an existing version artifact; bump version')

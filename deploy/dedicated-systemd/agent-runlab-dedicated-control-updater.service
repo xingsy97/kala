@@ -1,5 +1,5 @@
 [Unit]
-Description=Agent RunLab Dedicated Control Plane Updater
+Description=Kala Dedicated Control Plane Updater
 After=network-online.target agent-runlab-dedicated-ingress.service agent-runlab-dedicated-deploy-supervisor.service
 Wants=network-online.target
 

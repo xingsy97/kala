@@ -4,5 +4,5 @@
   "description": "Only the packaged launcher can connect. Dashboard UI hints use a separate origin-bound capability.",
   "local": true,
   "windows": ["launcher"],
-  "permissions": ["allow-connect"]
+  "permissions": ["allow-connect", "allow-window-control"]
 }

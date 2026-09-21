@@ -6,10 +6,10 @@ import { run, sha } from './desktop-provenance.mjs'
 
 // Low-level signing mechanics shared with the isolated TEST-ONLY integration.
 // Production callers must enforce controlled provenance and audits before invoking.
-export function writeSignedRepository(artifact, output, fingerprint, origin = 'Agent RunLab', expectedSha256) {
+export function writeSignedRepository(artifact, output, fingerprint, origin = 'Kala', expectedSha256) {
   if (existsSync(output)) throw new Error('Output must be a new directory; publish a verified staging tree atomically')
   run('gpg', ['--batch', '--list-secret-keys', fingerprint])
-  const pool = resolve(output, 'pool/main/a/agent-runlab-desktop')
+  const pool = resolve(output, 'pool/main/a/kala-desktop')
   const distribution = resolve(output, 'dists/stable')
   const binary = resolve(distribution, 'main/binary-amd64')
   mkdirSync(pool, { recursive: true })
@@ -34,6 +34,6 @@ export function writeSignedRepository(artifact, output, fingerprint, origin = 'A
   run('gpg', ['--batch', '--yes', '--local-user', fingerprint, '--digest-algo', 'SHA256', '--armor', '--detach-sign', '--output', resolve(distribution, 'Release.gpg'), resolve(distribution, 'Release')])
   const key = spawnSync('gpg', ['--batch', '--export', fingerprint], { maxBuffer: 1024 * 1024 })
   if (key.status !== 0 || key.stdout.length === 0) throw new Error('Public key export failed')
-  writeFileSync(resolve(output, 'agent-runlab-desktop-archive-keyring.gpg'), key.stdout)
-  run('gpgv', ['--keyring', resolve(output, 'agent-runlab-desktop-archive-keyring.gpg'), resolve(distribution, 'InRelease')])
+  writeFileSync(resolve(output, 'kala-desktop-archive-keyring.gpg'), key.stdout)
+  run('gpgv', ['--keyring', resolve(output, 'kala-desktop-archive-keyring.gpg'), resolve(distribution, 'InRelease')])
 }

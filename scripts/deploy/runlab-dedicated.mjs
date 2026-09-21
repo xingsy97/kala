@@ -66,7 +66,7 @@ try {
 }
 
 function help() {
-  process.stdout.write(`Agent RunLab Dedicated operator
+  process.stdout.write(`Kala Dedicated operator
 
 Usage:
   runlab-dedicated install --release-dir <dir> [--stage-only] [--legacy-data-root <dir>]

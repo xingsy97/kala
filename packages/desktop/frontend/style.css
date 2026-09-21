@@ -1,9 +1,15 @@
 :root { color-scheme: light dark; font-family: system-ui, sans-serif; font-size: 20px; background: #111827; color: #e5e7eb; }
 body { margin: 0; }
 main { max-width: 620px; margin: 0 auto; padding: 24px; }
-h1 { font-size: 2rem; margin-bottom: 4px; }
+.launcher-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; user-select: none; }
+.launcher-heading h1 { flex: 1; cursor: default; }
+.window-controls { display: flex; height: 32px; flex: none; overflow: hidden; border: 1px solid #334155; border-radius: 8px; }
+.window-controls button { width: 38px; height: 100%; margin: 0; padding: 0; border-radius: 0; background: transparent; color: #cbd5e1; font-size: .85rem; }
+.window-controls button:hover { background: #253247; }
+.window-controls .window-close:hover { background: #dc2626; color: white; }
+h1 { font-size: 2rem; margin: 0 0 4px; }
 p { line-height: 1.6; }
-form { margin: 28px 0; }
+form { margin: 20px 0 28px; }
 label { display: block; font-weight: 600; margin-bottom: 8px; }
 input { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid #64748b; border-radius: 8px; background: #1f2937; color: white; font: inherit; }
 button { margin-top: 16px; border: 0; border-radius: 8px; padding: 12px 24px; font: inherit; font-weight: 600; background: #93c5fd; color: #111827; cursor: pointer; }

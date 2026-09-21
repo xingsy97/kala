@@ -20,7 +20,7 @@ const args = process.argv.slice(2)
 if (args[0] === '--') args.shift()
 
 if (args.includes('--help') || args.includes('-h') || args.length === 0) {
-  process.stdout.write(`Agent RunLab Dedicated slot deployment
+  process.stdout.write(`Kala Dedicated slot deployment
 
 Usage:
   pnpm run deploy:dedicated -- stage [--local | --lxd <container> | --ssh <target>] [options]

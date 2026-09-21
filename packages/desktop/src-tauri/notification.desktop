@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Agent RunLab
-Exec=agent-runlab-desktop %u
-Icon=agent-runlab-desktop
+Name=Kala
+Exec=kala-desktop %u
+Icon=kala-desktop
 NoDisplay=true
 DBusActivatable=true
 X-GNOME-UsesNotifications=true

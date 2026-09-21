@@ -1,5 +1,5 @@
 [Unit]
-Description=Agent RunLab Dedicated Stable Ingress
+Description=Kala Dedicated Stable Ingress
 After=network-online.target
 Wants=network-online.target
 

@@ -41,7 +41,7 @@ const host = await startHostServer({
       if (['/commands', '/checks', '/feature-checks', '/probe.js'].includes(path)
           || path === '/downloads/desktop/release.json'
           || (req.method === 'HEAD' && path.startsWith('/downloads/desktop/99.'))
-          || (req.method === 'HEAD' && path.startsWith('/downloads/desktop/agent-runlab-desktop_99.'))) {
+          || (req.method === 'HEAD' && path.startsWith('/downloads/desktop/kala-desktop_99.'))) {
         const chunks = []
         for await (const chunk of req) chunks.push(chunk)
         const reply = await fetch(`${process.env.RUNLAB_DESKTOP_PROBE_ORIGIN}${path}`, {

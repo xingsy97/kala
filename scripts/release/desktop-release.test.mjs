@@ -13,9 +13,10 @@ function fixture(t, sourceVersion = '0.2.0-rc.1', base) {
   if (!base) t.after(() => rmSync(directory, { recursive: true, force: true }))
   const version = debianVersion(sourceVersion)
   const packageRoot = resolve(directory, `package-${version}`)
-  mkdirSync(resolve(packageRoot, 'DEBIAN'), { recursive: true })
-  writeFileSync(resolve(packageRoot, 'DEBIAN/control'), `Package: agent-runlab-desktop\nVersion: ${version}\nArchitecture: amd64\nMaintainer: Test Only <test@example.invalid>\nDescription: pipeline fixture, not a native release\n`)
-  const file = `agent-runlab-desktop_${version}_amd64.deb`
+  mkdirSync(resolve(packageRoot, 'DEBIAN'), { recursive: true, mode: 0o755 })
+  chmodSync(resolve(packageRoot, 'DEBIAN'), 0o755)
+  writeFileSync(resolve(packageRoot, 'DEBIAN/control'), `Package: kala-desktop\nVersion: ${version}\nArchitecture: amd64\nMaintainer: Test Only <test@example.invalid>\nDescription: pipeline fixture, not a native release\n`)
+  const file = `kala-desktop_${version}_amd64.deb`
   const artifact = resolve(directory, file)
   run('dpkg-deb', ['--root-owner-group', '--build', packageRoot, artifact])
   const bytes = readFileSync(artifact)

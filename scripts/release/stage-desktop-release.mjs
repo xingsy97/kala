@@ -4,6 +4,7 @@ import { basename, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { sha, verifyBuild } from './desktop-provenance.mjs'
+import { desktopBootstrapScript } from '../../packages/dashboard/public/downloads/desktop/release-data.js'
 
 export function stage(artifact, output, registry) {
   artifact = resolve(artifact)
@@ -35,6 +36,9 @@ export function stage(artifact, output, registry) {
   const pending = resolve(output, `release.json.incoming-${randomUUID()}`)
   writeFileSync(pending, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o644 })
   renameSync(pending, resolve(output, 'release.json'))
+  const installerPending = resolve(output, `install.sh.incoming-${randomUUID()}`)
+  writeFileSync(installerPending, `${desktopBootstrapScript(manifest)}\n`, { mode: 0o644 })
+  renameSync(installerPending, resolve(output, 'install.sh'))
   return manifest
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

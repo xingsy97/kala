@@ -26,7 +26,7 @@ logs = []
 requested = []
 browser_checks = []
 page_requests = []
-binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/agent-runlab-desktop")
+binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -212,7 +212,7 @@ def verify_tray():
 
     def registered_app(name):
         app = start(name, [binary])
-        launcher = window_named("Agent RunLab.*Connect")
+        launcher = window_named("Kala.*Connect")
         wait_for(registered, "Tray item did not register with the native watcher")
         time.sleep(1)
         item = registered()[-1]
@@ -234,7 +234,7 @@ def verify_tray():
             for child in children:
                 visit(child)
         visit(layout)
-        assert set(labels) == {"Open Agent RunLab", "Change server…", "Quit"}, labels
+        assert set(labels) == {"Open Kala", "Change server…", "Quit"}, labels
         call(destination, menu, "com.canonical.dbusmenu", "Event", "(isvu)",
              (labels[label], "clicked", GLib.Variant("i", 0), 0))
 
@@ -243,7 +243,7 @@ def verify_tray():
     app, launcher, destination, path = registered_app("tray-app")
     time.sleep(1)
     connect_to(launcher, f"http://127.0.0.1:{server.server_port}")
-    dashboard = window_named("^Agent RunLab$")
+    dashboard = window_named("^Kala$")
     time.sleep(1)
     count = len(page_requests)
     close_window(dashboard)
@@ -256,7 +256,7 @@ def verify_tray():
     call(destination, props["Menu"], "com.canonical.dbusmenu", "AboutToShow", "(i)", (0,))
     time.sleep(0.5)
     assert not visible(dashboard), "Opening the tray popup restored the hidden Dashboard"
-    menu_action(destination, path, "Open Agent RunLab")
+    menu_action(destination, path, "Open Kala")
     wait_for(lambda: visible(dashboard), "Tray Open did not restore")
     screenshot("root", "native-tray-menu-restored.png")
     xdo("key", "Escape")
@@ -264,13 +264,13 @@ def verify_tray():
     set_minimized(dashboard, True)
     wait_for(lambda: not visible(dashboard), "Native minimize state did not hide to tray")
     set_minimized(dashboard, False)
-    menu_action(destination, path, "Open Agent RunLab")
+    menu_action(destination, path, "Open Kala")
     wait_for(lambda: visible(dashboard), "Tray menu did not restore minimized dashboard")
     assert len(page_requests) == count
     menu_action(destination, path, "Change server…")
-    window_named("Agent RunLab.*Connect")
+    window_named("Kala.*Connect")
     assert len(page_requests) == count
-    menu_action(destination, path, "Open Agent RunLab")
+    menu_action(destination, path, "Open Kala")
     assert visible(dashboard)
     menu_action(destination, path, "Quit")
     assert app.wait(timeout=10) == 0
@@ -284,7 +284,7 @@ def verify_tray():
     assert app.poll() is None
     watcher_call("FailProperties", "(b)", (False,))
     time.sleep(1)
-    menu_action(destination, path, "Open Agent RunLab")
+    menu_action(destination, path, "Open Kala")
     wait_for(lambda: visible(launcher), "Tray recovery failed")
     watcher_call("FailProperties", "(b)", (True,))
     time.sleep(7)
@@ -340,7 +340,7 @@ try:
                    env=env, check=True, capture_output=True)
     baseline_ports = listening_ports()
     app = start("download-app", [binary])
-    launcher = window_named("Agent RunLab.*Connect")
+    launcher = window_named("Kala.*Connect")
     xdo("windowfocus", launcher)
     deadline = time.monotonic() + 15
     while True:
@@ -359,7 +359,7 @@ try:
     connect_to(launcher, "http://remote.example")
     time.sleep(0.5)
     assert not page_requests
-    window_named("Agent RunLab.*Connect")
+    window_named("Kala.*Connect")
     screenshot(launcher, "native-invalid-origin.png")
     with socket.socket() as refused:
         refused.bind(("127.0.0.1", 0))
@@ -369,16 +369,16 @@ try:
         while f"Unable to load {bad_origin}" not in (output / "download-app.log").read_text():
             assert time.monotonic() < deadline, "First unreachable endpoint did not report its native load error"
             time.sleep(0.1)
-        launcher = window_named("Agent RunLab.*Connect")
+        launcher = window_named("Kala.*Connect")
         settings_path = Path(env["XDG_CONFIG_HOME"]) / "io.github.xingsy97.akernel.desktop/desktop-state.json"
         assert not settings_path.exists() or not json.loads(settings_path.read_text()).get("origin"), "Unreachable first endpoint was remembered"
         screenshot(launcher, "native-first-endpoint-error.png")
     connect_to(launcher, f"http://127.0.0.1:{server.server_port}")
-    dashboard = window_named("^Agent RunLab$")
-    assert xdo("getwindowname", dashboard).stdout.strip() == "Agent RunLab", "Remote title or endpoint leaked into native title"
+    dashboard = window_named("^Kala$")
+    assert xdo("getwindowname", dashboard).stdout.strip() == "Kala", "Remote title or endpoint leaked into native title"
     xdo("windowfocus", dashboard)
     time.sleep(1)
-    assert xdo("search", "--onlyvisible", "--name", "Agent RunLab.*Connect").returncode != 0
+    assert xdo("search", "--onlyvisible", "--name", "Kala.*Connect").returncode != 0
     screenshot(dashboard, "native-menu-free-dashboard.png")
     # With no menu bar the HTML viewport starts at the top of the native window.
     top_pixel = subprocess.check_output(
@@ -404,10 +404,10 @@ try:
         "bridgeVersion": 1, "version": json.loads(Path("packages/desktop/package.json").read_text())["version"]}, browser_checks
     xdo("windowfocus", dashboard)
     xdo("key", "ctrl+shift+o")
-    launcher = window_named("Agent RunLab.*Connect")
+    launcher = window_named("Kala.*Connect")
     count = len(page_requests)
     connect_to(launcher, f"http://127.0.0.1:{server.server_port}")
-    dashboard = window_named("^Agent RunLab$")
+    dashboard = window_named("^Kala$")
     deadline = time.monotonic() + 10
     while len(page_requests) == count and time.monotonic() < deadline:
         time.sleep(0.1)
@@ -417,22 +417,22 @@ try:
     if live_origin:
         xdo("windowfocus", dashboard)
         xdo("key", "ctrl+shift+o")
-        launcher = window_named("Agent RunLab.*Connect")
+        launcher = window_named("Kala.*Connect")
         connect_to(launcher, live_origin)
         time.sleep(30)
         screenshot("root", "native-final-live-dashboard.png")
-        dashboard = window_named("Agent RunLab")
+        dashboard = window_named("Kala")
     close_window(dashboard)
     assert app.wait(timeout=10) == 0
-    assert xdo("search", "--onlyvisible", "--name", "Agent RunLab").returncode != 0
+    assert xdo("search", "--onlyvisible", "--name", "Kala").returncode != 0
     app = start("quit-app", [binary])
-    launcher = window_named("Agent RunLab.*Connect")
+    launcher = window_named("Kala.*Connect")
     time.sleep(0.5)
     xdo("windowfocus", launcher)
     xdo("key", "ctrl+q")
     assert app.wait(timeout=10) == 0
     app = start("launcher-close-app", [binary])
-    launcher = window_named("Agent RunLab.*Connect")
+    launcher = window_named("Kala.*Connect")
     close_window(launcher)
     assert app.wait(timeout=10) == 0
     tray_checks = verify_tray() if os.environ.get("RUNLAB_DESKTOP_TEST_TRAY") == "1" else {}

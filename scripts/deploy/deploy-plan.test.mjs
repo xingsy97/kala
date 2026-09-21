@@ -52,7 +52,7 @@ describe('deploy plan', () => {
   it('shows help without requiring a deployment target or touching release assets', () => {
     const script = fileURLToPath(new URL('./deploy-remote.mjs', import.meta.url))
     const output = execFileSync(process.execPath, [script, '--help'], { encoding: 'utf8' })
-    expect(output).toContain('Agent RunLab transactional deployment')
+    expect(output).toContain('Kala transactional deployment')
     expect(output).toContain('pnpm run deploy:remote -- --lxd <container>')
     expect(output).toContain('self-deployment checkpoint')
   })

@@ -1,5 +1,5 @@
 [Unit]
-Description=Agent RunLab Dedicated Deploy Supervisor
+Description=Kala Dedicated Deploy Supervisor
 After=network-online.target agent-runlab-dedicated-ingress.service
 Wants=network-online.target
 

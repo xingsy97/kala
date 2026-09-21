@@ -19,7 +19,7 @@ export function debianVersion(version) {
 export function packageIdentity(artifact) {
   const field = (name) => run('dpkg-deb', ['-f', artifact, name])
   const identity = { package: field('Package'), version: field('Version'), architecture: field('Architecture') }
-  if (identity.package !== 'agent-runlab-desktop' || identity.architecture !== 'amd64') throw new Error('Expected agent-runlab-desktop Linux amd64 package')
+  if (identity.package !== 'kala-desktop' || identity.architecture !== 'amd64') throw new Error('Expected kala-desktop Linux amd64 package')
   return identity
 }
 function controlled(path, directory = false) {

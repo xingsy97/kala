@@ -41,7 +41,7 @@ MAX_METADATA_BYTES="\${RUNLAB_INSTALLER_MAX_METADATA_BYTES:-1048576}"
 WORK_DIR="\${RUNLAB_INSTALLER_WORK_DIR:-$(mktemp -d)}"
 mkdir -p "$WORK_DIR"
 trap 'rm -rf "$WORK_DIR"' EXIT
-fail() { printf 'Agent RunLab installer: %s\\n' "$*" >&2; exit 1; }
+fail() { printf 'Kala installer: %s\\n' "$*" >&2; exit 1; }
 [ "\${RUNLAB_INSTALLER_ALLOW_UNSIGNED:-0}" = 1 ] || fail "release signatures are not available; refusing unsigned install (set RUNLAB_INSTALLER_ALLOW_UNSIGNED=1 only for development)"
 command -v wget >/dev/null 2>&1 || fail "wget is required"
 command -v uname >/dev/null 2>&1 || fail "uname is required"
@@ -78,7 +78,7 @@ exec "$WORK_DIR/$asset" --internal-installer "$@"
 
 export function generateExecutorInstallerPs1({ repo, tag }) {
   const base = githubReleaseBase(repo, tag)
-  return `# Agent RunLab executor installer (unsigned development bootstrap)
+  return `# Kala executor installer (unsigned development bootstrap)
 $ErrorActionPreference = 'Stop'
 if ($env:RUNLAB_INSTALLER_ALLOW_UNSIGNED -ne '1') { throw 'Release signatures are not available; refusing unsigned install. Set RUNLAB_INSTALLER_ALLOW_UNSIGNED=1 only for development.' }
 $baseUrl = if ($env:RUNLAB_RELEASE_ASSETS_URL) { $env:RUNLAB_RELEASE_ASSETS_URL.TrimEnd('/') } else { '${base}' }
@@ -114,7 +114,7 @@ try {
       $installChoice = $env:RUNLAB_INSTALL_NODE
       if ([string]::IsNullOrWhiteSpace($installChoice)) {
         Write-Host ''
-        Write-Host 'Agent RunLab needs Node.js 22+ because this release has no native Windows Executor.'
+        Write-Host 'Kala needs Node.js 22+ because this release has no native Windows Executor.'
         $installChoice = Read-Host 'Install the official Node.js LTS package with Windows Package Manager (winget)? [y/N]'
       }
       if ($installChoice -notmatch '^(?i:y|yes|1|true)$') { throw 'Node.js installation was not approved. Install Node.js 22+ from https://nodejs.org/ and run this command again.' }
@@ -128,7 +128,7 @@ try {
       $env:Path = @($machinePath, $userPath) -join [IO.Path]::PathSeparator
       $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
       $nodeVersion = if ($nodeCommand) { & $nodeCommand.Source --version 2>$null } else { '' }
-      if (-not $nodeCommand -or $nodeVersion -notmatch '^v(2[2-9]|[3-9][0-9])\\.') { throw 'Node.js was installed but Node.js 22+ is not available in this PowerShell session. Open a new PowerShell window and run the Agent RunLab command again.' }
+      if (-not $nodeCommand -or $nodeVersion -notmatch '^v(2[2-9]|[3-9][0-9])\\.') { throw 'Node.js was installed but Node.js 22+ is not available in this PowerShell session. Open a new PowerShell window and run the Kala command again.' }
       Write-Host "Node.js $nodeVersion installed successfully."
     }
     $useNode = $true

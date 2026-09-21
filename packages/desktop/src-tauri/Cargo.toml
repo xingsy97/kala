@@ -1,8 +1,8 @@
 [package]
-name = "agent-runlab-desktop"
-version = "0.2.0-rc.7"
-description = "Linux desktop client for an existing Agent RunLab Dashboard"
-authors = ["Agent RunLab contributors"]
+name = "kala-desktop"
+version = "0.2.0-rc.12"
+description = "Linux desktop client for an existing Kala Dashboard"
+authors = ["Kala contributors"]
 license = "MIT"
 repository = "https://github.com/xingsy97/akernel"
 edition = "2021"
@@ -14,6 +14,7 @@ tauri-build = { version = "=2.6.3", features = [] }
 [dependencies]
 tauri = { version = "=2.11.5", features = ["tray-icon"] }
 gtk = "=0.18.2"
+base64 = "=0.22.1"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 

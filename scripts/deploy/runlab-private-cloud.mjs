@@ -40,7 +40,7 @@ async function main() {
  finally { releaseOperationLock(operationLock) }
 }
 
-function help() { process.stdout.write(`Agent RunLab Private Cloud operator
+function help() { process.stdout.write(`Kala Private Cloud operator
 
 Usage:
   runlab-private-cloud install --bundle DIR --config-dir DIR

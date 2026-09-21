@@ -1,9 +1,9 @@
 {
   "name": "@agent-kernel/desktop",
-  "version": "0.2.0-rc.7",
+  "version": "0.2.0-rc.12",
   "private": true,
   "type": "module",
-  "description": "Linux-only Tauri client for an existing Agent RunLab Dashboard",
+  "description": "Linux-only Tauri client for an existing Kala Dashboard",
   "scripts": {
     "build": "node ../../scripts/release/build-desktop-release.mjs",
     "dev": "tauri dev",

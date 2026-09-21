@@ -160,7 +160,7 @@ class Fixture(BaseHTTPRequestHandler):
         if self.path == "/downloads/desktop/release.json":
             version = "99.0.0~rc.1"
             body = json.dumps({"schemaVersion": 2, "platform": "linux-amd64", "version": version,
-                "artifact": {"file": f"agent-runlab-desktop_{version}_amd64.deb", "sha256": "a" * 64, "size": 1},
+                "artifact": {"file": f"kala-desktop_{version}_amd64.deb", "sha256": "a" * 64, "size": 1},
                 "dependencies": {"file": f"{version}-{'a' * 64}.dependencies.json", "sha256": "b" * 64},
                 "checksums": {"file": f"{version}-{'a' * 64}.SHA256SUMS.txt", "sha256": "c" * 64},
                 "signature": {"status": "unsigned"}}).encode() if features else b"{}"
@@ -171,7 +171,7 @@ class Fixture(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         page_loads.append(self.path)
-        body = ("""<!doctype html><title>Agent RunLab - GNOME acceptance</title>
+        body = ("""<!doctype html><title>Kala - GNOME acceptance</title>
 <h1>GNOME tray acceptance</h1><input autofocus value="native-draft">
 <script>""" + probe + "</script>").encode()
         self.send_response(200)
@@ -226,7 +226,7 @@ def wait_for(predicate, description, timeout=35):
 
 
 def visible_windows():
-    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(app.pid), "--name", "Agent RunLab"],
+    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(app.pid), "--name", "Kala"],
                             env=env, text=True, capture_output=True)
     managed = taskbar_windows()
     return [window for window in result.stdout.splitlines() if int(window) in managed]
@@ -517,7 +517,7 @@ window.destroy()
                              "NameHasOwner", "(s)", ("org.freedesktop.Notifications",))[0],
                  "The distribution GNOME notification daemon did not start")
     assert shell.poll() is None
-    app = start("desktop", [os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/agent-runlab-desktop")])
+    app = start("desktop", [os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")])
     launcher = wait_for(lambda: visible_windows()[-1] if visible_windows() else None, "Launcher missing")
     registered = wait_for(lambda: watcher()["RegisteredStatusNotifierItems"], "GNOME did not register the tray")
     time.sleep(5)
@@ -533,7 +533,7 @@ window.destroy()
         wait_for(lambda: page_checks and page_checks[-1]["value"] is not None, "Real GNOME Dashboard did not load")
         window = wait_for(lambda: next((x for x in visible_windows() if x != launcher), None), "Dashboard missing")
         run("xdotool", "windowactivate", "--sync", window)
-        assert run("xdotool", "getwindowname", window).strip() == "Agent RunLab", "Native Dashboard title exposed remote title or endpoint"
+        assert run("xdotool", "getwindowname", window).strip() == "Kala", "Native Dashboard title exposed remote title or endpoint"
         if real_dashboard:
             settings_path = Path(env["XDG_CONFIG_HOME"]) / "io.github.xingsy97.akernel.desktop/desktop-state.json"
             wait_for(lambda: json.loads(settings_path.read_text()).get("origin") == origin,
@@ -557,8 +557,8 @@ window.destroy()
     time.sleep(2)
     screenshot("gnome-after-close.png")
     evidence = {"shell": run("gnome-shell", "--version").strip(),
-                "binary": os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/agent-runlab-desktop"),
-                "binarySha256": hashlib.sha256(Path(os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/agent-runlab-desktop")).read_bytes()).hexdigest(),
+                "binary": os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop"),
+                "binarySha256": hashlib.sha256(Path(os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")).read_bytes()).hexdigest(),
                 "extension": run("dpkg-query", "-W", "gnome-shell-extension-appindicator").strip(),
                 "watcherBeforeClose": registered, "watcherAfterClose": watcher(),
                 "processAliveAfterClose": app.poll() is None, "visibleWindowsAfterClose": visible_windows(),
@@ -582,6 +582,19 @@ window.destroy()
             run("xdotool", "click", "1")
             time.sleep(0.5)
 
+        def double_click_icon():
+            x, y = shell_eval("(()=>{const a=Object.entries(Main.panel.statusArea).find(([k,a])=>k.startsWith('appindicator-')&&a)[1];const [x,y]=a.get_transformed_position();const [w,h]=a.get_transformed_size();return [Math.round(x+w/2),Math.round(y+h/2)]})()")
+            run("xdotool", "mousemove", str(x), str(y))
+            time.sleep(0.3)
+            run("xdotool", "click", "--repeat", "2", "--delay", "100", "1")
+
+        double_click_icon()
+        wait_for(lambda: window in visible_windows(), "Double-clicking the native tray icon did not restore Kala")
+        run("xdotool", "windowactivate", "--sync", window)
+        run("xdotool", "key", "alt+F4")
+        wait_for(lambda: not visible_windows(), "Kala did not return to the tray after double-click restore")
+        evidence["trayDoubleClickRestores"] = True
+
         def exported_menu():
             item = watcher()["RegisteredStatusNotifierItems"][0]
             destination, path = item.split("@", 1)
@@ -594,12 +607,12 @@ window.destroy()
 
             def visit(node):
                 item_id, properties, children = node
-                if "label" in properties:
+                if "label" in properties and properties.get("enabled", True):
                     labels[properties["label"]] = item_id
                 for child in children:
                     visit(child)
             visit(layout)
-            assert list(labels) == ["Open Agent RunLab", "Change server…", "Quit"], layout
+            assert list(labels) == ["Open Kala", "Change server…", "Quit"], layout
             return {"destination": destination, "path": menu, "revision": revision, "layout": layout}
 
         def menu_action(label):
@@ -636,7 +649,7 @@ window.destroy()
 
         if measure_cpu:
             assert real_dashboard, "CPU acceptance requires the real production Dashboard"
-            binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/agent-runlab-desktop")
+            binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")
             samples = []
 
             def profile_state(name, hide=False, seconds=None):
@@ -660,7 +673,7 @@ window.destroy()
                 after_state = ui("inspectCpu")["result"]
                 sample["pageStateAfter"] = after_state
                 sample["faviconChangesIncludingSetupAndRestore"] = after_state["faviconChanges"] - page_state["faviconChanges"]
-                assert run("xdotool", "getwindowname", window).strip() == "Agent RunLab"
+                assert run("xdotool", "getwindowname", window).strip() == "Kala"
                 return sample
 
             def baseline(hold):
@@ -669,7 +682,7 @@ window.destroy()
                                      headers={"Content-Type": "application/json"}), timeout=10) as response:
                     assert response.status == 204
 
-            menu_action("Open Agent RunLab")
+            menu_action("Open Kala")
             wait_for(lambda: window in visible_windows() and page_checks[-1]["connectionStatus"] == "ready",
                      "Connected-idle CPU baseline not ready")
             if smooth_diagnostic:
@@ -898,7 +911,7 @@ window.destroy()
                 menu_action("Quit")
                 assert app.wait(timeout=10) == 0
                 wait_for(lambda: not watcher()["RegisteredStatusNotifierItems"], "CPU acceptance left the tray registered")
-                evidence.update({"cpuOnly": True, "nativeDashboardTitle": "Agent RunLab", "realQuitExitsAndRemovesTray": True})
+                evidence.update({"cpuOnly": True, "nativeDashboardTitle": "Kala", "realQuitExitsAndRemovesTray": True})
                 (output / "gnome-result.json").write_text(json.dumps(evidence, indent=2) + "\n")
                 raise SystemExit(0)
 
@@ -911,13 +924,13 @@ window.destroy()
             {"beforeOpening": before_menu, "afterOpening": after_menu}, indent=2) + "\n")
         menu_labels = shell_eval("(()=>{const a=Object.entries(Main.panel.statusArea).find(([k,a])=>k.startsWith('appindicator-')&&a)[1];return a.menu._getMenuItems().map(i=>({text:i.label?.text,visible:i.visible,mapped:i.mapped,opacity:i.label?.get_paint_opacity(),width:i.label?.width,height:i.label?.height,color:i.label?.get_theme_node().get_foreground_color().to_string(),position:i.label?.get_transformed_position()}))})()")
         (output / "native-menu-labels.json").write_text(json.dumps(menu_labels, indent=2) + "\n")
-        assert [item["text"] for item in menu_labels] == ["Open Agent RunLab", "Change server…", "Quit"], menu_labels
+        assert [item["text"] for item in menu_labels] == ["Idle", "Open Kala", "Change server…", "Quit"], menu_labels
         assert all(item["visible"] and item["mapped"] and item["opacity"] > 0 and item["width"] > 0 and item["height"] > 0 for item in menu_labels), menu_labels
         def painted_menu_labels():
             # Actor text/opacity can be correct before GNOME actually paints its glyphs.
             screenshot("gnome-visible-menu-text.png")
             counts = []
-            for item in menu_labels:
+            for item in menu_labels[1:]:
                 x, y = (round(value) for value in item["position"])
                 crop = f'{round(item["width"])}x{round(item["height"])}+{x}+{y}'
                 pixels = subprocess.run(["convert", str(output / "gnome-visible-menu-text.png"),
@@ -933,7 +946,7 @@ window.destroy()
 
         wait_for(painted_menu_labels, "GNOME exported menu labels but did not paint visible text", timeout=10)
         assert not visible_windows(), "Opening the native tray menu stole focus and restored the hidden window"
-        menu_action("Open Agent RunLab")
+        menu_action("Open Kala")
         wait_for(lambda: window in visible_windows(), "Physically selecting native Open did not restore")
         run("xdotool", "windowactivate", "--sync", window)
         run("xdotool", "key", "F8")
@@ -946,7 +959,7 @@ window.destroy()
         wait_for(lambda: not visible_windows(), "GNOME minimize did not hide to tray")
         wait_for(lambda: int(window) not in taskbar_windows(), "Minimized window remained in taskbar")
         screenshot("gnome-minimized-to-tray.png")
-        menu_action("Open Agent RunLab")
+        menu_action("Open Kala")
         wait_for(lambda: window in visible_windows(), "Native tray Open did not restore")
         assert len(page_loads) == count
         run("xdotool", "windowactivate", "--sync", window)
@@ -959,7 +972,7 @@ window.destroy()
         wait_for(lambda: watcher()["RegisteredStatusNotifierItems"], "Reenabled GNOME tray did not recover")
         time.sleep(2)
         if features:
-            binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/agent-runlab-desktop")
+            binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")
             run("xdotool", "windowactivate", "--sync", window)
             run("xdotool", "key", "alt+F4")
             wait_for(lambda: not visible_windows(), "Close before repeat launch failed")
@@ -987,7 +1000,7 @@ window.destroy()
             screenshot("gnome-working-badge.png")
             sent = lambda: [n for n in notifications if n["method"] == "Notify"
                             and n["destination"] == "org.freedesktop.Notifications"]
-            notice = {"id": "approval", "sessionId": "session-approval", "title": "Agent RunLab",
+            notice = {"id": "approval", "sessionId": "session-approval", "title": "Kala",
                       "body": "A session needs your attention.", "silent": True}
             for invalid in [
                 {**notice, "body": "x" * 513}, {**notice, "title": "Private transcript"},
@@ -1024,12 +1037,12 @@ window.destroy()
             if features:
                 def active_banner():
                     return shell_eval("Main.messageTray._notification ? {title: Main.messageTray._notification.title, body: Main.messageTray._notification.body} : null")
-                expected_banner = {"title": "Agent RunLab", "body": sent()[-1]["body"][4]}
+                expected_banner = {"title": "Kala", "body": sent()[-1]["body"][4]}
                 for _ in range(12):
                     banner = active_banner()
                     if banner == expected_banner:
                         break
-                    if banner is not None and banner["title"] == "Agent RunLab":
+                    if banner is not None and banner["title"] == "Kala":
                         # CPU scenarios may have queued an earlier completion banner.
                         shell_eval("Main.messageTray._notification.destroy()")
                     elif banner is not None:
@@ -1040,7 +1053,7 @@ window.destroy()
                     time.sleep(0.5)
                 assert active_banner() == expected_banner, f"Actual GNOME banner is {active_banner()!r}"
             screenshot("gnome-private-approval-notification.png")
-            assert sent()[-1]["body"][3] == "Agent RunLab"
+            assert sent()[-1]["body"][3] == "Kala"
             assert sent()[-1]["body"][6]["suppress-sound"] is True
             assert all("Private session" not in json.dumps(n) and "native-draft" not in json.dumps(n) for n in sent())
             run("xdotool", "mousemove", "720", "78", "click", "1")
@@ -1075,7 +1088,7 @@ window.destroy()
                 except AssertionError as error:
                     feature_failures.append(str(error))
                     print(f"FAIL: {error}", flush=True)
-                menu_action("Open Agent RunLab")
+                menu_action("Open Kala")
                 wait_for(lambda: window in visible_windows(), "Hidden completion did not preserve existing window")
                 subprocess.run([binary, "agent-runlab://session/session-viewed"], env=env, check=True, timeout=10)
                 wait_for(lambda: page_checks[-1]["label"] == "Private session-viewed" and page_checks[-1]["value"] == original["value"],
@@ -1162,7 +1175,7 @@ window.destroy()
                     wait_for(lambda: page_checks[-1]["instance"] != previous_instance and page_checks[-1]["origin"] == origin,
                              "Restart did not automatically reconnect to the last confirmed server", 45)
                     remote = wait_for(lambda: next((x for x in visible_windows()
-                        if run("xdotool", "getwindowname", x).strip() == "Agent RunLab"), None), "Automatically restored Dashboard missing")
+                        if run("xdotool", "getwindowname", x).strip() == "Kala"), None), "Automatically restored Dashboard missing")
                     assert len(visible_windows()) == 1, "Automatic restart left the connection form visible"
                     assert json.loads(settings_path.read_text())["origin"] == origin
                     evidence["restartAutomaticallyReusesConfirmedOrigin"] = True
@@ -1210,7 +1223,7 @@ window.destroy()
             evidence.update({"actualGeometryRestoredAfterRestart": True, "offscreenPlacementRecovered": True,
                              "coldSessionLinkRetainedUntilConnect": True})
         evidence.update({"actualGnomeMenuOpenClickRestores": True, "trayMenuDoesNotStealFocus": True,
-                         "nativeDashboardTitle": "Agent RunLab",
+                         "nativeDashboardTitle": "Kala",
                          "visibleNativeMenuLabels": menu_labels, "sameWindowDocumentAndDraft": True,
                          "noReloadOnRestore": True, "closeRemovesTaskbarEntry": True,
                          "actualGnomeMinimizeRemovesTaskbarEntry": True, "minimalNativeTrayMenu": True,

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-window-control"
+description = "Bounded minimize, maximize and close actions for Kala-owned windows only."
+commands.allow = ["desktop_window"]

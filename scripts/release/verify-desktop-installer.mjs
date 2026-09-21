@@ -71,7 +71,7 @@ try {
   }
   if (values.fresh) {
     // Remove only this task's application, never dependencies or another service.
-    const output = run(['--', 'apt-get', 'remove', '-y', 'agent-runlab-desktop'])
+    const output = run(['--', 'apt-get', 'remove', '-y', 'kala-desktop'])
     await writeFile(resolve(evidence, 'fresh-install-setup.log'), output, { mode: 0o600 })
   }
   const execution = spawnSync('lxc', [
@@ -85,10 +85,10 @@ try {
   if (execution.error) throw execution.error
   assert.equal(execution.status, 0, `Copied installer failed: ${output}`)
   assert(!/unsandboxed as root|couldn't be accessed by user '_apt'/i.test(output), 'APT fell back to unsandboxed root acquisition')
-  if (values.fresh) assert(output.includes('Setting up agent-runlab-desktop'), 'A fresh real installation must configure the package')
-  const installed = run(['--', 'dpkg-query', '-W', '-f=${Version} ${db:Status-Status}', 'agent-runlab-desktop']).trim()
+  if (values.fresh) assert(output.includes('Setting up kala-desktop'), 'A fresh real installation must configure the package')
+  const installed = run(['--', 'dpkg-query', '-W', '-f=${Version} ${db:Status-Status}', 'kala-desktop']).trim()
   assert.equal(installed, `${release.version} installed`)
-  run(['--', 'test', '-x', '/usr/bin/agent-runlab-desktop'])
+  run(['--', 'test', '-x', '/usr/bin/kala-desktop'])
   const leftovers = [...directories()].filter((directory) => !before.has(directory))
   assert.deepEqual(leftovers, [], 'Installer left temporary downloads behind')
   assert.equal(run(['--', 'stat', '-c', '%a', '/home/ubuntu']).trim(), homeMode)

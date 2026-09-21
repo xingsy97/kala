@@ -16,12 +16,21 @@ test('native window stays menu-free with local keyboard shortcuts and safe close
   assert.match(native, /connect_window_state_event[\s\S]*WindowState::ICONIFIED/)
   assert.match(native, /install_shortcuts\(&dashboard\)/)
   assert.match(native, /install_shortcuts\(&launcher\)/)
-  assert.match(native, /\.title\("Agent RunLab"\)/)
-  assert.match(native, /on_document_title_changed[\s\S]*set_title\("Agent RunLab"\)/)
-  assert.doesNotMatch(native, /set_title\(&format!|let title = format!\("Agent RunLab/)
+  assert.match(native, /\.title\("Kala"\)/)
+  assert.match(native, /on_document_title_changed[\s\S]*set_title\("Kala"\)/)
+  assert.doesNotMatch(native, /set_title\(&format!|let title = format!\("Kala/)
+  assert.equal(config.productName, 'kala-desktop')
+  assert.equal(config.app.windows[0].title, 'Kala — Connect')
   assert.equal(config.app.windows[0].width, 560)
   assert.equal(config.app.windows[0].height, 430)
-  assert.notEqual(config.app.windows[0].decorations, false)
+  assert.equal(config.app.windows[0].decorations, false)
+  assert.match(native, /\.decorations\(false\)/)
+  assert.match(html, /class="launcher-heading"[\s\S]*<h1>Kala<\/h1>[\s\S]*data-window-action="minimize"[\s\S]*data-window-action="toggle-maximize"[\s\S]*data-window-action="close"/)
+  assert.doesNotMatch(html, /class="titlebar"|<header/)
+  const init = read('../src-tauri/src/desktop-init.js')
+  assert.match(init, /data-kala-desktop-window-controls-slot[\s\S]*appendChild\(host\)/)
+  assert.match(init, /data-docked[\s\S]*background:transparent[\s\S]*box-shadow:none/)
+  assert.doesNotMatch(init, /workbench-toolbar[\s\S]*appendChild\(host\)|margin-left:auto|ak-app-shell|kala-desktop-titlebar|viewport-h[^']*- 36px/)
   assert.match(html, /<details>\s*<summary>Help and shortcuts<\/summary>/)
   assert.doesNotMatch(html, /<details[^>]*\bopen|Connection.*menu/)
   assert.match(html, /<details>[\s\S]*Remote servers require HTTPS[\s\S]*Ctrl\+Shift\+O[\s\S]*<\/details>/)
@@ -32,7 +41,7 @@ test('official tray is minimal and cannot hide an app without registered host su
   const cargo = read('../src-tauri/Cargo.toml')
   assert.match(cargo, /tauri = \{ version = "=2\.11\.5", features = \["tray-icon"\] \}/)
   assert.doesNotMatch(native, /set_menu|Submenu|http:|TcpListener/)
-  assert.match(native, /"Open Agent RunLab"/)
+  assert.match(native, /"Open Kala"/)
   assert.match(native, /"Change server…"/)
   assert.match(native, /"tray-quit" => \{ crate::placement::capture\(app\); app\.exit\(0\); \}/)
   assert.match(native, /IsStatusNotifierHostRegistered/)
@@ -51,6 +60,9 @@ test('official tray is minimal and cannot hide an app without registered host su
   assert.match(native, /Probe::Unknown/)
   assert.match(native, /keep_open_when_uncertain/)
   assert.match(native, /temp_dir_path\(app\.path\(\)\.app_cache_dir/)
+  assert.match(native, /com\.canonical\.dbusmenu[\s\S]*"opened"[\s\S]*"closed"[\s\S]*from_millis\(700\)/)
+  assert.doesNotMatch(native, /show_menu_on_left_click/)
+  assert.match(acceptance, /Double-clicking the native tray icon did not restore Kala/)
   const icon = readFileSync(new URL('../src-tauri/icons/icon.png', import.meta.url))
   assert.equal(icon[24], 8, 'Tray requires an RGBA8 PNG, not a 16-bit image')
   assert.equal(icon[25], 6)
@@ -71,7 +83,11 @@ async function launcherPage({ saved = null, legacy = null, autoConnect = false, 
     } } },
   }
   vm.runInNewContext(read('../frontend/launcher.js'), {
-    document: { getElementById: id => nodes[id] },
+    document: {
+      getElementById: id => nodes[id],
+      querySelectorAll: () => [],
+      querySelector: () => ({ addEventListener() {} }),
+    },
     localStorage: { getItem: () => legacy, setItem: () => assert.fail('Native confirmed settings are the only write source') },
     window, console,
   })
@@ -115,10 +131,10 @@ test('explicit Change server/reloaded launcher stays editable without reconnecti
 
 test('desktop release versions stay in sync without changing dependencies', () => {
   const version = JSON.parse(read('../package.json')).version
-  assert.equal(version, '0.2.0-rc.7')
+  assert.equal(version, '0.2.0-rc.12')
   assert.equal(JSON.parse(read('../src-tauri/tauri.conf.json')).version, version)
-  assert.match(read('../src-tauri/Cargo.toml'), /version = "0\.2\.0-rc\.7"/)
-  assert.match(read('../src-tauri/Cargo.lock'), /name = "agent-runlab-desktop"\nversion = "0\.2\.0-rc\.7"/)
+  assert.match(read('../src-tauri/Cargo.toml'), /name = "kala-desktop"[\s\S]*version = "0\.2\.0-rc\.12"/)
+  assert.match(read('../src-tauri/Cargo.lock'), /name = "kala-desktop"\nversion = "0\.2\.0-rc\.12"/)
 })
 
 test('connect remains local; selected-origin v1 UI hints get no general native privileges', () => {
@@ -127,7 +143,18 @@ test('connect remains local; selected-origin v1 UI hints get no general native p
   assert.deepEqual(config.bundle.targets, ['deb'])
   assert.deepEqual(config.app.security.capabilities, ['launcher'])
   assert.deepEqual(capability.windows, ['launcher'])
-  assert.deepEqual(capability.permissions, ['allow-connect'])
+  assert.deepEqual(capability.permissions, ['allow-connect', 'allow-window-control'])
+  const windowPermission = read('../src-tauri/permissions/window-control.toml')
+  assert.match(windowPermission, /commands\.allow = \["desktop_window"\]/)
+  assert.doesNotMatch(windowPermission, /shell|filesystem|allow-connect/)
+  const main = read('../src-tauri/src/main.rs')
+  const desktopUiPermission = read('../src-tauri/permissions/desktop-ui.toml')
+  assert.match(main, /authorize_window_control[\s\S]*authorize_dashboard/)
+  assert.match(main, /desktop_clipboard_image[\s\S]*authorize_dashboard/)
+  assert.match(main, /8192[\s\S]*40_000_000[\s\S]*20 \* 1024 \* 1024/)
+  assert.match(desktopUiPermission, /desktop_clipboard_image/)
+  assert.doesNotMatch(desktopUiPermission, /clipboard_text|read_text/)
+  assert.match(main, /"start-dragging"[\s\S]*"minimize"[\s\S]*"toggle-maximize"[\s\S]*"close"/)
   assert.equal(capability.local, true)
   assert.equal(capability.remote, undefined)
   assert.match(read('../src-tauri/src/main.rs'), /window\.label\(\) != "launcher"/)
@@ -200,17 +227,19 @@ test('public v1 methods preserve exact payloads and promise errors', async () =>
   const { window, calls } = nativePage()
   const bridge = window.__RUNLAB_DESKTOP_BRIDGE__
   assert.equal(bridge.version, 1)
-  assert.deepEqual(Object.keys(bridge).sort(), ['confirmConnection', 'getInfo', 'notify', 'setActivity', 'subscribe', 'version'])
+  assert.deepEqual(Object.keys(bridge).sort(), ['confirmConnection', 'getInfo', 'notify', 'readClipboardImage', 'setActivity', 'subscribe', 'version'])
   assert.equal((await bridge.getInfo()).version, '0.2.0-rc.5')
   const activity = { status: 'running', running: 1, attention: 0, completed: 0 }
-  const notice = { id: 'done:abc.1', sessionId: 'session:abc.1', title: 'Agent RunLab', body: 'A session completed.', silent: true }
+  const notice = { id: 'done:abc.1', sessionId: 'session:abc.1', title: 'Kala', body: 'A session completed.', silent: true }
   await bridge.setActivity(activity)
   await bridge.notify(notice)
+  await bridge.readClipboardImage()
   await bridge.confirmConnection()
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     { command: 'desktop_status' },
     { command: 'desktop_ui', args: { state: activity } },
     { command: 'desktop_notify', args: { notification: notice } },
+    { command: 'desktop_clipboard_image' },
     { command: 'desktop_connection_ready' },
   ])
   window.__TAURI__.core.invoke = async () => { throw new Error('Native delivery unavailable') }
@@ -258,7 +287,7 @@ async function installPage(response, checks = true) {
 
 const good = {
   schemaVersion: 2, platform: 'linux-amd64', version: '0.2.0~rc.1',
-  artifact: { file: 'agent-runlab-desktop_0.2.0~rc.1_amd64.deb', sha256: 'a'.repeat(64), size: 1234 },
+  artifact: { file: 'kala-desktop_0.2.0~rc.1_amd64.deb', sha256: 'a'.repeat(64), size: 1234 },
   dependencies: { file: `0.2.0~rc.1-${'a'.repeat(64)}.dependencies.json`, sha256: 'b'.repeat(64) },
   checksums: { file: `0.2.0~rc.1-${'a'.repeat(64)}.SHA256SUMS.txt`, sha256: 'c'.repeat(64) },
 }
@@ -267,9 +296,9 @@ test('download entry exposes only existing validated local artifacts', async () 
   const { nodes, requests } = await installPage({ ok: true, json: async () => good })
   assert.equal(nodes.get('available').hidden, false)
   assert.equal(nodes.get('deb').href, `/downloads/desktop/${good.artifact.file}`)
-  assert.match(nodes.get('commands').textContent, /sha256sum --strict --check/)
-  assert.doesNotMatch(nodes.get('commands').textContent, /ignore-missing/)
-  assert.match(nodes.get('commands').textContent, /agent-runlab-desktop_0\.2\.0~rc\.1_amd64\.deb/)
+  assert.match(nodes.get('commands').textContent, /bash -o pipefail[\s\S]*\/install\/assets\/desktop-install\.sh/)
+  assert.doesNotMatch(nodes.get('commands').textContent, /\n|ignore-missing|; exit "\$status"/)
+  assert.match(nodes.get('commands').textContent, /Cloudflare Access/)
   assert.equal(nodes.get('manifest').href, `/downloads/desktop/${good.dependencies.file}`)
   assert.equal(requests.filter(({ options }) => options.method === 'HEAD').length, 3)
 })

@@ -1,5 +1,5 @@
 [Unit]
-Description=Agent RunLab Dedicated one-shot migration finalizer
+Description=Kala Dedicated one-shot migration finalizer
 After=network-online.target agent-runlab-host.service
 Wants=network-online.target
 StartLimitIntervalSec=5min

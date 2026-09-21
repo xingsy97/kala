@@ -1,8 +1,9 @@
 #[cfg(not(target_os = "linux"))]
-compile_error!("Agent RunLab desktop is supported only on Linux.");
+compile_error!("Kala desktop is supported only on Linux.");
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use gtk::prelude::*;
+use base64::Engine;
 mod tray;
 mod desktop;
 mod placement;
@@ -114,6 +115,58 @@ fn authorize_launcher(window: &tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+fn authorize_window_control(app: &tauri::AppHandle, window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == "launcher" && window.url().map_err(|e| e.to_string())?.scheme() == "tauri" {
+        return Ok(());
+    }
+    desktop::authorize_dashboard(app, window).map(|_| ())
+}
+
+#[tauri::command]
+async fn desktop_window(app: tauri::AppHandle, window: tauri::WebviewWindow, action: String) -> Result<(), String> {
+    desktop::on_ui(app, move |app| {
+        authorize_window_control(app, &window)?;
+        match action.as_str() {
+            "start-dragging" => window.start_dragging().map_err(|e| e.to_string()),
+            "minimize" => window.minimize().map_err(|e| e.to_string()),
+            "toggle-maximize" => {
+                if window.is_maximized().map_err(|e| e.to_string())? {
+                    window.unmaximize().map_err(|e| e.to_string())
+                } else {
+                    window.maximize().map_err(|e| e.to_string())
+                }
+            }
+            "close" => {
+                if !tray::hide_if_available(app, window.label()) {
+                    window.close().map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            }
+            _ => Err("Unsupported window action.".into()),
+        }
+    }).await
+}
+
+#[tauri::command]
+async fn desktop_clipboard_image(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<Option<String>, String> {
+    desktop::on_ui(app, move |app| {
+        desktop::authorize_dashboard(app, &window)?;
+        let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
+        let Some(image) = clipboard.wait_for_image() else { return Ok(None); };
+        let width = image.width();
+        let height = image.height();
+        if width <= 0 || height <= 0 || width > 8192 || height > 8192
+            || i64::from(width) * i64::from(height) > 40_000_000 {
+            return Err("Clipboard image dimensions exceed the supported limit.".into());
+        }
+        let png = image.save_to_bufferv("png", &[]).map_err(|error| error.to_string())?;
+        if png.len() > 20 * 1024 * 1024 {
+            return Err("Clipboard image exceeds the 20 MiB encoded limit.".into());
+        }
+        Ok(Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png))))
+    }).await
+}
+
 fn connect_dashboard(app: tauri::AppHandle, window: tauri::WebviewWindow, endpoint: String) -> Result<String, String> {
     let url = endpoint_url(&endpoint)?;
     let origin = url.origin().ascii_serialization();
@@ -143,7 +196,8 @@ fn connect_dashboard(app: tauri::AppHandle, window: tauri::WebviewWindow, endpoi
     std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
     let dashboard = WebviewWindowBuilder::new(&app, "dashboard", WebviewUrl::External(url))
         .data_directory(profile)
-        .title("Agent RunLab")
+        .title("Kala")
+        .decorations(false)
         .inner_size(width, height)
         .min_inner_size(800.0, 600.0)
         .initialization_script(DESKTOP_INIT)
@@ -158,7 +212,7 @@ fn connect_dashboard(app: tauri::AppHandle, window: tauri::WebviewWindow, endpoi
         })
         .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
         .on_document_title_changed(|window, _| {
-            let _ = window.set_title("Agent RunLab");
+            let _ = window.set_title("Kala");
         })
         .on_download(|webview, event| {
             if let tauri::webview::DownloadEvent::Requested { destination, .. } = event {
@@ -214,7 +268,7 @@ fn main() {
         .manage(tray::State::default())
         .manage(desktop::State::default())
         .manage(connection::State::default())
-        .invoke_handler(tauri::generate_handler![connect, connection::launcher_bootstrap, desktop::desktop_ui, desktop::desktop_status, desktop::desktop_notify, desktop::desktop_connection_ready])
+        .invoke_handler(tauri::generate_handler![connect, desktop_window, desktop_clipboard_image, connection::launcher_bootstrap, desktop::desktop_ui, desktop::desktop_status, desktop::desktop_notify, desktop::desktop_connection_ready])
         .setup(|app| {
             if let Some(launcher) = app.get_webview_window("launcher") {
                 install_shortcuts(&launcher)?;
@@ -244,7 +298,7 @@ fn main() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("failed to build Agent RunLab desktop")
+        .expect("failed to build Kala desktop")
         .run(|_, _| {});
 }
 
