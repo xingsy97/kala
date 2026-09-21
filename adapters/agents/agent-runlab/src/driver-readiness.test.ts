@@ -6,7 +6,7 @@ import { waitForExecutor } from './driver-readiness.js'
 
 type DashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 
-describe('Agent RunLab driver readiness', () => {
+describe('Kala driver readiness', () => {
   it('polls again when the first executor snapshot is empty', async () => {
     vi.useFakeTimers()
     let listener: DashboardServerToClientEvents['server:executors'] | undefined

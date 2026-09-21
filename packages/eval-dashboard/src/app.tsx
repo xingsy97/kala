@@ -1772,7 +1772,7 @@ function Leaderboard({
             }
           >
             <option value="">All</option>
-            <option value="agent-runlab">Agent RunLab</option>
+            <option value="agent-runlab">Kala</option>
             <option value="claude-code">Claude Code</option>
             <option value="codex">Codex</option>
           </select>

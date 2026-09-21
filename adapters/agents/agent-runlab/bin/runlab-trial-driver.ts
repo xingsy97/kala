@@ -15,7 +15,7 @@ const children = new Set<ChildProcess>()
 let dashboard: DashboardSocket | undefined
 let shuttingDown = false
 
-if (process.argv.includes('--version')) { process.stdout.write('Agent RunLab evaluation driver ' + DRIVER_VERSION + '\n'); process.exit(0) }
+if (process.argv.includes('--version')) { process.stdout.write('Kala evaluation driver ' + DRIVER_VERSION + '\n'); process.exit(0) }
 
 void main().catch(async (error: unknown) => {
   emit({ type: 'runlab.error', message: error instanceof Error ? error.message : String(error), ...(error instanceof Error && error.stack ? { stack: error.stack } : {}) })
@@ -74,7 +74,7 @@ async function connectDashboard(url: string, sessionId: string, timeoutMs: numbe
       emit({ type: 'runlab.driver.ready', sessionId, url }); return socket
     } catch (error) { lastError = error instanceof Error ? error.message : String(error); socket.close(); await delay(100) }
   }
-  throw new Error('Agent RunLab Host did not accept Dashboard connection: ' + lastError)
+  throw new Error('Kala Host did not accept Dashboard connection: ' + lastError)
 }
 function wireDashboardEvents(socket: DashboardSocket): void {
   socket.on('session:ready', (payload) => emit({ type: 'runlab.session.ready', payload }))
@@ -94,7 +94,7 @@ async function setAllowAll(socket: DashboardSocket, sessionId: string, timeoutMs
 }
 async function runPrompt(socket: DashboardSocket, sessionId: string, prompt: string, timeoutMs: number): Promise<StateChangedEvent> {
   return await new Promise<StateChangedEvent>((resolve, reject) => {
-    const timer = setTimeout(() => { cleanup(); reject(new Error('Agent RunLab absolute deadline reached')) }, timeoutMs)
+    const timer = setTimeout(() => { cleanup(); reject(new Error('Kala absolute deadline reached')) }, timeoutMs)
     const changed: DashboardServerToClientEvents['state:changed'] = (payload) => { if (payload.sessionId !== sessionId) return; if (payload.state.status === 'done') { cleanup(); resolve(payload) }; if (payload.state.status === 'error') { cleanup(); reject(new Error(payload.state.error)) } }
     const failed: DashboardServerToClientEvents['session:error'] = (payload) => { if (payload.sessionId === sessionId) { cleanup(); reject(new Error(payload.message)) } }
     const cleanup = () => { clearTimeout(timer); socket.off('state:changed', changed); socket.off('session:error', failed) }; socket.on('state:changed', changed); socket.on('session:error', failed)
@@ -103,7 +103,7 @@ async function runPrompt(socket: DashboardSocket, sessionId: string, prompt: str
 }
 async function collectNativeEvidence(sessions: string, sessionId: string, root: string): Promise<void> {
   const file = (await readdir(sessions)).find((name) => name.endsWith('_' + sessionId + '.jsonl'))
-  if (!file) throw new Error('fresh Agent RunLab session ledger was not created')
+  if (!file) throw new Error('fresh Kala session ledger was not created')
   await cp(join(sessions, file), '/artifacts/runlab-session.jsonl')
   await command('tar', ['-cf', '/artifacts/runlab-native.tar', '-C', root, 'sessions', 'host-artifacts'])
 }
@@ -140,7 +140,7 @@ async function shutdown(): Promise<void> {
   for (const handle of children) handle.kill('SIGKILL')
 }
 function parseArgs(argv: readonly string[]): DriverArgs {
-  const values = new Map<string, string>(); for (let index = 0; index < argv.length; index += 2) { const key = argv[index]; const value = argv[index + 1]; if (!key?.startsWith('--') || value === undefined) throw new Error('invalid RunLab driver arguments'); values.set(key, value) }
+  const values = new Map<string, string>(); for (let index = 0; index < argv.length; index += 2) { const key = argv[index]; const value = argv[index + 1]; if (!key?.startsWith('--') || value === undefined) throw new Error('invalid Kala driver arguments'); values.set(key, value) }
   const provider = values.get('--provider'); const timeoutMs = Number(values.get('--timeout-ms')); if (provider !== 'openai' && provider !== 'anthropic') throw new Error('invalid provider'); if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error('invalid timeout')
   const sessionId = required(values, '--session-id'); if (basename(sessionId) !== sessionId) throw new Error('invalid session id')
   return { sessionId, workspace: required(values, '--workspace'), model: required(values, '--model'), provider, timeoutMs }

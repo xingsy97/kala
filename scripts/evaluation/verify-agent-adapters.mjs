@@ -43,7 +43,7 @@ try {
   const runLabPackage = await json('adapters/agents/agent-runlab/package.json')
   const runLabDependencies = Object.keys(runLabPackage.dependencies ?? {}).sort()
   const allowedRunLabDependencies = ['@agent-kernel/eval-protocol', '@agent-kernel/eval-sdk', '@agent-kernel/shared', 'socket.io-client']
-  if (JSON.stringify(runLabDependencies) !== JSON.stringify(allowedRunLabDependencies)) throw new Error('Agent RunLab production dependency boundary changed')
+  if (JSON.stringify(runLabDependencies) !== JSON.stringify(allowedRunLabDependencies)) throw new Error('Kala production dependency boundary changed')
   const runLabSourceFiles = (await walk(resolve(root, 'adapters/agents/agent-runlab'))).filter(sourceFile)
   const forbiddenRunLabImports = ['@agent-kernel/host', '@agent-kernel/dashboard', 'packages/host', '/src/eval/', 'src/eval/']
   for (const path of runLabSourceFiles) {
@@ -52,8 +52,8 @@ try {
   }
   const runLabSource = await source('adapters/agents/agent-runlab/src/index.ts')
   const runLabDriver = await source('adapters/agents/agent-runlab/bin/runlab-trial-driver.ts')
-  for (const marker of ['DashboardClientToServerEvents', 'DashboardServerToClientEvents', 'client:create_session', 'client:user_message']) if (!runLabDriver.includes(marker)) throw new Error('Agent RunLab public wire integration is missing ' + marker)
-  if (!runLabSource.includes("extraArtifactPaths: ['runlab-session.jsonl', 'runlab-native.tar']")) throw new Error('Agent RunLab native evidence declaration is missing')
+  for (const marker of ['DashboardClientToServerEvents', 'DashboardServerToClientEvents', 'client:create_session', 'client:user_message']) if (!runLabDriver.includes(marker)) throw new Error('Kala public wire integration is missing ' + marker)
+  if (!runLabSource.includes("extraArtifactPaths: ['runlab-session.jsonl', 'runlab-native.tar']")) throw new Error('Kala native evidence declaration is missing')
 
   const claudeSource = await source('adapters/agents/claude-code/src/index.ts')
   for (const marker of ['--output-format', 'stream-json', '--no-session-persistence', '--strict-mcp-config', 'CLAUDE_CONFIG_DIR', "['runuser', '-u'"]) if (!claudeSource.includes(marker)) throw new Error('Claude Code isolated native CLI integration is missing ' + marker)

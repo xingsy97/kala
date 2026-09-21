@@ -7,7 +7,7 @@ import { certifyOfficialAgentBackend } from './suite.js'
 const HASH = 'a'.repeat(64)
 
 certifyOfficialAgentBackend({
-  name: 'Agent RunLab', create: () => new AgentRunLabBackend(),
+  name: 'Kala', create: () => new AgentRunLabBackend(),
   variant: () => ({ variantId: 'runlab', backendId: 'agent-runlab', agentVersion: '1', model: { provider: 'openai', modelId: 'fixture-model' }, configHash: HASH, config: { provider: 'openai' }, credentialRefs: [{ referenceId: 'openai-key', provider: 'openai', scope: [] }] }),
 })
 

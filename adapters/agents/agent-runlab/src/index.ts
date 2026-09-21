@@ -21,7 +21,7 @@ const ACCEPTED_PROVIDERS = Object.keys(CREDENTIAL_ENVIRONMENT)
 
 export class AgentRunLabBackend implements EvaluationAgentBackend {
   readonly descriptor = AgentBackendDescriptorSchema.parse({
-    schemaVersion: 1, id: 'agent-runlab', label: 'Agent RunLab', version: '0.0.0', configSchemaVersion: 1, ranked: true, evidenceLevel: 'native',
+    schemaVersion: 1, id: 'agent-runlab', label: 'Kala', version: '0.0.0', configSchemaVersion: 1, ranked: true, evidenceLevel: 'native',
     capabilities: { nonInteractive: true, workspaceInjection: true, isolatedConfig: true, cancellation: true, absoluteDeadline: true, nativeEvents: true, normalizedEvents: true, toolEvents: true, finalDiff: true, usage: 'available' },
   })
   private readonly runs = new Map<string, Running>()
@@ -30,16 +30,16 @@ export class AgentRunLabBackend implements EvaluationAgentBackend {
     const compatible = config.credentialRefs.filter((reference) => ACCEPTED_PROVIDERS.includes(reference.provider))
     const configuredProvider = string(config.config.provider) ?? config.model.provider
     const errors: Array<{ code: string; message: string }> = []
-    if (compatible.length === 0) errors.push({ code: 'CREDENTIAL_REFERENCE_MISSING', message: 'Agent RunLab requires an openai or anthropic credential reference' })
-    if (configuredProvider && !ACCEPTED_PROVIDERS.includes(configuredProvider)) errors.push({ code: 'PROVIDER_UNSUPPORTED', message: 'Agent RunLab provider must be openai or anthropic' })
-    if (!configuredProvider && compatible.length > 1) errors.push({ code: 'PROVIDER_AMBIGUOUS', message: 'Agent RunLab config.provider is required when more than one compatible credential reference is declared' })
-    if (configuredProvider && !compatible.some((reference) => reference.provider === configuredProvider)) errors.push({ code: 'PROVIDER_CREDENTIAL_MISMATCH', message: 'Agent RunLab has no credential reference for configured provider ' + configuredProvider })
-    return { ok: errors.length === 0, errors, warnings: [{ code: 'SANDBOX_BINARY_PREFLIGHT_DEFERRED', message: 'RunLab driver, Host, and Executor binaries are verified inside each fresh trial sandbox' }], resolvedVersion: this.descriptor.version, capabilities: this.descriptor.capabilities }
+    if (compatible.length === 0) errors.push({ code: 'CREDENTIAL_REFERENCE_MISSING', message: 'Kala requires an openai or anthropic credential reference' })
+    if (configuredProvider && !ACCEPTED_PROVIDERS.includes(configuredProvider)) errors.push({ code: 'PROVIDER_UNSUPPORTED', message: 'Kala provider must be openai or anthropic' })
+    if (!configuredProvider && compatible.length > 1) errors.push({ code: 'PROVIDER_AMBIGUOUS', message: 'Kala config.provider is required when more than one compatible credential reference is declared' })
+    if (configuredProvider && !compatible.some((reference) => reference.provider === configuredProvider)) errors.push({ code: 'PROVIDER_CREDENTIAL_MISMATCH', message: 'Kala has no credential reference for configured provider ' + configuredProvider })
+    return { ok: errors.length === 0, errors, warnings: [{ code: 'SANDBOX_BINARY_PREFLIGHT_DEFERRED', message: 'Kala driver, Host, and Executor binaries are verified inside each fresh trial sandbox' }], resolvedVersion: this.descriptor.version, capabilities: this.descriptor.capabilities }
   }
 
   async start(input: AgentRunInput, signal: AbortSignal): Promise<AgentRunHandle> {
     const controller = new AbortController()
-    const abort = () => controller.abort(signal.reason ?? new Error('Agent RunLab cancelled'))
+    const abort = () => controller.abort(signal.reason ?? new Error('Kala cancelled'))
     signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
     const provider = selectedProvider(input.variant)
     const credentialEnvironment = mapCredential(input, provider)
@@ -77,12 +77,12 @@ export class AgentRunLabBackend implements EvaluationAgentBackend {
       onStdout: (chunk) => decoder.write(chunk),
     }, controller.signal).then((result) => {
       decoder.end()
-      if (result.timedOut) throw new AgentBackendTimeoutError('Agent RunLab exceeded its absolute deadline')
+      if (result.timedOut) throw new AgentBackendTimeoutError('Kala exceeded its absolute deadline')
       if (result.exitCode !== 0) {
         const diagnostic = 'stdout tail:\n' + result.stdout.trim().slice(-4_000) + '\nstderr tail:\n' + result.stderr.trim().slice(-4_000)
-        const providerError = transientProviderError(diagnostic, 'Agent RunLab provider request')
+        const providerError = transientProviderError(diagnostic, 'Kala provider request')
         if (providerError) throw providerError
-        throw new Error('Agent RunLab driver exited with ' + String(result.exitCode) + ': ' + diagnostic)
+        throw new Error('Kala driver exited with ' + String(result.exitCode) + ': ' + diagnostic)
       }
       queue.close(); return result
     }).catch((error: unknown) => { queue.close(error); throw error })
@@ -92,7 +92,7 @@ export class AgentRunLabBackend implements EvaluationAgentBackend {
   }
 
   async *events(handle: AgentRunHandle): AsyncIterable<NormalizedAgentEvent> { for await (const event of this.required(handle).queue) yield event }
-  async cancel(handle: AgentRunHandle): Promise<void> { this.required(handle).controller.abort(new Error('Agent RunLab adapter cancelled')) }
+  async cancel(handle: AgentRunHandle): Promise<void> { this.required(handle).controller.abort(new Error('Kala adapter cancelled')) }
 
   async collect(handle: AgentRunHandle): Promise<AgentRunArtifacts> {
     const run = this.required(handle)
@@ -117,7 +117,7 @@ export class AgentRunLabBackend implements EvaluationAgentBackend {
     const normalized = normalize(native, run.normalizedEvents.length, at, run.nativeEvents.length - 1)
     run.normalizedEvents.push(normalized); run.queue.push(normalized)
   }
-  private required(handle: AgentRunHandle): Running { const run = this.runs.get(handle.handleId); if (!run) throw new Error('unknown Agent RunLab handle: ' + handle.handleId); return run }
+  private required(handle: AgentRunHandle): Running { const run = this.runs.get(handle.handleId); if (!run) throw new Error('unknown Kala handle: ' + handle.handleId); return run }
 }
 
 function normalize(native: unknown, sequence: number, at: string, nativeIndex: number): NormalizedAgentEvent {
@@ -140,12 +140,12 @@ function selectedProvider(variant: AgentVariantSpec): keyof typeof CREDENTIAL_EN
   const configured = string(variant.config.provider) ?? variant.model.provider
   if (configured === 'openai' || configured === 'anthropic') return configured
   const providers = [...new Set(variant.credentialRefs.map((reference) => reference.provider).filter((provider) => ACCEPTED_PROVIDERS.includes(provider)))]
-  if (providers.length !== 1) throw new Error('Agent RunLab provider is missing or ambiguous')
+  if (providers.length !== 1) throw new Error('Kala provider is missing or ambiguous')
   return providers[0] as keyof typeof CREDENTIAL_ENVIRONMENT
 }
 function mapCredential(input: AgentRunInput, provider: keyof typeof CREDENTIAL_ENVIRONMENT): Readonly<Record<string, string>> {
   const references = input.variant.credentialRefs.filter((reference) => reference.provider === provider)
-  if (references.length !== 1) throw new Error('Agent RunLab requires exactly one credential reference for ' + provider)
+  if (references.length !== 1) throw new Error('Kala requires exactly one credential reference for ' + provider)
   const reference = references[0]!; const value = input.credentialValues[reference.referenceId]
   if (!value) throw new Error('resolved credential value is unavailable for reference: ' + reference.referenceId)
   return { [CREDENTIAL_ENVIRONMENT[provider]]: value }
@@ -157,7 +157,7 @@ async function version(input: AgentRunInput, binary: string, env: Readonly<Recor
 }
 function usageFromState(state: Record<string, unknown> | undefined): AgentRunArtifacts['usage'] {
   const usage = record(state?.usage); const inputTokens = number(usage.inputTokens); const outputTokens = number(usage.outputTokens)
-  return inputTokens !== undefined && outputTokens !== undefined ? { availability: 'available', inputTokens, outputTokens } : { availability: 'unavailable', reason: 'Agent RunLab final state did not expose token usage' }
+  return inputTokens !== undefined && outputTokens !== undefined ? { availability: 'available', inputTokens, outputTokens } : { availability: 'unavailable', reason: 'Kala final state did not expose token usage' }
 }
 function finalResponseFromState(state: Record<string, unknown> | undefined): string | undefined {
   const messages = Array.isArray(state?.messages) ? state.messages : []

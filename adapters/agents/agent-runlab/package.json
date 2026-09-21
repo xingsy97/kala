@@ -2,7 +2,7 @@
   "license": "MIT",
   "name": "@agent-kernel/eval-agent-runlab",
   "version": "0.2.0-rc.1",
-  "description": "Agent RunLab backend plugin for the Agent Evaluation Platform.",
+  "description": "Kala backend plugin for the Agent Evaluation Platform.",
   "repository": { "type": "git", "url": "git+https://github.com/xingsy97/akernel.git" }, "homepage": "https://github.com/xingsy97/akernel#readme", "bugs": { "url": "https://github.com/xingsy97/akernel/issues" },
   "type": "module",
   "main": "./dist/src/index.js",
