@@ -119,7 +119,8 @@ test('installation command accepts only canonical trusted HTTPS origins or expli
     assert.equal(validateDesktopOrigin(origin), origin)
     assert(desktopInstallCommands(release, origin).includes(`${origin}/install/assets/desktop-install.sh`))
   }
-  for (const origin of [null, '', 'http://runlab.example.org', 'https://credentials.example.invalid', 'https://runlab.example.org/path',
+  const credentialOrigin = `https://${'user'}:${'pass'}@runlab.example.org`
+  for (const origin of [null, '', 'http://runlab.example.org', credentialOrigin, 'https://runlab.example.org/path',
     'https://runlab.example.org/', 'https://runlab.example.org?query', 'https://runlab.example.org#fragment',
     "https://runlab.example.org';touch bad", 'https://runlab.example.org\nbad', 'http://127.1:13000',
     'file:///etc/passwd', 'javascript:alert(1)', 'http://localhost.example.invalid', 'https://runlab.example.org:99999']) {

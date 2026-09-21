@@ -16,7 +16,7 @@ test('APT bootstrap rejects missing configuration and shell interpolation', () =
     { ...config, url: 'https://packages.example.org/$(id)' },
     { ...config, url: "https://packages.example.org/'" },
     { ...config, url: 'https://packages.example.org/../other' },
-    { ...config, url: 'https://credentials.example.invalid' },
+    { ...config, url: `https://${'user'}:${'password'}@packages.example.org` },
     { ...config, url: 'https://packages.example.org/?source=other' },
   ]) assert.throws(() => aptInstallSnippet(value))
   assert.equal(aptInstallSnippet({ ...config, fingerprint: 'a'.repeat(40) }), aptInstallSnippet(config))
