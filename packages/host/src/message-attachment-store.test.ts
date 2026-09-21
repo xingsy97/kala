@@ -67,6 +67,13 @@ describe('MessageAttachmentStore', () => {
       { type: 'text', text: expect.stringContaining('{"enabled":true}') },
     ])
 
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const image = await store.register({ sessionId: 'session-a', name: 'screenshot.png', mediaType: 'image/png', data: png })
+    const resolvedImage = await resolveKernelMessageAttachments(store, 'session-a', [{ role: 'user', content: [image] }])
+    expect(resolvedImage[0]?.content).toEqual([{
+      type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: png.toString('base64') },
+    }])
+
     const binary = await store.register({
       sessionId: 'session-a',
       name: 'fake.txt',
@@ -77,6 +84,19 @@ describe('MessageAttachmentStore', () => {
       role: 'user',
       content: [binary],
     }])).rejects.toThrow('cannot send binary attachment')
+  })
+
+  it('reloads committed image references and bytes after a Runtime replacement', async () => {
+    const store = new MessageAttachmentStore(root)
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const image = await store.register({ sessionId: 'session-a', name: 'screenshot.png', mediaType: 'image/png', data: png })
+    await store.commitReferences('session-a', [image])
+
+    const replacementRuntimeStore = new MessageAttachmentStore(root)
+    await replacementRuntimeStore.load()
+    const restored = replacementRuntimeStore.resolveById('session-a', image.source.attachmentId)
+    expect(restored.mediaType).toBe('image/png')
+    await expect(restored.read()).resolves.toEqual(png)
   })
 
   it('releases failed pending uploads but retains committed references', async () => {

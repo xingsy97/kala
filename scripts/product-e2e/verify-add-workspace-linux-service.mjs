@@ -157,7 +157,7 @@ try {
     const status = await runCommand('lxc', ['exec', container, '--', cli, 'service', 'status', '--system'])
     if (!status.stdout.includes('Active: active')) throw new Error(`CLI status omitted active service: ${status.stdout}`)
     const restart = await runCommand('lxc', ['exec', container, '--', cli, 'service', 'restart', '--system'])
-    if (!restart.stdout.includes('SERVICE INSTALLED AND RUNNING') || !restart.stdout.includes('Manage the Agent RunLab Executor service')) throw new Error(`CLI restart omitted lifecycle controls: ${restart.stdout}`)
+    if (!restart.stdout.includes('SERVICE INSTALLED AND RUNNING') || !restart.stdout.includes('Manage the Kala Executor service')) throw new Error(`CLI restart omitted lifecycle controls: ${restart.stdout}`)
     await waitFor(async () => {
       const value = await runCommand('lxc', ['exec', container, '--', 'systemctl', 'is-active', 'runlab-executor.service'], { allowFailure: true })
       return value.stdout.trim() === 'active'

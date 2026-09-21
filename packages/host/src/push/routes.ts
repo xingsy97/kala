@@ -103,7 +103,7 @@ export function createPushRoutes(ctx: PushHttpContext): PushRouteHandler {
       const payload = {
         kind: 'session_error',
         sessionId: 'test',
-        title: 'Agent RunLab test notification',
+        title: 'Kala test notification',
         body: 'Notifications are working on this device.',
         url: '/',
         tag: 'ak-test-push',

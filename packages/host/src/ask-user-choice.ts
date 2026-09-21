@@ -5,13 +5,17 @@ import type { ToolExecutionResult } from './agent-modules/execution.js'
 
 type PendingChoice = {
   request: AskUserChoiceRequest
-  resolve(value: string): void
+  resolve(response: AskUserChoiceResponse): void
   reject(error: Error): void
 }
 
+type AskUserChoiceResponse =
+  | { kind: 'choice'; value: string }
+  | { kind: 'custom'; text: string }
+
 export class AskUserChoiceBroker {
   private readonly pending = new Map<string, PendingChoice>()
-  private readonly earlyResponses = new Map<string, { value: string; expiresAt: number }>()
+  private readonly earlyResponses = new Map<string, { response: AskUserChoiceResponse; expiresAt: number }>()
 
   async ask(sessionId: string, effect: CallToolEffect): Promise<ToolExecutionResult> {
     const parsed = parseAskUserChoiceInput(sessionId, effect)
@@ -22,14 +26,14 @@ export class AskUserChoiceBroker {
     const early = this.earlyResponses.get(key)
     if (early) {
       this.earlyResponses.delete(key)
-      if (Date.now() <= early.expiresAt) return selectedChoiceResult(parsed.request, early.value)
+      if (Date.now() <= early.expiresAt) return selectedChoiceResult(parsed.request, early.response)
     }
 
     try {
-      const value = await new Promise<string>((resolve, reject) => {
+      const response = await new Promise<AskUserChoiceResponse>((resolve, reject) => {
         this.pending.set(key, { request: parsed.request, resolve, reject })
       })
-      return selectedChoiceResult(parsed.request, value)
+      return selectedChoiceResult(parsed.request, response)
     } catch (error) {
       return {
         ok: false,
@@ -47,13 +51,15 @@ export class AskUserChoiceBroker {
     }
   }
 
-  respond(sessionId: string, callId: string, value: string): { ok: true } | { ok: false; error: string } {
+  respond(sessionId: string, callId: string, response: string | AskUserChoiceResponse): { ok: true } | { ok: false; error: string } {
     const pending = this.pending.get(choiceKey(sessionId, callId))
     if (!pending) return { ok: false, error: 'ask_user_choice request is not pending' }
-    if (!pending.request.choices.some((choice) => choice.value === value)) {
+    const normalized = normalizeResponse(response)
+    if (!normalized) return { ok: false, error: 'ask_user_choice response must be a non-empty choice value or custom text' }
+    if (normalized.kind === 'choice' && !pending.request.choices.some((choice) => choice.value === normalized.value)) {
       return { ok: false, error: 'selected value is not one of the available choices' }
     }
-    pending.resolve(value)
+    pending.resolve(normalized)
     return { ok: true }
   }
 
@@ -68,10 +74,10 @@ export class AskUserChoiceBroker {
     }
   }
 
-  respondEarly(sessionId: string, callId: string, value: string): { ok: true } {
+  respondEarly(sessionId: string, callId: string, response: string | AskUserChoiceResponse): { ok: true } {
     this.pruneEarlyResponses()
     this.earlyResponses.set(choiceKey(sessionId, callId), {
-      value,
+      response: normalizeResponse(response) ?? { kind: 'choice', value: '' },
       expiresAt: Date.now() + 30_000,
     })
     return { ok: true }
@@ -85,9 +91,18 @@ export class AskUserChoiceBroker {
   }
 }
 
-function selectedChoiceResult(request: AskUserChoiceRequest, value: string): ToolExecutionResult {
-  const option = request.choices.find((choice) => choice.value === value)
-  if (!option) return { ok: false, content: `invalid choice: ${value}` }
+function selectedChoiceResult(request: AskUserChoiceRequest, response: AskUserChoiceResponse): ToolExecutionResult {
+  if (response.kind === 'custom') {
+    return {
+      ok: true,
+      content: JSON.stringify({
+        type: 'custom_text',
+        text: response.text,
+      }),
+    }
+  }
+  const option = request.choices.find((choice) => choice.value === response.value)
+  if (!option) return { ok: false, content: `invalid choice: ${response.value}` }
   return {
     ok: true,
     content: JSON.stringify({
@@ -95,6 +110,19 @@ function selectedChoiceResult(request: AskUserChoiceRequest, value: string): Too
       label: option.label ?? option.value,
     }),
   }
+}
+
+function normalizeResponse(response: string | AskUserChoiceResponse): AskUserChoiceResponse | null {
+  if (typeof response === 'string') {
+    const value = response.trim()
+    return value.length > 0 ? { kind: 'choice', value } : null
+  }
+  if (response.kind === 'choice') {
+    const value = response.value.trim()
+    return value.length > 0 ? { kind: 'choice', value } : null
+  }
+  const text = response.text.trim()
+  return text.length > 0 ? { kind: 'custom', text } : null
 }
 
 export function askUserChoiceRequestFromPendingCall(input: {

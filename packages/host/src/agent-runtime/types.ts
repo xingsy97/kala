@@ -1,4 +1,4 @@
-import type { AgentState, ApprovalMode, MessageContent } from '@agent-kernel/kernel'
+import type { AgentState, ApprovalMode, Message, MessageContent } from '@agent-kernel/kernel'
 import type {
   AgentRuntimeDescriptor,
   AgentRuntimeId,
@@ -23,6 +23,7 @@ export type AgentRuntimeContext = {
   tools: ToolDispatcher
   broadcast: AgentRuntimeBroadcast
   messageAttachments?: MessageAttachmentStore
+  publishLocalImages?: (sessionId: string, record: SessionRecord, message: Message) => Promise<Message>
 }
 
 export type AgentRuntimeSendInput = {

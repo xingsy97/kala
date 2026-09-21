@@ -109,6 +109,7 @@ export type SubAgentStartedPayload = {
   parentCallId: string
   childSessionId: string
   agentType?: string
+  intention?: string
   prompt: string
   model?: string
   startedAt: string

@@ -5,6 +5,7 @@ import { activateTools, intentActivatedTools, searchToolCatalog, toolCatalogRevi
 const tools: ToolSchema[] = [
   { name: 'tool_search', description: 'discover', inputSchema: {}, requiresApproval: false },
   { name: 'read_file', description: 'read source', inputSchema: {}, requiresApproval: false },
+  { name: 'todo_graph', description: 'plan work', inputSchema: {}, requiresApproval: false },
   { name: 'write_file', description: 'write source files', inputSchema: {}, requiresApproval: true, version: '1.0.0', schemaHash: 'sha256:w' },
   { name: 'webfetch', description: 'fetch a web page over network', inputSchema: {}, requiresApproval: false },
   { name: 'websearch', description: 'search the web', inputSchema: {}, requiresApproval: false },
@@ -17,8 +18,8 @@ describe('progressive Tool disclosure', () => {
   })
 
   it('keeps core and discovery visible and adds activated Tools in catalog order', () => {
-    expect(visibleTools(tools, 'progressive', new Set()).map((tool) => tool.name)).toEqual(['tool_search', 'read_file'])
-    expect(visibleTools(tools, 'progressive', new Set(['webfetch'])).map((tool) => tool.name)).toEqual(['tool_search', 'read_file', 'webfetch'])
+    expect(visibleTools(tools, 'progressive', new Set()).map((tool) => tool.name)).toEqual(['tool_search', 'read_file', 'todo_graph'])
+    expect(visibleTools(tools, 'progressive', new Set(['webfetch'])).map((tool) => tool.name)).toEqual(['tool_search', 'read_file', 'todo_graph', 'webfetch'])
     expect(visibleTools(tools, 'legacy_full', new Set()).map((tool) => tool.name)).toEqual(tools.map((tool) => tool.name))
   })
 

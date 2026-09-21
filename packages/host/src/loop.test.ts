@@ -2165,6 +2165,7 @@ describe('host loop', () => {
     expect(artifact.parentCallId).toBe('agent-policy-1')
     expect(artifact.policy.role).toBe('research')
     expect(artifact.policy.objective).toBe('summarize repo layout')
+    expect(artifact.policy.intention).toBe('summarize repo layout')
     expect(artifact.policy.reasons).toContain('role_template_applied')
     expect(artifact.policy.allowedTools).toContain('read_file')
     expect(artifact.policy.maxTurns).toBe(180)
@@ -2217,6 +2218,7 @@ describe('host loop', () => {
               name: 'agent',
               input: {
                 prompt: 'do the thing',
+                intention: 'Investigate the delegated runtime behavior.',
                 agent_type: 'Explore',
                 model: 'claude-sonnet-4-6',
               },
@@ -2268,7 +2270,14 @@ describe('host loop', () => {
     expect(s.agentType).toBe('Explore')
     expect(s.model).toBe('claude-sonnet-4-6')
     expect(s.prompt).toBe('do the thing')
+    expect(s.intention).toBe('Investigate the delegated runtime behavior.')
     expect(s.childSessionId).toMatch(/./)
+    const persistedResult = store.get(parent.sessionId)!.state.messages
+      .flatMap((message) => message.content)
+      .find((content) => content.type === 'tool_result' && content.callId === 'agent-events-1')
+    expect(persistedResult?.type === 'tool_result' ? persistedResult.content : '').toContain(
+      'intention="Investigate the delegated runtime behavior."',
+    )
     const f = finished[0]!
     expect(f.childSessionId).toBe(s.childSessionId)
     expect(f.status).toBe('completed')

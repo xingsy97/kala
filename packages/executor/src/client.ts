@@ -509,7 +509,6 @@ function parseBuildInfo(value: unknown): BuildMetadata | null {
 }
 
 const OVERFLOW_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
-  'todowrite',
   'memory',
   'bash_output',
 ])

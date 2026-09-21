@@ -580,6 +580,27 @@ describe('wire protocol', () => {
     await expect(blockedRead.json()).resolves.toMatchObject({ error: 'tenant_forbidden' })
   })
 
+  it('requires explicit confirmation and sends restrictive headers for SVG artifacts', async () => {
+    await server.store.create({ sessionId: 'artifact-svg', config })
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect width="10" height="10"/></svg>')
+    const registered = await fetch(`${url}/session-artifacts/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'artifact-svg', fileName: 'diagram.svg', data: svg.toString('base64') }),
+    }).then((response) => response.json() as Promise<{ artifactId: string; uri: string }>)
+    expect(registered.uri).toContain('mediaType=image%2Fsvg%2Bxml')
+
+    const blocked = await fetch(`${url}/session-artifacts/${registered.artifactId}?sessionId=artifact-svg`)
+    expect(blocked.status).toBe(409)
+
+    const allowed = await fetch(`${url}/session-artifacts/${registered.artifactId}?sessionId=artifact-svg&allowSvg=1`)
+    expect(allowed.status).toBe(200)
+    expect(allowed.headers.get('content-type')).toBe('image/svg+xml')
+    expect(allowed.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(allowed.headers.get('content-security-policy')).toContain("default-src 'none'")
+    await expect(allowed.text()).resolves.toBe(svg.toString())
+  })
+
   it('enforces tenant storage quota before registering HTTP message attachments', async () => {
     await server.close()
     const quotaChecks: unknown[] = []

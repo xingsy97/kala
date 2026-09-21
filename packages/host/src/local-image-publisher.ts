@@ -8,17 +8,38 @@ import type { SessionArtifactRegistry } from './session-artifact-registry.js'
 export type LocalImageReadResult = { base64?: string; mediaType?: string; size?: number; error?: string }
 export type LocalImageReader = (input: { requestId: string; workspaceId: string; path: string; cwd?: string }) => Promise<LocalImageReadResult>
 
-export function createLocalImagePublisher(deps: { reader: LocalImageReader; artifacts: SessionArtifactRegistry }) {
+const MAX_IMAGES_PER_MESSAGE = 8
+
+type LocalImagePublisherDeps = {
+  reader: LocalImageReader
+  artifacts: SessionArtifactRegistry
+  assertCanStore?: (record: SessionRecord, bytes: number) => Promise<void>
+}
+
+export function createLocalImagePublisher(deps: LocalImagePublisherDeps) {
   return async (sessionId: string, record: SessionRecord, message: Message): Promise<Message> => {
     if (message.role !== 'assistant' || !record.workspaceId) return message
+    const published = new Map<string, Promise<Awaited<ReturnType<SessionArtifactRegistry['registerImage']>> | null>>()
     const content = await Promise.all(message.content.map(async (part) => part.type === 'text'
       ? { ...part, text: await publishMarkdownImages(part.text, async (path, alt) => {
-          const result = await deps.reader({ requestId: randomUUID(), workspaceId: record.workspaceId!, path, ...(record.state.cwd ? { cwd: record.state.cwd } : {}) })
-          if (result.error || !result.base64 || !result.mediaType) return `[Image unavailable: ${alt || basename(path) || 'image'}]`
-          try {
-            const artifact = await deps.artifacts.registerImage({ sessionId, title: alt || basename(path), fileName: basename(path), data: Buffer.from(result.base64, 'base64') })
-            return `![${escapeAlt(alt || artifact.title)}](artifact://${artifact.artifactId})`
-          } catch { return `[Image unavailable: ${alt || basename(path) || 'image'}]` }
+          const unavailable = `[Image unavailable: ${alt || basename(path) || 'image'}]`
+          let publication = published.get(path)
+          if (!publication) {
+            if (published.size >= MAX_IMAGES_PER_MESSAGE) return unavailable
+            publication = (async () => {
+              try {
+                const result = await deps.reader({ requestId: randomUUID(), workspaceId: record.workspaceId!, path, ...(record.state.cwd ? { cwd: record.state.cwd } : {}) })
+                if (result.error || !result.base64 || !result.mediaType) return null
+                const data = Buffer.from(result.base64, 'base64')
+                await deps.assertCanStore?.(record, data.byteLength)
+                return await deps.artifacts.registerImage({ sessionId, title: alt || basename(path), fileName: basename(path), data })
+              } catch { return null }
+            })()
+            published.set(path, publication)
+          }
+          const artifact = await publication
+          if (!artifact) return unavailable
+          return `![${escapeAlt(alt || artifact.title)}](artifact://${artifact.artifactId}?mediaType=${encodeURIComponent(artifact.mediaType)})`
         }) }
       : part))
     return { ...message, content }
@@ -48,7 +69,11 @@ function isLocalImageReference(value: string): boolean {
   return !/^(?:https?:|data:|blob:|artifact:)/.test(lower) && !value.startsWith('#')
 }
 function decodeFileReference(value: string): string {
-  const raw = value.startsWith('file://') ? value.slice('file://'.length) : value
+  const raw = value.startsWith('file://')
+    ? value.slice('file://'.length)
+    : value.startsWith('sandbox:')
+      ? value.slice('sandbox:'.length)
+      : value
   try { return decodeURIComponent(raw) } catch { return raw }
 }
 function escapeAlt(value: string): string { return value.replace(/[\]\\]/g, '\\$&') }

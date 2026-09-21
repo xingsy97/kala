@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ToolDispatcher } from '../loop-types.js'
 import { SessionStore } from '../store/session.js'
+import { snapshotSidecarPath } from '../store/log.js'
 import { CopilotAgentRuntime } from './copilot-runtime.js'
 import { MessageAttachmentStore } from '../message-attachment-store.js'
 
@@ -449,7 +450,7 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
-  it('resolves new Host file references to controlled SDK file attachments without persisting base64', async () => {
+  it('resolves Host file references to SDK blobs without exposing Host-only paths or persisting base64', async () => {
     const messageAttachments = new MessageAttachmentStore(join(dir, 'message-attachments'))
     const reference = await messageAttachments.register({
       sessionId: 'copilot-reference-session',
@@ -490,11 +491,13 @@ describe('Copilot runtime custom tools', () => {
     expect(sdk.sentMessages).toContainEqual({
       prompt: 'Review this file.',
       attachments: [{
-        type: 'file',
-        path: messageAttachments.resolve(record.sessionId, reference).path,
+        type: 'blob',
+        data: Buffer.from('{"ok":true}', 'utf8').toString('base64'),
+        mimeType: 'application/json',
         displayName: 'config.json',
       }],
     })
+    expect(JSON.stringify(sdk.sentMessages)).not.toContain(messageAttachments.resolve(record.sessionId, reference).path)
     const config = sdk.configs.at(-1)
     expect(config?.workingDirectory).toBe(join(dir, '..'))
     expect(config?.availableTools).toContain('builtin:view')
@@ -503,9 +506,39 @@ describe('Copilot runtime custom tools', () => {
     expect(config?.onPermissionRequest?.({ kind: 'read', path })).toEqual({ kind: 'approve-once' })
     expect(config?.onPermissionRequest?.({ kind: 'read', path: join(dir, 'secret.txt') })).toMatchObject({ kind: 'reject' })
     expect(config?.onPermissionRequest?.({ kind: 'read', path, managedApprovalRequired: true })).toMatchObject({ kind: 'reject' })
-    const persisted = readFileSync(record.logPath, 'utf8')
+    const persisted = readFileSync(snapshotSidecarPath(record.logPath), 'utf8')
     expect(persisted).toContain(reference.source.attachmentId)
     expect(persisted).not.toContain(Buffer.from('{"ok":true}', 'utf8').toString('base64'))
+    await runtime.close()
+  })
+
+  it('externalizes inline user images before persisting an external Runtime snapshot', async () => {
+    const messageAttachments = new MessageAttachmentStore(join(dir, 'message-attachments'))
+    const runtime = new CopilotAgentRuntime({
+      store,
+      messageAttachments,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-inline-image', agentRuntime: 'copilot', config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    const imageData = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64')
+    sdk.responses.push({
+      type: 'assistant.message', data: { content: 'Seen.', messageId: 'message-image-seen' },
+      id: 'event-image-seen', timestamp: new Date().toISOString(),
+    })
+    await runtime.send(record, {
+      text: 'Inspect this image.',
+      content: [{ type: 'text', text: 'Inspect this image.' }, { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: imageData } }],
+    })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+    const userImage = store.get(record.sessionId)?.state.messages[0]?.content[1]
+    expect(userImage).toMatchObject({ type: 'file', mediaType: 'image/png', source: { kind: 'host_ref' } })
+    const persisted = readFileSync(snapshotSidecarPath(record.logPath), 'utf8')
+    expect(persisted).not.toContain(imageData)
+    expect(sdk.sentMessages.at(-1)?.attachments).toEqual([expect.objectContaining({ type: 'blob', data: imageData, mimeType: 'image/png' })])
     await runtime.close()
   })
 
@@ -958,6 +991,117 @@ describe('Copilot runtime custom tools', () => {
       role: 'assistant',
       content: [{ type: 'text', text: 'OK' }],
     })
+    await runtime.close()
+  })
+
+  it('publishes local images before persisting a final assistant response', async () => {
+    const publishLocalImages = vi.fn(async (_sessionId, _record, message) => ({
+      ...message,
+      content: message.content.map((part) => part.type === 'text'
+        ? { ...part, text: part.text.replace('/repo/design.png', 'artifact://published-image?mediaType=image%2Fpng') }
+        : part),
+    }))
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      publishLocalImages,
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-local-image',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    sdk.responses.push({
+      type: 'assistant.message',
+      data: { content: '![Design](/repo/design.png)', messageId: 'message-image' },
+      id: 'event-image',
+      timestamp: new Date().toISOString(),
+    })
+
+    await runtime.send(record, { text: 'Show the image.' })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+
+    expect(publishLocalImages).toHaveBeenCalledOnce()
+    expect(store.get(record.sessionId)?.state.messages.at(-1)).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: '![Design](artifact://published-image?mediaType=image%2Fpng)' }],
+    })
+    await runtime.close()
+  })
+
+  it('persists ordered reasoning and every complete assistant chunk instead of only sendAndWait final content', async () => {
+    let resolveResponse!: (value: unknown) => void
+    const response = new Promise((resolve) => { resolveResponse = resolve })
+    sdk.responses.push(response)
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-complete-events',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    await runtime.send(record, { text: 'Investigate then answer.' })
+    await vi.waitFor(() => expect(sdk.sentMessages).toHaveLength(1))
+    const emit = (event: unknown) => [...sdk.listeners].forEach((listener) => listener(event))
+    const timestamp = new Date().toISOString()
+    emit({ type: 'assistant.reasoning', id: 'reasoning-1', parentId: null, timestamp, data: { reasoningId: 'r1', content: 'First inspect the state.' } })
+    emit({ type: 'assistant.message', id: 'message-1', parentId: 'reasoning-1', timestamp, data: { messageId: 'm1', apiCallId: 'api-1', chunkIndex: 0, chunkCount: 2, content: 'I will inspect it.' } })
+    emit({ type: 'assistant.message', id: 'message-2', parentId: 'message-1', timestamp, data: { messageId: 'm2', apiCallId: 'api-1', chunkIndex: 1, chunkCount: 2, content: 'The final answer is preserved.', outputTokens: 12 } })
+    resolveResponse({ type: 'assistant.message', id: 'message-2', parentId: 'message-1', timestamp, data: { messageId: 'm2', apiCallId: 'api-1', content: 'The final answer is preserved.', outputTokens: 12 } })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+
+    const assistantContent = store.get(record.sessionId)?.state.messages
+      .filter((message) => message.role === 'assistant')
+      .flatMap((message) => message.content) ?? []
+    expect(assistantContent).toEqual([
+      expect.objectContaining({ type: 'thinking', text: 'First inspect the state.' }),
+      expect.objectContaining({ type: 'text', text: 'I will inspect it.' }),
+      expect.objectContaining({ type: 'text', text: 'The final answer is preserved.' }),
+    ])
+    expect(store.get(record.sessionId)?.state.usage.outputTokens).toBe(12)
+    await runtime.close()
+  })
+
+  it('persists a distinct sendAndWait final event even when its text equals an intermediate event', async () => {
+    let resolveResponse!: (value: unknown) => void
+    sdk.responses.push(new Promise((resolve) => { resolveResponse = resolve }))
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-final-fallback', agentRuntime: 'copilot', config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    await runtime.send(record, { text: 'Narrate then answer.' })
+    await vi.waitFor(() => expect(sdk.sentMessages).toHaveLength(1))
+    const timestamp = new Date().toISOString()
+    for (const listener of sdk.listeners) listener({
+      type: 'assistant.message', id: 'message-intermediate', parentId: null, timestamp,
+      data: { messageId: 'm-intermediate', content: 'I will inspect it.' },
+    })
+    resolveResponse({
+      type: 'assistant.message', id: 'message-final', parentId: 'message-intermediate', timestamp,
+      data: { messageId: 'm-final', content: 'I will inspect it.' },
+    })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+    expect(store.get(record.sessionId)?.state.messages
+      .filter((message) => message.role === 'assistant')
+      .flatMap((message) => message.content)
+      .filter((content) => content.type === 'text')
+      .map((content) => content.text)).toEqual(['I will inspect it.', 'I will inspect it.'])
     await runtime.close()
   })
 })

@@ -66,7 +66,7 @@ const codexSystemPromptPlugin: SystemPromptPlugin = {
   label: 'Codex System Prompt',
   render() {
     return [
-      'You are Codex, a coding agent running inside Agent RunLab in a shared developer workspace.',
+      'You are Codex, a coding agent running inside Kala in a shared developer workspace.',
       'Work pragmatically: inspect the codebase before changing it, make focused edits, and verify the result with the narrowest reliable tests.',
       'Prefer existing project patterns over new abstractions. Use fast search tools first, especially ripgrep-backed search, before broad file reads.',
       'Treat filesystem, shell, network, and memory tools as real side effects. Avoid destructive actions unless the user clearly requested them or approval policy permits them.',
@@ -80,7 +80,7 @@ const codexSystemPromptPlugin: SystemPromptPlugin = {
 }
 
 export const DEFAULT_CUSTOM_SYSTEM_PROMPT = [
-  'You are Codex, a coding agent running inside Agent RunLab in a shared developer workspace.',
+  'You are Codex, a coding agent running inside Kala in a shared developer workspace.',
   'Work pragmatically: inspect the codebase before changing it, make focused edits, and verify the result with the narrowest reliable tests.',
   'Prefer existing project patterns over new abstractions. Use fast search tools first, especially ripgrep-backed search, before broad file reads.',
   'Treat filesystem, shell, network, and memory tools as real side effects. Avoid destructive actions unless the user clearly requested them or approval policy permits them.',
@@ -107,7 +107,7 @@ const claudeCodeSystemPromptPlugin: SystemPromptPlugin = {
   label: 'Claude Code System Prompt',
   render() {
     return [
-      'You are Claude Code, an interactive coding agent running inside Agent RunLab.',
+      'You are Claude Code, an interactive coding agent running inside Kala.',
       'Help the user with software engineering tasks in the current workspace. Be direct, concise, and action-oriented.',
       'Before making changes, understand the relevant files and existing conventions. Prefer precise reads and searches over broad exploration.',
       'When the user requests an implementation, move the work forward with file and shell tools once the task is clear. It is acceptable to clarify or report a real blocker first, but do not only describe future work when you can act.',
@@ -166,9 +166,9 @@ const humanInputToolset: ToolsetPlugin = {
   provideTools() {
     return [
       tool('ask_user_choice', 'host', 'read', false, 'ask_user_choice', {
-        purpose: 'Ask the user to choose one option when progress depends on a product, design, or implementation decision.',
+        purpose: 'Ask the user to choose one option when progress depends on a product, design, or implementation decision. The UI also lets the user reject all options and stop, or provide a custom text response.',
         whenToUse: ['Use when multiple reasonable choices exist and guessing would materially affect the outcome.', 'Use for a concise single-question choice prompt.'],
-        constraints: ['Ask only one question per call.', 'Provide clear, mutually distinct choices.', 'Do not use for tool approvals or confirmations that are already handled by the approval system.'],
+        constraints: ['Ask only one question per call.', 'Provide clear, mutually distinct choices.', 'Treat a custom text response as the user\'s chosen instruction even if it does not match one of the listed values.', 'Do not use for tool approvals or confirmations that are already handled by the approval system.'],
       }, {
         type: 'object',
         required: ['message', 'choices'],
@@ -261,7 +261,7 @@ const filesystemToolset: ToolsetPlugin = {
       tool('apply_file_patch', 'executor', 'write', true, 'apply_file_patch', {
         purpose: 'Apply a patch-format file mutation. Supports add, update, delete, and move operations; a patch may touch one file or many files.',
         whenToUse: ['Apply complex line-level changes.', 'Create, delete, move, or update files from one patch-format description.'],
-        constraints: ['Patch context must match exactly.', 'Prefer replace_in_file for one small exact replacement.', 'Use the Agent RunLab patch format beginning with *** Begin Patch and ending with *** End Patch.'],
+        constraints: ['Patch context must match exactly.', 'Prefer replace_in_file for one small exact replacement.', 'Use the Kala patch format beginning with *** Begin Patch and ending with *** End Patch.'],
       }, { type: 'object', required: ['patch'], properties: { patch: { type: 'string', description: 'Patch text beginning with *** Begin Patch and ending with *** End Patch.' } } }),
     ]
   },
@@ -298,11 +298,6 @@ const planningToolset: ToolsetPlugin = {
   label: 'Planning',
   provideTools() {
     return [
-      tool('todowrite', 'executor', 'read', false, 'todowrite', {
-        purpose: 'Create and maintain a simple linear task list for the current session. The input replaces the entire list.',
-        whenToUse: ['Use for straightforward multi-step work without dependencies.', 'Use when the user asks for a simple todo list.'],
-        constraints: ['Use todo_graph instead when tasks have prerequisites or parallel branches.', 'Always include every todo that should remain.', 'Exactly one item may be in_progress at a time.', 'Mark completed only after verification.'],
-      }, { type: 'object', required: ['todos'], properties: { todos: { type: 'array', description: 'The complete replacement list of todos.', items: { type: 'object', required: ['content', 'status'], properties: { content: { type: 'string', description: 'Short imperative description of the task.' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] }, priority: { type: 'string', enum: ['high', 'medium', 'low'] } } } } } }),
       tool('todo_graph', 'host', 'read', false, 'todo_graph', {
         purpose: 'Create and maintain a session task dependency graph with parallel branches and blocked work. Operations are atomic.',
         whenToUse: ['Use when tasks have prerequisites, fan-out/fan-in, blocked work, or parallel execution.', 'Use for complex implementation plans that cannot be represented accurately as a linear list.'],
@@ -329,7 +324,8 @@ const agentToolset: ToolsetPlugin = {
         tools: { type: 'array', items: { type: 'string' } },
         role: { type: 'string', enum: ['research', 'implementation', 'test', 'review'], description: 'Optional capability role. implementation includes controlled file mutation and shell tools; research/review are read-only and test runs verification without source edits. The role also selects default turns and deadlines: research 180 turns/4h, implementation 240 turns/6h, test 200 turns/5h, review 120 turns/3h.' },
         agent_type: { type: 'string', description: 'Optional child type shown in the Session graph. When role is omitted, research, implementation, test, or review also selects the matching least-privilege role.' },
-        objective: { type: 'string' },
+        intention: { type: 'string', minLength: 12, maxLength: 240, description: 'Optional explicit user-facing reason for this delegation. State the concrete objective the child advances without commands, paths, or prompt details. When omitted, objective or the required _intent is used.' },
+        objective: { type: 'string', description: 'Backward-compatible user-facing delegation objective. Prefer intention for new calls.' },
         max_turns: { type: 'integer', minimum: 1, maximum: 480, description: 'Optional per-call turn budget. Use higher values for complex tasks. Role caps: review 240, research 360, test 400, implementation 480.' },
         timeout_ms: { type: 'integer', minimum: 1, maximum: 43_200_000, description: 'Optional per-call absolute deadline in milliseconds. Use higher values for long-running work. Role caps: review 21600000, research 28800000, test 36000000, implementation 43200000.' },
         expected_output: { type: 'string' },

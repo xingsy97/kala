@@ -401,11 +401,13 @@ describe('enhancement foundation', () => {
       { name: 'skill', description: 'Load skill', requiresApproval: false, inputSchema: { type: 'object' } },
       { name: 'agent', description: 'Sub agent', requiresApproval: false, inputSchema: { type: 'object' } },
       { name: 'edit', description: 'Edit file', requiresApproval: true, inputSchema: { type: 'object' } },
+      { name: 'todo_graph', description: 'Task graph', requiresApproval: false, inputSchema: { type: 'object' } },
     ])
-    expect(catalog.toolCount).toBe(3)
+    expect(catalog.toolCount).toBe(4)
     expect(catalog.tools[0]).toMatchObject({ name: 'skill', kind: 'skill_loader', skillBacked: true })
     expect(catalog.tools[1]).toMatchObject({ name: 'agent', kind: 'sub_agent' })
     expect(catalog.tools[2]).toMatchObject({ name: 'edit', kind: 'executor', requiresApproval: true })
+    expect(catalog.tools[3]).toMatchObject({ name: 'todo_graph', kind: 'host' })
   })
 
   it('records capability requirements when tools, images, or reasoning are needed', () => {

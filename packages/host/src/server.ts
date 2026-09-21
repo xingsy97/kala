@@ -1045,6 +1045,21 @@ export async function startHostServer(
 
   const skills = options.skills ?? createSkillManager(store, getDefaultConfig())
   const askUserChoice = new AskUserChoiceBroker()
+  const publishLocalImages = createLocalImagePublisher({
+    artifacts: sessionArtifacts,
+    reader: async (input) => await executors.publishLocalImage(input),
+    ...(options.storageQuota ? {
+      assertCanStore: async (record, bytes) => {
+        if (!record.organizationId) throw new Error('tenant_attribution_missing')
+        await options.storageQuota!.assertCanStoreArtifact({
+          organizationId: record.organizationId,
+          sessionId: record.sessionId,
+          kind: 'session_artifact',
+          bytes,
+        })
+      },
+    } : {}),
+  })
 
   const loopDeps = {
     store,
@@ -1065,10 +1080,7 @@ export async function startHostServer(
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
     messageAttachments,
     askUserChoice,
-    publishLocalImages: createLocalImagePublisher({
-      artifacts: sessionArtifacts,
-      reader: async (input) => await executors.publishLocalImage(input),
-    }),
+    publishLocalImages,
   }
   loop = runHostLoop(loopDeps)
   agentRuntimes = new AgentRuntimeRegistry()
@@ -1088,6 +1100,7 @@ export async function startHostServer(
     store,
     tools: copilotTools,
     messageAttachments,
+    publishLocalImages,
     broadcast: {
       onState(record, state, runtimeContextSnapshot) {
         scheduleSessionsBroadcast()

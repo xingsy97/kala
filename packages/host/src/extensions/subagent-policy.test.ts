@@ -20,6 +20,12 @@ describe('resolveSubAgentPolicy', () => {
     expect(policy.gracePeriodMs).toBe(5 * 60_000)
   })
 
+  it('retains explicit intention independently from the legacy objective alias', () => {
+    const policy = resolveSubAgentPolicy({ input: { intention: 'Inspect the runtime projection.', objective: 'legacy objective' } })
+    expect(policy.intention).toBe('Inspect the runtime projection.')
+    expect(policy.objective).toBe('legacy objective')
+  })
+
   it('applies the research role template as defaults', () => {
     const policy = resolveSubAgentPolicy({ input: { role: 'research' } })
     expect(policy.role).toBe('research')
@@ -128,6 +134,8 @@ describe('SubAgent role registry', () => {
       expect(template).toBeDefined()
       expect(template?.role).toBe(role)
       expect(template?.defaultAllowedTools.length).toBeGreaterThan(0)
+      expect(template?.defaultAllowedTools).toContain('todo_graph')
+      expect(template?.defaultAllowedTools).not.toContain('todowrite')
     }
   })
 

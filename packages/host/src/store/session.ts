@@ -37,9 +37,11 @@ import {
   findLatestEventEntry,
   findLatestRuntimeMetadata,
   readLastSessionSnapshot,
+  readRecentSessionMetadata,
   readSessionHeader,
   readSessionLog,
   readSessionState,
+  snapshotSidecarPath,
   writeHeader,
 } from './log.js'
 import { step } from '@agent-kernel/kernel'
@@ -90,11 +92,11 @@ export type SessionRecord = {
 }
 
 const EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024
+// Leave room for the SnapshotEntry envelope (`kind`, `seq`, `ts`, and `state`).
+const EXTERNAL_RUNTIME_SNAPSHOT_STATE_MAX_BYTES = EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES - 1024
 const EXTERNAL_RUNTIME_CONTENT_MAX_BYTES = 32 * 1024
 const EXTERNAL_RUNTIME_TEXT_MAX_BYTES = 128 * 1024
 const EXTERNAL_RUNTIME_INPUT_MAX_BYTES = 32 * 1024
-const EXTERNAL_RUNTIME_RECENT_MESSAGE_WINDOW = 80
-const EXTERNAL_RUNTIME_MIN_MESSAGE_WINDOW = 20
 
 function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8')
@@ -192,51 +194,132 @@ function compactSnapshotMessage(message: Message, aggressive: boolean): Message 
   }
 }
 
-function placeholderMessage(message: Message, index: number): Message {
-  const bytes = jsonBytes(message)
-  if (message.role === 'tool') {
-    const first = message.content.find((content) => content.type === 'tool_result')
-    return {
-      role: 'tool',
-      content: [{
-        type: 'tool_result',
-        callId: first?.type === 'tool_result' ? first.callId : `compacted-${index}`,
-        ok: first?.type === 'tool_result' ? first.ok : true,
-        content: `--- older tool result compacted in projection snapshot: original ${bytes} bytes ---`,
-        ...(first?.type === 'tool_result' && first.failure ? { failure: first.failure } : {}),
-      }],
-      ...(message.metadata ? { metadata: message.metadata } : {}),
+const SNAPSHOT_PLACEHOLDER = 'compacted in projection snapshot'
+
+function isRealUserMessage(message: Message): boolean {
+  if (message.role !== 'user') return false
+  return message.content.some((content) =>
+    content.type !== 'text'
+    || (content.text.trim().length > 0 && !content.text.includes(SNAPSHOT_PLACEHOLDER)),
+  )
+}
+
+function normalizeToolPairs(messages: readonly Message[], pendingCallIds: ReadonlySet<string>): Message[] {
+  const callIds = new Set<string>()
+  const resultIds = new Set<string>()
+  for (const message of messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call') callIds.add(content.callId)
+      else if (content.type === 'tool_result') resultIds.add(content.callId)
     }
   }
-  return {
-    role: message.role,
-    content: [{
-      type: 'text',
-      text: `--- older ${message.role} message compacted in projection snapshot: original ${bytes} bytes ---`,
-    }],
-    ...(message.metadata ? { metadata: message.metadata } : {}),
+  const pairedCallIds = new Set([...callIds].filter((callId) => resultIds.has(callId)))
+  return messages.flatMap((message) => {
+    const content = message.content.filter((item) => {
+      if (item.type === 'tool_result') return pairedCallIds.has(item.callId)
+      if (item.type === 'tool_call') return pairedCallIds.has(item.callId) || pendingCallIds.has(item.callId)
+      return true
+    })
+    return content.length > 0 ? [{ ...message, content }] : []
+  })
+}
+
+function relatedMessageIndices(messages: readonly Message[]): Map<number, ReadonlySet<number>> {
+  const indicesByCallId = new Map<string, Set<number>>()
+  for (const [index, message] of messages.entries()) {
+    for (const content of message.content) {
+      if (content.type !== 'tool_call' && content.type !== 'tool_result') continue
+      const indices = indicesByCallId.get(content.callId) ?? new Set<number>()
+      indices.add(index)
+      indicesByCallId.set(content.callId, indices)
+    }
   }
+  const related = new Map<number, Set<number>>()
+  for (const indices of indicesByCallId.values()) {
+    for (const index of indices) {
+      const set = related.get(index) ?? new Set<number>([index])
+      for (const relatedIndex of indices) set.add(relatedIndex)
+      related.set(index, set)
+    }
+  }
+  return related
+}
+
+function compactPendingCalls(state: AgentState, aggressive: boolean): AgentState {
+  if (state.pendingCalls.length === 0) return state
+  return {
+    ...state,
+    pendingCalls: state.pendingCalls.map((call) => ({
+      ...call,
+      input: aggressive ? { __snapshotCompacted: true } : compactToolInput(call.input),
+    })),
+  } as AgentState
 }
 
 export function compactExternalRuntimeSnapshotState(state: AgentState): AgentState {
-  let messages = state.messages.map((message) => compactSnapshotMessage(message, false))
-  let candidate = { ...state, messages } as AgentState
-  if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES) return candidate
+  const pendingCallIds = new Set(state.pendingCalls.map((call) => call.callId))
+  let messages = normalizeToolPairs(
+    state.messages.map((message) => compactSnapshotMessage(message, false)),
+    pendingCallIds,
+  )
+  let base = compactPendingCalls(state, false)
+  let candidate = { ...base, messages } as AgentState
+  if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_STATE_MAX_BYTES) return candidate
 
-  messages = messages.map((message) => compactSnapshotMessage(message, true))
-  candidate = { ...state, messages } as AgentState
-  if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES) return candidate
+  messages = normalizeToolPairs(
+    state.messages.map((message) => compactSnapshotMessage(message, true)),
+    pendingCallIds,
+  )
+  base = compactPendingCalls(state, true)
+  candidate = { ...base, messages } as AgentState
+  if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_STATE_MAX_BYTES) return candidate
 
-  for (const window of [EXTERNAL_RUNTIME_RECENT_MESSAGE_WINDOW, 50, EXTERNAL_RUNTIME_MIN_MESSAGE_WINDOW]) {
-    const keepFrom = Math.max(0, messages.length - window)
-    const nextMessages = messages.map((message, index) =>
-      index === 0 || index >= keepFrom ? message : placeholderMessage(message, index),
-    )
-    candidate = { ...state, messages: nextMessages } as AgentState
-    if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_MAX_BYTES) return candidate
+  const firstUserIndex = messages.findIndex(isRealUserMessage)
+  const related = relatedMessageIndices(messages)
+  const selected = new Set<number>()
+  const rejected = new Set<number>()
+  const messageBytes = messages.map(jsonBytes)
+  const emptyStateBytes = jsonBytes({ ...base, messages: [] })
+  let selectedMessageBytes = 0
+  const relatedClosure = (index: number): Set<number> => {
+    const closure = new Set<number>()
+    const pending = [index]
+    while (pending.length > 0) {
+      const next = pending.pop()!
+      if (closure.has(next)) continue
+      closure.add(next)
+      for (const relatedIndex of related.get(next) ?? []) pending.push(relatedIndex)
+    }
+    return closure
+  }
+  const trySelect = (index: number, required: boolean): void => {
+    const closure = relatedClosure(index)
+    const added = [...closure].filter((relatedIndex) => !selected.has(relatedIndex))
+    const nextMessageBytes = selectedMessageBytes
+      + added.reduce((total, relatedIndex) => total + messageBytes[relatedIndex]!, 0)
+    const nextCount = selected.size + added.length
+    const estimatedBytes = emptyStateBytes + nextMessageBytes + Math.max(0, nextCount - 1)
+    if (required || estimatedBytes <= EXTERNAL_RUNTIME_SNAPSHOT_STATE_MAX_BYTES) {
+      for (const relatedIndex of added) selected.add(relatedIndex)
+      selectedMessageBytes = nextMessageBytes
+    } else {
+      for (const relatedIndex of closure) rejected.add(relatedIndex)
+    }
+  }
+  if (firstUserIndex >= 0) trySelect(firstUserIndex, true)
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (selected.has(index) || rejected.has(index)) continue
+    trySelect(index, false)
   }
 
-  return candidate
+  candidate = {
+    ...base,
+    messages: messages.filter((_, index) => selected.has(index)),
+  } as AgentState
+  if (jsonBytes(candidate) <= EXTERNAL_RUNTIME_SNAPSHOT_STATE_MAX_BYTES) return candidate
+
+  throw new Error('External runtime snapshot cannot be compacted below 2 MiB without losing live state')
 }
 
 async function optionalSnapshot(path: string): Promise<SnapshotEntry[]> {
@@ -927,6 +1010,7 @@ export class SessionStore {
       this.summaryCache.delete(path)
       this.summaryLoads.delete(path)
       await rm(path, { force: true })
+      await rm(snapshotSidecarPath(path), { force: true })
       await rm(summaryCachePath(path), { force: true })
       await rm(runtimeContextCachePath(path), { force: true })
     }
@@ -1031,22 +1115,31 @@ export class SessionStore {
     const header = await readSessionHeader(path)
     if ((header.agentRuntime ?? 'kernel') !== 'kernel') {
       const snapshots = [...await optionalSnapshot(path)]
+      const metadata = await readRecentSessionMetadata(path)
       const current = summarizeLog({
         header,
         events: [],
         snapshots,
-        metadata: [],
+        metadata,
         runtimeMetadata: [],
         warnings: [],
       })
       const summary: SessionSummary = {
-        ...current,
         ...persisted?.summary,
+        ...current,
+        ...(persisted?.summary.agentRuntimeVersion
+          ? { agentRuntimeVersion: persisted.summary.agentRuntimeVersion }
+          : {}),
         eventCount: current.eventCount,
         ...(current.lastEventAt ? { lastEventAt: current.lastEventAt } : {}),
         ...(current.status ? { status: current.status } : {}),
         ...(current.currentCwd ? { currentCwd: current.currentCwd } : {}),
         ...(current.firstUserMessage ? { firstUserMessage: current.firstUserMessage } : {}),
+      }
+      const labelPatch = latestStringMetadataPatch(metadata, 'label')
+      if (labelPatch.found) {
+        if (labelPatch.value) summary.label = labelPatch.value
+        else delete summary.label
       }
       const latest = statSync(path)
       if (latest.mtimeMs === stat.mtimeMs && latest.size === stat.size) {
@@ -1130,12 +1223,15 @@ export class SessionStore {
     const latestExternalKernelEvent = fastExternalLoad && !externalRuntimeAlreadyQuarantined
       ? await findLatestEventEntry(path, { maxScanBytes: 64 * 1024 * 1024 })
       : undefined
+    const recentExternalMetadata = fastExternalLoad
+      ? await readRecentSessionMetadata(path)
+      : []
     const parsed = fastExternalLoad
       ? {
           header,
           events: latestExternalKernelEvent ? [latestExternalKernelEvent] : [],
           snapshots: [...await optionalSnapshot(path)],
-          metadata: [],
+          metadata: recentExternalMetadata,
           runtimeMetadata: externalRuntimeAlreadyQuarantined
             ? [{
                 kind: 'runtime_metadata' as const,
@@ -1285,12 +1381,12 @@ export class SessionStore {
     }
 
     const latestWorkspaceId =
-      persistedSummary?.summary.workspaceId ??
       latestStringFromMetadata(parsed.metadata, 'workspaceId') ??
+      persistedSummary?.summary.workspaceId ??
       parsed.header.workspaceId
     const latestWorkspaceName =
-      persistedSummary?.summary.workspaceName ??
       latestStringFromMetadata(parsed.metadata, 'workspaceName') ??
+      persistedSummary?.summary.workspaceName ??
       parsed.header.workspaceName
     const latestOrganizationId =
       latestStringFromMetadata(parsed.metadata, 'organizationId') ??
@@ -1301,15 +1397,17 @@ export class SessionStore {
     const latestOrganizationRole =
       latestOrganizationRoleFromMetadata(parsed.metadata) ??
       parsed.header.organizationRole
-    const label = persistedSummary?.summary.label ??
-      latestStringFromMetadata(parsed.metadata, 'label')
+    const labelPatch = latestStringMetadataPatch(parsed.metadata, 'label')
+    const label = labelPatch.found
+      ? labelPatch.value
+      : persistedSummary?.summary.label
     const firstUserMessage = agentRuntime === 'kernel'
       ? firstUserMessageFromEvents(parsed.events)
       : firstUserMessageFromState(finalState)
-    const selectedModel = persistedSummary?.summary.preferences?.selectedModel ??
-      latestStringFromMetadata(parsed.metadata, 'selectedModel')
-    const toolCardMode = persistedSummary?.summary.preferences?.toolCardMode ??
-      latestToolCardModeFromMetadata(parsed.metadata)
+    const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel') ??
+      persistedSummary?.summary.preferences?.selectedModel
+    const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata) ??
+      persistedSummary?.summary.preferences?.toolCardMode
     const preferences: SessionPreferences = {
       ...(selectedModel
         ? { selectedModel }
@@ -1649,7 +1747,7 @@ function summarizeLog(
 
 function firstUserMessageFromState(state: AgentState): string | undefined {
   for (const message of state.messages) {
-    if (message.role !== 'user') continue
+    if (!isRealUserMessage(message)) continue
     const text = message.content.find((content) => content.type === 'text')
     if (text?.type === 'text' && text.text.trim()) return text.text
   }
@@ -1657,18 +1755,26 @@ function firstUserMessageFromState(state: AgentState): string | undefined {
 }
 
 /** Walk metadata entries in reverse to find the most recent string value. */
-function latestStringFromMetadata(
+function latestStringMetadataPatch(
   metadata: readonly Record<string, string | undefined>[],
   key: 'label' | 'workspaceId' | 'workspaceName' | 'selectedModel' | 'organizationId' | 'principal',
-): string | undefined {
+): { found: false } | { found: true; value: string | undefined } {
   for (let i = metadata.length - 1; i >= 0; i--) {
     const entry = metadata[i]!
     const value = entry[key]
     if (value === undefined) continue
     const trimmed = value.trim()
-    return trimmed.length === 0 ? undefined : trimmed
+    return { found: true, value: trimmed.length === 0 ? undefined : trimmed }
   }
-  return undefined
+  return { found: false }
+}
+
+function latestStringFromMetadata(
+  metadata: readonly Record<string, string | undefined>[],
+  key: 'label' | 'workspaceId' | 'workspaceName' | 'selectedModel' | 'organizationId' | 'principal',
+): string | undefined {
+  const patch = latestStringMetadataPatch(metadata, key)
+  return patch.found ? patch.value : undefined
 }
 
 function latestOrganizationRoleFromMetadata(

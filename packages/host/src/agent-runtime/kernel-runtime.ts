@@ -16,7 +16,7 @@ export class KernelAgentRuntime implements AgentRuntime {
   descriptor(): AgentRuntimeDescriptor {
     return {
       id: this.id,
-      label: 'Agent RunLab',
+      label: 'Kala',
       description: 'Agent Kernel deterministic reducer and host loop',
       available: true,
       status: 'ready',

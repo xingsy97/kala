@@ -28,7 +28,7 @@ legacy `~/.agent-kernel/` files.
 
 ## Responsibilities
 
-1. **Tool registry** (`src/tools/`) — one file per tool from [`docs/executor/tools.md`](../../docs/executor/tools.md): `read_file`, `read_files`, `ls`, `glob`, `grep`, `write_file`, `replace_in_file`, `replace_many_in_file`, `apply_file_patch`, `bash`, `todowrite`, `memory`, `websearch`, `webfetch`, `bash_output`, `kill_shell`.
+1. **Tool registry** (`src/tools/`) — one file per tool from [`docs/executor/tools.md`](../../docs/executor/tools.md): `read_file`, `read_files`, `ls`, `glob`, `grep`, `write_file`, `replace_in_file`, `replace_many_in_file`, `apply_file_patch`, `bash`, `memory`, `websearch`, `webfetch`, `bash_output`, `kill_shell`.
 2. **Sandbox** (`src/sandbox.ts`) — workspace whitelist. Every path is resolved and rechecked to prevent escape via `..`, absolute paths, or symlinks.
 3. **Background shell registry** (`src/background.ts`) — `bash --run-in-background` → `taskId`; `bash_output`; `kill_shell`.
 4. **Socket.IO client** (`src/client.ts`) — dials Host's `/executor` namespace; announces `workspaceId` / `workspaceName` / `os` / `runtime` / `sandboxRoots` / tool names; handles `tool:call` / `fs:list_dirs` / cancel; auto-reconnects and re-announces.

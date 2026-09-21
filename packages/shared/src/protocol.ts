@@ -482,7 +482,8 @@ export type ClientAskUserChoice = {
   operationId?: string
   sessionId: string
   callId: string
-  value: string
+  value?: string
+  customText?: string
 }
 
 export type ClientCancel = {
@@ -1147,6 +1148,8 @@ export type ServerSubAgentStartedEvent = {
   childSessionId: string
   /** Named agent type from the registry (e.g. 'general-purpose'). Undefined for anonymous spawns. */
   agentType?: string
+  /** Short user-facing reason for delegating this child. Optional for historical calls. */
+  intention?: string
   prompt: string
   /** Per-call model override, if the parent passed one. */
   model?: string

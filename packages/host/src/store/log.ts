@@ -6,8 +6,7 @@
  */
 
 import { createReadStream } from 'node:fs'
-import { appendFile, mkdir, writeFile } from 'node:fs/promises'
-import { open } from 'node:fs/promises'
+import { appendFile, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline/promises'
@@ -295,8 +294,41 @@ export async function appendSnapshotEntry(
     ts: new Date().toISOString(),
     state,
   }
-  await appendFile(path, JSON.stringify(entry) + '\n', 'utf8')
+  await writeSnapshotSidecar(path, entry)
   return entry
+}
+
+export function snapshotSidecarPath(logPath: string): string {
+  return logPath.endsWith('.jsonl')
+    ? `${logPath.slice(0, -'.jsonl'.length)}.snapshot.json`
+    : `${logPath}.snapshot.json`
+}
+
+async function writeSnapshotSidecar(logPath: string, entry: SnapshotEntry): Promise<void> {
+  const path = snapshotSidecarPath(logPath)
+  const directory = dirname(path)
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  const temporary = `${path}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    const logSize = (await stat(logPath)).size
+    handle = await open(temporary, 'wx', 0o600)
+    await handle.writeFile(`${JSON.stringify({ ...entry, logSize })}\n`, 'utf8')
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    await rename(temporary, path)
+    const directoryHandle = await open(directory, 'r')
+    try {
+      await directoryHandle.sync()
+    } finally {
+      await directoryHandle.close()
+    }
+  } catch (error) {
+    await handle?.close().catch(() => undefined)
+    await rm(temporary, { force: true }).catch(() => undefined)
+    throw error
+  }
 }
 
 export async function appendMetadataEntry(
@@ -542,6 +574,35 @@ export async function findLatestRuntimeMetadata(
   }
 }
 
+export async function readRecentSessionMetadata(
+  path: string,
+  options: { maxScanBytes?: number } = {},
+): Promise<MetadataEntry[]> {
+  const handle = await open(path, 'r')
+  try {
+    const file = await handle.stat()
+    const maxScanBytes = options.maxScanBytes ?? 64 * 1024 * 1024
+    const start = Math.max(0, file.size - maxScanBytes)
+    const data = Buffer.allocUnsafe(file.size - start)
+    await handle.read(data, 0, data.length, start)
+    let text = data.toString('utf8')
+    if (start > 0) {
+      const firstNewline = text.indexOf('\n')
+      if (firstNewline < 0) return []
+      text = text.slice(firstNewline + 1)
+    }
+    const metadata: MetadataEntry[] = []
+    for (const line of text.split('\n')) {
+      if (!line.startsWith('{"kind":"metadata"')) continue
+      const entry = JSON.parse(line) as LogEntry
+      if (entry.kind === 'metadata') metadata.push(entry)
+    }
+    return metadata
+  } finally {
+    await handle.close()
+  }
+}
+
 export async function readSessionHistory(path: string, options?: FullSessionReadOptions): Promise<ParsedHistory> {
   await assertFullSessionReadAllowed(path, options, 'readSessionHistory')
   const input = createReadStream(path, { encoding: 'utf8' })
@@ -609,10 +670,21 @@ export async function readSessionState(path: string, options?: FullSessionReadOp
     if (!input.closed) await once(input, 'close')
   }
   if (latestSnapshot) parseLogLine(latestSnapshot.line, latestSnapshot.lineNo, entries)
-  return categorizeLogEntries(path, entries, warnings)
+  const parsed = await includeSnapshotSidecar(path, categorizeLogEntries(path, entries, warnings))
+  if (parsed.snapshots.length > 1) parsed.snapshots = [latestSnapshotBySeq(parsed.snapshots)!]
+  return parsed
 }
 
 export async function readLastSessionSnapshot(path: string): Promise<SnapshotEntry | undefined> {
+  const sidecar = await readSnapshotSidecar(path)
+  if (sidecar?.logSize === (await stat(path)).size) return sidecar.snapshot
+  const embedded = await readLastEmbeddedSessionSnapshot(path)
+  if (!embedded) return sidecar?.snapshot
+  if (!sidecar) return embedded
+  return sidecar.snapshot.seq >= embedded.seq ? sidecar.snapshot : embedded
+}
+
+async function readLastEmbeddedSessionSnapshot(path: string): Promise<SnapshotEntry | undefined> {
   const handle = await open(path, 'r')
   try {
     const stat = await handle.stat()
@@ -686,7 +758,43 @@ export async function readSessionLog(path: string, options?: FullSessionReadOpti
     }
   }
 
-  return categorizeLogEntries(path, entries, warnings)
+  return includeSnapshotSidecar(path, categorizeLogEntries(path, entries, warnings))
+}
+
+type ReadSnapshotSidecar = {
+  snapshot: SnapshotEntry
+  logSize?: number
+}
+
+async function readSnapshotSidecar(logPath: string): Promise<ReadSnapshotSidecar | undefined> {
+  try {
+    const raw = JSON.parse(await readFile(snapshotSidecarPath(logPath), 'utf8')) as SnapshotEntry & { logSize?: unknown }
+    if (raw.kind !== 'snapshot' || !Number.isSafeInteger(raw.seq) || raw.seq < 0) {
+      throw new Error(`Invalid snapshot sidecar for ${logPath}`)
+    }
+    const { logSize, ...snapshot } = raw
+    return {
+      snapshot,
+      ...(typeof logSize === 'number' && Number.isSafeInteger(logSize) && logSize >= 0 ? { logSize } : {}),
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+async function includeSnapshotSidecar(logPath: string, parsed: ParsedLog): Promise<ParsedLog> {
+  const sidecar = await readSnapshotSidecar(logPath)
+  if (!sidecar) return parsed
+  const snapshots = parsed.snapshots.filter((snapshot) => snapshot.seq !== sidecar.snapshot.seq)
+  snapshots.push(sidecar.snapshot)
+  snapshots.sort((left, right) => left.seq - right.seq)
+  return { ...parsed, snapshots }
+}
+
+function latestSnapshotBySeq(snapshots: readonly SnapshotEntry[]): SnapshotEntry | undefined {
+  return snapshots.reduce<SnapshotEntry | undefined>((latest, snapshot) =>
+    !latest || snapshot.seq >= latest.seq ? snapshot : latest, undefined)
 }
 
 function categorizeLogEntries(path: string, entries: LogEntry[], warnings: string[]): ParsedLog {

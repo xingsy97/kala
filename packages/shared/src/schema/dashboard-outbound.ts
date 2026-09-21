@@ -401,6 +401,7 @@ export const ServerSubAgentStartedEventSchema = z.object({
   parentCallId: z.string(),
   childSessionId: z.string(),
   agentType: z.string().optional(),
+  intention: z.string().min(1).max(240).optional(),
   prompt: z.string(),
   model: z.string().optional(),
   startedAt: z.string(),

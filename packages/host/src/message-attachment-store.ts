@@ -165,18 +165,23 @@ export class MessageAttachmentStore {
   }
 
   resolve(sessionId: string, file: ReferencedFileContent): ResolvedMessageAttachment {
-    this.reloadSyncUnsafe()
-    const record = this.records.get(file.source.attachmentId)
-    if (!record || record.sessionId !== sessionId) {
-      throw new Error(`Attachment "${file.name}" is unavailable or does not belong to this Session`)
-    }
+    const resolved = this.resolveById(sessionId, file.source.attachmentId)
     if (
-      record.sha256 !== file.source.sha256
-      || record.bytes !== file.source.bytes
-      || record.name !== file.name
-      || record.mediaType !== file.mediaType
+      resolved.sha256 !== file.source.sha256
+      || resolved.bytes !== file.source.bytes
+      || resolved.name !== file.name
+      || resolved.mediaType !== file.mediaType
     ) {
       throw new Error(`Attachment "${file.name}" reference metadata does not match Host storage`)
+    }
+    return resolved
+  }
+
+  resolveById(sessionId: string, attachmentId: string): ResolvedMessageAttachment {
+    this.reloadSyncUnsafe()
+    const record = this.records.get(attachmentId)
+    if (!record || record.sessionId !== sessionId) {
+      throw new Error('Attachment is unavailable or does not belong to this Session')
     }
     const path = this.pathForHash(record.sha256)
     return {

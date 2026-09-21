@@ -217,7 +217,6 @@ function toolKind(name: string): ToolCatalogArtifact['tools'][number]['kind'] {
     name === 'ls' ||
     name === 'glob' ||
     name === 'multi_grep' ||
-    name === 'todowrite' ||
     name === 'websearch'
   ) return 'executor'
   return 'unknown'

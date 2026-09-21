@@ -15,7 +15,7 @@ import type { RateLimiter } from '../governance/rate-limit.js'
 export type RuntimeIngressGateway = { readonly http: HttpServer; readonly port: number; close(): Promise<void> }
 
 function publicProfile(session: AuthenticatedIdentity): { displayName: string; email?: string; initials: string } {
-  const displayName = session.displayName?.trim() || session.email?.split('@')[0] || 'Agent RunLab user'
+  const displayName = session.displayName?.trim() || session.email?.split('@')[0] || 'Kala user'
   const initials = displayName.split(/\s+/u).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || 'AR'
   return { displayName, ...(session.email ? { email: session.email } : {}), initials }
 }
@@ -76,7 +76,7 @@ function cookies(request: IncomingMessage): Record<string, string> {
 }
 
 function signedOutPage(): string {
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out · Agent RunLab</title><style>html{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#09090b;color:#f8fafc;font:16px system-ui,sans-serif}.card{width:min(28rem,calc(100% - 2rem));padding:2rem;border:1px solid #27272a;border-radius:1rem;background:#18181b;box-sizing:border-box}.mark{width:3rem;height:3rem;display:grid;place-items:center;border-radius:.75rem;background:#0f766e;font-weight:800}h1{font-size:1.5rem;margin:1.25rem 0 .5rem}p{color:#a1a1aa;line-height:1.5}a{display:inline-flex;margin-top:1rem;padding:.75rem 1rem;border-radius:.65rem;background:#0f766e;color:white;text-decoration:none;font-weight:650}</style></head><body><main class="card"><div class="mark">AR</div><h1>You are signed out</h1><p>Your Agent RunLab browser session has ended. Sign in again when you are ready.</p><a href="/auth/login">Sign in</a></main></body></html>'
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out · Kala</title><style>html{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#09090b;color:#f8fafc;font:16px system-ui,sans-serif}.card{width:min(28rem,calc(100% - 2rem));padding:2rem;border:1px solid #27272a;border-radius:1rem;background:#18181b;box-sizing:border-box}.mark{width:3rem;height:3rem;display:grid;place-items:center;border-radius:.75rem;background:#0f766e;font-weight:800}h1{font-size:1.5rem;margin:1.25rem 0 .5rem}p{color:#a1a1aa;line-height:1.5}a{display:inline-flex;margin-top:1rem;padding:.75rem 1rem;border-radius:.65rem;background:#0f766e;color:white;text-decoration:none;font-weight:650}</style></head><body><main class="card"><div class="mark">AR</div><h1>You are signed out</h1><p>Your Kala browser session has ended. Sign in again when you are ready.</p><a href="/auth/login">Sign in</a></main></body></html>'
 }
 
 export async function startRuntimeIngressGateway(options: {
@@ -396,7 +396,7 @@ export async function startRuntimeIngressGateway(options: {
     const organizationMissing = message === 'organization_not_provisioned'
     if (!response.headersSent) response.writeHead(organizationMissing ? 403 : 500, { 'content-type': 'application/json', 'cache-control': 'no-store' })
     response.end(JSON.stringify(organizationMissing
-      ? { error: 'organization_not_provisioned', message: 'Your identity is valid, but this account has not been enabled for an Agent RunLab organization.' }
+      ? { error: 'organization_not_provisioned', message: 'Your identity is valid, but this account has not been enabled for an Kala organization.' }
       : { error: 'internal_server_error' }))
   }) })
   http.on('upgrade', (request, socket, head) => { void (async () => {

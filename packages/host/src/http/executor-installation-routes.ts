@@ -215,17 +215,17 @@ function installCommand(origin: string, platform: string, mode: string, setupCod
     : `curl -fsSL ${quoteSh(`${origin}/install`)} | RUNLAB_SETUP_CODE=${quoteSh(setupCode)} RUNLAB_INSTALL_MODE=${quoteSh(mode)} sh`
 }
 function renderShellBootstrap(origin: string): string {
-  return `#!/bin/sh\nset -eu\ncode=\${RUNLAB_SETUP_CODE:-}\nif [ -z "$code" ]; then printf 'Agent RunLab setup code: ' >&2; IFS= read -r code; fi\ncase "$code" in *[!A-Fa-f0-9-]*|'') echo 'Invalid setup code' >&2; exit 1;; esac\ncommand -v bash >/dev/null 2>&1 || { echo 'Agent RunLab installer: bash is required' >&2; exit 1; }\ninstaller=\$(mktemp)\ntrap 'rm -f "$installer"' EXIT HUP INT TERM\nprintf '\\nAgent RunLab Executor setup\\n'\nprintf '[1/4] Downloading verified installer...\\n'\ncurl --fail --silent --show-error --location --retry 3 --retry-connrefused -o "$installer" ${quoteSh(`${origin}/install/assets/install-executor.sh`)} || { echo 'Agent RunLab installer: failed to download installer asset' >&2; exit 1; }\nprintf '[2/4] Validating setup code...\\n'\nclaim=\$(curl --fail --silent --show-error --location --retry 3 --retry-connrefused -X POST -H 'content-type: application/json' -H 'accept: text/x-shellscript' --data "{\\"setupCode\\":\\"$code\\"}" ${quoteSh(`${origin}/install/session`)}) || { echo 'Agent RunLab installer: setup code is invalid, expired, or already used' >&2; exit 1; }\neval "$claim"\nprintf '[3/4] Installing Executor...\\n'\nbash "$installer"\n`
+  return `#!/bin/sh\nset -eu\ncode=\${RUNLAB_SETUP_CODE:-}\nif [ -z "$code" ]; then printf 'Kala setup code: ' >&2; IFS= read -r code; fi\ncase "$code" in *[!A-Fa-f0-9-]*|'') echo 'Invalid setup code' >&2; exit 1;; esac\ncommand -v bash >/dev/null 2>&1 || { echo 'Kala installer: bash is required' >&2; exit 1; }\ninstaller=\$(mktemp)\ntrap 'rm -f "$installer"' EXIT HUP INT TERM\nprintf '\\nKala Executor setup\\n'\nprintf '[1/4] Downloading verified installer...\\n'\ncurl --fail --silent --show-error --location --retry 3 --retry-connrefused -o "$installer" ${quoteSh(`${origin}/install/assets/install-executor.sh`)} || { echo 'Kala installer: failed to download installer asset' >&2; exit 1; }\nprintf '[2/4] Validating setup code...\\n'\nclaim=\$(curl --fail --silent --show-error --location --retry 3 --retry-connrefused -X POST -H 'content-type: application/json' -H 'accept: text/x-shellscript' --data "{\\"setupCode\\":\\"$code\\"}" ${quoteSh(`${origin}/install/session`)}) || { echo 'Kala installer: setup code is invalid, expired, or already used' >&2; exit 1; }\neval "$claim"\nprintf '[3/4] Installing Executor...\\n'\nbash "$installer"\n`
 }
 function renderPowerShellBootstrap(origin: string): string {
   return `$ErrorActionPreference = 'Stop'
 $code = $env:RUNLAB_SETUP_CODE
-if ([string]::IsNullOrWhiteSpace($code)) { $code = Read-Host 'Agent RunLab setup code' }
-if ([string]::IsNullOrWhiteSpace($code)) { throw 'Agent RunLab setup code is required' }
+if ([string]::IsNullOrWhiteSpace($code)) { $code = Read-Host 'Kala setup code' }
+if ([string]::IsNullOrWhiteSpace($code)) { throw 'Kala setup code is required' }
 $installer = Join-Path ([IO.Path]::GetTempPath()) ('runlab-bootstrap-' + [guid]::NewGuid() + '.ps1')
 try {
   Write-Host ''
-  Write-Host 'Agent RunLab Executor setup'
+  Write-Host 'Kala Executor setup'
   Write-Host '[1/4] Downloading verified installer...'
   Invoke-WebRequest -UseBasicParsing -Uri ${quotePs(`${origin}/install/assets/install-executor.ps1`)} -OutFile $installer
   if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
@@ -239,7 +239,7 @@ try {
       $installChoice = $env:RUNLAB_INSTALL_NODE
       if ([string]::IsNullOrWhiteSpace($installChoice)) {
         Write-Host ''
-        Write-Host 'Agent RunLab needs Node.js 22+ because this release has no native Windows Executor.'
+        Write-Host 'Kala needs Node.js 22+ because this release has no native Windows Executor.'
         $installChoice = Read-Host 'Install the official Node.js LTS package with Windows Package Manager (winget)? [y/N]'
       }
       if ($installChoice -notmatch '^(?i:y|yes|1|true)$') { throw 'Node.js installation was not approved. The setup code was not consumed. Install Node.js 22+ from https://nodejs.org/ and run this command again.' }
@@ -257,13 +257,13 @@ try {
   }
   Write-Host '[2/4] Validating setup code...'
   $claim = Invoke-RestMethod -Method Post -ContentType 'application/json' -Headers @{ Accept = 'application/json' } -Body (@{ setupCode = $code } | ConvertTo-Json -Compress) -Uri ${quotePs(`${origin}/install/session`)}
-  if ($null -eq $claim -or $null -eq $claim.env) { throw 'Agent RunLab Host returned an invalid installation session' }
+  if ($null -eq $claim -or $null -eq $claim.env) { throw 'Kala Host returned an invalid installation session' }
   $properties = $claim.env.PSObject.Properties
-  if ($null -eq $properties -or $properties.Count -eq 0) { throw 'Agent RunLab Host returned an empty installation environment' }
+  if ($null -eq $properties -or $properties.Count -eq 0) { throw 'Kala Host returned an empty installation environment' }
   $properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name, [string]$_.Value, 'Process') }
   Write-Host '[3/4] Starting Executor...'
   & $installer
-  if ($LASTEXITCODE -ne 0) { throw "Agent RunLab Executor installer exited with code $LASTEXITCODE" }
+  if ($LASTEXITCODE -ne 0) { throw "Kala Executor installer exited with code $LASTEXITCODE" }
 } finally {
   Remove-Item $installer -Force -ErrorAction SilentlyContinue
 }

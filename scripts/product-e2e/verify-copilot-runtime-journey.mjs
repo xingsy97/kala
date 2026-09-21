@@ -9,7 +9,7 @@ const origin = process.env.RUNLAB_URL ?? process.env.DASHBOARD_URL
 const sourceRevision = process.env.RUNLAB_REVISION
 const artifactDigest = process.env.RUNLAB_ARTIFACT_DIGEST
 const requestedWorkspaceId = process.env.RUNLAB_WORKSPACE_ID
-if (!origin) throw new Error('set RUNLAB_URL or DASHBOARD_URL to the production Agent RunLab origin')
+if (!origin) throw new Error('set RUNLAB_URL or DASHBOARD_URL to the production Kala origin')
 if (!sourceRevision || !artifactDigest) {
   throw new Error('set RUNLAB_REVISION and RUNLAB_ARTIFACT_DIGEST to the exact deployed production artifact evidence')
 }
@@ -20,8 +20,6 @@ const executorMarker = `COPILOT_E2E_EXECUTOR_${runId}`
 const executorFinalMarker = `COPILOT_E2E_EXECUTOR_DONE_${runId}`
 const hostFinalMarker = `COPILOT_E2E_HOST_DONE_${runId}`
 const hostNodeId = `copilot-e2e-host-${runId}`
-const todoMarker = `COPILOT_E2E_TODO_${runId}`
-const todoFinalMarker = `COPILOT_E2E_TODO_DONE_${runId}`
 const childMarker = `COPILOT_E2E_CHILD_${runId}`
 const subAgentFinalMarker = `COPILOT_E2E_SUBAGENT_DONE_${runId}`
 const bootstrapSessionId = `copilot-e2e-bootstrap-${runId}`
@@ -264,30 +262,6 @@ try {
     }
   })
 
-  await harness.step('project Copilot todowrite state into the Composer task control', async () => {
-    const input = {
-      todos: [
-        { content: todoMarker, status: 'in_progress', priority: 'high' },
-        { content: `verify-${runId}`, status: 'pending', priority: 'medium' },
-      ],
-    }
-    await sendMessage(actor.page, [
-      'Call the todowrite tool exactly once before answering.',
-      `Use exactly this JSON input: ${JSON.stringify(input)}.`,
-      `Do not use any other tool. After success, reply with exactly ${todoFinalMarker}.`,
-    ].join(' '))
-    const state = await waitForState(sessionId, (candidate) => (
-      candidate.status === 'done'
-      && successfulToolResult(candidate, 'todowrite')
-      && assistantText(candidate).includes(todoFinalMarker)
-    ), 180_000)
-    await actor.page.waitForSelector('[data-testid="tasks-button-trigger"]', { visible: true, timeout: 30_000 })
-    await clickByTestId(actor.page, 'tasks-button-trigger')
-    await actor.page.waitForFunction((marker) => document.querySelector('[data-testid="tasks-popover"]')?.textContent?.includes(marker), { timeout: 30_000 }, todoMarker)
-    await actor.page.keyboard.press('Escape')
-    return { status: state.status, cursor: state.cursor, todoTool: toolEvidence(state, 'todowrite') }
-  })
-
   await harness.step('run a Copilot sub-agent through the inherited Runtime', async () => {
     await sendMessage(actor.page, [
       'Call the agent tool exactly once before answering.',
@@ -329,12 +303,11 @@ try {
     if (persisted.agentRuntime !== 'copilot' || persisted.state?.status !== 'done') {
       throw new Error(`persisted Runtime state is inconsistent: ${JSON.stringify({ runtime: persisted.agentRuntime, status: persisted.state?.status })}`)
     }
-    for (const marker of [executorFinalMarker, hostFinalMarker, todoFinalMarker, subAgentFinalMarker]) {
+    for (const marker of [executorFinalMarker, hostFinalMarker, subAgentFinalMarker]) {
       if (!assistantText(persisted.state).includes(marker)) {
         throw new Error(`persisted Copilot transcript omitted marker: ${marker}`)
       }
     }
-    await actor.page.waitForSelector('[data-testid="tasks-button-trigger"]', { visible: true, timeout: 30_000 })
     const reloadedToolUi = await collectVirtualizedToolUi(actor.page)
     if (reloadedToolUi.indicatorCount < 2) {
       throw new Error(`reloaded production transcript omitted Tool UI: ${JSON.stringify({ liveToolUi, reloadedToolUi })}`)

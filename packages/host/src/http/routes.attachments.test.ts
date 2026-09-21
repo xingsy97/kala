@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { createConfig, type ReferencedFileContent } from '@agent-kernel/kernel'
@@ -201,7 +201,49 @@ describe('message attachment upload route', () => {
     expect(messageAttachments.resolve('session-1', responseBody.file).bytes).toBe(12)
   })
 
-  it('rejects binary files for Kernel sessions before storing them', async () => {
+  it('persists and serves image attachments through a session-scoped immutable URL', async () => {
+    const sessions = new SessionStore(join(root, 'sessions'))
+    await sessions.create({ sessionId: 'image-session', config: createConfig({ tools: [], systemPrompt: 'test' }) })
+    await sessions.create({ sessionId: 'other-session', config: createConfig({ tools: [], systemPrompt: 'test' }) })
+    const messageAttachments = new MessageAttachmentStore(join(root, 'message-attachments'))
+    server = createServer()
+    attachJsonRoutes(server, { models: [], defaultModel: '', sessions, messageAttachments, auth: { sharedToken: 'image-token' } })
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('test server did not bind')
+    const origin = `http://127.0.0.1:${address.port}`
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const uploaded = await fetch(`${origin}/runtime/attachments?sessionId=image-session`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer image-token', 'content-type': 'image/png', 'x-agent-runlab-attachment-name': 'pasted-image.png' },
+      body: png,
+    })
+    expect(uploaded.status).toBe(201)
+    const file = (await uploaded.json() as { file: ReferencedFileContent }).file
+    const imageUrl = `${origin}/runtime/attachments/${file.source.attachmentId}?sessionId=image-session`
+    expect((await fetch(imageUrl)).status).toBe(401)
+    expect((await fetch(`${origin}/runtime/attachments/%?sessionId=image-session`, { headers: { authorization: 'Bearer image-token' } })).status).toBe(400)
+    const image = await fetch(imageUrl, { headers: { authorization: 'Bearer image-token' } })
+    expect(image.status).toBe(200)
+    expect(image.headers.get('content-type')).toBe('image/png')
+    expect(image.headers.get('cache-control')).toContain('immutable')
+    expect(Buffer.from(await image.arrayBuffer())).toEqual(png)
+    expect((await fetch(`${origin}/runtime/attachments/${file.source.attachmentId}?sessionId=other-session`, { headers: { authorization: 'Bearer image-token' } })).status).toBe(404)
+    await writeFile(messageAttachments.resolve('image-session', file).path, Buffer.from('corrupted'))
+    const corrupted = await fetch(imageUrl, { headers: { authorization: 'Bearer image-token' } })
+    expect(corrupted.status).toBe(404)
+    expect(await corrupted.text()).toContain('integrity validation')
+
+    const invalidImage = await fetch(`${origin}/runtime/attachments?sessionId=image-session`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer image-token', 'content-type': 'image/png', 'x-agent-runlab-attachment-name': 'fake.png' },
+      body: Buffer.from('not a png'),
+    })
+    expect(invalidImage.status).toBe(400)
+    expect(await invalidImage.text()).toContain('do not match declared image type')
+  })
+
+  it('rejects non-image binary files for Kernel sessions before storing them', async () => {
     const sessions = new SessionStore(join(root, 'sessions'))
     await sessions.create({
       sessionId: 'kernel-session',

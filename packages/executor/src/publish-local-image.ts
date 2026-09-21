@@ -6,7 +6,7 @@ import type { Sandbox } from './sandbox.js'
 import { isPathInsideRoot } from './sandbox.js'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml'])
 
 export type PublishLocalImageRequest = { requestId: string; path: string; cwd?: string }
 export type PublishLocalImageResponse = { requestId: string; path: string; base64?: string; mediaType?: string; size?: number; error?: string }
@@ -29,7 +29,7 @@ export async function publishLocalImage(input: PublishLocalImageRequest, sandbox
     if (typeof process.getuid === 'function' && isPathInsideRoot(canonical, await realpath(tmpdir())) && info.uid !== process.getuid()) return fail('temporary image is not owned by the Executor user')
     const data = await readFile(canonical)
     const mediaType = sniffImageMime(data)
-    if (!mediaType || !IMAGE_MIMES.has(mediaType)) return fail('file is not a supported PNG, JPEG, WebP, or GIF image')
+    if (!mediaType || !IMAGE_MIMES.has(mediaType)) return fail('file is not a supported PNG, JPEG, WebP, GIF, or SVG image')
     return { requestId: input.requestId, path: input.path, base64: data.toString('base64'), mediaType, size: data.length }
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error))
@@ -42,5 +42,6 @@ function sniffImageMime(data: Buffer): string | undefined {
   const head = data.subarray(0, 6).toString('ascii')
   if (head === 'GIF87a' || head === 'GIF89a') return 'image/gif'
   if (data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
+  if (/^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg(?:\s|>)/i.test(data.subarray(0, 64 * 1024).toString('utf8'))) return 'image/svg+xml'
   return undefined
 }

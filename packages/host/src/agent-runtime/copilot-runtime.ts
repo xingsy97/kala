@@ -39,6 +39,14 @@ type PendingApproval = {
   resolve(decision: ApprovalDecision): void
 }
 
+type TurnCapture = {
+  assistantEventIds: Set<string>
+  reasoningTexts: Set<string>
+  eventIds: Set<string>
+  projections: Promise<void>[]
+  projectionError?: unknown
+}
+
 const COPILOT_INACTIVITY_TIMEOUT_MS = 30 * 60_000
 const COPILOT_SDK_TURN_TIMEOUT_MS = 24 * 60 * 60_000
 
@@ -58,6 +66,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   private readonly compactions = new Map<string, { attemptId: string; tokensBefore: number }>()
   private readonly tails = new Map<string, Promise<void>>()
   private readonly accountedUsageCallIds = new Set<string>()
+  private readonly turnCaptures = new Map<string, TurnCapture>()
   private status: AgentRuntimeDescriptor['status']
   private reason: string | undefined
   private models: readonly ModelInfo[] = []
@@ -273,9 +282,8 @@ export class CopilotAgentRuntime implements AgentRuntime {
       clientName: 'agent-runlab',
       ...(model ? { model } : {}),
       // The Copilot CLI runs with the Host, while record.state.cwd belongs to
-      // the remote Workspace Executor. Its Host-owned working directory also
-      // contains the sibling attachment store so SDK file attachments remain
-      // inside the runtime's permitted filesystem boundary.
+      // the remote Workspace Executor. Never expose Host-only paths as message
+      // attachments; persisted attachments are sent to the SDK as blobs below.
       workingDirectory,
       systemMessage: {
         mode: 'replace' as const,
@@ -469,7 +477,49 @@ export class CopilotAgentRuntime implements AgentRuntime {
       this.context.broadcast.onTokenDelta(record.sessionId, event.data.deltaContent)
       return
     }
-    if (event.type === 'assistant.message' || event.type === 'session.idle') return
+    if ((event.type === 'assistant.message' || event.type === 'assistant.reasoning') && !event.agentId) {
+      const capture = this.turnCaptures.get(record.sessionId)
+      if (!capture || capture.eventIds.has(event.id)) return
+      capture.eventIds.add(event.id)
+      const content: MessageContent[] = []
+      const reasoningTexts: string[] = []
+      let assistantText = ''
+      if (event.type === 'assistant.reasoning') {
+        const text = event.data.content.trim()
+        if (text && !capture.reasoningTexts.has(text)) {
+          reasoningTexts.push(text)
+          content.push({ type: 'thinking', text: event.data.content, provider: 'github-copilot' })
+        }
+      } else {
+        const reasoning = event.data.reasoningText?.trim()
+        if (reasoning && !capture.reasoningTexts.has(reasoning)) {
+          reasoningTexts.push(reasoning)
+          content.push({ type: 'thinking', text: event.data.reasoningText!, provider: 'github-copilot' })
+        }
+        assistantText = event.data.content.trim()
+        if (assistantText) content.push({ type: 'text', text: event.data.content })
+      }
+      if (content.length > 0) {
+        // Reserve content immediately to de-duplicate back-to-back complete
+        // events. A failed projection fails the whole turn below rather than
+        // allowing session_idle to hide the missing transcript content.
+        for (const text of reasoningTexts) capture.reasoningTexts.add(text)
+        if (assistantText) capture.assistantEventIds.add(event.id)
+        const outputTokens = event.type === 'assistant.message'
+          ? this.takeOutputTokens(event.data.apiCallId, event.data.outputTokens)
+          : 0
+        const projection = this.projectAssistantContent(
+          record,
+          event.type === 'assistant.reasoning' ? 'copilot.assistant_reasoning' : 'copilot.assistant_message',
+          nativeEventPayload(event),
+          content,
+          outputTokens,
+        ).catch((error) => { capture.projectionError ??= error })
+        capture.projections.push(projection)
+      }
+      return
+    }
+    if (event.type === 'assistant.reasoning_delta' || event.type === 'session.idle') return
     if (event.type === 'session.error') {
       void this.project(record, 'copilot.session_error', nativeEventPayload(event), (state) => ({
         ...state,
@@ -482,36 +532,45 @@ export class CopilotAgentRuntime implements AgentRuntime {
   }
 
   private async runTurn(record: SessionRecord, session: CopilotSession, input: AgentRuntimeSendInput): Promise<void> {
+    const capture: TurnCapture = {
+      assistantEventIds: new Set(), reasoningTexts: new Set(), eventIds: new Set(), projections: [],
+    }
+    this.turnCaptures.set(record.sessionId, capture)
     try {
       const response = await sendAndWaitWithActivityTimeout(
         session,
         await copilotMessageOptions(this.context, record, input),
       )
       if (this.cancelledSessions.delete(record.sessionId)) return
+      await Promise.all(capture.projections)
+      if (capture.projectionError) throw capture.projectionError
       const pendingProjection = this.tails.get(record.sessionId)
       if (pendingProjection) await pendingProjection
-      if (!response) throw new Error('Copilot turn completed without an assistant message')
+      if (!response && capture.assistantEventIds.size === 0) throw new Error('Copilot turn completed without an assistant message')
       const content: MessageContent[] = []
-      if (response.data.reasoningText) {
+      if (response?.data.reasoningText && !capture.reasoningTexts.has(response.data.reasoningText.trim())) {
         content.push({ type: 'thinking', text: response.data.reasoningText, provider: 'github-copilot' })
       }
-      if (response.data.content) content.push({ type: 'text', text: response.data.content })
-      if (content.length === 0) throw new Error('Copilot assistant message was empty')
-      const outputTokens = response.data.apiCallId && !this.accountedUsageCallIds.has(response.data.apiCallId)
-        ? response.data.outputTokens ?? 0
-        : 0
-      if (response.data.apiCallId && outputTokens > 0) this.accountedUsageCallIds.add(response.data.apiCallId)
-      await this.project(record, 'copilot.assistant_message', nativeEventPayload(response), (state) => ({
-        ...state,
-        messages: [...state.messages, { role: 'assistant', content }],
-        usage: outputTokens > 0
-          ? { ...state.usage, outputTokens: state.usage.outputTokens + outputTokens }
-          : state.usage,
-        status: 'thinking',
-        pendingCalls: [],
-        error: undefined,
-      }))
-      await this.project(record, 'copilot.session_idle', nativeEventPayload(response), (state) => ({
+      if (response?.data.content && !capture.assistantEventIds.has(response.id)) {
+        content.push({ type: 'text', text: response.data.content })
+      }
+      if (content.length > 0) {
+        const assistantMessage = this.context.publishLocalImages
+          ? await this.context.publishLocalImages(record.sessionId, record, { role: 'assistant', content })
+          : { role: 'assistant' as const, content }
+        const outputTokens = this.takeOutputTokens(response?.data.apiCallId, response?.data.outputTokens)
+        await this.project(record, 'copilot.assistant_message', response ? nativeEventPayload(response) : {}, (state) => ({
+          ...state,
+          messages: [...state.messages, assistantMessage],
+          usage: outputTokens > 0
+            ? { ...state.usage, outputTokens: state.usage.outputTokens + outputTokens }
+            : state.usage,
+          status: 'thinking',
+          pendingCalls: [],
+          error: undefined,
+        }))
+      }
+      await this.project(record, 'copilot.session_idle', response ? nativeEventPayload(response) : {}, (state) => ({
         ...state,
         status: 'done',
         pendingCalls: [],
@@ -534,7 +593,16 @@ export class CopilotAgentRuntime implements AgentRuntime {
         error: message,
       }))
       this.context.broadcast.onError(record.sessionId, message)
+    } finally {
+      if (this.turnCaptures.get(record.sessionId) === capture) this.turnCaptures.delete(record.sessionId)
     }
+  }
+
+  private takeOutputTokens(apiCallId: string | undefined, outputTokens: number | undefined): number {
+    if (!apiCallId || this.accountedUsageCallIds.has(apiCallId)) return 0
+    const tokens = outputTokens ?? 0
+    if (tokens > 0) this.accountedUsageCallIds.add(apiCallId)
+    return tokens
   }
 
   private async projectToolCall(record: SessionRecord, pending: PendingToolCall): Promise<void> {
@@ -602,6 +670,75 @@ export class CopilotAgentRuntime implements AgentRuntime {
     )
   }
 
+  private async projectAssistantContent(
+    record: SessionRecord,
+    action: string,
+    payload: Record<string, unknown>,
+    content: MessageContent[],
+    outputTokens: number,
+  ): Promise<void> {
+    const previous = this.tails.get(record.sessionId) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(async () => {
+      const latest = this.context.store.get(record.sessionId) ?? record
+      const message: Message = { role: 'assistant', content }
+      const assistantMessage = this.context.publishLocalImages
+        ? await this.context.publishLocalImages(record.sessionId, latest, message)
+        : message
+      const projected = {
+        ...latest.state,
+        messages: [...latest.state.messages, assistantMessage],
+        usage: outputTokens > 0
+          ? { ...latest.state.usage, outputTokens: latest.state.usage.outputTokens + outputTokens }
+          : latest.state.usage,
+        ...(latest.state.pendingCalls.length > 0
+          ? {
+              status: latest.state.status === 'awaiting_approval' ? 'awaiting_approval' as const : 'executing_tools' as const,
+              pendingCalls: latest.state.pendingCalls,
+            }
+          : { status: 'thinking' as const, pendingCalls: [] as const }),
+        error: undefined,
+        cursor: latest.state.cursor + 1,
+      } as AgentState
+      const next = await this.externalizeInlineImages(record.sessionId, projected)
+      await this.context.store.recordRuntimeProjection(record.sessionId, next, action, payload)
+      this.context.broadcast.onState(latest, next)
+    })
+    this.tails.set(record.sessionId, current)
+    try {
+      await current
+    } finally {
+      if (this.tails.get(record.sessionId) === current) this.tails.delete(record.sessionId)
+    }
+  }
+
+  private async externalizeInlineImages(sessionId: string, state: AgentState): Promise<AgentState> {
+    const store = this.context.messageAttachments
+    if (!store) return state
+    let changed = false
+    const messages: Message[] = []
+    for (const [messageIndex, message] of state.messages.entries()) {
+      const content: MessageContent[] = []
+      for (const [contentIndex, block] of message.content.entries()) {
+        if (block.type !== 'image' || block.source.kind !== 'base64' || !block.source.data) {
+          content.push(block)
+          continue
+        }
+        const extension = imageExtension(block.source.mediaType)
+        const file = await store.register({
+          sessionId,
+          name: `pasted-image-${messageIndex + 1}-${contentIndex + 1}.${extension}`,
+          mediaType: block.source.mediaType,
+          data: Buffer.from(block.source.data, 'base64'),
+        })
+        await store.commitReferences(sessionId, [file])
+        content.push(file)
+        changed = true
+      }
+      messages.push(changed ? { ...message, content } : message)
+    }
+    return changed ? { ...state, messages } as AgentState : state
+  }
+
   private async project(
     record: SessionRecord,
     action: string,
@@ -611,7 +748,8 @@ export class CopilotAgentRuntime implements AgentRuntime {
     const previous = this.tails.get(record.sessionId) ?? Promise.resolve()
     const current = previous.catch(() => undefined).then(async () => {
       const latest = this.context.store.get(record.sessionId) ?? record
-      const next = { ...update(latest.state), cursor: latest.state.cursor + 1 } as AgentState
+      const projected = { ...update(latest.state), cursor: latest.state.cursor + 1 } as AgentState
+      const next = await this.externalizeInlineImages(record.sessionId, projected)
       await this.context.store.recordRuntimeProjection(record.sessionId, next, action, payload)
       this.context.broadcast.onState(latest, next)
     })
@@ -686,11 +824,11 @@ async function copilotMessageOptions(
       if (!context.messageAttachments) {
         throw new Error(`Attachment "${block.name}" cannot be resolved because Host attachment storage is unavailable`)
       }
-      const path = await context.messageAttachments.sdkFilePath(record.sessionId, block)
-      if (!path) throw new Error(`Attachment "${block.name}" cannot be exposed as a controlled Copilot SDK file`)
+      const data = await context.messageAttachments.resolve(record.sessionId, block).read()
       attachments.push({
-        type: 'file',
-        path,
+        type: 'blob',
+        data: data.toString('base64'),
+        mimeType: block.mediaType,
         displayName: block.name,
       })
     } else if (block.type === 'image' && block.source.kind === 'base64') {

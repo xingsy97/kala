@@ -14,6 +14,11 @@ export type BootstrapEnvironment = {
   EXECUTOR_INSTALL_LABEL?: string
 }
 
+export type ExecutorUpdateAssets = {
+  manifestUrl: string
+  publicKey: string
+}
+
 export function bootstrapEnvironment(env: NodeJS.ProcessEnv): BootstrapEnvironment {
   const required = (name: keyof BootstrapEnvironment): string => {
     const value = env[name]?.trim()
@@ -54,6 +59,17 @@ export async function waitForApproval(env: BootstrapEnvironment, intervalMs = 1_
 
 export async function redeemInstallation(env: BootstrapEnvironment, workspaceId: string): Promise<{ token: string }> {
   return await installationRequest(env, '/redeem', { method: 'POST', body: JSON.stringify({ workspaceId, ...(env.EXECUTOR_INSTALL_LABEL ? { label: env.EXECUTOR_INSTALL_LABEL } : {}) }) })
+}
+
+export async function downloadExecutorUpdateAssets(hostUrl: string): Promise<ExecutorUpdateAssets | undefined> {
+  const assetsUrl = `${hostUrl.replace(/\/$/u, '')}/install/assets`
+  const manifestUrl = `${assetsUrl}/executor-update-manifest.json`
+  const publicKeyUrl = `${assetsUrl}/executor-update-public-key.pem`
+  const [manifestResponse, publicKeyResponse] = await Promise.all([fetch(manifestUrl), fetch(publicKeyUrl)])
+  if (manifestResponse.status === 404 && publicKeyResponse.status === 404) return undefined
+  if (!manifestResponse.ok) throw new Error(`failed to download Executor update manifest: ${manifestResponse.status}`)
+  if (!publicKeyResponse.ok) throw new Error(`failed to download Executor update verification key: ${publicKeyResponse.status}`)
+  return { manifestUrl, publicKey: await publicKeyResponse.text() }
 }
 
 export function writeInstallerSession(path: string, session: InstallerSession): void {

@@ -18,6 +18,13 @@ describe('publishLocalImage', () => {
     expect((await publishLocalImage({ requestId: 'w', path: workspaceImage }, sandbox)).mediaType).toBe('image/png')
     expect((await publishLocalImage({ requestId: 't', path: tempImage }, sandbox)).mediaType).toBe('image/png')
   })
+  it('recognizes SVG content from the workspace', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'publish-svg-')); roots.push(workspace)
+    const image = join(workspace, 'diagram.svg')
+    await writeFile(image, '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>')
+    const result = await publishLocalImage({ requestId: 'svg', path: image }, createSandbox({ roots: [workspace] }))
+    expect(result.mediaType).toBe('image/svg+xml')
+  })
   it('rejects non-images and symbolic links', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'publish-safe-')); roots.push(workspace)
     const text = join(workspace, 'fake.png'); await writeFile(text, 'not an image')

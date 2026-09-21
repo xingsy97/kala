@@ -25,6 +25,16 @@ describe('SessionArtifactRegistry', () => {
     await expect(registry.registerImage({ sessionId: 's1', fileName: 'secret.png', data: Buffer.from('not an image') })).rejects.toThrow('unsupported image type')
   })
 
+  it('stores SVG images with their explicit media type', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ak-session-artifact-'))
+    const registry = new SessionArtifactRegistry(root)
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>')
+    const record = await registry.registerImage({ sessionId: 's1', fileName: 'image.svg', data: svg })
+    expect(record.mediaType).toBe('image/svg+xml')
+    expect(record.fileName).toMatch(/\.svg$/)
+    expect(await readFile(registry.contentPath(record))).toEqual(svg)
+  })
+
   it('deletes only the registered images for the requested Session', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ak-session-artifact-'))
     const registry = new SessionArtifactRegistry(root)

@@ -13,6 +13,9 @@ export type SubAgentPolicyReasonCode =
 
 export type SubAgentPolicyInput = {
   role?: SubAgentRole
+  /** User-facing description of why this child is being delegated. */
+  intention?: string
+  /** Backward-compatible alias retained for older agent calls and artifacts. */
   objective?: string
   allowedTools?: readonly string[]
   maxTurns?: number
@@ -22,6 +25,7 @@ export type SubAgentPolicyInput = {
 
 export type SubAgentPolicy = {
   role?: SubAgentRole
+  intention?: string
   objective?: string
   allowedTools?: readonly string[]
   maxTurns?: number
@@ -67,7 +71,7 @@ export type SubAgentRoleTemplate = {
 export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRoleTemplate>> = {
   research: {
     role: 'research', purpose: 'Read files and return a concise report with references.',
-    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'websearch', 'webfetch', 'todowrite'],
+    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'websearch', 'webfetch', 'todo_graph'],
     defaultMaxTurns: 180, minimumMaxTurns: 25, maximumMaxTurns: 360,
     defaultIdleTimeoutMs: 45 * 60_000, defaultToolIdleTimeoutMs: 120 * 60_000,
     defaultTimeoutMs: 4 * 60 * 60_000, minimumTimeoutMs: 30 * 60_000, maximumTimeoutMs: 8 * 60 * 60_000,
@@ -76,7 +80,7 @@ export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRol
   },
   implementation: {
     role: 'implementation', purpose: 'Implement a bounded change in the shared workspace and verify it without reverting unrelated work.',
-    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'write_file', 'replace_in_file', 'replace_many_in_file', 'apply_file_patch', 'shell', 'bash_output', 'kill_shell', 'todowrite'],
+    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'write_file', 'replace_in_file', 'replace_many_in_file', 'apply_file_patch', 'shell', 'bash_output', 'kill_shell', 'todo_graph'],
     defaultMaxTurns: 240, minimumMaxTurns: 40, maximumMaxTurns: 480,
     defaultIdleTimeoutMs: 45 * 60_000, defaultToolIdleTimeoutMs: 120 * 60_000,
     defaultTimeoutMs: 6 * 60 * 60_000, minimumTimeoutMs: 60 * 60_000, maximumTimeoutMs: 12 * 60 * 60_000,
@@ -85,7 +89,7 @@ export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRol
   },
   test: {
     role: 'test', purpose: 'Run focused tests and report failure causes.',
-    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'shell', 'bash_output', 'kill_shell', 'todowrite'],
+    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'shell', 'bash_output', 'kill_shell', 'todo_graph'],
     defaultMaxTurns: 200, minimumMaxTurns: 30, maximumMaxTurns: 400,
     defaultIdleTimeoutMs: 45 * 60_000, defaultToolIdleTimeoutMs: 120 * 60_000,
     defaultTimeoutMs: 5 * 60 * 60_000, minimumTimeoutMs: 45 * 60_000, maximumTimeoutMs: 10 * 60 * 60_000,
@@ -94,7 +98,7 @@ export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRol
   },
   review: {
     role: 'review', purpose: 'Inspect the final diff and report risks before answer.',
-    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'todowrite'],
+    defaultAllowedTools: ['read_file', 'read_files', 'multi_grep', 'glob', 'ls', 'todo_graph'],
     defaultMaxTurns: 120, minimumMaxTurns: 20, maximumMaxTurns: 240,
     defaultIdleTimeoutMs: 30 * 60_000, defaultToolIdleTimeoutMs: 90 * 60_000,
     defaultTimeoutMs: 3 * 60 * 60_000, minimumTimeoutMs: 20 * 60_000, maximumTimeoutMs: 6 * 60 * 60_000,
@@ -219,6 +223,7 @@ export function resolveSubAgentPolicy({
 
   const policy: SubAgentPolicy = {
     ...(input?.role ? { role: input.role } : {}),
+    ...(input?.intention ? { intention: input.intention } : {}),
     ...(input?.objective ? { objective: input.objective } : {}),
     ...(allowedTools ? { allowedTools } : {}),
     maxTurns,

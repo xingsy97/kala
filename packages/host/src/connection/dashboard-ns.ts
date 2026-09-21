@@ -369,6 +369,11 @@ export function configureDashboardNamespace(
       if (record.workspaceId !== workspaceId) return 'session does not belong to workspace'
       return undefined
     }
+    const validateTerminalSessionAccess = async (targetSessionId: string, workspaceId: string): Promise<string | undefined> => {
+      const ownerSessionId = terminalOwnerSessionId(targetSessionId)
+      if (!ownerSessionId) return 'invalid temporary workspace terminal identity'
+      return validateBgSessionAccess(ownerSessionId, workspaceId)
+    }
     const auditScopedAccessDenied = (action: string, targetSessionId: string, workspaceId: string, error: string): void => {
       deps.audit?.log({ action, actor: auditActor(socket), target: { sessionId: targetSessionId, workspaceId }, outcome: 'denied', error })
     }
@@ -689,15 +694,18 @@ export function configureDashboardNamespace(
       if (!p) { ack?.({ ok: false, error: 'invalid ask_user_choice payload' }); return }
       const result = await operations.run(p.operationId, async () => {
         if (!deps.askUserChoice) throw new Error('ask_user_choice is not configured on this host')
-        const resolved = deps.askUserChoice.respond(p.sessionId, p.callId, p.value)
+        const response = p.customText !== undefined
+          ? { kind: 'custom' as const, text: p.customText }
+          : { kind: 'choice' as const, value: p.value ?? '' }
+        const resolved = deps.askUserChoice.respond(p.sessionId, p.callId, response)
         if (!resolved.ok && resolved.error === 'ask_user_choice request is not pending') {
-          deps.askUserChoice.respondEarly(p.sessionId, p.callId, p.value)
+          deps.askUserChoice.respondEarly(p.sessionId, p.callId, response)
           return
         }
         if (!resolved.ok) throw new Error(resolved.error)
       })
       ack?.(result)
-      deps.audit?.log({ action: 'dashboard.ask_user_choice', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: result.ok ? 'ok' : 'error', metadata: { value: p.value }, ...(!result.ok ? { error: result.error } : {}) })
+      deps.audit?.log({ action: 'dashboard.ask_user_choice', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: result.ok ? 'ok' : 'error', metadata: { responseType: p.customText !== undefined ? 'custom_text' : 'choice', ...(p.value !== undefined ? { value: p.value } : { customTextBytes: Buffer.byteLength(p.customText ?? '', 'utf8') }) }, ...(!result.ok ? { error: result.error } : {}) })
     })
     socket.on('client:cancel', async (raw: ClientCancel) => {
       const p = vparse(schema.ClientCancelSchema, raw, 'client:cancel', (raw as ClientCancel | undefined)?.sessionId)
@@ -1079,7 +1087,7 @@ export function configureDashboardNamespace(
     socket.on('terminal:create', async (raw: ClientTerminalCreate, ack) => {
       const p = vparse(schema.ClientTerminalCreateSchema, raw, 'terminal:create', (raw as ClientTerminalCreate | undefined)?.sessionId)
       if (!p) return
-      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      const error = await validateTerminalSessionAccess(p.sessionId, p.workspaceId)
       if (error) {
         auditScopedAccessDenied('terminal.create', p.sessionId, p.workspaceId, error)
         return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, error })
@@ -1090,7 +1098,7 @@ export function configureDashboardNamespace(
     socket.on('terminal:input', async (raw: ClientTerminalInput) => {
       const p = vparse(schema.ClientTerminalInputSchema, raw, 'terminal:input', (raw as ClientTerminalInput | undefined)?.sessionId)
       if (!p) return
-      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      const error = await validateTerminalSessionAccess(p.sessionId, p.workspaceId)
       if (error) {
         auditScopedAccessDenied('terminal.input', p.sessionId, p.workspaceId, error)
         return
@@ -1100,7 +1108,7 @@ export function configureDashboardNamespace(
     socket.on('terminal:resize', async (raw: ClientTerminalResize) => {
       const p = vparse(schema.ClientTerminalResizeSchema, raw, 'terminal:resize', (raw as ClientTerminalResize | undefined)?.sessionId)
       if (!p) return
-      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      const error = await validateTerminalSessionAccess(p.sessionId, p.workspaceId)
       if (error) {
         auditScopedAccessDenied('terminal.resize', p.sessionId, p.workspaceId, error)
         return
@@ -1110,7 +1118,7 @@ export function configureDashboardNamespace(
     socket.on('terminal:kill', async (raw: ClientTerminalKill, ack) => {
       const p = vparse(schema.ClientTerminalKillSchema, raw, 'terminal:kill', (raw as ClientTerminalKill | undefined)?.sessionId)
       if (!p) return
-      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      const error = await validateTerminalSessionAccess(p.sessionId, p.workspaceId)
       if (error) {
         auditScopedAccessDenied('terminal.kill', p.sessionId, p.workspaceId, error)
         return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, terminalId: p.terminalId, killed: false, error })
@@ -1728,6 +1736,13 @@ async function loadRecordForDashboard(
     }
   }
   return record
+}
+
+export function terminalOwnerSessionId(sessionId: string): string | undefined {
+  const prefix = 'workspace-terminal:'
+  if (!sessionId.startsWith(prefix)) return sessionId
+  const separator = sessionId.lastIndexOf(':')
+  return separator > prefix.length ? sessionId.slice(prefix.length, separator) : undefined
 }
 
 export async function loadDashboardSession(

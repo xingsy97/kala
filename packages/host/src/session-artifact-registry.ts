@@ -3,8 +3,6 @@ import { basename, dirname, extname, join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MIME_BY_EXTENSION: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' }
-
 export type SessionArtifactRecord = { artifactId: string; sessionId: string; title: string; mediaType: string; bytes: number; sha256: string; fileName: string; createdAt: string }
 type RegistryFile = { schemaVersion: 1; records: SessionArtifactRecord[] }
 
@@ -68,6 +66,7 @@ function detectImageMime(data: Buffer, fileName: string): string | undefined {
   if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg'
   if (data.subarray(0, 6).toString('ascii') === 'GIF87a' || data.subarray(0, 6).toString('ascii') === 'GIF89a') return 'image/gif'
   if (data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
-  return MIME_BY_EXTENSION[extname(fileName).toLowerCase()] && undefined
+  if (extname(fileName).toLowerCase() === '.svg' && /^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg(?:\s|>)/i.test(data.subarray(0, 64 * 1024).toString('utf8'))) return 'image/svg+xml'
+  return undefined
 }
-function extensionForMime(mime: string): string { return mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : mime === 'image/gif' ? '.gif' : '.png' }
+function extensionForMime(mime: string): string { return mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : mime === 'image/gif' ? '.gif' : mime === 'image/svg+xml' ? '.svg' : '.png' }

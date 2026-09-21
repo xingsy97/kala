@@ -85,7 +85,7 @@ export function renderLinuxServiceFiles(session: InstallerSession, home: string)
     ? `${session.credential.token}\n`
     : `${session.credential.invite!}\n`
   const unit = `[Unit]
-Description=Agent RunLab Executor
+Description=Kala Executor
 After=network-online.target
 Wants=network-online.target
 
@@ -109,7 +109,7 @@ NoNewPrivileges=yes
 WantedBy=${session.mode === 'system' ? 'multi-user.target' : 'default.target'}
 `
   const updateUnit = session.update ? `[Unit]
-Description=Agent RunLab Executor managed update
+Description=Kala Executor managed update
 After=network-online.target runlab-executor.service
 
 [Service]
@@ -117,7 +117,7 @@ Type=oneshot
 ExecStart=${systemdQuote(session.executable)} update apply --config ${systemdQuote(paths.config)}
 ` : undefined
   const updateTimer = session.update ? `[Unit]
-Description=Check for Agent RunLab Executor updates
+Description=Check for Kala Executor updates
 
 [Timer]
 OnBootSec=5min

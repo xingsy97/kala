@@ -187,6 +187,7 @@ export async function runAgentTool(
     concurrentSiblingCount,
     maxFanOut,
   })
+  const intention = policy.intention
 
   if (policy.reasons.includes('policy_max_depth_exceeded')) {
     await persistSubAgentPolicyArtifact(deps, parent, undefined, effect.callId, policy)
@@ -196,6 +197,7 @@ export async function runAgentTool(
       `agent depth exceeded: parent depth ${depth} >= max ${maxDepth}`,
       0,
       0,
+      intention,
     )
   }
   if (policy.reasons.includes('policy_max_fanout_exceeded')) {
@@ -206,6 +208,7 @@ export async function runAgentTool(
       `agent fan-out exceeded: ${concurrentSiblingCount} live siblings >= max ${maxFanOut}`,
       0,
       0,
+      intention,
     )
   }
 
@@ -218,7 +221,7 @@ export async function runAgentTool(
     const final = existingChild.state
     const turns = final.cursor
     if (final.status === 'done') {
-      return okEnvelope(existingChild.sessionId, agentType, finalAssistantText(final), turns, 0)
+      return okEnvelope(existingChild.sessionId, agentType, finalAssistantText(final), turns, 0, intention)
     }
     if (final.status !== 'error') {
       await dispatchOne(deps, existingChild.sessionId, { kind: 'cancel' }, aborts)
@@ -229,6 +232,7 @@ export async function runAgentTool(
       `sub-agent recovery stopped incomplete child in status ${final.status}`,
       turns,
       0,
+      intention,
     )
   }
 
@@ -274,6 +278,7 @@ export async function runAgentTool(
     parentCallId: effect.callId,
     childSessionId: child.sessionId,
     ...(agentType !== undefined ? { agentType } : {}),
+    ...(intention !== undefined ? { intention } : {}),
     prompt,
     ...(model !== undefined ? { model } : {}),
     startedAt: startedAt.toISOString(),
@@ -384,10 +389,10 @@ export async function runAgentTool(
       error,
     })
     return timedOut && partial
-      ? partialTimeoutEnvelope(child.sessionId, agentType, partial, timeoutReason ?? 'absolute-deadline', turns, durationMs)
+      ? partialTimeoutEnvelope(child.sessionId, agentType, partial, timeoutReason ?? 'absolute-deadline', turns, durationMs, intention)
       : timedOut
-        ? failEnvelope(child.sessionId, agentType, `timeout: ${error}`, turns, durationMs)
-        : cancelEnvelope(child.sessionId, agentType, error, turns, durationMs)
+        ? failEnvelope(child.sessionId, agentType, `timeout: ${error}`, turns, durationMs, intention)
+        : cancelEnvelope(child.sessionId, agentType, error, turns, durationMs, intention)
   }
 
   if (dispatchError || !final || final.status !== 'done') {
@@ -405,7 +410,7 @@ export async function runAgentTool(
       finishedAt: finishedAt.toISOString(),
       error,
     })
-    return failEnvelope(child.sessionId, agentType, error, turns, durationMs)
+    return failEnvelope(child.sessionId, agentType, error, turns, durationMs, intention)
   }
 
   deps.broadcast.onSubAgentFinished?.({
@@ -417,7 +422,7 @@ export async function runAgentTool(
     durationMs,
     finishedAt: finishedAt.toISOString(),
   })
-  return okEnvelope(child.sessionId, agentType, finalAssistantText(final), turns, durationMs)
+  return okEnvelope(child.sessionId, agentType, finalAssistantText(final), turns, durationMs, intention)
 }
 
 async function waitForExternalSubAgent(
@@ -459,8 +464,9 @@ function okEnvelope(
   resultText: string,
   turns: number,
   durationMs: number,
+  intention?: string,
 ): { ok: true; content: string } {
-  const header = envelopeHeader(childSessionId, agentType, 'completed', turns, durationMs)
+  const header = envelopeHeader(childSessionId, agentType, 'completed', turns, durationMs, intention)
   return {
     ok: true,
     content: `${header}\n<result>\n${escapeEnvelopeBody(resultText)}\n</result>\n</sub_agent>`,
@@ -474,8 +480,9 @@ function partialTimeoutEnvelope(
   reason: TimeoutReason,
   turns: number,
   durationMs: number,
+  intention?: string,
 ): { ok: true; content: string } {
-  const header = envelopeHeader(childSessionId, agentType, 'timed_out_with_partial_result', turns, durationMs)
+  const header = envelopeHeader(childSessionId, agentType, 'timed_out_with_partial_result', turns, durationMs, intention)
   return { ok: true, content: `${header}\n<warning>Sub-agent reached ${reason}; returning verified partial work.</warning>\n<result>\n${escapeEnvelopeBody(partial)}\n</result>\n</sub_agent>` }
 }
 
@@ -485,8 +492,9 @@ function failEnvelope(
   error: string,
   turns: number,
   durationMs: number,
+  intention?: string,
 ): { ok: false; content: string } {
-  const header = envelopeHeader(childSessionId, agentType, 'failed', turns, durationMs)
+  const header = envelopeHeader(childSessionId, agentType, 'failed', turns, durationMs, intention)
   return {
     ok: false,
     content: `${header}\n<error>\n${escapeEnvelopeBody(error)}\n</error>\n</sub_agent>`,
@@ -499,8 +507,9 @@ function cancelEnvelope(
   reason: string,
   turns: number,
   durationMs: number,
+  intention?: string,
 ): { ok: false; content: string } {
-  const header = envelopeHeader(childSessionId, agentType, 'cancelled', turns, durationMs)
+  const header = envelopeHeader(childSessionId, agentType, 'cancelled', turns, durationMs, intention)
   return {
     ok: false,
     content: `${header}\n<error>\n${escapeEnvelopeBody(reason)}\n</error>\n</sub_agent>`,
@@ -513,10 +522,12 @@ function envelopeHeader(
   status: 'completed' | 'failed' | 'cancelled' | 'timed_out_with_partial_result',
   turns: number,
   durationMs: number,
+  intention?: string,
 ): string {
   const attrs = [
     `session_id="${escapeAttr(childSessionId)}"`,
     ...(agentType ? [`agent_type="${escapeAttr(agentType)}"`] : []),
+    ...(intention ? [`intention="${escapeAttr(intention)}"`] : []),
     `status="${status}"`,
     `turns="${turns}"`,
     `duration_ms="${durationMs}"`,
@@ -592,9 +603,11 @@ function readPolicyInput(effect: CallToolEffect, _parentConfig: AgentConfig): Su
   const roleRaw = raw['role']
   const typeRaw = raw['agent_type']
   const role = isSubAgentRole(roleRaw) ? roleRaw : isSubAgentRole(typeRaw) ? typeRaw : undefined
+  const intention = firstNonEmptyString(raw['intention'], raw['objective'], raw['_intent'])
   const explicitAllowed = Array.isArray(raw['tools']) ? (raw['tools'] as unknown[]).filter((tool): tool is string => typeof tool === 'string') : undefined
   const input: SubAgentPolicyInput = {
     ...(role ? { role } : {}),
+    ...(intention ? { intention } : {}),
     ...(typeof raw['objective'] === 'string' && raw['objective'].length > 0 ? { objective: raw['objective'] as string } : {}),
     ...(explicitAllowed && explicitAllowed.length > 0 ? { allowedTools: explicitAllowed } : {}),
     ...(typeof raw['max_turns'] === 'number' && Number.isFinite(raw['max_turns']) ? { maxTurns: Math.floor(raw['max_turns'] as number) } : {}),
@@ -603,6 +616,15 @@ function readPolicyInput(effect: CallToolEffect, _parentConfig: AgentConfig): Su
   }
   if (Object.keys(input).length === 0 && roleRaw === undefined && typeRaw === undefined) return undefined
   return input
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const trimmed = value.trim()
+    if (trimmed.length > 0 && trimmed.length <= 240 && !/[\r\n]/.test(trimmed)) return trimmed
+  }
+  return undefined
 }
 
 function pickEffectiveTools(

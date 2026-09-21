@@ -4,7 +4,7 @@
  * disk for the same sessionId; `ensure()` coalesces via a per-id promise map.
  */
 
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createConfig, step } from '@agent-kernel/kernel'
 
 import { SessionStore } from './session.js'
-import { appendEventEntry, appendSnapshotEntry, readSessionLog, writeHeader } from './log.js'
+import { appendEventEntry, appendSnapshotEntry, readSessionLog, snapshotSidecarPath, writeHeader } from './log.js'
 import { createInitialState } from '@agent-kernel/kernel'
 
 const config = createConfig({ tools: [], systemPrompt: 'sys' })
@@ -66,8 +66,46 @@ describe('SessionStore.ensure', () => {
     expect(reloaded.state.error).toBe('Copilot turn was interrupted by a host restart')
     const log = await readSessionLog(record.logPath, { allowExternalRuntime: true })
     expect(log.events).toHaveLength(0)
-    expect(log.snapshots).toHaveLength(2)
+    expect(log.snapshots).toHaveLength(1)
     expect(log.runtimeMetadata.at(-1)?.action).toBe('copilot.recovered_interrupted_turn')
+  })
+
+  it('keeps repeated projections out of the main JSONL and reloads the latest sidecar', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-sidecar-growth',
+      agentRuntime: 'copilot',
+      config,
+    })
+    const initialLogBytes = statSync(record.logPath).size
+    let projected = record.state
+    for (let index = 0; index < 8; index += 1) {
+      projected = {
+        ...projected,
+        cursor: projected.cursor + 1,
+        status: 'done',
+        pendingCalls: [],
+        messages: [
+          ...projected.messages,
+          ...(index === 0 ? [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'stable title' }] }] : []),
+          { role: 'assistant' as const, content: [{ type: 'text' as const, text: `${index}:${'x'.repeat(128 * 1024)}` }] },
+        ],
+      }
+      await store.recordRuntimeProjection(record.sessionId, projected, 'copilot.projection', { index })
+    }
+
+    const mainLog = readFileSync(record.logPath, 'utf8')
+    expect(mainLog).not.toContain('\"kind\":\"snapshot\"')
+    expect(statSync(record.logPath).size - initialLogBytes).toBeLessThan(16 * 1024)
+    expect(existsSync(snapshotSidecarPath(record.logPath))).toBe(true)
+
+    const parsed = await readSessionLog(record.logPath, { allowExternalRuntime: true })
+    expect(parsed.snapshots).toHaveLength(1)
+    expect(parsed.snapshots[0]?.seq).toBe(8)
+    const reloaded = await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })
+    expect(reloaded.state.cursor).toBe(8)
+    expect(reloaded.state.messages.at(-1)?.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('7:') })
+    expect(reloaded.firstUserMessage).toBe('stable title')
   })
 
   it('compacts large Copilot projection snapshots without mutating live state', async () => {
@@ -126,7 +164,16 @@ describe('SessionStore.ensure', () => {
       pendingCalls: [] as const,
       messages: [
         ...record.state.messages,
-        ...Array.from({ length: 700 }, (_, index) => ({
+        { role: 'user' as const, content: [{ type: 'text' as const, text: 'original long-running request' }] },
+        ...Array.from({ length: 700 }, (_, index) => ([{
+          role: 'assistant' as const,
+          content: [{
+            type: 'tool_call' as const,
+            callId: `call-${index}`,
+            name: 'shell',
+            input: { command: `echo ${index}` },
+          }],
+        }, {
           role: 'tool' as const,
           content: [{
             type: 'tool_result' as const,
@@ -134,7 +181,7 @@ describe('SessionStore.ensure', () => {
             ok: true,
             content: `tool ${index}\n${'x'.repeat(40 * 1024)}`,
           }],
-        })),
+        }])).flat(),
       ],
     }
 
@@ -143,12 +190,16 @@ describe('SessionStore.ensure', () => {
     const log = await readSessionLog(record.logPath, { allowExternalRuntime: true })
     const snapshot = log.snapshots.at(-1)
     const snapshotJson = JSON.stringify(snapshot)
-    const compactedMessages = snapshot?.state.messages.filter((message) =>
-      message.content.some((content) => content.type === 'tool_result' && content.content.includes('older tool result compacted')),
-    ) ?? []
-    expect(Buffer.byteLength(snapshotJson)).toBeLessThan(2 * 1024 * 1024)
-    expect(compactedMessages.length).toBeGreaterThan(0)
-    expect(snapshot?.state.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool_result', callId: 'call-699' })
+    const contents = snapshot?.state.messages.flatMap((message) => message.content) ?? []
+    const callIds = contents.filter((content) => content.type === 'tool_call').map((content) => content.callId)
+    const resultIds = contents.filter((content) => content.type === 'tool_result').map((content) => content.callId)
+    expect(Buffer.byteLength(snapshotJson)).toBeLessThanOrEqual(2 * 1024 * 1024)
+    expect(callIds).toEqual(resultIds)
+    expect(resultIds).toContain('call-699')
+    expect(resultIds).not.toContain('call-0')
+    expect(snapshot?.state.messages.some((message) => message.role === 'user' && message.content.some((content) => content.type === 'text' && content.text === 'original long-running request'))).toBe(true)
+    const reloaded = await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })
+    expect(reloaded.firstUserMessage).toBe('original long-running request')
   })
 
   it.runIf(process.platform === 'linux')('loads a large Copilot projection log without summary cache or full replay', async () => {
@@ -388,7 +439,13 @@ describe('SessionStore.ensure', () => {
       artifactRootDir,
       deleteRegisteredArtifacts: async (sessionId) => { deletedRegistered.push(sessionId) },
     })
-    const record = await store.create({ sessionId: 'session-delete-exact', config })
+    const record = await store.create({ sessionId: 'session-delete-exact', agentRuntime: 'copilot', config })
+    await store.recordRuntimeProjection(record.sessionId, {
+      ...record.state,
+      cursor: 1,
+      status: 'done',
+      pendingCalls: [],
+    }, 'copilot.done', {})
     const logSlug = basename(record.logPath, '.jsonl')
     const logArtifacts = join(dir, 'artifacts', logSlug)
     const similarlyNamed = join(dir, 'artifacts', `${logSlug}-other`)
@@ -404,6 +461,7 @@ describe('SessionStore.ensure', () => {
     await store.delete(record.sessionId)
 
     expect(existsSync(record.logPath)).toBe(false)
+    expect(existsSync(snapshotSidecarPath(record.logPath))).toBe(false)
     expect(existsSync(logArtifacts)).toBe(false)
     expect(existsSync(similarlyNamed)).toBe(true)
     for (const kind of ['message-assembly', 'router-decisions', 'tool-catalog', 'compaction-summaries', 'subagent-policies']) {
@@ -628,6 +686,35 @@ describe('SessionStore.rename', () => {
     const store2 = new SessionStore(dir)
     const rec2 = await store2.load('sess-persist-label')
     expect(rec2.label).toBe('Persisted title')
+  })
+
+  it('uses recent Copilot label metadata instead of a stale persisted summary', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-stale-title',
+      agentRuntime: 'copilot',
+      config,
+    })
+    await store.recordRuntimeProjection(record.sessionId, {
+      ...record.state,
+      cursor: 1,
+      status: 'done',
+      messages: [...record.state.messages, {
+        role: 'user',
+        content: [{ type: 'text', text: 'fallback title' }],
+      }],
+    }, 'copilot.user_message', { text: 'fallback title' })
+    await store.listSummaries()
+    await store.rename(record.sessionId, 'Latest title')
+
+    const replacement = new SessionStore(dir)
+    expect((await replacement.listSummaries())[0]?.label).toBe('Latest title')
+    expect((await replacement.load(record.sessionId, { recoverDangling: false })).label).toBe('Latest title')
+
+    await store.rename(record.sessionId, '')
+    const afterClear = new SessionStore(dir)
+    expect((await afterClear.listSummaries())[0]?.label).toBeUndefined()
+    expect((await afterClear.load(record.sessionId, { recoverDangling: false })).label).toBeUndefined()
   })
 })
 

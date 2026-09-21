@@ -71,7 +71,7 @@ import {
   MAX_MESSAGE_ATTACHMENT_BYTES,
   type MessageAttachmentStore,
 } from '../message-attachment-store.js'
-import { assertKernelTextAttachment, validateMessageAttachmentReferences } from '../message-attachment-resolver.js'
+import { assertImageAttachmentBytes, assertKernelTextAttachment, supportedImageMediaType, validateMessageAttachmentReferences } from '../message-attachment-resolver.js'
 import type { OperationalMetrics } from '../operational-metrics.js'
 import type { MemoStore } from '../memo-store.js'
 import { diffToolCatalogs } from '../tool-catalog-diff.js'
@@ -649,7 +649,7 @@ export function attachJsonRoutes(
       claimRoute(req)
       const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
       if (!auth.ok) { sendError(res, auth.status, auth.error); return }
-      void runWebSearch({ query: 'Agent RunLab', limit: 1 }, { credentials: payloads.webSearchCredentials })
+      void runWebSearch({ query: 'Kala', limit: 1 }, { credentials: payloads.webSearchCredentials })
         .then((result) => {
           if (!result.ok) {
             sendError(res, result.failure?.code === 'ESEARCH_CREDENTIAL' ? 400 : 502, result.content)
@@ -743,6 +743,8 @@ export function attachJsonRoutes(
         const mediaType = typeof req.headers['content-type'] === 'string'
           ? req.headers['content-type'].split(';', 1)[0]!.trim().toLowerCase()
           : 'application/octet-stream'
+        const imageMediaType = supportedImageMediaType(mediaType)
+        if (imageMediaType) assertImageAttachmentBytes(imageMediaType, data)
         if (session.agentRuntime === 'kernel') assertKernelTextAttachment({ name, mediaType }, data)
         const file = await payloads.messageAttachments!.register({
           sessionId,
@@ -1082,25 +1084,69 @@ export function attachJsonRoutes(
         const data = Buffer.from(input.data, 'base64')
         await assertTenantStorageQuota(payloads.storageQuota, session, 'session_artifact', data.byteLength)
         const record = await payloads.sessionArtifacts!.registerImage({ sessionId: input.sessionId, title: input.title, fileName: input.fileName, data })
-        sendJson(req, res, { ...record, uri: `artifact://${record.artifactId}` })
+        sendJson(req, res, { ...record, uri: `artifact://${record.artifactId}?mediaType=${encodeURIComponent(record.mediaType)}` })
       }).catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
       return
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') return
+    if (path.startsWith('/runtime/attachments/')) {
+      claimRoute(req)
+      if (!payloads.messageAttachments || !payloads.sessions) { sendError(res, 404, 'attachment not found'); return }
+      const auth = authorizeDashboardHttp(req, payloads.auth)
+      if (!auth.ok) { sendError(res, 401, auth.reason); return }
+      let attachmentId: string
+      try { attachmentId = decodeURIComponent(path.slice('/runtime/attachments/'.length)) } catch { sendError(res, 400, 'invalid attachment id'); return }
+      const attachmentUrl = new URL(url, 'http://localhost')
+      const sessionId = attachmentUrl.searchParams.get('sessionId')
+      if (!sessionId) { sendError(res, 400, 'sessionId is required'); return }
+      void payloads.sessions.load(sessionId, { recoverDangling: false })
+        .then(async (session) => {
+          const accessError = httpSessionAccessError(req, session)
+          if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
+          const attachment = payloads.messageAttachments!.resolveById(sessionId, attachmentId)
+          if (!supportedImageMediaType(attachment.mediaType)) throw new HttpRouteError(409, 'attachment is not a previewable image')
+          const data = req.method === 'HEAD' ? undefined : await attachment.read()
+          const headers = {
+            'content-type': attachment.mediaType,
+            'content-length': String(attachment.bytes),
+            'cache-control': 'private, max-age=31536000, immutable',
+            etag: `"${attachment.sha256}"`,
+            'x-content-type-options': 'nosniff',
+          }
+          res.writeHead(200, headers)
+          res.end(data)
+        })
+        .catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 404, error instanceof Error ? error.message : 'attachment not found'))
+      return
+    }
     if (path.startsWith('/session-artifacts/')) {
       claimRoute(req)
       const artifactId = decodeURIComponent(path.slice('/session-artifacts/'.length))
       const record = payloads.sessionArtifacts?.get(artifactId)
       if (!record || !payloads.sessions) { sendError(res, 404, 'artifact not found'); return }
-      const sessionId = new URL(url, 'http://localhost').searchParams.get('sessionId')
+      const artifactUrl = new URL(url, 'http://localhost')
+      const sessionId = artifactUrl.searchParams.get('sessionId')
       if (!sessionId || record.sessionId !== sessionId) { sendError(res, 403, 'artifact does not belong to this session'); return }
+      if (record.mediaType === 'image/svg+xml' && artifactUrl.searchParams.get('allowSvg') !== '1') {
+        sendError(res, 409, 'SVG preview requires explicit confirmation')
+        return
+      }
       void payloads.sessions.load(sessionId)
         .then(() => {
           const session = payloads.sessions!.get(sessionId)
           const accessError = httpSessionAccessError(req, session)
           if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
-          const headers = { 'content-type': record.mediaType, 'content-length': String(record.bytes), 'cache-control': 'private, max-age=31536000, immutable', etag: `"${record.sha256}"` }
+          const headers = {
+            'content-type': record.mediaType,
+            'content-length': String(record.bytes),
+            'cache-control': 'private, max-age=31536000, immutable',
+            etag: `"${record.sha256}"`,
+            'x-content-type-options': 'nosniff',
+            ...(record.mediaType === 'image/svg+xml'
+              ? { 'content-security-policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox" }
+              : {}),
+          }
           res.writeHead(200, headers)
           if (req.method === 'HEAD') res.end()
           else createReadStream(payloads.sessionArtifacts!.contentPath(record)).pipe(res)

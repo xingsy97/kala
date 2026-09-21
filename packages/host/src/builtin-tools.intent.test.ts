@@ -18,6 +18,19 @@ describe('built-in tool intent schema',()=>{
     expect((tool.inputSchema.properties as Record<string,any>).max_bytes).toBeUndefined()
   })
 
+  it('registers todo_graph as the only planning tool',()=>{
+    const planningTools=createBuiltinTools().filter((tool)=>tool.toolsetId==='planning')
+    expect(planningTools.map((tool)=>tool.name)).toEqual(['todo_graph'])
+    expect(planningTools[0]).toMatchObject({executionKind:'host',executionHandler:'todo_graph'})
+  })
+
+  it('exposes an explicit bounded subagent intention while retaining objective compatibility',()=>{
+    const agent=createBuiltinTools().find((tool)=>tool.name==='agent')!
+    const properties=agent.inputSchema.properties as Record<string,any>
+    expect(properties.intention).toMatchObject({type:'string',minLength:12,maxLength:240})
+    expect(properties.objective.description).toContain('Backward-compatible')
+  })
+
   it('requires a natural-language intent on every tool call',()=>{
     for(const tool of createBuiltinTools()){
       const intent=(tool.inputSchema.properties as Record<string,any>)._intent

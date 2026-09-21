@@ -39,7 +39,7 @@ import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
 import { applyManagedUpdate, rollbackManagedUpdate } from '../src/update-runtime.js'
-import { installManagedGeneration } from '../src/managed-install.js'
+import { installManagedGeneration, managedInstallSourceExecutable } from '../src/managed-install.js'
 import { startUpdateControlServer } from '../src/update-control.js'
 import { executorReleaseVersion } from '../src/build-info.js'
 import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
@@ -48,7 +48,7 @@ import { readExecutorCredential, readExecutorRuntimeConfig } from '../src/execut
 import { parseSandboxRootsEnv } from '../src/sandbox-roots-env.js'
 import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile } from '../src/workspace-id.js'
 import { acquireExecutorLock } from '../src/local-lock.js'
-import { bootstrapEnvironment, defaultManagedRoot, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
+import { bootstrapEnvironment, defaultManagedRoot, downloadExecutorUpdateAssets, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
 import { assertManagedWindowsInstallation, createWindowsServicePlan, executeWindowsServicePlan, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
@@ -148,7 +148,7 @@ function parseArgs(argv: readonly string[]): Args {
 }
 
 function printHelp(): void {
-  process.stdout.write(`Agent RunLab Executor
+  process.stdout.write(`Kala Executor
 
 Usage:
   runlab-executor --host <url> [options]
@@ -195,7 +195,7 @@ Examples:
 }
 
 function printVersion(): void {
-  process.stdout.write(`Agent RunLab Executor ${executorReleaseVersion()}\n`)
+  process.stdout.write(`Kala Executor ${executorReleaseVersion()}\n`)
 }
 
 function printServiceCommands(mode: ServiceMode, executable = process.execPath): void {
@@ -204,7 +204,7 @@ function printServiceCommands(mode: ServiceMode, executable = process.execPath):
   process.stdout.write(`\n============================================================\n`)
   process.stdout.write(`  SERVICE INSTALLED AND RUNNING\n`)
   process.stdout.write(`============================================================\n`)
-  process.stdout.write(`\nManage the Agent RunLab Executor service:\n\n`)
+  process.stdout.write(`\nManage the Kala Executor service:\n\n`)
   process.stdout.write(`  Status    systemctl${user} status runlab-executor.service\n`)
   process.stdout.write(`  Logs      journalctl${user} -u runlab-executor.service -f\n`)
   process.stdout.write(`  Restart   systemctl${user} restart runlab-executor.service\n`)
@@ -250,23 +250,33 @@ async function runInternalInstaller(): Promise<void> {
   const workspaceId = loadOrCreateWorkspaceId()
   const redeemed = await redeemInstallation(env, workspaceId)
   const workspaceRoot = env.EXECUTOR_INSTALL_ROOT === '__RUNLAB_CURRENT_DIRECTORY__' ? resolve(process.cwd()) : resolve(env.EXECUTOR_INSTALL_ROOT)
-  process.stdout.write(`Agent RunLab workspace root: ${workspaceRoot}\n`)
+  process.stdout.write(`Kala workspace root: ${workspaceRoot}\n`)
   const service = env.EXECUTOR_INSTALL_MODE === 'service'
   if (service && process.platform === 'win32') return await installWindowsService(env, workspaceRoot, redeemed.token)
   const managedRoot = defaultManagedRoot(homedir(), service && process.getuid?.() === 0)
-  const executable = service ? join(managedRoot, 'current', 'runlab-executor') : process.execPath
+  const release = executorReleaseVersion()
+  let managedInstall
+  if (service) {
+    const installSource = managedInstallSourceExecutable(process.execPath, process.argv[1])
+    managedInstall = installManagedGeneration(installSource, managedRoot, release, installSource === process.execPath ? undefined : process.execPath)
+  }
+  const executable = managedInstall?.executable ?? process.execPath
+  const updateAssets = service ? await downloadExecutorUpdateAssets(env.HOST_URL) : undefined
+  if (service && !updateAssets) {
+    process.stdout.write('Kala automatic updates are unavailable for this deployment; continuing without managed updates.\n')
+  }
   const installerSession: InstallerSession = {
     version: 1, mode: service && process.getuid?.() === 0 ? 'system' : 'user', executable,
     host: env.HOST_URL, ...(env.EXECUTOR_INSTALL_LABEL ? { name: env.EXECUTOR_INSTALL_LABEL } : {}),
     sandboxRoots: [workspaceRoot], credential: { token: redeemed.token }, installationId: env.EXECUTOR_INSTALL_ID,
     ...(service ? {
       managedRoot,
-      update: {
-        manifestUrl: `${env.HOST_URL.replace(/\/$/u, '')}/install/assets/executor-update-manifest.json`,
+      ...(updateAssets ? { update: {
+        manifestUrl: updateAssets.manifestUrl,
         publicKeyFile: join(managedRoot, 'update-public-key.pem'),
         channel: 'stable' as const,
         intervalMinutes: 60,
-      },
+      } } : {}),
     } : {}),
   }
   if (!service) {
@@ -276,11 +286,7 @@ async function runInternalInstaller(): Promise<void> {
     process.env.SANDBOX_ROOTS = workspaceRoot
     return await main(['--host', env.HOST_URL, '--sandbox-root', workspaceRoot, '--config', writeTemporaryConfig(installerSession)])
   }
-  const release = executorReleaseVersion()
-  installManagedGeneration(process.execPath, managedRoot, release)
-  const keyResponse = await fetch(`${env.HOST_URL.replace(/\/$/u, '')}/install/assets/executor-update-public-key.pem`)
-  if (!keyResponse.ok) throw new Error(`failed to download Executor update verification key: ${keyResponse.status}`)
-  writeFileSync(join(managedRoot, 'update-public-key.pem'), await keyResponse.text(), { mode: 0o600 })
+  if (updateAssets) writeFileSync(join(managedRoot, 'update-public-key.pem'), updateAssets.publicKey, { mode: 0o600 })
   const sessionFile = join(managedRoot, 'installer-session.json')
   writeInstallerSession(sessionFile, installerSession)
   const plan = createLinuxServicePlan('install', installerSession.mode, homedir(), installerSession)
@@ -297,7 +303,7 @@ async function runInternalInstaller(): Promise<void> {
 async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment>, workspaceRoot: string, token: string): Promise<void> {
   const serviceName = 'RunLabExecutor'
   const plan = createWindowsServicePlan({
-    serviceName, displayName: 'Agent RunLab Executor',
+    serviceName, displayName: 'Kala Executor',
     programFiles: process.env.ProgramFiles, programData: process.env.ProgramData,
   })
   if (basename(process.execPath).toLowerCase() === 'node.exe') throw new Error('Windows service mode requires the native runlab-executor asset')
@@ -384,7 +390,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
       if (result.stdout) process.stdout.write(result.stdout)
       if (result.stderr) process.stderr.write(result.stderr)
     }
-    if (args.serviceAction === 'uninstall') process.stdout.write('\nAgent RunLab Executor service was removed.\n')
+    if (args.serviceAction === 'uninstall') process.stdout.write('\nKala Executor service was removed.\n')
     else if (args.serviceAction !== 'logs' && args.serviceAction !== 'status') printServiceCommands(mode)
     return
   }
@@ -432,7 +438,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     const pairingUrl = `${host.replace(/\/$/u, '')}/auth/executor-pairings`
     const response = await fetch(pairingUrl, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ workspaceId, label: name }) })
     const pairing = await readPairingJson<{ id: string; claimSecret: string; code: string; expiresAt: string }>(response, 'start pairing', pairingUrl)
-    logger.info({ code: pairing.code, expiresAt: pairing.expiresAt }, 'approve this executor in Agent RunLab')
+    logger.info({ code: pairing.code, expiresAt: pairing.expiresAt }, 'approve this executor in Kala')
     while (Date.now() < Date.parse(pairing.expiresAt)) {
       await new Promise((resolve) => setTimeout(resolve, 2000))
       const claimUrl = `${host.replace(/\/$/u, '')}/auth/executor-pairings/${encodeURIComponent(pairing.id)}/claim`
@@ -551,7 +557,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
 
 async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): Promise<void> {
   if (action === 'logs') throw new Error('Windows service logs are available through Windows Event Viewer and are not streamed by this command')
-  const plan = createWindowsServicePlan({ serviceName: 'RunLabExecutor', displayName: 'Agent RunLab Executor', programFiles: process.env.ProgramFiles, programData: process.env.ProgramData })
+  const plan = createWindowsServicePlan({ serviceName: 'RunLabExecutor', displayName: 'Kala Executor', programFiles: process.env.ProgramFiles, programData: process.env.ProgramData })
   const actions: readonly WindowsServiceAction[] = action === 'status' ? ['query'] : action === 'start' ? ['start'] : action === 'stop' ? ['stop'] : action === 'restart' ? ['stop', 'start'] : ['stop', 'delete']
   if (action === 'uninstall') {
     if (!existsSync(plan.layout.configPath)) throw new Error('No managed Windows Executor service configuration was found')
@@ -567,7 +573,7 @@ async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): 
     rmSync(plan.layout.dataDir, { recursive: true, force: true })
     if (resolve(process.execPath).startsWith(`${resolve(plan.layout.installDir)}${sep}`)) scheduleWindowsSelfRemoval(plan.layout.installDir)
     else rmSync(plan.layout.installDir, { recursive: true, force: true })
-    process.stdout.write('\nAgent RunLab Executor Windows service and credentials were removed.\n')
+    process.stdout.write('\nKala Executor Windows service and credentials were removed.\n')
   }
 }
 

@@ -7,7 +7,7 @@ export type ToolDisclosureSnapshot = { catalogRevision: string; active: readonly
 const WEB_SEARCH_INTENT = /(?:联网|上网|网络搜索|搜索(?:网页|网络|互联网)|网页检索|检索(?:资料|来源|新闻)|最新(?:信息|消息|资料)|来源链接|可点击(?:的)?链接|web\s*search|search\s+the\s+web|online\s+(?:search|research)|browse\s+the\s+web|current\s+(?:news|information))/iu
 
 const DISCOVERY = new Set(['tool_search', 'tool_describe'])
-const DEFAULT_CORE = new Set(['read_file', 'read_files', 'ls', 'glob', 'multi_grep', 'shell', 'todowrite', 'todo_graph', 'agent'])
+const DEFAULT_CORE = new Set(['read_file', 'read_files', 'ls', 'glob', 'multi_grep', 'shell', 'todo_graph', 'agent'])
 
 export function toolCatalogRevision(tools: readonly ToolSchema[]): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(tools.map(stableTool))).digest('hex')}`

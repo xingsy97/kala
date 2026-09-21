@@ -678,8 +678,8 @@ describe('step: tool_result', () => {
   })
 })
 
-describe('step: tool_result — todowrite is an ordinary tool', () => {
-  it('does not promote todowrite input into kernel state', () => {
+describe('step: tool_result — legacy todowrite history compatibility', () => {
+  it('replays a historical todowrite result without promoting input into kernel state', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'executing_tools',

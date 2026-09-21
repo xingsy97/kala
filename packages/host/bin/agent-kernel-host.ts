@@ -109,7 +109,7 @@ function hasFlag(argv: readonly string[], ...names: readonly string[]): boolean 
 }
 
 function printHelp(): void {
-  process.stdout.write(`Agent RunLab Runtime
+  process.stdout.write(`Kala Runtime
 
 Usage:
   bundle-dashboard-with-runtime.cjs [options]
@@ -145,7 +145,7 @@ Examples:
 }
 
 function printVersion(): void {
-  process.stdout.write(`Agent RunLab Runtime ${VERSION}\n`)
+  process.stdout.write(`Kala Runtime ${VERSION}\n`)
 }
 
 async function main(): Promise<void> {

@@ -160,6 +160,39 @@ describe('configured tool execution', () => {
     await expect(pending).resolves.toEqual({ ok: true, content: JSON.stringify({ value: 'safe', label: 'Safe' }) })
   })
 
+  it('returns custom ask_user_choice text as a host-side tool result', async () => {
+    const record = await store.create({
+      sessionId: 'sess-ask-choice-custom',
+      config: createConfig({
+        tools: [{
+          name: 'ask_user_choice',
+          description: 'ask',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'ask_user_choice',
+        }],
+      }),
+    })
+    const broker = new AskUserChoiceBroker()
+    const call = effect('ask_user_choice', {
+      message: 'Pick a mode',
+      choices: [{ value: 'fast', label: 'Fast' }, { value: 'safe', label: 'Safe' }],
+    })
+    const pending = dispatchConfiguredTool({
+      ...deps(store, {
+        async callTool() {
+          return { ok: false, content: 'wrong route' }
+        },
+        cancelPending() {},
+      }),
+      askUserChoice: broker,
+    }, record.sessionId, call, new Map())
+
+    expect(broker.respond(record.sessionId, call.callId, { kind: 'custom', text: 'Use a safer hybrid plan.' })).toEqual({ ok: true })
+    await expect(pending).resolves.toEqual({ ok: true, content: JSON.stringify({ type: 'custom_text', text: 'Use a safer hybrid plan.' }) })
+  })
+
   it('runs the skill host handler without calling the executor', async () => {
     const skillsRoot = join(dir, 'skills-root')
     const skillDir = join(skillsRoot, 'demo-skill')

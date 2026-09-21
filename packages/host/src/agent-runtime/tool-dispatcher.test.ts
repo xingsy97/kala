@@ -56,12 +56,12 @@ describe('runtime tool dispatcher', () => {
       sessionId: 'executor-session',
       config: createConfig({
         tools: [{
-          name: 'todowrite',
-          description: 'Write todos',
+          name: 'shell',
+          description: 'Run a shell command',
           inputSchema: { type: 'object' },
           requiresApproval: false,
           executionKind: 'executor',
-          executionHandler: 'todowrite',
+          executionHandler: 'shell',
         }],
       }),
     })
@@ -69,7 +69,7 @@ describe('runtime tool dispatcher', () => {
 
     await expect(dispatcher.callTool(
       'executor-session',
-      effect('todowrite', { todos: [] }),
+      effect('shell', { command: 'pwd' }),
     )).resolves.toEqual({ ok: true, content: 'executor result' })
     expect(executorCall).toHaveBeenCalledOnce()
   })

@@ -42,7 +42,7 @@ describe('inProcessRlToolDispatcher', () => {
 
   it('rejects disallowed tools', async () => {
     const disp = inProcessRlToolDispatcher(dir)
-    const r = await disp.callTool('s1', effect('todowrite', { todos: [] }))
+    const r = await disp.callTool('s1', effect('memory', { operation: 'read' }))
     expect(r.ok).toBe(false)
     expect(r.content).toMatch(/tool not enabled for rl/)
   })

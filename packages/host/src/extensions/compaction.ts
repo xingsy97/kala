@@ -107,7 +107,7 @@ Rules:
 - Preserve opaque identifiers exactly as written: UUIDs, hashes, commit IDs, session IDs, hostnames, ports, URLs, file names, room IDs, and socket IDs.
 - Write summary bodies in the primary language used by the conversation. Keep section headings exactly as shown.
 - Do not copy API keys, bearer tokens, passwords, cookies, or private key material. If such a value matters, describe the credential source or configuration shape and redact the secret value.
-- Preserve todo/task state from todowrite, todo_graph (including dependencies, ready/blocked state, and active nodes), or equivalent tool calls.
+- Preserve todo/task state from todo_graph (including dependencies, ready/blocked state, and active nodes), legacy/history todowrite calls, or equivalent tool calls.
 - Preserve tool-result evidence, but summarize noisy logs to the command, exit/status, and decisive lines.
 - Use terse bullets, not prose paragraphs.
 - Do NOT address the user. Do NOT ask questions. Do NOT describe that you are summarizing or continuing anything.

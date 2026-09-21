@@ -61,6 +61,7 @@ describe('multi_grep', () => {
   it('is the only publicly registered regex search tool', () => {
     expect(allTools.some((tool) => tool.name === 'grep')).toBe(false)
     expect(allTools.some((tool) => tool.name === 'multi_grep')).toBe(true)
+    expect(allTools.some((tool) => tool.name === 'todowrite')).toBe(false)
   })
 
   it('honors cancellation before execution', async () => {

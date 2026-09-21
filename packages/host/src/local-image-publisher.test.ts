@@ -16,9 +16,26 @@ describe('publishMarkdownImages', () => {
   it('supports angle-wrapped local paths with spaces', async () => {
     expect(await publishMarkdownImages('![design](</tmp/my design.png>)', async (path) => `[${path}]`)).toBe('[/tmp/my design.png]')
   })
-  it('replaces failed local publication with a readable non-image placeholder', async () => {
+  it('publishes sandbox image references with media metadata', async () => {
+    const reader = vi.fn(async () => ({ base64: Buffer.from('<svg/>').toString('base64'), mediaType: 'image/svg+xml', size: 6 }))
+    const registerImage = vi.fn(async () => ({ artifactId: 'svg-1', title: 'Diagram', mediaType: 'image/svg+xml' }))
+    const assertCanStore = vi.fn(async () => {})
+    const publisher = createLocalImagePublisher({ reader, artifacts: { registerImage } as never, assertCanStore })
+    const message = await publisher('session-1', { workspaceId: 'workspace-1', state: { cwd: '/repo' } } as SessionRecord, {
+      role: 'assistant',
+      content: [{ type: 'text', text: '![Diagram](sandbox:/repo/diagram.svg)' }],
+    })
+    expect(reader).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'workspace-1', path: '/repo/diagram.svg', cwd: '/repo' }))
+    expect(assertCanStore).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'workspace-1' }), 6)
+    expect(message.content).toEqual([{ type: 'text', text: '![Diagram](artifact://svg-1?mediaType=image%2Fsvg%2Bxml)' }])
+  })
+
+  it.each([
+    ['an error result', async () => ({ error: 'outside sandbox' })],
+    ['a rejected read', async () => { throw new Error('executor disconnected') }],
+  ])('replaces %s with a readable non-image placeholder', async (_case, reader) => {
     const publisher = createLocalImagePublisher({
-      reader: async () => ({ error: 'outside sandbox' }),
+      reader,
       artifacts: { registerImage: vi.fn() } as never,
     })
     const message = await publisher('session-1', { workspaceId: 'workspace-1', state: { cwd: '/repo' } } as SessionRecord, {

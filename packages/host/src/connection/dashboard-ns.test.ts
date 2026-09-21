@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
 
-import { buildCompactionMetadataIndex, consumeCompactionMetadata, loadDashboardSession } from './dashboard-ns.js'
+import { buildCompactionMetadataIndex, consumeCompactionMetadata, loadDashboardSession, terminalOwnerSessionId } from './dashboard-ns.js'
 import type { SessionStore } from '../store/session.js'
 
 function makeMeta(
@@ -17,6 +17,15 @@ function makeMeta(
     payload,
   }
 }
+
+describe('temporary workspace terminal identity', () => {
+  it('maps an isolated PTY id to its authorized owner session and rejects malformed ids', () => {
+    expect(terminalOwnerSessionId('session-1')).toBe('session-1')
+    expect(terminalOwnerSessionId('workspace-terminal:session-1:request-1')).toBe('session-1')
+    expect(terminalOwnerSessionId('workspace-terminal:')).toBeUndefined()
+    expect(terminalOwnerSessionId('workspace-terminal::request-1')).toBeUndefined()
+  })
+})
 
 describe('history compaction-metadata correlator', () => {
   it('rebuilds trigger/token metadata by replaceRange, preserving order for duplicates', () => {

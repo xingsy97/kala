@@ -18,6 +18,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import {
   appendEventEntry,
   appendRuntimeMetadataEntry,
+  appendSnapshotEntry,
   findLatestRuntimeMetadata,
   findSessionOperation,
   readSessionHistory,
@@ -102,13 +103,27 @@ describe('readSessionLog', () => {
     await writeHeader({ path, sessionId: 'external', agentRuntime: 'copilot', config, initialState })
     await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 1, ts: new Date().toISOString(), state: { ...initialState, cursor: 1, status: 'thinking' } })}\n`, 'utf8')
     await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 2, ts: new Date().toISOString(), state: { ...initialState, cursor: 2, status: 'done' } })}\n`, 'utf8')
+    await appendSnapshotEntry(path, 3, { ...initialState, cursor: 3, status: 'error', error: 'sidecar is newer' })
 
     await expect(readSessionState(path)).rejects.toThrow(/refuses to fully read external Runtime session external/)
     const parsed = await readSessionState(path, { allowExternalRuntime: true })
 
     expect(parsed.snapshots).toHaveLength(1)
-    expect(parsed.snapshots[0]?.seq).toBe(2)
-    expect(parsed.snapshots[0]?.state.status).toBe('done')
+    expect(parsed.snapshots[0]?.seq).toBe(3)
+    expect(parsed.snapshots[0]?.state.status).toBe('error')
+  })
+
+  it('includes a sidecar in full reads without duplicating an embedded snapshot at the same seq', async () => {
+    const path = join(dir, 'full-read-sidecar.jsonl')
+    await writeHeader({ path, sessionId: 'external', agentRuntime: 'copilot', config, initialState })
+    await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 1, ts: new Date().toISOString(), state: { ...initialState, cursor: 1 } })}\n`, 'utf8')
+    await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 2, ts: new Date().toISOString(), state: { ...initialState, cursor: 2, status: 'thinking' } })}\n`, 'utf8')
+    await appendSnapshotEntry(path, 2, { ...initialState, cursor: 2, status: 'done' })
+
+    const parsed = await readSessionLog(path, { allowExternalRuntime: true })
+
+    expect(parsed.snapshots.map((snapshot) => snapshot.seq)).toEqual([1, 2])
+    expect(parsed.snapshots.at(-1)?.state.status).toBe('done')
   })
 
   it('finds the latest snapshot from the tail without parsing earlier snapshots', async () => {
@@ -116,6 +131,7 @@ describe('readSessionLog', () => {
     await writeHeader({ path, sessionId: 'external', agentRuntime: 'copilot', config, initialState })
     await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 1, ts: new Date().toISOString(), state: { ...initialState, cursor: 1, messages: [{ role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(200_000) }] }] } })}\n`, 'utf8')
     await appendRuntimeMetadataEntry(path, { sessionId: 'external', action: 'between', payload: {} })
+    await appendSnapshotEntry(path, 1, { ...initialState, cursor: 1, status: 'error', error: 'older sidecar' })
     await appendFile(path, `${JSON.stringify({ kind: 'snapshot', seq: 2, ts: new Date().toISOString(), state: { ...initialState, cursor: 2, status: 'done' } })}\n`, 'utf8')
     await appendRuntimeMetadataEntry(path, { sessionId: 'external', action: 'after', payload: {} })
 

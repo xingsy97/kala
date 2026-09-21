@@ -4,19 +4,13 @@ import { randomUUID } from 'node:crypto'
 import { io } from 'socket.io-client'
 
 const origin = process.env.RUNLAB_URL ?? process.env.DASHBOARD_URL
-if (!origin) throw new Error('set RUNLAB_URL or DASHBOARD_URL to the Agent RunLab origin')
+if (!origin) throw new Error('set RUNLAB_URL or DASHBOARD_URL to the Kala origin')
 
 const cases = [
   {
     runtime: 'kernel',
-    tool: 'todowrite',
-    input: {
-      todos: [{
-        content: 'Verify Kernel executor tool routing',
-        status: 'completed',
-        priority: 'low',
-      }],
-    },
+    tool: 'ls',
+    input: { path: '.' },
   },
   {
     runtime: 'kernel',
@@ -35,14 +29,8 @@ const cases = [
   },
   {
     runtime: 'copilot',
-    tool: 'todowrite',
-    input: {
-      todos: [{
-        content: 'Verify Copilot executor tool routing',
-        status: 'completed',
-        priority: 'low',
-      }],
-    },
+    tool: 'ls',
+    input: { path: '.' },
   },
   {
     runtime: 'copilot',
