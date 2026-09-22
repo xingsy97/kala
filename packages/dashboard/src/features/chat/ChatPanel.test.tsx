@@ -100,6 +100,36 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()
   })
 
+  it('renders grouped sub-agent replay when only the active sessionId is provided', () => {
+    render(
+      <ChatPanel
+        sessionId="parent-session"
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'Fan out the release review.' }] },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'Starting the sub-agents.' },
+              { type: 'tool_call', callId: 'agent-impl', name: 'agent', input: { intention: 'Implement the README polish.', agent_type: 'implementation' } },
+              { type: 'tool_call', callId: 'agent-review', name: 'agent', input: { intention: 'Review the release copy.', agent_type: 'review' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'agent-impl', ok: true, content: '<sub_agent session_id="child-impl" agent_type="implementation" intention="Implement the README polish." status="completed" turns="5" duration_ms="12000"><result>Done.</result></sub_agent>' },
+              { type: 'tool_result', callId: 'agent-review', ok: true, content: '<sub_agent session_id="child-review" agent_type="review" intention="Review the release copy." status="completed" turns="3" duration_ms="8000"><result>Done.</result></sub_agent>' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('sub-agent-group-agent-impl')).toBeTruthy()
+    expect(screen.getAllByTestId(/^sub-agent-chip-/)).toHaveLength(2)
+    expect(screen.queryByTestId('tool-call-group-agent-impl')).toBeNull()
+  })
+
   it('renders durable queued rows instead of the empty welcome state', () => {
     render(
       <ChatPanel

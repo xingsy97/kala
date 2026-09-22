@@ -2320,7 +2320,7 @@ export function App(): JSX.Element {
               {wideLayout && inspectorOpen ? (
                 <>
                   <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={26} minSize={22} maxSize={36} className="bg-card text-card-foreground" data-testid="inspector-panel">
+                  <ResizablePanel defaultSize={30} minSize={26} maxSize={42} className="bg-card text-card-foreground" data-testid="inspector-panel">
                     <div className="ak-motion-slide-right h-full min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <RightPanel
                         activeTab={rightPanelTab}
@@ -2557,6 +2557,7 @@ export function App(): JSX.Element {
       <ConnectWorkspaceDialog
         open={connectWorkspaceOpen}
         onOpenChange={setConnectWorkspaceOpen}
+        host={hostEndpoint.url}
       />
       <ExecutorPairingPrompt />
       <WorkspaceMetadataDialog
@@ -3313,8 +3314,10 @@ export function ConnectionStatusProvider({ socket, status, transport, cursor, wo
       <div className="relative flex-none">
         <button type="button" onClick={() => setOpenTrigger((value) => value === triggerId ? null : triggerId)} className={brand ? 'inline-flex h-9 w-9 touch-manipulation items-center justify-center rounded-full transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' : cn('inline-flex h-9 items-center rounded-lg text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8', compact ? 'w-8 justify-center p-0' : 'gap-2 px-2')} data-testid={brand ? 'sidebar-connection-status' : 'connection-status'} data-trigger-id={triggerId} data-status={displayStatus} data-compact={compact ? 'true' : undefined} aria-expanded={open} aria-label={brand || compact ? triggerTitle : undefined} title={triggerTitle}>
           {brand ? (
-            <span className={cn('flex h-8 w-8 items-center justify-center rounded-full border-2', statusRing(displayStatus))} data-testid="sidebar-connection-status-ring">
-              <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="h-6 w-6" aria-hidden />
+            <span className={cn('grid h-8 w-8 place-items-center overflow-hidden rounded-full border-2', statusRing(displayStatus))} data-testid="sidebar-connection-status-ring">
+              <span className="grid h-5 w-5 place-items-center leading-none">
+                <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="block h-5 w-5 object-contain" aria-hidden />
+              </span>
             </span>
           ) : <span className={cn('h-2 w-2 rounded-full', statusDot(displayStatus))} />}
           {brand || compact ? null : <span className="hidden sm:inline">{label}</span>}

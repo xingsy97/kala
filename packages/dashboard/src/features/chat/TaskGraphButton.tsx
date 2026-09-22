@@ -36,12 +36,12 @@ export function TaskGraphButton({ graph }: Props): JSX.Element | null {
       <GitBranch className="h-4 w-4" aria-hidden="true" />
       {summary.active > 0 ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" aria-hidden="true" /> : null}
     </button>
-    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label={t('taskGraph.aria')} data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-[70] flex h-[min(76dvh,42rem)] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-2xl md:inset-x-4 md:bottom-4 lg:left-1/2 lg:right-auto lg:bottom-20 lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
+    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label={t('taskGraph.aria')} data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-[70] flex max-h-[min(76dvh,42rem)] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-2xl md:inset-x-4 md:bottom-4 lg:left-1/2 lg:right-auto lg:bottom-20 lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
       <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
         <GitBranch className="h-4 w-4" /><span className="text-sm font-medium">{t('taskGraph.title')}</span><span className="text-xs text-muted-foreground">{t('taskGraph.revision', { revision: graph.revision })}</span>
         <button className="ml-auto rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => setGraphView((value) => !value)}>{graphView ? t('taskGraph.listView') : t('taskGraph.graphView')}</button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div className="overflow-auto p-3">
         {graphView ? <GraphView graph={graph} /> : <GroupedList graph={graph} />}
       </div>
     </div>, document.body) : null}
@@ -87,7 +87,7 @@ function GraphView({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
   const portrait = usePortraitGraphLayout()
   const layout = useMemo(() => graphLayout(graph, portrait ? 'vertical' : 'horizontal'), [graph, portrait])
   const related = useMemo(() => selected ? connectedNodeIds(graph, selected) : null, [graph, selected])
-  return <div className="flex min-h-full min-w-full w-max justify-center"><div className="relative overflow-hidden rounded-lg border border-border/50 bg-muted/10" style={{ width: layout.width, height: layout.height }} data-testid="task-graph-view" data-layout={layout.direction}>
+  return <div className="flex w-full justify-center"><div className="relative shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/10" style={{ width: layout.width, height: layout.height }} data-testid="task-graph-view" data-layout={layout.direction} data-canvas-width={layout.width} data-canvas-height={layout.height}>
     <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden="true">
       <defs>
         <marker id="todo-graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

@@ -151,9 +151,8 @@ export function SimpleChatDraft({
                 <span className="flex items-center gap-1">
                   <span>{label}</span>
                   {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
-                  <Info className="h-3.5 w-3.5 text-muted-foreground" aria-label={description} />
+                  <HelpHint label={label} trigger={<span className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground" aria-label={description}><Info className="h-3.5 w-3.5" aria-hidden="true" /></span>}>{description}</HelpHint>
                 </span>
-                <span className="max-w-[16rem] truncate text-[0.6875rem] font-normal text-muted-foreground">{description}</span>
               </span>
             </Button>
           })}

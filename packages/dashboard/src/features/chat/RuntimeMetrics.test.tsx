@@ -207,6 +207,7 @@ describe('RuntimeMetrics', () => {
     const usage = track.querySelector('[data-context-usage-tone]')
     expect(usage?.getAttribute('data-context-usage-tone')).toBe('ok')
     expect(usage?.getAttribute('class')).toContain('stroke-sky-500/85')
+    expect(usage?.getAttribute('class')).toContain('drop-shadow')
     expect(usage?.getAttribute('class')).not.toContain('border-')
     expect(usage?.getAttribute('stroke-linecap')).toBe('round')
     expect(usage?.getAttribute('stroke-dasharray')).toBe('30 71')
@@ -214,9 +215,8 @@ describe('RuntimeMetrics', () => {
     // combined with non-scaling-stroke, producing many visible breaks. The
     // Composer SVG has a 1:1 viewBox, so vector-effect is unnecessary here.
     expect(usage?.hasAttribute('vector-effect')).toBe(false)
-    // No inline percentage number in the composer chrome...
-    expect(indicator.textContent ?? '').not.toContain('%')
-    // ...but the exact figure is still reachable via the tooltip and popover.
+    // The simple composer now surfaces the percentage as a tiny badge so the border UI is legible in screenshots.
+    expect(screen.getByTestId('context-usage-simple-label').textContent ?? '').toContain('30%')
     expect(indicator.getAttribute('title') ?? '').toContain('30%')
     fireEvent.click(indicator)
     const anchoredPopover = screen.getByTestId('context-pressure-popover')

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ModelsRequestError, normalizeModelsHost } from './use-models.js'
+import { ModelsRequestError, modelsEndpoint, normalizeModelsHost } from './use-models.js'
 
 describe('models query scope', () => {
   it('normalizes equivalent host URLs to a stable key', () => {
@@ -10,6 +10,11 @@ describe('models query scope', () => {
 
   it('uses a stable same-origin scope when no host is supplied', () => {
     expect(normalizeModelsHost(undefined)).toBe('same-origin')
+  })
+
+  it('resolves model requests against the active host endpoint', () => {
+    expect(modelsEndpoint('http://127.0.0.1:5301')).toBe('http://127.0.0.1:5301/models')
+    expect(modelsEndpoint(undefined)).toBe('/models')
   })
 
   it('preserves the response status on request failures', () => {

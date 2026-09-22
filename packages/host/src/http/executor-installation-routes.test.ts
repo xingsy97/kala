@@ -23,6 +23,22 @@ describe('executor installation routes', () => {
     return { url: `http://localhost:${address.port}`, dir }
   }
 
+  it('allows browser preflight for cross-origin dashboard install API calls', async () => {
+    const { url } = await start()
+    const response = await fetch(`${url}/api/executor-installs`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://127.0.0.1:5302',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    })
+    expect(response.status).toBe(204)
+    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('access-control-allow-methods')).toContain('POST')
+    expect(response.headers.get('access-control-allow-headers')).toContain('content-type')
+  })
+
   it('creates, patches, reports progress, approves, redeems, and short-polls', async () => {
     const { url, dir } = await start()
     const createdResponse = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'temporary', workspaceRoot: '/work' }) })

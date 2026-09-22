@@ -484,7 +484,7 @@ function Overview({
   const pending = state?.pendingCalls.find((c) => c.status !== 'rejected')
   return (
     <section className="flex-none bg-card px-3 pb-3" aria-label={t('inspector.overview')}>
-      <div className="grid grid-cols-2 gap-1.5 text-xs xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-1.5 text-xs">
         <Metric label={t('inspector.metrics.status')} value={shortStatus(state?.status)} tone={statusTone(state?.status)} />
         <Metric label={t('inspector.metrics.events')} value={String(timeline.length)} />
         <Metric label={t('inspector.metrics.context')} value={context} />
@@ -1160,7 +1160,7 @@ function StateRuntime({
 
           <SubAgentRelationPanel summary={subAgentRelation} />
 
-          <div className="grid gap-2 xl:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2">
             <StateGroup
               title={t('inspector.runtime.core')}
               rows={[
@@ -1240,7 +1240,7 @@ function SubAgentRelationPanel({ summary }: { summary: SubAgentRelationSummary }
         <Network className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
         <span className="font-medium text-foreground">{t('inspector.runtime.subAgentRelations')}</span>
       </div>
-      <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-1.5">
         <Metric label={t('inspector.runtime.parent')} value={summary.parentSessionId ? `${summary.parentSessionId}${summary.parentCursor !== null ? ` @${summary.parentCursor}` : ''}` : 'none'} />
         <Metric label={t('inspector.runtime.children')} value={String(summary.total)} />
         <Metric label={t('inspector.runtime.completed')} value={String(summary.completed)} />
@@ -1257,7 +1257,7 @@ function SubAgentRelationPanel({ summary }: { summary: SubAgentRelationSummary }
 
 function RunHealthPanel({ items }: { items: readonly RunHealthItem[] }): JSX.Element {
   return (
-    <div className="grid min-w-0 gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-3" data-testid="run-health-panel">
+    <div className="grid min-w-0 grid-cols-2 gap-1.5 text-xs" data-testid="run-health-panel">
       {items.map((item) => (
         <div key={item.id} className="min-w-0 rounded bg-background/70 px-2 py-1.5 ring-1 ring-border/30" title={`${item.label}: ${item.value}`}>
           <div className="flex min-w-0 items-center gap-1.5">

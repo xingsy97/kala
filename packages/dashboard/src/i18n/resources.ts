@@ -868,7 +868,7 @@ export const resources = {
           platform: 'Platform',
           platforms: { linux: 'Linux', macos: 'macOS', windows: 'Windows' },
           runMode: 'Run mode',
-          modes: { service: 'Install as service — Recommended', temporary: 'Run temporarily' },
+          modes: { service: 'Install as service', temporary: 'Run temporarily' },
           modeDescriptions: {
             service: 'Starts automatically, restarts after failure, and stays updated.',
             temporary: 'Runs only while this terminal remains open.',
@@ -2555,7 +2555,7 @@ export const resources = {
           platform: '平台',
           platforms: { linux: 'Linux', macos: 'macOS', windows: 'Windows' },
           runMode: '运行模式',
-          modes: { service: '安装为服务 — 推荐', temporary: '临时运行' },
+          modes: { service: '安装为服务', temporary: '临时运行' },
           modeDescriptions: {
             service: '自动启动、故障后重启并保持更新。',
             temporary: '仅在当前终端保持打开时运行。',

@@ -23,17 +23,17 @@ import { cn } from '../../lib/utils.js'
 type Props = {
   open: boolean
   onOpenChange(open: boolean): void
+  host?: string
 }
 
 type InstallResponse = ExecutorInstallStatusSnapshot & { command?: string; setupCode?: string }
 type FormState = Pick<CreateExecutorInstall, 'platform' | 'mode'>
 
 const POLL_INTERVAL_MS = 2_000
-const PATCH_DEBOUNCE_MS = 350
 const PLATFORMS: ExecutorInstallPlatform[] = ['linux', 'macos', 'windows']
 const MODES: ExecutorInstallMode[] = ['service', 'temporary']
 
-export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Element {
+export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX.Element {
   const { t } = useTranslation()
   const [form, setForm] = useState<FormState>(() => ({
     platform: detectCurrentPlatform(),
@@ -75,7 +75,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
     const input = toApiInput(form)
     createdFormRef.current = form
     setError(null)
-    void request<InstallResponse>('/api/executor-installs', {
+    void request<InstallResponse>(apiEndpoint(host, '/api/executor-installs'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
@@ -93,44 +93,39 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
     return () => controller.abort()
     // A session is created once per opening. Form edits are handled by the debounced PATCH effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [host, open])
 
   useEffect(() => {
     if (!open || !installation || !createdFormRef.current || sameForm(form, createdFormRef.current)) return
     const previousInstallationId = installation.id
     const generation = generationRef.current
     const controller = new AbortController()
-    const timeout = window.setTimeout(() => {
-      // A setup command contains a one-time code that the Host stores only as a
-      // hash. PATCH cannot regenerate that command for a new platform or mode.
-      // Create a replacement first, then retire the still-unclaimed old record.
-      void request<InstallResponse>('/api/executor-installs', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(toApiInput(form)),
-        signal: controller.signal,
-      }).then((created) => {
-        if (generationRef.current !== generation) return
-        installationIdRef.current = created.id
-        createdFormRef.current = form
-        setInstallation(created)
-        setCommand(created.command ?? '')
-        updatePairingCode(created, setPairingCode)
-        setError(null)
+    // A setup command contains a one-time code that the Host stores only as a
+    // hash. PATCH cannot regenerate that command for a new platform or mode.
+    // Create a replacement immediately, then retire the still-unclaimed old record.
+    void request<InstallResponse>(apiEndpoint(host, '/api/executor-installs'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(toApiInput(form)),
+      signal: controller.signal,
+    }).then((created) => {
+      if (generationRef.current !== generation) return
+      installationIdRef.current = created.id
+      createdFormRef.current = form
+      setInstallation(created)
+      setCommand(created.command ?? '')
+      updatePairingCode(created, setPairingCode)
+      setError(null)
+      setCommandTransitioning(false)
+      void fetch(apiEndpoint(host, `/api/executor-installs/${encodeURIComponent(previousInstallationId)}`), { method: 'DELETE' }).catch(() => {})
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted && generationRef.current === generation) {
+        setError(errorMessage(cause))
         setCommandTransitioning(false)
-        void fetch(`/api/executor-installs/${encodeURIComponent(previousInstallationId)}`, { method: 'DELETE' }).catch(() => {})
-      }).catch((cause: unknown) => {
-        if (!controller.signal.aborted && generationRef.current === generation) {
-          setError(errorMessage(cause))
-          setCommandTransitioning(false)
-        }
-      })
-    }, PATCH_DEBOUNCE_MS)
-    return () => {
-      window.clearTimeout(timeout)
-      controller.abort()
-    }
-  }, [form, installation, open])
+      }
+    })
+    return () => controller.abort()
+  }, [form, host, installation, open])
 
   useEffect(() => {
     if (!open || !installation) return
@@ -146,8 +141,8 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
       try {
         const encodedId = encodeURIComponent(installationId)
         const [snapshot, eventResult] = await Promise.all([
-          request<InstallResponse>(`/api/executor-installs/${encodedId}`, { signal: controller.signal }),
-          request<{ events: ExecutorInstallEvent[] }>(`/api/executor-installs/${encodedId}/events?after=${lastSeq}`, { signal: controller.signal }),
+          request<InstallResponse>(apiEndpoint(host, `/api/executor-installs/${encodedId}`), { signal: controller.signal }),
+          request<{ events: ExecutorInstallEvent[] }>(apiEndpoint(host, `/api/executor-installs/${encodedId}/events?after=${lastSeq}`), { signal: controller.signal }),
         ])
         if (stopped || generationRef.current !== generation) return
         const events = eventResult.events ?? []
@@ -173,7 +168,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
       if (timeout !== undefined) window.clearTimeout(timeout)
       controller?.abort()
     }
-  }, [installation?.id, open])
+  }, [host, installation?.id, open])
 
   const updateForm = (patch: Partial<FormState>): void => {
     setForm((current) => {
@@ -202,7 +197,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
     if (!installation) return
     setDeciding(true)
     try {
-      const updated = await request<InstallResponse>(`/api/executor-installs/${encodeURIComponent(installation.id)}/${action}`, { method: 'POST' })
+      const updated = await request<InstallResponse>(apiEndpoint(host, `/api/executor-installs/${encodeURIComponent(installation.id)}/${action}`), { method: 'POST' })
       setInstallation(updated)
       updatePairingCode(updated, setPairingCode)
       setError(null)
@@ -273,7 +268,8 @@ function PlatformGroup({ label, selected, labelFor, onChange }: { label: string;
 }
 
 function ChoiceGroup<T extends string>({ label, values, selected, labelFor, onChange }: { label: string; values: readonly T[]; selected: T; labelFor(value: T): string; onChange(value: T): void }): JSX.Element {
-  return <fieldset className="min-w-0 space-y-2.5"><legend className="text-xs font-medium text-muted-foreground">{label}</legend><div className="grid min-w-0 grid-cols-2 rounded-xl bg-muted/30 p-1">{values.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`h-10 min-w-0 rounded-lg px-3 text-xs font-medium transition-colors sm:h-9 ${selected === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{labelFor(value)}</button>)}</div></fieldset>
+  const { t } = useTranslation()
+  return <fieldset className="min-w-0 space-y-2.5"><legend className="text-xs font-medium text-muted-foreground">{label}</legend><div className="grid min-w-0 grid-cols-2 rounded-xl bg-muted/30 p-1">{values.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex h-10 min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors sm:h-9 ${selected === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}><span className="truncate">{labelFor(value)}</span>{value === 'service' ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}</button>)}</div></fieldset>
 }
 
 function TerminalCommand({ command, copied, mode, modeLabel, transitioning, onCopy }: { command: string; copied: boolean; mode: ExecutorInstallMode; modeLabel: string; transitioning: boolean; onCopy(): void }): JSX.Element {
@@ -291,7 +287,7 @@ function TerminalCommand({ command, copied, mode, modeLabel, transitioning, onCo
         {transitioning ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" data-testid="executor-command-transition" aria-hidden="true" /> : null}
       </div>
       <div className={cn('flex min-w-0 flex-col gap-3 p-4 transition-opacity duration-200 sm:flex-row sm:items-start', transitioning && 'animate-pulse opacity-55')}>
-        <span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none text-primary" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[0.75rem] leading-5">{transitioning ? t('explorer.connectDialog.preparing') : command || t('explorer.connectDialog.preparing')}</pre></span>
+        <span className="flex min-w-0 flex-1 items-start gap-3"><Terminal className="mt-0.5 h-4 w-4 flex-none text-primary" aria-hidden="true" /><pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[0.75rem] leading-5">{command || t('explorer.connectDialog.preparing')}</pre></span>
         <Button type="button" variant="outline" size="sm" className="h-9 w-full flex-none gap-1.5 rounded-lg bg-background/70 px-3 text-[0.6875rem] shadow-none hover:bg-accent sm:w-auto" onClick={onCopy} disabled={!command || transitioning} data-testid="copy-executor-command">{copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}{copied ? t('common.copied') : t('common.copy')}</Button>
       </div>
     </section>
@@ -341,6 +337,10 @@ function updatePairingCode(value: ExecutorInstallEvent | ExecutorInstallStatusSn
   const metadata = 'metadata' in value ? value.metadata : undefined
   const code = metadata?.pairingCode ?? metadata?.code
   set(typeof code === 'string' || typeof code === 'number' ? String(code) : null)
+}
+
+function apiEndpoint(host: string | undefined, path: string): string {
+  return host ? new URL(path, host).toString() : path
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

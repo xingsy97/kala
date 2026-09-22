@@ -985,9 +985,16 @@ function releaseNotes(manifest) {
   const lines = [
     `# Kala ${manifest.tag}`,
     '',
+    'Kala is a self-hosted runtime and dashboard for coding agents. This release packages the runtime, dashboard, executor, checksums, and bootstrap scripts needed to start from GitHub Releases.',
+    '',
+    '## What ships',
+    '',
+    '- Host + Dashboard bundle for running Kala locally or on a VM.',
+    '- Separately deployable Executor for workspace tools.',
+    '- `SHA256SUMS` for release-asset verification.',
     hasNativeAssets
-      ? 'Kala ships a self-contained host + dashboard bundle, a separately deployable Executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component. By default, `run.sh` uses Node.js 22 `.cjs` assets when Node.js 22+ is available and falls back to native binaries when Node is missing or too old.'
-      : 'Kala ships a self-contained host + dashboard bundle, a separately deployable Executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component.',
+      ? '- Native fallback binaries when Node.js 22+ is unavailable.'
+      : '- Node.js `.cjs` assets for environments with Node.js 22+.',
     '',
     '## Quick Start',
     '',

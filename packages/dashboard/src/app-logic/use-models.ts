@@ -11,7 +11,7 @@ export function useModels(
   const query = useQuery({
     queryKey,
     queryFn: async (): Promise<ServerModelsPayload> => {
-      const r = await fetch('/models', { cache: 'no-store' })
+      const r = await fetch(modelsEndpoint(scope.host), { cache: 'no-store' })
       if (!r.ok) throw new ModelsRequestError(r.status)
       return (await r.json()) as ServerModelsPayload
     },
@@ -26,6 +26,10 @@ export function useModels(
       void client.invalidateQueries({ queryKey })
     },
   }
+}
+
+export function modelsEndpoint(host: string | undefined): string {
+  return host ? new URL('/models', host).toString() : '/models'
 }
 
 export function normalizeModelsHost(host: string | undefined): string {

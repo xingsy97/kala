@@ -22,6 +22,7 @@
     "00000000-"
   ],
   "allowedImagePaths": [
+    "docs/assets/kala-dashboard-preview.png",
     "deploy/identity/favicon.svg",
     "deploy/saas/branding/icon-dark.svg",
     "deploy/saas/branding/icon.svg",
@@ -65,6 +66,7 @@
   ],
   "ruleExceptions": [],
   "allowedBinaryHashes": {
+    "docs/assets/kala-dashboard-preview.png": "6b7546ce92a20f82432f67206bae084aa9dff4ea89ade4c277c8b38c35c17dce",
     "deploy/identity/favicon.svg": "8bc90f77b1f8dbe0375fac6581f67ee69929952a3361c2274fdef1b4c32fc94a",
     "deploy/saas/branding/icon-dark.svg": "c8056baa0e15de9b0ae580003fefd617c70b6fd5575eb0c7d5dc4c80b0224b71",
     "deploy/saas/branding/icon.svg": "a9e9fe0907ce4654b5e0e9ca07c5289592166deb4ee7facf9f137b08d9b48ee3",

@@ -35,6 +35,14 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
     const match = path.match(/^\/api\/executor-installs(?:\/([^/]+)(?:\/(approve|reject|events|redeem|status))?)?$/u)
     if (!match && !installSession) return
     claimRoute(req)
+    if (match) {
+      applyCors(req, res)
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204)
+        res.end()
+        return
+      }
+    }
     const idValue = match?.[1] ?? installSessionMatch?.[1]
     const id = idValue ? decodeURIComponent(idValue) : undefined
     const action = match?.[2] ?? installSessionMatch?.[2]
@@ -283,6 +291,26 @@ function bearer(req: IncomingMessage): string | undefined { const value = header
 function header(req: IncomingMessage, name: string): string | undefined { const value = req.headers[name]; return Array.isArray(value) ? value[0] : value }
 function quoteSh(value: string): string { return `'${value.replaceAll("'", "'\\''")}'` }
 function quotePs(value: string): string { return `'${value.replaceAll("'", "''")}'` }
+function applyCors(req: IncomingMessage, res: ServerResponse): void {
+  const allowedOrigins = parseAllowedOriginsFromEnv()
+  const origin = header(req, 'origin')
+  if (allowedOrigins === null) {
+    res.setHeader('access-control-allow-origin', '*')
+  } else if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('access-control-allow-origin', origin)
+    res.setHeader('access-control-allow-credentials', 'true')
+    res.setHeader('vary', 'origin')
+  }
+  res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS')
+  res.setHeader('access-control-allow-headers', header(req, 'access-control-request-headers') ?? 'authorization,content-type,idempotency-key')
+  res.setHeader('access-control-max-age', '600')
+}
+function parseAllowedOriginsFromEnv(): string[] | null {
+  const raw = process.env.AGENT_KERNEL_ALLOWED_ORIGINS
+  if (!raw) return null
+  const list = raw.split(',').map((value) => value.trim()).filter(Boolean)
+  return list.length > 0 ? list : null
+}
 function sendJson(res: ServerResponse, status: number, body: unknown): void { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) }
 function sendError(res: ServerResponse, status: number, error: string): void { sendJson(res, status, { error }) }
 function handleError(res: ServerResponse, error: unknown): void { if (res.writableEnded) return; if (error instanceof ExecutorInstallationError) { sendError(res, error.status, error.message); return } sendError(res, 400, error instanceof Error ? error.message : String(error)) }

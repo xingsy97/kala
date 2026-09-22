@@ -157,7 +157,7 @@ export function RuntimeMetrics({
       {isSimple ? (
         <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${simpleGeometry.width} ${simpleGeometry.height}`} aria-hidden="true" data-testid="context-usage-track">
           <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" />
-          {usedPercent > 0 ? <path d={contextBorderPath} pathLength="100" fill="none" className={cn('opacity-90 transition-[filter,opacity] duration-[240ms] ease-out', contextStrokeTone)} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${usedPercent} ${contextUsageGap}`} data-context-usage-tone={evaluation.tone} /> : null}
+          {usedPercent > 0 ? <path d={contextBorderPath} pathLength="100" fill="none" className={cn('drop-shadow-[0_0_8px_currentColor] opacity-95 transition-[filter,opacity] duration-[240ms] ease-out', contextStrokeTone)} strokeWidth="3.25" strokeLinecap="round" strokeDasharray={`${usedPercent} ${contextUsageGap}`} data-context-usage-tone={evaluation.tone} /> : null}
         </svg>
       ) : null}
       <button
@@ -172,6 +172,11 @@ export function RuntimeMetrics({
         data-testid={isSimple ? 'context-usage-bar' : 'context-usage-indicator'}
         onClick={() => setOpen((value) => !value)}
       >
+        {isSimple && percent !== null && usedPercent > 0 ? (
+          <span className={cn('pointer-events-none absolute right-3 top-0 -translate-y-1/2 rounded-full border border-border/60 bg-popover/95 px-1.5 py-0.5 font-mono text-[0.5625rem] leading-none shadow-sm backdrop-blur', tone)} data-testid="context-usage-simple-label">
+            {percent}%
+          </span>
+        ) : null}
         {!isSimple ? <svg
           viewBox="0 0 20 20"
           className={cn('flex-none -rotate-90', isSimple ? 'h-[18px] w-[18px]' : 'h-5 w-5')}

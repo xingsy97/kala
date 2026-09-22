@@ -291,6 +291,7 @@ export function ChatPanel({
     return { toolNameByCallId: names, allMessages: messageItems, resultsByCallId: results, intraMessageGroupedCallIds: groupedIds }
   }, [rawItems])
   const approvalByCallId = useMemo(() => new Map((pendingApprovals ?? []).map((approval) => [approval.callId, approval])), [pendingApprovals])
+  const effectiveParentSessionId = parentSessionId ?? sessionId ?? undefined
   // Null preserves the isolated/demo fallback. The product App always
   // supplies the authoritative set so an unpaired historical call cannot be
   // mistaken for live work after compaction, interruption, or recovery.
@@ -320,7 +321,7 @@ export function ChatPanel({
         resultsByCallId,
         {
           absorbReasoning: toolCardMode === 'dots',
-          preserveAgentCalls: Boolean(parentSessionId),
+          preserveAgentCalls: Boolean(effectiveParentSessionId),
         },
       )
       if (transcriptGroup) {
@@ -384,7 +385,7 @@ export function ChatPanel({
       hideHeader.push(false)
     }
     return { transcriptItems: kept, messageIndexByItem: mapping, hideHeaderByItem: hideHeader, groupedCallIds: groupedIds }
-  }, [rawItems, intraMessageGroupedCallIds, resultsByCallId, compactStatus, parentSessionId, toolCardMode])
+  }, [rawItems, intraMessageGroupedCallIds, resultsByCallId, compactStatus, effectiveParentSessionId, toolCardMode])
 
   // Translate message-index highlight into item-index so VirtualTranscript
   // can scroll to the right row. -1 means "no highlight" or unresolved.
@@ -452,7 +453,7 @@ export function ChatPanel({
             toolCardMode={toolCardMode}
             activeToolCallIds={activeToolCallIdSet}
             badgeIntentionCallId={badgeIntentionCallId}
-            parentSessionId={parentSessionId}
+            parentSessionId={effectiveParentSessionId}
             socket={socket ?? null}
           />
         )
@@ -490,7 +491,7 @@ export function ChatPanel({
           ts={item.ts}
           hideHeader={hideHeader}
           onEditAndRerun={onEditAndRerun}
-          parentSessionId={parentSessionId}
+          parentSessionId={effectiveParentSessionId}
           socket={socket ?? null}
           liveToolActivityTailCount={liveToolActivityTailCount}
           toolCardMode={toolCardMode}
@@ -511,7 +512,7 @@ export function ChatPanel({
       resultsByCallId,
       groupedCallIds,
       onEditAndRerun,
-      parentSessionId,
+      effectiveParentSessionId,
       socket,
       onDismissCompactStatus,
       liveToolActivityTailCount,
@@ -1820,7 +1821,7 @@ function MessageRow({
         <div className="flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">
           {groupedItems.map((item, i) => {
             if (item.kind === 'tool_call_group') {
-              if (item.toolName === 'agent' && parentSessionId) {
+              if (parentSessionId && item.calls.every((call) => call.name === 'agent')) {
                 return (
                   <SubAgentCard
                     key={`sub-agent-${item.firstCallId}`}

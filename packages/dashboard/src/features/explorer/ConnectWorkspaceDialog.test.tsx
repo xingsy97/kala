@@ -24,7 +24,8 @@ describe('ConnectWorkspaceDialog', () => {
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux x86_64' })
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
+      const rawUrl = String(input)
+      const url = rawUrl.replace(/^http:\/\/host\.test:5301/u, '')
       if (url === '/api/executor-installs' && init?.method === 'POST') {
         const input = JSON.parse(String(init.body)) as Record<string, string>
         if (input.platform === 'windows' || input.mode === 'temporary') {
@@ -59,6 +60,8 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByRole('region', { name: 'Installation options' })).toBeTruthy()
     expect(screen.getByTestId('connect-workspace-linux').className).toContain('bg-accent')
     expect(screen.getByTestId('connect-workspace-service').className).toContain('bg-background')
+    expect(screen.getByTestId('connect-workspace-service').textContent).toContain('Recommended')
+    expect(screen.getByTestId('connect-workspace-service').textContent).toContain('Install as service')
     expect(screen.getByTestId('installation-status').querySelector('svg')).toBeTruthy()
     const dialog = screen.getByTestId('connect-workspace-dialog')
     expect(dialog.className).toContain('rounded-t-2xl')
@@ -79,13 +82,12 @@ describe('ConnectWorkspaceDialog', () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('executor-invites'))).toBe(false)
   })
 
-  it('supports all three platforms, both modes, debounced updates, and copies exactly one line', async () => {
+  it('supports all three platforms, both modes, immediate updates, and copies exactly one line', async () => {
     const write = vi.mocked(navigator.clipboard.writeText)
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
     await screen.findByText(/curl -fsSL/)
     fireEvent.click(screen.getByTestId('connect-workspace-windows'))
     fireEvent.click(screen.getByTestId('connect-workspace-temporary'))
-    await vi.advanceTimersByTimeAsync(400)
     await waitFor(() => expect(screen.getByText(/install\.ps1/)).toBeTruthy())
     expect(screen.getByTestId('executor-terminal-command').textContent).toContain("RUNLAB_INSTALL_MODE='temporary'")
     expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs' && init?.method === 'POST' && String(init.body).includes('temporary'))).toBe(true)
@@ -96,7 +98,7 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByTestId('connect-workspace-macos')).toBeTruthy()
   })
 
-  it('immediately shows the target run mode and prevents copying the previous command', async () => {
+  it('immediately shows the target run mode, keeps the previous command visible, and prevents copying while refreshing', async () => {
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
     await screen.findByText(/curl -fsSL/)
 
@@ -107,13 +109,18 @@ describe('ConnectWorkspaceDialog', () => {
     expect(terminal.getAttribute('aria-busy')).toBe('true')
     expect(screen.getByTestId('executor-command-transition')).toBeTruthy()
     expect(screen.getByTestId('copy-executor-command').hasAttribute('disabled')).toBe(true)
-    expect(terminal.textContent).not.toContain('A1B2C3D4E5')
+    expect(terminal.textContent).toContain('A1B2C3D4E5')
 
-    await vi.advanceTimersByTimeAsync(400)
     await waitFor(() => expect(screen.getByText(/F6E7D8C9B0/)).toBeTruthy())
     expect(terminal.getAttribute('aria-busy')).toBe('false')
     expect(screen.queryByTestId('executor-command-transition')).toBeNull()
     expect(screen.getByTestId('copy-executor-command').hasAttribute('disabled')).toBe(false)
+  })
+
+  it('uses the active host endpoint for install APIs when provided', async () => {
+    render(<ConnectWorkspaceDialog open host="http://host.test:5301" onOpenChange={() => {}} />)
+    await screen.findByText(/curl -fsSL/)
+    expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === 'http://host.test:5301/api/executor-installs' && init?.method === 'POST')).toBe(true)
   })
 
   it('closes when the backdrop is clicked', async () => {

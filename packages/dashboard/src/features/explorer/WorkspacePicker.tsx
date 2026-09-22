@@ -165,7 +165,7 @@ export function NewSessionDialog({
                   data-testid={`new-session-runtime-${runtime.id}`}
                   title={runtime.available ? description : runtime.reason}
                   className={cn(
-                    'relative flex min-h-14 min-w-0 items-start gap-2 rounded-md border px-2 py-1.5 text-left transition-colors',
+                    'relative flex min-h-12 min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors',
                     selected
                       ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
                       : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50',
@@ -181,11 +181,10 @@ export function NewSessionDialog({
                     <span className="flex min-w-0 flex-wrap items-center gap-1 text-sm font-semibold">
                       <span className="truncate">{label}</span>
                       {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
-                      <Info className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-label={description} />
+                      <HelpHint label={label} trigger={<span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded text-muted-foreground/70 hover:text-foreground" aria-label={description}><Info className="h-3.5 w-3.5" aria-hidden="true" /></span>}>{description}</HelpHint>
                       {selected ? <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" /> : null}
                     </span>
-                    <span className="mt-0.5 block text-[0.6875rem] leading-4 text-muted-foreground">{description}</span>
-                    {!runtime.available ? <span className="block break-words text-[0.6875rem] text-muted-foreground">{runtime.reason ?? runtime.status}</span> : null}
+                    {!runtime.available ? <span className="mt-0.5 block break-words text-[0.6875rem] text-muted-foreground">{runtime.reason ?? runtime.status}</span> : null}
                   </span>
                 </button>
               )
