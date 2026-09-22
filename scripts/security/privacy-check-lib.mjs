@@ -91,7 +91,7 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
     }
   }
 
-  if (source === 'file') {
+  if (source === 'file' || source === 'history-file') {
     if (/^(?:tmp|\.tmp)\//.test(path)) add('privacy.temporary-path', 0, 'Move generated output outside Git.')
     if (/^docs\/design\/.*\.(?:png|jpe?g|gif|webp|svg)$/i.test(path) || /(?:^|\/)screenshots?\//i.test(path)) {
       add('privacy.design-image', 0, 'Do not commit design previews or product screenshots.')
@@ -103,7 +103,7 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
       add('privacy.unregistered-binary', 0, 'Register a required fixture explicitly or keep the binary outside Git.')
       return findings
     }
-    if ((policy.allowedBinaryPaths.has(path) || policy.allowedImagePaths.has(path)) && policy.allowedBinaryHashes[path] !== contentSha256) {
+    if (source === 'file' && (policy.allowedBinaryPaths.has(path) || policy.allowedImagePaths.has(path)) && policy.allowedBinaryHashes[path] !== contentSha256) {
       add('privacy.asset-content-drift', 0, 'Review the asset change and update its approved SHA-256 explicitly.')
       return findings
     }

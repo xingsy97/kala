@@ -75,7 +75,7 @@ function scanCommit(commit) {
   const metadataFindings = metadata.flatMap((email, index) => scanEntry({ path: `${index ? 'COMMITTER' : 'AUTHOR'}@${commit.slice(0, 12)}`, content: email, policy, denylist, source: 'message' }))
   const entries = parseNameStatus(gitBuffer(['diff-tree', '--root', '-m', '--no-commit-id', '--name-status', '-r', '-z', '--diff-filter=ACMR', commit]))
   const paths = entries.map(({ path }) => path)
-  return [...messageFindings, ...metadataFindings, ...scanPaths(paths, (path) => gitBuffer(['show', `${commit}:${path}`]))]
+  return [...messageFindings, ...metadataFindings, ...scanPaths(paths, (path) => gitBuffer(['show', `${commit}:${path}`]), 'history-file')]
 }
 
 function scanTree(tree) {
@@ -90,9 +90,9 @@ function scanWorktree() {
   return scanPaths(paths, (path) => readFileSync(resolve(root, path)))
 }
 
-function scanPaths(paths, read) {
+function scanPaths(paths, read, source = 'file') {
   return [...new Set(paths)].flatMap((path) => [
-    ...scanEntry({ path, content: read(path), policy, denylist }),
+    ...scanEntry({ path, content: read(path), policy, denylist, source }),
     ...scanEntry({ path, content: path, policy, denylist, source: 'path' }),
   ])
 }
