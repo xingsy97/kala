@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check } from 'lucide-react'
+import { Check, Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AgentRuntimeDescriptor, AgentRuntimeId, ModelInfo } from '@agent-kernel/shared'
 import { HelpHint } from '../../components/ui/help-hint.js'
@@ -9,6 +9,7 @@ import { createSessionWithAck, type DashboardSocket } from '../../session.js'
 import { randomId } from '../../lib/random-id.js'
 import { PREF_AGENT_RUNTIME, readStringPref, writeStringPref } from '../../lib/prefs.js'
 import { Button } from '../../components/ui/button.js'
+import { isRecommendedRuntime, runtimeDisplayDescription, runtimeDisplayLabel } from '../../app-logic/agent-runtime-display.js'
 import { Composer } from './Composer.js'
 import type { ChatDisplayPrefs } from './chatDisplayPrefs.js'
 
@@ -124,6 +125,9 @@ export function SimpleChatDraft({
         <div className="mt-6 flex max-w-full flex-wrap justify-center gap-2" role="radiogroup" aria-label={t('dialogs.chooseAgentRuntime')}>
           {agentRuntimes.map((item) => {
             const selected = descriptor?.id === item.id
+            const label = runtimeDisplayLabel(t, item)
+            const description = runtimeDisplayDescription(t, item)
+            const recommended = isRecommendedRuntime(item)
             return <Button
               key={item.id}
               variant="ghost"
@@ -131,7 +135,7 @@ export function SimpleChatDraft({
               role="radio"
               aria-checked={selected}
               disabled={started || !item.available}
-              title={item.available ? item.description : item.reason}
+              title={item.available ? description : item.reason}
               data-testid={`draft-runtime-${item.id}`}
               onClick={() => {
                 setRuntime(item.id)
@@ -139,11 +143,18 @@ export function SimpleChatDraft({
                 writeStringPref(PREF_AGENT_RUNTIME, item.id as AgentRuntimeId)
               }}
               className={selected
-                ? 'gap-1.5 rounded-full border border-primary/65 bg-primary/15 px-3 text-primary shadow-sm ring-2 ring-primary/25 ring-offset-2 ring-offset-background hover:bg-primary/20 hover:text-primary'
-                : 'rounded-full border border-transparent px-3 text-muted-foreground hover:border-border/50 hover:bg-accent hover:text-foreground'}
+                ? 'h-auto min-h-10 gap-1.5 rounded-full border border-primary/65 bg-primary/15 px-3 py-1.5 text-primary shadow-sm ring-2 ring-primary/25 ring-offset-2 ring-offset-background hover:bg-primary/20 hover:text-primary'
+                : 'h-auto min-h-10 rounded-full border border-transparent px-3 py-1.5 text-muted-foreground hover:border-border/50 hover:bg-accent hover:text-foreground'}
             >
               {selected ? <Check className="h-3.5 w-3.5" aria-hidden /> : null}
-              {item.label}
+              <span className="flex min-w-0 flex-col items-start">
+                <span className="flex items-center gap-1">
+                  <span>{label}</span>
+                  {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
+                  <Info className="h-3.5 w-3.5 text-muted-foreground" aria-label={description} />
+                </span>
+                <span className="max-w-[16rem] truncate text-[0.6875rem] font-normal text-muted-foreground">{description}</span>
+              </span>
             </Button>
           })}
         </div>

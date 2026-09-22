@@ -99,8 +99,8 @@
     "deploy/evaluation/fixtures/release-handoff.tar": "de6587e456fa403d0afc86e53ea4aa6c97521195aefc3537e03afc7f2822d600",
     "deploy/evaluation/fixtures/release-ledger-reconciliation.tar": "31fcc901dd16af2abde77e6146fdb60be4db2553e7a4721588273bdf818ee730",
     "deploy/evaluation/fixtures/service-release-v2.tar": "984e8f00a64041e75a4a0a1248b33b60264ec06f96d28df100ead1c59c13d040",
-    "packages/dashboard/public/brand/kala-wordmark.svg": "f1141d8044950f2524704261903c86c186879b38dcbd153c2430ebb853974d8a",
-    "packages/dashboard/public/brand/kala-wordmark-light.svg": "74948b05c7475684318ff09820c0e6a8fbd6d62897fc76e8fda80bf85b43a27c",
+    "packages/dashboard/public/brand/kala-wordmark.svg": "c7279e19d03e21e474510412aac41568a2a8eeefcbf86fdfce47f0e53abaf60f",
+    "packages/dashboard/public/brand/kala-wordmark-light.svg": "4258eca59bf362f42e955b6d323dc2d50bf5e99bde1ac3ffe3e8e8f611b0cf78",
     "packages/dashboard/public/brand/kala-wordmark.png": "0d9509421af6b4eab77f0611bb91b8202d8fd7f9d4299ab72868571991496f9a",
     "packages/dashboard/public/brand/kala-wordmark-light.png": "0e1613a2f0afff238b24b3f86d4699c127f56f3819556585d6421fb0a62f8a03"
   },

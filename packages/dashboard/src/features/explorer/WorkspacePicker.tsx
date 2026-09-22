@@ -4,7 +4,7 @@ import { HelpHint } from '../../components/ui/help-hint.js'
 import type { AgentRuntimeDescriptor, AgentRuntimeId, AttachedExecutor } from '@agent-kernel/shared'
 import { KERNEL_AGENT_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 
-import { Bot, Check, X } from 'lucide-react'
+import { Bot, Check, Info, X } from 'lucide-react'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -22,6 +22,7 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 import { PREF_AGENT_RUNTIME, readStringPref, writeStringPref } from '../../lib/prefs.js'
 import type { DashboardSocket } from '../../session.js'
+import { isRecommendedRuntime, runtimeDisplayDescription, runtimeDisplayLabel } from '../../app-logic/agent-runtime-display.js'
 import { DirectoryPicker } from './DirectoryPicker.js'
 
 type Props = {
@@ -145,11 +146,14 @@ export function NewSessionDialog({
         <section className="min-w-0 overflow-hidden border-b border-border/50 bg-muted/20 px-3 py-1.5" aria-labelledby="new-session-runtime-label">
           <div id="new-session-runtime-label" className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
             {t('dialogs.chooseAgentRuntime')}
-            <HelpHint label={t('dialogs.chooseAgentRuntime')}>{agentRuntimes.map((runtime) => <span className="mb-2 block last:mb-0" key={runtime.id}><strong>{runtime.label}</strong><br />{runtime.description}</span>)}</HelpHint>
+            <HelpHint label={t('dialogs.chooseAgentRuntime')}>{agentRuntimes.map((runtime) => <span className="mb-2 block last:mb-0" key={runtime.id}><strong>{runtimeDisplayLabel(t, runtime)}</strong><br />{runtimeDisplayDescription(t, runtime)}</span>)}</HelpHint>
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-1.5" role="radiogroup" aria-labelledby="new-session-runtime-label">
             {agentRuntimes.map((runtime) => {
               const selected = agentRuntime === runtime.id
+              const label = runtimeDisplayLabel(t, runtime)
+              const description = runtimeDisplayDescription(t, runtime)
+              const recommended = isRecommendedRuntime(runtime)
               return (
                 <button
                   key={runtime.id}
@@ -159,8 +163,9 @@ export function NewSessionDialog({
                   disabled={submitting || !runtime.available}
                   onClick={() => selectAgentRuntime(runtime.id)}
                   data-testid={`new-session-runtime-${runtime.id}`}
+                  title={runtime.available ? description : runtime.reason}
                   className={cn(
-                    'relative flex min-h-10 min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors',
+                    'relative flex min-h-14 min-w-0 items-start gap-2 rounded-md border px-2 py-1.5 text-left transition-colors',
                     selected
                       ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
                       : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50',
@@ -173,10 +178,13 @@ export function NewSessionDialog({
                       : <Bot className="h-3.5 w-3.5" aria-hidden="true" />}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex min-w-0 items-center gap-1 text-sm font-semibold">
-                      <span className="truncate">{runtime.label}</span>
+                    <span className="flex min-w-0 flex-wrap items-center gap-1 text-sm font-semibold">
+                      <span className="truncate">{label}</span>
+                      {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
+                      <Info className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-label={description} />
                       {selected ? <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" /> : null}
                     </span>
+                    <span className="mt-0.5 block text-[0.6875rem] leading-4 text-muted-foreground">{description}</span>
                     {!runtime.available ? <span className="block break-words text-[0.6875rem] text-muted-foreground">{runtime.reason ?? runtime.status}</span> : null}
                   </span>
                 </button>

@@ -297,8 +297,12 @@ describe('NewSessionDialog', () => {
 
     const copilot = screen.getByTestId('new-session-runtime-copilot')
     expect(copilot.getAttribute('role')).toBe('radio')
-    expect(copilot.className).toContain('min-h-10')
+    expect(copilot.className).toContain('min-h-14')
     expect(copilot.className).not.toContain('min-h-16')
+    expect(screen.getByText('Kala Kernel')).toBeTruthy()
+    expect(screen.getByText('Recommended')).toBeTruthy()
+    expect(screen.getByText(/Requires your own LLM endpoint/u)).toBeTruthy()
+    expect(screen.getByText(/Uses your Copilot subscription/u)).toBeTruthy()
     fireEvent.click(copilot)
     expect(copilot.getAttribute('aria-checked')).toBe('true')
     expect(localStorage.getItem('ak-agent-runtime')).toBe('copilot')

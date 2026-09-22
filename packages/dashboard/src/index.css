@@ -7,10 +7,6 @@
     container-type: inline-size;
   }
 
-  .ak-sidebar-wordmark {
-    width: clamp(2.5rem, 14cqi, 4rem);
-  }
-
   .ak-product-switcher-menu {
     width: min(16rem, calc(100cqi - 1.5rem));
   }

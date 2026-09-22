@@ -110,12 +110,18 @@ export function ProductSwitcher({
 
 export function SidebarBrand({ connectionStatus }: { connectionStatus?: ReactNode }): JSX.Element {
   return (
-    <span aria-label="Kala" className="ak-sidebar-brand flex min-w-0 flex-none items-center gap-2 text-foreground">
+    <span aria-label="Kala" className="ak-sidebar-brand flex min-w-0 flex-1 items-center gap-3 text-foreground">
       {connectionStatus ?? <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="h-6 w-6 flex-none" aria-hidden />}
-      <span className="ak-sidebar-wordmark relative h-5 flex-none" aria-hidden="true">
-        <img src="/brand/kala-wordmark.svg" alt="" className="h-5 w-full object-contain dark:hidden" />
-        <img src="/brand/kala-wordmark-light.svg" alt="" className="hidden h-5 w-full object-contain dark:block" />
-      </span>
+      <KalaWordmark className="h-5" />
+    </span>
+  )
+}
+
+function KalaWordmark({ className }: { className?: string }): JSX.Element {
+  return (
+    <span className={cn('ak-sidebar-wordmark relative block flex-none', className)} aria-hidden="true">
+      <img src="/brand/kala-wordmark.svg" alt="" className="h-full w-auto dark:hidden" />
+      <img src="/brand/kala-wordmark-light.svg" alt="" className="hidden h-full w-auto dark:block" />
     </span>
   )
 }
@@ -256,14 +262,14 @@ export function AppShellNav({
         )}
       >
         {collapsedContent ?? (
-          <span aria-label="Kala" className="group flex min-w-0 items-center gap-2 text-foreground">
+          <span aria-label="Kala" className="group flex min-w-0 items-center gap-2.5 text-foreground">
             <img
               src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
               alt=""
               className="h-5 w-5 text-foreground/90"
               aria-hidden
             />
-            <span className="truncate text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">Kala</span>
+            <KalaWordmark className="h-5" />
           </span>
         )}
         {!collapsedContent ? (
@@ -295,7 +301,7 @@ export function AppShellNav({
     >
       <span
         aria-label="Kala"
-        className="group mr-4 hidden items-center gap-2.5 text-foreground sm:flex"
+        className="group mr-5 hidden items-center gap-2.5 text-foreground sm:flex"
       >
         <img
           src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
@@ -303,9 +309,7 @@ export function AppShellNav({
           className="h-5 w-5 text-foreground/90 transition-transform duration-200 ease-out group-hover:rotate-[2deg] group-hover:scale-[1.04] motion-reduce:transition-none"
           aria-hidden
         />
-          <span className="text-[0.8125rem] font-semibold tracking-[-0.025em] text-foreground/90">
-          Kala
-        </span>
+        <KalaWordmark className="h-5" />
       </span>
       <div
         ref={navItemsRef}

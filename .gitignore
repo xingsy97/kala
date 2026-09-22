@@ -66,6 +66,7 @@ references/
 .agent-home/
 .claude-home/
 .artifacts/
+.chrome-cdp/
 
 # Experiment-local heavy/raw evidence. Small summaries, reports, diagnostics,
 # and plans live outside artifacts so gitignore stays simple.

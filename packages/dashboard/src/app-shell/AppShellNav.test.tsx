@@ -37,14 +37,18 @@ describe('sidebar shell controls', () => {
     expect(container.contains(screen.getByTestId('product-switcher-menu'))).toBe(false)
   })
 
-  it('uses the complete Kala wordmark in the sidebar brand', () => {
+  it('uses the complete Kala SVG wordmark in the sidebar brand', () => {
     const { container } = render(<SidebarBrand />)
     expect(screen.getByLabelText('Kala')).toBeTruthy()
-    expect(container.querySelector('.ak-sidebar-brand')).toBeTruthy()
-    expect(container.querySelector('.ak-sidebar-wordmark')).toBeTruthy()
-    const marks = Array.from(container.querySelectorAll<HTMLImageElement>('img'))
-    expect(marks.some((mark) => mark.src.endsWith('/brand/kala-wordmark.svg'))).toBe(true)
-    expect(marks.some((mark) => mark.src.endsWith('/brand/kala-wordmark-light.svg'))).toBe(true)
+    const brand = container.querySelector('.ak-sidebar-brand')
+    const wordmark = container.querySelector('.ak-sidebar-wordmark')
+    expect(brand).toBeTruthy()
+    expect(brand?.className).toContain('flex-1')
+    expect(brand?.className).toContain('gap-3')
+    expect(wordmark).toBeTruthy()
+    expect(wordmark?.className).toContain('h-5')
+    expect(container.querySelector('img[src$="/brand/kala-wordmark.svg"]')).toBeTruthy()
+    expect(container.querySelector('img[src$="/brand/kala-wordmark-light.svg"]')).toBeTruthy()
   })
 
   it('keeps settings in the vertical global action owner', () => {
@@ -213,6 +217,7 @@ describe('AppShellNav', () => {
 
     expect(screen.getByTestId('app-shell-nav').getAttribute('data-collapsed')).toBe('true')
     expect(screen.getByLabelText('Kala')).toBeTruthy()
+    expect(screen.getByLabelText('Kala').querySelector('img[src$="/brand/kala-wordmark.svg"]')).toBeTruthy()
     fireEvent.click(screen.getByTestId('app-shell-nav-expand'))
     expect(onExpand).toHaveBeenCalledOnce()
   })

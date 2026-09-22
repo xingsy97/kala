@@ -1283,6 +1283,17 @@ export const resources = {
         newSession: 'Start a conversation',
         agentRuntime: 'Agent',
         chooseAgentRuntime: 'Choose agent runtime',
+        runtime: {
+          recommended: 'Recommended',
+          kalaKernel: {
+            label: 'Kala Kernel',
+            description: 'Self-hosted kernel with stronger tools, orchestration, memory, and workspace control. Requires your own LLM endpoint.',
+          },
+          githubCopilot: {
+            label: 'GitHub Copilot',
+            description: 'Uses your Copilot subscription. Easier to start, but less capable than Kala Kernel for deep runtime features.',
+          },
+        },
         newSessionDescription: 'Start a chat, or choose a workspace when you need files and tools.',
         runtimeTemporarilyReadOnly: 'The Runtime is being migrated and is temporarily read-only. Retry in a moment.',
         newSessionInitialDirectory: 'Initial directory',
@@ -2959,6 +2970,17 @@ export const resources = {
         newSession: '开始对话',
         agentRuntime: 'Agent 运行时',
         chooseAgentRuntime: '选择 Agent 运行时',
+        runtime: {
+          recommended: '推荐',
+          kalaKernel: {
+            label: 'Kala Kernel',
+            description: '自建 Kernel，工具编排、记忆、工作区控制和深度能力更强；需要配置你自己的 LLM endpoint。',
+          },
+          githubCopilot: {
+            label: 'GitHub Copilot',
+            description: '使用你的 Copilot subscription，更容易开始；但深度 runtime 功能不如 Kala Kernel 强。',
+          },
+        },
         newSessionDescription: '直接开始对话；需要文件和工具时再选择工作区。',
         runtimeTemporarilyReadOnly: 'Runtime 正在迁移，当前暂时只读，请稍后重试。',
         newSessionInitialDirectory: '初始目录',
