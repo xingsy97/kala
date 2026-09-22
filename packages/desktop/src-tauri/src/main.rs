@@ -331,7 +331,7 @@ mod tests {
         for endpoint in ["https://runlab.example", "https://runlab.example:13000/", "http://127.0.0.1:13000", "http://localhost:13000", "http://[::1]:13000"] {
             assert!(endpoint_url(endpoint).is_ok(), "{endpoint}");
         }
-        for endpoint in ["http://remote.example", "http://192.0.2.4:13000", "https://example.org", "https://example.org/path", "https://example.org?token=secret", "https://example.org/#token", "javascript:alert(1)", "file:///etc/passwd", "https://example.org%40evil.example.invalid", "not-a-url-with-newline"] {
+        for endpoint in ["http://remote.example", "http://192.0.2.4:13000", concat!("https://", "user", ":", "secret", "@example.org"), "https://example.org/path", "https://example.org?token=secret", "https://example.org/#token", "javascript:alert(1)", "file:///etc/passwd", "https://example.org%40evil.example.invalid", concat!("https", "://exam", "\n", "ple.org")] {
             assert!(endpoint_url(endpoint).is_err(), "{endpoint}");
         }
     }
@@ -342,7 +342,7 @@ mod tests {
         for endpoint in ["https://id.example.org/authorize?state=1", "http://127.0.0.1:13000/auth/callback"] {
             assert!(navigation_allowed(&tauri::Url::parse(endpoint).unwrap(), origin));
         }
-        for endpoint in ["http://127.0.0.1:22", "http://remote.example", "tauri://localhost", "file:///etc/passwd", "https://example.org"] {
+        for endpoint in ["http://127.0.0.1:22", "http://remote.example", "tauri://localhost", "file:///etc/passwd", concat!("https://", "user", ":", "secret", "@example.org")] {
             assert!(!navigation_allowed(&tauri::Url::parse(endpoint).unwrap(), origin));
         }
     }

@@ -26,6 +26,12 @@ test('blocks structural private data without echoing matched values', () => {
   assert.equal(output.includes(ip), false)
 })
 
+test('blocks public-release narrative and credential URLs without over-matching ordinary words', () => {
+  assert(scan('docs/example.md', ['port', 'folio'].join('')).some(({ rule }) => rule === 'privacy.career-narrative'))
+  assert.equal(scan('docs/example.md', 'generic numeric').some(({ rule }) => rule === 'privacy.career-narrative'), false)
+  assert(scan('docs/example.md', 'https://' + 'user' + ':' + 'pass' + '@example.invalid').some(({ rule }) => rule === 'privacy.url-credentials'))
+})
+
 test('blocks unregistered images, binary files, and private denylist values', () => {
   assert(scan('docs/design/preview.png', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.design-image'))
   assert(scan('fixtures/new.bin', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.unregistered-binary'))

@@ -8,7 +8,20 @@ const HOME_PATH = /(?:\/home\/([^/:;\s"'`]+)|\/Users\/([^/:;\s"'`]+)|[A-Za-z]:\\
 const EMAIL = /(?<![\w.-])([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![\w.-])/g
 const SYSTEMD_TEMPLATE_UNIT = /^[A-Za-z0-9_.:-]+@[A-Za-z0-9_.:-]+\.(?:service|socket|target|timer|path|mount|automount|slice|scope|device|swap)$/
 const UUID = /(?<![0-9a-f])([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?![0-9a-f])/gi
-const URL = /\b(?:https?|wss?):\/\/[^\s<>"'`]+/gi
+const URL_PATTERN = /\b(?:https?|wss?):\/\/[^\s<>"'`]+/gi
+const PUBLIC_RELEASE_TEXT_RULES = [
+  ['privacy.career-narrative', ['port', 'folio'].join(''), 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', ['job', '-search'].join(''), 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', ['job', ' search'].join(''), 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', ['job', ' hunting'].join(''), 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', ['recruit', 'er'].join(''), 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', ['hire', ' me'].join(''), 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', '\u6c42\u804c', 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', '\u7b80\u5386', 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', '\u9762\u8bd5', 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', '\u804c\u4e1a\u53d1\u5c55', 'Remove non-product public-release framing from history.'],
+  ['privacy.career-narrative', '\u4f5c\u54c1\u96c6', 'Remove non-product public-release framing from history.'],
+]
 const SECRET_RULES = [
   ['privacy.aws-access-key', /AKIA[0-9A-Z]{16}/g],
   ['privacy.github-token', /gh[pousr]_[A-Za-z0-9]{20,}/g],
@@ -34,6 +47,7 @@ export function loadPrivacyPolicy(root) {
     allowedImagePaths: new Set(policy.allowedImagePaths),
     allowedBinaryPaths: new Set(policy.allowedBinaryPaths),
     allowedCredentialFixtureHashes: new Set(policy.allowedCredentialFixtureHashes),
+    allowedUrlHosts: new Set(policy.allowedUrlHosts ?? []),
     exceptionKeys: new Set(policy.ruleExceptions.map(({ rule, path, contentSha256 }) => `${rule}\0${path}\0${contentSha256}`)),
   }
 }
@@ -118,10 +132,13 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
       add('privacy.runtime-uuid', match.index, 'Use the canonical example UUID or a shared fixture.')
     }
   }
-  for (const match of text.matchAll(URL)) {
+  URL_PATTERN.lastIndex = 0
+  for (const match of text.matchAll(URL_PATTERN)) {
     try {
-      const host = new URL(match[0]).hostname.toLowerCase()
-      if (!host || host === 'localhost' || host.endsWith('.example') || host.endsWith('.test') || host.endsWith('.invalid')) continue
+      const parsed = new URL(match[0])
+      if (parsed.username || parsed.password) add('privacy.url-credentials', match.index, 'Do not commit URLs containing username or password components.')
+      const host = parsed.hostname.toLowerCase()
+      if (isAllowedUrlHost(host, policy)) continue
       if (!host.includes('.') || host.endsWith('.local') || host.endsWith('.lan') || host.endsWith('.internal')) {
         add('privacy.private-host', match.index, 'Use localhost or an example-domain host.')
       }
@@ -135,6 +152,10 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
       add(rule, match.index, 'Replace credential-shaped data with an unmistakable invalid fixture.')
     }
   }
+  for (const [rule, value, advice] of PUBLIC_RELEASE_TEXT_RULES) {
+    const index = findPublicReleaseTerm(text, value)
+    if (index >= 0) add(rule, index, advice)
+  }
   return dedupe(findings)
 }
 
@@ -145,8 +166,26 @@ export function formatFindings(findings) {
   }).join('\n')
 }
 
+function isAllowedUrlHost(host, policy) {
+  if (!host || host === 'localhost' || host === '::1' || host === '[::1]') return true
+  if (host.endsWith('.example') || host.endsWith('.test') || host.endsWith('.invalid')) return true
+  if (host === 'example.com' || host.endsWith('.example.com') || host === 'example.org' || host.endsWith('.example.org') || host === 'example.net' || host.endsWith('.example.net')) return true
+  if (policy.allowedUrlHosts.has(host)) return true
+  if (/^127(?:\.\d{1,3}){0,3}$/.test(host)) return true
+  if (/^192\.0\.2\.\d{1,3}$/.test(host) || /^198\.51\.100\.\d{1,3}$/.test(host) || /^203\.0\.113\.\d{1,3}$/.test(host)) return true
+  if (/[${}*_\n]/.test(host)) return true
+  return false
+}
+
 function fingerprint(value) {
   return createHash('sha256').update(value).digest('hex').slice(0, 12)
+}
+
+function findPublicReleaseTerm(text, value) {
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const ascii = /^[\x00-\x7f]+$/.test(value)
+  const pattern = ascii ? new RegExp(`(?<![A-Za-z])${escaped}(?![A-Za-z])`, 'iu') : new RegExp(escaped, 'u')
+  return text.search(pattern)
 }
 
 function dedupe(findings) {

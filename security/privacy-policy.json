@@ -104,6 +104,25 @@
     "packages/dashboard/public/brand/kala-wordmark.png": "0d9509421af6b4eab77f0611bb91b8202d8fd7f9d4299ab72868571991496f9a",
     "packages/dashboard/public/brand/kala-wordmark-light.png": "0e1613a2f0afff238b24b3f86d4699c127f56f3819556585d6421fb0a62f8a03"
   },
+  "allowedUrlHosts": [
+    "$orchestrator_upstream",
+    "box",
+    "control-plane",
+    "dashboard",
+    "host",
+    "host-machine",
+    "mock-llm",
+    "orchestrator",
+    "origin",
+    "portable",
+    "provider",
+    "redacted",
+    "runtime-host",
+    "stable-ingress",
+    "test",
+    "x",
+    "zitadel"
+  ],
   "allowedCredentialFixtureHashes": [
     "0d3e0214125889b108ff99657776757c260c3e2b98ee9485722d8f05c76592ab"
   ]

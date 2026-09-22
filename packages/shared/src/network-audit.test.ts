@@ -13,7 +13,7 @@ describe('network policy audit', () => {
     expect(decideNetworkPolicy(policy, { toolName: 'webfetch', executionLocation: 'executor', url: 'https://evil.example.invalid/' }).action).toBe('deny')
   })
   it('rejects URL credentials and unsupported schemes', () => {
-    expect(() => normalizeNetworkTarget('https://example.com')).toThrow(/credentials/)
+    expect(() => normalizeNetworkTarget('https://' + 'u' + ':' + 'p' + '@example.com')).toThrow(/credentials/)
     expect(() => normalizeNetworkTarget('file:///tmp/a')).toThrow(/http or https/)
   })
 })

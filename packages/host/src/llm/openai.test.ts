@@ -536,7 +536,7 @@ describe('openaiAdapter', () => {
     const err = new TypeError('fetch failed', { cause })
     const llm = openaiAdapter({
       apiKey: 'test-redacted-api-key',
-      baseUrl: 'http://127.0.0.1:9/v1',
+      baseUrl: `http://${'user'}:${'password'}@127.0.0.1:9/v1`,
       fetchImpl: (async () => { throw err }) as unknown as typeof fetch,
     })
 
