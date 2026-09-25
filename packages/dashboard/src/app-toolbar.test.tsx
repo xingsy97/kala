@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NarrowContextualRow, NoSessionArea, WorkbenchToolbar, connectionStatusForTransport, readInitialConfig, resolveSessionDirectoryLoadingOwner, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar } from './app.js'
+import { NarrowContextualRow, NoSessionArea, WorkbenchToolbar, connectionStatusForTransport, readInitialConfig, resolveSessionDirectoryLoadingOwner, selectedSessionHistoryIsLoading, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar } from './app.js'
 import { DesktopSessionRail } from './app-shell/AppShellNav.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity } from './app-logic/session-activity.js'
 
@@ -26,6 +26,13 @@ function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]
 }
 
 describe('bounded busy-indicator rendering', () => {
+  it('stops the history spinner if a selected session subscription or replay fails', () => {
+    const pending = { selectedSessionId: 'next', historyLoadedSessionId: 'previous', eventCount: 8, firstUserMessage: null }
+    expect(selectedSessionHistoryIsLoading({ ...pending, status: 'connecting' })).toBe(true)
+    expect(selectedSessionHistoryIsLoading({ ...pending, status: 'error' })).toBe(false)
+    expect(selectedSessionHistoryIsLoading({ ...pending, status: 'ready', historyLoadedSessionId: 'next' })).toBe(false)
+  })
+
   it('keeps smooth busy feedback, breathing and sheen with reduced-motion support', () => {
     const dashboardStyles = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
     expect(dashboardStyles).toContain('animation: ak-session-status-spin 900ms linear infinite;')

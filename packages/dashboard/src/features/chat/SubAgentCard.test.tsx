@@ -116,7 +116,11 @@ describe('SubAgentCard', () => {
       })
     })
     await waitFor(() => expect(screen.getByTestId('sub-agent-row-c1').getAttribute('data-sub-agent-status')).toBe('running'))
+    const runningRow = screen.getByTestId('sub-agent-row-c1')
     expect(screen.queryByTestId('border-beam')).toBeNull()
+    expect(runningRow.className).not.toContain('border-l-2')
+    expect(runningRow.className).not.toContain('border-l-sky')
+    expect(screen.getByTestId('sub-agent-status-badge').textContent).toContain('Running')
 
     act(() => {
       socket.emitFinished({
@@ -401,6 +405,44 @@ describe('SubAgentCard', () => {
     await waitFor(() => expect(screen.getByText(/child is still working/)).toBeTruthy())
     expect(screen.getByTestId('sub-agent-transcript-frame-c-live').getAttribute('data-layout')).toBe('content')
     expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('false')
+  })
+
+  it('keeps a long running transcript virtualized in a compact content-sized viewport', async () => {
+    const messages: Message[] = Array.from({ length: 8 }, (_, index) => ({
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: [{ type: 'text', text: `child execution detail ${index + 1}` }],
+    }))
+    const socket = makeRecoveringSocket({
+      parentSessionId: 'parent-1',
+      parentCallId: 'c-compact-live',
+      childSessionId: 'child-compact-live',
+      messages,
+    })
+
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={socket}
+        group={makeGroup([makeCall('c-compact-live', {
+          intention: 'Inspect the compact live transcript.',
+          agent_type: 'Explore',
+          model: 'claude-sonnet',
+        })])}
+        approvalByCallId={new Map()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-compact-live').getAttribute('data-sub-agent-status')).toBe('running'))
+    const frame = await screen.findByTestId('sub-agent-transcript-frame-c-compact-live')
+    expect(frame.getAttribute('data-layout')).toBe('viewport')
+    expect(frame.style.height).toBe('256px')
+    expect(frame.className).toContain('max-h-[min(20rem,55dvh)]')
+    expect(frame.className).not.toContain('h-[min(28rem,55dvh)]')
+    expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('true')
+    expect(screen.getByTestId('sub-agent-intention-c-compact-live').textContent).toContain('Inspect the compact live transcript.')
+    expect(screen.getByText('claude-sonnet')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-interrupt-c-compact-live')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-status-badge').textContent).toContain('Running')
   })
 
   it('surfaces a resolved policy artifact inline on the expanded row', async () => {

@@ -36,13 +36,18 @@ import { cn } from '../../lib/utils.js'
 import { withViewTransition } from '../../lib/viewTransition.js'
 import type { DashboardSocket } from '../../session.js'
 import type { ToolCallGroup } from './grouping.js'
-import { NestedTranscript } from './NestedTranscript.js'
+import { NestedTranscript, nestedTranscriptRowCount } from './NestedTranscript.js'
 import { parseSubAgentEnvelope } from './subAgentEnvelope.js'
 import {
   useSubAgentSession,
   type SubAgentLifecycle,
 } from './useSubAgentSession.js'
 import { useSubAgentPolicy, type SubAgentPolicyView } from './useSubAgentPolicy.js'
+
+const VIRTUALIZED_TRANSCRIPT_THRESHOLD = 6
+const VIRTUALIZED_ROW_HEIGHT_PX = 32
+const VIRTUALIZED_TRANSCRIPT_MIN_HEIGHT_PX = 160
+const VIRTUALIZED_TRANSCRIPT_MAX_HEIGHT_PX = 320
 
 type Props = {
   parentSessionId: string
@@ -204,7 +209,17 @@ const SubAgentRow = memo(function SubAgentRow({
       ? [{ role: 'assistant', content: [{ type: 'text', text: envelope.body }] }]
       : []
   const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
-  const useCompactTranscript = displayedMessages.length <= 12
+  const renderedRows = nestedTranscriptRowCount(displayedMessages)
+  const virtualizeTranscript = renderedRows > VIRTUALIZED_TRANSCRIPT_THRESHOLD
+  const transcriptViewportHeight = virtualizeTranscript
+    ? Math.min(
+        VIRTUALIZED_TRANSCRIPT_MAX_HEIGHT_PX,
+        Math.max(
+          VIRTUALIZED_TRANSCRIPT_MIN_HEIGHT_PX,
+          renderedRows * VIRTUALIZED_ROW_HEIGHT_PX,
+        ),
+      )
+    : undefined
 
   // Grouped rows always start collapsed so a new fan-out remains
   // skimmable and expansion is user-controlled. Standalone live/failed
@@ -278,14 +293,7 @@ const SubAgentRow = memo(function SubAgentRow({
   return (
     <div
       className={cn(
-        'ak-subagent-card-surface relative min-w-0 max-w-full overflow-hidden rounded-2xl border border-border/60 border-l-2 transition-colors',
-        status === 'failed'
-          ? 'border-l-rose-400/70'
-          : status === 'completed'
-            ? 'border-l-emerald-400/70'
-            : status === 'running'
-              ? 'border-l-sky-400/70'
-              : 'border-l-border/70',
+        'ak-subagent-card-surface relative min-w-0 max-w-full overflow-hidden rounded-2xl border border-border/60 transition-colors',
         grouped && 'w-full',
       )}
       data-testid={`sub-agent-row-${call.callId}`}
@@ -364,17 +372,18 @@ const SubAgentRow = memo(function SubAgentRow({
             <div
               className={cn(
                 'flex min-h-0 flex-col',
-                useCompactTranscript
-                  ? compact ? 'max-h-[22rem] overflow-y-auto' : 'max-h-96 overflow-y-auto'
-                  : compact ? 'h-[min(28rem,55dvh)]' : 'h-[min(28rem,55dvh)]',
+                virtualizeTranscript
+                  ? 'max-h-[min(20rem,55dvh)]'
+                  : compact ? 'max-h-[22rem] overflow-y-auto' : 'max-h-96 overflow-y-auto',
               )}
+              style={transcriptViewportHeight === undefined ? undefined : { height: transcriptViewportHeight }}
               data-testid={`sub-agent-transcript-frame-${call.callId}`}
-              data-layout={useCompactTranscript ? 'content' : 'viewport'}
+              data-layout={virtualizeTranscript ? 'viewport' : 'content'}
             >
               <NestedTranscript
                 messages={displayedMessages}
                 compact={false}
-                virtualized={!useCompactTranscript}
+                virtualized={virtualizeTranscript}
               />
             </div>
           ) : (

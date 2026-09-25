@@ -1069,11 +1069,13 @@ export function App(): JSX.Element {
     explorerOpen,
     explorerDrawerOpen,
   })
-  const selectedHistorySessionLoading = Boolean(
-    hasSelectedSession &&
-      session.historyLoadedSessionId !== activeSessionId &&
-      ((currentSession?.eventCount ?? 0) > 0 || Boolean(currentSession?.firstUserMessage)),
-  )
+  const selectedHistorySessionLoading = selectedSessionHistoryIsLoading({
+    selectedSessionId: hasSelectedSession ? activeSessionId : null,
+    historyLoadedSessionId: session.historyLoadedSessionId,
+    status: session.status,
+    eventCount: currentSession?.eventCount ?? 0,
+    firstUserMessage: currentSession?.firstUserMessage ?? null,
+  })
   const currentWorkspaceExecutor = useMemo(() => {
     if (!currentSession?.workspaceId) return undefined
     return control.executors.find(
@@ -2723,6 +2725,26 @@ export function readInitialConfig(): Config {
 
 export function sessionDirectoryIsLoading(sessionsLoaded: boolean): boolean {
   return !sessionsLoaded
+}
+
+export function selectedSessionHistoryIsLoading({
+  selectedSessionId,
+  historyLoadedSessionId,
+  status,
+  eventCount,
+  firstUserMessage,
+}: {
+  selectedSessionId: string | null
+  historyLoadedSessionId: string | null
+  status: string
+  eventCount: number
+  firstUserMessage: string | null
+}): boolean {
+  // A failed subscription or history request is not still loading: otherwise
+  // switching to an unavailable Session leaves its spinner running forever.
+  return selectedSessionId !== null && status !== 'error' &&
+    historyLoadedSessionId !== selectedSessionId &&
+    (eventCount > 0 || Boolean(firstUserMessage))
 }
 
 export type SessionDirectoryLoadingOwner = 'explorer' | 'workbench' | null

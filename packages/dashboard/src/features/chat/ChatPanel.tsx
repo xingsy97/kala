@@ -3209,38 +3209,46 @@ function ToolCallInlineDetail({
   const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
   const hasDiffPreview = isPendingApproval && hasDiffPreviewForTool(call.name)
   const summary = summarizeToolCallInput(call)
+  const headingId = `tool-call-heading-${call.callId}`
+  const intentId = `tool-call-intent-heading-${call.callId}`
   return (
-    <div
-      className="min-w-0 overflow-hidden rounded-md border border-border/40 bg-background/40"
-      data-testid={isPendingApproval ? `tool-call-pending-${call.callId}` : undefined}
+    <section
+      className="min-w-0 overflow-hidden rounded-md border border-border/50 bg-background/55"
+      aria-labelledby={headingId}
+      data-testid={isPendingApproval ? `tool-call-pending-${call.callId}` : `tool-call-detail-${call.callId}`}
     >
-      {!compactNarrative ? (
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2.5 py-1.5 text-[0.8125rem]">
-          <ToolTextBadge>{t('chatCommon.request')}</ToolTextBadge>
-          <span className="min-w-0 truncate font-mono text-foreground">{call.name}</span>
-          {isPendingApproval ? (
-            <ToolTextBadge tone="warning">{t('chatCommon.approvalNeeded')}</ToolTextBadge>
-          ) : null}
+      <header className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/40 px-2 py-2 sm:px-2.5">
+        <h4 id={headingId} className="flex min-w-0 items-center gap-2">
+          <span className="flex-none text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('chatCommon.tool')}</span>
+          <ToolNameChip name={call.name} />
+        </h4>
+        {isPendingApproval ? (
+          <ToolTextBadge tone="warning">{t('chatCommon.approvalNeeded')}</ToolTextBadge>
+        ) : null}
+      </header>
+      {call.intent ? (
+        <div className="border-b border-border/40 bg-primary/[0.035] px-2 py-2.5 sm:px-2.5" aria-labelledby={intentId}>
+          <h5 id={intentId} className="mb-1 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-primary/80">
+            {t('chatCommon.intention')}
+          </h5>
+          <p className="whitespace-pre-wrap break-words text-[0.875rem] leading-relaxed text-foreground [overflow-wrap:anywhere]" data-testid={`tool-call-detail-intent-${call.callId}`}>
+            {call.intent}
+          </p>
         </div>
       ) : null}
-      {call.intent ? (
-        <p className="border-b border-border/30 px-2.5 py-2 text-[0.875rem] leading-relaxed text-foreground whitespace-pre-wrap break-words" data-testid={`tool-call-detail-intent-${call.callId}`}>
-          {call.intent}
-        </p>
-      ) : null}
-      <details open className="border-b border-border/30 text-[0.8125rem]" data-testid={`tool-call-technical-details-${call.callId}`}>
-        <summary className="cursor-pointer select-none px-2.5 py-1.5 font-medium text-muted-foreground hover:text-foreground">{t('chatCommon.request')}</summary>
-        <div className="border-t border-border/30">
-          {summary ? <div className="flex flex-wrap gap-1.5 px-2.5 py-2"><ToolCallInputFieldBadges fields={summary.fields} /></div> : null}
+      <details open className="border-b border-border/40 text-[0.8125rem]" data-testid={`tool-call-technical-details-${call.callId}`}>
+        <summary className="cursor-pointer select-none px-2 py-2 font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground sm:px-2.5">{t('chatCommon.inputs')}</summary>
+        <div className="min-w-0 border-t border-border/30 bg-muted/15">
+          {summary ? <div className="flex min-w-0 flex-wrap gap-1.5 px-2 py-2 sm:px-2.5"><ToolCallInputFieldBadges fields={summary.fields} /></div> : null}
           {isPendingApproval && hasDiffPreview ? (
-            <div className="p-2">
+            <div className="min-w-0 p-2">
               <DiffPreview toolName={call.name} input={approval.input} />
             </div>
           ) : summary?.rows?.length ? (
             <ToolCallInputSummaryRows rows={summary.rows} />
           ) : (
-            <ScrollArea>
-              <pre className="min-w-0 whitespace-pre-wrap break-words px-2.5 py-2 font-mono text-[0.8125rem] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+            <ScrollArea className="max-w-full">
+              <pre className="min-w-0 max-w-full whitespace-pre-wrap break-words px-2 py-2 font-mono text-[0.8125rem] leading-relaxed text-muted-foreground [overflow-wrap:anywhere] sm:px-2.5">
                 {JSON.stringify(call.input, null, 2)}
               </pre>
             </ScrollArea>
@@ -3248,11 +3256,11 @@ function ToolCallInlineDetail({
         </div>
       </details>
       {isPendingApproval ? (
-        <p className="border-t border-border/30 px-2.5 py-1.5 text-[0.8125rem] italic text-amber-700 dark:text-amber-300">
+        <p className="border-t border-border/30 px-2 py-1.5 text-[0.8125rem] italic text-amber-700 dark:text-amber-300 sm:px-2.5">
           Approve or reject below.
         </p>
       ) : null}
-    </div>
+    </section>
   )
 }
 
@@ -3342,6 +3350,7 @@ function ToolResultInlineDetail({
   result: ToolResultContent
   compactNarrative?: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   const overflowReader = useContext(OverflowReaderContext)
   const isOverflowed = detectOverflowMarker(result.content)
   const [fullOutput, setFullOutput] = useState<
@@ -3359,16 +3368,18 @@ function ToolResultInlineDetail({
     else setFullOutput({ state: 'loaded', content: res.content ?? '' })
   }
 
+  const headingId = `tool-result-heading-${result.callId}`
   return (
-    <div className="min-w-0 overflow-hidden rounded-md border border-border/40 bg-background/40">
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2.5 py-1.5 text-[0.8125rem]">
-        <ToolTextBadge tone={compactNarrative ? 'neutral' : result.ok ? 'success' : 'danger'}>{compactNarrative ? 'result' : result.ok ? 'succeeded' : 'failed'}</ToolTextBadge>
+    <section className="min-w-0 overflow-hidden rounded-md border border-border/50 bg-background/55" aria-labelledby={headingId} data-testid={`tool-result-detail-${result.callId}`}>
+      <header className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/40 px-2 py-2 text-[0.8125rem] sm:px-2.5">
+        <h4 id={headingId} className="mr-0.5 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('chatCommon.result')}</h4>
+        {!compactNarrative ? <ToolTextBadge tone={result.ok ? 'success' : 'danger'}>{result.ok ? 'succeeded' : 'failed'}</ToolTextBadge> : null}
         {parsedError?.code ? <ToolTextBadge tone="danger">{parsedError.code}</ToolTextBadge> : null}
         {displayOutput.metadata ? <ToolResultMetadataFields metadata={displayOutput.metadata} compact /> : null}
         {isOverflowed ? (
           <ToolTextBadge tone="warning">truncated</ToolTextBadge>
         ) : null}
-      </div>
+      </header>
       {isOverflowed && fullOutput.state !== 'loaded' && overflowReader ? (
         <div className="flex items-center justify-between border-b border-border/30 px-2.5 py-1.5 text-[0.8125rem]">
           <span className="text-muted-foreground">Output truncated inline.</span>
@@ -3393,7 +3404,7 @@ function ToolResultInlineDetail({
         content={displayOutput.content}
         fallback={parsedError?.message}
       />
-    </div>
+    </section>
   )
 }
 

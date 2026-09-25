@@ -425,11 +425,21 @@ describe('ChatPanel', () => {
     // Body is collapsed by default; ordinary success output stays in the expanded detail.
     fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
     expect(screen.getAllByText('wrote 3 bytes').length).toBeGreaterThanOrEqual(1)
-    const request = screen.getByTestId('tool-call-technical-details-c1')
-    expect(request.hasAttribute('open')).toBe(true)
-    expect(request.textContent).toContain('request')
-    expect(request.textContent).toContain('/tmp/a')
-    expect(request.textContent).not.toContain('_intent')
+
+    const toolDetail = screen.getByRole('region', { name: 'Tool write' })
+    expect(within(toolDetail).getByRole('heading', { name: 'Tool write' })).toBeTruthy()
+    expect(within(toolDetail).getByRole('heading', { name: 'Intention' })).toBeTruthy()
+    expect(within(toolDetail).getByText('Create the requested output file.')).toBeTruthy()
+
+    const inputs = screen.getByTestId('tool-call-technical-details-c1')
+    expect(inputs.hasAttribute('open')).toBe(true)
+    expect(within(inputs).getByText('Inputs')).toBeTruthy()
+    expect(inputs.textContent).toContain('/tmp/a')
+    expect(inputs.textContent).not.toContain('_intent')
+
+    const resultDetail = screen.getByRole('region', { name: 'Result' })
+    expect(within(resultDetail).getByRole('heading', { name: 'Result' })).toBeTruthy()
+    expect(within(resultDetail).getByText('succeeded')).toBeTruthy()
   })
 
   it('previews intent and tool summary on hover or click without expanding the group', () => {
@@ -500,10 +510,10 @@ describe('ChatPanel', () => {
     expect(toolNameChip?.className).not.toContain('max-w-[45%]')
     expect(toolNameChip?.parentElement?.className).toContain('flex-1')
     expect(pinnedCard.textContent).toContain('failed')
-    expect(pinnedCard.textContent).toContain('result')
+    expect(pinnedCard.textContent).toContain('Result')
     const technicalDetails = screen.getByTestId('tool-call-technical-details-dot-2')
     expect(technicalDetails.hasAttribute('open')).toBe(true)
-    expect(technicalDetails.textContent).toContain('request')
+    expect(technicalDetails.textContent).toContain('Inputs')
     expect(technicalDetails.textContent).not.toContain('Technical details')
     expect(pinnedCard.className).toContain('pointer-events-auto')
     expect(screen.getByTestId('tool-card-preview-close')).toBeTruthy()
@@ -2144,7 +2154,7 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-call-detail-intent-c1').textContent).toBe('Inspect the target implementation.')
     const technical = screen.getByTestId('tool-call-technical-details-c1')
     expect(technical.hasAttribute('open')).toBe(true)
-    expect(technical.textContent).toContain('request')
+    expect(technical.textContent).toContain('Inputs')
     expect(technical.textContent).not.toContain('Technical details')
   })
 

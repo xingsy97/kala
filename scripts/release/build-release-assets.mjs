@@ -985,7 +985,7 @@ function releaseNotes(manifest) {
   const lines = [
     `# Kala ${manifest.tag}`,
     '',
-    'Kala is a self-hosted runtime and dashboard for coding agents. This release packages the runtime, dashboard, executor, checksums, and bootstrap scripts needed to start from GitHub Releases.',
+    'Kala is a self-hosted command center for coding agents across workspaces. Plan work as a DAG, follow live tool activity, and inspect sessions, files, Git changes, and runtime traces. This release packages the Host, Dashboard, Executor, checksums, and bootstrap scripts.',
     '',
     '## What ships',
     '',

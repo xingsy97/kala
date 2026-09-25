@@ -3,9 +3,20 @@ import { describe, expect, it } from 'vitest'
 
 import type { Message } from '@agent-kernel/kernel'
 
-import { NestedTranscript } from './NestedTranscript.js'
+import { NestedTranscript, nestedTranscriptRowCount } from './NestedTranscript.js'
 
 describe('NestedTranscript', () => {
+  it('counts collapsed tool calls by displayed rows instead of raw messages', () => {
+    const calls: Message[] = Array.from({ length: 12 }, (_, index) => [
+      { role: 'assistant', content: [{ type: 'tool_call', callId: `call-${index}`, name: 'read', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool_result', callId: `call-${index}`, ok: true, content: 'ok' }] },
+    ] as Message[]).flat()
+    expect(nestedTranscriptRowCount([
+      { role: 'user', content: [{ type: 'text', text: 'inspect the files' }] },
+      ...calls,
+    ])).toBe(2)
+  })
+
   it('collapses mixed tool activity split across nested messages', () => {
     render(
       <NestedTranscript

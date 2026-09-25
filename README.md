@@ -5,19 +5,16 @@
 
 # Kala
 
-Kala is a self-hosted dashboard for running coding agents across your
-workspaces. Switch between sessions and machines, follow what an agent is doing,
-and inspect its work without losing the conversation.
-
-> Pre-release software. The current public release line is `v0.2.0-rc.*`; APIs,
-storage, and deployment contracts may change before 1.0.
+Kala is a self-hosted command center for coding agents. Run agents across
+machines, keep concurrent sessions organized, and see plans, tool activity, and
+workspace changes as they happen.
 
 ## What you can do
 
 - **Work across machines** — connect workspace executors, see their online
   status, and switch between sessions from one dashboard.
-- **Follow the work** — use the Task Graph for multi-step plans, tool activity
-  timelines for individual calls, and sub-agent cards for delegated work.
+- **DAG-first task planning & tracking** — map dependencies, see what is done
+  or blocked, and follow delegated sub-agents alongside live tool activity.
 - **Keep context in view** — check context usage, inspect attachments and
   conversation history, and choose between simple and full composer modes.
 - **Inspect without leaving the session** — use the right panel for files, Git
@@ -38,7 +35,10 @@ pnpm run build
 Run the Host and Dashboard in separate terminals:
 
 ```bash
-ANTHROPIC_API_KEY=<provider-key> pnpm host:dev
+# Terminal 1 — any OpenAI-compatible /v1 endpoint
+AGENT_KERNEL_PROVIDER=openai OPENAI_BASE_URL=https://api.example.com/v1 \
+  OPENAI_API_KEY='replace-with-your-key' HOST_MODEL='your-model-id' pnpm host:dev
+# Terminal 2
 pnpm dashboard:dev
 ```
 
@@ -46,7 +46,7 @@ Open the Dashboard URL printed by Vite. For workspace tools, start an executor
 from the workspace you want Kala to operate on:
 
 ```bash
-pnpm --filter @agent-kernel/executor dev -- --host http://localhost:3000 --sandbox-root <workspace-root>
+pnpm --filter @agent-kernel/executor dev -- --host http://localhost:3000 --sandbox-root '/absolute/path/to/workspace'
 ```
 
 Provider endpoints and model choices can also be configured in Dashboard
@@ -54,22 +54,21 @@ Settings. Never commit provider credentials or local configuration.
 
 ## Releases
 
-GitHub Releases are the distribution entry point **once a public release is
-published**. You do not need the GitHub CLI. For a published Portable release,
-use the release's `run.sh` bootstrapper (Linux/macOS, with `curl`, `bash`, `wget`
-and `sha256sum` or `shasum`). The command uses the latest published release:
+GitHub Releases distribute Kala's portable Host and Dashboard. No GitHub CLI
+is needed: on Linux or macOS, use the latest published release (requires `curl`,
+`bash`, `wget`, and `sha256sum` or `shasum`):
 
 ```bash
-bash -o pipefail -c 'curl --proto "=https" --tlsv1.2 -fsSL "https://github.com/xingsy97/akernel/releases/latest/download/run.sh" | bash'
+set -o pipefail; curl --proto '=https' --tlsv1.2 -fsSL https://github.com/xingsy97/akernel/releases/latest/download/run.sh | bash
 ```
 
-Review the download source before executing network code. The bootstrapper
-verifies downloaded executable and Dashboard assets against `SHA256SUMS` from
-its release; checksums alone do not prove publisher identity. This command
-requires a published release with those assets and fails if none exists. Do
-not run it with `sudo`; configure a model provider and connect a workspace
-Executor after the Host starts. See the source quick start above if no public
-release is available yet.
+Run this from Bash or another shell supporting `pipefail`, so download errors
+are not hidden by the pipe. Review the download source before running network
+code. The bootstrapper checks release assets against `SHA256SUMS`; checksums do
+not establish publisher identity. The URL still uses the repository's current
+name (`akernel`) until its GitHub rename to Kala; this command requires a
+published release and fails if none exists. Do not run it with `sudo`. Configure
+a model provider and connect a workspace Executor after the Host starts.
 
 For the **Linux Desktop client** connecting to an existing trusted Kala server,
 open that server's `/downloads/desktop/index.html` and copy its one-command

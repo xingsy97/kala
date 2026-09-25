@@ -49,6 +49,14 @@ type NestedRenderItem =
 
 type NestedSummaryRow = SummaryRow & { toolName: string }
 
+// A long run of tool calls/results can collapse to one visible activity row.
+// Size the parent viewport from rendered rows, never from raw message count.
+export function nestedTranscriptRowCount(messages: readonly Message[]): number {
+  const visible = messages.filter((message) => message.role !== 'system')
+  const results = collectAllToolResults(visible)
+  return collectNestedRenderItems(visible, results).length
+}
+
 export function NestedTranscript({ messages, compact = false, virtualized = true }: Props): JSX.Element {
   const { resultsByCallId, groupedCallIds, renderItems } = useMemo(() => {
     const visible = messages.filter((message) => message.role !== 'system')
