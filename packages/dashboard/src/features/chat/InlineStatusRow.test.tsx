@@ -22,10 +22,12 @@ describe('agent activity card', () => {
     expect(screen.queryByTestId('inline-status-intention')).toBeNull()
   })
 
-  it('keeps breathing and elapsed busy feedback live and yields to streaming', () => {
+  it('keeps breathing and authoritative elapsed feedback live and yields to streaming', () => {
     vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-25T12:00:00.000Z'))
     try {
-      const { rerender } = render(<InlineStatusRow state={state} streamingActive={false} />)
+      const startedAt = Date.now()
+      const { rerender } = render(<InlineStatusRow state={state} streamingActive={false} progress={{ phase: 'thinking', label: 'Thinking', startedAt }} />)
       const row = screen.getByTestId('inline-status-thinking')
       expect(row.getAttribute('role')).toBe('status')
       expect(row.getAttribute('aria-live')).toBe('polite')
@@ -33,11 +35,44 @@ describe('agent activity card', () => {
       expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('0s')
       act(() => vi.advanceTimersByTime(2_100))
       expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('2s')
-      rerender(<InlineStatusRow state={state} streamingActive />)
+      rerender(<InlineStatusRow state={state} streamingActive progress={{ phase: 'thinking', label: 'Thinking', startedAt }} />)
       expect(screen.queryByTestId('inline-status-thinking')).toBeNull()
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('continues from the absolute turn start after remount instead of resetting to zero', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-25T12:00:12.000Z'))
+    try {
+      const progress = { phase: 'thinking' as const, label: 'Thinking', startedAt: Date.now() - 12_000 }
+      const first = render(<InlineStatusRow state={state} streamingActive={false} progress={progress} />)
+      expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('12s')
+      first.unmount()
+      render(<InlineStatusRow state={state} streamingActive={false} progress={progress} />)
+      expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('12s')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('hides elapsed time while the authoritative start is ahead of the browser clock', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-25T12:00:00.000Z'))
+    try {
+      render(<InlineStatusRow state={state} streamingActive={false} progress={{ phase: 'thinking', label: 'Thinking', startedAt: Date.now() + 2_000 }} />)
+      expect(screen.queryByTestId('inline-status-elapsed')).toBeNull()
+      act(() => vi.advanceTimersByTime(2_100))
+      expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('0s')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('hides elapsed time for legacy activity without a trustworthy start', () => {
+    render(<InlineStatusRow state={state} streamingActive={false} progress={{ phase: 'thinking', label: 'Thinking' }} />)
+    expect(screen.queryByTestId('inline-status-elapsed')).toBeNull()
   })
 
   it('expresses failure and approval without verbose lifecycle prefixes', () => {

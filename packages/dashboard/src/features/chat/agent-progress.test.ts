@@ -133,6 +133,14 @@ describe('deriveAgentProgress', () => {
     expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking', startedAt: Date.parse(new Date(3).toISOString()) })
   })
 
+  it('prefers the Host-authoritative turn start over a legacy timeline timestamp', () => {
+    const authoritative = '2026-09-25T12:00:00.000Z'
+    const timeline = [{ seq: 3, ts: '2026-09-25T12:00:05.000Z', effects: [], event: { kind: 'user_message' as const, text: 'go' } }]
+    expect(deriveAgentProgress(state('thinking'), timeline, authoritative)).toEqual({
+      phase: 'thinking', label: 'Thinking', startedAt: Date.parse(authoritative),
+    })
+  })
+
   it('ignores a result that has no persisted model-authored Intention', () => {
     const timeline = [toolResult(1, 'legacy', true)]
     expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking' })

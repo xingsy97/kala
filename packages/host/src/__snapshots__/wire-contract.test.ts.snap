@@ -172,3 +172,35 @@ exports[`wire contract — schema surface > exports a stable, sorted set of sche
   "WorkspaceMetaChangedSchema",
 ]
 `;
+
+exports[`wire contract — schema surface > pins authoritative session timing on both Dashboard baseline schemas 1`] = `
+{
+  "sessionReady": [
+    "agentRuntime",
+    "agentRuntimeCapabilities",
+    "agentType",
+    "config",
+    "contextSnapshot",
+    "cursor",
+    "parentCallId",
+    "parentCursor",
+    "parentSessionId",
+    "reason",
+    "selectedModel",
+    "sessionId",
+    "state",
+    "streamingDraft",
+    "subAgentStartedAt",
+    "turnStartedAt",
+    "workspaceId",
+    "workspaceName",
+  ],
+  "stateChanged": [
+    "contextSnapshot",
+    "cursor",
+    "sessionId",
+    "state",
+    "turnStartedAt",
+  ],
+}
+`;

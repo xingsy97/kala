@@ -421,6 +421,20 @@ describe('readSessionLog', () => {
     })
   })
 
+  it('uses snapshot time to filter orphaned legacy projection metadata without a cursor', async () => {
+    const path = join(dir, 'legacy-runtime-metadata.jsonl')
+    await writeHeader({ path, sessionId: 'legacy-runtime-metadata', config, initialState })
+    const entry = (ts: string, text: string) => JSON.stringify({
+      kind: 'runtime_metadata', ts, sessionId: 'legacy-runtime-metadata',
+      action: 'copilot.user_message', payload: { text },
+    })
+    await appendFile(path, `${entry('2026-01-01T00:00:00.000Z', 'committed')}\n${entry('2999-01-01T00:00:00.000Z', 'orphan')}\n`, 'utf8')
+
+    await expect(findLatestRuntimeMetadata(path, 'copilot.user_message', {
+      committedProjection: { cursor: 1, ts: '2026-01-02T00:00:00.000Z' },
+    })).resolves.toMatchObject({ payload: { text: 'committed' } })
+  })
+
   it('keeps queue and operation lookups bounded on a 1.4 GiB Session log', async () => {
     const path = join(dir, 'large-session.jsonl')
     await writeHeader({ path, sessionId: 'large-session', config, initialState })

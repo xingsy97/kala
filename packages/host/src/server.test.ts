@@ -345,6 +345,10 @@ describe('wire protocol', () => {
       const initial = ready()
       await dashboard.timeout(2000).emitWithAck('client:subscribe_channels', { requestId: 'stream-sub-1', generation: 1, channels: ['session:stream-first'] })
       await initial
+      const stateTurnStarts: Array<string | undefined> = []
+      dashboard.on('state:changed', (payload) => {
+        if (payload.sessionId === 'stream-first') stateTurnStarts.push(payload.turnStartedAt)
+      })
       await dashboard.timeout(2000).emitWithAck('client:user_message', {
         sessionId: 'stream-first', text: 'generate', mode: 'queue', operationId: 'stream-message',
       })
@@ -354,7 +358,12 @@ describe('wire protocol', () => {
       expect((await second).sessionId).toBe('stream-second')
       const resumed = ready()
       await dashboard.timeout(2000).emitWithAck('client:refresh_channels', { requestId: 'stream-resume', generation: 3, channels: ['session:stream-first'] })
-      expect((await resumed).streamingDraft?.text).toBe('before switching')
+      const resumedPayload = await resumed
+      expect(resumedPayload.streamingDraft?.text).toBe('before switching')
+      expect(resumedPayload.turnStartedAt).toBe(server.store.get('stream-first')?.turnStartedAt)
+      expect(resumedPayload.turnStartedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+      expect(stateTurnStarts.length).toBeGreaterThan(0)
+      expect(new Set(stateTurnStarts)).toEqual(new Set([resumedPayload.turnStartedAt]))
     } finally {
       releaseResponse()
       dashboard.close()

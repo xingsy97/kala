@@ -83,6 +83,7 @@ Emitted once per client, right after handshake succeeds.
   state: AgentState           // current snapshot (see SPEC §1.4)
   config: AgentConfig         // (see SPEC §1.3)
   contextSnapshot?: ContextSnapshot // host-owned context estimate for UI/policy
+  turnStartedAt?: string       // ISO 8601 start of latest committed user turn; absent on legacy hosts/no turn
   parentSessionId?: string    // for forked sessions
   parentCursor?: number       // fork point on the parent
   workspaceId?: string        // routing key — the workspace this session is bound to (§5.1). Undefined for legacy sessions predating the field.
@@ -101,8 +102,11 @@ Emitted after every kernel `step` call that mutated state.
   cursor: number              // = state.cursor (matches SPEC I1)
   state: AgentState
   contextSnapshot?: ContextSnapshot
+  turnStartedAt?: string       // same durable latest-turn start as session:ready
 }
 ```
+
+`turnStartedAt` is a Host-owned projection, not Kernel state. For Kernel sessions it is recovered from the latest committed `user_message` timing (or that durable event timestamp); for external runtimes it is recovered from durable user-message runtime metadata. It remains stable through thinking, tools, approval, and terminal state until the next committed user turn. A `session:ready` baseline is authoritative; legacy hosts may omit the field.
 
 For bandwidth reasons, clients MAY subscribe to `event:appended` instead and reconstruct state locally by applying events to their last-known snapshot. v1 servers send both.
 

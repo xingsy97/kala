@@ -69,13 +69,14 @@ function timelineEntry(seq: number): TimelineEntry {
   }
 }
 
-function cachedView(sessionId: string, timeline: readonly TimelineEntry[]) {
+function cachedView(sessionId: string, timeline: readonly TimelineEntry[], turnStartedAt?: string) {
   return {
     sessionId,
     status: 'ready' as const,
     state: createInitialState({ sessionId }),
     config: { systemPrompt: 'cached', tools: [] },
     contextSnapshot: null,
+    ...(turnStartedAt ? { turnStartedAt, turnStartedAtCursor: timeline.at(-1)?.seq ?? 0 } : {}),
     timeline,
     queuedMessages: [],
     lastError: null,
@@ -94,6 +95,34 @@ afterEach(() => {
 })
 
 describe('useSession session view cache', () => {
+  it('preserves turn timing across rapid A to B to A cache selection and authoritative ready hydration', () => {
+    const socket = new MockSocket()
+    const cache = createSessionViewCache({ maxBytes: 10 * 1024 * 1024 })
+    const aStart = '2026-09-25T12:00:00.000Z'
+    const bStart = '2026-09-25T12:01:00.000Z'
+    cache.set('a', cachedView('a', [timelineEntry(1)], aStart))
+    cache.set('b', cachedView('b', [timelineEntry(1)], bStart))
+
+    const view = renderHook(
+      ({ id }) => useSession({ host: 'http://host', sessionId: id, socket: socket as never, cache }),
+      { initialProps: { id: 'a' } },
+    )
+    expect(view.result.current.turnStartedAt).toBe(aStart)
+    view.rerender({ id: 'b' })
+    expect(view.result.current.turnStartedAt).toBe(bStart)
+    view.rerender({ id: 'a' })
+    expect(view.result.current.turnStartedAt).toBe(aStart)
+
+    act(() => socket.serverEmit('session:ready', {
+      sessionId: 'a', agentRuntime: 'kernel', reason: 'load', cursor: 1,
+      state: createInitialState({ sessionId: 'a' }), config: { tools: [] }, contextSnapshot: null,
+      turnStartedAt: aStart,
+    }))
+    expect(view.result.current.hydratedSessionId).toBe('a')
+    expect(view.result.current.turnStartedAt).toBe(aStart)
+    view.unmount()
+  })
+
   it('restores all already-streamed text on a mid-turn session switch and appends only new deltas', () => {
     const socket = new MockSocket()
     const ready = (id: string, text?: string) => ({

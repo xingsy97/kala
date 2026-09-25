@@ -17,6 +17,9 @@ export type CachedSessionView = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  /** Optional for durable entries written by older Dashboard versions. */
+  turnStartedAt?: string | null
+  turnStartedAtCursor?: number | null
   timeline: readonly TimelineEntry[]
   queuedMessages: readonly QueuedMessagePreview[]
   lastError: SessionErrorEvent | null
@@ -183,6 +186,8 @@ function estimateCachedSessionViewParts(
       status: input.status,
       config: input.config,
       contextSnapshot: input.contextSnapshot,
+      turnStartedAt: input.turnStartedAt,
+      turnStartedAtCursor: input.turnStartedAtCursor,
       queuedMessages: input.queuedMessages,
       lastError: input.lastError,
       parentSessionId: input.parentSessionId,

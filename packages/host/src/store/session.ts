@@ -20,6 +20,7 @@ import type {
 import type {
   AgentRuntimeId,
   ContextUsageSnapshot,
+  EventEntry,
   LLMTrace,
   SessionMemoryPolicy,
   SessionPreferences,
@@ -68,6 +69,8 @@ export type SessionRecord = {
   readonly principal?: string
   readonly organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   lastEventAt?: string
+  /** Durable timestamp of the latest committed user turn; projected by the Host. */
+  turnStartedAt?: string
   state: AgentState
   /** Stable default title captured from the first persisted user_message event. */
   firstUserMessage?: string
@@ -873,6 +876,9 @@ export class SessionStore {
       // Publish in-memory state only after the durable append and fsync succeed.
       rec.state = nextState
       rec.lastEventAt = entry.ts
+      if (event.kind === 'user_message') {
+        rec.turnStartedAt = validTimestamp(timing?.turnStartedAt) ?? entry.ts
+      }
       if (event.kind === 'user_message' && event.text?.trim() && !rec.firstUserMessage) {
         rec.firstUserMessage = event.text
       }
@@ -905,10 +911,15 @@ export class SessionStore {
           `stale runtime projection for ${sessionId}: expected cursor ${expectedCursor}, received ${nextState.cursor}`,
         )
       }
-      await appendRuntimeMetadataEntry(rec.logPath, { sessionId, action, payload })
+      const metadataEntry = await appendRuntimeMetadataEntry(rec.logPath, {
+        sessionId,
+        action,
+        payload: { ...payload, projectionCursor: nextState.cursor },
+      })
       const entry = await appendSnapshotEntry(rec.logPath, nextState.cursor, compactExternalRuntimeSnapshotState(nextState))
       rec.state = nextState
       rec.lastEventAt = entry.ts
+      if (action === 'copilot.user_message') rec.turnStartedAt = metadataEntry.ts
       this.locallyProjectedExternalSessions.add(sessionId)
       if (!rec.firstUserMessage) rec.firstUserMessage = firstUserMessageFromState(nextState)
       this.summaryCache.delete(rec.logPath)
@@ -1226,11 +1237,21 @@ export class SessionStore {
     const recentExternalMetadata = fastExternalLoad
       ? await readRecentSessionMetadata(path)
       : []
+    const externalSnapshots = fastExternalLoad ? await optionalSnapshot(path) : []
+    const committedExternalProjection = externalSnapshots.at(-1)
+    const latestCopilotUserMessage = fastExternalLoad && committedExternalProjection
+      ? await findLatestRuntimeMetadata(path, 'copilot.user_message', {
+          committedProjection: {
+            cursor: committedExternalProjection.seq,
+            ts: committedExternalProjection.ts,
+          },
+        })
+      : undefined
     const parsed = fastExternalLoad
       ? {
           header,
           events: latestExternalKernelEvent ? [latestExternalKernelEvent] : [],
-          snapshots: [...await optionalSnapshot(path)],
+          snapshots: [...externalSnapshots],
           metadata: recentExternalMetadata,
           runtimeMetadata: externalRuntimeAlreadyQuarantined
             ? [{
@@ -1404,6 +1425,9 @@ export class SessionStore {
     const firstUserMessage = agentRuntime === 'kernel'
       ? firstUserMessageFromEvents(parsed.events)
       : firstUserMessageFromState(finalState)
+    const turnStartedAt = agentRuntime === 'kernel'
+      ? latestKernelTurnStartedAt(parsed.events)
+      : validTimestamp(latestCopilotUserMessage?.ts)
     const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel') ??
       persistedSummary?.summary.preferences?.selectedModel
     const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata) ??
@@ -1430,6 +1454,7 @@ export class SessionStore {
         ? { lastEventAt: persistedSummary?.summary.lastEventAt ?? parsed.events[parsed.events.length - 1]!.ts }
         : {}),
       state: finalState,
+      ...(turnStartedAt ? { turnStartedAt } : {}),
       ...(firstUserMessage ? { firstUserMessage } : {}),
       ...(parsed.header.parentSessionId
         ? { parentSessionId: parsed.header.parentSessionId }
@@ -1684,6 +1709,19 @@ function firstUserMessageFromEvents(
     if (entry.event.text?.trim()) return entry.event.text
   }
   return undefined
+}
+
+function latestKernelTurnStartedAt(events: readonly EventEntry[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const entry = events[index]
+    if (entry?.event.kind !== 'user_message') continue
+    return validTimestamp(entry.timing?.turnStartedAt) ?? validTimestamp(entry.ts)
+  }
+  return undefined
+}
+
+function validTimestamp(value: string | undefined): string | undefined {
+  return value !== undefined && Number.isFinite(Date.parse(value)) ? value : undefined
 }
 
 function summarizeLog(

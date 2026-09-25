@@ -538,7 +538,10 @@ async function readLineContaining(
 export async function findLatestRuntimeMetadata(
   path: string,
   action: string,
-  options: { maxScanBytes?: number } = {},
+  options: {
+    maxScanBytes?: number
+    committedProjection?: { cursor: number; ts: string }
+  } = {},
 ): Promise<RuntimeMetadataEntry | undefined> {
   if (!action) throw new Error('runtime metadata action is required')
   const handle = await open(path, 'r')
@@ -561,7 +564,15 @@ export async function findLatestRuntimeMetadata(
         const line = await readLineContaining(handle, start + match, stat.size)
         if (line.startsWith('{"kind":"runtime_metadata"')) {
           const entry = JSON.parse(line) as LogEntry
-          if (entry.kind === 'runtime_metadata' && entry.action === action) return entry
+          if (entry.kind === 'runtime_metadata' && entry.action === action) {
+            const committed = options.committedProjection
+            if (!committed) return entry
+            const projectionCursor = entry.payload.projectionCursor
+            if (
+              (Number.isSafeInteger(projectionCursor) && (projectionCursor as number) <= committed.cursor)
+              || (!Number.isSafeInteger(projectionCursor) && entry.ts <= committed.ts)
+            ) return entry
+          }
         }
         match = data.lastIndexOf(needle, match - 1)
       }

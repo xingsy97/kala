@@ -14,7 +14,11 @@ export type AgentProgress = {
 
 type PersistedToolCall = { callId: string; intention: string }
 
-export function deriveAgentProgress(state: AgentState | null, timeline: readonly TimelineEntry[]): AgentProgress {
+export function deriveAgentProgress(
+  state: AgentState | null,
+  timeline: readonly TimelineEntry[],
+  turnStartedAt?: string | null,
+): AgentProgress {
   const status = state?.status
   const calls = persistedToolIntentions(timeline)
 
@@ -44,7 +48,7 @@ export function deriveAgentProgress(state: AgentState | null, timeline: readonly
         ...(previous.durationMs !== undefined ? { durationMs: previous.durationMs } : {}),
       }
     }
-    const startedAt = currentTurnStartedAt(timeline)
+    const startedAt = parsedTimestamp(turnStartedAt) ?? currentTurnStartedAt(timeline)
     return { phase: 'thinking', label: 'Thinking', ...(startedAt !== undefined ? { startedAt } : {}) }
   }
 
@@ -116,6 +120,12 @@ function toolStartedAt(timeline: readonly TimelineEntry[], callId: string): numb
     startedAt = startedAt === undefined ? parsed : Math.min(startedAt, parsed)
   }
   return startedAt
+}
+
+function parsedTimestamp(value: string | null | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : undefined
 }
 
 function currentTurnStartedAt(timeline: readonly TimelineEntry[]): number | undefined {

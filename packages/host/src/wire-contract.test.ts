@@ -23,6 +23,13 @@ describe('wire contract — schema surface', () => {
       .sort()
     expect(names).toMatchSnapshot()
   })
+
+  it('pins authoritative session timing on both Dashboard baseline schemas', () => {
+    expect({
+      sessionReady: Object.keys(schema.SessionReadyEventSchema.shape).sort(),
+      stateChanged: Object.keys(schema.StateChangedEventSchema.shape).sort(),
+    }).toMatchSnapshot()
+  })
 })
 
 describe('wire contract — round-trip parses', () => {
@@ -152,6 +159,12 @@ describe('wire contract — round-trip parses', () => {
 })
 
 describe('wire contract — rejection cases', () => {
+  it('accepts omitted legacy turn timing and rejects malformed present timestamps', () => {
+    expect(schema.SessionReadyEventSchema.shape.turnStartedAt.safeParse(undefined).success).toBe(true)
+    expect(schema.StateChangedEventSchema.shape.turnStartedAt.safeParse('2026-09-25T12:00:00.000Z').success).toBe(true)
+    expect(schema.StateChangedEventSchema.shape.turnStartedAt.safeParse('not-a-timestamp').success).toBe(false)
+  })
+
   it('rejects ClientUserMessage missing required fields', () => {
     expect(schema.ClientUserMessageSchema.safeParse({ sessionId: 's' }).success).toBe(false)
     expect(schema.ClientUserMessageSchema.safeParse({ text: 'orphan' }).success).toBe(false)

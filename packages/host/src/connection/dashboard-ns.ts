@@ -1394,6 +1394,7 @@ export function configureDashboardNamespace(
           config: record.config,
           contextSnapshot: record.runtimeContextSnapshot
             ?? contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record), parentModel),
+          ...(record.turnStartedAt ? { turnStartedAt: record.turnStartedAt } : {}),
           ...(parentModel ? { selectedModel: parentModel } : {}),
           ...(record.workspaceId !== undefined
             ? { workspaceId: record.workspaceId }
@@ -1596,6 +1597,7 @@ async function applyPreferencesUpdate(
       cursor: updatedRecord.state.cursor,
       state: updatedRecord.state,
       contextSnapshot: contextSnapshot(updatedRecord, updatedRecord.state.messages, contextWindowForSession(deps, updatedRecord), effectiveModelForRecord(deps, updatedRecord)),
+      ...(updatedRecord.turnStartedAt ? { turnStartedAt: updatedRecord.turnStartedAt } : {}),
     })
   }
 }
@@ -1959,6 +1961,7 @@ export function readyEventFor(
     config: record.config,
     contextSnapshot: record.runtimeContextSnapshot
       ?? contextSnapshot(record, record.state.messages, contextOverride, selectedModel),
+    ...(record.turnStartedAt ? { turnStartedAt: record.turnStartedAt } : {}),
     ...(record.parentSessionId
       ? { parentSessionId: record.parentSessionId }
       : {}),

@@ -199,6 +199,7 @@ export const SessionReadyEventSchema = z.object({
   state: AgentStateSchema,
   config: AgentConfigSchema,
   contextSnapshot: ContextUsageSnapshotSchema,
+  turnStartedAt: z.iso.datetime({ offset: true }).optional(),
   streamingDraft: z.object({ text: z.string(), afterSeq: z.number().int().nonnegative(), messageCount: z.number().int().nonnegative() }).optional(),
   reason: z.enum(['load', 'created', 'forked']).optional(),
   parentSessionId: z.string().optional(),
@@ -216,6 +217,7 @@ export const StateChangedEventSchema = z.object({
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
   contextSnapshot: ContextUsageSnapshotSchema,
+  turnStartedAt: z.iso.datetime({ offset: true }).optional(),
 }) satisfies z.ZodType<StateChangedEvent>
 
 export const HostRestartSessionPlanSchema = z.object({

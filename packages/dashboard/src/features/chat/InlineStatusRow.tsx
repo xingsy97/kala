@@ -82,7 +82,7 @@ function ThinkingRow({ progress, startedAt }: { progress?: AgentProgress; starte
       </span>
       <span className="relative z-[1] flex min-w-0 items-center gap-2 font-semibold leading-5" data-testid="inline-status-label">
         <span>{label}</span>
-        {(running || progress?.durationMs !== undefined) ? <span className="font-normal tabular-nums text-muted-foreground" data-testid="inline-status-elapsed">{Math.floor(elapsed)}s</span> : null}
+        {elapsed !== undefined ? <span className="font-normal tabular-nums text-muted-foreground" data-testid="inline-status-elapsed">{Math.floor(elapsed)}s</span> : null}
       </span>
     </div>
   )
@@ -225,11 +225,11 @@ export function formatTokensShort(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(1)}m tokens`
 }
 
-export function useElapsedSeconds(active: boolean, startedAt?: number | null, fixedDurationMs?: number): number {
-  const [fallbackStart] = useState(() => Date.now())
-  const [now, setNow] = useState(fallbackStart)
+export function useElapsedSeconds(active: boolean, startedAt?: number | null, fixedDurationMs?: number): number | undefined {
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (!active) return
+    if (!active || startedAt === undefined || startedAt === null) return
+    setNow(Date.now())
     let t: number | undefined
     const tick = (): void => {
       setNow(Date.now())
@@ -237,9 +237,13 @@ export function useElapsedSeconds(active: boolean, startedAt?: number | null, fi
     }
     t = window.setTimeout(tick, 100)
     return () => { if (t !== undefined) window.clearTimeout(t) }
-  }, [active])
+  }, [active, startedAt])
   if (fixedDurationMs !== undefined) return Math.max(0, fixedDurationMs / 1000)
-  return Math.max(0, (now - (startedAt ?? fallbackStart)) / 1000)
+  if (startedAt === undefined || startedAt === null) return undefined
+  // Do not invent 0s when the browser clock trails the Host. The timer will
+  // appear once local wall time reaches the authoritative turn start.
+  if (now < startedAt) return undefined
+  return (now - startedAt) / 1000
 }
 
 function useElapsedMs(active: boolean, startedAt?: number): number {

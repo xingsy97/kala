@@ -935,6 +935,7 @@ export async function startHostServer(
           contextWindowForModel(effectiveModelForSession(sessionId)),
           effectiveModelForSession(sessionId),
         ),
+        ...(recordForContext?.turnStartedAt ? { turnStartedAt: recordForContext.turnStartedAt } : {}),
       })
       io.of('/executor').to(room).emit('event:appended', {
         sessionId,
@@ -952,6 +953,7 @@ export async function startHostServer(
         sessionId,
         cursor: state.cursor,
         state,
+        ...(recordForContext?.turnStartedAt ? { turnStartedAt: recordForContext.turnStartedAt } : {}),
       })
       if (!closed && isRestingStatus(state.status) && messageQueues.pending(sessionId) > 0) {
         setTimeout(() => {
@@ -1131,6 +1133,7 @@ export async function startHostServer(
           cursor: state.cursor,
           state,
           contextSnapshot,
+          ...(record.turnStartedAt ? { turnStartedAt: record.turnStartedAt } : {}),
         })
       },
       onTokenDelta(sessionId, text) {

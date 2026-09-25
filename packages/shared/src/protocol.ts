@@ -113,6 +113,8 @@ export type SessionReadyEvent = {
   state: AgentState
   config: AgentConfig
   contextSnapshot: ContextUsageSnapshot
+  /** Host-owned, durable start of the current/latest committed user turn. */
+  turnStartedAt?: string
   /** Current uncommitted assistant text; restored on a mid-stream subscription. */
   streamingDraft?: { text: string; afterSeq: number; messageCount: number }
   /**
@@ -237,6 +239,8 @@ export type StateChangedEvent = {
   cursor: number
   state: AgentState
   contextSnapshot: ContextUsageSnapshot
+  /** Host-owned, durable start of the current/latest committed user turn. */
+  turnStartedAt?: string
 }
 
 export type HostRestartMode = 'checkpoint' | 'when_idle' | 'force'

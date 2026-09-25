@@ -150,6 +150,40 @@ describe('session projection reducer', () => {
     expect(next.contextSnapshot).toBe(authoritativeContext)
   })
 
+  it('preserves a known turn start across missing and older state corrections, while ready stays authoritative', () => {
+    const firstStart = '2026-09-25T12:00:00.000Z'
+    const nextStart = '2026-09-25T12:01:00.000Z'
+    let current = reduceSessionProjection(
+      reduceSessionProjection(EMPTY_SESSION_PROJECTION, { kind: 'select', generation: 1, sessionId: 'session-a' }),
+      { kind: 'ready', generation: 1, sessionId: 'session-a', payload: { ...ready('session-a'), cursor: 4, turnStartedAt: firstStart } },
+    )
+    current = reduceSessionProjection(current, {
+      kind: 'authoritative', generation: 1, sessionId: 'session-a',
+      payload: { sessionId: 'session-a', cursor: 5, state: { ...current.state!, cursor: 5 }, contextSnapshot },
+    })
+    expect(current.turnStartedAt).toBe(firstStart)
+
+    current = reduceSessionProjection(current, {
+      kind: 'authoritative', generation: 1, sessionId: 'session-a',
+      payload: { sessionId: 'session-a', cursor: 3, state: { ...current.state!, cursor: 3 }, contextSnapshot, turnStartedAt: '2026-09-25T11:59:00.000Z' },
+    })
+    expect(current.turnStartedAt).toBe(firstStart)
+    expect(current.state?.cursor).toBe(5)
+
+    current = reduceSessionProjection(current, {
+      kind: 'authoritative', generation: 1, sessionId: 'session-a',
+      payload: { sessionId: 'session-a', cursor: 6, state: { ...current.state!, cursor: 6 }, contextSnapshot, turnStartedAt: nextStart },
+    })
+    expect(current.turnStartedAt).toBe(nextStart)
+    expect(current.turnStartedAtCursor).toBe(6)
+
+    const legacyReady = reduceSessionProjection(current, {
+      kind: 'ready', generation: 1, sessionId: 'session-a', payload: { ...ready('session-a'), cursor: 7 },
+    })
+    expect(legacyReady.turnStartedAt).toBeNull()
+    expect(legacyReady.turnStartedAtCursor).toBeNull()
+  })
+
   it('ignores events from obsolete session generations', () => {
     const old = selected('session-a', 1)
     const current = reduceSessionProjection(old, { kind: 'select', generation: 2, sessionId: 'session-b' })

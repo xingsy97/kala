@@ -25,7 +25,10 @@ describe('durable session cache', () => {
     await first.flush()
 
     const second = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
-    expect((await second.hydrate('s1'))?.timeline.at(-1)?.seq).toBe(3)
+    const hydrated = await second.hydrate('s1')
+    expect(hydrated?.timeline.at(-1)?.seq).toBe(3)
+    expect(hydrated?.turnStartedAt).toBe('1970-01-01T00:00:00.000Z')
+    expect(hydrated?.turnStartedAtCursor).toBe(3)
 
     const otherHost = createDurableSessionViewCache({ namespace: sessionCacheNamespace('https://host-b.test', '1'), maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
     expect(await otherHost.hydrate('s1')).toBeNull()
@@ -43,6 +46,26 @@ describe('durable session cache', () => {
     await stale.flush()
     const reader = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
     expect((await reader.hydrate('s1'))?.timeline.at(-1)?.seq).toBe(8)
+    first.close(); stale.close(); reader.close()
+  })
+
+  it('does not let an older Copilot snapshot with an empty timeline overwrite a newer turn', async () => {
+    const namespace = sessionCacheNamespace(`https://host-${crypto.randomUUID()}.test`, '1')
+    const database = immediateDatabase()
+    const first = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
+    const stale = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
+    const newer = snapshot('s1', 8)
+    const older = snapshot('s1', 3)
+    first.set('s1', { ...newer, state: { ...newer.state, cursor: 8 }, timeline: [] })
+    await first.flush()
+    stale.set('s1', { ...older, state: { ...older.state, cursor: 3 }, timeline: [] })
+    await stale.flush()
+
+    const reader = createDurableSessionViewCache({ namespace, maxBytes: 1024 * 1024, enabled: true, openDatabase: database.open })
+    const hydrated = await reader.hydrate('s1')
+    expect(hydrated?.timeline).toEqual([])
+    expect(hydrated?.state?.cursor).toBe(8)
+    expect(hydrated?.turnStartedAtCursor).toBe(8)
     first.close(); stale.close(); reader.close()
   })
 
@@ -147,6 +170,7 @@ function snapshot(sessionId: string, cursor: number) {
   return {
     sessionId, status: 'ready' as const, state: createInitialState({ sessionId }),
     config: { systemPrompt: 'test', tools: [] }, contextSnapshot: null,
+    turnStartedAt: new Date(0).toISOString(), turnStartedAtCursor: cursor,
     timeline: [{ seq: cursor, ts: new Date(0).toISOString(), event: { kind: 'user_message' as const, message: { role: 'user' as const, content: [{ type: 'text' as const, text: 'hi' }] } }, effects: [] }],
     queuedMessages: [], lastError: null, parentSessionId: null, parentCursor: null, selectedModel: null, hydratedSessionId: sessionId,
   }

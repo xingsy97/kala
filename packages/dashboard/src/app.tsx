@@ -1235,7 +1235,10 @@ export function App(): JSX.Element {
     () => backgroundTerminalTasks(session.timeline),
     [session.timeline],
   )
-  const agentProgress = useMemo(() => deriveAgentProgress(session.state, session.timeline), [session.state, session.timeline])
+  const agentProgress = useMemo(
+    () => deriveAgentProgress(session.state, session.timeline, session.turnStartedAt),
+    [session.state, session.timeline, session.turnStartedAt],
+  )
   const taskGraph = useMemo(
     () => taskGraphFromMessages(session.state?.messages ?? [], taskGraphFromTimeline(session.timeline)),
     [session.state?.messages, session.timeline],

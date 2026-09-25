@@ -110,7 +110,14 @@ export function createDurableSessionViewCache(options: {
       const entryKey = key(entry.sessionId)
       const tx = database.transaction('sessions', 'readwrite')
       const existing = await tx.store.get(entryKey)
-      const cursor = entry.timeline.at(-1)?.seq ?? 0
+      // Copilot sessions intentionally have no Kernel timeline. Include the
+      // projected state/timing cursors so a stale tab cannot overwrite a newer
+      // durable snapshot with an apparent cursor of zero.
+      const cursor = Math.max(
+        entry.timeline.at(-1)?.seq ?? 0,
+        entry.state?.cursor ?? 0,
+        entry.turnStartedAtCursor ?? 0,
+      )
       if (!isCurrent() || (existing && existing.cursor > cursor)) {
         await tx.done
         return

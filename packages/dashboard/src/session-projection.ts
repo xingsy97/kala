@@ -32,6 +32,9 @@ export type SessionProjection = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  turnStartedAt: string | null
+  /** Cursor of the authoritative payload that supplied turnStartedAt. */
+  turnStartedAtCursor: number | null
   compactStatus: CompactStatusEvent | null
   timeline: readonly TimelineEntry[]
   queuedMessages: readonly QueuedMessagePreview[]
@@ -60,7 +63,8 @@ export type SessionProjectionEvent =
 
 export const EMPTY_SESSION_PROJECTION: SessionProjection = {
   generation: 0, sessionId: null, agentRuntime: 'kernel', status: 'idle', state: null, config: null,
-  contextSnapshot: null, compactStatus: null, timeline: [], queuedMessages: [],
+  contextSnapshot: null, turnStartedAt: null, turnStartedAtCursor: null,
+  compactStatus: null, timeline: [], queuedMessages: [],
   lastError: null, parentSessionId: null, parentCursor: null, selectedModel: null,
   hydratedSessionId: null, historyLoadedSessionId: null,
 }
@@ -95,7 +99,10 @@ export function reduceSessionProjection(
       const p = event.payload
       return {
         ...current, status: 'ready', agentRuntime: p.agentRuntime ?? 'kernel', state: p.state, config: p.config,
-        contextSnapshot: p.contextSnapshot ?? null, parentSessionId: p.parentSessionId ?? null,
+        contextSnapshot: p.contextSnapshot ?? null,
+        // Ready is the authoritative baseline and may deliberately clear a stale cached value.
+        turnStartedAt: p.turnStartedAt ?? null, turnStartedAtCursor: p.turnStartedAt ? p.cursor : null,
+        parentSessionId: p.parentSessionId ?? null,
         parentCursor: p.parentCursor ?? null, selectedModel: p.selectedModel ?? null,
         hydratedSessionId: p.sessionId, lastError: null,
       }
@@ -110,8 +117,20 @@ export function reduceSessionProjection(
           : mergeBySeq(current.timeline, event.entries),
         historyLoadedSessionId: event.sessionId,
       }
-    case 'authoritative':
-      return { ...current, state: event.payload.state, contextSnapshot: event.payload.contextSnapshot ?? null }
+    case 'authoritative': {
+      const p = event.payload
+      // State, context, and turn timing form one Host projection. A delayed
+      // correction must not regress only part of that projection.
+      if (current.state && p.cursor < current.state.cursor) return current
+      const acceptsTurnStart = p.turnStartedAt !== undefined
+        && (current.turnStartedAtCursor === null || p.cursor >= current.turnStartedAtCursor)
+      return {
+        ...current, state: p.state, contextSnapshot: p.contextSnapshot ?? null,
+        // Missing legacy/same-turn corrections preserve a known start. A newer
+        // explicit value may begin the next turn; ready can authoritatively clear.
+        ...(acceptsTurnStart ? { turnStartedAt: p.turnStartedAt!, turnStartedAtCursor: p.cursor } : {}),
+      }
+    }
     case 'appended': {
       const entry = timelineEntry(event.payload)
       let state = current.state
@@ -138,6 +157,7 @@ function projectionFromCache(cached: CachedSessionView): Partial<SessionProjecti
   return {
     agentRuntime: cached.agentRuntime ?? 'kernel',
     state: cached.state, config: cached.config, contextSnapshot: cached.contextSnapshot,
+    turnStartedAt: cached.turnStartedAt ?? null, turnStartedAtCursor: cached.turnStartedAtCursor ?? null,
     timeline: cached.timeline, queuedMessages: cached.queuedMessages, lastError: cached.lastError,
     parentSessionId: cached.parentSessionId, parentCursor: cached.parentCursor,
     // Cached content is paint-ready, but it is not an authoritative live

@@ -496,6 +496,7 @@ export function ChatPanel({
           parentSessionId={effectiveParentSessionId}
           socket={socket ?? null}
           liveToolActivityTailCount={liveToolActivityTailCount}
+          toolExecutionStartedAt={toolExecutionStartedAt}
           toolCardMode={toolCardMode}
           activeToolCallIds={activeToolCallIdSet}
           badgeIntentionCallId={badgeIntentionCallId}
@@ -1646,6 +1647,7 @@ function MessageRow({
   parentSessionId,
   socket,
   liveToolActivityTailCount,
+  toolExecutionStartedAt,
   toolCardMode,
   activeToolCallIds,
   badgeIntentionCallId,
@@ -1668,6 +1670,7 @@ function MessageRow({
   parentSessionId?: string
   socket?: DashboardSocket | null
   liveToolActivityTailCount: number
+  toolExecutionStartedAt?: number | null
   toolCardMode: ToolCardMode
   activeToolCallIds: ReadonlySet<string> | null
   badgeIntentionCallId?: string
@@ -1843,6 +1846,7 @@ function MessageRow({
                   approvalByCallId={approvalByCallId}
                   onApprovalDecision={onApprovalDecision}
                   liveToolActivityTailCount={liveToolActivityTailCount}
+                  toolExecutionStartedAt={toolExecutionStartedAt}
                   toolCardMode={toolCardMode}
                   activeToolCallIds={activeToolCallIds}
                   badgeIntentionCallId={badgeIntentionCallId}
@@ -3843,7 +3847,7 @@ function ToolCallGroupBlock({
             </span>
           ) : null}
           {!singleCall ? <ToolLifecycleSummaryBadges summary={groupLifecycle} /> : null}
-          {isRunning ? (
+          {isRunning && runningElapsed !== undefined ? (
             <span className="flex-none whitespace-nowrap font-mono text-[0.75rem] tabular-nums text-violet-700/80 dark:text-violet-300/80" data-testid="tool-running-elapsed">
               ↳ {runningElapsed.toFixed(1)}s
             </span>

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createConfig, step } from '@agent-kernel/kernel'
 
+import { readyEventFor } from '../connection/dashboard-ns.js'
 import { SessionStore } from './session.js'
 import { appendEventEntry, appendSnapshotEntry, readSessionLog, snapshotSidecarPath, writeHeader } from './log.js'
 import { createInitialState } from '@agent-kernel/kernel'
@@ -55,6 +56,18 @@ describe('SessionStore.ensure', () => {
       }],
     }
     await store.recordRuntimeProjection(record.sessionId, projected, 'copilot.user_message', { text: 'hello copilot' })
+    const committedStart = record.turnStartedAt
+    expect(committedStart).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+
+    // Simulate metadata fsync succeeding before the matching snapshot write
+    // fails. Reload must skip this orphan and retain the committed turn.
+    appendFileSync(record.logPath, `${JSON.stringify({
+      kind: 'runtime_metadata',
+      ts: '2999-01-01T00:00:00.000Z',
+      sessionId: record.sessionId,
+      action: 'copilot.user_message',
+      payload: { text: 'orphan', projectionCursor: 2 },
+    })}\n`, 'utf8')
 
     const reloaded = await new SessionStore(dir).load(record.sessionId)
     expect(reloaded.agentRuntime).toBe('copilot')
@@ -64,10 +77,33 @@ describe('SessionStore.ensure', () => {
     expect(reloaded.state.messages).toEqual(projected.messages)
     expect(reloaded.state.pendingCalls).toEqual([])
     expect(reloaded.state.error).toBe('Copilot turn was interrupted by a host restart')
+    expect(reloaded.turnStartedAt).toBe(committedStart)
+    expect(readyEventFor(reloaded).turnStartedAt).toBe(committedStart)
     const log = await readSessionLog(record.logPath, { allowExternalRuntime: true })
     expect(log.events).toHaveLength(0)
     expect(log.snapshots).toHaveLength(1)
+    expect(log.runtimeMetadata.find((entry) => entry.action === 'copilot.user_message')?.ts).toBe(committedStart)
     expect(log.runtimeMetadata.at(-1)?.action).toBe('copilot.recovered_interrupted_turn')
+  })
+
+  it('keeps Kernel turn timing through later phases and recovers it from the committed user event', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'kernel-turn-timing', config })
+    const startedAt = '2026-09-25T12:00:00.000Z'
+    const user = { kind: 'user_message' as const, text: 'keep timing' }
+    const userTransition = step(record.state, user, record.config)
+    await store.record(record.sessionId, user, userTransition.effects, userTransition.next, undefined, undefined, undefined, {
+      turnId: 'turn-1', turnStartedAt: startedAt,
+    })
+    expect(record.turnStartedAt).toBe(startedAt)
+
+    const laterEvent = { kind: 'cwd_changed' as const, cwd: '/workspace' }
+    const laterTransition = step(record.state, laterEvent, record.config)
+    await store.record(record.sessionId, laterEvent, laterTransition.effects, laterTransition.next)
+    expect(record.turnStartedAt).toBe(startedAt)
+
+    const reloaded = await new SessionStore(dir).load(record.sessionId)
+    expect(reloaded.turnStartedAt).toBe(startedAt)
   })
 
   it('keeps repeated projections out of the main JSONL and reloads the latest sidecar', async () => {

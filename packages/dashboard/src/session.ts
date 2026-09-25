@@ -69,6 +69,8 @@ export type SessionView = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  /** Host-authoritative start of the current/latest committed user turn. */
+  turnStartedAt: string | null
   /**
    * Latest compaction lifecycle event received from the host. Every
    * attached dashboard receives the same broadcast; consumers use it to
@@ -180,7 +182,9 @@ export function useSession({
     if (!cache || !projection.sessionId || projection.hydratedSessionId !== projection.sessionId) return
     const checkpoint = {
       sessionId: projection.sessionId, status: projection.status, state: projection.state,
-      config: projection.config, contextSnapshot: projection.contextSnapshot, timeline: projection.timeline,
+      config: projection.config, contextSnapshot: projection.contextSnapshot,
+      turnStartedAt: projection.turnStartedAt, turnStartedAtCursor: projection.turnStartedAtCursor,
+      timeline: projection.timeline,
       queuedMessages: projection.queuedMessages, lastError: projection.lastError,
       parentSessionId: projection.parentSessionId, parentCursor: projection.parentCursor,
       selectedModel: projection.selectedModel, hydratedSessionId: projection.hydratedSessionId, historyLoadedSessionId: projection.historyLoadedSessionId,
@@ -748,7 +752,8 @@ export function useSession({
 
   const {
     status, agentRuntime, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
-    queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, hydratedSessionId, historyLoadedSessionId,
+    queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, turnStartedAt,
+    hydratedSessionId, historyLoadedSessionId,
   } = projection
 
   const pendingApprovals = useMemo<readonly ApprovalRequiredEvent[]>(() => {
@@ -800,6 +805,7 @@ export function useSession({
       state,
       config,
       contextSnapshot,
+      turnStartedAt,
       compactStatus: remoteCompactStatus,
       timeline,
       humanAttention,
@@ -825,6 +831,7 @@ export function useSession({
       state,
       config,
       contextSnapshot,
+      turnStartedAt,
       remoteCompactStatus,
       timeline,
       humanAttention,
