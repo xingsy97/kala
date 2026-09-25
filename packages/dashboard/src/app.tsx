@@ -131,7 +131,7 @@ import { emitRpc } from './socket-rpc.js'
 import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage, releaseMessageAttachments, uploadMessageAttachment } from './admission-client.js'
 import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, type TranscriptItem } from './transcript.js'
 import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent, shouldShowQueuedAutoCompact } from './app-logic/compaction.js'
-import { mergeOptimisticQueuedMessages, nextSessionSelection, queuedMessageKey, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
+import { mergeOptimisticQueuedMessages, nextSessionSelection, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity, isRunningSessionActivity } from './app-logic/session-activity.js'
 import { modelKey, resolveModelKey } from './app-logic/model-key.js'
 import { useModels } from './app-logic/use-models.js'
@@ -2221,6 +2221,11 @@ export function App(): JSX.Element {
                                 ] satisfies readonly MessageContent[]
                               : undefined
                             const createdAt = new Date().toISOString()
+                            // Use one identity from the optimistic row through
+                            // admission, Host queueing, and the committed event.
+                            // A successful admission can then retire only this
+                            // local placeholder without relying on wall clocks.
+                            const operationId = newPendingMessageId()
                             // When the operator picked "queue" but the agent
                             // is currently idle, the server will drain the
                             // queue immediately — routing the message through
@@ -2238,13 +2243,13 @@ export function App(): JSX.Element {
                             if (effectiveOptimisticMode === 'queue') {
                               setOptimisticQueuedMessages((prev) => [
                                 ...prev,
-                                { id: `optimistic-${newPendingMessageId()}`, text, mode, createdAt, ...(content ? { content } : {}) },
+                                { id: operationId, text, mode, createdAt, ...(content ? { content } : {}) },
                               ])
                             } else {
                               setPendingUserMessages((prev) => [
                                 ...prev,
                                 {
-                                  id: newPendingMessageId(),
+                                  id: operationId,
                                   text,
                                   mode: effectiveOptimisticMode,
                                   ...(content ? { content } : {}),
@@ -2256,18 +2261,26 @@ export function App(): JSX.Element {
                             setAwaitingAck(true)
                             setMessageDeliveryError(null)
                             try {
-                              await admitUserMessage({
+                              const admission = await admitUserMessage({
                                 host: hostEndpoint.url,
                                 ...(config.token ? { token: config.token } : {}),
                                 sessionId: activeSessionId,
                                 text,
                                 mode,
+                                operationId,
                                 ...(content ? { content } : {}),
                               })
-                              if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
+                              if (effectiveOptimisticMode === 'queue' && admission.state === 'committed') {
+                                setOptimisticQueuedMessages((prev) => prev.filter((item) => item.id !== operationId))
+                              } else if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
                             } catch (error) {
-                              setPendingUserMessages((prev) => prev.filter((item) => item.text !== text || item.createdAt !== createdAt))
-                              setOptimisticQueuedMessages((prev) => prev.filter((item) => item.text !== text || item.createdAt !== createdAt))
+                              setPendingUserMessages((prev) => prev.filter((item) => item.id !== operationId))
+                              // A delivery-pending error means the Queue operation is
+                              // already durable. Keep its row until Host publication;
+                              // terminal rejection/expiry can remove it.
+                              if (!(error instanceof AdmissionDeliveryPendingError && effectiveOptimisticMode === 'queue')) {
+                                setOptimisticQueuedMessages((prev) => prev.filter((item) => item.id !== operationId))
+                              }
                               if (error instanceof AdmissionDeliveryPendingError) {
                                 setMessageDeliveryError({
                                   message: error.lastError

@@ -123,6 +123,32 @@ describe('useSession session view cache', () => {
     view.unmount()
   })
 
+  it('applies a committed queued message before the following empty queue snapshot', () => {
+    const socket = new MockSocket()
+    const view = renderHook(() => useSession({ host: 'http://host', sessionId: 'queued', socket: socket as never }))
+    act(() => socket.serverEmit('session:ready', {
+      sessionId: 'queued', agentRuntime: 'kernel', reason: 'load', cursor: 0,
+      state: createInitialState({ sessionId: 'queued' }), config: { tools: [] }, contextSnapshot: null,
+    }))
+    act(() => socket.serverEmit('server:message_queue', {
+      sessionId: 'queued', pending: 1,
+      items: [{ id: 'operation-queued', text: 'follow up', mode: 'queue', createdAt: '2026-09-25T12:00:00.000Z' }],
+    }))
+    expect(view.result.current.queuedMessages).toHaveLength(1)
+
+    act(() => {
+      socket.serverEmit('event:appended', {
+        sessionId: 'queued', seq: 1, ts: '2026-09-25T12:00:01.000Z',
+        event: { kind: 'user_message', operationId: 'operation-queued', text: 'follow up' }, effects: [],
+      })
+      socket.serverEmit('server:message_queue', { sessionId: 'queued', pending: 0, items: [] })
+    })
+
+    expect(view.result.current.timeline.at(-1)?.event).toMatchObject({ kind: 'user_message', operationId: 'operation-queued' })
+    expect(view.result.current.queuedMessages).toEqual([])
+    view.unmount()
+  })
+
   it('restores all already-streamed text on a mid-turn session switch and appends only new deltas', () => {
     const socket = new MockSocket()
     const ready = (id: string, text?: string) => ({

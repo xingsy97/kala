@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 
-import { nextSessionSelection, reconcileOptimisticQueuedMessages, removedSessionIds, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
+import { mergeOptimisticQueuedMessages, nextSessionSelection, reconcileOptimisticQueuedMessages, removedSessionIds, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
 import type { TimelineEntry } from './session.js'
 
 function session(id: string, eventCount: number): SessionSummary {
@@ -131,8 +131,37 @@ describe('optimistic queued messages', () => {
     ).toEqual([])
   })
 
+  it('replaces the optimistic row with the Host row and clears it after dequeue', () => {
+    const optimistic = [{ id: 'operation-queue', text: 'follow up', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }]
+    const server = [{ ...optimistic[0]!, createdAt: '2026-07-07T00:00:01.000Z' }]
+
+    const reconciled = reconcileOptimisticQueuedMessages(optimistic, server, [])
+    expect(reconciled).toEqual([])
+    expect(mergeOptimisticQueuedMessages(server, reconciled).map((item) => item.id)).toEqual(['operation-queue'])
+    expect(mergeOptimisticQueuedMessages([], reconciled)).toEqual([])
+  })
+
+  it('reconciles the exact queued operation even when browser and Host clocks differ', () => {
+    const optimistic = [{ id: 'operation-1', text: 'same text', mode: 'queue' as const, createdAt: '2026-07-07T00:00:01.000Z' }]
+    const timeline: TimelineEntry[] = [{
+      seq: 1,
+      ts: '2026-07-07T00:00:00.000Z',
+      event: { kind: 'user_message', operationId: 'operation-1', text: 'same text' },
+      effects: [],
+    }]
+
+    expect(reconcileOptimisticQueuedMessages(optimistic, [], timeline)).toEqual([])
+  })
+
+  it('does not merge distinct queued operations that have identical content', () => {
+    const server = [{ id: 'operation-1', text: 'repeat', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }]
+    const optimistic = [{ id: 'operation-2', text: 'repeat', mode: 'queue' as const, createdAt: '2026-07-07T00:00:01.000Z' }]
+
+    expect(mergeOptimisticQueuedMessages(server, optimistic).map((item) => item.id)).toEqual(['operation-1', 'operation-2'])
+  })
+
   it('keeps an optimistic queue row while the host has not acknowledged it', () => {
-    const optimistic = [{ id: 'optimistic-1', text: 'still pending', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }]
+    const optimistic = [{ id: 'operation-pending', text: 'still pending', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }]
 
     expect(reconcileOptimisticQueuedMessages(optimistic, [], [])).toBe(optimistic)
   })

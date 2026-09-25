@@ -649,6 +649,9 @@ export function useSession({
     bind('server:message_queue', (p) => {
       if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) {
+        // A dequeue snapshot can immediately follow the committed user event.
+        // Preserve that wire order before optimistic Queue reconciliation runs.
+        flushProjectionQueue()
         const items = p.items ?? []
         dispatchProjectionEvent({ kind: 'queue', generation, sessionId, items })
       }

@@ -11,10 +11,14 @@ export function mergeOptimisticQueuedMessages(
   optimisticMessages: readonly QueuedMessagePreview[],
 ): readonly QueuedMessagePreview[] {
   if (optimisticMessages.length === 0) return serverMessages
+  const serverIds = new Set(serverMessages.map((item) => item.id))
   const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
   return [
     ...serverMessages,
-    ...optimisticMessages.filter((item) => !serverKeys.has(queuedMessageKey(item))),
+    ...optimisticMessages.filter((item) =>
+      !serverIds.has(item.id)
+      && !(item.id.startsWith('optimistic-') && serverKeys.has(queuedMessageKey(item))),
+    ),
   ]
 }
 
@@ -24,10 +28,13 @@ export function reconcileOptimisticQueuedMessages(
   timeline: readonly TimelineEntry[] = [],
 ): readonly QueuedMessagePreview[] {
   if (optimisticMessages.length === 0) return optimisticMessages
+  const serverIds = new Set(serverMessages.map((item) => item.id))
   const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
+  const committedOperationIds = new Set<string>()
   const ackedUserTexts = new Map<string, number[]>()
   for (const entry of timeline) {
     if (entry.event.kind !== 'user_message') continue
+    if (entry.event.operationId) committedOperationIds.add(entry.event.operationId)
     const text = entry.event.text ?? entry.event.content?.map((part) => part.type === 'text' ? part.text : '').join('') ?? ''
     const ts = Date.parse(entry.ts)
     const bucket = ackedUserTexts.get(text) ?? []
@@ -35,6 +42,9 @@ export function reconcileOptimisticQueuedMessages(
     ackedUserTexts.set(text, bucket)
   }
   const next = optimisticMessages.filter((item) => {
+    if (serverIds.has(item.id) || committedOperationIds.has(item.id)) return false
+    // Compatibility for placeholders created before operationId was shared.
+    if (!item.id.startsWith('optimistic-')) return true
     if (serverKeys.has(queuedMessageKey(item))) return false
     const bucket = ackedUserTexts.get(item.text)
     if (!bucket || bucket.length === 0) return true
