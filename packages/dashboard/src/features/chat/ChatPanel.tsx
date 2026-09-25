@@ -77,6 +77,7 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { ReadonlyImagePreviewDialog } from '../../components/ReadonlyImagePreview.js'
 import { Textarea } from '../../components/ui/textarea.js'
 import { Typewriter } from '../../components/Typewriter.js'
+import { MarkdownTable } from '../../components/MarkdownTable.js'
 import { formatTokens } from '../../lib/format.js'
 import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, PREF_SMOOTH_STREAMING_TEXT, PREF_TOOL_ACTIVITY_ICON_SCALE, useBooleanPref, useNumberPref } from '../../lib/prefs.js'
 import { useInterfaceScale } from '../../lib/interface-scale.js'
@@ -104,6 +105,7 @@ import { transcriptItemKey } from './transcript-key.js'
 import { groupConsecutiveToolDots, toolDotNodeWidth, toolDotRailBudget, toolPreviewGeometry, visibleToolDots, type ToolPreviewGeometry } from './tool-dot-layout.js'
 import { useIsMobile } from '../../app-logic/use-viewport.js'
 import { nextSearchMatchIndex, searchMatchSnippet, searchTranscript, type TranscriptSearchCategory, type TranscriptSearchMatch } from './transcript-search.js'
+import { normalizeMarkdownEmphasisAdjacency, remarkStripEmphasisAdjacencyMarker } from './normalize-markdown.js'
 
 type Props = {
   messages?: readonly Message[]
@@ -2295,42 +2297,6 @@ function ThinkingBlock({
   )
 }
 
-/**
- * Split streaming markdown into completed blocks (everything up to safe block
- * boundaries) plus a trailing block still being written. Rendering each
- * completed block as its own memoized component means a new token only ever
- * appends/updates the LAST block — every earlier block is byte-identical and
- * skips re-render entirely, eliminating the flicker where already-rendered
- * paragraphs/code/tables were torn down and rebuilt on every token. A boundary
- * is a blank line (`\n\n`) that is NOT inside a fenced code block.
- */
-export function splitMarkdownBlocks(text: string): { blocks: readonly string[]; tail: string } {
-  const boundaries: number[] = []
-  let insideFence = false
-  for (let i = 0; i < text.length; i += 1) {
-    if ((i === 0 || text[i - 1] === '\n') && text.startsWith('```', i)) {
-      insideFence = !insideFence
-      continue
-    }
-    if (!insideFence && text[i] === '\n' && text[i + 1] === '\n') {
-      boundaries.push(i + 2) // include the blank line with the completed block
-    }
-  }
-  const blocks: string[] = []
-  let start = 0
-  for (const end of boundaries) {
-    blocks.push(text.slice(start, end))
-    start = end
-  }
-  return { blocks, tail: text.slice(start) }
-}
-
-/** Back-compat: previous prefix/tail split, expressed via the block split. */
-export function splitStableMarkdown(text: string): { stable: string; tail: string } {
-  const { blocks, tail } = splitMarkdownBlocks(text)
-  return { stable: blocks.join(''), tail }
-}
-
 export function isLocalMarkdownImageSource(value: string): boolean {
   return !/^(?:https?:|data:|blob:|artifact:)/i.test(value) && !value.startsWith('#')
 }
@@ -2342,32 +2308,13 @@ function localImageFileName(value: string): string {
 
 export const AssistantMarkdown = memo(function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
   const [smoothFade] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
-  const { blocks, tail } = splitMarkdownBlocks(text)
-  // Every logical block, including the live tail, keeps one position key for
-  // its whole lifetime. When a blank line completes the tail it changes from
-  // live to committed in place instead of replacing MarkdownBody/CodeBlock.
-  // Replacing that subtree made already-rendered code flash as later text arrived.
-  const parts = tail.length > 0 || blocks.length === 0 ? [...blocks, tail] : blocks
-  return (
-    <>
-      {parts.map((block, index) => (
-        <MarkdownBlock
-          key={index}
-          text={block}
-          // A block ending at a blank-line boundary is already committed even
-          // when it is currently the final block. Treating that block as live
-          // until later text arrived changed its cursor/defer props and caused
-          // ReactMarkdown to remount completed code/diagram DOM.
-          streaming={streaming && tail.length > 0 && index === blocks.length}
-          smoothFade={smoothFade}
-        />
-      ))}
-    </>
-  )
+  // Markdown constructs can span blank lines (continued lists, reference links,
+  // and fences), so semantic content must always be parsed as one document.
+  return <MarkdownBlock text={text} streaming={streaming} smoothFade={smoothFade} />
 })
 
-// Earlier blocks retain text/lifecycle values and skip rendering while only the
-// live tail receives tokens.
+// Memoization avoids reparsing unchanged completed messages. Streaming Markdown
+// intentionally reparses the whole document for cross-block semantic correctness.
 const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, smoothFade }: { text: string; streaming: boolean; smoothFade: boolean }): JSX.Element {
   if (streaming && smoothFade && canFadeRevealTail(text)) return <RevealTail text={text} />
   return <MarkdownBody text={text} streaming={streaming} />
@@ -2376,8 +2323,9 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, smoothFade 
 const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
   const onOpenWorkspaceFile = useContext(WorkspaceFileLinkContext)
   const artifactSessionId = useContext(ArtifactSessionContext)
-  const cursorTarget = streaming ? findStreamingCursorTarget(text) : null
-  const cursorEndOffset = text.trimEnd().length
+  const markdownText = normalizeMarkdownEmphasisAdjacency(text)
+  const cursorTarget = streaming ? findStreamingCursorTarget(markdownText) : null
+  const cursorEndOffset = markdownText.trimEnd().length
   const cursor = <RevealCursor />
   // The streaming cursor is placed at the active leaf. Per-character fade is NOT
   // done here: spans nested inside ReactMarkdown remount on every token (the AST
@@ -2389,32 +2337,22 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
   return (
     <div
       className={cn(
-        'ak-markdown-body ak-chat-text min-w-0 max-w-full overflow-hidden break-words text-foreground [overflow-wrap:anywhere]',
+        'ak-markdown-body ak-chat-text min-w-0 max-w-full break-words text-foreground [overflow-wrap:anywhere]',
         streaming && 'ak-streaming-markdown',
         '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
-        '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
-        '[&_p]:my-3',
-        '[&_h1]:mb-2 [&_h1]:mt-5 [&_h1]:text-base [&_h1]:font-semibold',
-        '[&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-sm [&_h2]:font-semibold',
-        '[&_h3]:mb-1.5 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:font-semibold',
-        '[&_h4]:mb-1.5 [&_h4]:mt-4 [&_h4]:text-sm [&_h4]:font-semibold',
-        '[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
-        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground [&_code]:[overflow-wrap:anywhere] [&_code]:[word-break:break-word]',
         '[&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg sm:[&_img]:max-w-xs',
-        '[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5',
-        '[&_li]:my-1 [&_li>p]:my-1',
-        '[&_li_ul]:my-1 [&_li_ol]:my-1',
-        '[&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:bg-transparent [&_pre]:p-0',
+        '[&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:bg-transparent [&_pre]:p-0',
         '[&_pre_code]:block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:text-foreground',
-        '[&_hr]:my-4 [&_hr]:border-border/50',
-        '[&_table]:my-3 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:ring-1 [&_table]:ring-border/50 [&_td]:px-2 [&_th]:px-2',
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkStripEmphasisAdjacencyMarker]}
         rehypePlugins={[rehypeKatex]}
-        urlTransform={(url) => url.startsWith('artifact://') ? url : defaultUrlTransform(url)}
+        urlTransform={(url, key) => key === 'src' && url.startsWith('artifact://') ? url : defaultUrlTransform(url)}
         components={{
+          table({ children }) {
+            return <MarkdownTable label="Message table">{children}</MarkdownTable>
+          },
           img({ src, alt }) {
             const artifact = typeof src === 'string' ? parseArtifactMarkdownSource(src) : null
             if (artifact && artifactSessionId) {
@@ -2473,7 +2411,7 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
           },
           th({ children, node: _node, ...rest }) {
             const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'th', _node, cursorEndOffset) ? placeTextCursor(children) : children
-            return <th {...rest}>{withCursor}</th>
+            return <th scope="col" {...rest}>{withCursor}</th>
           },
           a({ href, children, ...rest }) {
             const fileTarget = href ? workspaceFileTargetFromHref(href) : null
@@ -2505,7 +2443,7 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
           },
         }}
       >
-        {text}
+        {markdownText}
       </ReactMarkdown>
     </div>
   )

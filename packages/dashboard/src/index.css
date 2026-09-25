@@ -435,7 +435,9 @@
   }
 
   .ak-motion-session-swap {
-    animation: ak-session-swap 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    /* Opacity-only: transforms on the long-lived chat subtree blur text in
+       WebKitGTK and can keep the composer on a composited raster layer. */
+    animation: ak-fade-in 160ms ease-out both;
   }
 
   .ak-motion-slide-right {
@@ -875,9 +877,22 @@ body {
   }
 }
 
+:root {
+  --ak-sans-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'WenQuanYi Micro Hei', Arial, sans-serif;
+}
+
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ak-sans-font);
   font-size: var(--font-size-base);
+}
+
+button,
+input,
+select,
+textarea,
+[contenteditable='true'],
+.ak-markdown-body {
+  font-family: var(--ak-sans-font);
 }
 
 /**
@@ -942,6 +957,10 @@ body {
   word-break: normal;
   white-space: pre;
 }
+/* Shared Markdown defaults are layered so docs, file preview, and chat
+ * utilities can intentionally override them. The system stack provides broad
+ * CJK coverage; exact glyph metrics remain engine- and platform-dependent. */
+@layer components {
 .ak-reader-surface {
   background:
     radial-gradient(circle at 92% 0%, hsl(var(--primary) / 0.045), transparent 22rem),
@@ -953,28 +972,97 @@ body {
 .ak-reader-surface :where(code):not(.ak-code-snippet code) {
   box-decoration-break: clone;
 }
+.ak-markdown-body {
+  line-height: 1.7;
+}
 .ak-markdown-body :where(p, ol, ul, li, blockquote, table, th, td) {
   font-size: inherit;
   line-height: inherit;
 }
+.ak-markdown-body :where(p, ol, ul, blockquote, pre, .ak-markdown-table-scroll) {
+  margin-block: 0.75em;
+}
+.ak-markdown-body :where(h1, h2, h3, h4) {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  line-height: 1.35;
+}
+.ak-markdown-body h1 { margin: 1.4em 0 0.55em; font-size: 1.35em; }
+.ak-markdown-body h2 { margin: 1.3em 0 0.5em; font-size: 1.2em; }
+.ak-markdown-body h3 { margin: 1.2em 0 0.45em; font-size: 1.08em; }
+.ak-markdown-body h4 { margin: 1.1em 0 0.4em; font-size: 1em; }
+.ak-markdown-body strong {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
 .ak-markdown-body :where(ol, ul) {
   padding-left: 1.5em;
 }
+.ak-markdown-body ol { list-style: decimal; }
+.ak-markdown-body ul { list-style: disc; }
+.ak-markdown-body :where(li) { margin-block: 0.25em; }
 .ak-markdown-body :where(li)::marker {
   color: hsl(var(--muted-foreground) / 0.82);
   font-size: 1em;
 }
-.ak-markdown-body li > p:first-child {
-  margin-top: 0.25em;
+.ak-markdown-body li > p:first-child { margin-top: 0.25em; }
+.ak-markdown-body li > p:last-child { margin-bottom: 0.25em; }
+.ak-markdown-body blockquote {
+  border-left: 2px solid hsl(var(--border));
+  padding: 0.2em 0 0.2em 1em;
+  color: hsl(var(--muted-foreground));
 }
-.ak-markdown-body li > p:last-child {
-  margin-bottom: 0.25em;
+.ak-markdown-body blockquote > p:first-child { margin-top: 0; }
+.ak-markdown-body blockquote > p:last-child { margin-bottom: 0; }
+.ak-markdown-body a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-decoration-thickness: from-font;
+  text-underline-offset: 0.2em;
 }
-.ak-markdown-body blockquote > p:first-child {
-  margin-top: 0;
+.ak-markdown-body a:hover { text-decoration-thickness: 0.12em; }
+.ak-markdown-body :where(code):not(pre code) {
+  border-radius: 0.25rem;
+  background: hsl(var(--muted));
+  padding: 0.1em 0.3em;
+  color: hsl(var(--foreground));
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
 }
-.ak-markdown-body blockquote > p:last-child {
-  margin-bottom: 0;
+.ak-markdown-body hr {
+  margin-block: 1.25em;
+  border-color: hsl(var(--border) / 0.65);
+}
+.ak-markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 0.5rem;
+}
+.ak-markdown-table-scroll:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+.ak-markdown-table-scroll table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  text-align: left;
+}
+.ak-markdown-table-scroll :where(th, td) {
+  border-right: 1px solid hsl(var(--border) / 0.55);
+  border-bottom: 1px solid hsl(var(--border) / 0.55);
+  padding: 0.5em 0.75em;
+  vertical-align: top;
+}
+.ak-markdown-table-scroll th {
+  background: hsl(var(--muted) / 0.55);
+  font-weight: 600;
+}
+.ak-markdown-table-scroll tbody tr:nth-child(even) { background: hsl(var(--muted) / 0.16); }
+.ak-markdown-table-scroll tr:last-child > * { border-bottom: 0; }
+.ak-markdown-table-scroll tr > *:last-child { border-right: 0; }
 }
 .shiki-host .shiki,
 .shiki-host .shiki span,

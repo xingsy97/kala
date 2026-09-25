@@ -23,15 +23,23 @@ export function RevealCursor(): JSX.Element {
 /**
  * Whether the actively-revealing trailing block may use the persistent
  * per-character fade tail. We downgrade (render via markdown, no fade) when the
- * tail is inside a fenced code block, which needs real <pre>/<code> layout that
- * plain-text fading would visually break. Other constructs (headings, lists,
- * emphasis) degrade acceptably as plain text for the brief pre-settle moment.
+ * tail contains any Markdown-significant syntax. Only genuinely plain prose uses
+ * the persistent text path; structural or inline Markdown renders immediately.
  */
 export function canFadeRevealTail(tail: string): boolean {
   if (tail.length === 0) return false
-  // Odd number of ``` fences before the tail end => currently inside a code block.
-  const fences = (tail.match(/```/g) ?? []).length
-  return fences % 2 === 0 && !tail.includes('\n```')
+  // Newlines can change paragraph/list/fence/reference interpretation elsewhere
+  // in the document, so only a single line can take the non-Markdown fast path.
+  if (/[\r\n]/u.test(tail)) return false
+  // Inline constructs: emphasis/strike, code, links/images, tables, entities,
+  // raw HTML, and escapes all need the Markdown parser.
+  if (/[*_~`$\[\]|<>\\&]/u.test(tail)) return false
+  // GFM autolink literals have no punctuation delimiter but still produce links.
+  if (/\b(?:https?:\/\/|www\.)|\b[^\s@]+@[^\s@]+\.[^\s@]+/iu.test(tail)) return false
+  // Block constructs: headings, lists, blockquotes, indented code, and rules.
+  if (/^(?: {4}|\t)/u.test(tail)) return false
+  if (/^ {0,3}(?:#{1,6}(?:\s|$)|>|[-+]\s|\d+[.)]\s|(?:-{3,}|_{3,})\s*$)/mu.test(tail)) return false
+  return true
 }
 
 /**

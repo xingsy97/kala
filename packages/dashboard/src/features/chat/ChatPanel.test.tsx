@@ -6,7 +6,7 @@ import { createInitialState } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
-import { AssistantMarkdown, ChatPanel as DashboardChatPanel, splitMarkdownBlocks } from './ChatPanel.js'
+import { AssistantMarkdown, ChatPanel as DashboardChatPanel } from './ChatPanel.js'
 import { InlineStatusRow, useElapsedSeconds } from './InlineStatusRow.js'
 
 function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Element {
@@ -67,6 +67,54 @@ describe('ChatPanel', () => {
     expect(links[1]?.getAttribute('href')).toBe('https://example.com')
   })
 
+  it('allows artifact URLs only for image sources and keeps raw HTML escaped', () => {
+    const { container } = render(<AssistantMarkdown text={'[artifact link](artifact://secret) ![artifact image](artifact://image-1) <button>raw</button>'} />)
+    expect(screen.getByText('artifact link').closest('a')?.getAttribute('href')).toBe('')
+    expect(container.querySelector('img[src^="artifact://"]')).toBeTruthy()
+    expect(container.querySelector('button')).toBeNull()
+    expect(container.textContent).toContain('<button>raw</button>')
+  })
+
+  it.each([false, true])('parses cross-block Markdown as one document when streaming=%s', (streaming) => {
+    const markdown = [
+      '1. First item',
+      '',
+      '   Continued paragraph.',
+      '',
+      '[Reference link][target]',
+      '',
+      '[target]: https://example.com/reference',
+      '',
+      '~~~~js',
+      'const tilde = true',
+      '~~~~',
+      '',
+      '`````text',
+      '``` is content',
+      '`````',
+    ].join('\r\n')
+    const { container } = render(<AssistantMarkdown text={markdown} streaming={streaming} />)
+    expect(container.querySelectorAll('ol')).toHaveLength(1)
+    expect(container.querySelector('ol > li')?.textContent).toContain('Continued paragraph.')
+    expect(screen.getByRole('link', { name: 'Reference link' }).getAttribute('href')).toBe('https://example.com/reference')
+    expect(container.querySelectorAll('pre')).toHaveLength(2)
+    expect(container.textContent).toContain('``` is content')
+  })
+
+  it('removes the emphasis repair marker from rendered and copied user-facing text', async () => {
+    const source = '**香港可以接受：**QRT'
+    const { container } = render(<AssistantMarkdown text={source} />)
+    expect(container.querySelector('strong')?.textContent).toBe('香港可以接受：')
+    expect(container.textContent).toBe('香港可以接受：QRT')
+    expect(container.textContent).not.toMatch(/[\uFEFF\uE000\uE001]/u)
+
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    render(<ChatPanel messages={[{ role: 'assistant', content: [{ type: 'text', text: source }] }]} />)
+    fireEvent.click(screen.getByTestId('copy-message'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(source))
+  })
+
   it('uses the shared markdown typography layer for mixed markdown blocks', () => {
     const { container } = render(<AssistantMarkdown text={[
       'Paragraph text.',
@@ -87,12 +135,18 @@ describe('ChatPanel', () => {
     const orderedList = container.querySelector('ol')
     const unorderedList = container.querySelector('ul')
     expect(bodies.length).toBeGreaterThan(0)
-    expect(bodies.some((body) => body.className.includes('[&_ol]:list-decimal'))).toBe(true)
-    expect(bodies.some((body) => body.className.includes('[&_ul]:list-disc'))).toBe(true)
+    expect(bodies.every((body) => body.className.includes('ak-markdown-body'))).toBe(true)
     expect(orderedList).toBeTruthy()
     expect(unorderedList).toBeTruthy()
     expect(orderedList?.querySelector('li')?.textContent).toContain('First numbered item')
-    expect(container.querySelector('table')?.textContent).toContain('Alpha')
+    const table = container.querySelector('table')
+    const tableScroll = table?.parentElement
+    expect(table?.textContent).toContain('Alpha')
+    expect(tableScroll?.classList.contains('ak-markdown-table-scroll')).toBe(true)
+    expect(tableScroll?.hasAttribute('tabindex')).toBe(false)
+    expect(tableScroll?.getAttribute('aria-label')).toBe('Message table')
+    expect(table?.querySelector('th')?.getAttribute('scope')).toBe('col')
+    expect(table?.tagName).toBe('TABLE')
   })
 
   it('renders empty state', () => {
@@ -1687,10 +1741,11 @@ describe('ChatPanel', () => {
 
     const listCursor = screen.getByTestId('streaming-cursor')
     expect(screen.getAllByTestId('streaming-cursor')).toHaveLength(1)
-    // Actively-streaming list tail renders as the plain-text fade tail; the
-    // cursor sits at its end with the latest text.
-    expect(listCursor.parentElement?.classList.contains('ak-streaming-tail')).toBe(true)
-    expect(listCursor.parentElement?.textContent).toContain('second')
+    // Markdown-significant tails render immediately, rather than leaking list
+    // markers through the persistent plain-text reveal path.
+    expect(listCursor.closest('li')?.textContent).toContain('second')
+    expect(listCursor.closest('.ak-streaming-tail')).toBeNull()
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
 
     rerender(
       <ChatPanel
@@ -2655,56 +2710,60 @@ function toolResultEntry(
 }
 
 describe('AssistantMarkdown streaming stability', () => {
-  it('keeps completed markdown block DOM mounted while the tail grows and commits', () => {
-    const { container, rerender } = render(<AssistantMarkdown text={'Stable paragraph.\n\nTail'} streaming />)
-    const stableNode = container.querySelector('.ak-chat-text p')
-    expect(stableNode?.textContent).toBe('Stable paragraph.')
-
-    rerender(<AssistantMarkdown text={'Stable paragraph.\n\nTail grows'} streaming />)
-    expect(container.querySelector('.ak-chat-text p')).toBe(stableNode)
-
-    rerender(<AssistantMarkdown text={'Stable paragraph.\n\nTail grows'} streaming={false} />)
-    expect(container.querySelector('.ak-chat-text p')).toBe(stableNode)
+  it.each([
+    ['emphasis', '**正在生成**文本', 'strong'],
+    ['heading', '## 正在生成', 'h2'],
+    ['list', '- **香港可以接受：**QRT', 'li strong'],
+    ['table', '| 名称 | 值 |\n| --- | --- |\n| 香港 | QRT |', 'table'],
+    ['link', '[安全链接](https://example.com)', 'a'],
+    ['blockquote', '> 正在生成', 'blockquote'],
+    ['inline code', '`QRT`', 'code'],
+    ['fenced code', '```text\nQRT', 'pre'],
+  ])('renders a streaming %s tail through Markdown immediately', (_kind, text, selector) => {
+    const { container } = render(<AssistantMarkdown text={text} streaming />)
+    expect(container.querySelector(selector)).toBeTruthy()
+    expect(container.querySelector('.ak-streaming-tail')).toBeNull()
+    expect(screen.getAllByTestId('streaming-cursor')).toHaveLength(1)
   })
 
-  it('commits a blank-line-terminated final code block before later text arrives', () => {
+  it('repairs the model emphasis adjacency case while streaming and when complete', () => {
+    const source = '- **香港可以接受：**QRT...'
+    const { container, rerender } = render(<AssistantMarkdown text={source} streaming />)
+    expect(container.querySelector('li strong')?.textContent).toBe('香港可以接受：')
+    expect(container.querySelector('li')?.textContent).toBe('香港可以接受：QRT...')
+    expect(container.textContent).not.toMatch(/[\uFEFF\uE000\uE001]/u)
+    expect(container.textContent).not.toContain('**')
+
+    rerender(<AssistantMarkdown text={source} streaming={false} />)
+    expect(container.querySelector('li strong')?.textContent).toBe('香港可以接受：')
+    expect(container.textContent).not.toContain('**')
+  })
+
+  it('keeps raw HTML escaped and blocks unsafe URLs after normalization', () => {
+    const { container } = render(<AssistantMarkdown text={'<img src=x onerror=alert(1)> [bad](javascript:alert(1))'} streaming />)
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toContain('<img src=x onerror=alert(1)>')
+    expect(container.querySelector('a')?.getAttribute('href')).not.toContain('javascript:')
+  })
+
+  it('reparses the whole streaming document while preserving completed paragraph semantics', () => {
+    const { container, rerender } = render(<AssistantMarkdown text={'Stable paragraph.\n\nTail'} streaming />)
+    expect(container.querySelectorAll('.ak-chat-text p')).toHaveLength(2)
+    rerender(<AssistantMarkdown text={'Stable paragraph.\n\nTail grows'} streaming />)
+    expect(container.querySelectorAll('.ak-chat-text p')).toHaveLength(2)
+    expect(container.querySelector('.ak-chat-text p')?.textContent).toBe('Stable paragraph.')
+    rerender(<AssistantMarkdown text={'Stable paragraph.\n\nTail grows'} streaming={false} />)
+    expect(container.textContent).toContain('Tail grows')
+  })
+
+  it('keeps completed fenced code semantic while later text arrives', () => {
     const code = '```typescript\nconst stable = true\n```\n\n'
     const { rerender } = render(<AssistantMarkdown text={code} streaming />)
-    const stableCode = screen.getByTestId('code-block-raw')
-    rerender(<AssistantMarkdown text={`${code}later`} streaming />)
-    expect(screen.getByTestId('code-block-raw')).toBe(stableCode)
-  })
-
-  it('keeps a completed code block DOM node mounted when later blocks stream', () => {
-    const code = '```typescript\nconst stable = true\n```\n\n'
-    const { rerender } = render(<AssistantMarkdown text={`${code}later`} streaming />)
-    const stableCode = screen.getByTestId('code-block-raw')
+    expect(screen.getByTestId('code-block-raw').textContent).toContain('const stable = true')
     rerender(<AssistantMarkdown text={`${code}later text grows`} streaming />)
-    expect(screen.getByTestId('code-block-raw')).toBe(stableCode)
+    expect(screen.getByTestId('code-block-raw').textContent).toContain('const stable = true')
+    expect(screen.getByText('later text grows')).toBeTruthy()
     rerender(<AssistantMarkdown text={`${code}later text grows`} streaming={false} />)
-    expect(screen.getByTestId('code-block-raw')).toBe(stableCode)
-  })
-})
-
-describe('splitMarkdownBlocks', () => {
-  it('splits completed blocks from the trailing block being written', () => {
-    const { blocks, tail } = splitMarkdownBlocks('# Title\n\nfirst para\n\nsecond par')
-    expect(blocks).toEqual(['# Title\n\n', 'first para\n\n'])
-    expect(tail).toBe('second par')
-    // Joining the completed blocks plus the tail must reproduce the input.
-    expect(blocks.join('') + tail).toBe('# Title\n\nfirst para\n\nsecond par')
-  })
-
-  it('does not treat a blank line inside a fenced code block as a boundary', () => {
-    const text = '```ts\nconst a = 1\n\nconst b = 2\n```\n\nafter'
-    const { blocks, tail } = splitMarkdownBlocks(text)
-    // The blank line inside the fence stays in one block; only the boundary
-    // after the closing fence splits.
-    expect(blocks).toEqual(['```ts\nconst a = 1\n\nconst b = 2\n```\n\n'])
-    expect(tail).toBe('after')
-  })
-
-  it('returns no completed blocks until the first boundary appears', () => {
-    expect(splitMarkdownBlocks('just one line still typing')).toEqual({ blocks: [], tail: 'just one line still typing' })
+    expect(screen.getByTestId('code-block-raw').textContent).toContain('const stable = true')
   })
 })

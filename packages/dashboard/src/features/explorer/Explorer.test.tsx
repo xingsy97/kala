@@ -15,6 +15,7 @@ import { HIDDEN_WORKSPACES_STORAGE_KEY } from './hidden-workspaces.js'
 import { PREF_AUTO_HIDE_OFFLINE_WORKSPACES, PREF_HIDE_SUB_AGENT_SESSIONS, PREF_WORKSPACE_ORDER } from '../../lib/prefs.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 import { SessionPreviewStore } from './session-preview-store.js'
+import { i18n } from '../../i18n/index.js'
 
 const executor: AttachedExecutor = {
   executorId: 'ex-1',
@@ -123,6 +124,11 @@ describe('Explorer', () => {
     fireEvent(window, new StorageEvent('storage', { key: PREF_AUTO_HIDE_OFFLINE_WORKSPACES, newValue: '0' }))
     rerender(<Explorer {...props} />)
     expect(screen.getByTestId('workspace-row').textContent).toContain('offline box')
+    const status = screen.getByTestId('workspace-status-icon')
+    expect(status.getAttribute('data-os')).toBe('unknown')
+    expect(status.getAttribute('aria-label')).toBe('Unknown OS, offline')
+    expect(status.getAttribute('title')).toBe('Unknown OS, offline')
+    expect(screen.getByTestId('workspace-os-icon').classList.contains('lucide-monitor')).toBe(true)
   })
 
   it('hides sub-agent sessions by default while keeping the selected child reachable', () => {
@@ -377,12 +383,71 @@ describe('Explorer', () => {
     expect(workspaceStatus.className).not.toContain('border')
     expect(workspaceStatus.className).toContain('text-emerald-600')
     expect(workspaceStatus.querySelector('svg')).toBeTruthy()
-    expect(workspaceStatus.getAttribute('aria-label')).toBe('online')
-    expect(workspaceStatus.textContent).toBe('online')
+    expect(workspaceStatus.getAttribute('aria-label')).toBe('macOS, online')
+    expect(workspaceStatus.getAttribute('title')).toBe('macOS, online')
+    expect(workspaceStatus.textContent).toBe('')
     expect(screen.queryByTestId('workspace-row-meta')).toBeNull()
     expect(wsRow.textContent).not.toContain('node')
     expect(wsRow.textContent).not.toContain('v22')
     expect(wsRow.textContent).not.toContain('192.0.2.10')
+  })
+
+  it.each([
+    { label: 'Windows', os: 'win32', selectorOs: 'win32', icon: 'windows', accessibleName: 'Windows, online' },
+    { label: 'macOS', os: 'darwin', selectorOs: 'darwin', icon: 'macos', accessibleName: 'macOS, online' },
+    { label: 'Linux', os: 'linux', selectorOs: 'linux', icon: 'linux', accessibleName: 'Linux, online' },
+    { label: 'other OS', os: 'other', selectorOs: 'other', icon: 'generic', accessibleName: 'Other OS, online' },
+    { label: 'an undefined OS', os: undefined, selectorOs: 'unknown', icon: 'generic', accessibleName: 'Unknown OS, online' },
+  ] as const)('renders the $label workspace icon with stable OS selectors and an accessible label', ({ os, selectorOs, icon, accessibleName }) => {
+    render(
+      <Explorer
+        executors={[{ ...executor, os }]}
+        sessions={[]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const status = screen.getByTestId('workspace-status-icon')
+    const osIcon = screen.getByTestId('workspace-os-icon')
+    expect(status.getAttribute('data-os')).toBe(selectorOs)
+    expect(status.getAttribute('title')).toBe(accessibleName)
+    expect(status.getAttribute('aria-label')).toBe(accessibleName)
+    expect(status.textContent).toBe('')
+    expect(status.className).toContain('text-emerald-600')
+    expect(osIcon.getAttribute('data-os-icon')).toBe(icon)
+    expect(osIcon.classList.contains('lucide-monitor')).toBe(icon === 'generic')
+    expect(osIcon.classList.contains('lucide-apple')).toBe(icon === 'macos')
+    if (icon === 'windows') {
+      expect(osIcon.getAttribute('fill')).toBe('currentColor')
+      expect(osIcon.querySelectorAll('path')).toHaveLength(4)
+    }
+  })
+
+  it('localizes the workspace OS and connection status accessible label', async () => {
+    await act(async () => { await i18n.changeLanguage('zh') })
+    try {
+      render(
+        <Explorer
+          executors={[{ ...executor, os: 'linux' }]}
+          sessions={[]}
+          selectedSessionId={null}
+          onSelect={() => {}}
+          onNewSession={() => {}}
+          onConnectWorkspace={() => {}}
+          onDelete={() => {}}
+          onRename={() => {}}
+        />,
+      )
+      expect(screen.getByTestId('workspace-status-icon').getAttribute('aria-label')).toBe('Linux，在线')
+    } finally {
+      cleanup()
+      await act(async () => { await i18n.changeLanguage('en') })
+    }
   })
 
   it('persists workspace ordering preference from local storage', () => {

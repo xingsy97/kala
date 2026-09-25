@@ -16,6 +16,7 @@ import type { NodeRendererProps, RowRendererProps } from 'react-arborist'
 import { useTranslation } from 'react-i18next'
 import {
   AlertCircle,
+  Apple,
   Cable,
   ChevronDown,
   ChevronLeft,
@@ -991,10 +992,20 @@ function WorkspaceRow({
   const { t } = useTranslation()
   const w = node.data
   const workspaceLabel = w.workspaceId === null ? t('explorer.chats') : w.name
-  const meta =
+  const statusLabel =
     w.workspaceId === null
       ? t('explorer.sessionsNoWorkspace')
       : w.online ? t('explorer.online') : t('explorer.offline')
+  const osLabel = w.os === 'win32'
+    ? t('explorer.os.windows')
+    : w.os === 'darwin'
+      ? t('explorer.os.macos')
+      : w.os === 'linux'
+        ? t('explorer.os.linux')
+        : w.os === 'other'
+          ? t('explorer.os.other')
+          : t('explorer.os.unknown')
+  const iconLabel = t('explorer.workspaceOsStatus', { os: osLabel, status: statusLabel })
   const workspaceIconCls = w.online
     ? 'text-emerald-600 dark:text-emerald-300'
     : 'text-muted-foreground/75'
@@ -1048,7 +1059,7 @@ function WorkspaceRow({
         />
       ) : (
         <div className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2">
-          {w.workspaceId === null ? <span className="inline-flex h-5 w-5 flex-none items-center justify-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{meta}</span></span> : <span className={cn('inline-flex h-5 w-5 flex-none items-center justify-center transition-colors', workspaceIconCls)} data-testid="workspace-status-icon" title={meta} aria-label={meta}><Monitor className="h-4 w-4" aria-hidden="true" /><span className="sr-only">{meta}</span></span>}
+          {w.workspaceId === null ? <span className="inline-flex h-5 w-5 flex-none items-center justify-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{statusLabel}</span></span> : <span className={cn('inline-flex h-5 w-5 flex-none items-center justify-center transition-colors', workspaceIconCls)} data-testid="workspace-status-icon" data-os={w.os ?? 'unknown'} title={iconLabel} role="img" aria-label={iconLabel}><WorkspaceOsIcon os={w.os} /></span>}
           <span
             className="min-w-0 truncate font-semibold leading-5 text-foreground"
             style={{ fontSize: fontSizePx, lineHeight: 1.35 }}
@@ -1146,6 +1157,38 @@ function WorkspaceRow({
       </div>
     </div>
   )
+}
+
+function WorkspaceOsIcon({ os }: { os: WorkspaceNode['os'] }): JSX.Element {
+  const iconProps = {
+    className: 'h-4 w-4',
+    'data-testid': 'workspace-os-icon',
+    'aria-hidden': true,
+  } as const
+
+  switch (os) {
+    case 'win32':
+      return (
+        <svg viewBox="0 0 24 24" fill="currentColor" {...iconProps} data-os-icon="windows">
+          <path d="M3 4.7 10.4 3.65v7.6H3V4.7Z" />
+          <path d="m11.6 3.48 9.4-1.33v9.1h-9.4V3.48Z" />
+          <path d="M3 12.75h7.4v7.6L3 19.3v-6.55Z" />
+          <path d="M11.6 12.75H21v9.1l-9.4-1.33v-7.77Z" />
+        </svg>
+      )
+    case 'darwin':
+      return <Apple {...iconProps} data-os-icon="macos" />
+    case 'linux':
+      return (
+        <svg viewBox="0 0 24 24" fill="none" {...iconProps} data-os-icon="linux">
+          {/* Original minimal project penguin glyph; not copied from third-party artwork. */}
+          <path d="M8.2 15.7c-.8 1-1.4 2.2-1.5 3.5m9.1-3.5c.8 1 1.4 2.2 1.5 3.5M9.2 8.3c0-3 1.2-5.3 2.8-5.3s2.8 2.3 2.8 5.3c0 1.2-.2 2.3-.5 3.2 1.4 1 2.2 2.6 2.2 4.4 0 3-2 5.1-4.5 5.1s-4.5-2.1-4.5-5.1c0-1.8.8-3.4 2.2-4.4-.3-.9-.5-2-.5-3.2Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M10.6 8.2h.01M13.4 8.2h.01M10.8 10.4c.8.6 1.6.6 2.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
+      )
+    default:
+      return <Monitor {...iconProps} data-os-icon="generic" />
+  }
 }
 
 function SessionRow({

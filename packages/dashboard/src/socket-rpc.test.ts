@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { cancelSession } from './session.js'
 import { emitRpc } from './socket-rpc.js'
 
 describe('emitRpc', () => {
@@ -22,6 +23,22 @@ describe('emitRpc', () => {
     expect(emitWithAck).toHaveBeenCalledTimes(2)
     expect(emitWithAck.mock.calls[0]?.[1].operationId).toBe('stable-op')
     expect(emitWithAck.mock.calls[1]?.[1].operationId).toBe('stable-op')
+  })
+
+  it('waits for cancel acknowledgement and surfaces Host failure', async () => {
+    const emitWithAck = vi.fn().mockResolvedValue({ ok: false, error: 'cancel denied' })
+    const socket = {
+      connected: true,
+      active: true,
+      timeout: () => ({ emitWithAck }),
+      connect: vi.fn(),
+    }
+
+    await expect(cancelSession(socket as never, 'session-1')).rejects.toThrow('cancel denied')
+    expect(emitWithAck).toHaveBeenCalledWith('client:cancel', expect.objectContaining({
+      sessionId: 'session-1',
+      operationId: expect.any(String),
+    }))
   })
 
   it('throws business errors from ACK envelopes without retrying', async () => {

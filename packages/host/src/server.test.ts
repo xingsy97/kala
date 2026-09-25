@@ -1217,15 +1217,39 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
-  it('resolves an ask_user_choice tool from a dashboard choice', async () => {
+  it('ACKs client:cancel failures while preserving legacy optional ACK compatibility', async () => {
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'missing-cancel-session', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const ack = await dashboard.timeout(1000).emitWithAck('client:cancel', {
+      sessionId: 'missing-cancel-session',
+      operationId: 'cancel-missing',
+    })
+    expect(ack).toMatchObject({ ok: false, error: expect.stringContaining('unknown session') })
+    dashboard.emit('client:cancel', { sessionId: 'missing-cancel-session' })
+    dashboard.close()
+  })
+
+  it('ACKs an ask_user_choice at broker acceptance before the gated continuation completes', async () => {
     await server.close()
     const askConfig = createConfig({ tools: [ASK_USER_CHOICE], systemPrompt: 'sys' })
     let secondCallMessages: unknown
+    let releaseSecondCall: () => void = () => {}
+    let markSecondCallStarted: () => void = () => {}
+    let secondCallCompleted = false
+    const secondCallGate = new Promise<void>((resolve) => { releaseSecondCall = resolve })
+    const secondCallStarted = new Promise<void>((resolve) => { markSecondCallStarted = resolve })
     const llm: LLMAdapter = {
       name: 'ask-choice-test',
       async call(input) {
         secondCallMessages = input.messages
         if (input.messages.some((message) => message.role === 'tool')) {
+          markSecondCallStarted()
+          await secondCallGate
+          secondCallCompleted = true
           return { message: { role: 'assistant', content: [{ type: 'text', text: 'choice accepted' }] } }
         }
         return {
@@ -1279,13 +1303,28 @@ describe('wire protocol', () => {
     expect(startAck).toEqual({ ok: true })
     await toolRequested
 
+    const unknownAck = await dashboard.timeout(1000).emitWithAck('client:ask_user_choice', {
+      sessionId,
+      callId: 'unknown-choice',
+      value: 'complete',
+    })
+    expect(unknownAck).toMatchObject({ ok: false, error: expect.stringContaining('not pending') })
+    const invalidAck = await dashboard.timeout(1000).emitWithAck('client:ask_user_choice', {
+      sessionId,
+      callId: 'choice-1',
+      value: 'not-an-option',
+    })
+    expect(invalidAck).toMatchObject({ ok: false, error: expect.stringContaining('available choices') })
+
     const ack = await dashboard.timeout(1000).emitWithAck('client:ask_user_choice', {
       sessionId,
       callId: 'choice-1',
       value: 'complete',
     })
     expect(ack).toEqual({ ok: true })
-    await new Promise<void>((resolve, reject) => {
+    await secondCallStarted
+    expect(secondCallCompleted).toBe(false)
+    const turnDone = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('never finished choice turn')), 3000)
       dashboard.on('state:changed', (payload) => {
         if (payload.state.status === 'done') {
@@ -1294,7 +1333,15 @@ describe('wire protocol', () => {
         }
       })
     })
+    releaseSecondCall()
+    await turnDone
     expect(JSON.stringify(secondCallMessages)).toContain('"value":"complete"')
+    const staleAck = await dashboard.timeout(1000).emitWithAck('client:ask_user_choice', {
+      sessionId,
+      callId: 'choice-1',
+      value: 'minimal',
+    })
+    expect(staleAck).toMatchObject({ ok: false, error: expect.stringContaining('not pending') })
     dashboard.close()
   })
 

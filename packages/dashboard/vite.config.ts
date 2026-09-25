@@ -57,7 +57,7 @@ export default defineConfig({
         // Precache only the navigation shell. Hashed feature chunks (Monaco,
         // Mermaid, Shiki languages/themes, Settings, etc.) stay truly on-demand
         // instead of turning every PWA update into a ~16 MiB install.
-        globPatterns: ['index.html', '**/index-*.css', '**/*.{svg,png,webmanifest}'],
+        globPatterns: ['index.html', '**/index-*.css', '**/*.{svg,png,webmanifest,woff,woff2}'],
         // The entry filename is hash-generated and added below; broad index-*.js
         // matching accidentally precached lazy Shiki/shared chunks as well.
         globIgnores: ['**/mermaid*.js', '**/cytoscape*.js', '**/SessionFilesPanel-*.js', '**/SettingsDialog-*.js'],

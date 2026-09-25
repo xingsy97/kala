@@ -130,6 +130,7 @@ export const ClientAskUserChoiceSchema = z.object({
 ) satisfies z.ZodType<ClientAskUserChoice>
 
 export const ClientCancelSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientCancel>
 

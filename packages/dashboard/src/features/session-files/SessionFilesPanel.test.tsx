@@ -351,12 +351,17 @@ describe('SessionFilesPanel', () => {
 
     expect(await screen.findByTestId('session-file-pdf-fallback')).toBeTruthy()
     expect(createObjectURLMock).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Open inline preview' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Try inline preview' }))
     const pdf = await screen.findByTestId('session-file-pdf-viewer')
     expect(pdf.getAttribute('src')).toBe('blob:mock')
     expect(createObjectURLMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'application/pdf' }))
     expect(pdf.getAttribute('sandbox')).toBe('allow-same-origin')
     expect(pdf.getAttribute('referrerpolicy')).toBe('no-referrer')
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh file/i }))
+    await waitFor(() => expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock'))
+    expect(await screen.findByTestId('session-file-pdf-fallback')).toBeTruthy()
+    expect(screen.queryByTestId('session-file-pdf-viewer')).toBeNull()
   })
 
   it('assembles an MP4 larger than the initial 1 MiB preview before rendering native video', async () => {
@@ -364,7 +369,7 @@ describe('SessionFilesPanel', () => {
     const rangedRequests: Record<string, unknown>[] = []
     const socket = makeRangedMediaSocket('/repo/demo.mp4', size, 'video/mp4', (payload, ack) => {
       rangedRequests.push(payload)
-      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('v'.repeat(size)), mime: 'video/mp4', size, offset: payload.offset }))
+      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('v'.repeat(size)), mime: 'video/mp4', size, fileVersion: 'version-1', offset: payload.offset }))
     })
     const { unmount } = render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
     fireEvent.click(await screen.findByText('demo.mp4'))
@@ -382,7 +387,7 @@ describe('SessionFilesPanel', () => {
     expect(video.getAttribute('disableremoteplayback')).not.toBeNull()
 
     fireEvent.error(video)
-    expect(await screen.findByText(/cannot play the MP4 codec/i)).toBeTruthy()
+    expect(await screen.findByText(/cannot play this MP4/i)).toBeTruthy()
     expect(screen.getAllByRole('button', { name: 'Download file' }).length).toBeGreaterThan(0)
     await waitFor(() => expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock'))
     unmount()
@@ -396,14 +401,47 @@ describe('SessionFilesPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Load video preview' }))
     await waitFor(() => expect(pending).toHaveLength(1))
 
-    pending.shift()?.({ requestId: 'chunk-1', base64: btoa('ab'), mime: 'video/mp4', size: 5, offset: 0, truncated: { maxBytes: 2 } })
+    pending.shift()?.({ requestId: 'chunk-1', base64: btoa('ab'), mime: 'video/mp4', size: 5, fileVersion: 'version-1', offset: 0, truncated: { maxBytes: 2 } })
     expect(await screen.findByText(/40%/)).toBeTruthy()
     await waitFor(() => expect(pending).toHaveLength(1))
-    pending.shift()?.({ requestId: 'chunk-2', base64: btoa('cde'), mime: 'application/octet-stream', size: 5, offset: 2 })
-    await screen.findByTestId('session-file-video-player')
+    pending.shift()?.({ requestId: 'chunk-2', base64: btoa('cde'), mime: 'application/octet-stream', size: 5, fileVersion: 'version-1', offset: 2 })
+    expect(await screen.findByText(/file type changed while it was being loaded/i)).toBeTruthy()
+    expect(createObjectURLMock).not.toHaveBeenCalled()
 
     unmount()
-    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock')
+    expect(revokeObjectURLMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a same-size media replacement with a different file version', async () => {
+    const socket = makeRangedMediaSocket('/repo/replaced.mp4', 5, 'video/mp4', (payload, ack) => {
+      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('abcde'), mime: 'video/mp4', size: 5, fileVersion: 'version-2', offset: 0 }))
+    })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('replaced.mp4'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Load video preview' }))
+
+    expect(await screen.findByText(/file changed while it was being loaded/i)).toBeTruthy()
+    expect(createObjectURLMock).not.toHaveBeenCalled()
+  })
+
+  it('cancels pending media assembly on unmount without scheduling another chunk or creating a Blob URL', async () => {
+    let resolveChunk: ((response: unknown) => void) | undefined
+    const rangedRequests: Record<string, unknown>[] = []
+    const socket = makeRangedMediaSocket('/repo/cancel.mp4', 5, 'video/mp4', (payload, ack) => {
+      rangedRequests.push(payload)
+      resolveChunk = ack
+    })
+    const { unmount } = render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('cancel.mp4'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Load video preview' }))
+    await waitFor(() => expect(resolveChunk).toBeDefined())
+
+    unmount()
+    resolveChunk?.({ requestId: 'cancelled', base64: btoa('ab'), mime: 'video/mp4', size: 5, fileVersion: 'version-1', offset: 0, truncated: { maxBytes: 2 } })
+    await Promise.resolve()
+
+    expect(rangedRequests).toHaveLength(1)
+    expect(createObjectURLMock).not.toHaveBeenCalled()
   })
 
   it('enforces the 32 MiB inline preview cap without starting ranged assembly', async () => {
@@ -420,7 +458,7 @@ describe('SessionFilesPanel', () => {
 
   it('rejects media when its size changes during full assembly', async () => {
     const socket = makeRangedMediaSocket('/repo/changing.mp4', 5, 'video/mp4', (payload, ack) => {
-      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('abcdef'), mime: 'video/mp4', size: 6, offset: 0 }))
+      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('abcdef'), mime: 'video/mp4', size: 6, fileVersion: 'version-1', offset: 0 }))
     })
     render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
     fireEvent.click(await screen.findByText('changing.mp4'))
@@ -432,7 +470,7 @@ describe('SessionFilesPanel', () => {
 
   it('rejects an incomplete non-truncated media range', async () => {
     const socket = makeRangedMediaSocket('/repo/incomplete.mp4', 5, 'video/mp4', (payload, ack) => {
-      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('ab'), mime: 'video/mp4', size: 5, offset: 0 }))
+      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('ab'), mime: 'video/mp4', size: 5, fileVersion: 'version-1', offset: 0 }))
     })
     render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
     fireEvent.click(await screen.findByText('incomplete.mp4'))
@@ -442,14 +480,16 @@ describe('SessionFilesPanel', () => {
     expect(createObjectURLMock).not.toHaveBeenCalled()
   })
 
-  it('shows a download-oriented PDF fallback without creating a Blob URL when the browser lacks a viewer', async () => {
+  it('offers a sandboxed inline PDF attempt in desktop WebKit even when pdfViewerEnabled is false', async () => {
     Object.defineProperty(navigator, 'pdfViewerEnabled', { configurable: true, value: false })
     const socket = makeSessionFilesSocket({ file: { kind: 'pdf', content: 'JVBERi0x', size: 6, encoding: 'base64', mediaType: 'application/pdf' }, entries: [{ name: 'report.pdf', path: '/repo/report.pdf', type: 'file' }] })
     render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
     fireEvent.click(await screen.findByText('report.pdf'))
-    expect(await screen.findByTestId('session-file-pdf-fallback')).toBeTruthy()
-    expect(screen.getByText(/Use Download file/u)).toBeTruthy()
-    expect(createObjectURLMock).not.toHaveBeenCalled()
+    expect(await screen.findByRole('button', { name: 'Try inline preview' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Download file' }).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Try inline preview' }))
+    const frame = await screen.findByTestId('session-file-pdf-viewer')
+    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin')
   })
 
   it('opens Markdown files in rendered preview mode with unified typography and can switch to source', async () => {
@@ -474,8 +514,11 @@ describe('SessionFilesPanel', () => {
     const preview = await screen.findByTestId('session-file-markdown-preview')
     expect(preview.className).toContain('ak-markdown-body')
     expect(preview.textContent).toContain('Title')
+    expect(preview.querySelector('h1')?.className).toContain('text-xl')
     expect(preview.querySelector('ol')?.className).toContain('list-decimal')
     expect(preview.querySelector('table')?.className).not.toContain('text-xs')
+    expect(screen.getByRole('region', { name: 'File preview table' }).hasAttribute('tabindex')).toBe(false)
+    expect(screen.getByRole('columnheader', { name: 'Name' }).getAttribute('scope')).toBe('col')
     expect(preview.textContent).toContain('Alpha')
     expect(screen.queryByTestId('monaco-editor')).toBeNull()
 
@@ -703,7 +746,7 @@ function makeRangedMediaSocket(
     if (event === 'client:list_dirs') queueMicrotask(() => socket.serverEmit('server:dir_list', dirList(String(payload.requestId), [{ name: path.split('/').pop()!, path, type: 'file', size }])))
     if (event === 'workspace:read_binary' && ack) {
       if (payload.offset === undefined) {
-        queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('x'), mime, size, truncated: { maxBytes: 1024 * 1024 } }))
+        queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('x'), mime, size, fileVersion: 'version-1', truncated: { maxBytes: 1024 * 1024 } }))
       } else {
         onRange(payload, ack)
       }
@@ -731,7 +774,7 @@ function readBinaryFromFixture(requestId: string, file: Pick<FileContentsResult,
     ? (file.content ?? '')
     : btoa(unescape(encodeURIComponent(file.content ?? '')))
   const truncated = file.truncated || isTruncatedTextFixture ? { truncated: { maxBytes: file.size ?? 0 } } : {}
-  return { requestId, base64, mime, size: file.size ?? base64.length, ...truncated }
+  return { requestId, base64, mime, size: file.size ?? base64.length, fileVersion: 'version-1', ...truncated }
 }
 
 function dirList(requestId: string, overrideEntries?: DirListEntry[]): DirListResult {

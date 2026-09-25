@@ -61,6 +61,10 @@ session or PTY. The app shell and Settings navigation choose their responsive
 layout using the scaled breakpoints in `useMinWidth()`. Do not implement this
 with CSS `zoom`, which leaves viewport units and media queries inconsistent.
 
+## Serving security policy
+
+The Host does not add a global Content-Security-Policy to the static dashboard. Deployments that set CSP at a reverse proxy must permit `blob:` in both `media-src` (MP4 previews) and `frame-src` (sandboxed PDF previews), while keeping `object-src 'none'`. Scope those directives to the product dashboard; the separate evaluation dashboard does not use this feature and must not inherit them. The desktop shell carries the equivalent policy in `src-tauri/tauri.conf.json`.
+
 ## What it does NOT do
 
 - Call the LLM directly — always goes through Host.

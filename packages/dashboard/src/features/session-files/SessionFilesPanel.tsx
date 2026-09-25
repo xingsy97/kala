@@ -32,6 +32,7 @@ import type {
 
 import { Button } from '../../components/ui/button.js'
 import { ReadonlyImageCanvas } from '../../components/ReadonlyImagePreview.js'
+import { MarkdownTable } from '../../components/MarkdownTable.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { DEFAULT_FILE_VIEW_FONT_SIZE, PREF_FILE_VIEW_FONT_SIZE, useNumberPref } from '../../lib/prefs.js'
 import { FILE_VIEW_FONT_SIZE_PX, FONT_SIZE_MIN, FONT_SIZE_MAX } from '../../lib/display-sizes.js'
@@ -455,8 +456,8 @@ type FileViewState =
   | { kind: 'loading'; path: string }
   | { kind: 'text'; path: string; content: string; size?: number; truncated?: boolean; error?: string }
   | { kind: 'image'; path: string; content: string; size?: number; mediaType: string }
-  | { kind: 'pdf'; path: string; content: string; size?: number; mediaType: string; truncated?: boolean }
-  | { kind: 'video'; path: string; content: string; size?: number; mediaType: string; truncated?: boolean }
+  | { kind: 'pdf'; path: string; content: string; size?: number; mediaType: string; fileVersion?: string; truncated?: boolean }
+  | { kind: 'video'; path: string; content: string; size?: number; mediaType: string; fileVersion?: string; truncated?: boolean }
   | { kind: 'binary'; path?: string; size?: number; message?: string; content?: string; mediaType?: string }
   | { kind: 'too_large' | 'not_found' | 'error'; path?: string; size?: number; message?: string }
 
@@ -480,7 +481,10 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
       </ViewerShell>
     )
   }
-  if (viewer.kind === 'pdf' || viewer.kind === 'video') return <MediaFileView viewer={viewer} chrome={chrome} socket={socket} workspaceId={workspaceId} cwd={cwd} />
+  if (viewer.kind === 'pdf' || viewer.kind === 'video') {
+    const mediaIdentity = `${activePath ?? viewer.path}\0${viewer.fileVersion ?? 'unversioned'}`
+    return <MediaFileView key={mediaIdentity} viewer={viewer} chrome={chrome} socket={socket} workspaceId={workspaceId} cwd={cwd} />
+  }
   if (viewer.kind !== 'text') {
     return <ViewerShell title={viewer.path ?? t('sessionFiles.fileView')} chrome={chrome}><FallbackViewer kind={viewer.kind} size={viewer.size} message={viewer.message} /></ViewerShell>
   }
@@ -522,15 +526,17 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
 }
 
 function MediaFileView({ viewer, chrome, socket, workspaceId, cwd }: { viewer: Extract<FileViewState, { kind: 'pdf' | 'video' }>; chrome: boolean; socket?: DashboardSocket | null; workspaceId?: string; cwd?: string }): JSX.Element {
-  const pdfViewerAvailable = viewer.kind !== 'pdf' || (typeof navigator !== 'undefined' && navigator.pdfViewerEnabled === true)
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'loading'; loaded: number } | { kind: 'ready'; blob: Blob } | { kind: 'error'; message: string }>({ kind: 'idle' })
   const requestGeneration = useRef(0)
-  const identity = `${viewer.path}\0${viewer.size ?? -1}\0${viewer.mediaType}`
+  const assemblyToken = useRef<FileAssemblyToken | null>(null)
+  const pdfLoadTimer = useRef<number | null>(null)
 
-  useEffect(() => {
+  useEffect(() => () => {
     requestGeneration.current += 1
-    setState({ kind: 'idle' })
-  }, [identity])
+    if (assemblyToken.current) assemblyToken.current.cancelled = true
+    assemblyToken.current = null
+    if (pdfLoadTimer.current !== null) window.clearTimeout(pdfLoadTimer.current)
+  }, [])
 
   const [objectUrl, setObjectUrl] = useState<string | null>(null)
   useEffect(() => {
@@ -550,8 +556,9 @@ function MediaFileView({ viewer, chrome, socket, workspaceId, cwd }: { viewer: E
   }, [state])
 
   const loadPreview = useCallback(async (): Promise<void> => {
-    if (!socket || !workspaceId || viewer.size === undefined) {
-      setState({ kind: 'error', message: 'File metadata or workspace connection is unavailable.' })
+    if (assemblyToken.current) assemblyToken.current.cancelled = true
+    if (!socket || !workspaceId || viewer.size === undefined || !viewer.fileVersion) {
+      setState({ kind: 'error', message: 'Versioned file metadata or workspace connection is unavailable. Update the Executor and try again.' })
       return
     }
     if (viewer.size > INLINE_MEDIA_PREVIEW_MAX_BYTES) {
@@ -559,24 +566,43 @@ function MediaFileView({ viewer, chrome, socket, workspaceId, cwd }: { viewer: E
       return
     }
     const generation = ++requestGeneration.current
+    const token: FileAssemblyToken = { cancelled: false }
+    assemblyToken.current = token
     setState({ kind: 'loading', loaded: 0 })
     const result = await assembleWorkspaceFileBlob(socket, workspaceId, viewer.path, {
       cwd,
       limitBytes: INLINE_MEDIA_PREVIEW_MAX_BYTES,
       expectedSize: viewer.size,
       expectedMime: viewer.mediaType,
+      expectedFileVersion: viewer.fileVersion,
+      token,
       onProgress: (loaded) => {
-        if (generation === requestGeneration.current) setState({ kind: 'loading', loaded })
+        if (!token.cancelled && generation === requestGeneration.current) setState({ kind: 'loading', loaded })
       },
     })
-    if (generation !== requestGeneration.current) return
+    if (token.cancelled || generation !== requestGeneration.current) return
+    assemblyToken.current = null
     setState('error' in result ? { kind: 'error', message: result.error } : { kind: 'ready', blob: result.blob })
-  }, [cwd, socket, viewer.mediaType, viewer.path, viewer.size, workspaceId])
+  }, [cwd, socket, viewer.fileVersion, viewer.mediaType, viewer.path, viewer.size, workspaceId])
 
   const nativeViewerError = (): void => {
     requestGeneration.current += 1
-    setState({ kind: 'error', message: viewer.kind === 'video' ? 'This browser cannot play the MP4 codec.' : 'The browser PDF viewer could not display this file.' })
+    if (pdfLoadTimer.current !== null) window.clearTimeout(pdfLoadTimer.current)
+    pdfLoadTimer.current = null
+    setState({ kind: 'error', message: viewer.kind === 'video' ? 'This browser cannot play this MP4. Download the file to try a local player.' : 'The browser PDF viewer could not display this file.' })
   }
+  const pdfViewerStarted = (): void => {
+    if (pdfLoadTimer.current !== null) window.clearTimeout(pdfLoadTimer.current)
+    pdfLoadTimer.current = null
+  }
+  useEffect(() => {
+    if (viewer.kind !== 'pdf' || !objectUrl) return
+    pdfLoadTimer.current = window.setTimeout(nativeViewerError, 12_000)
+    return () => {
+      if (pdfLoadTimer.current !== null) window.clearTimeout(pdfLoadTimer.current)
+      pdfLoadTimer.current = null
+    }
+  }, [objectUrl, viewer.kind])
   const progress = state.kind === 'loading' && viewer.size ? Math.min(100, Math.round((state.loaded / viewer.size) * 100)) : 0
   const fallbackTestId = viewer.kind === 'pdf' ? 'session-file-pdf-fallback' : 'session-file-video-fallback'
 
@@ -586,16 +612,16 @@ function MediaFileView({ viewer, chrome, socket, workspaceId, cwd }: { viewer: E
         viewer.kind === 'video' ? (
           <video className="h-full w-full bg-black object-contain" src={objectUrl} controls preload="metadata" playsInline disableRemotePlayback onError={nativeViewerError} data-testid="session-file-video-player" />
         ) : (
-          <iframe className="h-full w-full border-0 bg-muted/25" src={objectUrl} sandbox="allow-same-origin" referrerPolicy="no-referrer" title={`PDF preview: ${viewer.path}`} onError={nativeViewerError} data-testid="session-file-pdf-viewer" />
+          <iframe className="h-full w-full border-0 bg-muted/25" src={objectUrl} sandbox="allow-same-origin" referrerPolicy="no-referrer" title={`PDF preview: ${viewer.path}`} onLoad={pdfViewerStarted} onError={nativeViewerError} data-testid="session-file-pdf-viewer" />
         )
       ) : (
         <div className="space-y-3 p-4 text-sm" data-testid={fallbackTestId}>
           <div className="font-medium">{viewer.kind === 'pdf' ? 'PDF ready for read-only preview' : 'MP4 ready for playback'}</div>
           <div className="text-xs text-muted-foreground">
-            {state.kind === 'error' ? state.message : state.kind === 'loading' ? `Loading complete file… ${formatBytes(state.loaded)} of ${formatBytes(viewer.size ?? 0)} (${progress}%)` : !pdfViewerAvailable ? 'This browser does not provide a built-in PDF viewer. Use Download file to open it with a trusted local viewer.' : `Preview loads the complete file on request, up to ${formatBytes(INLINE_MEDIA_PREVIEW_MAX_BYTES)}.`}
+            {state.kind === 'error' ? state.message : state.kind === 'loading' ? `Loading complete file… ${formatBytes(state.loaded)} of ${formatBytes(viewer.size ?? 0)} (${progress}%)` : viewer.kind === 'pdf' ? `Try the browser's sandboxed inline PDF viewer, or download the file. Preview loads up to ${formatBytes(INLINE_MEDIA_PREVIEW_MAX_BYTES)}.` : `Preview loads the complete file on request, up to ${formatBytes(INLINE_MEDIA_PREVIEW_MAX_BYTES)}.`}
           </div>
           {state.kind === 'loading' ? <progress className="w-full" max={viewer.size ?? 1} value={state.loaded} aria-label="Preview loading progress" /> : null}
-          {pdfViewerAvailable && state.kind !== 'loading' ? <Button size="sm" variant="outline" onClick={() => void loadPreview()}>{state.kind === 'error' ? 'Retry preview' : viewer.kind === 'pdf' ? 'Open inline preview' : 'Load video preview'}</Button> : null}
+          {state.kind !== 'loading' ? <Button size="sm" variant="outline" onClick={() => void loadPreview()}>{state.kind === 'error' ? 'Retry preview' : viewer.kind === 'pdf' ? 'Try inline preview' : 'Load video preview'}</Button> : null}
           <Button size="sm" variant="ghost" disabled={!socket || !workspaceId} onClick={() => { if (socket && workspaceId) void downloadWorkspaceFile(socket, workspaceId, undefined, viewer.path, undefined, cwd) }}>Download file</Button>
         </div>
       )}
@@ -619,9 +645,7 @@ function MarkdownFileView({ content, fontSize }: { content: string; fontSize: nu
         code: ({ className, children }) => <code className={cn('rounded-md border border-border/45 bg-muted/55 px-1 py-0.5 font-mono text-[0.9em] text-foreground', className)}>{children}</code>,
         pre: ({ children }) => <MarkdownPre>{children}</MarkdownPre>,
         blockquote: ({ children }) => <blockquote className="my-3 rounded-r-xl border-l-2 border-primary/45 bg-muted/30 px-3 py-1 text-muted-foreground">{children}</blockquote>,
-        table: ({ children }) => <div className="my-3 overflow-auto rounded-xl border border-border/55"><table className="w-full border-collapse text-left">{children}</table></div>,
-        th: ({ children }) => <th className="border-b border-r border-border/45 bg-muted/55 px-2 py-1 font-semibold">{children}</th>,
-        td: ({ children }) => <td className="border border-border px-2 py-1 align-top">{children}</td>,
+        table: ({ children }) => <MarkdownTable label="File preview table">{children}</MarkdownTable>,
       }}>
         {content}
       </ReactMarkdown>
@@ -707,57 +731,64 @@ async function downloadWorkspaceFileBlob(socket: DashboardSocket, workspaceId: s
   return assembleWorkspaceFileBlob(socket, workspaceId, path, { cwd, limitBytes: FILE_DOWNLOAD_MAX_BYTES })
 }
 
+type FileAssemblyToken = { cancelled: boolean }
+
 type FileAssemblyOptions = {
   cwd?: string
   limitBytes: number
   expectedSize?: number
   expectedMime?: string
+  expectedFileVersion?: string
+  token?: FileAssemblyToken
   onProgress?: (loaded: number, total: number) => void
 }
 
 async function assembleWorkspaceFileBlob(socket: DashboardSocket, workspaceId: string, path: string, options: FileAssemblyOptions): Promise<{ blob: Blob } | { error: string }> {
-  const chunks: ArrayBuffer[] = []
+  const chunks: BlobPart[] = []
   let offset = 0
   let expectedSize: number | null = options.expectedSize ?? null
-  let mediaType = options.expectedMime ?? 'application/octet-stream'
-  if (expectedSize !== null && expectedSize > options.limitBytes) return { error: `The file is ${formatBytes(expectedSize)}, above the ${formatBytes(options.limitBytes)} inline preview limit.` }
+  let expectedFileVersion = options.expectedFileVersion
+  let mediaType = options.expectedMime ?? ''
+  const fail = (error: string): { error: string } => {
+    chunks.length = 0
+    return { error }
+  }
+  if (expectedSize !== null && expectedSize > options.limitBytes) return fail(`The file is ${formatBytes(expectedSize)}, above the ${formatBytes(options.limitBytes)} inline preview limit.`)
 
   while (expectedSize === null || offset < expectedSize) {
+    if (options.token?.cancelled) return fail('File loading was cancelled.')
     const res = await workspaceReadBinary(socket, workspaceId, path, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
       offset,
       maxBytes: Math.min(FILE_TRANSFER_CHUNK_BYTES, options.limitBytes - offset),
       ackTimeoutMs: 120_000,
     })
-    if (res.error) return { error: res.error.message }
-    if (offset > 0 && res.offset !== offset) return { error: 'The connected Executor does not support ranged file reads yet. Update the Executor and try again.' }
+    if (options.token?.cancelled) return fail('File loading was cancelled.')
+    if (res.error) return fail(res.error.message)
+    if (offset > 0 && res.offset !== offset) return fail('The connected Executor does not support ranged file reads yet. Update the Executor and try again.')
     if (expectedSize === null) {
       expectedSize = res.size
-      if (expectedSize > options.limitBytes) return { error: `The file is ${formatBytes(expectedSize)}, above the ${formatBytes(options.limitBytes)} limit.` }
+      if (expectedSize > options.limitBytes) return fail(`The file is ${formatBytes(expectedSize)}, above the ${formatBytes(options.limitBytes)} limit.`)
     } else if (res.size !== expectedSize) {
-      return { error: 'The file changed while it was being loaded. Try again.' }
+      return fail('The file changed while it was being loaded. Try again.')
     }
-    if (offset === 0) {
-      mediaType = res.mime || mediaType
-      if (options.expectedMime && res.mime !== options.expectedMime) return { error: 'The file type changed while it was being loaded. Try again.' }
-    }
-    const bytes = base64ToBytes(res.base64)
-    if (bytes.length === 0 && offset < expectedSize) return { error: 'The executor returned an empty file chunk. Try again.' }
-    if (offset + bytes.length > expectedSize || offset + bytes.length > options.limitBytes) return { error: 'The executor returned a file chunk outside the expected size.' }
-    chunks.push(copyBytesToArrayBuffer(bytes))
-    offset += bytes.length
-    options.onProgress?.(offset, expectedSize)
-    if (offset < expectedSize && !res.truncated) return { error: `Loaded ${formatBytes(offset)} of ${formatBytes(expectedSize)} before the range ended. Try again.` }
-  }
-  if (expectedSize === null) return { error: 'The executor did not return file metadata.' }
-  if (offset !== expectedSize) return { error: `Loaded ${formatBytes(offset)} of ${formatBytes(expectedSize)}. Try again.` }
-  return { blob: new Blob(chunks, { type: mediaType }) }
-}
+    if (expectedFileVersion === undefined && offset === 0) expectedFileVersion = res.fileVersion
+    if (expectedFileVersion !== undefined && res.fileVersion !== expectedFileVersion) return fail('The file changed while it was being loaded. Try again.')
+    if (!mediaType) mediaType = res.mime
+    if (!res.mime || res.mime !== mediaType) return fail('The file type changed while it was being loaded. Try again.')
 
-function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new ArrayBuffer(bytes.byteLength)
-  new Uint8Array(copy).set(bytes)
-  return copy
+    const bytes = base64ToBytes(res.base64)
+    if (bytes.length === 0 && offset < expectedSize) return fail('The executor returned an empty file chunk. Try again.')
+    if (offset + bytes.length > expectedSize || offset + bytes.length > options.limitBytes) return fail('The executor returned a file chunk outside the expected size.')
+    chunks.push(bytes)
+    offset += bytes.length
+    if (!options.token?.cancelled) options.onProgress?.(offset, expectedSize)
+    if (offset < expectedSize && !res.truncated) return fail(`Loaded ${formatBytes(offset)} of ${formatBytes(expectedSize)} before the range ended. Try again.`)
+  }
+  if (options.token?.cancelled) return fail('File loading was cancelled.')
+  if (expectedSize === null) return fail('The executor did not return file metadata.')
+  if (offset !== expectedSize) return fail(`Loaded ${formatBytes(offset)} of ${formatBytes(expectedSize)}. Try again.`)
+  return { blob: new Blob(chunks, { type: mediaType || 'application/octet-stream' }) }
 }
 
 function downloadableBlob(viewer: FileViewState): { blob: Blob } | undefined {
@@ -799,7 +830,7 @@ function fileViewDiagnostic(kind: string, message?: string): { title: string; de
 
 function fileResultToViewState(result: FileContentsResult): FileViewState {
   if (result.mediaType === 'video/mp4' && result.content !== undefined) {
-    return { kind: 'video', path: result.path, content: result.content, size: result.size, mediaType: result.mediaType, truncated: result.truncated }
+    return { kind: 'video', path: result.path, content: result.content, size: result.size, mediaType: result.mediaType, fileVersion: result.fileVersion, truncated: result.truncated }
   }
   if (result.kind === 'binary' && result.content !== undefined) {
     return { kind: 'binary', path: result.path, content: result.content, size: result.size, mediaType: result.mediaType, message: result.error }
@@ -808,7 +839,7 @@ function fileResultToViewState(result: FileContentsResult): FileViewState {
     return { kind: 'image', path: result.path, content: result.content, size: result.size, mediaType: result.mediaType ?? 'application/octet-stream' }
   }
   if ((result.kind === 'pdf' || result.mediaType === 'application/pdf') && result.content !== undefined) {
-    return { kind: 'pdf', path: result.path, content: result.content, size: result.size, mediaType: result.mediaType ?? 'application/pdf', truncated: result.truncated }
+    return { kind: 'pdf', path: result.path, content: result.content, size: result.size, mediaType: result.mediaType ?? 'application/pdf', fileVersion: result.fileVersion, truncated: result.truncated }
   }
   if (result.content !== undefined) {
     return { kind: 'text', path: result.path, content: result.content, size: result.size, truncated: result.truncated, error: result.error }
@@ -1002,10 +1033,10 @@ function classifyReadBinaryResult(
     return { requestId, workspaceId, path, kind: 'image', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
   }
   if (isPdf) {
-    return { requestId, workspaceId, path, kind: 'pdf', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
+    return { requestId, workspaceId, path, kind: 'pdf', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, fileVersion: res.fileVersion, ...(truncated ? { truncated: true } : {}) }
   }
   if (isVideo) {
-    return { requestId, workspaceId, path, kind: 'binary', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
+    return { requestId, workspaceId, path, kind: 'binary', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, fileVersion: res.fileVersion, ...(truncated ? { truncated: true } : {}) }
   }
   if (isText) {
     // For text-shaped MIME, decode UTF-8 for the viewer. Callers who need
@@ -1015,12 +1046,12 @@ function classifyReadBinaryResult(
     const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
     return { requestId, workspaceId, path, kind: 'text', content: text, encoding: 'utf8', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
   }
-  return { requestId, workspaceId, path, kind: 'binary', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
+  return { requestId, workspaceId, path, kind: 'binary', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, fileVersion: res.fileVersion, ...(truncated ? { truncated: true } : {}) }
 }
 
-function base64ToBytes(base64: string): Uint8Array {
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(base64)
-  const out = new Uint8Array(binary.length)
+  const out = new Uint8Array(new ArrayBuffer(binary.length))
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
   return out
 }

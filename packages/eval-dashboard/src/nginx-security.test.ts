@@ -12,9 +12,8 @@ function location(start: string, next: string): string {
 describe("evaluation dashboard nginx security policy", () => {
   it("prevents framing and disables unnecessary browser capabilities", () => {
     expect(securityHeaders).toMatch(/Content-Security-Policy[^\n]*frame-ancestors 'none'/);
-    expect(securityHeaders).toMatch(/media-src blob:; frame-src blob:; object-src 'none'/);
-    expect(securityHeaders).not.toMatch(/media-src[^;]*(?:https?:|'self')/);
-    expect(securityHeaders).not.toMatch(/frame-src[^;]*(?:https?:|'self')/);
+    expect(securityHeaders).toMatch(/object-src 'none'/);
+    expect(securityHeaders).not.toMatch(/media-src|frame-src/);
     expect(securityHeaders).toMatch(/add_header X-Frame-Options DENY always;/);
     expect(securityHeaders).toMatch(/add_header Permissions-Policy "camera=\(\), microphone=\(\), geolocation=\(\), payment=\(\), usb=\(\)" always;/);
     expect(config).toMatch(/include \/opt\/agent-evaluation\/security-headers\.conf;/);

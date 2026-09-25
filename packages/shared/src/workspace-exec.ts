@@ -50,6 +50,8 @@ export type WorkspaceReadBinaryResponse = {
   base64: string
   mime: string
   size: number
+  /** Stable identity for the opened file version. Older Executors may omit it. */
+  fileVersion?: string
   offset?: number
   truncated?: { maxBytes: number }
   error?: WorkspaceReadBinaryError

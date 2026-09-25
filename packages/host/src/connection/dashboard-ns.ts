@@ -117,7 +117,7 @@ import { dashboardConnectionMeta, type ConnectionMeta } from './socket-metadata.
 import { OperationDeduper } from './operation-deduper.js'
 import type { AgentRuntimeRegistry } from '../agent-runtime/types.js'
 import { validateMessageAttachmentReferences } from '../message-attachment-resolver.js'
-import type { AskUserChoiceBroker } from '../ask-user-choice.js'
+import { askUserChoiceRequestFromPendingCall, type AskUserChoiceBroker } from '../ask-user-choice.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -735,22 +735,45 @@ export function configureDashboardNamespace(
           : { kind: 'choice' as const, value: p.value ?? '' }
         const resolved = deps.askUserChoice.respond(p.sessionId, p.callId, response)
         if (!resolved.ok && resolved.error === 'ask_user_choice request is not pending') {
-          deps.askUserChoice.respondEarly(p.sessionId, p.callId, response)
+          const record = await loadRecordForDashboard(deps, p.sessionId)
+          const call = record?.state.pendingCalls.find((candidate) => (
+            candidate.callId === p.callId
+            && candidate.name === 'ask_user_choice'
+            && (candidate.status === 'dispatched' || candidate.status === 'approved')
+          ))
+          const request = call ? askUserChoiceRequestFromPendingCall({
+            sessionId: p.sessionId,
+            callId: call.callId,
+            name: call.name,
+            input: call.input,
+            intent: call.intent,
+          }) : null
+          if (!request) throw new Error('ask_user_choice request is not pending')
+          const early = deps.askUserChoice.respondEarly(request, response)
+          if (!early.ok) throw new Error(early.error)
           return
         }
         if (!resolved.ok) throw new Error(resolved.error)
       })
+      // This ACK confirms broker acceptance only. Resolving the broker wakes the
+      // agent continuation, but the continuation intentionally runs independently.
       ack?.(result)
       deps.audit?.log({ action: 'dashboard.ask_user_choice', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: result.ok ? 'ok' : 'error', metadata: { responseType: p.customText !== undefined ? 'custom_text' : 'choice', ...(p.value !== undefined ? { value: p.value } : { customTextBytes: Buffer.byteLength(p.customText ?? '', 'utf8') }) }, ...(!result.ok ? { error: result.error } : {}) })
     })
-    socket.on('client:cancel', async (raw: ClientCancel) => {
+    socket.on('client:cancel', async (raw: ClientCancel, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientCancelSchema, raw, 'client:cancel', (raw as ClientCancel | undefined)?.sessionId)
-      if (!p) return
-      // Establish the queue boundary before cancelling the turn. Otherwise the
-      // queue drainer can observe the resulting resting state and immediately
-      // start a queued steer/follow-up, making Stop appear ineffective.
-      await deps.messageQueues.stop(p.sessionId)
-      await safeRuntimeAction(deps, p.sessionId, (runtime, record) => runtime.cancel(record))
+      if (!p) { ack?.({ ok: false, error: 'invalid cancel payload' }); return }
+      const result = await operations.run(p.operationId, async () => {
+        // Establish the queue boundary before cancelling the turn. Otherwise the
+        // queue drainer can observe the resulting resting state and immediately
+        // start a queued steer/follow-up, making Stop appear ineffective.
+        await deps.messageQueues.stop(p.sessionId)
+        const record = await loadRecordForDashboard(deps, p.sessionId)
+        if (!record) throw new Error('unknown session')
+        await deps.agentRuntimes.require(record.agentRuntime).cancel(record)
+      })
+      ack?.(result)
+      if (!result.ok) deps.broadcastError(p.sessionId, 'host', result.error)
     })
     socket.on('client:interrupt_sub_agent', async (raw: ClientInterruptSubAgent) => {
       const p = vparse(schema.ClientInterruptSubAgentSchema, raw, 'client:interrupt_sub_agent')

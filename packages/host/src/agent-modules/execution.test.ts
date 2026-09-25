@@ -193,6 +193,52 @@ describe('configured tool execution', () => {
     await expect(pending).resolves.toEqual({ ok: true, content: JSON.stringify({ type: 'custom_text', text: 'Use a safer hybrid plan.' }) })
   })
 
+  it('rejects invalid choices without consuming the pending broker request', async () => {
+    const broker = new AskUserChoiceBroker()
+    const call = effect('ask_user_choice', { message: 'Pick', choices: ['one', 'two'] })
+    const pending = broker.ask('session', call)
+
+    expect(broker.respond('session', call.callId, { kind: 'choice', value: 'invalid' })).toEqual({
+      ok: false,
+      error: 'selected value is not one of the available choices',
+    })
+    expect(broker.respond('session', call.callId, { kind: 'choice', value: 'two' })).toEqual({ ok: true })
+    await expect(pending).resolves.toMatchObject({ ok: true })
+  })
+
+  it('rejects choice values that cannot round-trip through the response wire schema', async () => {
+    const broker = new AskUserChoiceBroker()
+    await expect(broker.ask('session', effect('ask_user_choice', {
+      message: 'Pick',
+      choices: ['x'.repeat(501)],
+    }))).resolves.toEqual({
+      ok: false,
+      content: 'ask_user_choice choice values cannot exceed 500 characters',
+    })
+  })
+
+  it('validates legitimate early responses against the authoritative request', async () => {
+    const broker = new AskUserChoiceBroker()
+    const request = {
+      sessionId: 'session', callId: 'ask_user_choice-1', message: 'Pick', choices: [{ value: 'one' }],
+    }
+    expect(broker.respondEarly(request, { kind: 'choice', value: 'invalid' })).toMatchObject({ ok: false })
+    expect(broker.respondEarly(request, { kind: 'choice', value: 'one' })).toEqual({ ok: true })
+    await expect(broker.ask('session', effect('ask_user_choice', { message: 'Pick', choices: ['one'] })))
+      .resolves.toEqual({ ok: true, content: JSON.stringify({ value: 'one', label: 'one' }) })
+  })
+
+  it('does not let superseded same-key cleanup delete the replacement broker entry', async () => {
+    const broker = new AskUserChoiceBroker()
+    const call = effect('ask_user_choice', { message: 'Pick', choices: ['one', 'two'] })
+    const first = broker.ask('session', call)
+    const second = broker.ask('session', call)
+    await expect(first).resolves.toMatchObject({ ok: false, failure: { code: 'ASK_USER_CHOICE_CANCELLED' } })
+
+    expect(broker.respond('session', call.callId, { kind: 'choice', value: 'two' })).toEqual({ ok: true })
+    await expect(second).resolves.toEqual({ ok: true, content: JSON.stringify({ value: 'two', label: 'two' }) })
+  })
+
   it('runs the skill host handler without calling the executor', async () => {
     const skillsRoot = join(dir, 'skills-root')
     const skillDir = join(skillsRoot, 'demo-skill')

@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
 import { HelpHint } from '../../components/ui/help-hint.js'
+import { MarkdownTable } from '../../components/MarkdownTable.js'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '../../components/ui/button.js'
@@ -295,17 +296,11 @@ function DocsMarkdown({ body }: { body: string }): JSX.Element {
     <div
       className={cn(
         'ak-markdown-body min-w-0 max-w-none break-words text-sm leading-7 text-foreground [overflow-wrap:anywhere]',
-        '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
-        '[&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border/70 [&_blockquote]:bg-muted/30 [&_blockquote]:py-1 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground',
-        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_code]:text-foreground',
         '[&_h1]:mb-4 [&_h1]:mt-0 [&_h1]:border-b [&_h1]:border-border/60 [&_h1]:pb-2 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-normal',
         '[&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:border-b [&_h2]:border-border/50 [&_h2]:pb-1.5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-normal',
         '[&_h3]:mb-2 [&_h3]:mt-6 [&_h3]:text-base [&_h3]:font-semibold [&_h4]:mb-2 [&_h4]:mt-5 [&_h4]:text-sm [&_h4]:font-semibold',
-        '[&_hr]:my-6 [&_hr]:border-border/60',
         '[&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md [&_img]:border [&_img]:border-border/60',
-        '[&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-3 [&_strong]:font-semibold [&_strong]:text-foreground [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6',
         '[&_pre]:m-0 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
-        '[&_table]:w-full [&_table]:border-collapse [&_table]:text-left [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_td]:border [&_td]:border-border/60 [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_th]:border [&_th]:border-border/70 [&_th]:bg-muted/60 [&_th]:px-3 [&_th]:py-2 [&_th]:font-semibold',
       )}
       data-testid="docs-markdown"
     >
@@ -313,7 +308,7 @@ function DocsMarkdown({ body }: { body: string }): JSX.Element {
         remarkPlugins={[remarkGfm]}
         components={{
           table({ children }) {
-            return <div className="my-4 max-w-full overflow-x-auto rounded-md border border-border/60"><table>{children}</table></div>
+            return <MarkdownTable label="Documentation table">{children}</MarkdownTable>
           },
           pre({ children }) {
             return <MarkdownPre>{children}</MarkdownPre>

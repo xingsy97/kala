@@ -629,7 +629,7 @@ export function App(): JSX.Element {
       return
     }
     if (status !== 'thinking' && status !== 'executing_tools' && status !== 'awaiting_approval') return
-    if (session.socket) cancelSession(session.socket, cancelPendingSessionId)
+    if (session.socket) void cancelSession(session.socket, cancelPendingSessionId).catch(() => {})
     setCancelPendingSessionId(null)
   }, [activeSessionId, cancelPendingSessionId, session.socket, session.state?.status])
 
@@ -1467,7 +1467,7 @@ export function App(): JSX.Element {
           if (!socket || activeSessionId === null) return
           setPendingUserMessages((items) => items.filter((item) => item.mode !== 'steer'))
           setOptimisticQueuedMessages([])
-          cancelSession(socket, activeSessionId)
+          void cancelSession(socket, activeSessionId).catch(() => {})
         },
       },
       {
@@ -2142,7 +2142,7 @@ export function App(): JSX.Element {
                             // stuck as "sending" or restarts the stopped Session.
                             setPendingUserMessages((items) => items.filter((item) => item.mode !== 'steer'))
                             setOptimisticQueuedMessages([])
-                            cancelSession(session.socket, activeSessionId)
+                            void cancelSession(session.socket, activeSessionId).catch(() => {})
                           }}
                           onRenameSession={renameCurrentSessionFromSlash}
                           onDeleteSession={requestSlashDeleteCurrentSession}
@@ -2305,18 +2305,24 @@ export function App(): JSX.Element {
                             />
                           ) : (
                             <AskUserChoiceCard
+                              sessionScope={activeSessionId ?? ''}
                               requests={session.pendingAskUserChoices}
-                              onChoose={(callId, value) => {
-                                if (!session.socket || activeSessionId === null) return
-                                void respondAskUserChoice(session.socket, activeSessionId, callId, { value })
+                              onSubmit={(callId, draft) => {
+                                if (!session.socket || activeSessionId === null) {
+                                  return Promise.reject(new Error('Dashboard is not connected to the session'))
+                                }
+                                return respondAskUserChoice(
+                                  session.socket,
+                                  activeSessionId,
+                                  callId,
+                                  draft.kind === 'choice' ? { value: draft.value } : { customText: draft.text },
+                                )
                               }}
-                              onCustomText={(callId, customText) => {
-                                if (!session.socket || activeSessionId === null) return
-                                void respondAskUserChoice(session.socket, activeSessionId, callId, { customText })
-                              }}
-                              onRejectAll={() => {
-                                if (!session.socket || activeSessionId === null) return
-                                cancelSession(session.socket, activeSessionId)
+                              onReject={() => {
+                                if (!session.socket || activeSessionId === null) {
+                                  return Promise.reject(new Error('Dashboard is not connected to the session'))
+                                }
+                                return cancelSession(session.socket, activeSessionId)
                               }}
                             />
                           )

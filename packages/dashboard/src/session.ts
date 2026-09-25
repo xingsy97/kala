@@ -945,12 +945,12 @@ function pendingCallToAskUserChoice(sessionId: string, call: PendingToolCall): A
 function normalizeAskUserChoiceOption(raw: unknown): AskUserChoiceOption | null {
   if (typeof raw === 'string') {
     const value = raw.trim()
-    return value.length > 0 ? { value } : null
+    return value.length > 0 && value.length <= 500 ? { value } : null
   }
   if (!raw || typeof raw !== 'object') return null
   const record = raw as Record<string, unknown>
   const value = typeof record.value === 'string' ? record.value.trim() : ''
-  if (value.length === 0) return null
+  if (value.length === 0 || value.length > 500) return null
   const label = typeof record.label === 'string' && record.label.trim().length > 0 ? record.label.trim() : undefined
   const description = typeof record.description === 'string' && record.description.trim().length > 0 ? record.description.trim() : undefined
   return {
@@ -1004,8 +1004,8 @@ export function deleteSession(
 export function cancelSession(
   socket: DashboardSocket,
   sessionId: string,
-): void {
-  socket.emit('client:cancel', { sessionId })
+): Promise<void> {
+  return emitRpc(socket, 'client:cancel', { sessionId })
 }
 
 export function clearSession(

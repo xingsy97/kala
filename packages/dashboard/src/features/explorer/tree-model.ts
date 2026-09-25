@@ -6,7 +6,7 @@
  * component harness. Explorer.tsx feeds the output directly to react-arborist.
  */
 
-import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
+import type { AttachedExecutor, ExecutorOs, SessionSummary } from '@agent-kernel/shared'
 
 export type WorkspaceNode = {
   id: string
@@ -14,7 +14,7 @@ export type WorkspaceNode = {
   workspaceId: string | null
   name: string
   online: boolean
-  os?: string
+  os?: ExecutorOs
   runtime?: string
   runtimeVersion?: string
   ip?: string
@@ -94,6 +94,8 @@ export function buildTree(
     const key = s.workspaceId ?? UNASSIGNED_KEY
     workspaceKeyBySession.set(s.sessionId, key)
     if (!workspacesByKey.has(key)) {
+      // A session-only, offline workspace has no attached executor to
+      // authoritatively report its OS. Leave it unknown for the generic icon.
       workspacesByKey.set(key, {
         id: key === UNASSIGNED_KEY ? 'ws:unassigned' : `ws:${key}`,
         kind: 'workspace',

@@ -29,9 +29,11 @@ export class AskUserChoiceBroker {
       if (Date.now() <= early.expiresAt) return selectedChoiceResult(parsed.request, early.response)
     }
 
+    let entry: PendingChoice | undefined
     try {
       const response = await new Promise<AskUserChoiceResponse>((resolve, reject) => {
-        this.pending.set(key, { request: parsed.request, resolve, reject })
+        entry = { request: parsed.request, resolve, reject }
+        this.pending.set(key, entry)
       })
       return selectedChoiceResult(parsed.request, response)
     } catch (error) {
@@ -47,19 +49,16 @@ export class AskUserChoiceBroker {
         },
       }
     } finally {
-      if (this.pending.get(key)?.request.callId === effect.callId) this.pending.delete(key)
+      if (entry && this.pending.get(key) === entry) this.pending.delete(key)
     }
   }
 
   respond(sessionId: string, callId: string, response: string | AskUserChoiceResponse): { ok: true } | { ok: false; error: string } {
     const pending = this.pending.get(choiceKey(sessionId, callId))
     if (!pending) return { ok: false, error: 'ask_user_choice request is not pending' }
-    const normalized = normalizeResponse(response)
-    if (!normalized) return { ok: false, error: 'ask_user_choice response must be a non-empty choice value or custom text' }
-    if (normalized.kind === 'choice' && !pending.request.choices.some((choice) => choice.value === normalized.value)) {
-      return { ok: false, error: 'selected value is not one of the available choices' }
-    }
-    pending.resolve(normalized)
+    const normalized = validateResponse(pending.request, response)
+    if (!normalized.ok) return normalized
+    pending.resolve(normalized.response)
     return { ok: true }
   }
 
@@ -74,10 +73,12 @@ export class AskUserChoiceBroker {
     }
   }
 
-  respondEarly(sessionId: string, callId: string, response: string | AskUserChoiceResponse): { ok: true } {
+  respondEarly(request: AskUserChoiceRequest, response: string | AskUserChoiceResponse): { ok: true } | { ok: false; error: string } {
     this.pruneEarlyResponses()
-    this.earlyResponses.set(choiceKey(sessionId, callId), {
-      response: normalizeResponse(response) ?? { kind: 'choice', value: '' },
+    const normalized = validateResponse(request, response)
+    if (!normalized.ok) return normalized
+    this.earlyResponses.set(choiceKey(request.sessionId, request.callId), {
+      response: normalized.response,
       expiresAt: Date.now() + 30_000,
     })
     return { ok: true }
@@ -89,6 +90,18 @@ export class AskUserChoiceBroker {
       if (response.expiresAt <= now) this.earlyResponses.delete(key)
     }
   }
+}
+
+function validateResponse(
+  request: AskUserChoiceRequest,
+  response: string | AskUserChoiceResponse,
+): { ok: true; response: AskUserChoiceResponse } | { ok: false; error: string } {
+  const normalized = normalizeResponse(response)
+  if (!normalized) return { ok: false, error: 'ask_user_choice response must be a non-empty choice value or custom text' }
+  if (normalized.kind === 'choice' && !request.choices.some((choice) => choice.value === normalized.value)) {
+    return { ok: false, error: 'selected value is not one of the available choices' }
+  }
+  return { ok: true, response: normalized }
 }
 
 function selectedChoiceResult(request: AskUserChoiceRequest, response: AskUserChoiceResponse): ToolExecutionResult {
@@ -161,6 +174,7 @@ function parseAskUserChoicePayload(
   for (const raw of rawChoices) {
     const choice = normalizeChoice(raw)
     if (!choice) return { ok: false, error: 'ask_user_choice.choices must be strings or { value, label, description } objects' }
+    if (choice.value.length > 500) return { ok: false, error: 'ask_user_choice choice values cannot exceed 500 characters' }
     if (values.has(choice.value)) return { ok: false, error: `duplicate ask_user_choice value: ${choice.value}` }
     values.add(choice.value)
     choices.push(choice)

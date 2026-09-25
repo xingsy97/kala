@@ -16,11 +16,26 @@ describe('canFadeRevealTail (safety-net downgrade)', () => {
   it('refuses an empty tail', () => {
     expect(canFadeRevealTail('')).toBe(false)
   })
-  it('refuses a tail that is inside a fenced code block', () => {
-    expect(canFadeRevealTail('here is code:\n```js\nconst a = 1')).toBe(false)
-  })
-  it('conservatively refuses a tail that contains a closing fence line', () => {
-    expect(canFadeRevealTail('```js\nconst a = 1\n```\nnow prose')).toBe(false)
+  it.each([
+    ['emphasis', 'Answer: **香港可以接受：**QRT'],
+    ['heading', '## 标题'],
+    ['unordered list', '- 第一项'],
+    ['ordered list', '1. 第一项'],
+    ['table', '| 名称 | 值 |\n| --- | --- |'],
+    ['link', '[文档](https://example.com)'],
+    ['blockquote', '> 引用'],
+    ['inline code', '运行 `pnpm test`'],
+    ['fenced code', 'here is code:\n```js\nconst a = 1'],
+    ['completed fence', '```js\nconst a = 1\n```\nnow prose'],
+    ['plain multi-paragraph document', 'first paragraph\n\nsecond paragraph'],
+    ['escaped syntax', String.raw`\*literal asterisk`],
+    ['GFM URL autolink', 'See https://example.com'],
+    ['GFM email autolink', 'Email dev@example.com'],
+    ['entity', 'Copyright &copy;'],
+    ['inline math', 'Value $x + y$'],
+    ['indented code', '    const value = true'],
+  ])('refuses a Markdown-significant %s tail', (_kind, tail) => {
+    expect(canFadeRevealTail(tail)).toBe(false)
   })
 })
 

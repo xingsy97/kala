@@ -489,6 +489,7 @@ export type ClientAskUserChoice = {
 }
 
 export type ClientCancel = {
+  operationId?: string
   sessionId: string
 }
 
@@ -802,6 +803,7 @@ export type FileContentsResult = {
   path: string
   content?: string
   size?: number
+  fileVersion?: string
   kind?: 'text' | 'image' | 'pdf' | 'binary' | 'too_large' | 'not_found' | 'error'
   encoding?: 'utf8' | 'base64'
   mediaType?: string
@@ -1719,7 +1721,7 @@ export type DashboardClientToServerEvents = {
   'client:user_approve': (payload: ClientUserApprove, ack?: (result: RpcAck) => void) => void
   'client:user_reject': (payload: ClientUserReject, ack?: (result: RpcAck) => void) => void
   'client:ask_user_choice': (payload: ClientAskUserChoice, ack?: (result: RpcAck) => void) => void
-  'client:cancel': (payload: ClientCancel) => void
+  'client:cancel': (payload: ClientCancel, ack?: (result: RpcAck) => void) => void
   'client:interrupt_sub_agent': (payload: ClientInterruptSubAgent) => void
   'client:clear': (payload: ClientClear) => void
   'client:compact': (payload: ClientCompact) => void

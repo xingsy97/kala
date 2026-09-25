@@ -62,6 +62,12 @@ describe('wire contract — round-trip parses', () => {
       .toThrow()
   })
 
+  it('parses legacy and acknowledged ClientCancel payloads', () => {
+    expect(schema.ClientCancelSchema.parse({ sessionId: 's' })).toEqual({ sessionId: 's' })
+    expect(schema.ClientCancelSchema.parse({ sessionId: 's', operationId: 'cancel-1' }))
+      .toEqual({ sessionId: 's', operationId: 'cancel-1' })
+  })
+
   it('parses ClientListSessions / ClientListExecutors from empty payloads', () => {
     expect(schema.ClientListSessionsSchema.parse(undefined)).toEqual({})
     expect(schema.ClientListSessionsSchema.parse({})).toEqual({})

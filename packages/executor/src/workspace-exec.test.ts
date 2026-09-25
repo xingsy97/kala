@@ -138,6 +138,24 @@ describe('workspaceReadBinary', () => {
     expect(res.mime).toBe('video/mp4')
   })
 
+  it('detects 64-bit MP4 ftyp after a bounded permitted leading box and standard brands', async () => {
+    const leadingFree = Buffer.concat([Buffer.from([0, 0, 0, 8]), Buffer.from('free')])
+    const ftyp = Buffer.alloc(32)
+    ftyp.writeUInt32BE(1, 0)
+    ftyp.write('ftyp', 4, 'ascii')
+    ftyp.writeBigUInt64BE(24n, 8)
+    ftyp.write('iso1', 16, 'ascii')
+    ftyp.writeUInt32BE(0, 20)
+    ftyp.write('mp71', 24, 'ascii')
+    writeFileSync(join(root, 'leading.mp4'), Buffer.concat([leadingFree, ftyp.subarray(0, 24)]))
+    const sandbox = createSandbox({ roots: [root] })
+    const res = await workspaceReadBinary(
+      { requestId: 'r2-mp4-64', workspaceId: 'w', path: join(root, 'leading.mp4') },
+      sandbox,
+    )
+    expect(res.mime).toBe('video/mp4')
+  })
+
   it('does not trust an mp4 extension or an unrelated ISO-BMFF brand', async () => {
     writeFileSync(join(root, 'spoof.mp4'), Buffer.from([0, 1, 2, 3, 4, 5]))
     const heif = Buffer.concat([
@@ -199,6 +217,21 @@ describe('workspaceReadBinary', () => {
     expect(second.truncated).toEqual({ maxBytes: 5 })
     expect(final.truncated).toBeUndefined()
     expect(final.size).toBe(big.length)
+    expect(first.fileVersion).toMatch(/^v1:/)
+    expect(second.fileVersion).toBe(first.fileVersion)
+    expect(final.fileVersion).toBe(first.fileVersion)
+  })
+
+  it('changes fileVersion when a file is replaced with the same size', async () => {
+    const path = join(root, 'replace.bin')
+    writeFileSync(path, 'first')
+    const sandbox = createSandbox({ roots: [root] })
+    const first = await workspaceReadBinary({ requestId: 'version-1', workspaceId: 'w', path }, sandbox)
+    rmSync(path)
+    writeFileSync(path, 'other')
+    const second = await workspaceReadBinary({ requestId: 'version-2', workspaceId: 'w', path }, sandbox)
+    expect(second.size).toBe(first.size)
+    expect(second.fileVersion).not.toBe(first.fileVersion)
   })
 
   it('rejects paths outside the sandbox', async () => {

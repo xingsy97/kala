@@ -97,9 +97,12 @@ describe('DocsPage', () => {
     expect(within(list).getByText('Wire Protocol')).toBeTruthy()
     expect(toggleAll.textContent ?? '').toContain('Collapse all')
     expect(screen.getByRole('table')).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Documentation table' }).hasAttribute('tabindex')).toBe(false)
+    expect(screen.getByRole('columnheader', { name: 'Phase' }).getAttribute('scope')).toBe('col')
     expect(screen.getByText('Phase')).toBeTruthy()
     const docsMarkdown = screen.getByTestId('docs-markdown')
     expect(docsMarkdown.className).toContain('ak-markdown-body')
+    expect(docsMarkdown.className).toContain('[&_h1]:text-2xl')
     expect(docsMarkdown.textContent).toContain('compact({ force: true })')
     expect(screen.getByText('compact()')).toBeTruthy()
 
