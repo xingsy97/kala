@@ -341,8 +341,8 @@ describe('SessionFilesPanel', () => {
   it('renders PDF files in the file view modal when the browser has a PDF viewer', async () => {
     Object.defineProperty(navigator, 'pdfViewerEnabled', { configurable: true, value: true })
     const socket = makeSessionFilesSocket({
-      file: { kind: 'pdf', content: 'JVBERi0x', size: 8, encoding: 'base64', mediaType: 'application/pdf' },
-      entries: [{ name: 'report.pdf', path: '/repo/report.pdf', type: 'file', size: 8 }],
+      file: { kind: 'pdf', content: 'JVBERi0x', size: 6, encoding: 'base64', mediaType: 'application/pdf' },
+      entries: [{ name: 'report.pdf', path: '/repo/report.pdf', type: 'file', size: 6 }],
     })
 
     render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
@@ -359,9 +359,92 @@ describe('SessionFilesPanel', () => {
     expect(pdf.getAttribute('referrerpolicy')).toBe('no-referrer')
   })
 
+  it('assembles an MP4 larger than the initial 1 MiB preview before rendering native video', async () => {
+    const size = 1024 * 1024 + 3
+    const rangedRequests: Record<string, unknown>[] = []
+    const socket = makeRangedMediaSocket('/repo/demo.mp4', size, 'video/mp4', (payload, ack) => {
+      rangedRequests.push(payload)
+      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('v'.repeat(size)), mime: 'video/mp4', size, offset: payload.offset }))
+    })
+    const { unmount } = render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('demo.mp4'))
+
+    expect(await screen.findByTestId('session-file-video-fallback')).toBeTruthy()
+    expect(rangedRequests).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Load video preview' }))
+
+    const video = await screen.findByTestId('session-file-video-player')
+    expect(rangedRequests).toEqual([expect.objectContaining({ offset: 0, maxBytes: 4 * 1024 * 1024 })])
+    expect(createObjectURLMock).toHaveBeenCalledWith(expect.objectContaining({ size, type: 'video/mp4' }))
+    expect(video.getAttribute('controls')).not.toBeNull()
+    expect(video.getAttribute('preload')).toBe('metadata')
+    expect(video.getAttribute('playsinline')).not.toBeNull()
+    expect(video.getAttribute('disableremoteplayback')).not.toBeNull()
+
+    fireEvent.error(video)
+    expect(await screen.findByText(/cannot play the MP4 codec/i)).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Download file' }).length).toBeGreaterThan(0)
+    await waitFor(() => expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock'))
+    unmount()
+  })
+
+  it('reports ranged media loading progress and revokes the Blob URL on unmount', async () => {
+    const pending: Array<(response: unknown) => void> = []
+    const socket = makeRangedMediaSocket('/repo/progress.mp4', 5, 'video/mp4', (_payload, ack) => pending.push(ack))
+    const { unmount } = render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('progress.mp4'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Load video preview' }))
+    await waitFor(() => expect(pending).toHaveLength(1))
+
+    pending.shift()?.({ requestId: 'chunk-1', base64: btoa('ab'), mime: 'video/mp4', size: 5, offset: 0, truncated: { maxBytes: 2 } })
+    expect(await screen.findByText(/40%/)).toBeTruthy()
+    await waitFor(() => expect(pending).toHaveLength(1))
+    pending.shift()?.({ requestId: 'chunk-2', base64: btoa('cde'), mime: 'application/octet-stream', size: 5, offset: 2 })
+    await screen.findByTestId('session-file-video-player')
+
+    unmount()
+    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock')
+  })
+
+  it('enforces the 32 MiB inline preview cap without starting ranged assembly', async () => {
+    const onRange = vi.fn()
+    const socket = makeRangedMediaSocket('/repo/huge.mp4', 32 * 1024 * 1024 + 1, 'video/mp4', onRange)
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('huge.mp4'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Load video preview' }))
+
+    expect(await screen.findByText(/limited to 32\.0 MB/i)).toBeTruthy()
+    expect(onRange).not.toHaveBeenCalled()
+    expect(createObjectURLMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects media when its size changes during full assembly', async () => {
+    const socket = makeRangedMediaSocket('/repo/changing.mp4', 5, 'video/mp4', (payload, ack) => {
+      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('abcdef'), mime: 'video/mp4', size: 6, offset: 0 }))
+    })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('changing.mp4'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Load video preview' }))
+
+    expect(await screen.findByText(/file changed while it was being loaded/i)).toBeTruthy()
+    expect(createObjectURLMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an incomplete non-truncated media range', async () => {
+    const socket = makeRangedMediaSocket('/repo/incomplete.mp4', 5, 'video/mp4', (payload, ack) => {
+      queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('ab'), mime: 'video/mp4', size: 5, offset: 0 }))
+    })
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('incomplete.mp4'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Load video preview' }))
+
+    expect(await screen.findByText(/before the range ended/i)).toBeTruthy()
+    expect(createObjectURLMock).not.toHaveBeenCalled()
+  })
+
   it('shows a download-oriented PDF fallback without creating a Blob URL when the browser lacks a viewer', async () => {
     Object.defineProperty(navigator, 'pdfViewerEnabled', { configurable: true, value: false })
-    const socket = makeSessionFilesSocket({ file: { kind: 'pdf', content: 'JVBERi0x', size: 8, encoding: 'base64', mediaType: 'application/pdf' }, entries: [{ name: 'report.pdf', path: '/repo/report.pdf', type: 'file' }] })
+    const socket = makeSessionFilesSocket({ file: { kind: 'pdf', content: 'JVBERi0x', size: 6, encoding: 'base64', mediaType: 'application/pdf' }, entries: [{ name: 'report.pdf', path: '/repo/report.pdf', type: 'file' }] })
     render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
     fireEvent.click(await screen.findByText('report.pdf'))
     expect(await screen.findByTestId('session-file-pdf-fallback')).toBeTruthy()
@@ -604,6 +687,30 @@ function makeSessionFilesSocket(input: {
       } as never
     },
   }
+}
+
+function makeRangedMediaSocket(
+  path: string,
+  size: number,
+  mime: 'video/mp4' | 'application/pdf',
+  onRange: (payload: Record<string, unknown>, ack: (response: unknown) => void) => void,
+) {
+  const socket = makeSessionFilesSocket({
+    file: { kind: 'binary', content: btoa('x'), size, truncated: size > 1, encoding: 'base64', mediaType: mime },
+    entries: [{ name: path.split('/').pop()!, path, type: 'file', size }],
+  })
+  socket.emitMock.mockImplementation((event: string, payload: Record<string, unknown>, ack?: (response: unknown) => void) => {
+    if (event === 'client:list_dirs') queueMicrotask(() => socket.serverEmit('server:dir_list', dirList(String(payload.requestId), [{ name: path.split('/').pop()!, path, type: 'file', size }])))
+    if (event === 'workspace:read_binary' && ack) {
+      if (payload.offset === undefined) {
+        queueMicrotask(() => ack({ requestId: payload.requestId, base64: btoa('x'), mime, size, truncated: { maxBytes: 1024 * 1024 } }))
+      } else {
+        onRange(payload, ack)
+      }
+    }
+    return undefined
+  })
+  return socket
 }
 
 function readBinaryFromFixture(requestId: string, file: Pick<FileContentsResult, 'kind' | 'content' | 'size' | 'truncated' | 'error' | 'encoding' | 'mediaType'>) {

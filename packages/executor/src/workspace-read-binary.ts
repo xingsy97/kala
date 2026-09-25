@@ -111,6 +111,7 @@ function sniffMime(buf: Buffer, path: string): string {
   if (buf.length >= 4 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return 'image/gif'
   if (buf.length >= 12 && buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') return 'image/webp'
   if (buf.length >= 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return 'application/pdf'
+  if (looksLikeMp4(buf)) return 'video/mp4'
   if (buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && (buf[2] === 0x03 || buf[2] === 0x05 || buf[2] === 0x07)) return 'application/zip'
   if (looksLikeText(buf)) {
     const ext = path.split('.').pop()?.toLowerCase()
@@ -123,6 +124,25 @@ function sniffMime(buf: Buffer, path: string): string {
     return 'text/plain'
   }
   return 'application/octet-stream'
+}
+
+// ISO-BMFF is also used by formats such as HEIF and QuickTime. Require an
+// ftyp box at byte zero plus an MP4-specific major or compatible brand rather
+// than trusting a .mp4 extension or classifying every ISO-BMFF file as video.
+const MP4_BRANDS = new Set([
+  'avc1', 'dash', 'iso2', 'iso3', 'iso4', 'iso5', 'iso6', 'iso7', 'iso8', 'iso9',
+  'isom', 'M4V ', 'M4VH', 'M4VP', 'mp41', 'mp42', 'mp4v', 'MSNV',
+])
+
+function looksLikeMp4(buf: Buffer): boolean {
+  if (buf.length < 16 || buf.toString('ascii', 4, 8) !== 'ftyp') return false
+  const boxSize = buf.readUInt32BE(0)
+  if (boxSize < 16 || boxSize > buf.length || boxSize % 4 !== 0) return false
+  if (MP4_BRANDS.has(buf.toString('ascii', 8, 12))) return true
+  for (let offset = 16; offset + 4 <= boxSize; offset += 4) {
+    if (MP4_BRANDS.has(buf.toString('ascii', offset, offset + 4))) return true
+  }
+  return false
 }
 
 function looksLikeText(buf: Buffer): boolean {

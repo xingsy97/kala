@@ -122,6 +122,44 @@ describe('workspaceReadBinary', () => {
     expect(res.mime).toBe('image/png')
   })
 
+  it('detects MP4 only from a valid ftyp box with a recognized brand', async () => {
+    const mp4 = Buffer.concat([
+      Buffer.from([0, 0, 0, 24]),
+      Buffer.from('ftypisom'),
+      Buffer.from([0, 0, 2, 0]),
+      Buffer.from('iso2mp41'),
+    ])
+    writeFileSync(join(root, 'video.bin'), mp4)
+    const sandbox = createSandbox({ roots: [root] })
+    const res = await workspaceReadBinary(
+      { requestId: 'r2-mp4', workspaceId: 'w', path: join(root, 'video.bin') },
+      sandbox,
+    )
+    expect(res.mime).toBe('video/mp4')
+  })
+
+  it('does not trust an mp4 extension or an unrelated ISO-BMFF brand', async () => {
+    writeFileSync(join(root, 'spoof.mp4'), Buffer.from([0, 1, 2, 3, 4, 5]))
+    const heif = Buffer.concat([
+      Buffer.from([0, 0, 0, 20]),
+      Buffer.from('ftypheic'),
+      Buffer.from([0, 0, 0, 0]),
+      Buffer.from('mif1'),
+    ])
+    writeFileSync(join(root, 'photo.mp4'), heif)
+    const sandbox = createSandbox({ roots: [root] })
+    const spoof = await workspaceReadBinary(
+      { requestId: 'r2-spoof', workspaceId: 'w', path: join(root, 'spoof.mp4') },
+      sandbox,
+    )
+    const unrelated = await workspaceReadBinary(
+      { requestId: 'r2-heif', workspaceId: 'w', path: join(root, 'photo.mp4') },
+      sandbox,
+    )
+    expect(spoof.mime).toBe('application/octet-stream')
+    expect(unrelated.mime).toBe('application/octet-stream')
+  })
+
   it('truncates when file exceeds maxBytes and reports it', async () => {
     const big = Buffer.alloc(4096, 0x41)
     writeFileSync(join(root, 'big.bin'), big)
