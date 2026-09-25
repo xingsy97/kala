@@ -10,12 +10,10 @@ import {
 
 describe('coarseSummaryStatus', () => {
   it('collapses running-ish statuses and passes others through', () => {
-    // Running statuses should map to a single coarse value; resting ones stay.
-    const running = coarseSummaryStatus('thinking' as never)
-    const idle = coarseSummaryStatus('idle' as never)
-    expect(typeof running).toBe('string')
-    expect(idle).toBe('idle')
-    expect(coarseSummaryStatus(undefined)).toBeTypeOf('string')
+    expect(coarseSummaryStatus('thinking' as never)).toBe('running')
+    expect(coarseSummaryStatus('executing_tools' as never)).toBe('running')
+    expect(coarseSummaryStatus('idle' as never)).toBe('idle')
+    expect(coarseSummaryStatus(undefined)).toBe('unknown')
   })
 })
 
@@ -49,11 +47,20 @@ describe('sameSessionListForExplorer', () => {
 })
 
 describe('sameSessionStatusMap', () => {
-  it('compares two status maps by entries', () => {
+  it('compares two status maps by session and visible status', () => {
     const a = new Map([['s1', 'idle']]) as never
     const same = new Map([['s1', 'idle']]) as never
     const diff = new Map([['s1', 'loading']]) as never
     expect(sameSessionStatusMap(a, same)).toBe(true)
     expect(sameSessionStatusMap(a, diff)).toBe(false)
+  })
+
+  it('updates exact labels independently as sessions enter different running phases', () => {
+    const loading = new Map([['s1', 'loading'], ['s2', 'thinking']]) as never
+    const nextPhase = new Map([['s1', 'executing_tools'], ['s2', 'loading']]) as never
+    const wrongSession = new Map([['s1', 'executing_tools'], ['s3', 'loading']]) as never
+
+    expect(sameSessionStatusMap(loading, nextPhase)).toBe(false)
+    expect(sameSessionStatusMap(loading, wrongSession)).toBe(false)
   })
 })

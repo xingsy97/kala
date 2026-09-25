@@ -113,6 +113,8 @@ export type SessionReadyEvent = {
   state: AgentState
   config: AgentConfig
   contextSnapshot: ContextUsageSnapshot
+  /** Current uncommitted assistant text; restored on a mid-stream subscription. */
+  streamingDraft?: { text: string; afterSeq: number; messageCount: number }
   /**
    * Why this event fired. `'load'` (default) — a dashboard subscribed to an
    * existing or ephemeral session. `'created'` — the session was just

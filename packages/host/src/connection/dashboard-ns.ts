@@ -216,6 +216,7 @@ export type DashboardDeps = {
   normalizeModelRef?(model: string): string | undefined
   dashboardNs: DashboardNs
   messageQueues: MessageQueueManager
+  streamingDraftSnapshot?(sessionId: string): { text: string; afterSeq: number; messageCount: number } | undefined
   agentRuntimes: AgentRuntimeRegistry
   askUserChoice?: AskUserChoiceBroker
   executorSnapshot?(): readonly AttachedExecutor[]
@@ -515,6 +516,10 @@ export function configureDashboardNamespace(
 
     const channelTails = new Map<DashboardChannel, Promise<void>>()
     const channelGenerations = new Map<DashboardChannel, number>()
+    const emitSessionReady = (payload: SessionReadyEvent): void => {
+      const streamingDraft = payload.state.status === 'thinking' ? deps.streamingDraftSnapshot?.(payload.sessionId) : undefined
+      socket.emit('session:ready', streamingDraft ? { ...payload, streamingDraft } : payload)
+    }
     const serializeChannel = async <T>(channel: DashboardChannel, operation: () => Promise<T>): Promise<T> => {
       const previous = channelTails.get(channel) ?? Promise.resolve()
       let result!: T
@@ -538,7 +543,7 @@ export function configureDashboardNamespace(
       const payload: SessionReadyEvent = target
         ? readyEventFor(target, effectiveModelForRecord(deps, target), 'load', contextWindowForSession(deps, target))
         : ephemeralReadyEventFor(targetSessionId, getDefaultConfig(), defaultModel, contextWindowForModelRef(deps, defaultModel))
-      socket.emit('session:ready', payload)
+      emitSessionReady(payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(targetSessionId))
       // Candidate sockets may inspect the authoritative state during private
       // verification, but only the RestartCoordinator owns continuation before
@@ -637,7 +642,7 @@ export function configureDashboardNamespace(
           defaultModel,
           contextWindowForModelRef(deps, defaultModel),
         )
-    socket.emit('session:ready', ready)
+    emitSessionReady(ready)
     socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
     // A service-manager restart has no persisted RestartCoordinator marker for
     // the active turn. Resume any dangling LLM/tool state on first hydration;
@@ -676,7 +681,7 @@ export function configureDashboardNamespace(
             defaultModel,
             contextWindowForModelRef(deps, defaultModel),
           )
-      socket.emit('session:ready', payload)
+      emitSessionReady(payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
       if (mutableRuntimeReady()) {
         if (target?.agentRuntime === 'kernel' && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(sessionId)
@@ -1293,7 +1298,7 @@ export function configureDashboardNamespace(
           try {
             await refreshSessionSkillsIfNeeded(deps, record)
             await socket.join(sessionRoom(record.sessionId))
-            socket.emit('session:ready', readyEventFor(record, effectiveModelForRecord(deps, record), created ? 'created' : 'load', contextWindowForSession(deps, record)))
+            emitSessionReady(readyEventFor(record, effectiveModelForRecord(deps, record), created ? 'created' : 'load', contextWindowForSession(deps, record)))
             if (!created) return
             deps.audit?.log({ action: 'dashboard.session_create', actor: auditActor(socket), target: { sessionId: record.sessionId, workspaceId: record.workspaceId }, outcome: 'ok', metadata: { cwd: record.state.cwd } })
             await broadcastSessionList(deps)

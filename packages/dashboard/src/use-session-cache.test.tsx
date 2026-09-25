@@ -94,6 +94,32 @@ afterEach(() => {
 })
 
 describe('useSession session view cache', () => {
+  it('restores all already-streamed text on a mid-turn session switch and appends only new deltas', () => {
+    const socket = new MockSocket()
+    const ready = (id: string, text?: string) => ({
+      sessionId: id, agentRuntime: 'kernel', reason: 'load', cursor: 1,
+      state: { ...createInitialState({ sessionId: id }), status: 'thinking' },
+      config: { tools: [] }, contextSnapshot: null,
+      ...(text ? { streamingDraft: { text, afterSeq: 1, messageCount: 0 } } : {}),
+    })
+    const view = renderHook(({ id }) => useSession({ host: 'http://host', sessionId: id, socket: socket as never }), { initialProps: { id: 'first' } })
+    act(() => socket.serverEmit('session:ready', ready('first')))
+    act(() => socket.serverEmit('session:token_delta', { sessionId: 'first', text: 'old prefix' }))
+    view.rerender({ id: 'second' })
+    act(() => socket.serverEmit('session:ready', ready('second')))
+    view.rerender({ id: 'first' })
+    act(() => socket.serverEmit('session:ready', ready('first', 'old prefix while away')))
+    expect(view.result.current.streamingText).toBe('old prefix while away')
+    act(() => socket.serverEmit('session:token_delta', { sessionId: 'first', text: ' and new suffix' }))
+    act(() => socket.serverEmit('state:changed', {
+      sessionId: 'first', cursor: 1,
+      state: { ...createInitialState({ sessionId: 'first' }), status: 'done' },
+      contextSnapshot: null,
+    }))
+    expect(view.result.current.streamingText).toBe('old prefix while away and new suffix')
+    view.unmount()
+  })
+
   it.each(['kernel', 'copilot'] as const)('hydrates a selected %s session even when preview consumed the first ready event', async (agentRuntime) => {
     const socket = new MockSocket()
     const manager = dashboardConnectionManager(socket as never)

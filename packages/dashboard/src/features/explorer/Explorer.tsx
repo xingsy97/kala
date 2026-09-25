@@ -8,11 +8,11 @@
  * sessions without a workspaceId are ordinary chats and group under "Chats".
  */
 
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
 import { createPortal } from 'react-dom'
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
-import type { RowRendererProps } from 'react-arborist'
+import type { NodeRendererProps, RowRendererProps } from 'react-arborist'
 import { useTranslation } from 'react-i18next'
 import {
   AlertCircle,
@@ -183,9 +183,11 @@ function ExplorerImpl({
   const sessionRuntimeStoreRef = useRef<SessionRuntimeStore | null>(null)
   if (sessionRuntimeStoreRef.current === null) sessionRuntimeStoreRef.current = new SessionRuntimeStore()
   const sessionRuntimeStore = sessionRuntimeStoreRef.current
-  // Sync before rows render so useSyncExternalStore snapshots always match this
-  // render. Only listeners for session IDs whose volatile snapshot changed fire.
-  sessionRuntimeStore.sync(sessions, sessionStatuses)
+  // Notify row subscribers before paint, never while rendering ExplorerImpl:
+  // render-time store notifications trigger React cross-component updates.
+  useLayoutEffect(() => {
+    sessionRuntimeStore.sync(sessions, sessionStatuses)
+  }, [sessionRuntimeStore, sessions, sessionStatuses])
   useEffect(() => {
     setManualSessionOrder((prev) => syncSessionOrder(prev, structuralSessions))
   }, [structuralSessions])
@@ -314,6 +316,54 @@ function ExplorerImpl({
     setManualSessionOrder((prev) => reorderSessionIds(prev, targetIds, movableIds, args.index))
   }, [visibleData])
 
+  // react-arborist treats its child renderer as a component type. An inline
+  // function gives it a new type on every Explorer update, remounting every
+  // visible row and resetting long-running spinner animations.
+  const renderTreeNode = useCallback(({ node, style, dragHandle }: NodeRendererProps<TreeNode>) => (
+    <Row
+      node={node}
+      style={style}
+      dragHandle={dragHandle}
+      editingSessionId={editingSessionId}
+      onDeleteRequest={(sess) => setPendingDelete(sess)}
+      onStartEdit={(sess) => {
+        if (!isSessionWorkspaceOnline(sess, onlineWorkspaceIds)) return
+        setEditingSessionId(sess.sessionId)
+      }}
+      onCancelEdit={() => setEditingSessionId(null)}
+      onSubmitEdit={(sess, next) => {
+        setEditingSessionId(null)
+        if (next.trim() !== sess.label.trim()) onRename(sess.sessionId, next)
+      }}
+      onOpenSessionInfo={onOpenSessionInfo}
+      onHideSession={hiddenSessions.hide}
+      onWorkspaceInfo={onWorkspaceInfo}
+      onOpenWorkspaceTerminal={onOpenWorkspaceTerminal}
+      onHideWorkspace={hiddenWorkspaces.hide}
+      editingWorkspaceId={editingWorkspaceId}
+      onStartWorkspaceEdit={(workspace) => setEditingWorkspaceId(workspace.workspaceId)}
+      onCancelWorkspaceEdit={() => setEditingWorkspaceId(null)}
+      onSubmitWorkspaceEdit={(workspace, next) => {
+        setEditingWorkspaceId(null)
+        if (workspace.workspaceId !== null && next.trim() !== workspace.name.trim()) {
+          onRenameWorkspace?.(workspace.workspaceId, next)
+        }
+      }}
+      onNewSession={onNewSession}
+      query={query}
+      sessionRuntimeStore={sessionRuntimeStore}
+      onlineWorkspaceIds={onlineWorkspaceIds}
+      fontSizePx={fontSizePx}
+      onPreviewAnchorChange={preview.enter}
+      onPreviewLeave={preview.leave}
+      onPointerActivateSession={activateSessionOnPointerDown}
+    />
+  ), [editingSessionId, onlineWorkspaceIds, onRename, onOpenSessionInfo,
+    hiddenSessions.hide, onWorkspaceInfo, onOpenWorkspaceTerminal,
+    hiddenWorkspaces.hide, editingWorkspaceId, onRenameWorkspace, onNewSession,
+    query, sessionRuntimeStore, fontSizePx, preview.enter, preview.leave,
+    activateSessionOnPointerDown])
+
   return (
     <div ref={preview.explorerRef} className="@container flex h-full min-w-0 flex-col overflow-hidden bg-transparent text-foreground">
       <Header query={query} onQueryChange={setQuery} onNewSession={onNewSession} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} leading={headerLeading} />
@@ -391,48 +441,7 @@ function ExplorerImpl({
             width={bounds.width}
             height={bounds.height}
           >
-            {({ node, style, dragHandle }) => (
-              <Row
-                node={node}
-                style={style}
-                dragHandle={dragHandle}
-                editingSessionId={editingSessionId}
-                onDeleteRequest={(sess) => setPendingDelete(sess)}
-                onStartEdit={(sess) => {
-                  if (!isSessionWorkspaceOnline(sess, onlineWorkspaceIds)) return
-                  setEditingSessionId(sess.sessionId)
-                }}
-                onCancelEdit={() => setEditingSessionId(null)}
-                onSubmitEdit={(sess, next) => {
-                  setEditingSessionId(null)
-                  if (next.trim() !== sess.label.trim()) {
-                    onRename(sess.sessionId, next)
-                  }
-                }}
-                onOpenSessionInfo={onOpenSessionInfo}
-                onHideSession={hiddenSessions.hide}
-                onWorkspaceInfo={onWorkspaceInfo}
-                onOpenWorkspaceTerminal={onOpenWorkspaceTerminal}
-                onHideWorkspace={hiddenWorkspaces.hide}
-                editingWorkspaceId={editingWorkspaceId}
-                onStartWorkspaceEdit={(workspace) => setEditingWorkspaceId(workspace.workspaceId)}
-                onCancelWorkspaceEdit={() => setEditingWorkspaceId(null)}
-                onSubmitWorkspaceEdit={(workspace, next) => {
-                  setEditingWorkspaceId(null)
-                  if (workspace.workspaceId !== null && next.trim() !== workspace.name.trim()) {
-                    onRenameWorkspace?.(workspace.workspaceId, next)
-                  }
-                }}
-                onNewSession={onNewSession}
-                query={query}
-                sessionRuntimeStore={sessionRuntimeStore}
-                onlineWorkspaceIds={onlineWorkspaceIds}
-                fontSizePx={fontSizePx}
-                onPreviewAnchorChange={preview.enter}
-                onPreviewLeave={preview.leave}
-                onPointerActivateSession={activateSessionOnPointerDown}
-              />
-            )}
+            {renderTreeNode}
           </Tree>
         ) : null}
         <SessionHoverPreview
@@ -1449,11 +1458,16 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   phaseKey?: string
 }): JSX.Element {
   const { t } = useTranslation()
+  const phase = useRef<{ key: string; delayMs: number } | null>(null)
   const label = statusIndicatorLabel(status, t)
   if (selected) return <ToolbarSessionStatus status={status} label={label} compact={compact} />
   const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
   if (status === 'loading' || status === 'thinking' || status === 'executing_tools') {
-    const phaseMs = sessionStatusAnimationPhaseMs(phaseKey ?? status ?? 'running')
+    const key = phaseKey ?? status
+    // React-arborist virtualizes rows: a scrolling row may unmount/remount.
+    // Align its animation to a stable session-specific timeline, not mount time.
+    if (phase.current?.key !== key) phase.current = { key, delayMs: sessionStatusAnimationPhaseMs(key, performance.now()) }
+    const phaseMs = phase.current.delayMs
     return (
       <span
         className={base}
@@ -1472,6 +1486,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
       </span>
     )
   }
+  phase.current = null
   if (status === 'awaiting_approval') {
     return (
       <span
@@ -1562,10 +1577,10 @@ function ToolbarSessionStatus({ status, label, compact }: { status: SessionActiv
   )
 }
 
-function sessionStatusAnimationPhaseMs(key: string): number {
+function sessionStatusAnimationPhaseMs(key: string, nowMs: number): number {
   let hash = 0
   for (let i = 0; i < key.length; i += 1) hash = ((hash * 31) + key.charCodeAt(i)) >>> 0
-  return -(hash % 900)
+  return -((Math.floor(nowMs) + hash) % 900)
 }
 
 function statusIndicatorLabel(status: SessionActivityStatus | undefined, t: ReturnType<typeof useTranslation>['t']): string {

@@ -314,6 +314,53 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('restores the full in-flight assistant text in a ready baseline after switching sessions', async () => {
+    await server.close()
+    let releaseResponse: () => void = () => {}
+    let firstChunk: () => void = () => {}
+    const emittedFirstChunk = new Promise<void>((resolve) => { firstChunk = resolve })
+    const continueResponse = new Promise<void>((resolve) => { releaseResponse = resolve })
+    server = await startHostServer({
+      port: 0, sessionsDir: dir, defaultConfig: config,
+      llm: {
+        name: 'gated-stream',
+        async call({ onTextDelta }) {
+          onTextDelta?.('before switching')
+          firstChunk()
+          await continueResponse
+          onTextDelta?.(' after switching')
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'before switching after switching' }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId: 'stream-first', defaultConfig: config })
+    await server.store.ensure({ sessionId: 'stream-second', defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { clientId: 'stream-switch', role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    try {
+      await new Promise<void>((resolve) => dashboard.on('connect', resolve))
+      const ready = (): Promise<SessionReadyEvent> => new Promise((resolve) => dashboard.once('session:ready', resolve))
+      const initial = ready()
+      await dashboard.timeout(2000).emitWithAck('client:subscribe_channels', { requestId: 'stream-sub-1', generation: 1, channels: ['session:stream-first'] })
+      await initial
+      await dashboard.timeout(2000).emitWithAck('client:user_message', {
+        sessionId: 'stream-first', text: 'generate', mode: 'queue', operationId: 'stream-message',
+      })
+      await emittedFirstChunk
+      const second = ready()
+      await dashboard.timeout(2000).emitWithAck('client:subscribe_channels', { requestId: 'stream-sub-2', generation: 2, channels: ['session:stream-second'] })
+      expect((await second).sessionId).toBe('stream-second')
+      const resumed = ready()
+      await dashboard.timeout(2000).emitWithAck('client:refresh_channels', { requestId: 'stream-resume', generation: 3, channels: ['session:stream-first'] })
+      expect((await resumed).streamingDraft?.text).toBe('before switching')
+    } finally {
+      releaseResponse()
+      dashboard.close()
+    }
+  })
+
   it('refreshes an already-subscribed session with an authoritative ready event before its ack', async () => {
     const sessionId = 'refresh-existing-room'
     await server.store.ensure({ sessionId, defaultConfig: config })

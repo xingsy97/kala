@@ -199,6 +199,7 @@ export const SessionReadyEventSchema = z.object({
   state: AgentStateSchema,
   config: AgentConfigSchema,
   contextSnapshot: ContextUsageSnapshotSchema,
+  streamingDraft: z.object({ text: z.string(), afterSeq: z.number().int().nonnegative(), messageCount: z.number().int().nonnegative() }).optional(),
   reason: z.enum(['load', 'created', 'forked']).optional(),
   parentSessionId: z.string().optional(),
   parentCursor: z.number().int().nonnegative().optional(),

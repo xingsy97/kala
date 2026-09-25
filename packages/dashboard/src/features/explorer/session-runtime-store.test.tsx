@@ -33,6 +33,28 @@ describe('SessionRuntimeStore', () => {
     expect(onB).not.toHaveBeenCalled()
   })
 
+  it('notifies each row when its exact running phase changes', () => {
+    const store = new SessionRuntimeStore()
+    store.sync([
+      { ...sessionA, status: 'thinking' },
+      { ...sessionB, status: 'executing_tools' },
+    ])
+    const onA = vi.fn()
+    const onB = vi.fn()
+    store.subscribe('a', onA)
+    store.subscribe('b', onB)
+
+    store.sync([
+      { ...sessionA, status: 'executing_tools' },
+      { ...sessionB, status: 'thinking' },
+    ])
+
+    expect(onA).toHaveBeenCalledTimes(1)
+    expect(onB).toHaveBeenCalledTimes(1)
+    expect(store.get('a')?.status).toBe('executing_tools')
+    expect(store.get('b')?.status).toBe('thinking')
+  })
+
   it('applies status overrides without mixing session ids', () => {
     const store = new SessionRuntimeStore()
     store.sync([sessionA, sessionB], new Map([['b', 'executing_tools']]))

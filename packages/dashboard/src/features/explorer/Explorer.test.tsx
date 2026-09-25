@@ -503,6 +503,53 @@ describe('Explorer', () => {
     expect(screen.getByTestId('session-status-spinner')).toBe(beforeSpinner)
   })
 
+  it('keeps each row spinner mounted when live running phases change', () => {
+    const second = {
+      ...sessionSummary,
+      sessionId: '02JXXXXXXXXXXXXXXXXXXXXX',
+      firstUserMessage: 'second task',
+    }
+    const noop = () => {}
+    const props = {
+      executors: [executor],
+      sessions: [sessionSummary, second],
+      selectedSessionId: sessionSummary.sessionId,
+      onSelect: noop,
+      onNewSession: noop,
+      onConnectWorkspace: noop,
+      onDelete: noop,
+      onRename: noop,
+    }
+    const { rerender } = render(
+      <Explorer
+        {...props}
+        sessionStatuses={new Map([
+          [sessionSummary.sessionId, 'thinking'],
+          [second.sessionId, 'loading'],
+        ])}
+      />,
+    )
+    const spinnerBySession = (sessionId: string): Element | null =>
+      screen.getAllByTestId('session-row')
+        .find((row) => row.getAttribute('data-session-id') === sessionId)
+        ?.querySelector('[data-testid="session-status-spinner"]') ?? null
+    const firstSpinner = spinnerBySession(sessionSummary.sessionId)
+    const secondSpinner = spinnerBySession(second.sessionId)
+
+    rerender(
+      <Explorer
+        {...props}
+        sessionStatuses={new Map([
+          [sessionSummary.sessionId, 'executing_tools'],
+          [second.sessionId, 'thinking'],
+        ])}
+      />,
+    )
+
+    expect(spinnerBySession(sessionSummary.sessionId)).toBe(firstSpinner)
+    expect(spinnerBySession(second.sessionId)).toBe(secondSpinner)
+  })
+
   it('does not offer hide for the unassigned workspace bucket', () => {
     render(
       <Explorer
@@ -694,6 +741,27 @@ describe('Explorer', () => {
     expect(firstIndicator?.getAttribute('data-status')).toBe('loading')
     expect(secondIndicator?.getAttribute('data-status')).toBe('executing_tools')
     expect(firstIndicator?.getAttribute('data-animation-phase-ms')).not.toBe(secondIndicator?.getAttribute('data-animation-phase-ms'))
+  })
+
+  it('resumes a virtualized session spinner at its previous rotation instead of restarting it', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(1_000)
+    const props = {
+      executors: [executor], sessions: [sessionSummary], selectedSessionId: sessionSummary.sessionId,
+      sessionStatuses: new Map([[sessionSummary.sessionId, 'loading' as const]]),
+      onSelect: () => {}, onNewSession: () => {}, onConnectWorkspace: () => {},
+      onDelete: () => {}, onRename: () => {},
+    }
+    try {
+      const first = render(<Explorer {...props} />)
+      const initial = Number(screen.getByTestId('session-status-indicator').getAttribute('data-animation-phase-ms'))
+      first.unmount()
+      clock.mockReturnValue(1_300)
+      render(<Explorer {...props} />)
+      const resumed = Number(screen.getByTestId('session-status-indicator').getAttribute('data-animation-phase-ms'))
+      expect((initial - resumed + 900) % 900).toBe(300)
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('presents sessions with no workspaceId as ordinary Chats', () => {

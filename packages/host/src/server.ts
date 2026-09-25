@@ -225,6 +225,7 @@ export async function startHostServer(
   })
   const TOKEN_DELTA_BATCH_MS = 16
   const tokenDeltaBatches = new Map<string, { text: string; timer: ReturnType<typeof setTimeout> }>()
+  const streamingDrafts = new Map<string, { text: string; afterSeq: number; messageCount: number }>()
   const flushTokenDelta = (sessionId: string): void => {
     const batch = tokenDeltaBatches.get(sessionId)
     if (!batch) return
@@ -241,6 +242,7 @@ export async function startHostServer(
     closed = true
     for (const batch of tokenDeltaBatches.values()) clearTimeout(batch.timer)
     tokenDeltaBatches.clear()
+    streamingDrafts.clear()
     // Queue persistence and post-turn drains may still be crossing their durable
     // boundary after the last socket closes. Wait before callers remove the
     // Session directory (tests) or replace storage (shutdown/deploy).
@@ -904,6 +906,7 @@ export async function startHostServer(
       // Dashboard uses them to clear its live tail and install persisted state.
       if (event.kind === 'llm_response' || event.kind === 'llm_error' || event.kind === 'cancel') {
         flushTokenDelta(sessionId)
+        streamingDrafts.delete(sessionId)
       }
       const room = sessionRoom(sessionId)
       const slimEffects = effects.map(slimEffect)
@@ -995,6 +998,7 @@ export async function startHostServer(
     },
     onError(sessionId, message) {
       flushTokenDelta(sessionId)
+      streamingDrafts.delete(sessionId)
       const payload: SessionErrorEvent = {
         sessionId,
         scope: 'llm',
@@ -1016,6 +1020,12 @@ export async function startHostServer(
     },
     onTokenDelta(sessionId, text) {
       if (text.length === 0) return
+      const draft = streamingDrafts.get(sessionId)
+      if (draft) draft.text += text
+      else {
+        const state = store.get(sessionId)?.state
+        streamingDrafts.set(sessionId, { text, afterSeq: state?.cursor ?? 0, messageCount: state?.messages.length ?? 0 })
+      }
       const pending = tokenDeltaBatches.get(sessionId)
       if (pending) {
         pending.text += text
@@ -1229,6 +1239,12 @@ export async function startHostServer(
     effectiveModelForSession: (record) => effectiveModelForSession(record.sessionId),
     normalizeModelRef,
     dashboardNs,
+    // Drain pending deltas before taking the synchronous ready snapshot. New
+    // subscribers ignore pre-ready deltas; existing subscribers receive them.
+    streamingDraftSnapshot: (sessionId) => {
+      flushTokenDelta(sessionId)
+      return streamingDrafts.get(sessionId)
+    },
     messageQueues,
     agentRuntimes,
     askUserChoice,

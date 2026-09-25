@@ -530,6 +530,16 @@ export function useSession({
       streamCursor = p.cursor
       streamMessageCount = p.state.messages.length
       updateStreamStatus(p.state.status)
+      if (p.streamingDraft?.text && acceptsSessionTokenDelta(p.state.status)) {
+        // Ready is sent after the Host flushes all earlier token batches. The
+        // snapshot therefore replaces (rather than appends to) the old tail;
+        // later deltas contain only newly generated text.
+        receivedText = p.streamingDraft.text
+        draftAnchor = { afterSeq: p.streamingDraft.afterSeq, messageCount: p.streamingDraft.messageCount }
+        setStreamingAnchor(draftAnchor)
+        setStreamingText(receivedText)
+        setStreamingActive(true)
+      }
       flushProjectionQueue()
       liveConnectionStatus = 'ready'
       dispatchProjectionEvent({ kind: 'ready', generation, sessionId, payload: p })
