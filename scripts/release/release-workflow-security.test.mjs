@@ -19,6 +19,29 @@ test('gitless Private Cloud runtime context includes tracked release bootstrap i
   assert.match(dockerfile, /docs\/\.tracked-release-docs/u)
 })
 
+test('Private Cloud images pin a patched multi-platform Node base and exclude build tooling at runtime', () => {
+  const digest = 'sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c'
+  for (const name of ['runtime-service', 'runtime-ingress-gateway', 'dashboard']) {
+    const dockerfile = readFileSync(join(import.meta.dirname, `../../deploy/private-cloud/images/Dockerfile.${name}`), 'utf8')
+    assert.equal(dockerfile.match(new RegExp(`FROM node@${digest}`, 'gu'))?.length, 2)
+    assert.doesNotMatch(dockerfile, /^COPY --from=build --chown=runlab:runlab \/app \/app$/mu)
+  }
+  for (const name of ['runtime-service', 'runtime-ingress-gateway']) {
+    const dockerfile = readFileSync(join(import.meta.dirname, `../../deploy/private-cloud/images/Dockerfile.${name}`), 'utf8')
+    assert.match(dockerfile, /pnpm deploy --legacy --filter @agent-kernel\/[^ ]+ --prod \/out\//u)
+  }
+})
+
+test('Private Cloud scanner preserves failure while collecting all three image reports', () => {
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/private-cloud-release.yml'), 'utf8')
+  for (const component of ['runtime', 'ingress', 'dashboard']) {
+    assert.match(workflow, new RegExp(`scan ${component} [^\n]+ \\|\\| failed=1`, 'u'))
+  }
+  assert.match(workflow, /exit "\$failed"/u)
+  assert.match(workflow, /grype "\$image"[^\n]+\|\| return 1/u)
+  assert.match(workflow, /trivy image [^\n]+\|\| return 1/u)
+})
+
 test('release reconciliation deletes unrelated remote assets and proves exact local closure', () => {
   const temporary = mkdtempSync(join(tmpdir(), 'release-reconcile-'))
   try {

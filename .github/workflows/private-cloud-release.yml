@@ -155,16 +155,19 @@ jobs:
           mkdir -p "${{ runner.temp }}/image-vulnerability-reports"
           scan() {
             component="$1"; image="$2"
-            grype "$image" -o json > "${{ runner.temp }}/image-vulnerability-reports/$component-grype.json"
-            trivy image --scanners vuln --format json --output "${{ runner.temp }}/image-vulnerability-reports/$component-trivy.json" "$image"
+            grype "$image" -o json > "${{ runner.temp }}/image-vulnerability-reports/$component-grype.json" || return 1
+            trivy image --scanners vuln --format json --output "${{ runner.temp }}/image-vulnerability-reports/$component-trivy.json" "$image" || return 1
             node scripts/security/check-vulnerabilities.mjs \
               --grype "${{ runner.temp }}/image-vulnerability-reports/$component-grype.json" \
               --trivy "${{ runner.temp }}/image-vulnerability-reports/$component-trivy.json" \
               --output "${{ runner.temp }}/image-vulnerability-reports/$component-normalized.json"
           }
-          scan runtime "ghcr.io/${{ github.repository }}-private-cloud-runtime@${{ needs.runtime-image.outputs.digest }}"
-          scan ingress "ghcr.io/${{ github.repository }}-private-cloud-ingress@${{ needs.ingress-image.outputs.digest }}"
-          scan dashboard "ghcr.io/${{ github.repository }}-private-cloud-dashboard@${{ needs.dashboard-image.outputs.digest }}"
+          # Gather all three reports, but never turn a scanner/policy failure into a passing job.
+          failed=0
+          scan runtime "ghcr.io/${{ github.repository }}-private-cloud-runtime@${{ needs.runtime-image.outputs.digest }}" || failed=1
+          scan ingress "ghcr.io/${{ github.repository }}-private-cloud-ingress@${{ needs.ingress-image.outputs.digest }}" || failed=1
+          scan dashboard "ghcr.io/${{ github.repository }}-private-cloud-dashboard@${{ needs.dashboard-image.outputs.digest }}" || failed=1
+          exit "$failed"
       - uses: actions/upload-artifact@v5
         if: always()
         with:

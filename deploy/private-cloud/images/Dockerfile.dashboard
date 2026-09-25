@@ -1,4 +1,4 @@
-FROM node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34 AS build
+FROM node@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
@@ -11,7 +11,7 @@ COPY packages/shared packages/shared
 COPY packages/kernel packages/kernel
 RUN pnpm --filter @agent-kernel/kernel build && pnpm --filter @agent-kernel/shared build && pnpm --filter @agent-kernel/dashboard build
 
-FROM node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34 AS runtime
+FROM node@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS runtime
 ENV NODE_ENV=production DASHBOARD_PORT=8080 DASHBOARD_ROOT=/app/dashboard
 WORKDIR /app
 RUN groupadd --system --gid 10001 runlab && useradd --system --uid 10001 --gid runlab --home /nonexistent --shell /usr/sbin/nologin runlab
