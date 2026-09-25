@@ -544,7 +544,9 @@ export function Composer({
       files = uploadedFiles
       // Host references keep screenshots durable without copying base64 into
       // every external-runtime snapshot. Demos without an upload endpoint keep
-      // the legacy inline representation.
+      // the legacy inline representation. Do not add any synthetic text here:
+      // it would be rendered as user-authored transcript content and would also
+      // break optimistic/admitted message reconciliation keys.
       const attachments = [...(uploadImages ? [] : images), ...files]
       const payloadError = validateClientMessagePayload({ text: trimmed, mode: sendMode, content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...extraBlocks, ...attachments] })
       if (payloadError) throw new Error(payloadError.message)
@@ -800,82 +802,84 @@ export function Composer({
         />
         {mode === 'simple' ? (
           <div className="flex min-w-0 flex-col gap-1" data-testid="composer-simple-frame">
-            <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} />
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 items-end gap-2">
               <ComposerLeftAccessory mode={mode}>{leftAccessory}</ComposerLeftAccessory>
               <div
-              className="ak-composer-surface relative flex min-h-14 min-w-0 flex-1 items-center gap-1 rounded-[22px] px-1.5 py-1 transition-[border-color,background-color,box-shadow] sm:min-h-14 sm:px-1.5"
-              data-testid="composer-simple-shell"
-              data-layout="single-row-tools"
-            >
-            <RuntimeMetrics
-              state={state}
-              config={config}
-              contextSnapshot={contextSnapshot}
-              modelInfo={modelInfoFor(models, model)}
-              queuedMessages={queuedMessages.length}
-              timeline={timeline}
-              density="simple"
-              onCompact={onCompact}
-              compactDisabled={disabled}
-            />
-            <ComposerModeToggle mode={mode} onToggle={toggleMode} />
-            <SlashCommandMenu
-              commands={matchingCommands}
-              disabled={disabled}
-              onRun={(cmd) => {
-                cmd.run({ args: '' })
-                setText('')
-              }}
-              className="absolute inset-x-0 bottom-full z-20 mb-2"
-            />
-            <div className="min-w-0 flex-1">
-              <SimpleComposerInput
-                text={text}
-                images={pastedImages.map((img) => ({ id: img.id, dataUrl: img.dataUrl }))}
-                disabled={disabled}
-                placeholder={placeholderText}
-                ariaLabel={t('composer.placeholder')}
-                onTextChange={(next) => setText(next)}
-                onRemoveImage={(id) => removeImage(id)}
-                onPaste={handleSimplePaste}
-                onEnterSubmit={() => { void submit() }}
-                className="border-0 bg-transparent shadow-none focus-within:border-0 focus-within:bg-transparent focus-within:ring-0"
-              />
-            </div>
-            <ComposerConfigButton
-              model={model}
-              models={models}
-              onModelChange={onModelChange}
-              approvalMode={approvalMode}
-              approvalModeLabel={approvalModeLabel}
-              onApprovalModeChange={onApprovalModeChange}
-              composerMode={mode}
-              onComposerModeChange={toggleMode}
-              sendMode={sendMode}
-              onSendModeChange={updateSendMode}
-              allowModelSelection={allowModelSelection}
-              allowApprovalMode={allowApprovalMode}
-              allowQueue={allowQueue}
-            />
-            {(allowAttachments || simpleFooterExtras) ? <div
-              className="flex min-w-0 flex-none flex-row items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              data-layout="horizontal"
-              data-testid="composer-simple-footer-extras"
-            >
-              {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
-              {simpleFooterExtras}
-            </div> : null}
-            <div className="flex flex-none items-center justify-center" data-testid="composer-simple-send-column">
-              <SendButton
-                disabled={!canSubmit}
-                sendMode={sendMode}
-                onSendModeChange={updateSendMode}
-                density="simple"
-                allowQueue={allowQueue}
-                stop={showStopButton ? { onClick: onCancel } : undefined}
-              />
-            </div>
+                className="ak-composer-surface relative flex min-h-14 min-w-0 flex-1 flex-col overflow-visible rounded-[22px] transition-[border-color,background-color,box-shadow]"
+                data-testid="composer-simple-shell"
+                data-layout="mobile-input-first"
+              >
+                <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-1 px-1.5 py-1 sm:min-h-14 sm:flex-nowrap sm:justify-start sm:px-1.5">
+                  <RuntimeMetrics
+                    state={state}
+                    config={config}
+                    contextSnapshot={contextSnapshot}
+                    modelInfo={modelInfoFor(models, model)}
+                    queuedMessages={queuedMessages.length}
+                    timeline={timeline}
+                    density="simple"
+                    onCompact={onCompact}
+                    compactDisabled={disabled}
+                  />
+                  <ComposerModeToggle mode={mode} onToggle={toggleMode} />
+                  <SlashCommandMenu
+                    commands={matchingCommands}
+                    disabled={disabled}
+                    onRun={(cmd) => {
+                      cmd.run({ args: '' })
+                      setText('')
+                    }}
+                    className="absolute inset-x-0 bottom-full z-20 mb-2"
+                  />
+                  <div className="order-first w-full min-w-0 flex-none sm:order-none sm:w-auto sm:flex-1">
+                    <SimpleComposerInput
+                      text={text}
+                      images={[]}
+                      disabled={disabled}
+                      placeholder={placeholderText}
+                      ariaLabel={t('composer.placeholder')}
+                      onTextChange={(next) => setText(next)}
+                      onRemoveImage={(id) => removeImage(id)}
+                      onPaste={handleSimplePaste}
+                      onEnterSubmit={() => { void submit() }}
+                      className="border-0 bg-transparent shadow-none focus-within:border-0 focus-within:bg-transparent focus-within:ring-0"
+                    />
+                  </div>
+                  <ComposerConfigButton
+                    model={model}
+                    models={models}
+                    onModelChange={onModelChange}
+                    approvalMode={approvalMode}
+                    approvalModeLabel={approvalModeLabel}
+                    onApprovalModeChange={onApprovalModeChange}
+                    composerMode={mode}
+                    onComposerModeChange={toggleMode}
+                    sendMode={sendMode}
+                    onSendModeChange={updateSendMode}
+                    allowModelSelection={allowModelSelection}
+                    allowApprovalMode={allowApprovalMode}
+                    allowQueue={allowQueue}
+                  />
+                  {(allowAttachments || simpleFooterExtras) ? <div
+                    className="flex min-w-0 flex-none flex-row items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    data-layout="horizontal"
+                    data-testid="composer-simple-footer-extras"
+                  >
+                    {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
+                    {simpleFooterExtras}
+                  </div> : null}
+                  <div className="flex flex-none items-center justify-center" data-testid="composer-simple-send-column">
+                    <SendButton
+                      disabled={!canSubmit}
+                      sendMode={sendMode}
+                      onSendModeChange={updateSendMode}
+                      density="simple"
+                      allowQueue={allowQueue}
+                      stop={showStopButton ? { onClick: onCancel } : undefined}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -992,11 +996,11 @@ export function Composer({
             ) : null}
           </div>
           <div
-            className="flex min-h-12 min-w-0 flex-row flex-nowrap items-center gap-1 overflow-hidden border-t border-border/25 px-2 py-1.5 sm:py-1.5"
+            className="flex min-h-12 min-w-0 flex-col items-stretch gap-1 border-t border-border/25 px-2 py-1.5 sm:flex-row sm:flex-nowrap sm:items-center sm:overflow-hidden"
             data-testid="composer-footer"
           >
             <div
-              className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex min-w-0 flex-1 flex-wrap items-center gap-1 pr-1 sm:flex-nowrap sm:overflow-x-auto sm:overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               data-testid="composer-footer-rail"
             >
               <ComposerModeToggle mode={mode} onToggle={toggleMode} />
@@ -1087,7 +1091,7 @@ export function Composer({
               </div>
               {footerExtras}
             </div>
-            <div className="flex flex-none items-center gap-0.5 max-sm:justify-end" data-testid="composer-footer-actions">
+            <div className="flex flex-none items-center justify-end gap-0.5" data-testid="composer-footer-actions">
               <RuntimeMetrics
                 state={state}
                 config={config}

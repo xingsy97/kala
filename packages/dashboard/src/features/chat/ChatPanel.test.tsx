@@ -979,6 +979,19 @@ describe('ChatPanel', () => {
     expect(onPinnedChange).toHaveBeenCalledWith(true)
   })
 
+  it('does not flicker the bottom button on a transient virtualizer resize report', () => {
+    render(
+      <ChatPanel messages={[{ role: 'user', content: [{ type: 'text', text: 'one' }] }]} />,
+    )
+    const bridge = globalThis as typeof globalThis & {
+      __virtuosoAtBottomStateChange?: (atBottom: boolean) => void
+    }
+
+    act(() => bridge.__virtuosoAtBottomStateChange?.(false))
+
+    expect(screen.queryByTestId('scroll-to-bottom')).toBeNull()
+  })
+
   it('jumps between user-message anchors from the real viewport and supports repeated clicks', () => {
     const bridge = globalThis as typeof globalThis & {
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
@@ -1013,7 +1026,7 @@ describe('ChatPanel', () => {
     expect(onPinnedChange).toHaveBeenCalledWith(false)
   })
 
-  it('pins the user prompt that owns the currently viewed response', async () => {
+  it('pins the owning user prompt without resizing the virtual transcript', async () => {
     const bridge = globalThis as typeof globalThis & {
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
     }
@@ -1044,12 +1057,17 @@ describe('ChatPanel', () => {
     const inspector = screen.getByTestId('pinned-row-inspector')
     expect(overlayRow.contains(sticky)).toBe(true)
     expect(overlayRow.contains(inspector)).toBe(true)
+    expect(overlayRow.className).toContain('absolute')
+    expect(overlayRow.className).toContain('inset-x-0')
+    expect(overlayRow.className).not.toContain('flex-none')
+    expect(overlayRow.compareDocumentPosition(screen.getByTestId('virtual-transcript')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(sticky.contains(inspector)).toBe(false)
     expect(sticky.textContent).not.toContain('Current prompt')
     expect(sticky.textContent).toContain('first question')
     expect(sticky.textContent).not.toContain('second question')
-    expect(sticky.querySelector('.line-clamp-2')).toBeTruthy()
-    expect(sticky.querySelector('.sm\\:line-clamp-3')).toBeTruthy()
+    expect(sticky.querySelector('.line-clamp-1')).toBeTruthy()
+    expect(sticky.querySelector('.line-clamp-2')).toBeNull()
+    expect(sticky.querySelector('.sm\\:line-clamp-3')).toBeNull()
     const buttonClass = within(sticky).getByRole('button').className
     expect(buttonClass).toContain('ak-sticky-user-prompt-surface')
     expect(buttonClass).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
@@ -1204,16 +1222,33 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('artifact-image-preview-full')).toBeTruthy()
   })
 
-  it('renders Host-referenced image attachments from the session-scoped durable endpoint', () => {
-    render(<ChatPanel sessionId="session-1" messages={[{
-      role: 'user',
-      content: [{
-        type: 'file', name: 'pasted-image-1.png', mediaType: 'image/png',
-        source: { kind: 'host_ref', attachmentId: 'image-attachment-1', sha256: 'a'.repeat(64), bytes: 8 },
-      }],
-    }]} />)
-    const preview = screen.getByTestId('message-image-preview-trigger')
-    expect(preview.querySelector('img')?.getAttribute('src')).toBe('/runtime/attachments/image-attachment-1?sessionId=session-1')
+  it('renders Host-referenced image attachments from the session-scoped durable endpoint', async () => {
+    const originalFetch = globalThis.fetch
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Blob(['png'], { type: 'image/png' }), { status: 200 }))
+    globalThis.fetch = fetchMock
+    URL.createObjectURL = vi.fn(() => 'blob:session-image')
+    URL.revokeObjectURL = vi.fn()
+    try {
+      render(<ChatPanel sessionId="session-1" messages={[{
+        role: 'user',
+        content: [{
+          type: 'file', name: 'pasted-image-1.png', mediaType: 'image/png',
+          source: { kind: 'host_ref', attachmentId: 'image-attachment-1', sha256: 'a'.repeat(64), bytes: 8 },
+        }],
+      }]} />)
+      expect(screen.getByTestId('message-image-preview-loading')).toBeTruthy()
+      await waitFor(() => expect(screen.getByTestId('message-image-preview-trigger').querySelector('img')?.getAttribute('src')).toBe('blob:session-image'))
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/runtime/attachments/image-attachment-1?sessionId=session-1',
+        expect.objectContaining({ credentials: 'include', headers: undefined }),
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+    }
   })
 
   it('loads Host-referenced images with the configured bearer token', async () => {

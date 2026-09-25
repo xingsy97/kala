@@ -167,6 +167,28 @@ describe('VirtualTranscript', () => {
     expect(bridge.__virtuosoFollowOutput?.(true)).toBe(false)
   })
 
+  it('ignores transient atBottom=false reports caused by viewport remeasurement', () => {
+    const onPinnedChange = vi.fn()
+    render(
+      <VirtualTranscript<Item>
+        items={makeItems(20)}
+        renderItem={(it) => <span>{it.label}</span>}
+        keyFor={(it) => it.id}
+        pinnedToBottom
+        onPinnedChange={onPinnedChange}
+      />,
+    )
+    const bridge = globalThis as typeof globalThis & {
+      __virtuosoAtBottomStateChange?: (atBottom: boolean) => void
+      __virtuosoFollowOutput?: (isAtBottom: boolean) => boolean | 'auto' | 'smooth'
+    }
+
+    bridge.__virtuosoAtBottomStateChange?.(false)
+
+    expect(onPinnedChange).not.toHaveBeenCalled()
+    expect(bridge.__virtuosoFollowOutput?.(true)).toBe('auto')
+  })
+
   it('unpins for scrollbar/pointer upward movement but not internal resize compensation', () => {
     const onPinnedChange = vi.fn()
     render(

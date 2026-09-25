@@ -50,7 +50,7 @@ import {
   type TimelineEntry,
 } from './session-projection.js'
 import type { CachedSessionView, CachedSessionViewInput, SessionViewCache } from './session-view-cache.js'
-import { readBooleanPref, PREF_SMOOTH_STREAMING_TEXT } from './lib/prefs.js'
+import { DASHBOARD_PREFERENCES, DEFAULT_SESSION_SUBSCRIPTION_WARMTH_MINUTES, numberPreferenceOptions, PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES, PREF_SMOOTH_STREAMING_TEXT, readBooleanPref, readNumberPref } from './lib/prefs.js'
 import { emitRpc, emitRpcInBackground } from './socket-rpc.js'
 import { SessionSummaryStore } from './app-logic/session-summary-store.js'
 import { DashboardConnectionManager } from './dashboard-connection-manager.js'
@@ -121,7 +121,16 @@ const CONTROL_SOCKET_SESSION_ID = '__agent-kernel-control__'
 const connectionManagers = new WeakMap<DashboardSocket, DashboardConnectionManager>()
 export function dashboardConnectionManager(socket: DashboardSocket): DashboardConnectionManager {
   let manager = connectionManagers.get(socket)
-  if (!manager) { manager = new DashboardConnectionManager(socket); connectionManagers.set(socket, manager) }
+  if (!manager) {
+    manager = new DashboardConnectionManager(socket, {
+      sessionWarmthMs: () => readNumberPref(
+        PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES,
+        DEFAULT_SESSION_SUBSCRIPTION_WARMTH_MINUTES,
+        numberPreferenceOptions(DASHBOARD_PREFERENCES.sessionSubscriptionWarmthMinutes),
+      ) * 60_000,
+    })
+    connectionManagers.set(socket, manager)
+  }
   return manager
 }
 
@@ -848,9 +857,20 @@ export function useDashboardControlSocket(host: string, token?: string, enabled 
       reconnectionAttempts: 30,
       randomizationFactor: 0.5,
     }) as DashboardSocket
-    dashboardConnectionManager(next).acquire('global')
+    const manager = dashboardConnectionManager(next)
+    manager.acquire('global')
+    const onPreferenceChange = (event: Event): void => {
+      if ((event as CustomEvent<{ key: string }>).detail?.key === PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES) manager.updateWarmth()
+    }
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES) manager.updateWarmth()
+    }
+    window.addEventListener('ak-pref-change', onPreferenceChange)
+    window.addEventListener('storage', onStorage)
     setSocket(next)
     return () => {
+      window.removeEventListener('ak-pref-change', onPreferenceChange)
+      window.removeEventListener('storage', onStorage)
       next.close()
       setSocket((current) => current === next ? null : current)
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { lstatSync, readFileSync, readlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { formatFindings, loadPrivacyPolicy, loadPrivateDenylist, scanEntry } from './privacy-check-lib.mjs'
 
@@ -86,8 +86,14 @@ function scanTree(tree) {
 function scanWorktree() {
   const tracked = gitBuffer(['ls-files', '-z']).toString('utf8').split('\0').filter(Boolean)
   const untracked = gitBuffer(['ls-files', '--others', '--exclude-standard', '-z']).toString('utf8').split('\0').filter(Boolean)
-  const paths = [...new Set([...tracked, ...untracked])].filter((path) => existsSync(resolve(root, path)))
-  return scanPaths(paths, (path) => readFileSync(resolve(root, path)))
+  const paths = [...new Set([...tracked, ...untracked])].filter((path) => {
+    try { const stat = lstatSync(resolve(root, path)); return stat.isFile() || stat.isSymbolicLink() }
+    catch { return false }
+  })
+  return scanPaths(paths, (path) => {
+    const fullPath = resolve(root, path)
+    return lstatSync(fullPath).isSymbolicLink() ? Buffer.from(readlinkSync(fullPath)) : readFileSync(fullPath)
+  })
 }
 
 function scanPaths(paths, read, source = 'file') {

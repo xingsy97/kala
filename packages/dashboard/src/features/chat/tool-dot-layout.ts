@@ -18,6 +18,8 @@ export function toolDotNodeWidth(basePixels: number, consecutiveCount: number): 
 export function toolDotRailBudget(containerWidth: number): number {
   if (containerWidth <= 0) return 0
   if (containerWidth < 640) return Math.max(112, containerWidth - 52)
+  // Wide transcripts can show the full activity trail; keep the compact budget on narrower panels.
+  if (containerWidth >= 880) return Math.round(Math.min(containerWidth * 0.9, 840))
   return Math.round(Math.max(144, Math.min(containerWidth * 0.34, 420)))
 }
 

@@ -611,6 +611,9 @@ export const resources = {
           toolActivityIconSizeDesc: 'Scale the semantic tool icons in compact activity lines. Default: 150%.',
           sessionCacheMaxMb: 'Session cache memory',
           sessionCacheMaxMbDesc: 'Maximum in-tab memory used to keep recently opened session transcripts instant when switching back. Set 0 to disable.',
+          sessionSubscriptionWarmth: 'Session subscription warmth',
+          sessionSubscriptionWarmthDesc: 'Keep recently visited sessions subscribed for faster switching. Re-entering refreshes the timer. Up to 16 sessions are kept warm; set 0 to disable.',
+          minutes: 'min',
           chatFontSize: 'Chat font size',
           interfaceScale: 'Interface size',
           interfaceScaleDesc: 'Scale buttons, menus, settings, sidebars and content together. Default: 125%. Individual font sizes are applied before this scale.',
@@ -861,6 +864,7 @@ export const resources = {
           justNow: 'just now',
           minutesAgo: '{{count}}m ago',
           hoursAgo: '{{count}}h ago',
+          daysAgo: '{{count}}d ago',
         },
         connectDialog: {
           title: 'Connect a new workspace',
@@ -1218,7 +1222,7 @@ export const resources = {
           failed: 'failed',
         },
         runtimeMetrics: {
-          contextPressure: 'Context pressure', contextWindow: 'Context Window', tokens: 'tokens', effectiveModel: 'Effective {{effective}} / model {{model}}', reserved: 'Reserved', reservedForResponse: 'Reserved for response', hideBreakdown: 'Hide token breakdown', showBreakdown: 'Show token breakdown', system: 'System', systemReserve: 'System / reserve', toolDefinitions: 'Tool Definitions', userContext: 'User Context', messages: 'Messages', userMessages: 'User messages', assistantMessages: 'Assistant messages', toolResults: 'Tool call results', memory: 'Memory', attachments: 'Attachments', pendingInput: 'Pending input', diagnostics: 'Diagnostics', modelContext: 'Model context', source: 'Source', totalEstimator: 'Total estimator', breakdownEstimator: 'Breakdown estimator', compactConversation: 'Compact Conversation',
+          contextPressure: 'Context pressure', contextWindow: 'Context Window', used: 'Used', limit: 'Limit', remaining: 'Remaining', tokens: 'tokens', effectiveModel: 'Effective {{effective}} / model {{model}}', reserved: 'Reserved', reservedForResponse: 'Reserved for response', hideBreakdown: 'Hide token breakdown', showBreakdown: 'Show token breakdown', system: 'System', systemReserve: 'System / reserve', toolDefinitions: 'Tool Definitions', userContext: 'User Context', messages: 'Messages', userMessages: 'User messages', assistantMessages: 'Assistant messages', toolResults: 'Tool call results', memory: 'Memory', attachments: 'Attachments', pendingInput: 'Pending input', diagnostics: 'Diagnostics', modelContext: 'Model context', source: 'Source', totalEstimator: 'Total estimator', breakdownEstimator: 'Breakdown estimator', compactConversation: 'Compact Conversation',
           contributorNote: 'Contributor numbers are estimates from current runtime counters and captured request metadata when available.',
           title: 'Context window: {{input}} of {{userWindow}} user tokens ({{percent}}%). Total model context window: {{totalWindow}} tokens. User context window: {{userWindow}} tokens.',
           unavailableTitle: 'Context window usage unavailable. Input tokens seen: {{input}}.',
@@ -2298,6 +2302,9 @@ export const resources = {
           toolActivityIconSizeDesc: '调整紧凑工具活动线中的语义图标大小。默认 150%。',
           sessionCacheMaxMb: 'Session 缓存内存',
           sessionCacheMaxMbDesc: '当前浏览器 tab 内用于缓存最近打开 session 对话记录的最大内存，切回时可立即显示。设为 0 则禁用。',
+          sessionSubscriptionWarmth: 'Session 订阅保温时间',
+          sessionSubscriptionWarmthDesc: '保持最近访问的 Session 订阅以便快速切换；再次进入会刷新计时。最多保留 16 个，设为 0 则禁用。',
+          minutes: '分钟',
           chatFontSize: '聊天字体大小',
           interfaceScale: '整体界面大小',
           interfaceScaleDesc: '一起调整按钮、菜单、设置、侧栏和内容的大小，默认 125%。各区域字体大小会在此基础上等比例放大。',
@@ -2548,6 +2555,7 @@ export const resources = {
           justNow: '刚刚',
           minutesAgo: '{{count}} 分钟前',
           hoursAgo: '{{count}} 小时前',
+          daysAgo: '{{count}} 天前',
         },
         connectDialog: {
           title: '连接新工作区',
@@ -2905,7 +2913,7 @@ export const resources = {
           failed: '失败',
         },
         runtimeMetrics: {
-          contextPressure: '上下文压力', contextWindow: '上下文窗口', tokens: 'tokens', effectiveModel: '有效窗口 {{effective}} / 模型窗口 {{model}}', reserved: '预留', reservedForResponse: '为回复预留', hideBreakdown: '收起 token 明细', showBreakdown: '查看 token 明细', system: '系统', systemReserve: '系统 / 预留', toolDefinitions: '工具定义', userContext: '用户上下文', messages: '消息', userMessages: '用户消息', assistantMessages: 'Assistant 消息', toolResults: '工具调用结果', memory: '记忆', attachments: '附件', pendingInput: '待处理输入', diagnostics: '诊断信息', modelContext: '模型上下文', source: '来源', totalEstimator: '总量估算器', breakdownEstimator: '明细估算器', compactConversation: '压缩会话',
+          contextPressure: '上下文压力', contextWindow: '上下文窗口', used: '已使用', limit: '上限', remaining: '剩余', tokens: 'tokens', effectiveModel: '有效窗口 {{effective}} / 模型窗口 {{model}}', reserved: '预留', reservedForResponse: '为回复预留', hideBreakdown: '收起 token 明细', showBreakdown: '查看 token 明细', system: '系统', systemReserve: '系统 / 预留', toolDefinitions: '工具定义', userContext: '用户上下文', messages: '消息', userMessages: '用户消息', assistantMessages: 'Assistant 消息', toolResults: '工具调用结果', memory: '记忆', attachments: '附件', pendingInput: '待处理输入', diagnostics: '诊断信息', modelContext: '模型上下文', source: '来源', totalEstimator: '总量估算器', breakdownEstimator: '明细估算器', compactConversation: '压缩会话',
           contributorNote: '贡献项数字来自当前运行时计数器和已捕获 request metadata，可用时为估算值。',
           title: '上下文窗口：{{input}} / {{userWindow}} user tokens（{{percent}}%）。总模型上下文窗口：{{totalWindow}} tokens。用户上下文窗口：{{userWindow}} tokens。',
           unavailableTitle: '上下文窗口用量不可用。已看到 input tokens：{{input}}。',

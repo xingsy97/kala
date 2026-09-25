@@ -87,7 +87,7 @@ function GraphView({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
   const portrait = usePortraitGraphLayout()
   const layout = useMemo(() => graphLayout(graph, portrait ? 'vertical' : 'horizontal'), [graph, portrait])
   const related = useMemo(() => selected ? connectedNodeIds(graph, selected) : null, [graph, selected])
-  return <div className="flex w-full justify-center"><div className="relative shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/10" style={{ width: layout.width, height: layout.height }} data-testid="task-graph-view" data-layout={layout.direction} data-canvas-width={layout.width} data-canvas-height={layout.height}>
+  return <div className="flex w-max min-w-full justify-center" data-testid="task-graph-scroll-content"><div className="relative shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/10" style={{ width: layout.width, height: layout.height }} data-testid="task-graph-view" data-layout={layout.direction} data-canvas-width={layout.width} data-canvas-height={layout.height}>
     <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden="true">
       <defs>
         <marker id="todo-graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

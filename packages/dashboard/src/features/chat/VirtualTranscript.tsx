@@ -206,17 +206,17 @@ function VirtualTranscriptInner<Item>(
     }
   }, [items.length, scheduleViewportMeasure])
 
-  // Two-way pin: virtuoso reports `atBottom`, we forward it. When the
-  // external `pinnedToBottom` flag flips true we auto-follow, otherwise
-  // we don't.
+  // `atBottomStateChange` also fires when Virtuoso remeasures a row or its
+  // viewport. Treat it as confirmation that an already-unpinned reader reached
+  // the bottom, not as user intent to leave the bottom. Otherwise a layout
+  // resize briefly reports false, mounts the go-to-bottom button, and can feed
+  // another resize back into Virtuoso.
   const handleAtBottomChange = useCallback(
     (atBottom: boolean) => {
-      // A ResizeObserver pass can report a stale `true` immediately after the
-      // user starts scrolling upward. Never let that overwrite explicit user
-      // intent; only a real downward scroll reaching the bottom clears the lock.
-      if (atBottom && userUnpinnedRef.current) return
-      pinnedRef.current = atBottom
-      onPinnedChange(atBottom)
+      if (!atBottom || userUnpinnedRef.current) return
+      if (pinnedRef.current) return
+      pinnedRef.current = true
+      onPinnedChange(true)
     },
     [onPinnedChange],
   )

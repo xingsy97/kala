@@ -444,6 +444,11 @@ export function App(): JSX.Element {
       setConfig((prev) => ({ ...prev, sessionId: p.sessionId, explicit: true }))
     },
   })
+  // Session hydration may say "connecting" while the shared Socket.IO transport
+  // remains connected. Keep the connection indicator tied to the transport.
+  const connectedSocketRef = useRef<DashboardSocket | null>(null)
+  if (controlSocket?.connected) connectedSocketRef.current = controlSocket
+  const transportStatus = connectionStatusForTransport(controlSocket, session.status, connectedSocketRef.current === controlSocket)
   useEffect(() => previewStore.connect(controlSocket, sessionViewCache), [controlSocket, previewStore, sessionViewCache])
   const control = useControlPlane(controlSocket)
   const controlSessionsRef = useRef<readonly SessionSummary[]>([])
@@ -1749,7 +1754,7 @@ export function App(): JSX.Element {
 
   return (
     <PwaLifecycleHost>
-    <ConnectionStatusProvider enabled={hasSelectedSession} socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession}>
+    <ConnectionStatusProvider enabled={hasSelectedSession} socket={session.socket} status={transportStatus} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} workspaceId={currentSession?.workspaceId} executorConnected={sessionWorkspaceOnline} onResync={resyncSession}>
     <div className="ak-app-shell ak-workspace-canvas flex flex-row text-foreground">
       {wideLayout && (section !== 'agent' || !explorerOpen) ? (
         <DesktopSessionRail
@@ -1904,6 +1909,8 @@ export function App(): JSX.Element {
             ) : activeSessionId !== null ? (
             <ResizablePanelGroup direction="horizontal" autoSaveId="ak-workbench-cols-v1" className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
               <ResizablePanel
+                id="workbench-main"
+                order={1}
                 defaultSize={wideLayout ? (inspectorOpen ? 74 : 100) : 100}
                 minSize={wideLayout ? 70 : 100}
                 className="min-w-0"
@@ -2320,7 +2327,7 @@ export function App(): JSX.Element {
               {wideLayout && inspectorOpen ? (
                 <>
                   <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={30} minSize={26} maxSize={42} className="bg-card text-card-foreground" data-testid="inspector-panel">
+                  <ResizablePanel id="workbench-inspector" order={2} defaultSize={26} minSize={26} maxSize={42} className="min-w-0 bg-card text-card-foreground" data-testid="inspector-panel">
                     <div className="ak-motion-slide-right h-full min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <RightPanel
                         activeTab={rightPanelTab}
@@ -3162,6 +3169,13 @@ type ConnectionHealthSample = {
   executorRequired: boolean
 }
 
+export function connectionStatusForTransport(socket: { connected: boolean } | null, sessionStatus: string, wasConnected: boolean): string {
+  if (!socket) return sessionStatus
+  if (socket.connected) return 'ready'
+  if (wasConnected) return 'disconnected'
+  return sessionStatus === 'error' ? 'error' : 'connecting'
+}
+
 type ConnectionStatusProps = { socket: DashboardSocket | null; status: string; transport?: string; cursor: number; workspaceId?: string; executorConnected: boolean; onResync(): void; compact?: boolean; appearance?: 'default' | 'brand'; triggerId?: string }
 type ConnectionStatusEntryOptions = Pick<ConnectionStatusProps, 'compact' | 'appearance' | 'triggerId'>
 type ConnectionStatusRenderer = (options: ConnectionStatusEntryOptions) => JSX.Element
@@ -3314,8 +3328,8 @@ export function ConnectionStatusProvider({ socket, status, transport, cursor, wo
       <div className="relative flex-none">
         <button type="button" onClick={() => setOpenTrigger((value) => value === triggerId ? null : triggerId)} className={brand ? 'inline-flex h-9 w-9 touch-manipulation items-center justify-center rounded-full transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' : cn('inline-flex h-9 items-center rounded-lg text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground sm:h-8', compact ? 'w-8 justify-center p-0' : 'gap-2 px-2')} data-testid={brand ? 'sidebar-connection-status' : 'connection-status'} data-trigger-id={triggerId} data-status={displayStatus} data-compact={compact ? 'true' : undefined} aria-expanded={open} aria-label={brand || compact ? triggerTitle : undefined} title={triggerTitle}>
           {brand ? (
-            <span className={cn('grid h-8 w-8 place-items-center overflow-hidden rounded-full border-2', statusRing(displayStatus))} data-testid="sidebar-connection-status-ring">
-              <span className="grid h-5 w-5 place-items-center leading-none">
+            <span className={cn('relative grid h-8 w-8 place-items-center overflow-hidden rounded-full border-2', statusRing(displayStatus))} data-testid="sidebar-connection-status-ring">
+              <span className="absolute inset-0 grid place-items-center leading-none">
                 <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="block h-5 w-5 object-contain" aria-hidden />
               </span>
             </span>

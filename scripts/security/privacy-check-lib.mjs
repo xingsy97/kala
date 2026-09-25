@@ -39,6 +39,12 @@ export function loadPrivacyPolicy(root) {
       throw new Error('Privacy policy exceptions require an exact rule, exact path, content SHA-256, and public reason.')
     }
   }
+  for (const [path, hashes] of Object.entries(policy.allowedHistoricalAssetHashes ?? {})) {
+    if (!(policy.allowedImagePaths.includes(path) || policy.allowedBinaryPaths.includes(path))
+      || !Array.isArray(hashes) || hashes.some((hash) => !/^[0-9a-f]{64}$/.test(hash))) {
+      throw new Error('Historical asset exceptions require an approved path and exact SHA-256 digests.')
+    }
+  }
   return {
     ...policy,
     allowedHomeUsers: new Set(policy.allowedHomeUsers),
@@ -78,7 +84,9 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
   const binary = Buffer.isBuffer(content) && content.subarray(0, 8192).includes(0)
   const text = binary ? '' : Buffer.isBuffer(content) ? content.toString('utf8') : String(content)
   const contentSha256 = createHash('sha256').update(content).digest('hex')
-  const safePath = denylist.reduce((value, privateValue) => value.split(privateValue).join('<private>'), path)
+  // Never echo a potentially private filename: a finding can be about the
+  // filename itself, including paths containing credentials or personal data.
+  const safePath = `<path:${fingerprint(path)}>`
   const add = (rule, index = 0, advice) => {
     if (policy.exceptionKeys.has(`${rule}\0${path}\0${contentSha256}`)) return
     const line = text ? text.slice(0, index).split('\n').length : undefined
@@ -103,7 +111,9 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
       add('privacy.unregistered-binary', 0, 'Register a required fixture explicitly or keep the binary outside Git.')
       return findings
     }
-    if (source === 'file' && (policy.allowedBinaryPaths.has(path) || policy.allowedImagePaths.has(path)) && policy.allowedBinaryHashes[path] !== contentSha256) {
+    if ((policy.allowedBinaryPaths.has(path) || policy.allowedImagePaths.has(path))
+      && policy.allowedBinaryHashes[path] !== contentSha256
+      && !(source === 'history-file' && policy.allowedHistoricalAssetHashes?.[path]?.includes(contentSha256))) {
       add('privacy.asset-content-drift', 0, 'Review the asset change and update its approved SHA-256 explicitly.')
       return findings
     }

@@ -172,11 +172,6 @@ export function RuntimeMetrics({
         data-testid={isSimple ? 'context-usage-bar' : 'context-usage-indicator'}
         onClick={() => setOpen((value) => !value)}
       >
-        {isSimple && percent !== null && usedPercent > 0 ? (
-          <span className={cn('pointer-events-none absolute right-3 top-0 -translate-y-1/2 rounded-full border border-border/60 bg-popover/95 px-1.5 py-0.5 font-mono text-[0.5625rem] leading-none shadow-sm backdrop-blur', tone)} data-testid="context-usage-simple-label">
-            {percent}%
-          </span>
-        ) : null}
         {!isSimple ? <svg
           viewBox="0 0 20 20"
           className={cn('flex-none -rotate-90', isSimple ? 'h-[18px] w-[18px]' : 'h-5 w-5')}
@@ -234,6 +229,13 @@ export function RuntimeMetrics({
           {totalContextWindow && userContextWindow && totalContextWindow !== userContextWindow ? (
             <div className="mt-2 text-xs text-muted-foreground">
               {t('chat.runtimeMetrics.effectiveModel', { effective: formatTokens(userContextWindow), model: formatTokens(totalContextWindow) })}
+            </div>
+          ) : null}
+          {userContextWindow ? (
+            <div className="mt-2 space-y-0.5" data-testid="context-usage-totals">
+              <MetricRow label={t('chat.runtimeMetrics.used')} value={formatTokens(contextTokens)} />
+              <MetricRow label={t('chat.runtimeMetrics.limit')} value={formatTokens(userContextWindow, { thousands: 'compact' })} />
+              <MetricRow label={t('chat.runtimeMetrics.remaining')} value={formatTokens(Math.max(0, userContextWindow - contextTokens))} />
             </div>
           ) : null}
           <div className="relative mt-3 h-2 overflow-hidden rounded-full border border-border bg-muted">

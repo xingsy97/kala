@@ -18,6 +18,7 @@ import {
   DEFAULT_FILE_EXPLORER_FONT_SIZE,
   DEFAULT_FILE_VIEW_FONT_SIZE,
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  DEFAULT_SESSION_SUBSCRIPTION_WARMTH_MINUTES,
   DEFAULT_TOOL_ACTIVITY_ICON_SCALE,
   DEFAULT_SESSION_EXPLORER_FONT_SIZE,
   PREF_AUTO_HIDE_OFFLINE_WORKSPACES,
@@ -36,6 +37,7 @@ import {
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   PREF_TOOL_ACTIVITY_ICON_SCALE,
   PREF_SESSION_EXPLORER_FONT_SIZE,
+  PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES,
   PREF_SHOW_TOOL_CALL_TAB,
   PREF_SMOOTH_STREAMING_TEXT,
   PREF_TOPBAR_OPEN,
@@ -107,6 +109,7 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
   const [chatLineHeight, setChatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
   const [chatMathScale, setChatMathScale] = useNumberPref(PREF_CHAT_MATH_SCALE, DEFAULT_CHAT_MATH_SCALE, { min: 0, max: 4 })
   const [sessionCacheMaxMb, setSessionCacheMaxMb] = useNumberPref(PREF_SESSION_VIEW_CACHE_MAX_MB, DEFAULT_SESSION_VIEW_CACHE_MAX_MB, { min: 0, max: 4096 })
+  const [sessionSubscriptionWarmthMinutes, setSessionSubscriptionWarmthMinutes] = useNumberPref(PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES, DEFAULT_SESSION_SUBSCRIPTION_WARMTH_MINUTES, numberPreferenceOptions(DASHBOARD_PREFERENCES.sessionSubscriptionWarmthMinutes))
   const [durableCacheEnabled, setDurableCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
   const [keepScreenAwake, setKeepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
   const [smoothStreamingText, setSmoothStreamingText] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
@@ -377,6 +380,15 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
             <input list="session-cache-size-presets" type="number" min={0} max={4096} value={sessionCacheMaxMb} onChange={(event) => setSessionCacheMaxMb(Number(event.currentTarget.value))} className="h-8 w-24 rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.sessionCacheMaxMb')} data-testid="settings-session-cache-max-mb" />
             <datalist id="session-cache-size-presets">{[0, 50, 100, 200, 500, 750, 1024, 2048, 4096].map((value) => <option key={value} value={value} />)}</datalist>
             <span className="text-xs text-muted-foreground">MB</span>
+          </div>
+        </li>
+        <li className="flex items-center justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 font-medium">{t('settings.interface.sessionSubscriptionWarmth')}<HelpHint label={t('settings.interface.sessionSubscriptionWarmth')}>{t('settings.interface.sessionSubscriptionWarmthDesc')}</HelpHint></div>
+          </div>
+          <div className="flex flex-none items-center gap-2">
+            <input type="number" min={0} max={1440} value={sessionSubscriptionWarmthMinutes} onChange={(event) => setSessionSubscriptionWarmthMinutes(Number(event.currentTarget.value))} className="h-8 w-24 rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.sessionSubscriptionWarmth')} data-testid="settings-session-subscription-warmth" />
+            <span className="text-xs text-muted-foreground">{t('settings.interface.minutes')}</span>
           </div>
         </li>
         <InterfaceToggle

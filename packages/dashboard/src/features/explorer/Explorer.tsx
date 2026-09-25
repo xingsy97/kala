@@ -21,13 +21,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Circle,
-  Clock3,
   EyeOff,
   GripVertical,
   GitFork,
   Info,
   LoaderCircle,
   MessageCircle,
+  Monitor,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -120,10 +120,10 @@ type Props = {
   subscribeCachedSessionView?: (sessionId: string, listener: () => void) => () => void
 }
 
-const SESSION_ROW_HEIGHT = 44
-const WORKSPACE_ROW_HEIGHT = 40
-const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] gap-x-2'
-const WORKSPACE_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2'
+const SESSION_ROW_HEIGHT = 38
+const WORKSPACE_ROW_HEIGHT = 38
+const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_minmax(0,3.5rem)] items-center gap-x-2'
+const WORKSPACE_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-2'
 const EXPLORER_RAIL_CELL = 'flex h-4 w-4 flex-none items-center justify-center'
 
 export type SessionActivityStatus = SessionSummary['status'] | 'loading'
@@ -156,7 +156,7 @@ function ExplorerImpl({
   const interfaceScale = useInterfaceScale()
   const rowHeightFor = useCallback((node: NodeApi<TreeNode>): number => Math.ceil(Math.max(
     (node.data.kind === 'workspace' ? WORKSPACE_ROW_HEIGHT : SESSION_ROW_HEIGHT) * interfaceScale,
-    fontSizePx * 1.5 + 12 * interfaceScale,
+    fontSizePx * 1.4 + 9 * interfaceScale,
   )), [fontSizePx, interfaceScale])
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
@@ -315,7 +315,7 @@ function ExplorerImpl({
   }, [visibleData])
 
   return (
-    <div ref={preview.explorerRef} className="flex h-full min-w-0 flex-col overflow-hidden bg-transparent text-foreground">
+    <div ref={preview.explorerRef} className="@container flex h-full min-w-0 flex-col overflow-hidden bg-transparent text-foreground">
       <Header query={query} onQueryChange={setQuery} onNewSession={onNewSession} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} leading={headerLeading} />
       <div
         ref={ref}
@@ -986,11 +986,9 @@ function WorkspaceRow({
     w.workspaceId === null
       ? t('explorer.sessionsNoWorkspace')
       : w.online ? t('explorer.online') : t('explorer.offline')
-  const metaBadgeCls = w.workspaceId === null
-    ? 'bg-muted-foreground/45'
-    : w.online
-      ? 'bg-emerald-500'
-      : 'bg-muted-foreground/45'
+  const workspaceIconCls = w.online
+    ? 'text-emerald-600 dark:text-emerald-300'
+    : 'text-muted-foreground/75'
   const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
   const canOpenTerminal = w.workspaceId !== null && onOpenWorkspaceTerminal
   const canCreateSession = w.workspaceId !== null
@@ -1007,7 +1005,7 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws relative min-w-0 cursor-pointer select-none rounded-2xl px-3 py-2 transition-colors hover:bg-muted/45',
+        'group/ws relative min-w-0 cursor-pointer select-none rounded-xl px-2.5 py-1.5 transition-colors hover:bg-muted/45',
         WORKSPACE_ROW_GRID,
       )}
     >
@@ -1040,11 +1038,11 @@ function WorkspaceRow({
           ariaLabel={t('explorer.renameWorkspace')}
         />
       ) : (
-        <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2">
-          {w.workspaceId === null ? <span className="inline-flex h-4 w-4 flex-none items-center justify-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{meta}</span></span> : <span className="inline-flex h-4 w-4 flex-none items-center justify-center"><span className={cn('h-2 w-2 rounded-full', metaBadgeCls)} data-testid="workspace-status-badge" title={meta} aria-label={meta}><span className="sr-only">{meta}</span></span></span>}
+        <div className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2">
+          {w.workspaceId === null ? <span className="inline-flex h-5 w-5 flex-none items-center justify-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{meta}</span></span> : <span className={cn('inline-flex h-5 w-5 flex-none items-center justify-center transition-colors', workspaceIconCls)} data-testid="workspace-status-icon" title={meta} aria-label={meta}><Monitor className="h-4 w-4" aria-hidden="true" /><span className="sr-only">{meta}</span></span>}
           <span
             className="min-w-0 truncate font-semibold leading-5 text-foreground"
-            style={{ fontSize: fontSizePx, lineHeight: 1.4 }}
+            style={{ fontSize: fontSizePx, lineHeight: 1.35 }}
             title={canRename ? t('explorer.doubleClickRename') : undefined}
             onDoubleClick={(e) => {
               if (!canRename) return
@@ -1205,7 +1203,7 @@ function SessionRow({
       data-selected={selected ? 'true' : 'false'}
       aria-current={selected ? 'page' : undefined}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden rounded-2xl px-3 py-2 transition-[background-color,box-shadow,color]',
+        'group relative min-w-0 cursor-pointer overflow-hidden rounded-xl py-1.5 pl-6 pr-3 transition-[background-color,box-shadow,color]',
         'hover:bg-muted/45',
         selected && 'bg-muted/60',
         EXPLORER_ROW_GRID,
@@ -1296,9 +1294,6 @@ function SessionRow({
           />
         )}
       </div>
-      <div className={EXPLORER_RAIL_CELL}>
-        <SessionStatusIndicator status={status} />
-      </div>
       {editing ? (
         <RenameInput
           initial={s.label}
@@ -1308,17 +1303,18 @@ function SessionRow({
       ) : (
         <div
           className={cn(
-            'min-w-0 truncate font-medium leading-5',
+            'flex min-w-0 items-center gap-1.5 truncate font-medium leading-5',
             selected ? 'text-foreground' : 'text-foreground/88',
           )}
-          style={{ fontSize: fontSizePx, lineHeight: 1.4 }}
+          style={{ fontSize: fontSizePx, lineHeight: 1.35 }}
           title={currentCwd || t('explorer.doubleClickRename')}
         >
-          <HighlightText text={s.label} query={query} />
+          {showsInlineSessionStatus(status) ? <SessionStatusIndicator status={status} phaseKey={s.sessionId} /> : null}
+          <span className="min-w-0 truncate"><HighlightText text={s.label} query={query} /></span>
         </div>
       )}
       {editing ? null : (
-        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none col-start-4 row-start-1 flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none col-start-3 row-start-1 flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
           <Button
             variant="ghost"
             size="icon"
@@ -1430,39 +1426,44 @@ function SessionRow({
           </Button>
         </div>
       )}
-      <div className="ak-touch-hide pointer-events-none col-start-4 row-start-1 flex flex-none items-center justify-end whitespace-nowrap text-[0.6875rem] leading-4 text-muted-foreground/85 group-hover:opacity-0">
-        <span className="inline-flex flex-none items-center gap-1 whitespace-nowrap tabular-nums opacity-70">
-          <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
-          {formatWhen(lastActivityIso, t, minuteNow * 60_000)}
-        </span>
+      <div className="ak-session-last-activity ak-touch-hide pointer-events-none col-start-3 row-start-1 flex min-w-0 items-center justify-end overflow-hidden whitespace-nowrap text-[0.6875rem] leading-4 text-muted-foreground/85 group-hover:opacity-0">
+        <span className="min-w-0 max-w-full truncate tabular-nums opacity-70" title={formatWhen(lastActivityIso, t, minuteNow * 60_000)} data-testid="session-last-activity">{formatWhen(lastActivityIso, t, minuteNow * 60_000)}</span>
       </div>
     </div>
   )
+}
+
+function showsInlineSessionStatus(status: SessionActivityStatus | undefined): boolean {
+  return status === 'loading' || status === 'thinking' || status === 'executing_tools' || status === 'awaiting_approval' || status === 'error'
 }
 
 export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   status,
   selected = false,
   compact = false,
+  phaseKey,
 }: {
   status: SessionActivityStatus | undefined
   selected?: boolean
   compact?: boolean
+  phaseKey?: string
 }): JSX.Element {
   const { t } = useTranslation()
   const label = statusIndicatorLabel(status, t)
   if (selected) return <ToolbarSessionStatus status={status} label={label} compact={compact} />
   const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
   if (status === 'loading' || status === 'thinking' || status === 'executing_tools') {
+    const phaseMs = sessionStatusAnimationPhaseMs(phaseKey ?? status ?? 'running')
     return (
       <span
         className={base}
         data-testid="session-status-indicator"
         data-status={status}
+        data-animation-phase-ms={String(phaseMs)}
         aria-label={label}
         title={label}
       >
-        <span className="ak-session-status-spinner" data-testid="session-status-spinner" aria-hidden="true">
+        <span className="ak-session-status-spinner" style={{ '--ak-session-status-phase': `${phaseMs}ms` } as React.CSSProperties} data-testid="session-status-spinner" aria-hidden="true">
           <LoaderCircle
             className="h-3 w-3 text-sky-500 dark:text-sky-400"
             strokeWidth={2.4}
@@ -1503,29 +1504,16 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
       </span>
     )
   }
-  if (status === 'done') {
+  if (status === 'done' || status === 'idle' || status === undefined) {
     return (
       <span
         className={base}
         data-testid="session-status-indicator"
-        data-status={status}
+        data-status={status ?? 'unknown'}
         aria-label={label}
         title={label}
       >
-        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
-      </span>
-    )
-  }
-  if (status === 'idle') {
-    return (
-      <span
-        className={base}
-        data-testid="session-status-indicator"
-        data-status={status}
-        aria-label={label}
-        title={label}
-      >
-        <Circle className="h-2.5 w-2.5 text-muted-foreground/80" strokeWidth={3} />
+        <span className="sr-only">{label}</span>
       </span>
     )
   }
@@ -1537,7 +1525,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
       aria-label={label}
       title={label}
     >
-      <span className="h-2 w-2 rounded-full bg-muted-foreground/50" />
+      <span className="sr-only">{label}</span>
     </span>
   )
 })
@@ -1574,6 +1562,12 @@ function ToolbarSessionStatus({ status, label, compact }: { status: SessionActiv
   )
 }
 
+function sessionStatusAnimationPhaseMs(key: string): number {
+  let hash = 0
+  for (let i = 0; i < key.length; i += 1) hash = ((hash * 31) + key.charCodeAt(i)) >>> 0
+  return -(hash % 900)
+}
+
 function statusIndicatorLabel(status: SessionActivityStatus | undefined, t: ReturnType<typeof useTranslation>['t']): string {
   switch (status) {
     case 'loading':
@@ -1602,6 +1596,7 @@ function formatWhen(iso: string, t: ReturnType<typeof useTranslation>['t'], now 
     if (delta < 60_000) return t('explorer.time.justNow')
     if (delta < 3_600_000) return t('explorer.time.minutesAgo', { count: Math.floor(delta / 60_000) })
     if (delta < 86_400_000) return t('explorer.time.hoursAgo', { count: Math.floor(delta / 3_600_000) })
+    if (delta < 15 * 86_400_000) return t('explorer.time.daysAgo', { count: Math.floor(delta / 86_400_000) })
     return d.toISOString().slice(0, 10)
   } catch {
     return iso

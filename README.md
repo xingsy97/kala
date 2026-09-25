@@ -55,15 +55,31 @@ Settings. Never commit provider credentials or local configuration.
 
 ## Releases
 
-GitHub Releases are the distribution entry point. A release is expected to include
-clear notes, checksums, and the relevant portable, desktop, or operator assets for
-that channel. Download assets and checksums from the same release before running
-them.
+GitHub Releases are the distribution entry point **once a public release is
+published**. You do not need the GitHub CLI. For a published Portable release,
+use the release's `run.sh` bootstrapper (Linux/macOS, with `curl`, `bash`, `wget`
+and `sha256sum` or `shasum`). Pin a published tag rather than blindly using
+`latest`:
 
 ```bash
-gh release download v0.2.0-rc.1 --repo xingsy97/akernel --pattern SHA256SUMS
-sha256sum --ignore-missing --check SHA256SUMS
+# Replace TAG with an actually published release tag. Review the URL/script
+# before executing code from the network; this script fetches release assets.
+TAG=v0.2.0-rc.1; bash -o pipefail -c 'curl --proto "=https" --tlsv1.2 -fsSL "https://github.com/xingsy97/akernel/releases/download/$1/run.sh" | bash' -- "$TAG"
 ```
+
+The bootstrapper verifies downloaded executable and Dashboard assets against
+`SHA256SUMS` from the **same tag**; checksums alone do not prove publisher
+identity. This command requires a published release with those assets and will
+fail if the tag is absent. Do not run it with `sudo`; configure a model provider
+and connect a workspace Executor after the Host starts. See the source quick
+start above if no public release is available yet.
+
+For the **Linux Desktop client** connecting to an existing trusted Kala server,
+open that server's `/downloads/desktop/index.html` and copy its one-command
+`curl` installer. It verifies an immutable package before installation. It is
+not a Host installer, and the page only offers it when a Desktop package exists.
+For Dedicated and Private Cloud deployments, use their verified release bundles
+and operator runbooks below rather than piping a script into a privileged shell.
 
 Release and deployment details live in the runbooks instead of this README:
 

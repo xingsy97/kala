@@ -314,6 +314,39 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('refreshes an already-subscribed session with an authoritative ready event before its ack', async () => {
+    const sessionId = 'refresh-existing-room'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { clientId: 'refresh-room-dashboard', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => dashboard.on('connect', resolve))
+    await Promise.all([
+      new Promise<SessionReadyEvent>((resolve) => dashboard.once('session:ready', resolve)),
+      dashboard.timeout(1000).emitWithAck('client:subscribe_channels', {
+        requestId: 'subscribe-once', generation: 1, channels: [`session:${sessionId}`],
+      }),
+    ])
+
+    const order: string[] = []
+    const ready = new Promise<SessionReadyEvent>((resolve) => dashboard.once('session:ready', (payload) => {
+      order.push('ready')
+      resolve(payload)
+    }))
+    const acknowledged = dashboard.timeout(1000).emitWithAck('client:refresh_channels', {
+      requestId: 'refresh-baseline', generation: 2, channels: [`session:${sessionId}`],
+    }).then((result) => { order.push('ack'); return result })
+
+    const refreshed = await ready
+    const ack = await acknowledged
+    expect(refreshed).toMatchObject({ sessionId, cursor: server.store.get(sessionId)?.state.cursor, reason: 'load' })
+    expect(ack).toMatchObject({ accepted: [`session:${sessionId}`], rejected: [] })
+    expect(order).toEqual(['ready', 'ack'])
+    dashboard.close()
+  })
+
   it('acknowledges approval-mode changes and persists the authoritative mode', async () => {
     const sessionId = 'approval-mode-ack'
     await server.store.ensure({ sessionId, defaultConfig: config })

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
 import { SessionPreviewStore } from './session-preview-store.js'
 import { createSessionViewCache } from '../../session-view-cache.js'
+import { dashboardConnectionManager } from '../../session.js'
 
 const snapshot = (sessionId: string, updatedAt: number) => ({
   sessionId,
@@ -35,7 +36,7 @@ describe('SessionPreviewStore', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
-  it('reuses the control socket, ignores high-frequency token deltas, and releases the room', () => {
+  it('reuses the control socket, ignores high-frequency token deltas, and keeps the released room warm', () => {
     const handlers = new Map<string, (...args: never[]) => void>()
     const socket = {
       connected: true,
@@ -71,6 +72,7 @@ describe('SessionPreviewStore', () => {
 
     stop()
     unsubscribe()
-    expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).toHaveBeenCalledWith('client:unsubscribe_channels', expect.objectContaining({ channels: ['session:preview-session'] }), expect.any(Function))
+    expect(dashboardConnectionManager(socket).snapshot().get('session:preview-session')?.refs).toBe(0)
+    expect((socket as { emit: ReturnType<typeof vi.fn> }).emit).not.toHaveBeenCalledWith('client:unsubscribe_channels', expect.anything(), expect.any(Function))
   })
 })

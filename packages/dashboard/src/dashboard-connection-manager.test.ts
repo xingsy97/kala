@@ -8,7 +8,7 @@ class SocketMock {
   on(event: string, handler: (...args: any[]) => void): this { this.handlers.set(event, [...this.handlers.get(event) ?? [], handler]); return this }
   emit(event: string, payload: any, ack?: (value: any) => void): this {
     this.emits.push({ event, payload })
-    if (event.includes('subscribe')) queueMicrotask(() => ack?.({ requestId: payload.requestId, generation: payload.generation, accepted: payload.channels, rejected: [], cursors: {} }))
+    if (event.includes('subscribe') || event === 'client:refresh_channels') queueMicrotask(() => ack?.({ requestId: payload.requestId, generation: payload.generation, accepted: payload.channels, rejected: [], cursors: {} }))
     return this
   }
   fire(event: string): void { for (const handler of this.handlers.get(event) ?? []) handler() }
@@ -21,13 +21,14 @@ describe('DashboardConnectionManager', () => {
     const releasePreview = manager.acquire('session:s1')
     if (state === 'active') await vi.waitFor(() => expect(manager.snapshot().get('session:s1')?.state).toBe('active'))
     const releaseSelection = manager.acquire('session:s1', 4, { freshBaseline: true })
-    expect(socket.emits.filter(entry => entry.event === 'client:subscribe_channels')).toHaveLength(2)
+    expect(socket.emits.filter(entry => entry.event === 'client:subscribe_channels')).toHaveLength(1)
+    expect(socket.emits.filter(entry => entry.event === 'client:refresh_channels')).toHaveLength(1)
     expect(manager.snapshot().get('session:s1')?.refs).toBe(2)
     releasePreview()
     expect(socket.emits.filter(entry => entry.event === 'client:unsubscribe_channels')).toHaveLength(0)
     await vi.waitFor(() => expect(manager.snapshot().get('session:s1')?.state).toBe('active'))
     releaseSelection()
-    expect(socket.emits.filter(entry => entry.event === 'client:unsubscribe_channels')).toHaveLength(1)
+    expect(socket.emits.filter(entry => entry.event === 'client:unsubscribe_channels')).toHaveLength(0)
   })
 
   it('reports a rejected subscription to its active consumer, not a released one', () => {
@@ -69,7 +70,8 @@ describe('DashboardConnectionManager', () => {
     const release = manager.acquire('session:s1')
     await vi.waitFor(() => expect(manager.snapshot().get('session:s1')?.state).toBe('active'))
     manager.refresh('session:s1')
-    expect(socket.emits.filter(entry => entry.event === 'client:subscribe_channels')).toHaveLength(2)
+    expect(socket.emits.filter(entry => entry.event === 'client:subscribe_channels')).toHaveLength(1)
+    expect(socket.emits.filter(entry => entry.event === 'client:refresh_channels')).toHaveLength(1)
     expect(manager.snapshot().get('session:s1')?.refs).toBe(1)
     socket.connected = false
     manager.refresh('session:s1')
@@ -93,7 +95,7 @@ describe('DashboardConnectionManager', () => {
     release2()
   })
 
-  it('switches Sessions on the same physical socket and restores only active channels', async () => {
+  it('switches Sessions on the same physical socket and restores active and warm channels', async () => {
     const socket = new SocketMock()
     const manager = new DashboardConnectionManager(socket as never)
     const releaseWorkspace = manager.acquire('workspace:w1')
@@ -104,17 +106,14 @@ describe('DashboardConnectionManager', () => {
     releaseFirst()
     await vi.waitFor(() => expect(manager.snapshot().get('session:s2')?.state).toBe('active'))
     expect(manager.socket).toBe(socket)
-    const unsubscribe = socket.emits.filter((entry) => entry.event === 'client:unsubscribe_channels').at(-1)
-    const subscribeSecond = socket.emits.filter((entry) => entry.event === 'client:subscribe_channels' && entry.payload.channels.includes('session:s2')).at(-1)
-    expect(unsubscribe?.payload.channels).toEqual(['session:s1'])
-    expect(unsubscribe?.payload.generation).toBeGreaterThan(subscribeSecond?.payload.generation)
+    expect(socket.emits.filter((entry) => entry.event === 'client:unsubscribe_channels')).toHaveLength(0)
 
     socket.connected = false; socket.fire('disconnect')
     socket.connected = true; socket.fire('connect')
     await vi.waitFor(() => expect(socket.emits.some((entry) => entry.event === 'client:restore_subscriptions'
       && entry.payload.channels.includes('workspace:w1')
       && entry.payload.channels.includes('session:s2')
-      && !entry.payload.channels.includes('session:s1')
+      && entry.payload.channels.includes('session:s1')
       && entry.payload.cursors['session:s2'] === 8)).toBe(true))
     releaseSecond(); releaseWorkspace()
   })
@@ -123,11 +122,122 @@ describe('DashboardConnectionManager', () => {
     const socket = new SocketMock()
     let captured: ((value: any) => void) | undefined
     socket.emit = function (event: string, payload: any, ack?: (value: any) => void) { this.emits.push({ event, payload }); captured = ack; return this }
-    const manager = new DashboardConnectionManager(socket as never)
+    const manager = new DashboardConnectionManager(socket as never, { sessionWarmthMs: () => 0 })
     const release = manager.acquire('session:s1')
     release()
     captured?.({ requestId: 'old', generation: 1, accepted: ['session:s1'], rejected: [], cursors: {} })
     expect(manager.snapshot().has('session:s1')).toBe(false)
+  })
+
+  it('keeps A to B to A rooms warm while independently refreshing the reentered baseline', async () => {
+    const socket = new SocketMock()
+    const manager = new DashboardConnectionManager(socket as never, { sessionWarmthMs: () => 60_000 })
+    const releaseA = manager.acquire('session:a', undefined, { freshBaseline: true })
+    releaseA()
+    const releaseB = manager.acquire('session:b', undefined, { freshBaseline: true })
+    releaseB()
+    const releaseAAgain = manager.acquire('session:a', undefined, { freshBaseline: true })
+
+    expect(socket.emits.filter(({ event }) => event === 'client:unsubscribe_channels')).toHaveLength(0)
+    expect(socket.emits.filter(({ event, payload }) => event === 'client:subscribe_channels' && payload.channels.includes('session:a'))).toHaveLength(1)
+    expect(socket.emits.filter(({ event, payload }) => event === 'client:refresh_channels' && payload.channels.includes('session:a'))).toHaveLength(1)
+    expect(manager.snapshot().get('session:a')?.refs).toBe(1)
+    expect(manager.snapshot().get('session:b')?.refs).toBe(0)
+    releaseAAgain()
+  })
+
+  it('refreshes a warm session expiry when it is reentered', async () => {
+    vi.useFakeTimers()
+    try {
+      const socket = new SocketMock()
+      const manager = new DashboardConnectionManager(socket as never, { sessionWarmthMs: () => 1_000 })
+      const release = manager.acquire('session:s1')
+      release()
+      await vi.advanceTimersByTimeAsync(500)
+      const releaseAgain = manager.acquire('session:s1')
+      releaseAgain()
+      await vi.advanceTimersByTimeAsync(999)
+      expect(socket.emits.filter(({ event }) => event === 'client:unsubscribe_channels')).toHaveLength(0)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(socket.emits.filter(({ event }) => event === 'client:unsubscribe_channels')).toHaveLength(1)
+      expect(manager.snapshot().has('session:s1')).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('immediately removes idle rooms when the warmth setting is disabled', () => {
+    const socket = new SocketMock()
+    let duration = 60_000
+    const manager = new DashboardConnectionManager(socket as never, { sessionWarmthMs: () => duration })
+    manager.acquire('session:s1')()
+    expect(manager.snapshot().has('session:s1')).toBe(true)
+    duration = 0
+    manager.updateWarmth()
+    expect(manager.snapshot().has('session:s1')).toBe(false)
+    expect(socket.emits.filter(({ event }) => event === 'client:unsubscribe_channels')).toHaveLength(1)
+  })
+
+  it('evicts the least recently used warm session above the cap', () => {
+    const socket = new SocketMock()
+    const manager = new DashboardConnectionManager(socket as never, { sessionWarmthMs: () => 60_000, maxWarmSessions: 2 })
+    for (const id of ['s1', 's2', 's3']) manager.acquire(`session:${id}`)()
+
+    expect(manager.snapshot().has('session:s1')).toBe(false)
+    expect(manager.snapshot().has('session:s2')).toBe(true)
+    expect(manager.snapshot().has('session:s3')).toBe(true)
+    expect(socket.emits.filter(({ event, payload }) => event === 'client:unsubscribe_channels' && payload.channels.includes('session:s1'))).toHaveLength(1)
+  })
+
+  it('reports a rejected baseline refresh without dropping the active room', async () => {
+    const socket = new SocketMock()
+    const onError = vi.fn()
+    socket.emit = function (event, payload, ack) {
+      this.emits.push({ event, payload })
+      queueMicrotask(() => ack?.(event === 'client:refresh_channels'
+        ? { requestId: payload.requestId, generation: payload.generation, accepted: [], rejected: [{ channel: 'session:s1', code: 'tenant_forbidden' }], cursors: {} }
+        : { requestId: payload.requestId, generation: payload.generation, accepted: payload.channels, rejected: [], cursors: {} }))
+      return this
+    }
+    const manager = new DashboardConnectionManager(socket as never)
+    const releasePreview = manager.acquire('session:s1')
+    await vi.waitFor(() => expect(manager.snapshot().get('session:s1')?.state).toBe('active'))
+    const releaseSelection = manager.acquire('session:s1', undefined, { freshBaseline: true, onError })
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('tenant_forbidden'))
+    expect(manager.snapshot().get('session:s1')?.state).toBe('active')
+    expect(socket.emits.filter(({ event }) => event === 'client:unsubscribe_channels')).toHaveLength(0)
+    releaseSelection(); releasePreview()
+  })
+
+  it('evicts a throttled expired warm room before reentry and subscribes anew', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    try {
+      const socket = new SocketMock()
+      const manager = new DashboardConnectionManager(socket as never, { sessionWarmthMs: () => 1_000 })
+      manager.acquire('session:s1')()
+      await vi.runAllTicks()
+      vi.setSystemTime(new Date('2026-01-01T00:00:02.000Z'))
+
+      const release = manager.acquire('session:s1')
+
+      expect(socket.emits.filter(({ event }) => event === 'client:unsubscribe_channels')).toHaveLength(1)
+      expect(socket.emits.filter(({ event }) => event === 'client:subscribe_channels')).toHaveLength(2)
+      release()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('drops warm rooms promptly on restore when warmth is changed to zero', async () => {
+    const socket = new SocketMock()
+    let warmth = 1_000
+    const manager = new DashboardConnectionManager(socket as never, { sessionWarmthMs: () => warmth })
+    manager.acquire('session:s1')()
+    warmth = 0
+
+    await manager.restore()
+
+    expect(manager.snapshot().has('session:s1')).toBe(false)
+    expect(socket.emits.filter(({ event }) => event === 'client:unsubscribe_channels')).toHaveLength(1)
+    expect(socket.emits.filter(({ event }) => event === 'client:restore_subscriptions')).toHaveLength(0)
   })
 
   it('waits until a channel subscription is active', async () => {

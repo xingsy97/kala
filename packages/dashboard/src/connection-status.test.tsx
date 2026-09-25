@@ -200,7 +200,11 @@ describe('ConnectionStatus', () => {
 
     const trigger = screen.getByTestId('sidebar-connection-status')
     expect(trigger.getAttribute('data-status')).toBe(status)
-    expect(screen.getByTestId('sidebar-connection-status-ring').classList.contains(ringClass)).toBe(true)
+    const ring = screen.getByTestId('sidebar-connection-status-ring')
+    expect(ring.classList.contains(ringClass)).toBe(true)
+    expect(ring.className).toContain('relative')
+    expect(ring.querySelector('span')?.className).toContain('absolute inset-0 grid place-items-center')
+    expect(ring.querySelector('img')?.getAttribute('style')).toBeNull()
   })
 
   it('shares one probe, title, and details popover across desktop sidebar and mobile drawer entries', async () => {

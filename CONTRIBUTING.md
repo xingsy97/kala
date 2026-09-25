@@ -51,6 +51,7 @@ recoverable state transitions, and readable implementations over feature velocit
 git clone https://github.com/<owner>/agent-kernel
 cd agent-kernel
 pnpm install
+pnpm hooks:install   # opts in to the repository privacy pre-commit/commit-msg/pre-push hooks
 pnpm -r build
 pnpm -r test
 ```

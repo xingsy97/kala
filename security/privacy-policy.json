@@ -65,6 +65,22 @@
     "deploy/evaluation/fixtures/service-release-v2.tar"
   ],
   "ruleExceptions": [],
+  "allowedHistoricalAssetHashes": {
+    "deploy/identity/favicon.svg": ["fe588e5f2ad0261bc0e9ae4fda5fd538d5bad1baec28141d2368a5ea30bd2631"],
+    "deploy/private-cloud/branding/icon-dark.svg": ["c8056baa0e15de9b0ae580003fefd617c70b6fd5575eb0c7d5dc4c80b0224b71"],
+    "deploy/private-cloud/branding/icon.svg": ["a9e9fe0907ce4654b5e0e9ca07c5289592166deb4ee7facf9f137b08d9b48ee3"],
+    "deploy/private-cloud/branding/logo-dark.svg": ["bcd90411f38e7da771aa600d9ecf7dcff0475a1484c80b30c2a35517c55b3392"],
+    "deploy/private-cloud/branding/logo-light.svg": ["5b703644d9fb74ab4b10b630fc4ee80d7926a142ac14a08633f039323c951ff1"],
+    "packages/dashboard/public/brand/kala-wordmark.svg": ["f1141d8044950f2524704261903c86c186879b38dcbd153c2430ebb853974d8a"],
+    "packages/dashboard/public/brand/kala-wordmark-light.svg": ["74948b05c7475684318ff09820c0e6a8fbd6d62897fc76e8fda80bf85b43a27c"],
+    "packages/dashboard/public/favicon.svg": ["cfd234acfe2ef6cadfcebc99695c63b356c23147fe708182a0a9eecbf4b0a8ea"],
+    "packages/dashboard/public/icons/apple-touch-icon.png": ["35a4033a917e93525cc3f99804d7a3704c6b4800d173115766d49a2402daae73"],
+    "packages/dashboard/public/icons/badge-72.png": ["eecaddf8c7d2b42f6c9921f7140dce62bd277da6ee17c10cf19a0ceadd7170a3"],
+    "packages/dashboard/public/icons/icon-192.png": ["d12d0cc75f11f7c36c27f72e3599cfdc3367bf5dea37b12cb3b97d8a1aded1fe"],
+    "packages/dashboard/public/icons/icon-512.png": ["2bdbd2c9f7583bba84d069b6fc4c6707d0f6ee49b12bd42e9c91999e354babf0"],
+    "packages/dashboard/public/icons/maskable-192.png": ["dd6c53472bad37519a5e8ac1c2a9f359ce911938385154b34bbffb12f3695dad"],
+    "packages/dashboard/public/icons/maskable-512.png": ["fd9ce2ec31b9cc94987474aeb6b1c35826c10e94c3567cb9c6573baf5c730d50"]
+  },
   "allowedBinaryHashes": {
     "docs/assets/kala-dashboard-preview.png": "6b7546ce92a20f82432f67206bae084aa9dff4ea89ade4c277c8b38c35c17dce",
     "deploy/identity/favicon.svg": "8bc90f77b1f8dbe0375fac6581f67ee69929952a3361c2274fdef1b4c32fc94a",

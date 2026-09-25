@@ -690,11 +690,18 @@
   justify-content: center;
   transform-origin: center;
   animation: ak-session-status-spin 900ms linear infinite;
+  animation-delay: var(--ak-session-status-phase, 0ms);
   will-change: transform;
 }
 
 @keyframes ak-session-status-spin {
   to { transform: rotate(360deg); }
+}
+
+@container (max-width: 12rem) {
+  .ak-session-last-activity {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

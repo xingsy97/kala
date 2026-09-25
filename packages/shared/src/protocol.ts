@@ -1784,6 +1784,8 @@ export type DashboardClientToServerEvents = {
   subscribe: (payload: ClientSubscribe) => void
   unsubscribe: (payload: ClientUnsubscribe) => void
   'client:subscribe_channels': (payload: ClientSubscribeChannels, ack: (result: ChannelSubscriptionResult) => void) => void
+  /** Re-emit authoritative baselines for rooms this socket already owns. */
+  'client:refresh_channels': (payload: ClientSubscribeChannels, ack: (result: ChannelSubscriptionResult) => void) => void
   'client:unsubscribe_channels': (payload: ClientUnsubscribeChannels, ack: (result: ChannelSubscriptionResult) => void) => void
   'client:restore_subscriptions': (payload: ClientSubscribeChannels, ack: (result: ChannelSubscriptionResult) => void) => void
 }

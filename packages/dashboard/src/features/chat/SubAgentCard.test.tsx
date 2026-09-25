@@ -598,6 +598,9 @@ describe('ChatPanel sub-agent dispatch', () => {
     expect(screen.getByTestId('sub-agent-chip-c1')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-chip-c2')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-chip-c3')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-chip-c1').className).toContain('grid-cols-[auto_minmax(0,1fr)]')
+    expect(screen.getByTestId('sub-agent-chip-c1').className).toContain('sm:grid-cols-[auto_minmax(0,1fr)_auto]')
+    expect(screen.getAllByTestId('sub-agent-status-badge')[0].className).toContain('whitespace-nowrap')
     expect(screen.getByTestId('sub-agent-chip-c1').textContent).toContain('Find the source of behavior A.')
     expect(screen.queryByTestId('sub-agent-intention-c1')).toBeNull()
 

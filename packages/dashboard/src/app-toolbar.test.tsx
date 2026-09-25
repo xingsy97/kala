@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NarrowContextualRow, NoSessionArea, WorkbenchToolbar, readInitialConfig, resolveSessionDirectoryLoadingOwner, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar } from './app.js'
+import { NarrowContextualRow, NoSessionArea, WorkbenchToolbar, connectionStatusForTransport, readInitialConfig, resolveSessionDirectoryLoadingOwner, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar } from './app.js'
 import { DesktopSessionRail } from './app-shell/AppShellNav.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity } from './app-logic/session-activity.js'
 
@@ -44,6 +44,31 @@ describe('App hook ordering', () => {
     expect(loadingReturn).toBeGreaterThan(0)
     expect(mainRender).toBeGreaterThan(loadingReturn)
     expect(source.slice(loadingReturn, mainRender)).not.toMatch(/\buse[A-Z][A-Za-z0-9_]*\s*\(/)
+  })
+})
+
+describe('workbench sidebar layout', () => {
+  it('keeps stable, non-overcommitted panels when the right sidebar opens', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/app.tsx'), 'utf8')
+    const splitStart = source.indexOf('autoSaveId="ak-workbench-cols-v1"')
+    const splitEnd = source.indexOf('</ResizablePanelGroup>', splitStart)
+    const split = source.slice(splitStart, splitEnd)
+
+    expect(splitStart).toBeGreaterThan(0)
+    expect(split).toMatch(/id="workbench-main"\s+order=\{1\}[\s\S]*?defaultSize=\{wideLayout \? \(inspectorOpen \? 74 : 100\) : 100\}[\s\S]*?minSize=\{wideLayout \? 70 : 100\}/)
+    expect(split).toMatch(/id="workbench-inspector" order=\{2\} defaultSize=\{26\} minSize=\{26\} maxSize=\{42\} className="min-w-0/)
+    expect(74 + 26).toBe(100)
+  })
+})
+
+describe('shared transport connection indicator', () => {
+  it('does not jump when switching sessions while the physical socket stays connected', () => {
+    const socket = { connected: true }
+    expect(connectionStatusForTransport(socket, 'connecting', true)).toBe('ready')
+    expect(connectionStatusForTransport(socket, 'disconnected', true)).toBe('ready')
+    socket.connected = false
+    expect(connectionStatusForTransport(socket, 'connecting', true)).toBe('disconnected')
+    expect(connectionStatusForTransport(socket, 'connecting', false)).toBe('connecting')
   })
 })
 

@@ -62,6 +62,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   chatLineHeight: { key: 'ak-chat-line-height', type: 'number', defaultValue: 1, min: 0, max: 2 },
   chatMathScale: { key: 'ak-chat-math-scale', type: 'number', defaultValue: 2, min: 0, max: 4 },
   sessionViewCacheMaxMb: { key: 'ak-session-view-cache-max-mb', type: 'number', defaultValue: 500, min: 0, max: 4096 },
+  sessionSubscriptionWarmthMinutes: { key: 'ak-session-subscription-warmth-minutes', type: 'number', defaultValue: 60, min: 0, max: 1440 },
   durableSessionCacheEnabled: { key: 'ak-durable-session-cache-enabled', type: 'boolean', defaultValue: true },
   appBadgeEnabled: { key: 'ak-app-badge-enabled', type: 'boolean', defaultValue: true },
   keepScreenAwake: { key: 'ak-keep-screen-awake', type: 'boolean', defaultValue: false },
@@ -131,6 +132,13 @@ export function readBooleanPref(key: string, defaultValue: boolean): boolean {
   const raw = readRaw(key)
   if (raw === null) return defaultValue
   return raw === '1' || raw === 'true'
+}
+
+export function readNumberPref(key: string, defaultValue: number, options: { min?: number; max?: number } = {}): number {
+  const raw = readRaw(key)
+  const parsed = raw === null ? defaultValue : Number(raw)
+  if (!Number.isFinite(parsed)) return defaultValue
+  return Math.min(options.max ?? Number.POSITIVE_INFINITY, Math.max(options.min ?? Number.NEGATIVE_INFINITY, Math.round(parsed)))
 }
 
 export function readStringPref(key: string, defaultValue: string): string {
@@ -249,6 +257,7 @@ export const PREF_CHAT_SIDE_SPACE = DASHBOARD_PREFERENCES.chatSideSpace.key
 export const PREF_CHAT_LINE_HEIGHT = DASHBOARD_PREFERENCES.chatLineHeight.key
 export const PREF_CHAT_MATH_SCALE = DASHBOARD_PREFERENCES.chatMathScale.key
 export const PREF_DURABLE_SESSION_CACHE_ENABLED = DASHBOARD_PREFERENCES.durableSessionCacheEnabled.key
+export const PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES = DASHBOARD_PREFERENCES.sessionSubscriptionWarmthMinutes.key
 export const PREF_APP_BADGE_ENABLED = DASHBOARD_PREFERENCES.appBadgeEnabled.key
 export const PREF_KEEP_SCREEN_AWAKE = DASHBOARD_PREFERENCES.keepScreenAwake.key
 export const PREF_SMOOTH_STREAMING_TEXT = DASHBOARD_PREFERENCES.smoothStreamingText.key
@@ -268,6 +277,7 @@ export const PREF_SESSION_ORDER = DASHBOARD_PREFERENCES.sessionOrder.key
 export const PREF_WORKSPACE_OPEN = DASHBOARD_PREFERENCES.workspaceOpen.key
 export const PREF_SESSION_CHILDREN_OPEN = DASHBOARD_PREFERENCES.sessionChildrenOpen.key
 export const DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT = DASHBOARD_PREFERENCES.liveToolActivityTailCount.defaultValue
+export const DEFAULT_SESSION_SUBSCRIPTION_WARMTH_MINUTES = DASHBOARD_PREFERENCES.sessionSubscriptionWarmthMinutes.defaultValue
 export const DEFAULT_TOOL_ACTIVITY_ICON_SCALE = DASHBOARD_PREFERENCES.toolActivityIconScale.defaultValue
 export const DEFAULT_CHAT_FONT_SIZE = DASHBOARD_PREFERENCES.chatFontSize.defaultValue
 export const DEFAULT_SESSION_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.sessionExplorerFontSize.defaultValue

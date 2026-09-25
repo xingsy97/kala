@@ -371,9 +371,12 @@ describe('Explorer', () => {
     expect(screen.getByTestId('workspace-drag-handle').querySelector('svg')?.className.baseVal).toContain('group-hover/drag:opacity-100')
     expect(screen.queryByTestId('workspace-status-pill')).toBeNull()
     expect(screen.queryByTestId('workspace-status-indicator')).toBeNull()
-    const workspaceStatus = screen.getByTestId('workspace-status-badge')
-    expect(workspaceStatus.className).toContain('rounded-full')
-    expect(workspaceStatus.className).toContain('bg-emerald-500')
+    expect(screen.queryByTestId('workspace-status-ring')).toBeNull()
+    const workspaceStatus = screen.getByTestId('workspace-status-icon')
+    expect(workspaceStatus.className).not.toContain('rounded-full')
+    expect(workspaceStatus.className).not.toContain('border')
+    expect(workspaceStatus.className).toContain('text-emerald-600')
+    expect(workspaceStatus.querySelector('svg')).toBeTruthy()
     expect(workspaceStatus.getAttribute('aria-label')).toBe('online')
     expect(workspaceStatus.textContent).toBe('online')
     expect(screen.queryByTestId('workspace-row-meta')).toBeNull()
@@ -598,17 +601,25 @@ describe('Explorer', () => {
     expect(sessionRow.getAttribute('data-session-id')).toBe(
       sessionSummary.sessionId,
     )
-    expect(sessionRow.className).toContain('grid-cols-[1rem_1rem_minmax(0,1fr)_auto]')
+    expect(sessionRow.className).toContain('grid-cols-[1rem_minmax(0,1fr)_minmax(0,3.5rem)]')
+    expect(sessionRow.className).toContain('items-center')
+    expect(sessionRow.className).not.toContain('ml-4')
+    expect(sessionRow.className).toContain('pl-6')
+    expect(sessionRow.className).toContain('py-1.5')
+    expect((sessionRow as HTMLElement).style.width).not.toContain('calc')
     expect(sessionRow.textContent).toContain('please write hello.txt')
     expect(sessionRow.textContent).not.toContain('done')
     expect(sessionRow.textContent).not.toContain('4 evt')
-    expect(screen.getByTestId('session-status-indicator').getAttribute('title')).toBe('Done')
-    expect(screen.getByTestId('session-status-indicator').querySelector('span')?.className).toContain('h-2.5 w-2.5')
+    expect(screen.queryByTestId('session-status-indicator')).toBeNull()
     expect(screen.getByTestId('session-drag-handle').querySelector('svg')?.className.baseVal).not.toContain('opacity-0')
     // The working directory is no longer a persistent second line — it is shown
     // on hover via the session name's title tooltip (keeps the card single-line).
     expect(sessionRow.querySelector('[title="/tmp"]')).not.toBeNull()
     expect(screen.queryByTestId('session-row-cwd')).toBeNull()
+    const lastActivity = screen.getByTestId('session-last-activity')
+    expect(lastActivity.parentElement?.className).toContain('ak-session-last-activity')
+    expect(lastActivity.parentElement?.className).toContain('flex')
+    expect(lastActivity.parentElement?.className.split(/\s+/)).not.toContain('hidden')
   })
 
   it('overrides the selected session row with the live working status', () => {
@@ -678,8 +689,11 @@ describe('Explorer', () => {
     const rows = screen.getAllByTestId('session-row')
     const firstRow = rows.find((row) => row.getAttribute('data-session-id') === sessionSummary.sessionId)
     const secondRow = rows.find((row) => row.getAttribute('data-session-id') === second.sessionId)
-    expect(firstRow?.querySelector('[data-testid="session-status-indicator"]')?.getAttribute('data-status')).toBe('loading')
-    expect(secondRow?.querySelector('[data-testid="session-status-indicator"]')?.getAttribute('data-status')).toBe('executing_tools')
+    const firstIndicator = firstRow?.querySelector('[data-testid="session-status-indicator"]')
+    const secondIndicator = secondRow?.querySelector('[data-testid="session-status-indicator"]')
+    expect(firstIndicator?.getAttribute('data-status')).toBe('loading')
+    expect(secondIndicator?.getAttribute('data-status')).toBe('executing_tools')
+    expect(firstIndicator?.getAttribute('data-animation-phase-ms')).not.toBe(secondIndicator?.getAttribute('data-animation-phase-ms'))
   })
 
   it('presents sessions with no workspaceId as ordinary Chats', () => {
@@ -707,7 +721,7 @@ describe('Explorer', () => {
     expect(wsRow.textContent).toContain('Chats')
     expect(screen.getByTestId('chats-icon')).toBeTruthy()
     expect(screen.queryByTestId('chat-session-icon')).toBeNull()
-    expect(screen.getByTestId('session-status-indicator')).toBeTruthy()
+    expect(screen.queryByTestId('session-status-indicator')).toBeNull()
     expect(wsRow.textContent).toContain('personal conversations')
     expect(wsRow.textContent).not.toContain('no workspace')
     expect(screen.getByTestId('session-row').textContent).toContain(
@@ -715,7 +729,7 @@ describe('Explorer', () => {
     )
   })
 
-  it('pins Chats ahead of saved workspace order and preserves fork controls, status rails, and icons', () => {
+  it('pins Chats ahead of saved workspace order and preserves fork controls without idle status gaps', () => {
     localStorage.setItem(PREF_WORKSPACE_ORDER, JSON.stringify(['ws-2', 'ws-1']))
     localStorage.setItem(PREF_HIDE_SUB_AGENT_SESSIONS, 'false')
     const chat = { ...sessionSummary, sessionId: 'chat', workspaceId: undefined, workspaceName: undefined }
@@ -727,7 +741,7 @@ describe('Explorer', () => {
     expect(screen.queryByTestId('chat-session-icon')).toBeNull()
     fireEvent.click(screen.getByTestId('session-children-toggle'))
     expect(screen.getByLabelText('forked session')).toBeTruthy()
-    expect(screen.getAllByTestId('session-status-indicator')).toHaveLength(2)
+    expect(screen.queryAllByTestId('session-status-indicator')).toHaveLength(0)
     const [parent, child] = screen.getAllByTestId('session-row')
     expect(parent?.children[0]?.className).toBe(child?.children[0]?.className)
     expect(parent?.children[1]?.className).toBe(child?.children[1]?.className)
@@ -1202,7 +1216,7 @@ describe('Explorer', () => {
     )
     const sessionRow = screen.getByTestId('session-row')
     expect(sessionRow.className).toContain('bg-muted/60')
-    expect(sessionRow.className).toContain('grid-cols-[1rem_1rem_minmax(0,1fr)_auto]')
+    expect(sessionRow.className).toContain('grid-cols-[1rem_minmax(0,1fr)_minmax(0,3.5rem)]')
     expect(sessionRow.className).not.toMatch(/border-l-primary/)
     expect(sessionRow.className).not.toContain('shadow-[inset_0_0_0_1px')
     expect(screen.queryByTestId('session-selected-marker')).toBeNull()

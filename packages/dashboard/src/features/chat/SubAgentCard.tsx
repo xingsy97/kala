@@ -231,7 +231,7 @@ const SubAgentRow = memo(function SubAgentRow({
           type="button"
           onClick={() => withViewTransition(() => setOpen(true))}
           className={cn(
-            'grid min-h-20 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] items-start gap-x-2 gap-y-1.5 rounded-2xl bg-background/80 px-3 py-2.5 text-left text-sm text-foreground shadow-sm ring-1 ring-border/50 transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'grid min-h-20 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_auto_auto] items-start gap-x-2 gap-y-1.5 rounded-2xl bg-background/80 px-3 py-2.5 text-left text-sm text-foreground shadow-sm ring-1 ring-border/50 transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-rows-[auto_auto]',
             status === 'completed' ? 'ring-emerald-300/45 dark:ring-emerald-500/25' : status === 'failed' || status === 'cancelled' ? 'ring-rose-300/45 dark:ring-rose-500/25' : '',
           )}
           title={`${label} · ${intention}`}
@@ -239,15 +239,15 @@ const SubAgentRow = memo(function SubAgentRow({
           data-testid={`sub-agent-chip-${call.callId}`}
           data-sub-agent-toggle={call.callId}
         >
-          <span className="row-span-2 mt-0.5 flex h-5 w-5 items-center justify-center">
+          <span className="row-span-3 mt-0.5 flex h-5 w-5 items-center justify-center sm:row-span-2">
             <StatusIcon status={status} />
           </span>
           <span className="flex min-w-0 items-center gap-2">
             {agentType ? <span className="flex-none rounded-md bg-muted/70 px-1.5 py-0.5 text-[0.8125rem] font-medium text-muted-foreground">{agentType}</span> : null}
             <span className="truncate text-[0.8125rem] font-medium uppercase tracking-wide text-muted-foreground">{t('chat.subAgent.label')}</span>
           </span>
-          <span className="justify-self-end"><StatusBadge status={status} turns={turns} durationMs={totalMs} /></span>
-          <span className="col-start-2 col-end-4 line-clamp-2 min-w-0 break-words text-[0.9375rem] leading-snug text-foreground/90 [overflow-wrap:anywhere]">{intention}</span>
+          <span className="col-start-2 row-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end"><StatusBadge status={status} turns={turns} durationMs={totalMs} /></span>
+          <span className="col-start-2 col-end-3 row-start-3 line-clamp-2 min-w-0 break-words text-[0.9375rem] leading-snug text-foreground/90 [overflow-wrap:anywhere] sm:col-end-4 sm:row-start-2">{intention}</span>
         </button>
       </div>
     )
@@ -445,7 +445,7 @@ function StatusBadge({
   return (
     <span
       className={cn(
-        'flex-none rounded px-1.5 py-0.5 text-[0.75rem] font-medium uppercase tracking-wider',
+        'flex-none whitespace-nowrap rounded px-1.5 py-0.5 text-[0.75rem] font-medium uppercase tracking-wider',
         badgeClassFor(status),
       )}
       data-testid="sub-agent-status-badge"

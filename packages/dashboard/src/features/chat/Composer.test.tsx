@@ -461,7 +461,7 @@ describe('Composer', () => {
     expect(fullToggle.className).toContain('bg-transparent')
   })
 
-  it('keeps the standard composer footer on one mobile row', () => {
+  it('stacks the standard composer footer on mobile without clipping controls', () => {
     renderComposer({
       state: createInitialState({ sessionId: 'mobile-standard', systemPrompt: 'sys' }),
     })
@@ -470,12 +470,14 @@ describe('Composer', () => {
     const rail = screen.getByTestId('composer-footer-rail')
     const actions = screen.getByTestId('composer-footer-actions')
 
-    expect(footer.className).toContain('flex-nowrap')
-    expect(footer.className).not.toContain('flex-wrap')
-    expect(footer.className).toContain('overflow-hidden')
-    expect(rail.className).toContain('overflow-x-auto')
-    expect(rail.className).toContain('flex-nowrap')
+    expect(footer.className).toContain('flex-col')
+    expect(footer.className).toContain('sm:flex-row')
+    expect(footer.className).toContain('sm:overflow-hidden')
+    expect(rail.className).toContain('flex-wrap')
+    expect(rail.className).toContain('sm:flex-nowrap')
+    expect(rail.className).toContain('sm:overflow-x-auto')
     expect(actions.className).toContain('flex-none')
+    expect(actions.className).toContain('justify-end')
     expect(rail.contains(screen.getByTestId('composer-mode-toggle'))).toBe(true)
     expect(actions.contains(screen.getByTestId('composer-send'))).toBe(true)
   })
@@ -591,7 +593,7 @@ describe('Composer', () => {
     expect(screen.queryByTestId('composer-mode-toggle-menuitem')).toBeNull()
   })
 
-  it('keeps simple accessories on one row when multiline and keeps Send separate', () => {
+  it('gives the simple input its own mobile row and keeps tool actions together', () => {
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
     try {
@@ -603,17 +605,20 @@ describe('Composer', () => {
       const shell = screen.getByTestId('composer-simple-shell')
       const tools = screen.getByTestId('composer-simple-footer-extras')
       const sendColumn = screen.getByTestId('composer-simple-send-column')
-      expect(shell.getAttribute('data-layout')).toBe('single-row-tools')
+      expect(shell.getAttribute('data-layout')).toBe('mobile-input-first')
       expect(tools.getAttribute('data-layout')).toBe('horizontal')
       expect(tools.className).toContain('flex-row')
       expect(sendColumn.contains(screen.getByTestId('composer-send'))).toBe(true)
       expect(tools.contains(screen.getByTestId('composer-send'))).toBe(false)
 
       const input = screen.getByTestId('composer-input-simple')
+      expect(input.parentElement?.className).toContain('order-first')
+      expect(input.parentElement?.className).toContain('w-full')
+      expect(input.parentElement?.className).toContain('sm:order-none')
       input.textContent = 'first line\nsecond line'
       fireEvent.input(input)
 
-      expect(shell.getAttribute('data-layout')).toBe('single-row-tools')
+      expect(shell.getAttribute('data-layout')).toBe('mobile-input-first')
       expect(tools.getAttribute('data-layout')).toBe('horizontal')
       expect(tools.className).toContain('flex-row')
       expect(tools.className).not.toContain('flex-col')
@@ -938,15 +943,35 @@ describe('Composer', () => {
     expect(uploaded).toHaveLength(1)
     expect(uploaded?.[0]?.type).toBe('image/png')
     expect(uploaded?.[0]?.size).toBe(8)
-    const [text, mode, attachments] = onSubmit.mock.calls[0] as [
+    const [text, mode, attachments, extraBlocks] = onSubmit.mock.calls[0] as [
       string,
       'steer' | 'queue',
       readonly (ImageContent | FileContent)[] | undefined,
+      readonly TextContent[] | undefined,
     ]
     expect(text).toBe('look at this')
     expect(mode).toBe('steer')
     expect(attachments).toEqual([imageReference])
+    expect(extraBlocks).toBeUndefined()
     await waitFor(() => expect(screen.queryByTestId('pasted-image-tray')).toBeNull())
+  })
+
+  it('shows pasted image previews inside the simple composer surface', async () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    try {
+      renderComposer()
+      const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'simple.png', { type: 'image/png' })
+      fireEvent.paste(screen.getByTestId('composer-input-simple'), { clipboardData: { items: [], files: [file], getData: () => '' } })
+      const tray = await screen.findByTestId('pasted-image-tray')
+      const shell = screen.getByTestId('composer-simple-shell')
+      expect(shell.contains(tray)).toBe(true)
+      expect(tray.querySelector('img')?.getAttribute('src')).toContain('data:image/png;base64,')
+      expect(screen.getByTestId('composer-input-simple').querySelector('img')).toBeNull()
+    } finally {
+      if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+      else window.localStorage.setItem('ak-composer-mode', previousMode)
+    }
   })
 
   it('accepts WebKit clipboard images exposed only through clipboardData.files', async () => {
@@ -1044,7 +1069,9 @@ describe('Composer', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
     expect(onUploadFiles).toHaveBeenCalledWith([file])
     const attachments = onSubmit.mock.calls[0]?.[2] as readonly (ImageContent | FileContent)[]
+    const extraBlocks = onSubmit.mock.calls[0]?.[3] as readonly TextContent[] | undefined
     expect(attachments).toEqual([reference])
+    expect(extraBlocks).toBeUndefined()
     expect(screen.queryByTestId('attachment-tray')).toBeNull()
 
     fireEvent.change(screen.getByTestId('composer-file-input'), {

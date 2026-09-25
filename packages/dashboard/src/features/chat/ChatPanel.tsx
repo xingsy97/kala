@@ -632,6 +632,17 @@ export function ChatPanel({
             onClose={() => onSearchOpenChange?.(false)}
           />
         ) : null}
+        {(!searchOpen && stickyPrompt) || topRightAccessory ? (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start gap-2 px-2 pt-2 sm:px-4 sm:pt-3" data-testid="chat-top-overlay-row">
+            {!searchOpen && stickyPrompt ? (
+              <StickyUserPrompt
+                prompt={stickyPrompt}
+                onClick={() => navigateUserMessage(stickyPrompt.itemIndex)}
+              />
+            ) : <span className="min-w-0 flex-1" />}
+            {topRightAccessory ? <div className="pointer-events-auto flex-none" data-testid="chat-top-right-accessory">{topRightAccessory}</div> : null}
+          </div>
+        ) : null}
         {loading ? (
           <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
             <TranscriptLoadingState />
@@ -663,17 +674,6 @@ export function ChatPanel({
             onViewportAnchorChange={setViewportAnchor}
           />
         )}
-        {(!searchOpen && stickyPrompt) || topRightAccessory ? (
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start gap-2 px-2 pt-2 sm:px-4 sm:pt-3" data-testid="chat-top-overlay-row">
-            {!searchOpen && stickyPrompt ? (
-              <StickyUserPrompt
-                prompt={stickyPrompt}
-                onClick={() => navigateUserMessage(stickyPrompt.itemIndex)}
-              />
-            ) : <span className="min-w-0 flex-1" />}
-            {topRightAccessory ? <div className="pointer-events-auto flex-none" data-testid="chat-top-right-accessory">{topRightAccessory}</div> : null}
-          </div>
-        ) : null}
         {renderedUserMessageNavigation ? (
           userMessageNavigationPortalTarget ? renderedUserMessageNavigation : (
             <div className="absolute bottom-4 left-2 z-20 sm:left-3">
@@ -830,7 +830,7 @@ function StickyUserPrompt({
         </span>
         <span className="min-w-0 border-l border-primary/20 py-0.5 pl-3">
           {prompt.text ? (
-            <span className="ak-chat-text line-clamp-2 whitespace-pre-wrap break-words text-[0.9375rem] font-medium leading-6 tracking-[-0.01em] [overflow-wrap:anywhere] sm:line-clamp-3 sm:text-base">
+            <span className="ak-chat-text line-clamp-1 whitespace-pre-wrap break-words text-[0.9375rem] font-medium leading-6 tracking-[-0.01em] [overflow-wrap:anywhere] sm:text-base">
               {prompt.text}
             </span>
           ) : (
@@ -2165,17 +2165,16 @@ function ImageBlock({
   return <ImagePreviewBlock src={src} />
 }
 
-function DurableImagePreviewBlock({ url, token }: { url: string; token?: string }): JSX.Element {
-  const [src, setSrc] = useState(token ? '' : url)
+function DurableImagePreviewBlock({ url, token, name, mediaType }: { url: string; token?: string; name: string; mediaType: string }): JSX.Element {
+  const [src, setSrc] = useState('')
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
-    if (!token) {
-      setSrc(url)
-      return
-    }
     const controller = new AbortController()
     let objectUrl: string | undefined
+    setSrc('')
+    setFailed(false)
     void fetch(url, {
-      headers: { authorization: `Bearer ${token}` },
+      headers: token ? { authorization: `Bearer ${token}` } : undefined,
       credentials: 'include',
       signal: controller.signal,
     }).then(async (response) => {
@@ -2183,13 +2182,14 @@ function DurableImagePreviewBlock({ url, token }: { url: string; token?: string 
       objectUrl = URL.createObjectURL(await response.blob())
       setSrc(objectUrl)
     }).catch(() => {
-      if (!controller.signal.aborted) setSrc('')
+      if (!controller.signal.aborted) setFailed(true)
     })
     return () => {
       controller.abort()
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      if (objectUrl && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(objectUrl)
     }
   }, [token, url])
+  if (failed) return <AttachmentFileChip name={name} mediaType={mediaType} />
   if (!src) return <div className="h-28 w-40 max-w-full animate-pulse rounded-lg bg-muted/40 sm:h-32 sm:w-48" data-testid="message-image-preview-loading" />
   return <ImagePreviewBlock src={src} />
 }
@@ -2240,8 +2240,12 @@ function FileBlock({
   const attachmentAccess = useContext(AttachmentAccessContext)
   if ('source' in content && content.source.kind === 'host_ref' && content.mediaType.startsWith('image/') && sessionId) {
     const url = messageAttachmentUrl(attachmentAccess.host ?? '', sessionId, content.source.attachmentId)
-    return <DurableImagePreviewBlock url={url} token={attachmentAccess.token} />
+    return <DurableImagePreviewBlock url={url} token={attachmentAccess.token} name={content.name} mediaType={content.mediaType} />
   }
+  return <AttachmentFileChip name={content.name} mediaType={content.mediaType} />
+}
+
+function AttachmentFileChip({ name, mediaType }: { name: string; mediaType: string }): JSX.Element {
   return (
     <div
       className="flex max-w-sm items-center gap-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2"
@@ -2249,8 +2253,8 @@ function FileBlock({
     >
       <FileText className="h-5 w-5 flex-none text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0">
-        <span className="block truncate text-sm font-medium">{content.name}</span>
-        <span className="block truncate text-[0.8125rem] text-muted-foreground">{content.mediaType}</span>
+        <span className="block truncate text-sm font-medium">{name}</span>
+        <span className="block truncate text-[0.8125rem] text-muted-foreground">{mediaType}</span>
       </span>
     </div>
   )

@@ -47,6 +47,42 @@ test('blocks unregistered images, binary files, and private denylist values', ()
   assert(scan('docs/example.md', credential).some(({ rule }) => rule === 'privacy.api-token'))
 })
 
+test('historical approved assets reject unreviewed bytes and findings never disclose sensitive paths', () => {
+  const asset = 'packages/dashboard/public/favicon.svg'
+  assert(scanEntry({ path: asset, content: Buffer.from('altered'), policy, source: 'history-file' })
+    .some(({ rule }) => rule === 'privacy.asset-content-drift'))
+  const firstAssetCommit = spawnSync('git', ['log', '--reverse', '--format=%H', 'HEAD', '--', asset], { cwd: root, encoding: 'utf8' }).stdout.trim().split('\n')[0]
+  const oldBytes = firstAssetCommit ? spawnSync('git', ['show', `${firstAssetCommit}:${asset}`], { cwd: root }).stdout : Buffer.alloc(0)
+  if (oldBytes.length) {
+    assert.equal(scanEntry({ path: asset, content: oldBytes, policy, source: 'history-file' }).length, 0)
+    assert(scanEntry({ path: asset, content: oldBytes, policy, source: 'file' })
+      .some(({ rule }) => rule === 'privacy.asset-content-drift'))
+  }
+  const privateIp = [10, 23, 45, 67].join('.')
+  const sensitive = `docs/${['private', 'user'].join('.')}@${['personal', 'example'].join('.')}/${privateIp}/secret.md`
+  const findings = scanEntry({ path: sensitive, content: sensitive, policy, source: 'path' })
+  assert(findings.length > 0)
+  const output = formatFindings(findings)
+  assert(!output.includes(privateIp))
+  assert(!output.includes('private.user@personal.example'))
+  assert(!output.includes('secret.md'))
+})
+
+test('hook installer configures a fresh clone, is idempotent, and preserves conflicting hooks', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'privacy-installer-'))
+  try {
+    run(directory, 'git', ['init', '-q'])
+    const installer = join(root, 'scripts/security/install-git-hooks.mjs')
+    run(directory, 'node', [installer])
+    run(directory, 'node', [installer])
+    assert.equal(run(directory, 'git', ['config', '--local', '--get', 'core.hooksPath']).stdout.trim(), '.githooks')
+    run(directory, 'git', ['config', '--local', 'core.hooksPath', 'custom-hooks'])
+    const conflict = spawnSync('node', [installer], { cwd: directory, encoding: 'utf8' })
+    assert.notEqual(conflict.status, 0)
+    assert.equal(run(directory, 'git', ['config', '--local', '--get', 'core.hooksPath']).stdout.trim(), 'custom-hooks')
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
 test('versioned hooks block a real commit and allow a public example commit', () => {
   const directory = mkdtempSync(join(tmpdir(), 'privacy-hook-'))
   try {

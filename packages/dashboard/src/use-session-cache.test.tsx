@@ -106,7 +106,8 @@ describe('useSession session view cache', () => {
     expect(manager.snapshot().get('session:s1')?.state).toBe('active')
 
     const view = renderHook(() => useSession({ host: 'http://host', sessionId: 's1', socket: socket as never }))
-    expect(socket.emitted.filter(entry => entry.event === 'client:subscribe_channels')).toHaveLength(2)
+    expect(socket.emitted.filter(entry => entry.event === 'client:subscribe_channels')).toHaveLength(1)
+    expect(socket.emitted.filter(entry => entry.event === 'client:refresh_channels')).toHaveLength(1)
     expect(view.result.current.status).toBe('connecting')
     act(() => socket.serverEmit('session:ready', ready))
     expect(view.result.current.status).toBe('ready')
@@ -114,7 +115,8 @@ describe('useSession session view cache', () => {
     releasePreview()
     expect(socket.emitted.some(entry => entry.event === 'client:unsubscribe_channels')).toBe(false)
     view.unmount()
-    expect(socket.emitted.filter(entry => entry.event === 'client:unsubscribe_channels')).toHaveLength(1)
+    expect(socket.emitted.filter(entry => entry.event === 'client:unsubscribe_channels')).toHaveLength(0)
+    expect(manager.snapshot().get('session:s1')?.refs).toBe(0)
   })
 
   it('reflects shared control socket failures and waits for a fresh baseline after reconnect', () => {
@@ -195,6 +197,9 @@ describe('useSession session view cache', () => {
     view.rerender({ sessionId: 'b' })
     view.rerender({ sessionId: 'a' })
     await waitFor(() => expect(socket.handlers.get('session:ready')).toHaveLength(1))
+    expect(socket.emitted.filter(({ event }) => event === 'client:unsubscribe_channels')).toHaveLength(0)
+    expect(socket.emitted.filter(({ event, payload }) => event === 'client:subscribe_channels' && (payload as { channels?: string[] }).channels?.includes('session:a'))).toHaveLength(1)
+    expect(socket.emitted.filter(({ event, payload }) => event === 'client:refresh_channels' && (payload as { channels?: string[] }).channels?.includes('session:a'))).toHaveLength(1)
 
     act(() => socket.serverEmit('session:ready', { sessionId: 'b', reason: 'load', cursor: 1, state: createInitialState({ sessionId: 'b' }), config: { tools: [] }, contextSnapshot: null }))
     expect(view.result.current.hydratedSessionId).not.toBe('b')

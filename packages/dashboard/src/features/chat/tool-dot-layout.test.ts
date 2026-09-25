@@ -9,8 +9,9 @@ describe('tool dot responsive layout', () => {
     expect(toolDotNodeWidth(31, 100)).toBe(61)
   })
 
-  it('reserves most desktop width for intention instead of the dot rail', () => {
-    expect(toolDotRailBudget(1200)).toBe(408)
+  it('shows long rails on wide desktop panels but preserves compact and mobile layouts', () => {
+    expect(toolDotRailBudget(1200)).toBe(840)
+    expect(toolDotRailBudget(906)).toBe(815)
     expect(toolDotRailBudget(800)).toBe(272)
     expect(toolDotRailBudget(390)).toBe(338)
   })

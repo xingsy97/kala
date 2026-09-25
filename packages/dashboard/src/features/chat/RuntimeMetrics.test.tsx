@@ -92,6 +92,10 @@ describe('RuntimeMetrics', () => {
     expect(popover.textContent ?? '').not.toContain('Session Info')
     expect(popover.textContent ?? '').not.toContain('Session Cost')
     expect(popover.textContent ?? '').toContain('Context Window')
+    const totals = screen.getByTestId('context-usage-totals')
+    expect(totals.textContent ?? '').toContain('Used1.2k')
+    expect(totals.textContent ?? '').toContain('Limit4.0k')
+    expect(totals.textContent ?? '').toContain('Remaining2.8k')
     // With stacked segments the legend now says "Reserved" (without the
     // "for response" tail) and lives inline with the other categories.
     expect(popover.textContent ?? '').toContain('Reserved')
@@ -215,8 +219,8 @@ describe('RuntimeMetrics', () => {
     // combined with non-scaling-stroke, producing many visible breaks. The
     // Composer SVG has a 1:1 viewBox, so vector-effect is unnecessary here.
     expect(usage?.hasAttribute('vector-effect')).toBe(false)
-    // The simple composer now surfaces the percentage as a tiny badge so the border UI is legible in screenshots.
-    expect(screen.getByTestId('context-usage-simple-label').textContent ?? '').toContain('30%')
+    expect(screen.queryByTestId('context-usage-simple-label')).toBeNull()
+    expect(indicator.textContent ?? '').not.toContain('30%')
     expect(indicator.getAttribute('title') ?? '').toContain('30%')
     fireEvent.click(indicator)
     const anchoredPopover = screen.getByTestId('context-pressure-popover')

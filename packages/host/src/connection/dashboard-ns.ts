@@ -256,7 +256,7 @@ export type TenantModelPolicyEnforcer = {
 
 const READ_ONLY_DASHBOARD_EVENTS = new Set([
   'client:connection_ping', 'client:executor_ping', 'client:list_executors', 'client:list_sessions',
-  'client:load_history', 'client:load_log_artifact', 'client:subscribe_channels', 'client:restore_subscriptions',
+  'client:load_history', 'client:load_log_artifact', 'client:subscribe_channels', 'client:refresh_channels', 'client:restore_subscriptions',
   'client:unsubscribe_channels', 'subscribe', 'unsubscribe', 'client:list_dirs', 'client:list_files',
   'workspace:read_binary', 'client:read_overflow', 'bg:list', 'bg:output', 'sub_agent:list', 'agent_types:list',
 ])
@@ -523,14 +523,16 @@ export function configureDashboardNamespace(
       try { await current; return result } finally { if (channelTails.get(channel) === current) channelTails.delete(channel) }
     }
 
-    const subscribeSession = async (targetSessionId: string): Promise<number> => {
+    const subscribeSession = async (targetSessionId: string, joinRoom = true): Promise<number> => {
       let target: SessionRecord | undefined
       try { target = await loadDashboardSession(deps.store, targetSessionId, getDefaultConfig()) } catch { target = undefined }
       const tenantError = validateIngressSessionAccess(socket, target)
       if (tenantError) throw new Error(tenantError)
       if (target) await refreshSessionSkillsIfNeeded(deps, target)
-      await socket.join(sessionRoom(targetSessionId))
-      subscribedSessions.add(targetSessionId)
+      if (joinRoom) {
+        await socket.join(sessionRoom(targetSessionId))
+        subscribedSessions.add(targetSessionId)
+      }
       await deps.messageQueues.hydrate(targetSessionId)
       const defaultModel = effectiveDefaultModel(deps)
       const payload: SessionReadyEvent = target
@@ -542,7 +544,7 @@ export function configureDashboardNamespace(
       // verification, but only the RestartCoordinator owns continuation before
       // the route-generation fence is publicly committed. A read subscription
       // must never become a second resume/drain path.
-      if (mutableRuntimeReady()) {
+      if (joinRoom && mutableRuntimeReady()) {
         if (target?.agentRuntime === 'kernel' && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(targetSessionId)
         void deps.messageQueues.drain(targetSessionId)
       }
@@ -580,7 +582,36 @@ export function configureDashboardNamespace(
       }
       return { requestId: parsed.requestId, generation: parsed.generation, accepted, rejected, cursors }
     }
+    const refreshChannelResult = async (raw: ClientSubscribeChannels): Promise<ChannelSubscriptionResult | undefined> => {
+      const parsed = vparse(schema.ClientSubscribeChannelsSchema, raw, 'client:refresh_channels')
+      if (!parsed) return undefined
+      const accepted: DashboardChannel[] = [], rejected: Array<{ channel: DashboardChannel; code: string }> = [], cursors: Record<string, number> = {}
+      const uniqueChannels = [...new Set(parsed.channels)]
+      if (uniqueChannels.length > 128) {
+        return { requestId: parsed.requestId, generation: parsed.generation, accepted, rejected: uniqueChannels.map((channel) => ({ channel, code: 'subscription_limit' })), cursors }
+      }
+      for (const channel of uniqueChannels) {
+        const [kind, id] = channel.split(':', 2) as ['workspace' | 'session', string]
+        if (kind !== 'session' || !id) { rejected.push({ channel, code: 'invalid_channel' }); continue }
+        await serializeChannel(channel, async () => {
+          const latestGeneration = channelGenerations.get(channel) ?? Number.NEGATIVE_INFINITY
+          if (parsed.generation < latestGeneration) { rejected.push({ channel, code: 'stale_generation' }); return }
+          channelGenerations.set(channel, parsed.generation)
+          if (!subscribedSessions.has(id)) { rejected.push({ channel, code: 'not_subscribed' }); return }
+          try {
+            // Emit the ready event before acknowledging, but do not join again:
+            // this socket's existing room and all shared preview refs stay live.
+            cursors[channel] = await subscribeSession(id, false)
+            accepted.push(channel)
+          } catch (err) {
+            rejected.push({ channel, code: err instanceof Error ? err.message : String(err) })
+          }
+        })
+      }
+      return { requestId: parsed.requestId, generation: parsed.generation, accepted, rejected, cursors }
+    }
     socket.on('client:subscribe_channels', async (raw, ack) => ack((await channelResult(raw, false)) ?? { requestId: raw.requestId, generation: raw.generation, accepted: [], rejected: [], cursors: {} }))
+    socket.on('client:refresh_channels', async (raw, ack) => ack((await refreshChannelResult(raw)) ?? { requestId: raw.requestId, generation: raw.generation, accepted: [], rejected: [], cursors: {} }))
     socket.on('client:restore_subscriptions', async (raw, ack) => ack((await channelResult(raw, false)) ?? { requestId: raw.requestId, generation: raw.generation, accepted: [], rejected: [], cursors: {} }))
     socket.on('client:unsubscribe_channels', async (raw, ack) => ack((await channelResult(raw, true)) ?? { requestId: raw.requestId, generation: raw.generation, accepted: [], rejected: [], cursors: {} }))
 
