@@ -766,12 +766,12 @@ function joinPath(base: string, tail: string): string {
 
 /**
  * Environment-configured provider path used when no settings-file or catalog
- * provider is available. `AGENT_KERNEL_PROVIDER=policy-gateway` selects the
- * training path for SGLang-backed live rollouts; direct Anthropic/OpenAI
- * selection uses the same canonical variable.
+ * provider is available. `KALA_PROVIDER` takes precedence; legacy
+ * `AGENT_KERNEL_PROVIDER` remains accepted for existing deployments.
+ * `policy-gateway` selects SGLang-backed live rollouts.
  */
 function environmentProviderAdapter(models: ModelInfo[]): LLMAdapter {
-  const provider = (process.env.AGENT_KERNEL_PROVIDER ?? 'anthropic').toLowerCase()
+  const provider = (process.env.KALA_PROVIDER ?? process.env.AGENT_KERNEL_PROVIDER ?? 'anthropic').toLowerCase()
   if (provider === 'policy-gateway') {
     const baseUrl = process.env.AGENT_KERNEL_POLICY_BASE_URL
     const model = process.env.AGENT_KERNEL_POLICY_MODEL ?? process.env.HOST_MODEL

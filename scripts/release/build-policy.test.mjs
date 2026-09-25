@@ -4,6 +4,14 @@ import test from 'node:test'
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
 
+test('README presents Kala as the public project and installer repository', () => {
+  const readme = read('README.md')
+  assert.match(readme, /^# Kala$/m)
+  assert.match(readme, /github\.com\/xingsy97\/kala\/releases\/latest\/download\/run\.sh/)
+  assert.match(readme, /KALA_PROVIDER=openai/)
+  assert.doesNotMatch(readme, /akernel|@agent-kernel|AGENT_KERNEL_PROVIDER/i)
+})
+
 test('evaluation images build orchestrator and dashboard from source', () => {
   for (const name of ['orchestrator', 'dashboard']) {
     const dockerfile = read(`deploy/evaluation/images/Dockerfile.${name}`)
@@ -32,6 +40,13 @@ test('release builders remove native scratch files and verification rejects unde
   assert.match(builder, /rmSync\(join\(outDir, '\.sea'\), \{ recursive: true, force: true \}\)/)
   assert.match(verifier, /release file set does not exactly match its manifest/)
   assert.match(verifier, /actualReleaseEntries\.some\(\(entry\) => !entry\.isFile\(\)\)/)
+})
+
+test('release docs include tracked files only and exclude the unfinished showcase', () => {
+  const builder = read('scripts/release/build-release-assets.mjs')
+  assert.match(builder, /spawnSync\('git', \['ls-files', '-z', '--', 'docs\/']/)
+  assert.match(builder, /file !== 'docs\/assets\/kala-dashboard-preview\.gif'/)
+  assert.match(builder, /'--null', '-T', '-'/)
 })
 
 test('Dashboard release manifest materializes the file iterator before mapping and sorting', () => {

@@ -14,7 +14,6 @@
     "example.com",
     "example.org",
     "example.net",
-    "izs.me",
     "users.noreply.github.com"
   ],
   "allowedUuidPrefixes": [
@@ -64,7 +63,14 @@
     "deploy/evaluation/fixtures/release-ledger-reconciliation.tar",
     "deploy/evaluation/fixtures/service-release-v2.tar"
   ],
-  "ruleExceptions": [],
+  "ruleExceptions": [
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "6c0084e434cce8a734b2daea780518606a6d019f9c5acd7aa5e4266c28ea9084", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "d9fde70e390eaa2068ca13d487ef6020b2dd9d122249886e699de1a374e62063", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "8251bbb1d074838f92c1f6e110264cecd23e66fedac512d8c49a8bd837a4a5eb", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "bef5365935acb0c459c750e26b4e4987952418f162fa5745fd45d8254cdbb9b6", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "09c4c90bd5d81b38a997b5bddf132e55321b5a9214a3f8b2963aa64529a9e751", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "9414268907620b0fa4192030ed830ea08a8270f496db20b0e57bb905c62e9d28", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." }
+  ],
   "allowedHistoricalAssetHashes": {
     "deploy/identity/favicon.svg": ["fe588e5f2ad0261bc0e9ae4fda5fd538d5bad1baec28141d2368a5ea30bd2631"],
     "deploy/private-cloud/branding/icon-dark.svg": ["c8056baa0e15de9b0ae580003fefd617c70b6fd5575eb0c7d5dc4c80b0224b71"],

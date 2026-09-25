@@ -25,6 +25,7 @@ exports[`wire contract — schema surface > exports a stable, sorted set of sche
   "ClientClearSchema",
   "ClientCompactSchema",
   "ClientConsolidateMemorySchema",
+  "ClientCreateDirectorySchema",
   "ClientCreateSessionSchema",
   "ClientDeleteManualModelSchema",
   "ClientDeleteManualProviderSchema",

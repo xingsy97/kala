@@ -16,6 +16,15 @@ test('allows public examples and registered runtime assets', () => {
   assert.deepEqual(scan('packages/dashboard/public/favicon.svg', readFileSync(join(root, 'packages/dashboard/public/favicon.svg'))), [])
 })
 
+test('does not allow an entire real email domain for one historical dependency notice', () => {
+  const domain = ['izs', 'me'].join('.')
+  assert.equal(policy.allowedEmailDomains.has(domain), false)
+  const findings = scan('docs/example.md', `contact@${domain}`)
+  assert(findings.some(({ rule }) => rule === 'privacy.non-example-email'))
+  assert.equal(formatFindings(findings).includes(domain), false)
+  assert(policy.ruleExceptions.every((exception) => exception.path === 'pnpm-lock.yaml' && exception.rule === 'privacy.non-example-email'))
+})
+
 test('blocks structural private data without echoing matched values', () => {
   const home = ['/home', 'private-user'].join('/')
   const ip = [10, 23, 45, 67].join('.')

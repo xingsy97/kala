@@ -161,7 +161,19 @@ if (nativeOnly) {
 if (includeDashboard) {
   await run('tar', ['-czf', join(outDir, 'agent-kernel-dashboard-dist.tar.gz'), '-C', dashboardDist, '.'])
   writeDashboardReleaseManifest(dashboardDist)
-  await run('tar', ['-czf', join(outDir, 'agent-runlab-docs.tar.gz'), '-C', docsDir, '.'])
+  // Never package untracked local docs (captures, screenshots, notes). The
+  // tracked showcase GIF is still unfinished and explicitly excluded.
+  const listedDocs = spawnSync('git', ['ls-files', '-z', '--', 'docs/'], { cwd: root, encoding: 'buffer' })
+  if (listedDocs.status !== 0) throw new Error('cannot enumerate tracked release docs')
+  const docsFiles = listedDocs.stdout.toString('utf8').split('\0')
+    .filter((file) => file.startsWith('docs/') && file !== 'docs/assets/kala-dashboard-preview.gif')
+    .map((file) => file.slice('docs/'.length))
+    .filter(Boolean)
+  const docsArchive = spawnSync('tar', ['-czf', join(outDir, 'agent-runlab-docs.tar.gz'), '-C', docsDir, '--null', '-T', '-'], {
+    input: Buffer.from(`${docsFiles.join('\0')}\0`),
+    encoding: 'utf8',
+  })
+  if (docsArchive.status !== 0) throw new Error(`cannot package tracked release docs: ${docsArchive.stderr}`)
 }
 
 finalizeRelease()
