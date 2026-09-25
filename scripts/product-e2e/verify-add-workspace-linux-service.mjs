@@ -17,7 +17,7 @@ import {
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const release = join(root, 'release')
-const bundle = join(release, 'bundle-dashboard-with-runtime.cjs')
+const bundle = join(release, 'kala-dashboard-with-runtime.cjs')
 const port = Number(process.env.PRODUCT_E2E_INSTALLER_PORT ?? 3194)
 const hostOrigin = process.env.PRODUCT_E2E_INSTALLER_ORIGIN ?? `http://192.0.2.3:${port}`
 const localProbe = `http://127.0.0.1:${port}`
@@ -212,7 +212,7 @@ try {
 } finally {
   result = await harness.finalize({
     revision: (await runCommand('git', ['rev-parse', 'HEAD'], { cwd: root, allowFailure: true })).stdout.trim(),
-    artifact: { path: 'release/bundle-dashboard-with-runtime.cjs', sha256: existsSync(bundle) ? sha256File(bundle) : null },
+    artifact: { path: 'release/kala-dashboard-with-runtime.cjs', sha256: existsSync(bundle) ? sha256File(bundle) : null },
     controlledBoundaries: ['public DNS/domain routing omitted; local LXD bridge origin used'],
     untestedExternalCapabilities: ['public reverse proxy', 'macOS launchd', 'Windows service manager'],
     installationId,

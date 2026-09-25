@@ -1,6 +1,6 @@
 # Kala Private Cloud
 
-Public installations use the versioned release bundle and its `runlab-private-cloud`
+Public installations use the versioned release bundle and its `kala-private-cloud`
 operator. See `docs/operations/private-cloud-release.md`. No source checkout or
 local application build is part of the supported production workflow.
 

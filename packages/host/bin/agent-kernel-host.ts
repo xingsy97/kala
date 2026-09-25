@@ -112,8 +112,8 @@ function printHelp(): void {
   process.stdout.write(`Kala Runtime
 
 Usage:
-  bundle-dashboard-with-runtime.cjs [options]
-  bundle-dashboard-with-runtime.cjs enhancement <area> <command> [options]
+  kala-dashboard-with-runtime.cjs [options]
+  kala-dashboard-with-runtime.cjs enhancement <area> <command> [options]
 
 Options:
   -h, --help                 Show this help and exit.
@@ -137,10 +137,10 @@ Common environment:
   LOG_FORMAT                 pretty/human or json. Default: pretty.
 
 Examples:
-  node bundle-dashboard-with-runtime.cjs --port 3000
-  HOST_PORT=3001 node bundle-dashboard-with-runtime.cjs
-  LOG_FORMAT=json node bundle-dashboard-with-runtime.cjs --port 3000
-  node bundle-dashboard-with-runtime.cjs enhancement --help
+  node kala-dashboard-with-runtime.cjs --port 3000
+  HOST_PORT=3001 node kala-dashboard-with-runtime.cjs
+  LOG_FORMAT=json node kala-dashboard-with-runtime.cjs --port 3000
+  node kala-dashboard-with-runtime.cjs enhancement --help
 `)
 }
 

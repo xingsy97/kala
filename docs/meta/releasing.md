@@ -40,12 +40,12 @@ Important assets include:
 
 | Asset | Purpose |
 |---|---|
-| `bundle-dashboard-with-runtime.cjs` | Portable Runtime with embedded Dashboard |
-| `agent-kernel-host-<os>-<arch>` | Native Portable Runtime |
-| `agent-kernel-executor.cjs` | Node.js Executor fallback |
-| `runlab-executor-<os>-<arch>` | Native Executor |
-| `agent-runlab-runtime.cjs` | Platform Runtime without embedded Dashboard |
-| `agent-kernel-dashboard-dist.tar.gz` | Independent Platform Dashboard |
+| `kala-dashboard-with-runtime.cjs` | Portable Runtime with embedded Dashboard |
+| `kala-host-<os>-<arch>` | Native Portable Runtime |
+| `kala-executor.cjs` | Node.js Executor fallback |
+| `kala-executor-<os>-<arch>` | Native Executor |
+| `kala-runtime.cjs` | Platform Runtime without embedded Dashboard |
+| `kala-dashboard-dist.tar.gz` | Independent Platform Dashboard |
 | `run.sh` | Checksum-verifying Portable bootstrap |
 | `manifest.json` and `SHA256SUMS` | Release identity and integrity |
 

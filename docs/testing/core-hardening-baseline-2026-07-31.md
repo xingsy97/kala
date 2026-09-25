@@ -37,7 +37,7 @@ The unusually large uncommitted delta is itself a release risk. Review and tests
 | Runtime | Captured state |
 |---|---|
 | Standalone LXD service | active |
-| Standalone process | PID `23320`, `/usr/bin/node .../bundle-dashboard-with-runtime.cjs --port 13000` |
+| Standalone process | PID `23320`, `/usr/bin/node .../kala-dashboard-with-runtime.cjs --port 13000` |
 | Standalone bundle SHA-256 | `fc60146a12a275bfa266a586200ca55b4b0ddafcf455478cdc2a0cec45b4cbdb` |
 | Standalone Session storage | 15 GiB, 75 JSONL Session logs |
 | Docker Hosted | Docker daemon unavailable to the current execution identity (`/var/run/docker.sock` permission denied); must be recaptured before Hosted acceptance |

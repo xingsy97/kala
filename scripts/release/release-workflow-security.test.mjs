@@ -52,7 +52,7 @@ fs.writeFileSync(process.env.GH_STATE, JSON.stringify(assets));
   } finally { rmSync(temporary, { recursive: true, force: true }) }
 })
 
-test('promotion verifier binds the closed current draft to all four accepted native hashes', () => {
+test('promotion verifier binds the closed current draft to all three accepted native hashes', () => {
   const temporary = mkdtempSync(join(tmpdir(), 'promotion-candidate-'))
   try {
     const candidate = join(temporary, 'candidate')
@@ -62,7 +62,7 @@ test('promotion verifier binds the closed current draft to all four accepted nat
     const tag = 'v1.2.3-rc.1'
     const revision = 'a'.repeat(40)
     const targets = [...requiredReleaseEvidence.portable.targets]
-    const assets = targets.map((target) => `agent-kernel-host-${target}`)
+    const assets = targets.map((target) => `kala-host-${target}`)
     for (const [index, name] of assets.entries()) writeFileSync(join(candidate, name), `native-${index}\n`)
     writeFileSync(join(candidate, 'RELEASE_NOTES.md'), '# Notes\n')
     writeFileSync(join(candidate, 'manifest.json'), JSON.stringify({ version: tag.slice(1), source: { revision }, nativeTargets: targets, assets }, null, 2) + '\n')

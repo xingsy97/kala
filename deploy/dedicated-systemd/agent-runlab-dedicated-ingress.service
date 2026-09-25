@@ -18,7 +18,7 @@ Environment=AGENT_RUNLAB_DASHBOARD_RELEASES=/var/lib/agent-runlab/deploy/dashboa
 Environment=AGENT_RUNLAB_INGRESS_READINESS=/run/agent-runlab/ingress-readiness.json
 EnvironmentFile=-/etc/agent-runlab/handoff.env
 ExecStartPre=/usr/bin/rm -f /run/agent-runlab/ingress-readiness.json
-ExecStart=/usr/bin/node /var/lib/agent-runlab/deploy/control-current/agent-runlab-dedicated-ingress.cjs
+ExecStart=/usr/bin/node /var/lib/agent-runlab/deploy/control-current/kala-dedicated-ingress.cjs
 Restart=always
 RestartSec=2s
 TimeoutStopSec=15s

@@ -94,7 +94,7 @@ generation, release digest, asset digest, version, and protocol range. Dashboard
 is Supervisor-owned and must leave the Ingress, Runtime, Supervisor, Session, and Executor
 process identities unchanged. Runtime deployment must never rewrite an existing Dashboard
 route generation. Portable is the only architecture that uses the combined
-`bundle-dashboard-with-runtime.cjs` artifact.
+`kala-dashboard-with-runtime.cjs` artifact.
 
 The active Dashboard route file is readable only by `root:agent-runlab` (`0640`). Published
 Dashboard release directories are sealed read-only (`0555` directories and `0444` files),

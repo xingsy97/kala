@@ -9,8 +9,8 @@ import puppeteer from 'puppeteer-core'
 import { browserMetadata, resolveChrome, startProfileWindow, stopProfileWindow } from './profiling-utils.mjs'
 
 const root = new URL('../..', import.meta.url).pathname
-const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
-const executor = join(root, 'release', 'agent-kernel-executor.cjs')
+const bundle = join(root, 'release', 'kala-dashboard-with-runtime.cjs')
+const executor = join(root, 'release', 'kala-executor.cjs')
 const hostPort = Number(process.env.PERF_STREAM_HOST_PORT ?? 3216)
 const providerPort = Number(process.env.PERF_STREAM_PROVIDER_PORT ?? 3217)
 const origin = `http://127.0.0.1:${hostPort}`

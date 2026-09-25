@@ -37,7 +37,7 @@ async function main() {
   await mkdir(join(dataRoot, 'deploy', 'releases'), { recursive: true, mode: 0o711 })
   await installImmutableRelease(releaseFiles)
   await mkdir(join(root, 'control'), { recursive: true, mode: 0o755 })
-  for (const name of ['agent-runlab-dedicated-ingress.cjs', 'agent-runlab-dedicated-deploy-supervisor.cjs', 'runlab-dedicated.mjs', 'deploy-dedicated.mjs', 'deploy-dashboard.mjs', 'cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'rollback-dedicated-systemd.mjs']) await copyFile(join(source, name), join(root, 'control', name))
+  for (const name of ['kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs', 'kala-dedicated.mjs', 'deploy-dedicated.mjs', 'deploy-dashboard.mjs', 'cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'rollback-dedicated-systemd.mjs']) await copyFile(join(source, name), join(root, 'control', name))
   await mkdir(join(dataRoot, 'deploy', 'requests'), { recursive: true, mode: 0o3770 })
   await mkdir(join(dataRoot, 'deploy', 'submissions'), { recursive: true, mode: 0o3770 })
   await mkdir(join(dataRoot, 'deploy', 'receipts'), { recursive: true, mode: 0o750 })
@@ -68,7 +68,13 @@ async function main() {
   await writeFile('/etc/agent-runlab/slots/green.env', 'HOST_PORT=13002\n', { mode: 0o644 })
   const route = { schemaVersion: 1, generation: 1, activeSlot: 'blue', slots: { blue: { origin: 'http://127.0.0.1:13001', releaseId }, green: { origin: 'http://127.0.0.1:13002', releaseId } }, updatedAt: new Date().toISOString() }
   await writeAtomicJson(join(dataRoot, 'deploy', 'route-state.json'), route, 0o644)
-  for (const name of ['agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@.service', 'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service', 'agent-runlab-dedicated-migration-finalizer.service']) await copyFile(join(source, name), join(unitDir, name))
+  for (const [asset, service] of [
+    ['kala-dedicated-ingress.service', 'agent-runlab-dedicated-ingress.service'],
+    ['kala-dedicated-unit@.service', 'agent-runlab-dedicated-unit@.service'],
+    ['kala-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-deploy-supervisor.service'],
+    ['kala-dedicated-control-updater.service', 'agent-runlab-dedicated-control-updater.service'],
+    ['kala-dedicated-migration-finalizer.service', 'agent-runlab-dedicated-migration-finalizer.service'],
+  ]) await copyFile(join(source, asset), join(unitDir, service))
   await run('chown', ['-R', 'root:root', join(dataRoot, 'deploy')])
   await run('chmod', ['-R', 'go-w', join(dataRoot, 'deploy')])
   await run('chown', ['root:agent-runlab', join(dataRoot, 'deploy'), join(dataRoot, 'deploy', 'requests'), join(dataRoot, 'deploy', 'submissions'), join(dataRoot, 'deploy', 'receipts'), join(dataRoot, 'deploy', 'control-updates'), join(dataRoot, 'deploy', 'control-updates', 'requests'), join(dataRoot, 'deploy', 'control-updates', 'receipts')])
@@ -90,7 +96,7 @@ async function main() {
   await writeAtomicJson(join(dataRoot, 'deploy', 'migration-receipt.json'), {
     schemaVersion: 1, revision: 1, phase: 'installed_disabled', releaseId: basename(releaseDir), installedAt, updatedAt: installedAt,
     releaseDigest: createHash('sha256').update(sums).digest('hex'),
-    bundleSha256: createHash('sha256').update(await readFile(join(source, 'agent-runlab-runtime.cjs'))).digest('hex'),
+    bundleSha256: createHash('sha256').update(await readFile(join(source, 'kala-runtime.cjs'))).digest('hex'),
     containerBackend, cleanInstall: !normalizedLegacyDataRoot, ...(normalizedLegacyDataRoot ? { legacyDataRoot: normalizedLegacyDataRoot } : {}),
   })
   process.stdout.write(`${JSON.stringify({ ok: true, phase: 'installed_disabled', releaseId })}\n`)
@@ -110,11 +116,11 @@ async function installInitialDashboardRelease(sourceRoot, targetDataRoot, target
   const target = join(dashboardRoot, 'releases', targetReleaseId)
   const manifestBytes = await readFile(join(sourceRoot, 'dashboard-release.json'))
   const manifest = JSON.parse(String(manifestBytes))
-  await verifyDashboardArchive(join(sourceRoot, 'agent-kernel-dashboard-dist.tar.gz'), manifest.files)
+  await verifyDashboardArchive(join(sourceRoot, 'kala-dashboard-dist.tar.gz'), manifest.files)
   const incoming = `${target}.incoming-${randomBytes(12).toString('hex')}`
   await mkdir(join(incoming, 'assets'), { recursive: true, mode: 0o700 })
   try {
-    await run('tar', ['-xzf', join(sourceRoot, 'agent-kernel-dashboard-dist.tar.gz'), '-C', join(incoming, 'assets'), '--no-same-owner', '--no-same-permissions', '--keep-directory-symlink'])
+    await run('tar', ['-xzf', join(sourceRoot, 'kala-dashboard-dist.tar.gz'), '-C', join(incoming, 'assets'), '--no-same-owner', '--no-same-permissions', '--keep-directory-symlink'])
     await verifyDashboardFiles(join(incoming, 'assets'), manifest.files)
     await copyFile(join(sourceRoot, 'dashboard-release.json'), join(incoming, 'manifest.json'))
     await syncDashboardTree(incoming)

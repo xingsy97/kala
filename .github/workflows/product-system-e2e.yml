@@ -44,7 +44,7 @@ jobs:
           pnpm run verify:release-assets
           if ($LASTEXITCODE -ne 0) { throw 'Windows release asset verification failed' }
           $null = [scriptblock]::Create((Get-Content -Raw release/install-executor.ps1))
-          if (-not (Test-Path release/runlab-executor-win32-x64.exe)) { throw 'missing Windows Executor' }
+          if (-not (Test-Path release/kala-executor-win32-x64.exe)) { throw 'missing Windows Executor' }
           if (-not (Test-Path release/node-pty-win32-x64.tar.gz)) { throw 'missing ConPTY companion' }
           tar -xzf release/node-pty-win32-x64.tar.gz -C release
           if ($LASTEXITCODE -ne 0) { throw 'Windows ConPTY archive extraction failed' }

@@ -5,9 +5,10 @@ import test from 'node:test'
 const revision = 'a'.repeat(40)
 const tag = 'v0.2.0-rc.1'
 
-test('requires exactly four Linux and macOS Portable targets', () => {
+test('requires exactly three Linux and macOS Portable targets', () => {
   const portable = requiredReleaseEvidence.portable.targets.map((target) => create('portable', target))
-  assert.equal(verifyRcEvidenceSet(portable, { tag, revision }).length, 4)
+  assert.equal(verifyRcEvidenceSet(portable, { tag, revision }).length, 3)
+  assert.throws(() => create('portable', 'linux-arm64'), /unsupported portable evidence target/u)
   assert.throws(() => verifyRcEvidenceSet([...portable, create('dedicated', 'linux-x64-systemd')], { tag, revision }), /unexpected targets/u)
   assert.throws(() => verifyRcEvidenceSet(portable.slice(1), { tag, revision }), /matrix is incomplete/u)
 })

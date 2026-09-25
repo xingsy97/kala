@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url'
 import { ProductE2EHarness, clickByTestId, clickElement, clickFirstVisible, hoverAncestorAndClickFirst, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
-const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
-const executorAsset = join(root, 'release', 'agent-kernel-executor.cjs')
+const bundle = join(root, 'release', 'kala-dashboard-with-runtime.cjs')
+const executorAsset = join(root, 'release', 'kala-executor.cjs')
 const port = Number(process.env.PRODUCT_E2E_CORE_PORT ?? 3195)
 const origin = `http://127.0.0.1:${port}`
 const stateRoot = mkdtempSync(join(tmpdir(), 'runlab-e2e-core-state-'))

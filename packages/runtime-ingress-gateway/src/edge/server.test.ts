@@ -45,10 +45,10 @@ describe('Private Cloud edge request path', () => {
     const installer = await fetch(`http://127.0.0.1:${gateway.port}/install.ps1`)
     expect(installer.status).toBe(200)
     expect(await installer.text()).toContain('ErrorActionPreference')
-    const asset = await fetch(`http://127.0.0.1:${gateway.port}/release-assets/agent-kernel-executor.cjs`)
+    const asset = await fetch(`http://127.0.0.1:${gateway.port}/release-assets/kala-executor.cjs`)
     expect(asset.status).toBe(200)
     expect(await asset.text()).toContain('/usr/bin/env node')
-    expect(seen).toEqual(['/install.ps1', '/release-assets/agent-kernel-executor.cjs'])
+    expect(seen).toEqual(['/install.ps1', '/release-assets/kala-executor.cjs'])
   })
 
   it('binds login to one Unit, strips browser authority, and exposes account profile', async () => {

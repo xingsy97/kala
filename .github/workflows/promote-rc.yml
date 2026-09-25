@@ -73,9 +73,10 @@ jobs:
           node scripts/release/verify-promotion-candidate.mjs \
             --directory "$CANDIDATE" --evidence acceptance/evidence \
             --aggregate release-evidence/rc-evidence.json --tag "$TAG" --revision "$REVISION"
+          # Paused for the current RC: kala-host-linux-arm64
           for asset in manifest.json SHA256SUMS \
-            agent-kernel-host-linux-x64 agent-kernel-host-linux-arm64 \
-            agent-kernel-host-darwin-x64 agent-kernel-host-darwin-arm64; do
+            kala-host-linux-x64 \
+            kala-host-darwin-x64 kala-host-darwin-arm64; do
             gh attestation verify "$CANDIDATE/$asset" --repo "$GITHUB_REPOSITORY"
           done
           cosign verify-blob \

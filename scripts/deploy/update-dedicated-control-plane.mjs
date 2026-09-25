@@ -19,11 +19,11 @@ const ingressReadinessPath = resolve(process.env.AGENT_RUNLAB_INGRESS_READINESS 
 const systemctlBinary = resolve(process.env.AGENT_RUNLAB_SYSTEMCTL ?? '/usr/bin/systemctl')
 const chownBinary = resolve(process.env.AGENT_RUNLAB_CHOWN ?? '/usr/bin/chown')
 const units = [
-  'agent-runlab-dedicated-ingress.service',
-  'agent-runlab-dedicated-unit@.service',
-  'agent-runlab-dedicated-deploy-supervisor.service',
-  'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service',
+  { asset: 'kala-dedicated-ingress.service', service: 'agent-runlab-dedicated-ingress.service' },
+  { asset: 'kala-dedicated-unit@.service', service: 'agent-runlab-dedicated-unit@.service' },
+  { asset: 'kala-dedicated-deploy-supervisor.service', service: 'agent-runlab-dedicated-deploy-supervisor.service' },
+  { asset: 'kala-dedicated-control-updater.service', service: 'agent-runlab-dedicated-control-updater.service' },
+  { asset: 'kala-dedicated-migration-finalizer.service', service: 'agent-runlab-dedicated-migration-finalizer.service' },
 ]
 
 const transitions = {
@@ -126,7 +126,7 @@ async function rollback(receipt, cause) {
 
 async function installControlRelease(release) {
   await ensureIndependentDashboard(release)
-  for (const unit of units) await copyAtomic(join(release, unit), join(unitDir, unit), 0o644)
+  for (const unit of units) await copyAtomic(join(release, unit.asset), join(unitDir, unit.service), 0o644)
   await copyAtomic(join(release, 'deployment.json'), deploymentConfig, 0o644)
   await activate(controlLink, release)
   await systemctl('daemon-reload')
@@ -153,7 +153,7 @@ async function ensureIndependentDashboard(release) {
   } catch (error) { if (error?.code !== 'ENOENT') throw error }
   const manifestBytes = await readFile(join(release, 'dashboard-release.json'))
   const manifest = JSON.parse(String(manifestBytes))
-  if (manifest?.schemaVersion !== 1 || manifest.product !== 'agent-runlab-dashboard' || !Array.isArray(manifest.files) || !manifest.files.some((entry) => entry.path === 'index.html') || !digest(manifest.assetDigest)) throw new Error('initial Dashboard manifest is invalid')
+  if (manifest?.schemaVersion !== 1 || manifest.product !== 'kala-dashboard' || !Array.isArray(manifest.files) || !manifest.files.some((entry) => entry.path === 'index.html') || !digest(manifest.assetDigest)) throw new Error('initial Dashboard manifest is invalid')
   const initialReleaseId = basename(release)
   const target = join(releasesRoot, initialReleaseId)
   await mkdir(join(dashboardRoot, 'requests'), { recursive: true, mode: 0o3770 })
@@ -163,8 +163,8 @@ async function ensureIndependentDashboard(release) {
   const incoming = `${target}.incoming-${process.pid}`
   await mkdir(join(incoming, 'assets'), { recursive: true, mode: 0o755 })
   try {
-    await verifyDashboardArchive(join(release, 'agent-kernel-dashboard-dist.tar.gz'), manifest.files)
-    await command('/usr/bin/tar', ['-xzf', join(release, 'agent-kernel-dashboard-dist.tar.gz'), '-C', join(incoming, 'assets'), '--no-same-owner', '--no-same-permissions', '--keep-directory-symlink'])
+    await verifyDashboardArchive(join(release, 'kala-dashboard-dist.tar.gz'), manifest.files)
+    await command('/usr/bin/tar', ['-xzf', join(release, 'kala-dashboard-dist.tar.gz'), '-C', join(incoming, 'assets'), '--no-same-owner', '--no-same-permissions', '--keep-directory-symlink'])
     await verifyDashboardFiles(join(incoming, 'assets'), manifest.files)
     await copyFile(join(release, 'dashboard-release.json'), join(incoming, 'manifest.json'))
     await command('/usr/bin/chmod', ['-R', 'a-w', incoming])
@@ -198,7 +198,7 @@ async function verifyRelease(path, releaseId, expectedDigest) {
   const sumsBytes = await readFile(join(path, 'SHA256SUMS'))
   if (sha256(sumsBytes) !== expectedDigest) throw new Error('control release digest mismatch')
   const manifest = JSON.parse(await readFile(join(path, 'manifest.json'), 'utf8'))
-  if (!Array.isArray(manifest.assets) || !units.every((name) => manifest.assets.includes(name)) || !manifest.assets.includes('deployment.json') || !manifest.assets.includes('update-dedicated-control-plane.mjs')) throw new Error('control release assets are incomplete')
+  if (!Array.isArray(manifest.assets) || !units.every(({ asset }) => manifest.assets.includes(asset)) || !manifest.assets.includes('deployment.json') || !manifest.assets.includes('update-dedicated-control-plane.mjs')) throw new Error('control release assets are incomplete')
   if (manifest.assets.some((name) => typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/u.test(name) || ['manifest.json', 'SHA256SUMS', 'RELEASE_NOTES.md'].includes(name))) throw new Error('invalid control release manifest asset')
   const sums = new Map(String(sumsBytes).trim().split('\n').map((line) => { const match = /^([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9._@-]*)$/u.exec(line); if (!match) throw new Error('invalid control release checksum entry'); return [match[2], match[1]] }))
   const expectedFiles = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md'].sort()

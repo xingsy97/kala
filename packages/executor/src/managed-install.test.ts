@@ -8,8 +8,8 @@ import { installManagedGeneration, managedInstallSourceExecutable } from './mana
 
 describe('installManagedGeneration', () => {
   it('uses the bundled script rather than the Node.js runtime for fallback installs', () => {
-    expect(managedInstallSourceExecutable('/usr/bin/node', './release/agent-kernel-executor.cjs'))
-      .toBe(join(process.cwd(), 'release', 'agent-kernel-executor.cjs'))
+    expect(managedInstallSourceExecutable('/usr/bin/node', './release/kala-executor.cjs'))
+      .toBe(join(process.cwd(), 'release', 'kala-executor.cjs'))
     expect(managedInstallSourceExecutable('/tmp/runlab-executor', '/tmp/ignored.cjs'))
       .toBe('/tmp/runlab-executor')
     expect(() => managedInstallSourceExecutable('/usr/bin/node', undefined))

@@ -34,10 +34,10 @@ Explicitly out of scope:
 
 ## Deployment baseline (2026-07-31)
 
-- Portable release bundle: `release/bundle-dashboard-with-runtime.cjs`; Platform Runtime and Dashboard use separate artifacts.
+- Portable release bundle: `release/kala-dashboard-with-runtime.cjs`; Platform Runtime and Dashboard use separate artifacts.
 - LXD `agent-runlab-host`, port `13000`: deployed SHA-256 `b9cd67182903e0743f8d393b1e79598292a1c091a33ef4e3a83e546ddffce477`.
 - Deployment used checkpoint restart attempt `01KYWH25WAFV55A2Q9A4XT244W`; old PID `23320`, new PID `23438`; restart completed and runtime/model health probes passed.
-- Rollback artifact retained at `/home/ubuntu/.bin/bundle-dashboard-with-runtime.cjs.rollback`.
+- Rollback artifact retained at `/home/ubuntu/.bin/kala-dashboard-with-runtime.cjs.rollback`.
 - Private Cloud Docker execution remains an acceptance environment and must not be confused with every possible production topology.
 
 ## Quality baseline

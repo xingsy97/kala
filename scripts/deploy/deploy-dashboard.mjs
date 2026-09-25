@@ -33,7 +33,7 @@ function stage() {
   const state = readJson(join(deployRoot, 'route-state.json'))
   const staged = join(deployRoot, 'submissions', operationId)
   transport.stage(releaseDir, staged, [
-    { source: 'agent-kernel-dashboard-dist.tar.gz', target: 'dashboard.tar.gz' },
+    { source: 'kala-dashboard-dist.tar.gz', target: 'dashboard.tar.gz' },
     { source: 'dashboard-release.json', target: 'manifest.json' },
   ])
   const request = { schemaVersion: 1, action: 'deploy', operationId, deploymentId, requestedAt: new Date().toISOString(), expectedGeneration: state.generation, releaseId, releaseDigest: release.manifestSha256, manifestSha256: release.manifestSha256, archiveSha256: release.archiveSha256, stagedReleaseDir: staged }
@@ -62,9 +62,9 @@ function findRequest(value) { const names = transport.list(join(deployRoot, 'req
 function findReceipt(value) { const direct = join(deployRoot, 'receipts', `${value}.json`); if (transport.exists(direct)) return readJson(direct); for (const name of transport.list(join(deployRoot, 'receipts')).filter((x) => x.endsWith('.json'))) { const receipt = readJson(join(deployRoot, 'receipts', name)); if (receipt.operationId === value) return receipt } }
 function printAccepted(x, replayed) { process.stdout.write(JSON.stringify({ accepted: true, replayed, operationId: x.operationId, deploymentId: x.deploymentId, releaseId: x.releaseId, releaseDigest: x.releaseDigest, expectedGeneration: x.expectedGeneration }, null, 2) + '\n') }
 function inspectRelease(root) {
-  const archive = join(root, 'agent-kernel-dashboard-dist.tar.gz'), manifestPath = join(root, 'dashboard-release.json')
+  const archive = join(root, 'kala-dashboard-dist.tar.gz'), manifestPath = join(root, 'dashboard-release.json')
   const manifestBytes = readFileSync(manifestPath), archiveBytes = readFileSync(archive), manifest = JSON.parse(String(manifestBytes))
-  if (manifest.schemaVersion !== 1 || manifest.product !== 'agent-runlab-dashboard' || !Array.isArray(manifest.files) || !manifest.files.some((x) => x.path === 'index.html')) throw new Error('invalid Dashboard release manifest')
+  if (manifest.schemaVersion !== 1 || manifest.product !== 'kala-dashboard' || !Array.isArray(manifest.files) || !manifest.files.some((x) => x.path === 'index.html')) throw new Error('invalid Dashboard release manifest')
   const listing = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8' }); if (listing.status !== 0) throw new Error('Dashboard archive is unreadable')
   const paths = listing.stdout.split('\n').filter((x) => x && x !== './' && !x.endsWith('/')).map((x) => x.replace(/^\.\//u, '')).sort()
   const expected = manifest.files.map((x) => x.path).sort(); if (JSON.stringify(paths) !== JSON.stringify(expected)) throw new Error('Dashboard archive file set does not match manifest')

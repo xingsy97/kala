@@ -19,12 +19,7 @@ export function mapExecutorPlatform(os, arch) {
 
 export function executorNativeAssetName(target) {
   if (!TARGETS.has(target)) throw new Error(`unsupported executor target ${target}`)
-  return `runlab-executor-${target}`
-}
-
-export function legacyExecutorNativeAssetName(target) {
-  if (!TARGETS.has(target)) throw new Error(`unsupported executor target ${target}`)
-  return `agent-kernel-executor-${target}`
+  return `kala-executor-${target}`
 }
 
 export function generateExecutorInstallerSh({ repo, tag }) {
@@ -45,7 +40,7 @@ arch=$(uname -m | tr '[:upper:]' '[:lower:]')
 case "$os" in linux) os=linux ;; darwin) os=darwin ;; *) fail "unsupported OS: $os (this release supports Linux and macOS only)" ;; esac
 case "$arch" in x86_64|amd64) arch=x64 ;; arm64|aarch64) arch=arm64 ;; *) fail "unsupported architecture: $arch" ;; esac
 target="$os-$arch"
-asset="runlab-executor-$target"
+asset="kala-executor-$target"
 download_metadata() {
   name="$1"; wget -q --https-only --tries=3 --timeout=30 -O "$WORK_DIR/$name" "$BASE_URL/$name" || fail "failed to download $name"
   size=$(wc -c < "$WORK_DIR/$name" | tr -d ' '); [ "$size" -le "$MAX_METADATA_BYTES" ] || fail "$name exceeds metadata size limit"
@@ -54,7 +49,7 @@ download_metadata SHA256SUMS
 expected=$(awk -v file="$asset" '$2 == file && $1 ~ /^[0-9a-fA-F]{64}$/ {print tolower($1)}' "$WORK_DIR/SHA256SUMS")
 use_node=0
 if [ -z "$expected" ]; then
-  asset="agent-kernel-executor.cjs"
+  asset="kala-executor.cjs"
   expected=$(awk -v file="$asset" '$2 == file && $1 ~ /^[0-9a-fA-F]{64}$/ {print tolower($1)}' "$WORK_DIR/SHA256SUMS")
   [ -n "$expected" ] || fail "SHA256SUMS has no valid entry for the native Executor or Node.js fallback"
   command -v node >/dev/null 2>&1 || fail "No native Executor is published for $target. Install Node.js 22+ and retry."

@@ -47,8 +47,8 @@ type RecoveryDependencies = {
 export type DashboardRecoveryResult = 'reloading' | 'not-stale' | 'already-attempted'
 
 export function dashboardBootIdentity(documentValue: Pick<Document, 'querySelector'> = document): DashboardIdentity {
-  const releaseId = documentValue.querySelector<HTMLMetaElement>('meta[name=\"agent-runlab-dashboard-release\"]')?.content
-  const generationText = documentValue.querySelector<HTMLMetaElement>('meta[name=\"agent-runlab-dashboard-generation\"]')?.content
+  const releaseId = documentValue.querySelector<HTMLMetaElement>('meta[name=\"kala-dashboard-release\"]')?.content
+  const generationText = documentValue.querySelector<HTMLMetaElement>('meta[name=\"kala-dashboard-generation\"]')?.content
   const generation = Number(generationText)
   return {
     ...(releaseId ? { releaseId } : {}),

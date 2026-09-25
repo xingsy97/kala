@@ -42,8 +42,8 @@ async function submission(root: string, operationId: string, content: string): P
 async function writeRelease(dir: string, content: string): Promise<{ dir: string; bundle: string; release: string; files: string[] }> {
   await mkdir(dir, { recursive: true })
   const files = new Map([
-    ['agent-runlab-runtime.cjs', content],
-    ['manifest.json', JSON.stringify({ assets: ['agent-runlab-runtime.cjs'] })],
+    ['kala-runtime.cjs', content],
+    ['manifest.json', JSON.stringify({ assets: ['kala-runtime.cjs'] })],
     ['RELEASE_NOTES.md', '# test'],
   ])
   for (const [file, value] of files) await writeFile(join(dir, file), value)
@@ -162,14 +162,14 @@ describe('Dedicated Deploy Supervisor protocol', () => {
     const old = await release(root, 'old', 'old')
     const next = await submission(root, 'operation-deploy-0001', 'next')
     const manifestPath = join(next.dir, 'manifest.json')
-    const bundle = await readFile(join(next.dir, 'agent-runlab-runtime.cjs'))
+    const bundle = await readFile(join(next.dir, 'kala-runtime.cjs'))
     const unitName = 'agent-runlab-dedicated-unit@.service'
     const unit = '[Service]\nType=exec\n'
-    const manifest = JSON.stringify({ assets: ['agent-runlab-runtime.cjs', unitName] })
+    const manifest = JSON.stringify({ assets: ['kala-runtime.cjs', unitName] })
     await writeFile(manifestPath, manifest)
     await writeFile(join(next.dir, unitName), unit)
     const notes = await readFile(join(next.dir, 'RELEASE_NOTES.md'))
-    const sums = `${digest(bundle)}  agent-runlab-runtime.cjs\n${digest(unit)}  ${unitName}\n${digest(manifest)}  manifest.json\n${digest(notes)}  RELEASE_NOTES.md\n`
+    const sums = `${digest(bundle)}  kala-runtime.cjs\n${digest(unit)}  ${unitName}\n${digest(manifest)}  manifest.json\n${digest(notes)}  RELEASE_NOTES.md\n`
     await writeFile(join(next.dir, 'SHA256SUMS'), sums)
     const h = harness(); const supervisor = new DedicatedDeploySupervisor(root, h.adapter)
     const staged = await supervisor.accept(request({ ...next, release: digest(sums) }, { sourceReleaseDigest: old.release }))

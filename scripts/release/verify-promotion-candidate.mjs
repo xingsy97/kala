@@ -18,7 +18,7 @@ if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) fail('curre
 assertUnique(manifest.assets, 'current release manifest assets')
 const targets = [...requiredReleaseEvidence.portable.targets]
 if (!Array.isArray(manifest.nativeTargets) || JSON.stringify([...manifest.nativeTargets].sort()) !== JSON.stringify([...targets].sort())) {
-  fail('current release manifest does not contain exactly the four supported native targets')
+  fail('current release manifest does not contain exactly the three supported native targets')
 }
 
 const aggregateName = basename(aggregatePath)
@@ -39,7 +39,7 @@ await verifyReleaseChecksums(directory, [...manifest.assets, 'manifest.json', 'R
 const evidence = verifyRcEvidenceSet(collectRcEvidence(evidenceDirectory), { tag, revision })
 for (const target of targets) {
   const record = evidence.find((entry) => entry.category === 'portable' && entry.target === target)
-  const name = `agent-kernel-host-${target}`
+  const name = `kala-host-${target}`
   if (!record || record.artifact.name !== name) fail(`validated ${target} evidence does not identify ${name}`)
   if (!manifest.assets.includes(name)) fail(`current release manifest is missing accepted native asset ${name}`)
   if (digest(readFileSync(join(directory, name))) !== record.artifact.sha256) {

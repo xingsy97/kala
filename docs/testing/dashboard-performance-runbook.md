@@ -24,7 +24,7 @@ Implementation files live in [`scripts/performance`](../../scripts/performance/)
 - production release artifacts for the direct profile commands
 - Linux production Executor artifact for the streaming scenario
 
-The suite command builds its own artifacts. Direct commands expect `release/bundle-dashboard-with-runtime.cjs` to exist.
+The suite command builds its own artifacts. Direct commands expect `release/kala-dashboard-with-runtime.cjs` to exist.
 
 ## Recommended full investigation
 

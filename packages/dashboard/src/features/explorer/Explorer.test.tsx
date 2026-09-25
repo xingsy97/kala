@@ -382,7 +382,7 @@ describe('Explorer', () => {
     expect(workspaceStatus.className).not.toContain('rounded-full')
     expect(workspaceStatus.className).not.toContain('border')
     expect(workspaceStatus.className).toContain('text-emerald-600')
-    expect(workspaceStatus.querySelector('svg')).toBeTruthy()
+    expect(workspaceStatus.querySelector('img[src="/icons/macos.svg"]')).toBeTruthy()
     expect(workspaceStatus.getAttribute('aria-label')).toBe('macOS, online')
     expect(workspaceStatus.getAttribute('title')).toBe('macOS, online')
     expect(workspaceStatus.textContent).toBe('')
@@ -421,10 +421,10 @@ describe('Explorer', () => {
     expect(status.className).toContain('text-emerald-600')
     expect(osIcon.getAttribute('data-os-icon')).toBe(icon)
     expect(osIcon.classList.contains('lucide-monitor')).toBe(icon === 'generic')
-    expect(osIcon.classList.contains('lucide-apple')).toBe(icon === 'macos')
-    if (icon === 'windows') {
-      expect(osIcon.getAttribute('fill')).toBe('currentColor')
-      expect(osIcon.querySelectorAll('path')).toHaveLength(4)
+    if (icon !== 'generic') {
+      expect(osIcon.tagName.toLowerCase()).toBe('img')
+      expect(osIcon.getAttribute('src')).toBe(`/icons/${icon}.svg`)
+      expect(osIcon.getAttribute('alt')).toBe('')
     }
   })
 

@@ -37,7 +37,7 @@ The question: **which side initiates the connection?**
 ## Consequences
 
 **Good**:
-- Laptop executor works with zero network config. Download `agent-kernel-executor.cjs`, then run `node agent-kernel-executor.cjs --host wss://host.example.com --sandbox-root /repo` and you're done.
+- Laptop executor works with zero network config. Download `kala-executor.cjs`, then run `node kala-executor.cjs --host wss://host.example.com --sandbox-root /repo` and you're done.
 - Same pattern works for browser executor: browser dials Host over WSS.
 - Firewall-friendly (outbound HTTPS is universally allowed).
 - Kill-safe: if the laptop closes, the WS drops, Host notices via disconnect, session pauses gracefully.

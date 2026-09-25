@@ -5,13 +5,13 @@ import { spawnSync } from 'node:child_process'
 import { build } from 'esbuild'
 
 const root = resolve(import.meta.dirname, '../..')
-const output = resolve(option('--output') ?? join(root, 'release/runlab-private-cloud'))
+const output = resolve(option('--output') ?? join(root, 'release/kala-private-cloud'))
 const target = option('--target') ?? `${process.platform}-${process.arch}`
 const expected = process.platform === 'linux' ? `linux-${process.arch}` : `${process.platform}-${process.arch}`
 if (target !== expected || !['linux-x64', 'linux-arm64'].includes(target)) throw new Error(`operator native target ${target} must match a Linux x64/arm64 runner (${expected})`)
 const workspace = join(dirname(output), `.private-cloud-operator-${target}`)
 rmSync(workspace, { recursive: true, force: true }); mkdirSync(workspace, { recursive: true })
-const cjs = join(workspace, 'runlab-private-cloud.cjs'); const blob = join(workspace, 'runlab-private-cloud.blob'); const config = join(workspace, 'sea-config.json')
+const cjs = join(workspace, 'kala-private-cloud.cjs'); const blob = join(workspace, 'kala-private-cloud.blob'); const config = join(workspace, 'sea-config.json')
 await build({ entryPoints: [join(root, 'scripts/deploy/runlab-private-cloud.mjs')], outfile: cjs, bundle: true, platform: 'node', target: 'node22', format: 'cjs', legalComments: 'none', logLevel: 'silent' })
 writeFileSync(cjs, readFileSync(cjs, 'utf8').replace('#!/usr/bin/env node\n', ''))
 writeFileSync(config, `${JSON.stringify({ main: cjs, output: blob, disableExperimentalSEAWarning: true }, null, 2)}\n`)

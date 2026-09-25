@@ -425,7 +425,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
       {
         flag: '--host',
         env: 'HOST_URL',
-        example: 'HOST_URL=http://localhost:3000 EXECUTOR_INVITE=ak_invite_... node agent-kernel-executor.cjs',
+        example: 'HOST_URL=http://localhost:3000 EXECUTOR_INVITE=ak_invite_... node kala-executor.cjs',
       },
       'missing host url',
     )

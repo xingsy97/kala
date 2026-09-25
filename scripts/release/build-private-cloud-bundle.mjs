@@ -14,7 +14,7 @@ const images = {
   dashboard: requiredImage('--dashboard-image'),
 }
 const operator = resolve(option('--operator') ?? join(root, 'scripts/deploy/runlab-private-cloud.mjs'))
-const operatorName = option('--operator') ? 'runlab-private-cloud' : 'runlab-private-cloud.mjs'
+const operatorName = option('--operator') ? 'kala-private-cloud' : 'kala-private-cloud.mjs'
 if (!/^[0-9a-f]{40}$/u.test(revision)) throw new Error('revision must be an exact 40-character Git revision')
 rmSync(output, { recursive: true, force: true })
 mkdirSync(output, { recursive: true, mode: 0o755 })
@@ -33,11 +33,11 @@ const files = [
 for (const source of files) copyFileSync(join(root, source), join(output, source.endsWith('/runtime-provider-catalog.json') ? 'runtime-provider-catalog.example.json' : basename(source)))
 copyFileSync(operator, join(output, operatorName))
 chmodSync(join(output, operatorName), 0o755)
-const imageLock = { schemaVersion: 1, product: 'agent-runlab-private-cloud', version: pkg.version, revision, images }
+const imageLock = { schemaVersion: 1, product: 'kala-private-cloud', version: pkg.version, revision, images }
 writeFileSync(join(output, 'image-lock.json'), `${JSON.stringify(imageLock, null, 2)}\n`)
 const names = files.map((source) => source.endsWith('/runtime-provider-catalog.json') ? 'runtime-provider-catalog.example.json' : basename(source)).concat('image-lock.json', operatorName).sort()
 const manifest = {
-  schemaVersion: 1, product: 'agent-runlab-private-cloud', version: pkg.version, revision,
+  schemaVersion: 1, product: 'kala-private-cloud', version: pkg.version, revision,
   files: Object.fromEntries(names.map((name) => [name, describe(join(output, name))])),
 }
 writeFileSync(join(output, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)

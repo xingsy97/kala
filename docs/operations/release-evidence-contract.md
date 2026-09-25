@@ -29,7 +29,7 @@ The required promotion matrix is:
 
 | Category | Target | Required proof |
 |---|---|---|
-| Portable | Linux and macOS on x64 and arm64 (exactly four records) | exact attested asset, clean install, boot, capabilities, embedded Dashboard, persisted Session state, graceful stop, same-version reinstall |
+| Portable | Linux x64 and macOS x64/arm64 (exactly three records; Linux arm64 paused for this RC) | exact attested asset, clean install, boot, capabilities, embedded Dashboard, persisted Session state, graceful stop, same-version reinstall |
 
 Optional Dedicated and Private Cloud lifecycle evidence still has a strict schema
 if independently produced, but is not claimed as proven for this bootstrap RC.

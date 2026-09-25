@@ -2,23 +2,24 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
-  'bundle-dashboard-with-runtime.cjs',
-  'agent-runlab-dedicated-ingress.cjs',
-  'agent-runlab-dedicated-deploy-supervisor.cjs',
-  'agent-kernel-executor.cjs',
-  'agent-kernel-dashboard-dist.tar.gz',
-  'agent-runlab-model-catalog-seed.json',
-  'agent-runlab-dedicated-ingress.service',
-  'agent-runlab-dedicated-unit@.service',
-  'agent-runlab-dedicated-deploy-supervisor.service',
-  'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service',
+  'kala-dashboard-with-runtime.cjs',
+  'kala-dedicated-ingress.cjs',
+  'kala-dedicated-deploy-supervisor.cjs',
+  'kala-executor.cjs',
+  'kala-dashboard-dist.tar.gz',
+  'kala-model-catalog-seed.json',
+  'kala-dedicated-ingress.service',
+  'kala-dedicated-unit@.service',
+  'kala-dedicated-deploy-supervisor.service',
+  'kala-dedicated-control-updater.service',
+  'kala-dedicated-migration-finalizer.service',
   'deployment.json',
   'install-dedicated-systemd.mjs',
   'cutover-dedicated-systemd.mjs',
   'dedicated-data-migration.mjs',
   'update-dedicated-control-plane.mjs',
   'rollback-dedicated-systemd.mjs',
+  'kala-dedicated.mjs',
   'run.sh',
   'manifest.json',
   'RELEASE_NOTES.md',
@@ -26,10 +27,10 @@ export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
 ])
 
 export const REQUIRED_RELEASE_ASSETS = Object.freeze([
-  'bundle-dashboard-with-runtime.cjs',
-  'agent-runlab-dedicated-ingress.cjs',
-  'agent-runlab-dedicated-deploy-supervisor.cjs',
-  'agent-kernel-executor.cjs',
+  'kala-dashboard-with-runtime.cjs',
+  'kala-dedicated-ingress.cjs',
+  'kala-dedicated-deploy-supervisor.cjs',
+  'kala-executor.cjs',
   'SHA256SUMS',
 ])
 
@@ -99,7 +100,7 @@ export function releaseFiles(releaseDir, { exists = existsSync, readDir = readdi
 }
 
 export function installScript(remoteBinDir, remoteUploadDir, names, retiredNames = RETIRED_RELEASE_ASSETS) {
-  const catalogSeed = 'agent-runlab-model-catalog-seed.json'
+  const catalogSeed = 'kala-model-catalog-seed.json'
   const lines = [
     'set -euo pipefail',
     `REMOTE_BIN=${remotePathForShell(remoteBinDir)}`,

@@ -24,7 +24,7 @@ COPY resources resources
 RUN pnpm --filter @agent-kernel/kernel build && pnpm --filter @agent-kernel/shared build && pnpm --filter @agent-kernel/executor build && pnpm --filter @agent-kernel/host build && pnpm --filter @agent-kernel/runtime-ingress-gateway build && pnpm --filter @agent-kernel/dashboard build
 ARG SOURCE_REVISION
 RUN node scripts/release/build-release-assets.mjs --no-native --repo local/agent-runlab --skip-dashboard-build --skip-package-build --source-revision "$SOURCE_REVISION"
-RUN rm -rf packages/dashboard && rm -f release/agent-kernel-dashboard-dist.tar.gz release/dashboard-release.json docs/.tracked-release-docs
+RUN rm -rf packages/dashboard && rm -f release/kala-dashboard-dist.tar.gz release/dashboard-release.json docs/.tracked-release-docs
 
 FROM node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34 AS runtime
 ENV NODE_ENV=production

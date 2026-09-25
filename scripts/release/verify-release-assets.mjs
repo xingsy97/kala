@@ -12,7 +12,7 @@ const manifestPath = join(releaseDir, 'manifest.json')
 if (!existsSync(manifestPath)) fail('missing release/manifest.json')
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-const supportedNativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']
+const supportedNativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64']
 if (!/^[0-9a-f]{40}$/u.test(manifest.source?.revision ?? '')
   || !/^[0-9a-f]{64}$/u.test(manifest.source?.snapshotSha256 ?? '')
   || typeof manifest.source?.dirty !== 'boolean') {
@@ -25,10 +25,11 @@ if (new Set(manifest.assets).size !== manifest.assets.length) {
   fail('manifest.assets must not contain duplicates')
 }
 for (const asset of manifest.assets) assertSupportedReleaseAssetName(asset, 'manifest')
-if (!Array.isArray(manifest.nativeTargets)
-  || new Set(manifest.nativeTargets).size !== manifest.nativeTargets.length
-  || manifest.nativeTargets.some((target) => !supportedNativeTargets.includes(target))) {
-  fail('manifest.nativeTargets must contain only unique Linux/macOS x64/arm64 targets')
+const actualNativeTargets = Array.isArray(manifest.nativeTargets) ? [...manifest.nativeTargets].sort() : undefined
+if (!actualNativeTargets
+  || (actualNativeTargets.length !== 0
+    && JSON.stringify(actualNativeTargets) !== JSON.stringify([...supportedNativeTargets].sort()))) {
+  fail('manifest.nativeTargets must be empty for a CJS-only stage or contain exactly Linux x64 and macOS x64/arm64')
 }
 for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
   if (!Array.isArray(assets)) fail(`manifest.nativeAssets.${product} must be an array`)
@@ -57,17 +58,17 @@ if (actualReleaseEntries.some((entry) => !entry.isFile())
 const includesHost = manifest.component === 'all' || manifest.component === 'host'
 if (includesHost) {
   for (const asset of [
-    'agent-runlab-dedicated-ingress.cjs',
-    'agent-runlab-runtime.cjs',
-    'agent-runlab-dedicated-deploy-supervisor.cjs',
-    'agent-runlab-dedicated-ingress.service',
-    'agent-runlab-dedicated-unit@.service',
-    'agent-runlab-dedicated-deploy-supervisor.service',
-    'agent-runlab-dedicated-control-updater.service',
-    'agent-runlab-dedicated-migration-finalizer.service',
+    'kala-dedicated-ingress.cjs',
+    'kala-runtime.cjs',
+    'kala-dedicated-deploy-supervisor.cjs',
+    'kala-dedicated-ingress.service',
+    'kala-dedicated-unit@.service',
+    'kala-dedicated-deploy-supervisor.service',
+    'kala-dedicated-control-updater.service',
+    'kala-dedicated-migration-finalizer.service',
     'deployment.json',
     'install-dedicated-systemd.mjs',
-    'runlab-dedicated.mjs',
+    'kala-dedicated.mjs',
     'deploy-dedicated.mjs',
     'deploy-dashboard.mjs',
     'cutover-dedicated-systemd.mjs',
@@ -85,7 +86,7 @@ if (includesHost) {
     || dedicatedDeployment.runtimeProfile !== 'full') {
     fail('release deployment.json is not the canonical Dedicated configuration')
   }
-  const hostBundle = readFileSync(join(releaseDir, 'bundle-dashboard-with-runtime.cjs'), 'utf8')
+  const hostBundle = readFileSync(join(releaseDir, 'kala-dashboard-with-runtime.cjs'), 'utf8')
   const embeddedAssetsPrefix = 'globalThis.__AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__='
   const embeddedAssetsStart = hostBundle.indexOf(embeddedAssetsPrefix)
   if (embeddedAssetsStart < 0) fail('release Host bundle is missing embedded release assets')
@@ -99,13 +100,13 @@ if (includesHost) {
     || !hostBundle.includes(Buffer.from('# Dedicated Platform Runtime Unit Refactor').toString('base64'))) {
     fail('release Host bundle is missing embedded product documentation')
   }
-  const platformRuntime = readFileSync(join(releaseDir, 'agent-runlab-runtime.cjs'), 'utf8')
+  const platformRuntime = readFileSync(join(releaseDir, 'kala-runtime.cjs'), 'utf8')
   if (platformRuntime.includes('globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=')) fail('Self-hosted Platform Runtime must not embed Dashboard assets')
   const dashboardRelease = JSON.parse(readFileSync(join(releaseDir, 'dashboard-release.json'), 'utf8'))
-  if (dashboardRelease.schemaVersion !== 1 || dashboardRelease.product !== 'agent-runlab-dashboard' || !dashboardRelease.files?.some((entry) => entry.path === 'index.html')) fail('release Dashboard manifest is invalid')
-  const operatorHelp = spawnSync('node', ['runlab-dedicated.mjs', '--help'], { cwd: releaseDir, encoding: 'utf8' })
+  if (dashboardRelease.schemaVersion !== 1 || dashboardRelease.product !== 'kala-dashboard' || !dashboardRelease.files?.some((entry) => entry.path === 'index.html')) fail('release Dashboard manifest is invalid')
+  const operatorHelp = spawnSync('node', ['kala-dedicated.mjs', '--help'], { cwd: releaseDir, encoding: 'utf8' })
   if (operatorHelp.status !== 0 || !['install', 'status', 'upgrade', 'rollback', 'backup', 'restore', 'uninstall'].every((command) => operatorHelp.stdout.includes(command))) fail('Dedicated operator CLI help is incomplete')
-  accessSync(join(releaseDir, 'runlab-dedicated.mjs'), constants.X_OK)
+  accessSync(join(releaseDir, 'kala-dedicated.mjs'), constants.X_OK)
 }
 
 const forbiddenLegacyEvaluationMarkers = [
@@ -197,12 +198,12 @@ for (const asset of manifest.assets) {
 const installer = 'install-executor.sh'
 if (!manifest.assets.includes(installer)) fail(`manifest missing ${installer}`)
 const installerText = readFileSync(join(releaseDir, installer), 'utf8')
-for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'SHA256SUMS', 'runlab-executor-', '--internal-installer', 'Linux and macOS only']) {
+for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'SHA256SUMS', 'kala-executor-', '--internal-installer', 'Linux and macOS only']) {
   if (!installerText.includes(marker)) fail(`${installer} missing required installer marker: ${marker}`)
 }
 if (installerText.includes('manifest.json')) fail(`${installer} must use the Host-scoped checksum index without manifest fallback`)
-if (!installerText.includes('agent-kernel-executor.cjs') || !installerText.includes('Node.js 22+')) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
-if (/win32|mingw|msys|cygwin|\.exe|\.ps1|conpty/iu.test(installerText)) fail(`${installer} must support only the four Linux/macOS targets`)
+if (!installerText.includes('kala-executor.cjs') || !installerText.includes('Node.js 22+')) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
+if (/win32|mingw|msys|cygwin|\.exe|\.ps1|conpty/iu.test(installerText)) fail(`${installer} must support only Linux and macOS targets`)
 const installerSyntax = spawnSync('bash', ['-n', join(releaseDir, 'install-executor.sh')], { stdio: 'inherit' })
 if (installerSyntax.status !== 0) fail('install-executor.sh failed bash syntax check')
 
@@ -233,11 +234,11 @@ if (notes.includes('run-host.sh') || notes.includes('run-executor.sh')) {
 if (!notes.includes('sha256sum -c SHA256SUMS --ignore-missing')) {
   fail('release notes missing checksum verification command')
 }
-if (/agent-kernel-(host|executor)\.cjs\s*\|\s*node/.test(notes)) {
+if (/kala-(?:dashboard-with-runtime|host|executor)\.cjs\s*\|\s*node/.test(notes)) {
   fail('release notes must not pipe Node.js assets directly to node')
 }
-if (!notes.includes('Linux and macOS (x64 and arm64)') || !notes.includes('Windows release assets are not included')) {
-  fail('release notes must state the four-target Linux/macOS support scope')
+if (!notes.includes('Linux x64 and macOS x64/arm64') || !notes.includes('Linux arm64 and Windows release assets are not included')) {
+  fail('release notes must state the three-target Linux/macOS support scope')
 }
 if (/https?:\/\/\S*(?:win32|windows|\.ps1|\.exe|conpty)/iu.test(notes)) fail('release notes must not offer Windows downloads')
 
@@ -247,8 +248,8 @@ try {
   fail('SHA256SUMS verification failed')
 }
 
-if (manifest.assets.includes('agent-kernel-executor.cjs')) {
-  const executorHelp = spawnSync('node', ['agent-kernel-executor.cjs', '--help'], {
+if (manifest.assets.includes('kala-executor.cjs')) {
+  const executorHelp = spawnSync('node', ['kala-executor.cjs', '--help'], {
     cwd: releaseDir,
     encoding: 'utf8',
   })
@@ -261,7 +262,7 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
     fail('executor --help must not connect to a host')
   }
 
-  const executorVersion = spawnSync('node', ['agent-kernel-executor.cjs', '--version'], {
+  const executorVersion = spawnSync('node', ['kala-executor.cjs', '--version'], {
     cwd: releaseDir,
     encoding: 'utf8',
   })
@@ -271,7 +272,7 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
     fail(`executor --version must equal the release product version ${manifest.version}`)
   }
 
-  const executor = spawnSync('node', ['agent-kernel-executor.cjs'], {
+  const executor = spawnSync('node', ['kala-executor.cjs'], {
     cwd: releaseDir,
     encoding: 'utf8',
     env: { ...process.env, HOST_URL: '' },
@@ -283,21 +284,21 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   }
 }
 
-if (manifest.assets.includes('bundle-dashboard-with-runtime.cjs')) {
-  const hostHelp = spawnSync('node', ['bundle-dashboard-with-runtime.cjs', '--help'], {
+if (manifest.assets.includes('kala-dashboard-with-runtime.cjs')) {
+  const hostHelp = spawnSync('node', ['kala-dashboard-with-runtime.cjs', '--help'], {
     cwd: releaseDir,
     encoding: 'utf8',
   })
   if (hostHelp.status !== 0) fail('host --help smoke test should exit 0')
   const output = `${hostHelp.stdout}\n${hostHelp.stderr}`
-  if (!output.includes('Kala Runtime') || !output.includes('Usage:') || !output.includes('bundle-dashboard-with-runtime.cjs [options]') || !output.includes('--port <port>')) {
+  if (!output.includes('Kala Runtime') || !output.includes('Usage:') || !output.includes('kala-dashboard-with-runtime.cjs [options]') || !output.includes('--port <port>')) {
     fail('host --help smoke test did not print CLI usage')
   }
   if (output.includes('host listening')) {
     fail('host --help must not start the server')
   }
 
-  const hostVersion = spawnSync('node', ['bundle-dashboard-with-runtime.cjs', '-v'], {
+  const hostVersion = spawnSync('node', ['kala-dashboard-with-runtime.cjs', '-v'], {
     cwd: releaseDir,
     encoding: 'utf8',
   })
@@ -307,7 +308,7 @@ if (manifest.assets.includes('bundle-dashboard-with-runtime.cjs')) {
   }
 }
 
-const nativeExecutor = manifest.assets.find((asset) => asset === nativeAssetName('agent-kernel-executor'))
+const nativeExecutor = manifest.assets.find((asset) => asset === nativeAssetName('kala-executor'))
 if (nativeExecutor) {
   const executor = spawnSync(`./${nativeExecutor}`, [], {
     cwd: releaseDir,
@@ -324,7 +325,7 @@ if (nativeExecutor) {
 console.log('release assets verified')
 
 function isNativeAsset(asset) {
-  return /^(?:agent-kernel-(?:host|executor)|runlab-executor)-(linux|darwin)-(x64|arm64)$/.test(asset)
+  return /^kala-(?:host|executor|dedicated-ingress|dedicated-deploy-supervisor)-(linux|darwin)-(x64|arm64)$/.test(asset)
 }
 
 function nativeAssetName(base) {
@@ -334,7 +335,7 @@ function nativeAssetName(base) {
 }
 
 function assertSupportedReleaseAssetName(name, location) {
-  if (typeof name !== 'string' || /(?:win32|windows|conpty)/iu.test(name) || /\.(?:exe|ps1)$/iu.test(name) || /^node-pty-.*\.tar\.gz$/iu.test(name) || /^executor-update-(?:manifest\.json|public-key\.pem)$/u.test(name)) {
+  if (typeof name !== 'string' || /(?:linux-arm64|win32|windows|conpty)/iu.test(name) || /\.(?:exe|ps1)$/iu.test(name) || /^node-pty-.*\.tar\.gz$/iu.test(name) || /^executor-update-(?:manifest\.json|public-key\.pem)$/u.test(name)) {
     fail(`${location} contains unsupported or platform-ambiguous release asset ${String(name)}`)
   }
 }

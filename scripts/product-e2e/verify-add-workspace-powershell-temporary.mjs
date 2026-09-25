@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { runCommand, startProcess, waitFor, waitForHttp } from './harness.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
-const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
+const bundle = join(root, 'release', 'kala-dashboard-with-runtime.cjs')
 const port = Number(process.env.PRODUCT_E2E_POWERSHELL_INSTALLER_PORT ?? 3215)
 const origin = `http://127.0.0.1:${port}`
 const image = process.env.PRODUCT_E2E_POWERSHELL_IMAGE ?? 'mcr.microsoft.com/powershell:lts-ubuntu-22.04'

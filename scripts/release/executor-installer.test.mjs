@@ -9,7 +9,6 @@ import test from 'node:test'
 import {
   executorNativeAssetName,
   generateExecutorInstallerSh,
-  legacyExecutorNativeAssetName,
   mapExecutorPlatform,
 } from './executor-installer.mjs'
 
@@ -24,19 +23,19 @@ test('maps supported executor OS and architecture aliases', () => {
   assert.equal(mapExecutorPlatform('linux', 'riscv64'), undefined)
 })
 
-test('uses product native names while retaining deterministic legacy names', () => {
-  assert.equal(executorNativeAssetName('linux-x64'), 'runlab-executor-linux-x64')
-  assert.equal(executorNativeAssetName('linux-arm64'), 'runlab-executor-linux-arm64')
-  assert.equal(executorNativeAssetName('darwin-x64'), 'runlab-executor-darwin-x64')
-  assert.equal(legacyExecutorNativeAssetName('darwin-arm64'), 'agent-kernel-executor-darwin-arm64')
+test('uses one Kala namespace for native asset names', () => {
+  assert.equal(executorNativeAssetName('linux-x64'), 'kala-executor-linux-x64')
+  assert.equal(executorNativeAssetName('linux-arm64'), 'kala-executor-linux-arm64')
+  assert.equal(executorNativeAssetName('darwin-x64'), 'kala-executor-darwin-x64')
+  assert.equal(executorNativeAssetName('darwin-arm64'), 'kala-executor-darwin-arm64')
   assert.throws(() => executorNativeAssetName('win32-arm64'))
   assert.throws(() => executorNativeAssetName('freebsd-x64'))
 })
 
 test('generates fail-closed installers with checksummed native or Node.js fallback', () => {
   const sh = generateExecutorInstallerSh({ repo: 'owner/repo', tag: 'v1.2.3' })
-  for (const marker of [/RUNLAB_INSTALLER_ALLOW_UNSIGNED/, /SHA256SUMS/, /runlab-executor-/, /--internal-installer/]) assert.match(sh, marker)
-  assert.match(sh, /agent-kernel-executor\.cjs/)
+  for (const marker of [/RUNLAB_INSTALLER_ALLOW_UNSIGNED/, /SHA256SUMS/, /kala-executor-/, /--internal-installer/]) assert.match(sh, marker)
+  assert.match(sh, /kala-executor\.cjs/)
   assert.match(sh, /Node\.js 22\+/)
   assert.doesNotMatch(sh, /manifest\.json/)
   assert.match(sh, /this release supports Linux and macOS only/)
@@ -56,14 +55,14 @@ test('generates fail-closed installers with checksummed native or Node.js fallba
   }
 })
 
-test('release builder emits the four-target shell installer and product manifest mapping', () => {
+test('release builder emits the three-target RC manifest while preserving installer platform capabilities', () => {
   const builder = readFileSync(new URL('./build-release-assets.mjs', import.meta.url), 'utf8')
   assert.match(builder, /sourceSnapshotSha256/u)
   assert.match(builder, /release source changed while assets were being built/u)
   assert.match(builder, /generateExecutorInstallerSh/)
-  assert.match(builder, /const nativeTargets = \['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'\]/)
-  assert.match(builder, /'runlab-executor': executorProductNatives/)
-  assert.match(builder, /legacyExecutorNativeAssetName/)
+  assert.match(builder, /const nativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
+  assert.match(builder, /name: 'kala-executor'/)
+  assert.doesNotMatch(builder, /legacyExecutorNativeAssetName|runlab-executor/)
   assert.doesNotMatch(builder, /generateExecutorInstallerPs1|node-pty-win32|writeExecutorUpdateManifest/)
 })
 
@@ -76,9 +75,9 @@ test('generated shell installer executes the checksummed Node fallback from a re
     mkdirSync(release, { recursive: true })
     mkdirSync(bin, { recursive: true })
     const cjs = 'console.log("fallback executor invoked")\n'
-    writeFileSync(join(release, 'agent-kernel-executor.cjs'), cjs)
+    writeFileSync(join(release, 'kala-executor.cjs'), cjs)
     const hash = createHash('sha256').update(cjs).digest('hex')
-    writeFileSync(join(release, 'SHA256SUMS'), `${hash}  agent-kernel-executor.cjs\n`)
+    writeFileSync(join(release, 'SHA256SUMS'), `${hash}  kala-executor.cjs\n`)
     writeFileSync(join(bin, 'uname'), '#!/bin/sh\n[ "$1" = -m ] && echo x86_64 || echo Linux\n', { mode: 0o755 })
     writeFileSync(join(bin, 'wget'), '#!/bin/sh\nout=""; while [ $# -gt 0 ]; do [ "$1" = -O ] && { out="$2"; shift 2; continue; }; url="$1"; shift; done; cp "$FAKE_RELEASE_DIR/${url##*/}" "$out"\n', { mode: 0o755 })
     writeFileSync(join(bin, 'node'), '#!/bin/sh\nif [ "$1" = -p ]; then echo 22; exit 0; fi\nprintf "%s\\n" "$@" > "$FAKE_NODE_ARGS"\n', { mode: 0o755 })
@@ -88,7 +87,7 @@ test('generated shell installer executes the checksummed Node fallback from a re
     const result = spawnSync('bash', [installer, '--host', 'https://host.invalid'], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNLAB_INSTALLER_ALLOW_UNSIGNED: '1', RUNLAB_RELEASE_ASSETS_URL: 'https://assets.invalid', RUNLAB_INSTALLER_WORK_DIR: work, FAKE_RELEASE_DIR: release, FAKE_NODE_ARGS: argsFile } })
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
     const invoked = readFileSync(argsFile, 'utf8')
-    assert.match(invoked, /agent-kernel-executor\.cjs/)
+    assert.match(invoked, /kala-executor\.cjs/)
     assert.match(invoked, /--internal-installer/)
     assert.match(invoked, /--host/)
   } finally { rmSync(dir, { recursive: true, force: true }) }

@@ -9,7 +9,7 @@ import puppeteer from 'puppeteer-core'
 import { browserMetadata, resolveChrome, startProfileWindow, stopProfileWindow, summarizeCpuProfile } from './profiling-utils.mjs'
 
 const root = new URL('../..', import.meta.url).pathname
-const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
+const bundle = join(root, 'release', 'kala-dashboard-with-runtime.cjs')
 const port = Number(process.env.PERF_DASHBOARD_PORT ?? 3210)
 const origin = `http://127.0.0.1:${port}`
 const stateRoot = mkdtempSync(join(tmpdir(), 'runlab-production-profile-'))

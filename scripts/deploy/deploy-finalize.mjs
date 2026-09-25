@@ -96,7 +96,7 @@ async function main() {
       if (!commit.ok) throw new Error(`restart activation commit failed: ${commit.status}`)
     }
     const completed = await waitForRestartPhase({ ...config, attemptId: attempt.attemptId, phase: 'completed', timeoutMs: config.statusTimeoutMs })
-    const deployedHash = sha256(join(config.generationDir, 'bundle-dashboard-with-runtime.cjs'))
+    const deployedHash = sha256(join(config.generationDir, 'kala-dashboard-with-runtime.cjs'))
     if (deployedHash !== config.bundleHash) throw new Error(`generation hash mismatch: ${deployedHash}`)
     persist({ phase: 'completed', newPid: completed.status.pid, completedAt: new Date().toISOString() })
   } catch (error) {

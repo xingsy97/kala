@@ -15,7 +15,7 @@ import {
 } from './deploy-plan.mjs'
 
 const ROOT = '/repo'
-const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'agent-runlab-dedicated-deploy-supervisor.cjs', 'agent-runlab-dedicated-ingress.cjs', 'bundle-dashboard-with-runtime.cjs']
+const REQUIRED = ['SHA256SUMS', 'kala-executor.cjs', 'kala-dedicated-deploy-supervisor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dashboard-with-runtime.cjs']
 
 function fakeFs(names) {
   return {
@@ -58,14 +58,14 @@ describe('deploy plan', () => {
   })
 
   it('discovers only deployable release assets in stable order', () => {
-    const fs = fakeFs(['z.tmp', 'run.sh', ...REQUIRED, 'manifest.json', 'agent-runlab-model-catalog-seed.json'])
+    const fs = fakeFs(['z.tmp', 'run.sh', ...REQUIRED, 'manifest.json', 'kala-model-catalog-seed.json'])
     expect(releaseFiles(`${ROOT}/release`, fs)).toEqual([
       'SHA256SUMS',
-      'agent-kernel-executor.cjs',
-      'agent-runlab-dedicated-deploy-supervisor.cjs',
-      'agent-runlab-dedicated-ingress.cjs',
-      'agent-runlab-model-catalog-seed.json',
-      'bundle-dashboard-with-runtime.cjs',
+      'kala-dashboard-with-runtime.cjs',
+      'kala-dedicated-deploy-supervisor.cjs',
+      'kala-dedicated-ingress.cjs',
+      'kala-executor.cjs',
+      'kala-model-catalog-seed.json',
       'manifest.json',
       'run.sh',
     ])
@@ -73,7 +73,7 @@ describe('deploy plan', () => {
 
   it('includes the complete Dedicated control-plane update payload', () => {
     const names = [
-      'agent-runlab-dedicated-control-updater.service',
+      'kala-dedicated-control-updater.service',
       'update-dedicated-control-plane.mjs',
       'dedicated-data-migration.mjs',
       'rollback-dedicated-systemd.mjs',
@@ -100,8 +100,8 @@ describe('deploy plan', () => {
     expect(plan.restartTimeoutMs).toBe(600000)
     expect(plan.statusTimeoutMs).toBe(660000)
     expect(plan.pollMs).toBe(2000)
-    expect(plan.seedCommand).toContain('cp -p "$REMOTE_BIN/bundle-dashboard-with-runtime.cjs"')
-    expect(plan.installCommand).toContain('agent-kernel-executor.cjs')
+    expect(plan.seedCommand).toContain('cp -p "$REMOTE_BIN/kala-dashboard-with-runtime.cjs"')
+    expect(plan.installCommand).toContain('kala-executor.cjs')
     expect(plan.service).toBeUndefined()
     expect(plan.sudo).toBe(false)
   })
@@ -120,13 +120,13 @@ describe('deploy plan', () => {
   })
 
   it('requires core release assets before deployment can run', () => {
-    const fs = fakeFs(REQUIRED.filter((name) => name !== 'agent-kernel-executor.cjs'))
+    const fs = fakeFs(REQUIRED.filter((name) => name !== 'kala-executor.cjs'))
     expect(() => buildDeployPlan({
       args: ['--ssh', 'target', '--host-url', 'http://127.0.0.1:3000', '--remote-bin', '~/bin'],
       env: {},
       root: ROOT,
       ...fs,
-    })).toThrow(/agent-kernel-executor\.cjs/)
+    })).toThrow(/kala-executor\.cjs/)
   })
 
   it('quotes shell values and home-relative remote paths', () => {
@@ -137,16 +137,16 @@ describe('deploy plan', () => {
   })
 
   it('builds an install script that backs up and chmods executable assets', () => {
-    const script = installScript('~/bin', '~/bin/.upload', ['agent-kernel-executor.cjs', 'agent-runlab-model-catalog-seed.json', 'manifest.json', 'run.sh'])
+    const script = installScript('~/bin', '~/bin/.upload', ['kala-executor.cjs', 'kala-model-catalog-seed.json', 'manifest.json', 'run.sh'])
     expect(script).toContain('BACKUP_DIR="$REMOTE_BIN/.agent-kernel-backup-$(date +%Y%m%d%H%M%S)"')
     expect(script).toContain('cp -p "$REMOTE_BIN/manifest.json" "$BACKUP_DIR/manifest.json"')
-    expect(script).toContain('chmod +x "$REMOTE_BIN/agent-kernel-executor.cjs"')
+    expect(script).toContain('chmod +x "$REMOTE_BIN/kala-executor.cjs"')
     expect(script).toContain('chmod +x "$REMOTE_BIN/run.sh"')
     expect(script).not.toContain('chmod +x "$REMOTE_BIN/manifest.json"')
-    expect(script).toContain('cp -p "$REMOTE_BIN/agent-runlab-model-catalog-seed.json" "$MODEL_CATALOG_DIR/models-dev-seed.json"')
+    expect(script).toContain('cp -p "$REMOTE_BIN/kala-model-catalog-seed.json" "$MODEL_CATALOG_DIR/models-dev-seed.json"')
     expect(script).toContain('sha256sum -c SHA256SUMS --ignore-missing')
     expect(script).toContain('>> "$BACKUP_DIR/.deployed-files"')
-    expect(script.indexOf('.agent-kernel-backup-current')).toBeLessThan(script.indexOf('mv "$UPLOAD_DIR/agent-kernel-executor.cjs"'))
+    expect(script.indexOf('.agent-kernel-backup-current')).toBeLessThan(script.indexOf('mv "$UPLOAD_DIR/kala-executor.cjs"'))
     for (const retired of RETIRED_RELEASE_ASSETS) {
       expect(script).toContain(`cp -p "$REMOTE_BIN/${retired}" "$BACKUP_DIR/${retired}"`)
       expect(script).toContain(`rm -f "$REMOTE_BIN/${retired}"`)
@@ -165,19 +165,19 @@ describe('deploy plan', () => {
 
   it('seeds the upload directory from installed assets for incremental transfer', () => {
     const script = seedUploadScript('~/bin', '~/bin/.upload', [
-      'agent-kernel-executor.cjs',
-      'bundle-dashboard-with-runtime.cjs',
+      'kala-executor.cjs',
+      'kala-dashboard-with-runtime.cjs',
     ])
     expect(script).toContain('command -v rsync')
     expect(script).toContain('mkdir -p "$REMOTE_BIN" "$UPLOAD_DIR"')
-    expect(script).toContain('if [ -f "$REMOTE_BIN/agent-kernel-executor.cjs" ]')
-    expect(script).toContain('cp -p "$REMOTE_BIN/bundle-dashboard-with-runtime.cjs" "$UPLOAD_DIR/bundle-dashboard-with-runtime.cjs"')
+    expect(script).toContain('if [ -f "$REMOTE_BIN/kala-executor.cjs" ]')
+    expect(script).toContain('cp -p "$REMOTE_BIN/kala-dashboard-with-runtime.cjs" "$UPLOAD_DIR/kala-dashboard-with-runtime.cjs"')
   })
 
   it('builds a compressed, resumable rsync transfer with SSH liveness checks', () => {
     const args = rsyncUploadArgs({
       releaseDir: '/repo/release',
-      files: ['bundle-dashboard-with-runtime.cjs', 'manifest.json'],
+      files: ['kala-dashboard-with-runtime.cjs', 'manifest.json'],
       sshTarget: 'deploy-target',
       uploadDir: '~/bin/.upload',
     })
@@ -188,7 +188,7 @@ describe('deploy plan', () => {
     expect(args).toContain('--inplace')
     expect(args).toContain('--timeout=120')
     expect(args).toContain('--rsh=ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3')
-    expect(args).toContain('/repo/release/bundle-dashboard-with-runtime.cjs')
+    expect(args).toContain('/repo/release/kala-dashboard-with-runtime.cjs')
     expect(args.at(-1)).toBe('deploy-target:~/bin/.upload/')
   })
 })

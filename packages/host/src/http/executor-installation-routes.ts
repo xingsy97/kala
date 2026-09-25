@@ -243,7 +243,7 @@ try {
     $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
     $target = switch ($architecture.ToLowerInvariant()) { 'amd64' { 'win32-x64' } 'x64' { 'win32-x64' } 'arm64' { 'win32-arm64' } default { throw "Unsupported Windows architecture: $architecture" } }
     $sums = (Invoke-WebRequest -UseBasicParsing -Uri ${quotePs(`${origin}/install/assets/SHA256SUMS`)}).Content
-    $hasNative = $sums -match "(?m)^[0-9a-fA-F]{64}  runlab-executor-$([regex]::Escape($target))\\.exe$"
+    $hasNative = $sums -match "(?m)^[0-9a-fA-F]{64}  kala-executor-$([regex]::Escape($target))\\.exe$"
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     $nodeVersion = if ($nodeCommand) { & $nodeCommand.Source --version 2>$null } else { '' }
     if (-not $hasNative -and (-not $nodeCommand -or $nodeVersion -notmatch '^v(2[2-9]|[3-9][0-9])\\.')) {

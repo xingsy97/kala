@@ -46,12 +46,12 @@ try {
     'scripts/release/build-private-cloud-bundle.mjs', '--output', hybrid,
     '--runtime-image', predecessorLock.images.runtime, '--ingress-image', predecessorLock.images.ingress,
     '--dashboard-image', candidateLock.images.dashboard, '--revision', revision,
-    '--operator', join(candidate, 'runlab-private-cloud'),
+    '--operator', join(candidate, 'kala-private-cloud'),
   ])
   verify(hybrid)
 
-  const predecessorOperator = join(predecessor, 'runlab-private-cloud')
-  const candidateOperator = join(candidate, 'runlab-private-cloud')
+  const predecessorOperator = join(predecessor, 'kala-private-cloud')
+  const candidateOperator = join(candidate, 'kala-private-cloud')
   const env = { ...process.env, RUNLAB_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot }
   const installedResult = operator(predecessorOperator, ['install', '--bundle', predecessor, '--config-dir', config], env)
   installed = true
@@ -135,7 +135,7 @@ try {
   if (installed) {
     try {
       const active = json(readFileSync(join(operatorRoot, 'installation.json'), 'utf8'))
-      operator(join(candidate, 'runlab-private-cloud'), ['uninstall', '--confirm', 'UNINSTALL:' + active.installationId], { ...process.env, RUNLAB_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot })
+      operator(join(candidate, 'kala-private-cloud'), ['uninstall', '--confirm', 'UNINSTALL:' + active.installationId], { ...process.env, RUNLAB_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot })
     } catch {}
   }
   cleanupProject(project)

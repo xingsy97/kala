@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     commitPlannedRestart: async (slot, attemptId) => await postJson<HostRestartAttempt>(`${await slotOrigin(slot)}/internal/runtime/restart/commit`, { attemptId }, handoffHeaders()),
     abortPlannedRestart: async (slot, attemptId) => { await postJson(`${await slotOrigin(slot)}/internal/runtime/restart/abort`, attemptId ? { attemptId } : {}, handoffHeaders()) },
     selfTestRelease: async (releaseDir) => {
-      const result = await command('/usr/bin/node', ['--check', join(releaseDir, 'agent-runlab-runtime.cjs')], true)
+      const result = await command('/usr/bin/node', ['--check', join(releaseDir, 'kala-runtime.cjs')], true)
       if (result.trim()) process.stdout.write(result)
     },
     startControlPlaneUpdate: async (receipt) => {
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
             || capabilities.deployment.runtimeProfile !== 'full'
             || !capabilities.capabilities.operations
             || !capabilities.capabilities.pipeline) throw new Error('Dedicated capability profile mismatch')
-          const activeBundle = join(root, 'slots', slot, 'agent-runlab-runtime.cjs')
+          const activeBundle = join(root, 'slots', slot, 'kala-runtime.cjs')
           const actual = createHash('sha256').update(await readFile(activeBundle)).digest('hex')
           if (actual !== expected.bundleSha256) throw new Error('active bundle digest mismatch')
           const restart = await fetchJson<HostRestartStatus>(`${origin}/internal/runtime/restart/status`, handoffHeaders())

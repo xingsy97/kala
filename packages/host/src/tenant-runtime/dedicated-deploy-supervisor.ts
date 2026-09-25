@@ -130,7 +130,7 @@ export class DedicatedDeploySupervisor {
     const releaseId = route.slots[route.activeSlot].releaseId
     if (request.predecessorReleaseId !== releaseId || request.sourceReleaseDigest !== request.targetReleaseDigest) throw new Error('restart release identity mismatch')
     const releaseDir = resolve(this.root, 'releases', releaseId)
-    const bundleSha256 = sha256(await readFile(join(releaseDir, 'agent-runlab-runtime.cjs')))
+    const bundleSha256 = sha256(await readFile(join(releaseDir, 'kala-runtime.cjs')))
     await verifyImmutableRelease({ deployRoot: this.root, releaseDir, releaseId, releaseDigest: request.targetReleaseDigest, bundleSha256 })
     const now = new Date().toISOString()
     const receipt: DeploymentReceipt = {
@@ -223,7 +223,7 @@ export class DedicatedDeploySupervisor {
     if (request.predecessorReleaseId !== receipt.predecessorReleaseId || request.candidateSlot !== otherSlot(route.activeSlot) || request.targetReleaseDigest !== receipt.sourceReleaseDigest || request.sourceReleaseDigest !== receipt.releaseDigest) throw new Error('rollback release identity mismatch')
     const rollbackReleaseId = receipt.predecessorReleaseId
     const rollbackReleaseDir = resolve(this.root, 'releases', rollbackReleaseId)
-    const rollbackBundleSha256 = sha256(await readFile(join(rollbackReleaseDir, 'agent-runlab-runtime.cjs')))
+    const rollbackBundleSha256 = sha256(await readFile(join(rollbackReleaseDir, 'kala-runtime.cjs')))
     await verifyImmutableRelease({
       deployRoot: this.root, releaseDir: rollbackReleaseDir, releaseId: rollbackReleaseId,
       releaseDigest: receipt.sourceReleaseDigest, bundleSha256: rollbackBundleSha256,
@@ -507,7 +507,7 @@ export class DedicatedDeploySupervisor {
       }
       if (receipt.rollback!.stage === 'verifying_live') {
         const verified = await this.adapter.verifySlot(previousSlot, {
-          bundleSha256: sha256(await readFile(join(previousRelease, 'agent-runlab-runtime.cjs'))),
+          bundleSha256: sha256(await readFile(join(previousRelease, 'kala-runtime.cjs'))),
         })
         const recoveryReceipt = await rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deployment)
         const route = await this.adapter.routeState()
@@ -532,7 +532,7 @@ export class DedicatedDeploySupervisor {
       }
       if (receipt.rollback!.stage === 'verifying') {
         const verified = await this.adapter.verifySlot(previousSlot, {
-          bundleSha256: sha256(await readFile(join(previousRelease, 'agent-runlab-runtime.cjs'))),
+          bundleSha256: sha256(await readFile(join(previousRelease, 'kala-runtime.cjs'))),
           deployment, requireContinuation: true,
         })
         await this.adapter.writeCandidateState({
@@ -598,7 +598,7 @@ export class DedicatedDeploySupervisor {
     await this.adapter.writeCandidateState(undefined)
     await this.adapter.writeRuntimeFence(undefined)
     const verified = await this.adapter.verifySlot(previousSlot, {
-      bundleSha256: sha256(await readFile(join(previousRelease, 'agent-runlab-runtime.cjs'))),
+      bundleSha256: sha256(await readFile(join(previousRelease, 'kala-runtime.cjs'))),
     })
     const route = await this.adapter.routeState()
     const recoveryReceipt = await rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deploymentOwnership(receipt))
@@ -826,7 +826,7 @@ async function rollbackRuntimeReceipt(
     deploymentId: deployment.deploymentId,
     releaseId: basename(releaseDir),
     releaseDir,
-    bundleSha256: sha256(await readFile(join(releaseDir, 'agent-runlab-runtime.cjs'))),
+    bundleSha256: sha256(await readFile(join(releaseDir, 'kala-runtime.cjs'))),
     releaseDigest: receipt.sourceReleaseDigest,
     expectedRouteGeneration: deployment.expectedRouteGeneration,
     fencingToken: deployment.fencingToken,

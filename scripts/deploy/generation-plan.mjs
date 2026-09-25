@@ -39,8 +39,8 @@ export function verifyGenerationScript(plan) {
     `GEN=${sh(plan.generationDir)}`,
     'cd "$GEN"',
     'sha256sum -c SHA256SUMS --ignore-missing',
-    `test "$(sha256sum bundle-dashboard-with-runtime.cjs | cut -d' ' -f1)" = ${sh(plan.bundleHash)}`,
-    'chmod 755 bundle-dashboard-with-runtime.cjs agent-kernel-executor.cjs run.sh 2>/dev/null || true',
+    `test "$(sha256sum kala-dashboard-with-runtime.cjs | cut -d' ' -f1)" = ${sh(plan.bundleHash)}`,
+    'chmod 755 kala-dashboard-with-runtime.cjs kala-executor.cjs run.sh 2>/dev/null || true',
   ].join('\n')
 }
 
@@ -52,7 +52,7 @@ export function systemdDropInScript(plan) {
     `cat > ${sh(dropIn)} <<'EOF'`,
     '[Service]',
     'ExecStart=',
-    `ExecStart=/usr/bin/node ${plan.currentLink}/bundle-dashboard-with-runtime.cjs --port 13000`,
+    `ExecStart=/usr/bin/node ${plan.currentLink}/kala-dashboard-with-runtime.cjs --port 13000`,
     'EOF',
     'systemctl daemon-reload',
     `test "$(systemctl show -p Restart --value ${sh(plan.service)})" = always`,

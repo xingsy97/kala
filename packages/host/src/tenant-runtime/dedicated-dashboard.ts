@@ -7,7 +7,7 @@ import { readJsonFile, writeAtomicFile } from './atomic-json-file.js'
 
 export type DashboardReleaseManifest = {
   schemaVersion: 1
-  product: 'agent-runlab-dashboard'
+  product: 'kala-dashboard'
   version: string
   builtAt: string
   source: { revision: string; snapshotSha256: string; dirty: boolean }
@@ -132,9 +132,9 @@ export async function serveDedicatedDashboard(options: {
     'content-length': String(body.length),
     'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache, must-revalidate',
     'x-content-type-options': 'nosniff',
-    'x-agent-runlab-dashboard-release': state.releaseId,
-    'x-agent-runlab-dashboard-generation': String(state.generation),
-    'x-agent-runlab-dashboard-asset-release': sourceReleaseId,
+    'x-kala-dashboard-release': state.releaseId,
+    'x-kala-dashboard-generation': String(state.generation),
+    'x-kala-dashboard-asset-release': sourceReleaseId,
   })
   options.response.end(options.request.method === 'HEAD' ? undefined : body)
   return true
@@ -183,7 +183,7 @@ export function isHashedDashboardAssetPath(path: string): boolean {
 
 function injectDashboardIdentity(body: Buffer, state: DashboardRouteState): Buffer {
   const html = String(body)
-  const identity = `<meta name=\"agent-runlab-dashboard-release\" content=\"${state.releaseId}\"><meta name=\"agent-runlab-dashboard-generation\" content=\"${state.generation}\">`
+  const identity = `<meta name=\"kala-dashboard-release\" content=\"${state.releaseId}\"><meta name=\"kala-dashboard-generation\" content=\"${state.generation}\">`
   const injected = /<\/head>/iu.test(html) ? html.replace(/<\/head>/iu, `${identity}</head>`) : `${identity}${html}`
   return Buffer.from(injected)
 }
@@ -213,8 +213,8 @@ export async function verifyDashboardPublicRoute(
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url, { headers: { accept: 'text/html' }, signal: AbortSignal.timeout(Math.min(3_000, Math.max(1, deadline - Date.now()))) })
-      const releaseId = response.headers.get('x-agent-runlab-dashboard-release')
-      const generation = Number(response.headers.get('x-agent-runlab-dashboard-generation'))
+      const releaseId = response.headers.get('x-kala-dashboard-release')
+      const generation = Number(response.headers.get('x-kala-dashboard-generation'))
       if (response.ok && releaseId === expected.releaseId && generation === expected.generation) return
       lastFailure = `HTTP ${response.status}, release ${releaseId ?? 'missing'}, generation ${Number.isSafeInteger(generation) ? generation : 'missing'}`
     } catch (error) {
@@ -235,7 +235,7 @@ export function parseDashboardRouteState(value: unknown): DashboardRouteState {
 export function parseDashboardManifest(value: unknown): DashboardReleaseManifest {
   const manifest = record(value, 'dashboard manifest')
   exact(manifest, ['schemaVersion', 'product', 'version', 'builtAt', 'source', 'protocol', 'assetDigest', 'files'], 'dashboard manifest')
-  if (manifest.schemaVersion !== 1 || manifest.product !== 'agent-runlab-dashboard') throw new Error('unsupported dashboard manifest')
+  if (manifest.schemaVersion !== 1 || manifest.product !== 'kala-dashboard') throw new Error('unsupported dashboard manifest')
   const source = record(manifest.source, 'dashboard source')
   exact(source, ['revision', 'snapshotSha256', 'dirty'], 'dashboard source')
   if (typeof source.dirty !== 'boolean' || !/^[a-f0-9]{40}$/u.test(String(source.revision))) throw new Error('invalid dashboard source identity')
@@ -250,7 +250,7 @@ export function parseDashboardManifest(value: unknown): DashboardReleaseManifest
   if (new Set(files.map((file) => file.path)).size !== files.length || !files.some((file) => file.path === 'index.html')) throw new Error('invalid dashboard file set')
   const assetDigest = digest(manifest.assetDigest)
   if (hashFiles(files) !== assetDigest) throw new Error('dashboard asset digest mismatch')
-  return { schemaVersion: 1, product: 'agent-runlab-dashboard', version: text(manifest.version, 'version'), builtAt: timestamp(manifest.builtAt), source: { revision: String(source.revision), snapshotSha256: digest(source.snapshotSha256), dirty: source.dirty }, protocol: protocol(manifest.protocol), assetDigest, files }
+  return { schemaVersion: 1, product: 'kala-dashboard', version: text(manifest.version, 'version'), builtAt: timestamp(manifest.builtAt), source: { revision: String(source.revision), snapshotSha256: digest(source.snapshotSha256), dirty: source.dirty }, protocol: protocol(manifest.protocol), assetDigest, files }
 }
 
 export function parseDashboardRequest(value: unknown): DashboardDeploymentRequest {

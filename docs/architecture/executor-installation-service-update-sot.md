@@ -199,7 +199,7 @@ runlab-executor version
 
 These commands exist for diagnostics and automation, but the default Dashboard flow invokes them inside the installer and does not expose their flags.
 
-The legacy `agent-kernel-executor.cjs` command remains compatible for at least one release cycle. It must print a migration notice but must not auto-install or stop itself.
+The legacy `kala-executor.cjs` command remains compatible for at least one release cycle. It must print a migration notice but must not auto-install or stop itself.
 
 ## 7. Platform service adapters
 

@@ -10,9 +10,10 @@ on:
         description: 'Product release tag, for example v0.2.0-rc.1'
         required: true
       native_targets:
-        description: 'Comma-separated native targets. Empty builds Linux and macOS on x64 and arm64.'
+        description: 'Comma-separated native targets. Empty builds Linux x64 and macOS x64/arm64.'
         required: false
-        default: 'linux-x64,linux-arm64,darwin-x64,darwin-arm64'
+        # Linux arm64 is paused for the current RC: linux-x64,linux-arm64,darwin-x64,darwin-arm64
+        default: 'linux-x64,darwin-x64,darwin-arm64'
 
 jobs:
   resolve:
@@ -39,18 +40,20 @@ jobs:
           node scripts/release/version-policy.mjs --tag "$TAG"
 
           if [ -z "$NATIVE_TARGETS" ]; then
-            NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64"
+            # Linux arm64 is paused for the current RC: linux-x64,linux-arm64,darwin-x64,darwin-arm64
+            NATIVE_TARGETS="linux-x64,darwin-x64,darwin-arm64"
           fi
-          REQUIRED_NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64"
+          # Linux arm64 is paused for the current RC: REQUIRED_NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64"
+          REQUIRED_NATIVE_TARGETS="linux-x64,darwin-x64,darwin-arm64"
           if [ "$NATIVE_TARGETS" != "$REQUIRED_NATIVE_TARGETS" ]; then
-            echo "native_targets must be exactly $REQUIRED_NATIVE_TARGETS; partial four-platform RC releases are not supported" >&2
+            echo "native_targets must be exactly $REQUIRED_NATIVE_TARGETS; partial three-platform RC releases are not supported" >&2
             exit 1
           fi
           MATRIX_ENTRIES=""
           for t in $(echo "$NATIVE_TARGETS" | tr ',' ' '); do
             case "$t" in
               linux-x64) OS="ubuntu-24.04" ;;
-              linux-arm64) OS="ubuntu-24.04-arm" ;;
+              # linux-arm64) OS="ubuntu-24.04-arm" ;; # Paused for the current RC.
               darwin-x64) OS="macos-15-intel" ;;
               darwin-arm64) OS="macos-15" ;;
               *) echo "Unsupported native target: $t" >&2; exit 1 ;;
@@ -99,9 +102,7 @@ jobs:
       - uses: actions/upload-artifact@v5
         with:
           name: native-${{ matrix.target }}
-          path: |
-            release/agent-kernel-*-${{ matrix.target }}*
-            release/runlab-executor-${{ matrix.target }}*
+          path: release/kala-*-${{ matrix.target }}*
           if-no-files-found: error
 
   cjs-release:
@@ -194,16 +195,16 @@ jobs:
           merge-multiple: true
       - name: Restore executable bit on downloaded assets
         run: |
-          find release -maxdepth 1 -type f \( -name 'agent-kernel-*' -o -name 'runlab-executor-*' -o -name '*.cjs' -o -name '*.sh' \) -print0 \
+          find release -maxdepth 1 -type f \( -name 'kala-*' -o -name '*.cjs' -o -name '*.sh' \) -print0 \
             | xargs -0 -r chmod +x
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --finalize-only
       - name: Require installable desktop Executor assets
         run: |
-          test -f release/runlab-executor-linux-x64
-          test -f release/runlab-executor-linux-arm64
-          test -f release/runlab-executor-darwin-x64
-          test -f release/runlab-executor-darwin-arm64
-          test "$(find release -maxdepth 1 -type f -name 'runlab-executor-*' | wc -l)" -eq 4
+          test -f release/kala-executor-linux-x64
+          # test -f release/kala-executor-linux-arm64 # Paused for the current RC.
+          test -f release/kala-executor-darwin-x64
+          test -f release/kala-executor-darwin-arm64
+          test "$(find release -maxdepth 1 -type f -name 'kala-executor-*' | wc -l)" -eq 3
           ! find release -maxdepth 1 -type f \( -iname '*.ps1' -o -iname '*.exe' -o -iname '*.msi' -o -iname '*.dll' -o -iname '*win32*' -o -iname '*windows*' -o -iname '*conpty*' -o -iname '*winpty*' \) -print -quit | grep -q .
       - run: pnpm run verify:release-assets
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }} --manifest release/manifest.json
@@ -217,9 +218,9 @@ jobs:
             release/manifest.json
             release/SHA256SUMS
             release/sbom.cdx.json
-            release/bundle-dashboard-with-runtime.cjs
-            release/agent-kernel-host-*
-            release/runlab-executor-*
+            release/kala-dashboard-with-runtime.cjs
+            release/kala-host-*
+            release/kala-executor-*
       - name: Upload native assets and refreshed metadata
         env:
           GH_TOKEN: ${{ github.token }}

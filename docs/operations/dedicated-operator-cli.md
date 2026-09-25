@@ -7,7 +7,7 @@ systemd distribution of Kala Dedicated
 
 ## 1. Command surface
 
-The release bundle contains `runlab-dedicated.mjs`. Installation publishes the
+The release bundle contains `kala-dedicated.mjs`. Installation publishes the
 same program as `/usr/local/bin/runlab-dedicated`. Operators use this entry point for installation and Runtime/control-plane lifecycle:
 
 ```text

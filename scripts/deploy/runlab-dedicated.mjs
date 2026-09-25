@@ -108,7 +108,7 @@ async function install() {
   const installationId = existing?.installationId ?? `installation-${randomUUID()}`
   const installedAt = existing?.installedAt ?? now()
   writeAtomicJson(installationPath, { schemaVersion: 1, installationId, installedAt, updatedAt: now(), dataRoot, installRoot, configRoot, systemdDir })
-  installOperatorLink(join(deployRoot, 'control-current', 'runlab-dedicated.mjs'))
+  installOperatorLink(join(deployRoot, 'control-current', 'kala-dedicated.mjs'))
   if (has('--stage-only')) {
     output({ ok: true, phase: 'installed_disabled', installationId, releaseId, releaseDigest: release.releaseDigest })
     return

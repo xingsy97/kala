@@ -19,7 +19,7 @@ test "$(git -C /opt/agent-eval/swebench-source rev-parse HEAD)" = f7bbbb2ccdf479
 
 install -d -m 0755 /opt/agent-eval/bin
 install -m 0755 /root/agent-eval-install/agent-kernel-host.cjs /opt/agent-eval/bin/agent-kernel-host.cjs
-install -m 0755 /root/agent-eval-install/agent-kernel-executor.cjs /opt/agent-eval/bin/agent-kernel-executor.cjs
+install -m 0755 /root/agent-eval-install/kala-executor.cjs /opt/agent-eval/bin/kala-executor.cjs
 install -m 0755 /root/agent-eval-install/agent-eval-runlab-driver.cjs /opt/agent-eval/bin/agent-eval-runlab-driver.cjs
 install -m 0755 /root/agent-eval-install/agent-eval-codex-app-server.js /opt/agent-eval/bin/agent-eval-codex-app-server.js
 install -m 0755 /root/agent-eval-install/agent-eval-swe-bench-grade.js /opt/agent-eval/bin/agent-eval-swe-bench-grade.js
@@ -27,7 +27,7 @@ printf '%s\n' '{"type":"module"}' > /opt/agent-eval/package.json
 chmod 0444 /opt/agent-eval/package.json
 
 printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/agent-kernel-host.cjs "$@"' > /usr/local/bin/agent-kernel-host
-printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/agent-kernel-executor.cjs "$@"' > /usr/local/bin/agent-kernel-executor
+printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/kala-executor.cjs "$@"' > /usr/local/bin/agent-kernel-executor
 printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/agent-eval-runlab-driver.cjs "$@"' > /usr/local/bin/agent-eval-runlab-driver
 printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/agent-eval-codex-app-server.js "$@"' > /usr/local/bin/agent-eval-codex-app-server
 printf '%s\n' '#!/bin/sh' 'PATH=/opt/agent-eval/swebench/bin:$PATH PYTHONPATH=/opt/agent-eval/swebench-source${PYTHONPATH:+:$PYTHONPATH} exec node /opt/agent-eval/bin/agent-eval-swe-bench-grade.js "$@"' > /usr/local/bin/agent-eval-swe-bench-grade

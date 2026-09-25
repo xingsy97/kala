@@ -25,7 +25,7 @@ Environment=AGENT_RUNLAB_SLOT=%i
 Environment=COPILOT_CLI_PATH=/var/lib/agent-runlab/deploy/slots/%i/copilot-cli
 ExecStartPre=/usr/bin/rm -f /run/agent-runlab/unit-%i-readiness.json
 ExecStartPre=/usr/bin/rm -f /run/agent-runlab/unit-%i-process-ready.json
-ExecStart=/usr/bin/flock --exclusive --nonblock --no-fork /var/lib/agent-runlab/units/local/write.lock /usr/bin/node /var/lib/agent-runlab/deploy/slots/%i/agent-runlab-runtime.cjs --port ${HOST_PORT}
+ExecStart=/usr/bin/flock --exclusive --nonblock --no-fork /var/lib/agent-runlab/units/local/write.lock /usr/bin/node /var/lib/agent-runlab/deploy/slots/%i/kala-runtime.cjs --port ${HOST_PORT}
 ExecStopPost=/usr/bin/rm -f /run/agent-runlab/unit-%i-readiness.json /run/agent-runlab/unit-%i-process-ready.json
 Restart=on-failure
 RestartSec=2s

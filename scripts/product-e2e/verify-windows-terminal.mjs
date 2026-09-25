@@ -8,7 +8,7 @@ import { io } from 'socket.io-client'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const release = join(root, 'release')
-const hostBundle = join(release, 'bundle-dashboard-with-runtime.cjs')
+const hostBundle = join(release, 'kala-dashboard-with-runtime.cjs')
 const windowsTarget = process.arch === 'arm64' ? 'win32-arm64' : process.arch === 'x64' ? 'win32-x64' : ''
 if (!windowsTarget) throw new Error(`unsupported Windows architecture ${process.arch}`)
 const executor = join(release, `runlab-executor-${windowsTarget}.exe`)

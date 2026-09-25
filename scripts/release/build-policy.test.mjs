@@ -45,7 +45,7 @@ test('release builders remove native scratch files and verification rejects unde
 test('both full and native-only SEA Executor builds resolve adjacent native addons', () => {
   const builder = read('scripts/release/build-release-assets.mjs')
   assert.match(builder, /const wantsNativeBuild = !finalizeOnly && \(nativeOnly \|\| !noNative\)/)
-  assert.match(builder, /const nativeRequire = wantsNativeBuild && item\.name === 'agent-kernel-executor'/)
+  assert.match(builder, /const nativeRequire = wantsNativeBuild && item\.role === 'executor'/)
   assert.match(builder, /createRequire\(__filename\)/)
   assert.match(builder, /\$\{nativeRequire\}\$\{buildInfo\}/)
 })
@@ -74,8 +74,10 @@ test('release scripts enforce Linux and macOS assets and reject Windows offers',
   const verifier = read('scripts/release/verify-release-assets.mjs')
   const installSmoke = read('scripts/release/verify-release-install.mjs')
   assert.match(builder, /Windows release assets are not included in this release/)
+  assert.doesNotMatch(builder, /name: '(?:agent-kernel|agent-runlab|runlab)-|cjsName: 'bundle-dashboard-with-runtime'/)
   assert.doesNotMatch(builder, /install-executor\.ps1|node-pty-win32|writeExecutorUpdateManifest/)
-  assert.match(verifier, /supportedNativeTargets = \['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'\]/)
+  assert.match(verifier, /supportedNativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
+  assert.match(verifier, /linux-arm64\|win32\|windows/)
   assert.match(verifier, /assertSupportedReleaseAssetName\(asset\?\.path, 'embedded Host assets'\)/)
   assert.match(verifier, /executor-update-/)
   for (const forbidden of ['install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json']) {

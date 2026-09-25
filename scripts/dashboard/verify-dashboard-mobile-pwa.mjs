@@ -94,7 +94,7 @@ function check(name, pass, detail = '') {
 
 try {
   writeSessionFixture()
-  const releaseBundle = join(REPO_ROOT, 'release/bundle-dashboard-with-runtime.cjs')
+  const releaseBundle = join(REPO_ROOT, 'release/kala-dashboard-with-runtime.cjs')
   if (!existsSync(releaseBundle)) throw new Error('production release bundle is missing; run build:release-assets first')
   host = spawn(process.execPath, [releaseBundle], {
     cwd: REPO_ROOT,

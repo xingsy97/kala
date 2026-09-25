@@ -311,7 +311,7 @@ export async function verifyImmutableRelease(input: {
     if ((stat.mode & 0o222) !== 0) throw new Error(`immutable release asset must not be writable: ${name}`)
     if (sha256(await readFile(path)) !== expectedDigest) throw new Error(`release checksum mismatch for ${name}`)
   }
-  if (sums.get('agent-runlab-runtime.cjs') !== input.bundleSha256) throw new Error('bundle digest does not match release checksum manifest')
+  if (sums.get('kala-runtime.cjs') !== input.bundleSha256) throw new Error('bundle digest does not match release checksum manifest')
 }
 
 export async function promoteStagedRelease(input: {
@@ -382,7 +382,7 @@ async function verifyReleaseContents(directory: string, releaseDigest: string, b
   const sums = parseSums(String(sumsBytes)); const checksummed = expected.filter((name) => name !== 'SHA256SUMS')
   if (sums.size !== checksummed.length || checksummed.some((name) => !sums.has(name))) throw new Error('release checksum file set does not match manifest')
   for (const name of checksummed) { const path = join(directory, name); const stat = await lstat(path); if (!stat.isFile() || stat.isSymbolicLink() || immutable && (stat.mode & 0o222) !== 0 || sha256(await readFile(path)) !== sums.get(name)) throw new Error(`invalid release asset: ${name}`) }
-  if (sums.get('agent-runlab-runtime.cjs') !== bundleSha256) throw new Error('bundle digest does not match release checksum manifest')
+  if (sums.get('kala-runtime.cjs') !== bundleSha256) throw new Error('bundle digest does not match release checksum manifest')
   return expected
 }
 

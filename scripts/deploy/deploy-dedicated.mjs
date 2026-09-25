@@ -277,7 +277,7 @@ function inspectLocalRelease(releaseDir) {
   const checksummed = files.filter((name) => name !== 'SHA256SUMS')
   if (JSON.stringify([...parsedSums.keys()].sort()) !== JSON.stringify(checksummed)) throw new Error('release checksum file set does not exactly match its manifest')
   for (const name of checksummed) if (sha256(readFileSync(join(releaseDir, name))) !== parsedSums.get(name)) throw new Error('release checksum mismatch: ' + name)
-  const bundleSha256 = parsedSums.get('agent-runlab-runtime.cjs')
+  const bundleSha256 = parsedSums.get('kala-runtime.cjs')
   if (!bundleSha256) throw new Error('bundle checksum missing from SHA256SUMS')
   return { files, sums, releaseDigest: sha256(sums), bundleSha256 }
 }

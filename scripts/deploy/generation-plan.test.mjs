@@ -12,7 +12,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 function plan() {
   return createGenerationPlan({
     remoteBin: '/opt/runlab', service: 'agent-runlab-host', hostUrl: 'http://127.0.0.1:13000',
-    files: ['SHA256SUMS', 'bundle-dashboard-with-runtime.cjs'], bundleHash: 'a'.repeat(64),
+    files: ['SHA256SUMS', 'kala-dashboard-with-runtime.cjs'], bundleHash: 'a'.repeat(64),
     sessionId: 'session-origin', callId: 'call-origin', deployId: 'deploy-1',
   })
 }
@@ -24,7 +24,7 @@ describe('transactional generation deployment', () => {
     expect(prepareGenerationScript(value)).toContain('deploy.active')
     expect(prepareGenerationScript(value)).toContain('bootstrap-required')
     expect(verifyGenerationScript(value)).toContain('sha256sum -c SHA256SUMS')
-    expect(systemdDropInScript(value)).toContain('/opt/runlab/deploy/current/bundle-dashboard-with-runtime.cjs')
+    expect(systemdDropInScript(value)).toContain('/opt/runlab/deploy/current/kala-dashboard-with-runtime.cjs')
     expect(launchFinalizeScript(value)).toContain('systemd-run')
     expect(launchFinalizeScript(value)).not.toContain('systemctl restart')
     expect(JSON.parse(transactionJson(value))).toMatchObject({ sessionId: 'session-origin', callId: 'call-origin', phase: 'staged' })

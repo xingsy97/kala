@@ -10,7 +10,7 @@ const digest = (character) => `sha256:${character.repeat(64)}`
 const image = (name, character) => `ghcr.io/example/${name}@${digest(character)}`
 
 test('builds an exact digest-pinned source-free Private Cloud bundle', () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'runlab-private-cloud-bundle-'))
+  const scratch = mkdtempSync(join(tmpdir(), 'kala-private-cloud-bundle-'))
   const bundle = join(scratch, 'bundle')
   build(bundle, { runtime: image('runtime', 'a'), ingress: image('ingress', 'b'), dashboard: image('dashboard', 'c') })
   const verified = run(process.execPath, ['scripts/release/verify-private-cloud-bundle.mjs', bundle])
@@ -18,7 +18,7 @@ test('builds an exact digest-pinned source-free Private Cloud bundle', () => {
   const compose = readFileSync(join(bundle, 'compose.yaml'), 'utf8')
   assert.doesNotMatch(compose, /^\s+build:/mu)
   assert.equal(readFileSync(join(bundle, 'image-lock.json'), 'utf8').includes(image('dashboard', 'c')), true)
-  assert.equal(run(process.execPath, [join(bundle, 'runlab-private-cloud.mjs'), '--help']).stdout.includes('upgrade-dashboard'), true)
+  assert.equal(run(process.execPath, [join(bundle, 'kala-private-cloud.mjs'), '--help']).stdout.includes('upgrade-dashboard'), true)
 
   writeFileSync(join(bundle, 'compose.yaml'), `${compose}\n# tampered\n`)
   const rejected = run(process.execPath, ['scripts/release/verify-private-cloud-bundle.mjs', bundle], { allowFailure: true })
@@ -27,7 +27,7 @@ test('builds an exact digest-pinned source-free Private Cloud bundle', () => {
 })
 
 test('installs, upgrades Dashboard independently, and rolls back from persisted predecessor', () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'runlab-private-cloud-operator-'))
+  const scratch = mkdtempSync(join(tmpdir(), 'kala-private-cloud-operator-'))
   const first = join(scratch, 'first'); const second = join(scratch, 'second')
   const shared = { runtime: image('runtime', 'a'), ingress: image('ingress', 'b') }
   build(first, { ...shared, dashboard: image('dashboard', 'c') }, '1'.repeat(40))
@@ -49,7 +49,7 @@ if(args.includes('ps')&&args.includes('--format')){
 `)
   chmodSync(docker, 0o755)
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNLAB_PRIVATE_CLOUD_OPERATOR_ROOT: join(scratch, 'operator') }
-  const cli = join(first, 'runlab-private-cloud.mjs')
+  const cli = join(first, 'kala-private-cloud.mjs')
   const installed = JSON.parse(run(process.execPath, [cli, 'install', '--bundle', first, '--config-dir', config], { env }).stdout)
   assert.equal(installed.receipt.phase, 'completed')
   const upgraded = JSON.parse(run(process.execPath, [cli, 'upgrade-dashboard', '--bundle', second], { env }).stdout)

@@ -38,10 +38,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: linux-x64, asset: agent-kernel-host-linux-x64 }
-          - { os: ubuntu-24.04-arm, target: linux-arm64, asset: agent-kernel-host-linux-arm64 }
-          - { os: macos-15-intel, target: darwin-x64, asset: agent-kernel-host-darwin-x64 }
-          - { os: macos-15, target: darwin-arm64, asset: agent-kernel-host-darwin-arm64 }
+          - { os: ubuntu-24.04, target: linux-x64, asset: kala-host-linux-x64 }
+          # - { os: ubuntu-24.04-arm, target: linux-arm64, asset: kala-host-linux-arm64 } # Paused for the current RC.
+          - { os: macos-15-intel, target: darwin-x64, asset: kala-host-darwin-x64 }
+          - { os: macos-15, target: darwin-arm64, asset: kala-host-darwin-arm64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5

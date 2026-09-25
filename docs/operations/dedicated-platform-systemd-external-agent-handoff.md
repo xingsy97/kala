@@ -369,8 +369,8 @@ From the reviewed source revision:
 pnpm run build:release-assets -- --no-native --repo <public-owner>/<public-repo>
 pnpm run verify:release-assets
 git diff --check
-sha256sum release/agent-runlab-runtime.cjs
-sha256sum release/agent-kernel-dashboard-dist.tar.gz release/dashboard-release.json
+sha256sum release/kala-runtime.cjs
+sha256sum release/kala-dashboard-dist.tar.gz release/dashboard-release.json
 ```
 
 Record:
@@ -384,21 +384,21 @@ Record:
 The release must contain:
 
 ```text
-agent-runlab-runtime.cjs
-agent-kernel-dashboard-dist.tar.gz
+kala-runtime.cjs
+kala-dashboard-dist.tar.gz
 dashboard-release.json
 deploy-dashboard.mjs
-agent-kernel-executor.cjs
-agent-runlab-dedicated-ingress.cjs
-agent-runlab-dedicated-deploy-supervisor.cjs
-agent-runlab-dedicated-ingress.service
-agent-runlab-dedicated-unit@.service
-agent-runlab-dedicated-deploy-supervisor.service
-agent-runlab-dedicated-control-updater.service
-agent-runlab-dedicated-migration-finalizer.service
+kala-executor.cjs
+kala-dedicated-ingress.cjs
+kala-dedicated-deploy-supervisor.cjs
+kala-dedicated-ingress.service
+kala-dedicated-unit@.service
+kala-dedicated-deploy-supervisor.service
+kala-dedicated-control-updater.service
+kala-dedicated-migration-finalizer.service
 update-dedicated-control-plane.mjs
 install-dedicated-systemd.mjs
-runlab-dedicated.mjs
+kala-dedicated.mjs
 deploy-dedicated.mjs
 cutover-dedicated-systemd.mjs
 dedicated-data-migration.mjs

@@ -43,14 +43,14 @@ async function main() {
 function help() { process.stdout.write(`Kala Private Cloud operator
 
 Usage:
-  runlab-private-cloud install --bundle DIR --config-dir DIR
-  runlab-private-cloud status
-  runlab-private-cloud upgrade --bundle DIR
-  runlab-private-cloud upgrade-dashboard --bundle DIR
-  runlab-private-cloud rollback
-  runlab-private-cloud backup --output EMPTY_PERSISTENT_DIR
-  runlab-private-cloud restore --backup DIR --confirm RESTORE:<backup-id>
-  runlab-private-cloud uninstall --confirm UNINSTALL:<installation-id>
+  kala-private-cloud install --bundle DIR --config-dir DIR
+  kala-private-cloud status
+  kala-private-cloud upgrade --bundle DIR
+  kala-private-cloud upgrade-dashboard --bundle DIR
+  kala-private-cloud rollback
+  kala-private-cloud backup --output EMPTY_PERSISTENT_DIR
+  kala-private-cloud restore --backup DIR --confirm RESTORE:<backup-id>
+  kala-private-cloud uninstall --confirm UNINSTALL:<installation-id>
 
 The release bundle is immutable and digest pinned. Uninstall preserves Docker
 volumes, configuration, secrets, copied releases, receipts, and backups.
@@ -137,7 +137,7 @@ async function backup() {
     const volumes = resolveVolumes(release, installation.configDir)
     for (const [logical, file] of [['tenant-data', 'tenant-data.tar'], ['control-data', 'control-data.tar']]) await capture({ command: 'docker', args: ['run', '--rm', '--network', 'none', '-v', `${volumes[logical]}:/source:ro`, infrastructure(release, 'alpine'), 'tar', '-C', '/source', '-cf', '-', '.'], cwd: release.dir, env: composeEnv(release, installation.configDir) }, join(destination, file))
     const files = {}; for (const name of ['control-plane.pgdump', 'tenant-data.tar', 'control-data.tar']) files[name] = await describeFile(join(destination, name))
-    const manifest = { schemaVersion: 1, product: 'agent-runlab-private-cloud-backup', backupId, createdAt: now(), installationId: installation.installationId, projectName: installation.projectName, active: releaseRecord(release), volumes, files }
+    const manifest = { schemaVersion: 1, product: 'kala-private-cloud-backup', backupId, createdAt: now(), installationId: installation.installationId, projectName: installation.projectName, active: releaseRecord(release), volumes, files }
     atomicJson(join(destination, 'manifest.json'), manifest); receipt = move(receipt, 'backup_completed', { files }); compose(release, installation.configDir, ['up', '-d', '--wait', ...applicationServices]); stopped = false; receipt = move(receipt, 'services_updated'); receipt = move(receipt, 'ready'); receipt = move(receipt, 'completed')
     output({ ok: true, backupId, confirmation: `RESTORE:${backupId}`, manifest: { files }, receipt: publicReceipt(receipt) })
   } catch (error) { if (stopped) { try { compose(release, installation.configDir, ['up', '-d', '--wait', ...applicationServices]) } catch {} }; failed(receipt, error); throw error }
@@ -145,7 +145,7 @@ async function backup() {
 
 async function restore() {
   const installation = installed(); const current = loadRelease(requiredJson(activePath)); const backupDir = bounded(required('--backup'), 'backup directory'); const manifest = requiredJson(join(backupDir, 'manifest.json'))
-  if (manifest.product !== 'agent-runlab-private-cloud-backup' || manifest.installationId !== installation.installationId) throw new Error('backup does not belong to this installation')
+  if (manifest.product !== 'kala-private-cloud-backup' || manifest.installationId !== installation.installationId) throw new Error('backup does not belong to this installation')
   if (required('--confirm') !== `RESTORE:${manifest.backupId}`) throw new Error(`confirmation must equal RESTORE:${manifest.backupId}`)
   for (const [name, expected] of Object.entries(manifest.files ?? {})) { const actual = await describeFile(join(backupDir, name)); if (actual.bytes !== expected.bytes || actual.sha256 !== expected.sha256) throw new Error(`backup integrity failed for ${name}`) }
   const release = loadRelease(manifest.active); let receipt = begin('restore', { backupId: manifest.backupId })
@@ -179,7 +179,7 @@ function stageBundle(input) {
   verifyBundle(target, manifest); return loadRelease({ releaseId: id, releaseDir: target })
 }
 function verifyBundle(dir, manifest = requiredJson(join(dir, 'manifest.json'))) {
-  if (manifest.schemaVersion !== 1 || manifest.product !== 'agent-runlab-private-cloud' || !/^[0-9a-f]{40}$/u.test(manifest.revision)) throw new Error('invalid Private Cloud bundle manifest')
+  if (manifest.schemaVersion !== 1 || manifest.product !== 'kala-private-cloud' || !/^[0-9a-f]{40}$/u.test(manifest.revision)) throw new Error('invalid Private Cloud bundle manifest')
   const expected = Object.keys(manifest.files).concat('manifest.json').sort(); if (JSON.stringify(readdirSync(dir).sort()) !== JSON.stringify(expected)) throw new Error('bundle file set does not match manifest')
   for (const [name, value] of Object.entries(manifest.files)) { if (name.includes('/')) throw new Error('invalid bundle file path'); const path = join(dir, name); if (statSync(path).size !== value.bytes || hash(readFileSync(path)) !== value.sha256) throw new Error(`bundle integrity failed for ${name}`) }
   const lock = requiredJson(join(dir, 'image-lock.json')); if (lock.version !== manifest.version || lock.revision !== manifest.revision || !['runtime', 'ingress', 'dashboard'].every((key) => immutable(lock.images?.[key]))) throw new Error('invalid image lock')

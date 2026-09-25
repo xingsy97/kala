@@ -273,7 +273,7 @@ async function readSymlinkTarget(path: string): Promise<string | undefined> {
 }
 
 function safeArtifactName(value: string | undefined): string {
-  const name = value ?? 'agent-kernel-executor.cjs'
+  const name = value ?? 'kala-executor.cjs'
   if (basename(name) !== name || name === '.' || name === '..') throw new Error('artifact file name is unsafe')
   return name
 }

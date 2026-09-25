@@ -144,7 +144,7 @@ export function parseModelsDevCatalog(value: unknown): CatalogModel[] {
 }
 
 function defaultSeedPath(): string {
-  const executableAdjacent = join(dirname(resolve(process.argv[1] ?? process.execPath)), 'agent-runlab-model-catalog-seed.json')
+  const executableAdjacent = join(dirname(resolve(process.argv[1] ?? process.execPath)), 'kala-model-catalog-seed.json')
   const installed = join(homedir(), '.local', 'share', 'agent-runlab', 'model-catalog', 'models-dev-seed.json')
   const sourceTree = resolve(process.cwd(), 'resources', 'model-catalog', 'models-dev-seed.json')
   if (existsSync(installed)) return installed

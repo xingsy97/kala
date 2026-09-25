@@ -30,7 +30,7 @@ let browser
 try {
   assertRelease(candidate, revision)
   assertRelease(predecessor, predecessorRevision)
-  if (!existsSync(join(predecessorInput, 'runlab-executor-linux-x64'))) throw new Error('Dedicated predecessor release requires the Linux x64 native Executor asset')
+  if (!existsSync(join(predecessorInput, 'kala-executor-linux-x64'))) throw new Error('Dedicated predecessor release requires the Linux x64 native Executor asset')
   run('lxc', ['init', process.env.PRODUCT_E2E_LXD_IMAGE ?? 'ubuntu:24.04', container])
   created = true
   run('lxc', ['start', container])
@@ -38,9 +38,9 @@ try {
   run('lxc', ['file', 'push', process.execPath, container + '/usr/bin/node'])
   run('lxc', ['file', 'push', '--recursive', candidate + '/', container + '/tmp/candidate'])
   run('lxc', ['file', 'push', '--recursive', predecessor + '/', container + '/tmp/predecessor'])
-  run('lxc', ['file', 'push', join(predecessorInput, 'runlab-executor-linux-x64'), container + '/tmp/runlab-executor-linux-x64'])
+  run('lxc', ['file', 'push', join(predecessorInput, 'kala-executor-linux-x64'), container + '/tmp/kala-executor-linux-x64'])
   run('lxc', ['file', 'push', join(root, 'scripts/release/fixtures/dedicated-acceptance-provider.mjs'), container + '/tmp/dedicated-acceptance-provider.mjs'])
-  exec(['chmod', '+x', '/usr/bin/node', '/tmp/runlab-executor-linux-x64'])
+  exec(['chmod', '+x', '/usr/bin/node', '/tmp/kala-executor-linux-x64'])
   if (!exec(['node', '--version']).stdout.startsWith('v22.')) throw new Error('clean Dedicated environment did not receive Node.js 22')
   exec(['mkdir', '-p', '/etc/agent-runlab', '/tmp/workspace'])
   const deployCommand = "runlab-dedicated upgrade --release-dir /tmp/candidate --no-wait --operation-id " + operationId
@@ -53,11 +53,11 @@ try {
     'EXECUTOR_TOKENS=' + JSON.stringify([{ token }]),
   ].join('\n') + '\n')
   pushText('/etc/systemd/system/runlab-acceptance-provider.service', service('Acceptance provider', '/usr/bin/node /tmp/dedicated-acceptance-provider.mjs', 'Environment=' + quoteSystemd('RUNLAB_ACCEPTANCE_DEPLOY_COMMAND=' + deployCommand)))
-  pushText('/etc/systemd/system/runlab-acceptance-executor.service', service('Acceptance Executor', '/tmp/runlab-executor-linux-x64 --host http://127.0.0.1:13000 --sandbox-root /tmp/workspace', 'Environment=EXECUTOR_TOKEN=' + token + '\nEnvironment=WORKSPACE_NAME=acceptance-workspace'))
+  pushText('/etc/systemd/system/runlab-acceptance-executor.service', service('Acceptance Executor', '/tmp/kala-executor-linux-x64 --host http://127.0.0.1:13000 --sandbox-root /tmp/workspace', 'Environment=EXECUTOR_TOKEN=' + token + '\nEnvironment=WORKSPACE_NAME=acceptance-workspace'))
   exec(['systemctl', 'daemon-reload'])
   exec(['systemctl', 'enable', '--now', 'runlab-acceptance-provider.service'])
 
-  const staged = execNode('/tmp/predecessor/runlab-dedicated.mjs', ['install', '--release-dir', '/tmp/predecessor', '--stage-only'])
+  const staged = execNode('/tmp/predecessor/kala-dedicated.mjs', ['install', '--release-dir', '/tmp/predecessor', '--stage-only'])
   if (staged.phase !== 'installed_disabled') throw new Error('Dedicated staged install did not produce installed_disabled')
   exec(['chown', '-R', 'agent-runlab:agent-runlab', '/tmp/workspace'])
   for (const unit of ['agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@blue.service', 'agent-runlab-dedicated-unit@green.service', 'agent-runlab-dedicated-deploy-supervisor.service']) {

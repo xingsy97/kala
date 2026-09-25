@@ -15,6 +15,7 @@ const unitNames = [
   'agent-runlab-dedicated-control-updater.service',
   'agent-runlab-dedicated-migration-finalizer.service',
 ]
+const unitAssets = unitNames.map((name) => name.replace('agent-runlab-', 'kala-'))
 
 test('control updater atomically activates target and advances its own executable last', async () => {
   const fixture = await createFixture()
@@ -165,16 +166,16 @@ else if (args[0] === 'restart' && kind) {
 async function createRelease(releases, releaseId) {
   const path = join(releases, releaseId)
   await mkdir(path)
-  const assets = [...unitNames, 'deployment.json', 'update-dedicated-control-plane.mjs', 'agent-kernel-dashboard-dist.tar.gz', 'dashboard-release.json']
-  for (const name of unitNames) await writeFile(join(path, name), `${releaseId} ${name}\n`)
+  const assets = [...unitAssets, 'deployment.json', 'update-dedicated-control-plane.mjs', 'kala-dashboard-dist.tar.gz', 'dashboard-release.json']
+  for (const name of unitAssets) await writeFile(join(path, name), `${releaseId} ${name}\n`)
   await writeFile(join(path, 'deployment.json'), `${JSON.stringify({ schemaVersion: 1, releaseId })}\n`)
   await writeFile(join(path, 'update-dedicated-control-plane.mjs'), `// ${releaseId}\n`)
   const dashboardSource = join(path, '.dashboard-source')
   const dashboardBytes = Buffer.from(`<!doctype html><title>${releaseId}</title>`)
   await mkdir(dashboardSource)
   await writeFile(join(dashboardSource, 'index.html'), dashboardBytes)
-  await run('tar', ['-czf', join(path, 'agent-kernel-dashboard-dist.tar.gz'), '-C', dashboardSource, 'index.html'])
-  await writeFile(join(path, 'dashboard-release.json'), `${JSON.stringify({ schemaVersion: 1, product: 'agent-runlab-dashboard', version: '0.0.0-test', builtAt: new Date().toISOString(), source: { revision: '0'.repeat(40), snapshotSha256: '0'.repeat(64), dirty: false }, protocol: { min: '1.0.0', max: '1.0.0' }, assetDigest: sha256(dashboardBytes), files: [{ path: 'index.html', bytes: dashboardBytes.length, sha256: sha256(dashboardBytes) }] }, null, 2)}\n`)
+  await run('tar', ['-czf', join(path, 'kala-dashboard-dist.tar.gz'), '-C', dashboardSource, 'index.html'])
+  await writeFile(join(path, 'dashboard-release.json'), `${JSON.stringify({ schemaVersion: 1, product: 'kala-dashboard', version: '0.0.0-test', builtAt: new Date().toISOString(), source: { revision: '0'.repeat(40), snapshotSha256: '0'.repeat(64), dirty: false }, protocol: { min: '1.0.0', max: '1.0.0' }, assetDigest: sha256(dashboardBytes), files: [{ path: 'index.html', bytes: dashboardBytes.length, sha256: sha256(dashboardBytes) }] }, null, 2)}\n`)
   await import('node:fs/promises').then(({ rm }) => rm(dashboardSource, { recursive: true, force: true }))
   await writeFile(join(path, 'manifest.json'), `${JSON.stringify({ assets }, null, 2)}\n`)
   await writeFile(join(path, 'RELEASE_NOTES.md'), `${releaseId}\n`)

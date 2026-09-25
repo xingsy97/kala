@@ -1811,8 +1811,8 @@ describe('wire protocol', () => {
       defaultConfig: config,
       releaseAssetsDir: releaseDir,
       embeddedReleaseAssets: [
-        { path: 'agent-kernel-executor.cjs', contentBase64: Buffer.from('#!/usr/bin/env node\nconsole.log("embedded executor")\n').toString('base64') },
-        { path: 'SHA256SUMS', contentBase64: Buffer.from('abc  agent-kernel-executor.cjs\n').toString('base64') },
+        { path: 'kala-executor.cjs', contentBase64: Buffer.from('#!/usr/bin/env node\nconsole.log("embedded executor")\n').toString('base64') },
+        { path: 'SHA256SUMS', contentBase64: Buffer.from('abc  kala-executor.cjs\n').toString('base64') },
       ],
       settings: {
         providers: [],
@@ -1825,12 +1825,12 @@ describe('wire protocol', () => {
     })
 
     try {
-      const ok = await fetch(`http://localhost:${localServer.port}/release-assets/agent-kernel-executor.cjs`)
+      const ok = await fetch(`http://localhost:${localServer.port}/release-assets/kala-executor.cjs`)
       expect(ok.status).toBe(200)
       expect(await ok.text()).toContain('embedded executor')
       const sums = await fetch(`http://localhost:${localServer.port}/release-assets/SHA256SUMS`)
       expect(sums.status).toBe(200)
-      expect(await sums.text()).toContain('agent-kernel-executor.cjs')
+      expect(await sums.text()).toContain('kala-executor.cjs')
       const missing = await fetch(`http://localhost:${localServer.port}/release-assets/missing.cjs`)
       expect(missing.status).toBe(404)
     } finally {

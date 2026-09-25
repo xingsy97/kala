@@ -16,9 +16,9 @@ function fixture() {
   const release = join(root, 'release'), deploy = join(root, 'deploy')
   mkdirSync(join(root, 'assets', 'assets'), { recursive: true }); mkdirSync(release); mkdirSync(join(deploy, 'requests'), { recursive: true }); mkdirSync(join(deploy, 'submissions')); mkdirSync(join(deploy, 'receipts')); mkdirSync(join(deploy, 'releases'))
   writeFileSync(join(root, 'assets', 'index.html'), '<title>dashboard</title>'); writeFileSync(join(root, 'assets', 'assets', 'app.12345678.js'), 'export{}')
-  execFileSync('tar', ['-czf', join(release, 'agent-kernel-dashboard-dist.tar.gz'), '-C', join(root, 'assets'), '.'])
+  execFileSync('tar', ['-czf', join(release, 'kala-dashboard-dist.tar.gz'), '-C', join(root, 'assets'), '.'])
   const files = [{ path: 'assets/app.12345678.js', bytes: 8, sha256: sha('export{}') }, { path: 'index.html', bytes: 24, sha256: sha('<title>dashboard</title>') }].sort((a, b) => a.path.localeCompare(b.path))
-  const manifest = { schemaVersion: 1, product: 'agent-runlab-dashboard', version: '1.0.0', builtAt: new Date().toISOString(), source: { revision: 'a'.repeat(40), snapshotSha256: 'b'.repeat(64), dirty: false }, protocol: { min: '1.0.0', max: '1.0.0' }, assetDigest: sha(JSON.stringify(files)), files }
+  const manifest = { schemaVersion: 1, product: 'kala-dashboard', version: '1.0.0', builtAt: new Date().toISOString(), source: { revision: 'a'.repeat(40), snapshotSha256: 'b'.repeat(64), dirty: false }, protocol: { min: '1.0.0', max: '1.0.0' }, assetDigest: sha(JSON.stringify(files)), files }
   writeFileSync(join(release, 'dashboard-release.json'), JSON.stringify(manifest))
   writeFileSync(join(deploy, 'route-state.json'), JSON.stringify({ schemaVersion: 1, generation: 7, releaseId: 'old', releaseDigest: 'c'.repeat(64), assetDigest: 'd'.repeat(64), version: '0.9.0', protocol: { min: '1.0.0', max: '1.0.0' }, activatedAt: new Date().toISOString() }))
   return { root, release, deploy }

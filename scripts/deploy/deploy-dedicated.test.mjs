@@ -102,7 +102,7 @@ describe('deploy:dedicated client', () => {
     mkdirSync(predecessorDir, { recursive: true })
     mkdirSync(join(deployRoot, 'requests'), { recursive: true })
     mkdirSync(join(deployRoot, 'submissions'), { recursive: true })
-    const assets = ['agent-runlab-runtime.cjs']
+    const assets = ['kala-runtime.cjs']
     writeFileSync(join(releaseDir, assets[0]), '#!/usr/bin/env node\nprocess.exit(0)\n')
     writeFileSync(join(releaseDir, 'RELEASE_NOTES.md'), '# test release\n')
     writeFileSync(join(releaseDir, 'manifest.json'), JSON.stringify({ assets }))
@@ -130,13 +130,13 @@ describe('deploy:dedicated client', () => {
     mkdirSync(join(deployRoot, 'requests'), { recursive: true })
     mkdirSync(join(deployRoot, 'submissions'), { recursive: true })
     copyFileSync(script, join(packaged, 'deploy-dedicated.mjs'))
-    writeFileSync(join(packaged, 'agent-runlab-runtime.cjs'), '#!/usr/bin/env node\nprocess.exit(0)\n')
+    writeFileSync(join(packaged, 'kala-runtime.cjs'), '#!/usr/bin/env node\nprocess.exit(0)\n')
     writeFileSync(join(packaged, 'RELEASE_NOTES.md'), '# packaged release\n')
-    writeFileSync(join(packaged, 'manifest.json'), JSON.stringify({ assets: ['agent-runlab-runtime.cjs', 'deploy-dedicated.mjs'] }))
+    writeFileSync(join(packaged, 'manifest.json'), JSON.stringify({ assets: ['kala-runtime.cjs', 'deploy-dedicated.mjs'] }))
     const sum = (name) => execFileSync('sha256sum', [join(packaged, name)], { encoding: 'utf8' }).split(' ')[0]
     writeFileSync(join(packaged, 'SHA256SUMS'), [
       `${sum('RELEASE_NOTES.md')}  RELEASE_NOTES.md`,
-      `${sum('agent-runlab-runtime.cjs')}  agent-runlab-runtime.cjs`,
+      `${sum('kala-runtime.cjs')}  kala-runtime.cjs`,
       `${sum('deploy-dedicated.mjs')}  deploy-dedicated.mjs`,
       `${sum('manifest.json')}  manifest.json`,
     ].join('\n') + '\n')

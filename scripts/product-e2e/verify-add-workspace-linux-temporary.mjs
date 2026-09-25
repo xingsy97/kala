@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { ProductE2EHarness, clickByTestId, hoverAncestorAndClickFirst, runCommand, sha256File, startProcess, waitFor, waitForHttp } from './harness.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
-const bundle = join(root, 'release', 'bundle-dashboard-with-runtime.cjs')
+const bundle = join(root, 'release', 'kala-dashboard-with-runtime.cjs')
 const port = Number(process.env.PRODUCT_E2E_TEMP_INSTALLER_PORT ?? 3205)
 const hostOrigin = process.env.PRODUCT_E2E_TEMP_INSTALLER_ORIGIN ?? `http://192.0.2.3:${port}`
 const localProbe = `http://127.0.0.1:${port}`

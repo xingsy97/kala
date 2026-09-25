@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Install-time smoke for the pre-built release/ artifacts. Simulates a user who
 // downloads the embedded host asset into a clean directory, runs
-// `bundle-dashboard-with-runtime.cjs` with only environment configuration (no repo source
+// `kala-dashboard-with-runtime.cjs` with only environment configuration (no repo source
 // tree and no DASHBOARD_DIR), and checks that the server boots and serves the
 // embedded dashboard.
 //
@@ -22,7 +22,7 @@ if (!existsSync(manifestPath)) fail('missing release/manifest.json — run build
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 if (!Array.isArray(manifest.assets)) fail('release manifest missing assets array')
 
-const requiredAssets = ['bundle-dashboard-with-runtime.cjs', 'deployment.json']
+const requiredAssets = ['kala-dashboard-with-runtime.cjs', 'deployment.json']
 for (const asset of requiredAssets) {
   if (!existsSync(join(releaseDir, asset))) fail(`missing required asset: ${asset}`)
 }
@@ -38,7 +38,7 @@ for (const asset of requiredAssets) {
 }
 
 const port = await findFreePort()
-const hostCjs = join(installDir, 'bundle-dashboard-with-runtime.cjs')
+const hostCjs = join(installDir, 'kala-dashboard-with-runtime.cjs')
 
 const env = {
   ...process.env,

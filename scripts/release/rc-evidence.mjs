@@ -5,7 +5,7 @@ export const RC_EVIDENCE_SCHEMA_VERSION = 1
 
 export const requiredReleaseEvidence = Object.freeze({
   portable: Object.freeze({
-    targets: Object.freeze(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']),
+    targets: Object.freeze(['linux-x64', 'darwin-x64', 'darwin-arm64']),
     checks: Object.freeze(['assetIntegrity', 'cleanInstall', 'boot', 'capabilities', 'dashboard', 'statePersistence', 'cleanStop', 'reinstall']),
   }),
   dedicated: Object.freeze({

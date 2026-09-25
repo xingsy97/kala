@@ -98,7 +98,7 @@ assertPortableTarget(JSON.parse(remote(`curl -fsS --max-time 5 ${sh(`${hostUrl.r
 if (!effectiveArgs.includes('--skip-build')) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
 stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
 const sums = readFileSync(join(releaseDir, 'SHA256SUMS'), 'utf8')
-const bundleHash = sums.match(/^([a-f0-9]{64})\s+bundle-dashboard-with-runtime\.cjs$/m)?.[1]
+const bundleHash = sums.match(/^([a-f0-9]{64})\s+kala-dashboard-with-runtime\.cjs$/m)?.[1]
 if (!bundleHash) throw new Error('bundle hash is missing from SHA256SUMS')
 const generation = createGenerationPlan({
   remoteBin, service, hostUrl, files, bundleHash, restartTimeoutMs, statusTimeoutMs,
@@ -161,7 +161,7 @@ function deployLxd({ container, remoteBin, service, skipBuild }) {
   stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
   const sums = readFileSync(join(releaseDir, 'SHA256SUMS'), 'utf8')
   const files = releaseFiles(releaseDir)
-  const bundleHash = sums.match(/^([a-f0-9]{64})\s+bundle-dashboard-with-runtime\.cjs$/m)?.[1]
+  const bundleHash = sums.match(/^([a-f0-9]{64})\s+kala-dashboard-with-runtime\.cjs$/m)?.[1]
   if (!bundleHash) throw new Error('bundle hash is missing from SHA256SUMS')
   for (const file of files) if (!existsSync(join(releaseDir, file))) throw new Error(`missing release asset: ${file}`)
   const plan = createGenerationPlan({

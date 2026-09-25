@@ -11,7 +11,6 @@ import { build } from 'esbuild'
 import {
   executorNativeAssetName,
   generateExecutorInstallerSh,
-  legacyExecutorNativeAssetName,
 } from './executor-installer.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
@@ -37,36 +36,41 @@ mkdirSync(outDir, { recursive: true })
 
 const allEntries = [
   {
-    name: 'agent-kernel-host',
-    cjsName: 'bundle-dashboard-with-runtime',
+    name: 'kala-host',
+    cjsName: 'kala-dashboard-with-runtime',
+    role: 'host',
     component: 'host',
     entry: join(root, 'packages/host/bin/agent-kernel-host.ts'),
   },
   {
-    name: 'agent-runlab-runtime',
+    name: 'kala-runtime',
+    role: 'runtime',
     component: 'host',
     entry: join(root, 'packages/host/bin/agent-kernel-host.ts'),
     platformOnly: true,
   },
   {
-    name: 'agent-kernel-executor',
+    name: 'kala-executor',
+    role: 'executor',
     component: 'executor',
     entry: join(root, 'packages/executor/bin/agent-kernel-executor.ts'),
   },
   {
-    name: 'agent-runlab-dedicated-ingress',
+    name: 'kala-dedicated-ingress',
+    role: 'dedicated-ingress',
     component: 'host',
     entry: join(root, 'packages/host/bin/agent-runlab-dedicated-ingress.ts'),
   },
   {
-    name: 'agent-runlab-dedicated-deploy-supervisor',
+    name: 'kala-dedicated-deploy-supervisor',
+    role: 'dedicated-deploy-supervisor',
     component: 'host',
     entry: join(root, 'packages/host/bin/agent-runlab-dedicated-deploy-supervisor.ts'),
   },
 ]
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
-const nativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']
+const nativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64']
 if (finalizeOnly) {
   finalizeRelease()
   process.exit(0)
@@ -105,8 +109,8 @@ const buildEntries = [...entries].sort((a, b) => {
 })
 
 for (const item of buildEntries) {
-  const embedsHostRuntime = item.name === 'agent-kernel-host' || item.name === 'agent-runlab-runtime'
-  const embedsDashboard = item.name === 'agent-kernel-host' && includeDashboard
+  const embedsHostRuntime = item.role === 'host' || item.role === 'runtime'
+  const embedsDashboard = item.role === 'host' && includeDashboard
   const embeddedReleaseAssets = embedsHostRuntime
     ? prepareEmbeddedReleaseAssetsForHost()
     : ''
@@ -122,7 +126,7 @@ for (const item of buildEntries) {
   const buildInfo = buildInfoBanner({ artifactKind: nativeOnly ? 'native' : 'cjs', dashboardMode: embedsDashboard ? 'embedded' : 'none', socketAdminMode: embedsHostRuntime ? 'embedded' : 'missing' })
   // SEA's injected-main require only resolves built-ins. node-pty loads its native
   // companion at spawn time, so the Executor must resolve beside its executable.
-  const nativeRequire = wantsNativeBuild && item.name === 'agent-kernel-executor'
+  const nativeRequire = wantsNativeBuild && item.role === 'executor'
     ? "require = require('node:module').createRequire(__filename);\n"
     : ''
   const outfile = nativeOnly
@@ -147,10 +151,6 @@ for (const item of buildEntries) {
   if (!nativeOnly) chmodSync(outfile, 0o755)
   if (!item.platformOnly && (nativeOnly || !noNative)) {
     await buildNativeSea(item.name, outfile, nativeTarget)
-    if (item.name === 'agent-kernel-executor') {
-      copyFileSync(join(outDir, legacyExecutorNativeAssetName(nativeTarget)), join(outDir, executorNativeAssetName(nativeTarget)))
-      chmodSync(join(outDir, executorNativeAssetName(nativeTarget)), 0o755)
-    }
   }
 }
 
@@ -163,7 +163,7 @@ if (nativeOnly) {
 }
 
 if (includeDashboard) {
-  await run('tar', ['-czf', join(outDir, 'agent-kernel-dashboard-dist.tar.gz'), '-C', dashboardDist, '.'])
+  await run('tar', ['-czf', join(outDir, 'kala-dashboard-dist.tar.gz'), '-C', dashboardDist, '.'])
   writeDashboardReleaseManifest(dashboardDist)
   // Never package untracked local docs (captures, screenshots, notes). The
   // tracked showcase GIF is still unfinished and explicitly excluded.
@@ -183,7 +183,7 @@ if (includeDashboard) {
     .filter((file) => file.startsWith('docs/') && !file.split('/').includes('..') && file !== 'docs/assets/kala-dashboard-preview.gif')
     .map((file) => file.slice('docs/'.length))
     .filter(Boolean)
-  const docsArchive = spawnSync('tar', ['-czf', join(outDir, 'agent-runlab-docs.tar.gz'), '-C', docsDir, '--null', '-T', '-'], {
+  const docsArchive = spawnSync('tar', ['-czf', join(outDir, 'kala-docs.tar.gz'), '-C', docsDir, '--null', '-T', '-'], {
     input: Buffer.from(`${docsFiles.join('\0')}\0`),
     encoding: 'utf8',
   })
@@ -205,30 +205,30 @@ function finalizeRelease() {
     ? prepareCopilotRuntimeAsset(detectNativeTarget(), true)
     : []
   if (includeDashboard && existsSync(modelCatalogSeed)) {
-    copyFileSync(modelCatalogSeed, join(outDir, 'agent-runlab-model-catalog-seed.json'))
+    copyFileSync(modelCatalogSeed, join(outDir, 'kala-model-catalog-seed.json'))
   }
   if (component !== 'dashboard') {
     if (component === 'all' || component === 'host') {
-      for (const asset of [
-        'deploy/dedicated-systemd/agent-runlab-dedicated-ingress.service',
-        'deploy/dedicated-systemd/agent-runlab-dedicated-unit@.service',
-        'deploy/dedicated-systemd/agent-runlab-dedicated-deploy-supervisor.service',
-        'deploy/dedicated-systemd/agent-runlab-dedicated-control-updater.service',
-        'deploy/dedicated-systemd/agent-runlab-dedicated-migration-finalizer.service',
-        'deploy/dedicated-systemd/deployment.json',
-        'scripts/deploy/install-dedicated-systemd.mjs',
-        'scripts/deploy/runlab-dedicated.mjs',
-        'scripts/deploy/deploy-dedicated.mjs',
-        'scripts/deploy/deploy-dashboard.mjs',
-        'scripts/deploy/cutover-dedicated-systemd.mjs',
-        'scripts/deploy/dedicated-data-migration.mjs',
-        'scripts/deploy/dedicated-settings-fingerprint.mjs',
-        'scripts/deploy/update-dedicated-control-plane.mjs',
-        'scripts/deploy/rollback-dedicated-systemd.mjs',
+      for (const [asset, publishedName] of [
+        ['deploy/dedicated-systemd/agent-runlab-dedicated-ingress.service', 'kala-dedicated-ingress.service'],
+        ['deploy/dedicated-systemd/agent-runlab-dedicated-unit@.service', 'kala-dedicated-unit@.service'],
+        ['deploy/dedicated-systemd/agent-runlab-dedicated-deploy-supervisor.service', 'kala-dedicated-deploy-supervisor.service'],
+        ['deploy/dedicated-systemd/agent-runlab-dedicated-control-updater.service', 'kala-dedicated-control-updater.service'],
+        ['deploy/dedicated-systemd/agent-runlab-dedicated-migration-finalizer.service', 'kala-dedicated-migration-finalizer.service'],
+        ['deploy/dedicated-systemd/deployment.json', 'deployment.json'],
+        ['scripts/deploy/install-dedicated-systemd.mjs', 'install-dedicated-systemd.mjs'],
+        ['scripts/deploy/runlab-dedicated.mjs', 'kala-dedicated.mjs'],
+        ['scripts/deploy/deploy-dedicated.mjs', 'deploy-dedicated.mjs'],
+        ['scripts/deploy/deploy-dashboard.mjs', 'deploy-dashboard.mjs'],
+        ['scripts/deploy/cutover-dedicated-systemd.mjs', 'cutover-dedicated-systemd.mjs'],
+        ['scripts/deploy/dedicated-data-migration.mjs', 'dedicated-data-migration.mjs'],
+        ['scripts/deploy/dedicated-settings-fingerprint.mjs', 'dedicated-settings-fingerprint.mjs'],
+        ['scripts/deploy/update-dedicated-control-plane.mjs', 'update-dedicated-control-plane.mjs'],
+        ['scripts/deploy/rollback-dedicated-systemd.mjs', 'rollback-dedicated-systemd.mjs'],
       ]) {
-        const target = join(outDir, basename(asset))
+        const target = join(outDir, publishedName)
         copyFileSync(join(root, asset), target)
-        bootstrapAssets.push(basename(asset))
+        bootstrapAssets.push(publishedName)
       }
     }
   }
@@ -240,16 +240,14 @@ function finalizeRelease() {
       .filter((asset) => exists(asset))
     return { ...entry, cjs: exists(cjs) ? cjs : undefined, natives }
   })
-  const executorProductNatives = nativeTargets.map(executorNativeAssetName).filter((asset) => exists(asset))
   const desktopPublicAssets = ['desktop-install.sh', 'desktop-package.deb', 'desktop-dependencies.json', 'desktop-SHA256SUMS.txt'].filter((name) => exists(name))
   writeDependencyMetadata()
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
-    .concat(executorProductNatives)
     .concat(copilotRuntimeAssets)
-    .concat(includeDashboard && exists('agent-kernel-dashboard-dist.tar.gz') ? ['agent-kernel-dashboard-dist.tar.gz'] : [])
+    .concat(includeDashboard && exists('kala-dashboard-dist.tar.gz') ? ['kala-dashboard-dist.tar.gz'] : [])
     .concat(includeDashboard && exists('dashboard-release.json') ? ['dashboard-release.json'] : [])
-    .concat(includeDashboard && exists('agent-runlab-docs.tar.gz') ? ['agent-runlab-docs.tar.gz'] : [])
-    .concat(includeDashboard && exists('agent-runlab-model-catalog-seed.json') ? ['agent-runlab-model-catalog-seed.json'] : [])
+    .concat(includeDashboard && exists('kala-docs.tar.gz') ? ['kala-docs.tar.gz'] : [])
+    .concat(includeDashboard && exists('kala-model-catalog-seed.json') ? ['kala-model-catalog-seed.json'] : [])
     .concat(bootstrapAssets)
     .concat(desktopPublicAssets)
     .concat(['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt'])
@@ -266,7 +264,6 @@ function finalizeRelease() {
     assets,
     nativeAssets: {
       ...Object.fromEntries(builtEntries.map((entry) => [entry.name, entry.natives])),
-      ...(entries.some((entry) => entry.name === 'agent-kernel-executor') ? { 'runlab-executor': executorProductNatives } : {}),
     },
     fallbackAssets: Object.fromEntries(builtEntries.map((entry) => [entry.name, entry.cjs]).filter(([, cjs]) => cjs)),
     notes: [
@@ -274,8 +271,8 @@ function finalizeRelease() {
         ? 'runtime releases include native binaries plus Node.js .cjs fallback assets'
         : 'runtime releases include Node.js .cjs fallback assets; native binaries are added by the native release job',
       'run.sh is a wget-only bash bootstrap that uses compact .cjs assets when Node.js 22+ is available and falls back to native binaries otherwise',
-      'install-executor.sh installs only checksum-verified Linux or macOS runlab-executor native assets; unsigned mode is development-only',
-      'Portable uses bundle-dashboard-with-runtime.cjs with embedded dashboard assets; Self-hosted Platform uses agent-runlab-runtime.cjs plus an independently activated dashboard release',
+      'install-executor.sh installs only checksum-verified Linux or macOS kala-executor native assets; unsigned mode is development-only',
+      'Portable uses kala-dashboard-with-runtime.cjs with embedded dashboard assets; Self-hosted Platform uses kala-runtime.cjs plus an independently activated dashboard release',
     ],
   }
 
@@ -449,7 +446,7 @@ function writeDashboardReleaseManifest(dir) {
   const assetDigest = createHash('sha256').update(JSON.stringify(files)).digest('hex')
   writeFileSync(join(outDir, 'dashboard-release.json'), `${JSON.stringify({
     schemaVersion: 1,
-    product: 'agent-runlab-dashboard',
+    product: 'kala-dashboard',
     version: packageJson.version,
     builtAt: new Date().toISOString(),
     source: sourceIdentity,
@@ -888,9 +885,9 @@ function unifiedBootstrap({ repo, tag, component }) {
     '',
     'download_and_extract_frontend() {',
     '  require_cmd tar',
-    '  download agent-kernel-dashboard-dist.tar.gz',
-    '  verify_file agent-kernel-dashboard-dist.tar.gz',
-    '  tar -xzf "${WORK_DIR}/agent-kernel-dashboard-dist.tar.gz" -C "$FRONTEND_DIR"',
+    '  download kala-dashboard-dist.tar.gz',
+    '  verify_file kala-dashboard-dist.tar.gz',
+    '  tar -xzf "${WORK_DIR}/kala-dashboard-dist.tar.gz" -C "$FRONTEND_DIR"',
     '  if [ ! -f "${FRONTEND_DIR}/index.html" ]; then',
     '    echo "Extracted frontend bundle to $FRONTEND_DIR but index.html is missing" >&2',
     '    exit 1',
@@ -904,8 +901,8 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  target=$(platform_target)',
     '  native="${base}-${target}"',
     '  cjs="${base}.cjs"',
-    '  if [ "$base" = "agent-kernel-host" ]; then',
-    '    cjs="bundle-dashboard-with-runtime.cjs"',
+    '  if [ "$base" = "kala-host" ]; then',
+    '    cjs="kala-dashboard-with-runtime.cjs"',
     '  fi',
     '  runtime="${AGENT_KERNEL_RUNTIME:-auto}"',
     '  if [ "${AGENT_RUNLAB_COPILOT_ENABLED:-0}" = "1" ]; then',
@@ -981,14 +978,14 @@ function unifiedBootstrap({ repo, tag, component }) {
     '    ;;',
   '  host-frontend)',
     '    print_start_banner',
-    '    run_asset agent-kernel-host "$@"',
+    '    run_asset kala-host "$@"',
     '    ;;',
     '  host)',
     '    print_start_banner',
-    '    run_asset agent-kernel-host "$@"',
+    '    run_asset kala-host "$@"',
     '    ;;',
     '  executor)',
-    '    run_asset agent-kernel-executor "$@"',
+    '    run_asset kala-executor "$@"',
     '    ;;',
     'esac',
   ])
@@ -1023,7 +1020,7 @@ function releaseNotes(manifest) {
     '',
     '## Release support scope',
     '',
-    'Publication requires native Portable installation and same-version reinstall evidence on Linux and macOS (x64 and arm64). Windows release assets are not included in this release. This is not cross-version upgrade or rollback evidence.',
+    'Publication requires native Portable installation and same-version reinstall evidence on Linux x64 and macOS x64/arm64. Linux arm64 and Windows release assets are not included in this release. This is not cross-version upgrade or rollback evidence.',
     'Dedicated and Private Cloud assets are previews: production lifecycle, upgrade, rollback, and tenant isolation have not been certified for this release.',
     `See the [release support policy](https://github.com/${manifest.repo}/blob/${manifest.tag}/docs/operations/release-support-policy.md) for the supported scope.`,
     '',

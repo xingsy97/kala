@@ -32,7 +32,7 @@ pnpm --dir "$root" --filter @agent-kernel/eval-benchmark-swe-bench build
 # Keep that package external and install the pinned package beside the bundle so
 # Node resolves its complete module tree instead of an incomplete single file.
 pnpm --dir "$root" exec esbuild packages/host/bin/agent-kernel-host.ts --bundle --platform=node --target=node22 --format=cjs --external:jsonc-parser --outfile="$staging/agent-kernel-host.cjs"
-pnpm --dir "$root" exec esbuild packages/executor/bin/agent-kernel-executor.ts --bundle --platform=node --target=node22 --format=cjs --outfile="$staging/agent-kernel-executor.cjs"
+pnpm --dir "$root" exec esbuild packages/executor/bin/agent-kernel-executor.ts --bundle --platform=node --target=node22 --format=cjs --outfile="$staging/kala-executor.cjs"
 pnpm --dir "$root" exec esbuild adapters/agents/agent-runlab/bin/runlab-trial-driver.ts --bundle --platform=node --target=node22 --format=cjs --outfile="$staging/agent-eval-runlab-driver.cjs"
 pnpm --dir "$root" exec esbuild adapters/agents/codex/bin/codex-app-server-driver.ts --bundle --platform=node --target=node22 --format=esm --outfile="$staging/agent-eval-codex-app-server.js"
 cp "$root/adapters/benchmarks/swe-bench/dist/bin/swe-bench-grade.js" "$staging/agent-eval-swe-bench-grade.js"
@@ -53,7 +53,7 @@ for attempt in $(seq 1 60); do
 done
 if [ "$ready" != true ]; then echo "LXD builder did not become ready" >&2; exit 1; fi
 lxc exec "$builder" -- mkdir -p /root/agent-eval-install
-for asset in agent-kernel-host.cjs agent-kernel-executor.cjs agent-eval-runlab-driver.cjs agent-eval-codex-app-server.js agent-eval-swe-bench-grade.js install.sh; do
+for asset in agent-kernel-host.cjs kala-executor.cjs agent-eval-runlab-driver.cjs agent-eval-codex-app-server.js agent-eval-swe-bench-grade.js install.sh; do
   lxc file push "$staging/$asset" "$builder/root/agent-eval-install/$asset"
 done
 lxc exec "$builder" -- bash /root/agent-eval-install/install.sh

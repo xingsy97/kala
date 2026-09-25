@@ -16,7 +16,6 @@ import type { NodeRendererProps, RowRendererProps } from 'react-arborist'
 import { useTranslation } from 'react-i18next'
 import {
   AlertCircle,
-  Apple,
   Cable,
   ChevronDown,
   ChevronLeft,
@@ -1160,35 +1159,12 @@ function WorkspaceRow({
 }
 
 function WorkspaceOsIcon({ os }: { os: WorkspaceNode['os'] }): JSX.Element {
-  const iconProps = {
-    className: 'h-4 w-4',
-    'data-testid': 'workspace-os-icon',
-    'aria-hidden': true,
-  } as const
-
-  switch (os) {
-    case 'win32':
-      return (
-        <svg viewBox="0 0 24 24" fill="currentColor" {...iconProps} data-os-icon="windows">
-          <path d="M3 4.7 10.4 3.65v7.6H3V4.7Z" />
-          <path d="m11.6 3.48 9.4-1.33v9.1h-9.4V3.48Z" />
-          <path d="M3 12.75h7.4v7.6L3 19.3v-6.55Z" />
-          <path d="M11.6 12.75H21v9.1l-9.4-1.33v-7.77Z" />
-        </svg>
-      )
-    case 'darwin':
-      return <Apple {...iconProps} data-os-icon="macos" />
-    case 'linux':
-      return (
-        <svg viewBox="0 0 24 24" fill="none" {...iconProps} data-os-icon="linux">
-          {/* Original minimal project penguin glyph; not copied from third-party artwork. */}
-          <path d="M8.2 15.7c-.8 1-1.4 2.2-1.5 3.5m9.1-3.5c.8 1 1.4 2.2 1.5 3.5M9.2 8.3c0-3 1.2-5.3 2.8-5.3s2.8 2.3 2.8 5.3c0 1.2-.2 2.3-.5 3.2 1.4 1 2.2 2.6 2.2 4.4 0 3-2 5.1-4.5 5.1s-4.5-2.1-4.5-5.1c0-1.8.8-3.4 2.2-4.4-.3-.9-.5-2-.5-3.2Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M10.6 8.2h.01M13.4 8.2h.01M10.8 10.4c.8.6 1.6.6 2.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-        </svg>
-      )
-    default:
-      return <Monitor {...iconProps} data-os-icon="generic" />
+  // Devicon v2.16.0 OS artwork (MIT); shipped locally, never loaded from a CDN.
+  const icon = os === 'linux' ? 'linux' : os === 'darwin' ? 'macos' : os === 'win32' ? 'windows' : null
+  if (icon) {
+    return <img src={`/icons/${icon}.svg`} alt="" className="h-4 w-4" data-testid="workspace-os-icon" data-os-icon={icon} aria-hidden="true" />
   }
+  return <Monitor className="h-4 w-4" data-testid="workspace-os-icon" data-os-icon="generic" aria-hidden="true" />
 }
 
 function SessionRow({

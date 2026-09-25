@@ -40,7 +40,7 @@ function fixture(overrides: Partial<SignedUpdateManifest> = {}, artifact = Buffe
       url: artifactUrl,
       size: artifact.byteLength,
       sha256: createHash('sha256').update(artifact).digest('hex'),
-      file: 'agent-kernel-executor.cjs',
+      file: 'kala-executor.cjs',
     },
     ...overrides,
   }
@@ -69,7 +69,7 @@ function lifecycle(overrides: Partial<UpdateLifecycle> = {}): UpdateLifecycle {
 async function existingGeneration(root: string): Promise<string> {
   const path = join(root, 'generations', '1.1.0')
   await mkdir(path, { recursive: true })
-  await writeFile(join(path, 'agent-kernel-executor.cjs'), 'old executor')
+  await writeFile(join(path, 'kala-executor.cjs'), 'old executor')
   await symlink(path, join(root, 'current'), process.platform === 'win32' ? 'junction' : 'dir')
   return path
 }
@@ -103,7 +103,7 @@ describe('generation updater', () => {
     expect(result).toEqual({ status: 'updated', release: '1.2.0', generation: plan.generation })
     expect(resolve(root, await readlink(plan.current))).toBe(plan.generation)
     expect(resolve(root, await readlink(plan.previous))).toBe(old)
-    expect(await readFile(join(plan.generation, 'agent-kernel-executor.cjs'), 'utf8')).toBe('healthy executor')
+    expect(await readFile(join(plan.generation, 'kala-executor.cjs'), 'utf8')).toBe('healthy executor')
     expect((hooks.selfTest as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]).toBeLessThan((hooks.drain as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!)
     expect(hooks.restart).toHaveBeenCalledWith({ reason: 'activate', current: plan.generation, previous: old })
     expect(hooks.health).toHaveBeenCalledOnce()
@@ -192,8 +192,8 @@ describe('generation updater', () => {
 
 describe('executor update helpers', () => {
   it('finds checksums and compares semantic versions', () => {
-    const sums = ['aaa111  dashboard.cjs', 'bbb222  agent-kernel-executor.cjs'].join('\n')
-    expect(checksumFor(sums, 'agent-kernel-executor.cjs')).toBe('bbb222')
+    const sums = ['aaa111  dashboard.cjs', 'bbb222  kala-executor.cjs'].join('\n')
+    expect(checksumFor(sums, 'kala-executor.cjs')).toBe('bbb222')
     expect(checksumFor(sums, 'missing.cjs')).toBeNull()
     expect(compareSemVer('1.2.0', '1.1.9')).toBeGreaterThan(0)
     expect(compareSemVer('1.2.0-beta.2', '1.2.0')).toBeLessThan(0)
