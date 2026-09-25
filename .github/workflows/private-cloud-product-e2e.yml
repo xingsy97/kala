@@ -14,7 +14,10 @@ concurrency:
 
 jobs:
   two-tenant-product:
-    name: local IdP / shared origin / two Units
+    name: local IdP / shared origin / two Units (optional runner)
+    # This stronger operator acceptance requires a separately registered runner.
+    # Without one, remain explicitly skipped rather than queueing indefinitely.
+    if: vars.RUNLAB_PRIVATE_CLOUD_RUNNER_ENABLED == 'true'
     runs-on: [self-hosted, linux, x64, private-cloud-local]
     timeout-minutes: 60
     env:
@@ -25,7 +28,7 @@ jobs:
       PRIVATE_CLOUD_TEST_EMAIL: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_EMAIL }}
       PRIVATE_CLOUD_TEST_PASSWORD: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_PASSWORD }}
       PRIVATE_CLOUD_WORKSPACE_MARKER: private-cloud-${{ github.run_id }}
-      PRODUCT_E2E_EVIDENCE_ROOT: ${{ runner.temp }}/evidence/private-cloud
+      PRODUCT_E2E_EVIDENCE_ROOT: ${{ github.workspace }}/.tmp/evidence/private-cloud
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

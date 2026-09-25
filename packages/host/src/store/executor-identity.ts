@@ -271,11 +271,16 @@ export class ExecutorIdentityStore {
       }
       if (rotateBackup && existsSync(this.path)) this.writeBackupSnapshot()
       renameSync(temporaryPath, this.path)
-      const directoryFd = openSync(directory, 'r')
-      try {
-        fsyncSync(directoryFd)
-      } finally {
-        closeSync(directoryFd)
+      // Windows cannot open/flush a directory with Node's POSIX-style fsync.
+      // The temporary file itself was flushed above; keep the directory flush
+      // on systems where it supplies crash-consistent rename durability.
+      if (process.platform !== 'win32') {
+        const directoryFd = openSync(directory, 'r')
+        try {
+          fsyncSync(directoryFd)
+        } finally {
+          closeSync(directoryFd)
+        }
       }
     } finally {
       rmSync(temporaryPath, { force: true })
@@ -291,7 +296,7 @@ export class ExecutorIdentityStore {
     const temporaryBackupPath = `${backupPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
     try {
       copyFileSync(this.path, temporaryBackupPath)
-      const fd = openSync(temporaryBackupPath, 'r')
+      const fd = openSync(temporaryBackupPath, 'r+')
       try {
         fsyncSync(fd)
       } finally {

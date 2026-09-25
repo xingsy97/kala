@@ -72,23 +72,33 @@ try {
       }
       stateMatrix.push(snapshot)
     }
-    page.__acceptanceContext = route.id + ':offline'
-    await page.goto(routeUrl(route, 'ready'), { waitUntil: 'domcontentloaded', timeout: 15_000 })
-    await waitForRouteState(page, route.id, 'ready')
-    await page.setOfflineMode(true)
-    await page.click('.top-actions button')
-    await waitForRouteState(page, route.id, 'offline')
-    const offline = await pageSnapshot(page)
+    // A successful refresh retains authoritative data and correctly becomes
+    // stale when the network drops. Prove the distinct no-data offline state
+    // from a fresh page whose initial request failed instead.
+    const offlinePage = await instrumentedPage(browser, telemetry, viewports[0])
+    offlinePage.__acceptanceContext = route.id + ':error'
+    await offlinePage.goto(routeUrl(route, 'error'), { waitUntil: 'domcontentloaded', timeout: 15_000 })
+    await waitForRouteState(offlinePage, route.id, 'error')
+    offlinePage.__acceptanceContext = route.id + ':offline'
+    await offlinePage.setOfflineMode(true)
+    await offlinePage.click('.status-panel button')
+    await waitForRouteState(offlinePage, route.id, 'offline')
+    const offline = await pageSnapshot(offlinePage)
     offline.scenario = 'offline'
     offline.expected = 'offline'
     offline.expectedRoute = route.id
-    await page.setOfflineMode(false)
-    await page.waitForFunction(() => navigator.onLine)
-    await page.click('.status-panel button')
-    await waitForRouteState(page, route.id, 'ready')
+    await offlinePage.setOfflineMode(false)
+    await offlinePage.waitForFunction(() => navigator.onLine)
+    await offlinePage.evaluate(() => { document.cookie = 'dashboard-fixture=ready; Path=/; SameSite=Lax' })
+    await offlinePage.click('.status-panel button')
+    await waitForRouteState(offlinePage, route.id, 'ready')
     offline.reconnectRecovered = true
     stateMatrix.push(offline)
+    await offlinePage.close()
 
+    page.__acceptanceContext = route.id + ':ready-prime'
+    await page.goto(routeUrl(route, 'ready'), { waitUntil: 'domcontentloaded', timeout: 15_000 })
+    await waitForRouteState(page, route.id, 'ready')
     page.__acceptanceContext = route.id + ':stale'
     await page.evaluate(() => { document.cookie = 'dashboard-fixture=stale; Path=/; SameSite=Lax' })
     await page.click('.top-actions button')

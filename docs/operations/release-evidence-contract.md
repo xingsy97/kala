@@ -2,9 +2,11 @@
 
 **Status:** normative
 
-An RC remains a draft until clean-environment evidence for every supported
-distribution is complete. A successful build, unit test, packaging job, or workflow
-definition is not a substitute for runtime evidence.
+This bootstrap RC remains a draft until matching-runner clean-install evidence
+for every supported Portable target is complete and both source-free asset and
+GHCR image workflows succeed for the exact tag and revision. Builds alone do
+not substitute for Portable runtime evidence. Dedicated and Private Cloud
+lifecycles remain unverified preview capabilities.
 
 ## Evidence envelope
 
@@ -16,35 +18,42 @@ required check must equal `true`.
 
 Before a runner starts the product, the workflow verifies GitHub provenance for
 the downloaded artifact and checksum index, verifies the checksum entry, and binds
-the release manifest to the candidate or predecessor tag revision. A matching file
-name or a checksum downloaded from the same unverified release is not sufficient.
+the release manifest to the candidate tag revision. A matching file name or
+a checksum downloaded from the same unverified release is not sufficient.
 
 Evidence deliberately excludes logs, receipts, domains, IP addresses, endpoints,
 credentials, private paths, Session content, and screenshots. Those diagnostics may
 remain in access-controlled workflow artifacts but cannot enter the public aggregate.
 
-The required matrix is:
+The required promotion matrix is:
 
 | Category | Target | Required proof |
 |---|---|---|
-| Portable | Linux, macOS, Windows on x64 and arm64 | exact asset, clean install, boot, capabilities, embedded Dashboard, persisted Session state, graceful stop, predecessor-to-candidate replacement |
-| Dedicated | Linux x64 clean systemd | disabled staging, install, Browser, Executor, self-initiated graceful slot cutover, continuation, reboot, backup/restore, Supervisor rollback |
-| Private Cloud | Linux x64 clean Compose | source-free install, two-tenant Runtime Session isolation, Browser, Executor, full image update, isolated Dashboard update, rollback, backup/restore |
+| Portable | Linux and macOS on x64 and arm64 (exactly four records) | exact attested asset, clean install, boot, capabilities, embedded Dashboard, persisted Session state, graceful stop, same-version reinstall |
+
+Optional Dedicated and Private Cloud lifecycle evidence still has a strict schema
+if independently produced, but is not claimed as proven for this bootstrap RC.
+The old `v0.1.10` release lacks equivalent cross-platform predecessor assets;
+no cross-version upgrade, systemd rollback, or Compose tenant isolation is
+asserted by a same-version Portable reinstall.
 
 ## Promotion
 
-`rc-acceptance.yml` runs against a draft tag and an explicit supported predecessor.
-Portable jobs run on matching native runners. Dedicated uses a uniquely named clean
-systemd LXD instance controlled from the runner. Private Cloud uses a runner reserved
-for clean Compose acceptance and an access-controlled configuration template.
+`rc-acceptance.yml` runs against the draft tag on matching GitHub-hosted
+native runners, with no self-hosted or predecessor release dependency. The
+Private Cloud tag workflow independently builds, signs, and scans versioned
+multi-architecture images and bundles; those artifacts remain preview-only
+until real clean Compose lifecycle evidence is available.
 
 `promote-rc.yml` accepts an explicit acceptance run ID. Before changing release
 state it verifies that the run used the RC workflow, concluded successfully, and
-has the same source revision as the tag. It downloads all evidence and executes
-`verify-rc-evidence.mjs`, which rejects missing or duplicate targets, false or
+has the same source revision as the tag, and confirms the GitHub Release and
+GHCR tag workflows also succeeded for that revision. It downloads all evidence and executes
+`verify-rc-evidence.mjs`, which rejects missing, duplicate, or extra targets, false or
 missing checks, revision/tag drift, unknown schema fields, and private diagnostic
 material. Only then is the public redacted aggregate attached and the draft bit
-cleared.
+cleared. Promotion also fails if the draft contains a Windows-only download.
 
-Publishing npm packages or OCI images is a separate authorization boundary. RC
-promotion does not infer permission to publish those registries.
+No npm packages are published by version tags. GHCR images are published by
+the existing Private Cloud tag workflow, but image publication alone does not
+certify a production Private Cloud deployment.

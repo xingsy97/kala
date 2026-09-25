@@ -89,25 +89,18 @@ try {
   if (!dashboardHtml.includes('<html')) {
     fail(`GET / did not return an HTML dashboard shell (got ${dashboardHtml.slice(0, 200)})`)
   }
-  for (const [asset, expectedType] of [
-    ['install-executor.sh', 'text/x-shellscript'],
-    ['install-executor.ps1', 'text/plain'],
-  ]) {
-    const assetRes = await fetch(`${url}/install/assets/${asset}`)
-    if (assetRes.status !== 200) fail(`GET /install/assets/${asset} returned ${assetRes.status}`)
-    if (!assetRes.headers.get('content-type')?.includes(expectedType)) {
-      fail(`GET /install/assets/${asset} returned unexpected content-type ${assetRes.headers.get('content-type')}`)
-    }
-    const actual = await assetRes.text()
-    const expected = readFileSync(join(releaseDir, asset), 'utf8')
-    if (actual !== expected) fail(`GET /install/assets/${asset} did not return the built release asset`)
+  const installerAsset = 'install-executor.sh'
+  const installerRes = await fetch(`${url}/install/assets/${installerAsset}`)
+  if (installerRes.status !== 200) fail(`GET /install/assets/${installerAsset} returned ${installerRes.status}`)
+  if (!installerRes.headers.get('content-type')?.includes('text/x-shellscript')) {
+    fail(`GET /install/assets/${installerAsset} returned unexpected content-type ${installerRes.headers.get('content-type')}`)
   }
-  for (const asset of ['node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz']) {
+  const actualInstaller = await installerRes.text()
+  const expectedInstaller = readFileSync(join(releaseDir, installerAsset), 'utf8')
+  if (actualInstaller !== expectedInstaller) fail(`GET /install/assets/${installerAsset} did not return the built release asset`)
+  for (const asset of ['install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json']) {
     const assetRes = await fetch(`${url}/install/assets/${asset}`)
-    if (assetRes.status !== 200) fail(`GET /install/assets/${asset} returned ${assetRes.status}`)
-    const actual = Buffer.from(await assetRes.arrayBuffer())
-    const expected = readFileSync(join(releaseDir, asset))
-    if (!actual.equals(expected)) fail(`GET /install/assets/${asset} did not return the exact ConPTY companion bytes`)
+    if (assetRes.status !== 404) fail(`GET /install/assets/${asset} returned ${assetRes.status}, expected unsupported or platform-ambiguous asset to be absent`)
   }
   console.log(`release install smoke passed on port ${port} in ${installDir}`)
 } catch (err) {

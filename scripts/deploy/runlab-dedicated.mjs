@@ -9,6 +9,9 @@ import { tmpdir } from 'node:os'
 const argv = process.argv.slice(2)
 if (argv[0] === '--') argv.shift()
 const command = argv[0]
+// Help is platform-independent; validate Linux-only installation roots only
+// when executing an operator command, not while inspecting a release on Windows.
+if (!command || ['-h', '--help', 'help'].includes(command)) { help(); process.exit(0) }
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const dataRoot = boundedRoot(process.env.AGENT_RUNLAB_DATA_ROOT ?? '/var/lib/agent-runlab', 'data root')
 const installRoot = boundedRoot(process.env.AGENT_RUNLAB_INSTALL_ROOT ?? '/opt/agent-runlab', 'install root')
@@ -48,7 +51,6 @@ const lifecycleTransitions = new Map([
   ['completed', new Set()], ['failed', new Set()],
 ])
 
-if (!command || ['-h', '--help', 'help'].includes(command)) { help(); process.exit(0) }
 if (!['install', 'status', 'upgrade', 'rollback', 'backup', 'restore', 'uninstall'].includes(command)) fail(`unknown command ${command}`)
 if (command !== 'status') requireRoot()
 

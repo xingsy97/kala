@@ -12,6 +12,7 @@ on:
 
 permissions:
   actions: read
+  attestations: read
   contents: write
 
 jobs:
@@ -32,8 +33,23 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .conclusion)" = success
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .head_sha)" = "$REVISION"
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .inputs.tag)" = "$TAG"
-          test -n "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .inputs.predecessor_tag)"
           test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
+          # Publish only after both source-free assets and GHCR images have
+          # succeeded for this exact tag and revision, not merely been queued.
+          for workflow in release.yml private-cloud-release.yml; do
+            gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs" \
+              -f branch="$TAG" -f event=push -f status=success -f per_page=100 \
+              --jq '.workflow_runs[].head_sha' | awk -v revision="$REVISION" '$0 == revision { found=1 } END { exit !found }'
+          done
+          mapfile -t release_assets < <(gh release view "$TAG" --json assets --jq '.assets[].name')
+          for asset in "${release_assets[@]}"; do
+            case "${asset,,}" in
+              *.ps1|*.exe|*.msi|*.dll|*win32*|*windows*|*conpty*|*winpty*)
+                echo "Windows release asset is not allowed: $asset" >&2
+                exit 1
+                ;;
+            esac
+          done
       - name: Download and fail-closed verify the complete evidence matrix
         env: { GH_TOKEN: '${{ github.token }}', RUN_ID: '${{ inputs.acceptance_run_id }}', TAG: '${{ inputs.tag }}' }
         run: |
@@ -45,9 +61,27 @@ jobs:
           node scripts/release/verify-rc-evidence.mjs \
             --input acceptance/evidence --tag "$TAG" --revision "$(git rev-parse HEAD)" \
             --output release-evidence/rc-evidence.json
-      - name: Attach aggregate evidence and leave draft state only after verification
+      - uses: sigstore/cosign-installer@v3
+      - name: Revalidate the current closed draft and leave draft state
         env: { GH_TOKEN: '${{ github.token }}', TAG: '${{ inputs.tag }}' }
         run: |
           set -euo pipefail
           gh release upload "$TAG" release-evidence/rc-evidence.json --clobber
+          CANDIDATE=$(mktemp -d)
+          gh release download "$TAG" --dir "$CANDIDATE"
+          REVISION=$(git rev-parse HEAD)
+          node scripts/release/verify-promotion-candidate.mjs \
+            --directory "$CANDIDATE" --evidence acceptance/evidence \
+            --aggregate release-evidence/rc-evidence.json --tag "$TAG" --revision "$REVISION"
+          for asset in manifest.json SHA256SUMS \
+            agent-kernel-host-linux-x64 agent-kernel-host-linux-arm64 \
+            agent-kernel-host-darwin-x64 agent-kernel-host-darwin-arm64; do
+            gh attestation verify "$CANDIDATE/$asset" --repo "$GITHUB_REPOSITORY"
+          done
+          cosign verify-blob \
+            --bundle "$CANDIDATE/SHA256SUMS.sigstore.json" \
+            --certificate-identity-regexp "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@.*" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$CANDIDATE/SHA256SUMS"
+          test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
           gh release edit "$TAG" --draft=false

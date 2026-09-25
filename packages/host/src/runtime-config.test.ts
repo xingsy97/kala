@@ -92,6 +92,8 @@ describe('loadRuntimeConfig', () => {
       const cfg = loadRuntimeConfig({
         claudeSettingsPath: claudePath,
         codexConfigPath: codexPath,
+        codexAuthPath: join(dir, 'missing-auth.json'),
+        manualModelsPath: join(dir, 'missing-manual-models.json'),
       })
       expect(cfg.defaultModel).toBe('newapi:gpt-5.5')
       expect(cfg.models.map((m) => m.id)).toEqual([
@@ -287,6 +289,7 @@ describe('loadRuntimeConfig', () => {
       claudeSettingsPath: join(dir, 'missing.json'),
       codexConfigPath: codexPath,
       codexAuthPath: join(dir, 'missing-auth.json'),
+      manualModelsPath: join(dir, 'missing-manual-models.json'),
     })
     expect(cfg.providers).toEqual([])
     expect(cfg.models).toEqual([])
@@ -312,6 +315,7 @@ describe('loadRuntimeConfig', () => {
       claudeSettingsPath: join(dir, 'missing.json'),
       codexConfigPath: codexPath,
       codexAuthPath: authPath,
+      manualModelsPath: join(dir, 'missing-manual-models.json'),
     })
 
     expect(cfg.models.map((m) => m.id)).toEqual(['gpt-5.5'])
@@ -322,6 +326,8 @@ describe('loadRuntimeConfig', () => {
     const cfg = loadRuntimeConfig({
       claudeSettingsPath: join(dir, 'nope1'),
       codexConfigPath: join(dir, 'nope2'),
+      codexAuthPath: join(dir, 'missing-auth.json'),
+      manualModelsPath: join(dir, 'missing-manual-models.json'),
     })
     expect(cfg.providers).toEqual([])
     expect(cfg.models).toEqual([])

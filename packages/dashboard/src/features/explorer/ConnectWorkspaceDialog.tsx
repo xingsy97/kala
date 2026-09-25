@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Apple, Check, CheckCircle2, Clipboard, Clock3, LoaderCircle, Monitor, ShieldCheck, Terminal, XCircle } from 'lucide-react'
+import { Apple, Check, CheckCircle2, Clipboard, Clock3, LoaderCircle, ShieldCheck, Terminal, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type {
   CreateExecutorInstall,
@@ -30,7 +30,7 @@ type InstallResponse = ExecutorInstallStatusSnapshot & { command?: string; setup
 type FormState = Pick<CreateExecutorInstall, 'platform' | 'mode'>
 
 const POLL_INTERVAL_MS = 2_000
-const PLATFORMS: ExecutorInstallPlatform[] = ['linux', 'macos', 'windows']
+const PLATFORMS = ['linux', 'macos'] as const satisfies readonly ExecutorInstallPlatform[]
 const MODES: ExecutorInstallMode[] = ['service', 'temporary']
 
 export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX.Element {
@@ -263,8 +263,8 @@ function SectionLabel({ index, label }: { index: string; label: string }): JSX.E
 }
 
 function PlatformGroup({ label, selected, labelFor, onChange }: { label: string; selected: ExecutorInstallPlatform; labelFor(value: ExecutorInstallPlatform): string; onChange(value: ExecutorInstallPlatform): void }): JSX.Element {
-  const icons = { linux: <LinuxMark />, macos: <Apple className="h-5 w-5" />, windows: <Monitor className="h-5 w-5" /> }
-  return <fieldset className="min-w-0"><legend className="sr-only">{label}</legend><div className="grid grid-cols-3 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-medium transition-[background-color,color,box-shadow,transform] active:scale-[0.98] ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.5)]' : 'bg-muted/20 text-muted-foreground hover:bg-accent/55 hover:text-foreground'}`}>{icons[value]}<span className="truncate">{labelFor(value)}</span></button>)}</div></fieldset>
+  const icons = { linux: <LinuxMark />, macos: <Apple className="h-5 w-5" /> }
+  return <fieldset className="min-w-0"><legend className="sr-only">{label}</legend><div className="grid grid-cols-2 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-medium transition-[background-color,color,box-shadow,transform] active:scale-[0.98] ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.5)]' : 'bg-muted/20 text-muted-foreground hover:bg-accent/55 hover:text-foreground'}`}>{icons[value]}<span className="truncate">{labelFor(value)}</span></button>)}</div></fieldset>
 }
 
 function ChoiceGroup<T extends string>({ label, values, selected, labelFor, onChange }: { label: string; values: readonly T[]; selected: T; labelFor(value: T): string; onChange(value: T): void }): JSX.Element {
@@ -354,7 +354,6 @@ function errorMessage(value: unknown): string { return value instanceof Error ? 
 function detectCurrentPlatform(): ExecutorInstallPlatform {
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } }
   const platform = (nav.userAgentData?.platform ?? navigator.platform ?? '').toLowerCase()
-  if (platform.includes('win')) return 'windows'
   if (platform.includes('mac')) return 'macos'
   return 'linux'
 }

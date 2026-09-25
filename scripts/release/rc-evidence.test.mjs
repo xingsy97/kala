@@ -5,14 +5,16 @@ import test from 'node:test'
 const revision = 'a'.repeat(40)
 const tag = 'v0.2.0-rc.1'
 
-test('accepts only the complete release matrix bound to one tag and revision', () => {
-  const records = Object.entries(requiredReleaseEvidence).flatMap(([category, policy]) => policy.targets.map((target) => create(category, target)))
-  assert.equal(verifyRcEvidenceSet(records, { tag, revision }).length, 8)
+test('requires exactly four Linux and macOS Portable targets', () => {
+  const portable = requiredReleaseEvidence.portable.targets.map((target) => create('portable', target))
+  assert.equal(verifyRcEvidenceSet(portable, { tag, revision }).length, 4)
+  assert.throws(() => verifyRcEvidenceSet([...portable, create('dedicated', 'linux-x64-systemd')], { tag, revision }), /unexpected targets/u)
+  assert.throws(() => verifyRcEvidenceSet(portable.slice(1), { tag, revision }), /matrix is incomplete/u)
 })
 
 test('rejects missing checks, duplicate targets, and mismatched revisions', () => {
   const portable = create('portable', 'linux-x64')
-  assert.throws(() => validateRcEvidence({ ...portable, checks: { ...portable.checks, upgrade: false } }), /did not prove upgrade/u)
+  assert.throws(() => validateRcEvidence({ ...portable, checks: { ...portable.checks, reinstall: false } }), /did not prove reinstall/u)
   assert.throws(() => verifyRcEvidenceSet([portable, portable], { tag, revision }), /duplicate/u)
   assert.throws(() => validateRcEvidence(portable, { tag, revision: 'b'.repeat(40) }), /revision mismatch/u)
 })

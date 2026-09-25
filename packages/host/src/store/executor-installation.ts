@@ -214,7 +214,9 @@ export class ExecutorInstallationStore {
     const body: FileShape = { schemaVersion: 1, installations: [...this.records.values()], idempotency: Object.fromEntries(this.idempotency) }
     try {
       writeFileSync(temp, `${JSON.stringify(body, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-      const fd = openSync(temp, 'r'); try { fsyncSync(fd) } finally { closeSync(fd) }
+      // Windows FlushFileBuffers requires a writable file handle; retain the
+      // durability flush rather than reopening the new record read-only.
+      const fd = openSync(temp, 'r+'); try { fsyncSync(fd) } finally { closeSync(fd) }
       renameSync(temp, this.path)
     } finally { rmSync(temp, { force: true }) }
   }

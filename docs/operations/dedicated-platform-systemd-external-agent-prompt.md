@@ -6,7 +6,7 @@ Copy the block below verbatim into the external Agent Session.
 
 ---
 
-You are taking over the production migration of Agent RunLab Dedicated from the legacy single-process Host service to the real systemd topology with Stable Ingress, blue/green Runtime Unit slots, Deploy Supervisor, and Migration Finalizer.
+You are taking over the production migration of Kala Dedicated from the legacy single-process Host service to the real systemd topology with Stable Ingress, blue/green Runtime Unit slots, Deploy Supervisor, and Migration Finalizer.
 
 Repository root: `/home/example/agent-kernel`
 
@@ -22,7 +22,7 @@ Read both completely before making any change. Inspect the actual current source
 
 Critical control-boundary rule:
 
-- The existing Agent RunLab Sessions run inside the Dedicated Host being migrated.
+- The existing Kala Sessions run inside the Dedicated Host being migrated.
 - Do not execute production stop/start/cutover through a Tool call, Executor, browser Session, or process that depends on that Host.
 - Production cutover and all polling must run from an independent SSH/console/operator process that remains alive when `agent-runlab-host.service` and port 13000 disappear.
 - Do not use force restart or fixed sleeps.

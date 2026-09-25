@@ -4,10 +4,12 @@ RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/dashboard/package.json packages/dashboard/package.json
 COPY packages/shared/package.json packages/shared/package.json
+COPY packages/kernel/package.json packages/kernel/package.json
 RUN pnpm install --frozen-lockfile --filter @agent-kernel/dashboard...
 COPY packages/dashboard packages/dashboard
 COPY packages/shared packages/shared
-RUN pnpm --filter @agent-kernel/shared build && pnpm --filter @agent-kernel/dashboard build
+COPY packages/kernel packages/kernel
+RUN pnpm --filter @agent-kernel/kernel build && pnpm --filter @agent-kernel/shared build && pnpm --filter @agent-kernel/dashboard build
 
 FROM node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34 AS runtime
 ENV NODE_ENV=production DASHBOARD_PORT=8080 DASHBOARD_ROOT=/app/dashboard

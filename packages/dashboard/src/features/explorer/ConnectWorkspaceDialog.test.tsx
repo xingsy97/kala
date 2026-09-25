@@ -28,14 +28,12 @@ describe('ConnectWorkspaceDialog', () => {
       const url = rawUrl.replace(/^http:\/\/host\.test:5301/u, '')
       if (url === '/api/executor-installs' && init?.method === 'POST') {
         const input = JSON.parse(String(init.body)) as Record<string, string>
-        if (input.platform === 'windows' || input.mode === 'temporary') {
+        if (input.platform === 'macos' || input.mode === 'temporary') {
           return response({
             ...base,
             id: 'inst_2',
             ...input,
-            command: input.platform === 'windows'
-              ? "$env:RUNLAB_SETUP_CODE='F6E7D8C9B0'; $env:RUNLAB_INSTALL_MODE='temporary'; irm 'http://localhost:3000/install.ps1' | iex"
-              : "curl -fsSL 'http://localhost:3000/install' | RUNLAB_SETUP_CODE='F6E7D8C9B0' RUNLAB_INSTALL_MODE='temporary' sh",
+            command: "curl -fsSL 'http://localhost:3000/install' | RUNLAB_SETUP_CODE='F6E7D8C9B0' RUNLAB_INSTALL_MODE='temporary' sh",
             setupCode: 'F6E7D8C9B0',
           })
         }
@@ -59,6 +57,7 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.queryByText(/no sudo required/i)).toBeNull()
     expect(screen.getByRole('region', { name: 'Installation options' })).toBeTruthy()
     expect(screen.getByTestId('connect-workspace-linux').className).toContain('bg-accent')
+    expect(screen.queryByTestId('connect-workspace-windows')).toBeNull()
     expect(screen.getByTestId('connect-workspace-service').className).toContain('bg-background')
     expect(screen.getByTestId('connect-workspace-service').textContent).toContain('Recommended')
     expect(screen.getByTestId('connect-workspace-service').textContent).toContain('Install as service')
@@ -82,13 +81,13 @@ describe('ConnectWorkspaceDialog', () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('executor-invites'))).toBe(false)
   })
 
-  it('supports all three platforms, both modes, immediate updates, and copies exactly one line', async () => {
+  it('supports Linux and macOS, both modes, immediate updates, and copies exactly one line', async () => {
     const write = vi.mocked(navigator.clipboard.writeText)
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
     await screen.findByText(/curl -fsSL/)
-    fireEvent.click(screen.getByTestId('connect-workspace-windows'))
+    fireEvent.click(screen.getByTestId('connect-workspace-macos'))
     fireEvent.click(screen.getByTestId('connect-workspace-temporary'))
-    await waitFor(() => expect(screen.getByText(/install\.ps1/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/F6E7D8C9B0/)).toBeTruthy())
     expect(screen.getByTestId('executor-terminal-command').textContent).toContain("RUNLAB_INSTALL_MODE='temporary'")
     expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs' && init?.method === 'POST' && String(init.body).includes('temporary'))).toBe(true)
     expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs/inst_1' && init?.method === 'DELETE')).toBe(true)
@@ -96,6 +95,16 @@ describe('ConnectWorkspaceDialog', () => {
     await waitFor(() => expect(write).toHaveBeenCalledOnce())
     expect(write.mock.calls[0]![0]).not.toMatch(/[\r\n]/u)
     expect(screen.getByTestId('connect-workspace-macos')).toBeTruthy()
+  })
+
+  it('does not advertise or request Windows installation on a Windows browser', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' })
+    render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
+    await screen.findByText(/curl -fsSL/)
+    expect(screen.queryByTestId('connect-workspace-windows')).toBeNull()
+    expect(screen.getByTestId('connect-workspace-linux').getAttribute('aria-pressed')).toBe('true')
+    const createCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')
+    expect(String(createCall?.[1]?.body)).toContain('"platform":"linux"')
   })
 
   it('immediately shows the target run mode, keeps the previous command visible, and prevents copying while refreshing', async () => {

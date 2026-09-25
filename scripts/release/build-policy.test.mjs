@@ -42,6 +42,14 @@ test('release builders remove native scratch files and verification rejects unde
   assert.match(verifier, /actualReleaseEntries\.some\(\(entry\) => !entry\.isFile\(\)\)/)
 })
 
+test('both full and native-only SEA Executor builds resolve adjacent native addons', () => {
+  const builder = read('scripts/release/build-release-assets.mjs')
+  assert.match(builder, /const wantsNativeBuild = !finalizeOnly && \(nativeOnly \|\| !noNative\)/)
+  assert.match(builder, /const nativeRequire = wantsNativeBuild && item\.name === 'agent-kernel-executor'/)
+  assert.match(builder, /createRequire\(__filename\)/)
+  assert.match(builder, /\$\{nativeRequire\}\$\{buildInfo\}/)
+})
+
 test('release docs include tracked files only and exclude the unfinished showcase', () => {
   const builder = read('scripts/release/build-release-assets.mjs')
   assert.match(builder, /spawnSync\('git', \['ls-files', '-z', '--', 'docs\/']/)
@@ -59,6 +67,21 @@ test('release verification rejects embedded Dashboard assignment without rejecti
   const verifier = read('scripts/release/verify-release-assets.mjs')
   assert.ok(verifier.includes("platformRuntime.includes('globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=')"))
   assert.ok(!verifier.includes("platformRuntime.includes('__AGENT_KERNEL_EMBEDDED_DASHBOARD__')"))
+})
+
+test('release scripts enforce Linux and macOS assets and reject Windows offers', () => {
+  const builder = read('scripts/release/build-release-assets.mjs')
+  const verifier = read('scripts/release/verify-release-assets.mjs')
+  const installSmoke = read('scripts/release/verify-release-install.mjs')
+  assert.match(builder, /Windows release assets are not included in this release/)
+  assert.doesNotMatch(builder, /install-executor\.ps1|node-pty-win32|writeExecutorUpdateManifest/)
+  assert.match(verifier, /supportedNativeTargets = \['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'\]/)
+  assert.match(verifier, /assertSupportedReleaseAssetName\(asset\?\.path, 'embedded Host assets'\)/)
+  assert.match(verifier, /executor-update-/)
+  for (const forbidden of ['install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json']) {
+    assert.match(installSmoke, new RegExp(forbidden.replaceAll('.', '\\.')))
+  }
+  assert.match(installSmoke, /expected unsupported or platform-ambiguous asset to be absent/)
 })
 
 test('root tests expose fast and extended aggregation without experiments', () => {

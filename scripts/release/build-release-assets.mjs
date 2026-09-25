@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { copyFileSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import {
   executorNativeAssetName,
-  generateExecutorInstallerPs1,
   generateExecutorInstallerSh,
   legacyExecutorNativeAssetName,
 } from './executor-installer.mjs'
@@ -67,7 +66,7 @@ const allEntries = [
 ]
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
-const nativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']
+const nativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']
 if (finalizeOnly) {
   finalizeRelease()
   process.exit(0)
@@ -121,6 +120,11 @@ for (const item of buildEntries) {
     ? embeddedSocketAdminBanner(socketAdminDist)
     : ''
   const buildInfo = buildInfoBanner({ artifactKind: nativeOnly ? 'native' : 'cjs', dashboardMode: embedsDashboard ? 'embedded' : 'none', socketAdminMode: embedsHostRuntime ? 'embedded' : 'missing' })
+  // SEA's injected-main require only resolves built-ins. node-pty loads its native
+  // companion at spawn time, so the Executor must resolve beside its executable.
+  const nativeRequire = wantsNativeBuild && item.name === 'agent-kernel-executor'
+    ? "require = require('node:module').createRequire(__filename);\n"
+    : ''
   const outfile = nativeOnly
     ? join(outDir, '.sea', `${item.name}-${nativeTarget}`, `${item.name}.cjs`)
     : join(outDir, cjsAssetName(item))
@@ -133,7 +137,7 @@ for (const item of buildEntries) {
     target: 'node22',
     format: 'cjs',
     mainFields: ['module', 'main'],
-    banner: { js: `#!/usr/bin/env node\n${buildInfo}${embeddedDashboard}${embeddedDocs}${embeddedSocketAdmin}${embeddedReleaseAssets}` },
+    banner: { js: `#!/usr/bin/env node\n${nativeRequire}${buildInfo}${embeddedDashboard}${embeddedDocs}${embeddedSocketAdmin}${embeddedReleaseAssets}` },
     sourcemap: false,
     legalComments: 'none',
     logLevel: 'info',
@@ -163,10 +167,20 @@ if (includeDashboard) {
   writeDashboardReleaseManifest(dashboardDist)
   // Never package untracked local docs (captures, screenshots, notes). The
   // tracked showcase GIF is still unfinished and explicitly excluded.
-  const listedDocs = spawnSync('git', ['ls-files', '-z', '--', 'docs/'], { cwd: root, encoding: 'buffer' })
-  if (listedDocs.status !== 0) throw new Error('cannot enumerate tracked release docs')
-  const docsFiles = listedDocs.stdout.toString('utf8').split('\0')
-    .filter((file) => file.startsWith('docs/') && file !== 'docs/assets/kala-dashboard-preview.gif')
+  // CI supplies Git's tracked-docs list before creating a gitless Docker context.
+  // Never fall back to walking docs/: local screenshots and notes are not release assets.
+  const docsListPath = join(docsDir, '.tracked-release-docs')
+  let listedDocs
+  if (existsSync(join(root, '.git'))) {
+    const result = spawnSync('git', ['ls-files', '-z', '--', 'docs/'], { cwd: root, encoding: 'buffer' })
+    if (result.status !== 0) throw new Error('cannot enumerate tracked release docs')
+    listedDocs = result.stdout
+  } else {
+    if (!existsSync(docsListPath)) throw new Error('gitless release build requires a tracked docs list')
+    listedDocs = readFileSync(docsListPath)
+  }
+  const docsFiles = listedDocs.toString('utf8').split('\0')
+    .filter((file) => file.startsWith('docs/') && !file.split('/').includes('..') && file !== 'docs/assets/kala-dashboard-preview.gif')
     .map((file) => file.slice('docs/'.length))
     .filter(Boolean)
   const docsArchive = spawnSync('tar', ['-czf', join(outDir, 'agent-runlab-docs.tar.gz'), '-C', docsDir, '--null', '-T', '-'], {
@@ -190,7 +204,6 @@ function finalizeRelease() {
   const copilotRuntimeAssets = component === 'all' || component === 'host'
     ? prepareCopilotRuntimeAsset(detectNativeTarget(), true)
     : []
-  if (entries.some((entry) => entry.name === 'agent-kernel-executor') && currentNativeTarget && exists(executorNativeAssetName(currentNativeTarget))) writeExecutorUpdateManifest()
   if (includeDashboard && existsSync(modelCatalogSeed)) {
     copyFileSync(modelCatalogSeed, join(outDir, 'agent-runlab-model-catalog-seed.json'))
   }
@@ -240,10 +253,9 @@ function finalizeRelease() {
     .concat(bootstrapAssets)
     .concat(desktopPublicAssets)
     .concat(['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt'])
-    .concat(entries.some((entry) => entry.name === 'agent-kernel-executor') && exists('executor-update-manifest.json') ? ['executor-update-manifest.json', 'executor-update-public-key.pem'] : [])
   const hasNativeAssets = builtEntries.some((entry) => entry.natives.length > 0)
   const manifest = {
-    name: packageJson.name,
+    name: 'kala',
     version: packageJson.version,
     source: sourceIdentity,
     component,
@@ -262,7 +274,7 @@ function finalizeRelease() {
         ? 'runtime releases include native binaries plus Node.js .cjs fallback assets'
         : 'runtime releases include Node.js .cjs fallback assets; native binaries are added by the native release job',
       'run.sh is a wget-only bash bootstrap that uses compact .cjs assets when Node.js 22+ is available and falls back to native binaries otherwise',
-      'install-executor.sh and install-executor.ps1 install only checksum-verified runlab-executor native assets; unsigned mode is development-only',
+      'install-executor.sh installs only checksum-verified Linux or macOS runlab-executor native assets; unsigned mode is development-only',
       'Portable uses bundle-dashboard-with-runtime.cjs with embedded dashboard assets; Self-hosted Platform uses agent-runlab-runtime.cjs plus an independently activated dashboard release',
     ],
   }
@@ -283,7 +295,7 @@ function prepareCopilotRuntimeAsset(target, includeGenericAlias) {
   const copilotRequire = createRequire(copilotPackage)
   const source = copilotRequire.resolve(packageName)
   if (!existsSync(source)) throw new Error(`Copilot runtime binary is missing from ${packageName}`)
-  const binaryAsset = `copilot-cli-${target}${platform === 'win32' ? '.exe' : ''}`
+  const binaryAsset = `copilot-cli-${target}`
   const licenseAsset = 'COPILOT_CLI_LICENSE.md'
   copyFileSync(source, join(outDir, binaryAsset))
   copyFileSync(join(dirname(copilotPackage), 'LICENSE.md'), join(outDir, licenseAsset))
@@ -296,8 +308,8 @@ function prepareCopilotRuntimeAsset(target, includeGenericAlias) {
 }
 
 function writeDependencyMetadata() {
-  const inventory = spawnSync('pnpm', ['licenses', 'list', '--prod', '--json'], { cwd: root, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 })
-  if (inventory.status !== 0) throw new Error('production dependency license inventory failed')
+  const inventory = spawnSync('pnpm', ['licenses', 'list', '--prod', '--json'], { cwd: root, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024, shell: process.platform === 'win32' })
+  if (inventory.status !== 0) throw new Error(`production dependency license inventory failed (${inventory.error?.code ?? inventory.status ?? 'unknown'})`)
   const classes = JSON.parse(inventory.stdout)
   const components = []
   for (const [reportedLicense, packages] of Object.entries(classes)) {
@@ -322,7 +334,7 @@ function writeDependencyMetadata() {
     specVersion: '1.6',
     version: 1,
     metadata: {
-      component: { type: 'application', name: 'agent-runlab', version: packageJson.version },
+      component: { type: 'application', name: 'kala', version: packageJson.version },
       properties: [
         { name: 'agent-runlab:source-revision', value: sourceIdentity.revision },
         { name: 'agent-runlab:source-snapshot-sha256', value: sourceIdentity.snapshotSha256 },
@@ -354,16 +366,7 @@ function prepareBootstrapAssets() {
     const shPath = join(outDir, 'install-executor.sh')
     writeFileSync(shPath, generateExecutorInstallerSh({ repo, tag }))
     chmodSync(shPath, 0o755)
-    writeFileSync(join(outDir, 'install-executor.ps1'), generateExecutorInstallerPs1({ repo, tag }))
-    bootstrapAssets.push('install-executor.sh', 'install-executor.ps1')
-    for (const target of ['win32-x64', 'win32-arm64']) {
-      const prebuilds = join(root, 'packages/executor/node_modules/node-pty/prebuilds', target)
-      if (!existsSync(prebuilds)) continue
-      const archive = `node-pty-${target}.tar.gz`
-      const packed = spawnSync('tar', ['-czf', join(outDir, archive), '-C', dirname(prebuilds), target], { encoding: 'utf8' })
-      if (packed.status !== 0) throw new Error(`failed to package ${archive}: ${packed.stderr}`)
-      bootstrapAssets.push(archive)
-    }
+    bootstrapAssets.push('install-executor.sh')
   }
   return bootstrapAssets
 }
@@ -374,28 +377,6 @@ function writeSha256Sums(files) {
     .map((file) => `${sha256(join(outDir, file))}  ${file}`)
     .join('\n')
   writeFileSync(join(outDir, 'SHA256SUMS'), `${sums}\n`)
-}
-
-function writeExecutorUpdateManifest() {
-  const target = detectNativeTarget()
-  const asset = executorNativeAssetName(target)
-  if (!exists(asset)) return
-  const tagged = String(tag).replace(/^v/u, '')
-  const release = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(tagged) ? tagged : packageJson.version
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(release)) return
-  const configured = process.env.RUNLAB_EXECUTOR_UPDATE_PRIVATE_KEY_PEM
-  if (!configured && tag !== 'latest') throw new Error('RUNLAB_EXECUTOR_UPDATE_PRIVATE_KEY_PEM is required for signed Executor releases')
-  const pair = configured
-    ? { privateKey: createPrivateKey(configured), publicKey: createPublicKey(configured) }
-    : generateKeyPairSync('ed25519')
-  const publicPem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()
-  const signed = JSON.stringify({
-    version: 1, release, channel: 'stable', protocol: { min: 1, max: 1 },
-    artifact: { url: `./${asset}`, size: statSync(join(outDir, asset)).size, sha256: sha256(join(outDir, asset)), file: 'runlab-executor' },
-  })
-  const signature = sign(null, Buffer.from(signed), pair.privateKey).toString('base64')
-  writeFileSync(join(outDir, 'executor-update-manifest.json'), `${JSON.stringify({ signed, signature })}\n`)
-  writeFileSync(join(outDir, 'executor-update-public-key.pem'), publicPem)
 }
 
 function releaseFiles() {
@@ -428,9 +409,9 @@ function keepSingleShebang(text) {
 function detectNativeTarget() {
   const os = process.platform
   const arch = process.arch
-  const normalizedOs = os === 'win32' ? 'win32' : os === 'darwin' ? 'darwin' : os === 'linux' ? 'linux' : os
+  const normalizedOs = os === 'darwin' ? 'darwin' : os === 'linux' ? 'linux' : os
   const normalizedArch = arch === 'x64' ? 'x64' : arch === 'arm64' ? 'arm64' : arch
-  if (!['linux', 'darwin', 'win32'].includes(normalizedOs)) {
+  if (!['linux', 'darwin'].includes(normalizedOs)) {
     throw new Error(`unsupported native release os ${os}`)
   }
   if (!['x64', 'arm64'].includes(normalizedArch)) {
@@ -440,7 +421,8 @@ function detectNativeTarget() {
 }
 
 function nativeAssetName(name, target) {
-  return `${name}-${target}${target.startsWith('win32-') ? '.exe' : ''}`
+  if (!nativeTargets.includes(target)) throw new Error(`unsupported native release target ${target}`)
+  return `${name}-${target}`
 }
 
 function cjsAssetName(entry) {
@@ -533,7 +515,6 @@ function prepareEmbeddedReleaseAssetsForHost() {
     chmodSync(path, 0o755)
   }
   const nativeExecutor = currentNativeTarget ? executorNativeAssetName(currentNativeTarget) : undefined
-  if (nativeExecutor && exists(nativeExecutor)) writeExecutorUpdateManifest()
   const desktopDownloadDir = join(dashboardDist, 'downloads', 'desktop')
   const desktopManifestPath = join(desktopDownloadDir, 'release.json')
   const desktopNames = []
@@ -551,7 +532,7 @@ function prepareEmbeddedReleaseAssetsForHost() {
       desktopNames.push(target)
     }
   }
-  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', 'install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json', 'executor-update-public-key.pem', ...desktopNames]
+  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', ...desktopNames]
     .filter((name) => name && exists(name))
   writeSha256Sums(embeddedNames)
   return embeddedReleaseAssetsBanner(outDir, [...embeddedNames, 'SHA256SUMS'])
@@ -583,8 +564,17 @@ function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
 }
 
 function readSourceIdentity() {
-  const revision = gitText(['rev-parse', 'HEAD']).trim()
+  const revision = options.sourceRevision ?? gitText(['rev-parse', 'HEAD']).trim()
   if (!/^[0-9a-f]{40}$/u.test(revision)) throw new Error('release source revision is unavailable')
+  // Docker build contexts intentionally omit .git. Hash their copied source
+  // separately and never claim a gitless build has a verified clean worktree.
+  if (!existsSync(join(root, '.git'))) {
+    if (!options.sourceRevision) throw new Error('gitless release build requires --source-revision')
+    return { revision, snapshotSha256: gitlessSourceSnapshotSha256(), dirty: true }
+  }
+  if (options.sourceRevision && revision !== gitText(['rev-parse', 'HEAD']).trim()) {
+    throw new Error('release source revision does not match Git HEAD')
+  }
   return {
     revision,
     snapshotSha256: sourceSnapshotSha256(),
@@ -593,9 +583,33 @@ function readSourceIdentity() {
 }
 
 function assertSourceIdentityUnchanged() {
-  if (sourceSnapshotSha256() !== sourceIdentity.snapshotSha256) {
+  const snapshot = existsSync(join(root, '.git')) ? sourceSnapshotSha256() : gitlessSourceSnapshotSha256()
+  if (snapshot !== sourceIdentity.snapshotSha256) {
     throw new Error('release source changed while assets were being built')
   }
+}
+
+function gitlessSourceSnapshotSha256() {
+  const hash = createHash('sha256')
+  const roots = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'packages', 'docs', 'scripts/release', 'resources']
+  function visit(path) {
+    const absolute = join(root, path)
+    if (!existsSync(absolute)) return
+    const stat = lstatSync(absolute)
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(absolute).sort()) {
+        if (name === 'node_modules' || name === 'dist' || name === 'release' || name.startsWith('.')) continue
+        visit(`${path}/${name}`)
+      }
+      return
+    }
+    const content = stat.isSymbolicLink() ? Buffer.from(readlinkSync(absolute)) : readFileSync(absolute)
+    hash.update(`${stat.mode & 0o7777}\0${path}\0${content.length}\0`)
+    hash.update(content)
+    hash.update('\0')
+  }
+  for (const path of roots) visit(path)
+  return hash.digest('hex')
 }
 
 function sourceSnapshotSha256() {
@@ -665,6 +679,7 @@ function parseOptions(args) {
     skipDashboardBuild: normalized.includes('--skip-dashboard-build'),
     skipPackageBuild: normalized.includes('--skip-package-build'),
     nativeTarget: optionValue(normalized, '--native-target'),
+    sourceRevision: optionValue(normalized, '--source-revision'),
   }
 }
 
@@ -852,7 +867,6 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  case "$os" in',
     '    linux) os="linux" ;;',
     '    darwin) os="darwin" ;;',
-    '    mingw*|msys*|cygwin*) os="win32" ;;',
     '    *) echo ""; return ;;',
     '  esac',
     '  case "$arch" in',
@@ -889,7 +903,6 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  local target native cjs runtime',
     '  target=$(platform_target)',
     '  native="${base}-${target}"',
-    '  case "$target" in win32-*) native="${native}.exe" ;; esac',
     '  cjs="${base}.cjs"',
     '  if [ "$base" = "agent-kernel-host" ]; then',
     '    cjs="bundle-dashboard-with-runtime.cjs"',
@@ -897,7 +910,6 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  runtime="${AGENT_KERNEL_RUNTIME:-auto}"',
     '  if [ "${AGENT_RUNLAB_COPILOT_ENABLED:-0}" = "1" ]; then',
     '    local copilot_asset="copilot-cli-${target}"',
-    '    case "$target" in win32-*) copilot_asset="${copilot_asset}.exe" ;; esac',
     '    if [ -z "$target" ] || ! checksum_exists "$copilot_asset"; then',
     '      log "Copilot runtime is enabled but no Copilot CLI is published for platform ${target:-unsupported}"',
     '      exit 1',
@@ -991,7 +1003,7 @@ function releaseNotes(manifest) {
   const canRunExecutor = manifest.component === 'all' || manifest.component === 'executor'
   const run = (component, extraEnv = '') => {
     const env = [extraEnv.trim(), `COMPONENT=${component}`].filter(Boolean).join(' ')
-    return `wget -nv -O - "${base}/run.sh" | ${env} bash`
+    return `set -o pipefail; curl --proto '=https' --tlsv1.2 -fsSL "${base}/run.sh" | ${env} bash`
   }
   const hasNativeAssets = Object.values(manifest.nativeAssets ?? {}).some((assets) => Array.isArray(assets) && assets.length > 0)
   const lines = [
@@ -1007,6 +1019,13 @@ function releaseNotes(manifest) {
     hasNativeAssets
       ? '- Native fallback binaries when Node.js 22+ is unavailable.'
       : '- Node.js `.cjs` assets for environments with Node.js 22+.',
+    '- GHCR Runtime, Ingress, and Dashboard images (preview); no npm packages are published.',
+    '',
+    '## Release support scope',
+    '',
+    'Publication requires native Portable installation and same-version reinstall evidence on Linux and macOS (x64 and arm64). Windows release assets are not included in this release. This is not cross-version upgrade or rollback evidence.',
+    'Dedicated and Private Cloud assets are previews: production lifecycle, upgrade, rollback, and tenant isolation have not been certified for this release.',
+    `See the [release support policy](https://github.com/${manifest.repo}/blob/${manifest.tag}/docs/operations/release-support-policy.md) for the supported scope.`,
     '',
     '## Quick Start',
     '',
@@ -1030,15 +1049,7 @@ function releaseNotes(manifest) {
         run('executor', 'HOST_URL=http://host-machine:3000'),
         '```',
         '',
-        'Native installer preview (unsigned development mode; production remains fail-closed until release signing is implemented):',
-        '',
-        '```bash',
-        `wget -nv -O - "${base}/install-executor.sh" | RUNLAB_INSTALLER_ALLOW_UNSIGNED=1 bash`,
-        '```',
-        '',
-        '```powershell',
-        `$env:RUNLAB_INSTALLER_ALLOW_UNSIGNED='1'; irm "${base}/install-executor.ps1" | iex`,
-        '```',
+        'Standalone Executor installers refuse unsigned downloads by default. A one-time install initiated by an authenticated Host verifies SHA-256 against the same Host but trusts that Host and its transport rather than independently verifying the release signature; do not use the unsigned override with untrusted download URLs.',
         '',
         'Use `HOST_URL=https://agent.example.com` when the host is exposed through a public domain.',
         '',

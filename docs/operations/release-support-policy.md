@@ -1,9 +1,10 @@
 # Release and support policy
 
-Agent RunLab is pre-1.0 software. The supported public channel is the newest
-GitHub/npm release candidate identified by one product tag, currently
-`v0.2.0-rc.1`. A release candidate remains a draft until every platform and
-deployment gate in `public-release-readiness.md` has attached evidence. Source from
+Kala is pre-1.0 software. The supported public channel is the newest
+GitHub Release candidate identified by one product tag, currently
+`v0.2.0-rc.13`. A release candidate remains a draft until the four-platform
+Portable install/reinstall matrix and the release asset and image security gates
+in `public-release-readiness.md` have attached evidence. Source from
 an arbitrary commit, nightly artifacts, mutable container tags, and development
 Compose overrides are unsupported.
 
@@ -14,14 +15,22 @@ backup/restore procedure, and rollback boundary in the same release. The previou
 immutable Dedicated or Private Cloud release is retained for the documented rollback
 window; Portable users retain the previous verified executable themselves.
 
-Supported environments are the exact artifact matrix published by Release CI:
-Portable on Linux, macOS, and Windows x64/arm64; Dedicated on systemd Linux; and
-Private Cloud on Linux x64/arm64 with Docker Engine and Compose v2. A platform is not
-supported merely because source compilation succeeds. Browser support targets the
-current and previous major Chromium releases. Executor compatibility is verified by
-the release acceptance matrix.
+The supported install matrix for this bootstrap RC is Portable on Linux and
+macOS x64/arm64, only after each native asset has passed a clean install and
+same-version reinstall on its matching runner. Windows is not supported and no
+Windows binaries or installers ship in this RC; Windows ConPTY/installation
+acceptance has not passed. Public standalone Executor installers fail closed
+without release signature verification. A one-time install issued by an
+authenticated Host verifies the Host-served SHA-256 index, but trusts that Host
+and its transport; it does not independently verify a release signature.
+Do not enable the unsigned override for downloads from untrusted hosts.
+Dedicated bundles
+and Private Cloud images are packaged and scanned as preview artifacts; their
+upgrade, rollback, backup/restore, tenant isolation, and systemd/Compose
+lifecycles are **not** certified without independent clean-environment evidence.
+Do not represent these previews as supported deployments. Browser support targets
+the current and previous major Chromium releases.
 
 Report vulnerabilities privately through `SECURITY.md`. General defects use the
-public issue templates and must contain synthetic, redacted evidence. Release assets
-and npm packages use the repository, issue tracker, and documentation links embedded
-in their metadata; no private installation data is accepted as public evidence.
+public issue templates and must contain synthetic, redacted evidence. Release assets use the repository, issue tracker, and documentation links
+embedded in their metadata; no private installation data is accepted as public evidence.

@@ -1,8 +1,8 @@
 {
   "name": "@agent-kernel/eval-environment-common",
-  "version": "0.2.0-rc.1",
+  "version": "0.2.0-rc.13",
   "description": "Shared public utilities for Agent Evaluation Platform sandbox providers.",
-  "repository": { "type": "git", "url": "git+https://github.com/xingsy97/akernel.git" }, "homepage": "https://github.com/xingsy97/akernel#readme", "bugs": { "url": "https://github.com/xingsy97/akernel/issues" },
+  "repository": { "type": "git", "url": "git+https://github.com/xingsy97/kala.git" }, "homepage": "https://github.com/xingsy97/kala#readme", "bugs": { "url": "https://github.com/xingsy97/kala/issues" },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

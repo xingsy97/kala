@@ -226,7 +226,10 @@ describe('SessionStore.ensure', () => {
     const startedAt = performance.now()
     const reloaded = await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })
 
-    expect(performance.now() - startedAt).toBeLessThan(1000)
+    // Hosted runners can take over a second to inspect bounded tails of a
+    // sparse 1.4 GiB file. The malformed prefix and readSessionLog rejection
+    // below prove this path never performs a full JSONL replay.
+    expect(performance.now() - startedAt).toBeLessThan(5000)
     expect(reloaded.state.cursor).toBe(1234)
     expect(reloaded.state.messages.at(-1)?.content).toEqual([{ type: 'text', text: 'loaded from latest projection snapshot' }])
     await expect(readSessionLog(record.logPath)).rejects.toThrow(/refuses to fully read external Runtime session copilot-large-no-summary/)

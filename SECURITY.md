@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Agent RunLab is pre-1.0 software. Security fixes are made on the latest release
+Kala is pre-1.0 software. Security fixes are made on the latest release
 candidate and the default branch; older development snapshots are not supported.
 
 ## Reporting a vulnerability

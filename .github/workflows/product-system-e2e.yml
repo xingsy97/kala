@@ -18,7 +18,10 @@ concurrency:
 
 jobs:
   windows-terminal-e2e:
-    name: Windows Executor / ConPTY Terminal
+    name: Windows Executor / ConPTY Terminal (not supported in this RC)
+    # This RC ships no Windows assets. Keep the real ConPTY journey intact for
+    # the next Windows-enabled release, but do not report it as accepted here.
+    if: false
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -34,22 +37,34 @@ jobs:
           corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
       - name: Build Windows production release artifacts
-        run: pnpm run build:release-assets -- --repo local/agent-runlab
+        run: pnpm run build:release-assets -- --tag latest --repo xingsy97/kala
       - name: Verify Windows release and ConPTY companion
         shell: pwsh
         run: |
           pnpm run verify:release-assets
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release asset verification failed' }
+          $null = [scriptblock]::Create((Get-Content -Raw release/install-executor.ps1))
           if (-not (Test-Path release/runlab-executor-win32-x64.exe)) { throw 'missing Windows Executor' }
           if (-not (Test-Path release/node-pty-win32-x64.tar.gz)) { throw 'missing ConPTY companion' }
           tar -xzf release/node-pty-win32-x64.tar.gz -C release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows ConPTY archive extraction failed' }
           New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null
           Move-Item release/win32-x64 release/prebuilds/win32-x64 -Force
           if (-not (Test-Path release/prebuilds/win32-x64/conpty.node)) { throw 'ConPTY native was not installed beside Executor' }
-      - name: Real Windows Terminal lifecycle E2E
+      - name: Real Windows temporary Terminal lifecycle E2E
+        run: node scripts/product-e2e/verify-windows-terminal.mjs
+      - name: Real Windows service Terminal lifecycle E2E
+        env:
+          PRODUCT_E2E_WINDOWS_SERVICE: '1'
+          PRODUCT_E2E_WINDOWS_TERMINAL_PORT: '3326'
         run: node scripts/product-e2e/verify-windows-terminal.mjs
 
   linux-system-e2e:
-    name: production artifact / Chromium / LXD
+    name: production artifact / Chromium / LXD (optional runner)
+    # Keep this stronger system matrix visible but do not queue it forever when
+    # the repository has no registered LXD runner. Portable release acceptance
+    # uses matching hosted runners instead.
+    if: vars.RUNLAB_LXD_RUNNER_ENABLED == 'true'
     runs-on: [self-hosted, linux, x64, lxd-container]
     timeout-minutes: 45
     steps:
@@ -71,7 +86,7 @@ jobs:
           lxc image info ubuntu:24.04 >/dev/null
           test -z "$(lxc list 'runlab-e2e-*' --format csv -c n)"
       - name: Build production release artifacts
-        run: pnpm run build:release-assets -- --repo local/agent-runlab
+        run: pnpm run build:release-assets -- --tag latest --repo xingsy97/kala
       - name: Verify release artifacts
         run: pnpm run verify:release-assets && pnpm run verify:release-install
       - name: Add Workspace Linux service system E2E

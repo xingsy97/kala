@@ -32,8 +32,10 @@ function* parseGrype(document) {
   for (const match of document.matches) yield finding('grype', match.vulnerability?.id, match.artifact?.name, match.artifact?.version, match.vulnerability?.severity, match.vulnerability?.fix?.versions?.join(', ') ?? '', match.artifact?.locations?.[0]?.path ?? 'release')
 }
 function* parseTrivy(document) {
-  if (!Array.isArray(document.Results)) fail('invalid Trivy JSON report')
-  for (const result of document.Results) for (const item of result.Vulnerabilities ?? []) yield finding('trivy', item.VulnerabilityID, item.PkgName, item.InstalledVersion, item.Severity, item.FixedVersion ?? '', result.Target ?? 'release')
+  // Trivy omits Results entirely when a successfully scanned target has no
+  // findings; require its report identity before accepting that empty case.
+  if (!Number.isInteger(document.SchemaVersion) || typeof document.ArtifactName !== 'string' || typeof document.ArtifactType !== 'string' || (document.Results !== undefined && !Array.isArray(document.Results))) fail('invalid Trivy JSON report')
+  for (const result of document.Results ?? []) for (const item of result.Vulnerabilities ?? []) yield finding('trivy', item.VulnerabilityID, item.PkgName, item.InstalledVersion, item.Severity, item.FixedVersion ?? '', result.Target ?? 'release')
 }
 function finding(scanner, vulnerabilityId, packageName, installedVersion, severity, fixedVersion, target) {
   if (![vulnerabilityId, packageName, installedVersion, severity].every((value) => typeof value === 'string' && value)) fail(`invalid ${scanner} vulnerability entry`)

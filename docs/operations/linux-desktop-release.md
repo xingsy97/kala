@@ -22,7 +22,7 @@ pnpm --dir packages/desktop/src-tauri exec cargo test --locked
 # Runs frozen pnpm install, locked Cargo metadata/build, packaging and local receipt.
 pnpm --filter @agent-kernel/desktop build
 node scripts/release/stage-desktop-release.mjs \
-  'packages/desktop/.artifacts/agent-runlab-desktop_0.2.0~rc.7_amd64.deb' \
+  'packages/desktop/.artifacts/kala-desktop_0.2.0~rc.13_amd64.deb' \
   packages/dashboard/public/downloads/desktop
 pnpm --filter @agent-kernel/dashboard build
 ```
@@ -93,7 +93,7 @@ current page's complete automatic installation command.
 Do not purge the WebKit profile or broadly enable downgrade allowances.
 All corrected `~rc` versions sort before their final version.
 
-Open Agent RunLab and enter the Dashboard **origin**, not an API path or a URL
+Open Kala and enter the Dashboard **origin**, not an API path or a URL
 with a token. HTTPS is required except explicit loopback HTTP. A remote machine's
 `127.0.0.1` is not your desktop's loopback: use its HTTPS domain or your existing
 secure tunnel. Login in the WebView (no cookie import from Chrome/Firefox).
@@ -107,17 +107,17 @@ confirm its successful connection; IdP pages and other origins receive no such p
 instructions, filesystem/process access and general native APIs remain
 unavailable to remote pages. External links navigate in the
 unprivileged WebView. There is no native menu bar or browser toolbar.
-The native Dashboard window title is always `Agent RunLab`; it does not expose
+The native Dashboard window title is always `Kala`; it does not expose
 the endpoint or adopt remote page titles. Use **Change server** to view or edit
 the saved address. The desktop's mint octopus and dock underline distinguish it
 from the coral web/PWA icon.
 Press **Ctrl+Shift+O** to open the local connection screen, **Ctrl+R** to reload
 the Dashboard, or **Ctrl+Q** to quit. With a supported system tray, closing or
 minimizing a native window hides the app in the tray. Click its icon or choose
-**Open Agent RunLab** to restore the existing window without a reload;
+**Open Kala** to restore the existing window without a reload;
 **Change server…** opens the local launcher and **Quit** exits the process.
 On AppIndicator desktops, clicking the icon opens its native tray menu without
-restoring or focusing the hidden window. Select **Open Agent RunLab** to restore
+restoring or focusing the hidden window. Select **Open Kala** to restore
 it. No window menu bar is added.
 
 Hiding requires both a registered native item and an active StatusNotifier host.
@@ -275,7 +275,7 @@ await bridge.confirmConnection?.()
 await bridge.setActivity({ status: 'running', running: 1, attention: 0, completed: 0 })
 await bridge.notify({
   id: 'completion:123', sessionId: 'session-123',
-  title: 'Agent RunLab', body: 'A session completed.', silent: true,
+  title: 'Kala', body: 'A session completed.', silent: true,
 })
 const unsubscribe = bridge.subscribe(event => {
   // { type: 'window-state', focused, visible }
@@ -287,7 +287,7 @@ unsubscribe()
 Activity status is `idle`, `running`, `attention` or `completed`. Session IDs
 must match `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`; notification IDs use the same
 character set with a maximum of 256 characters. Unknown fields are rejected.
-The title is always `Agent RunLab`; body is bounded plain text of at most 512
+The title is always `Kala`; body is bounded plain text of at most 512
 characters. The shared Dashboard defaults to generic private text and owns
 explicit detail opt-in, viewed-session suppression and notification preferences.
 Capability URLs are restricted

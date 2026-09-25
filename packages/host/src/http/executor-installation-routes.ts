@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
+import { ZodError } from 'zod'
 
 import { schema, type ExecutorInstallStatus, type PlatformTenancy } from '@agent-kernel/shared'
 
@@ -22,8 +23,9 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
     const path = url.pathname
     if ((path === '/install' || path === '/install.ps1') && req.method === 'GET') {
       claimRoute(req)
-      const origin = requestOrigin(req)
       const shell = path === '/install'
+      if (!shell) { sendError(res, 410, 'windows_installation_unsupported'); return }
+      const origin = requestOrigin(req)
       const body = shell ? renderShellBootstrap(origin) : renderPowerShellBootstrap(origin)
       res.writeHead(200, { 'content-type': shell ? 'text/x-shellscript; charset=utf-8' : 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
       res.end(body)
@@ -90,6 +92,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
       if (!id && req.method === 'POST') {
         void readJson(req).then((body) => {
           const input = schema.CreateExecutorInstallSchema.parse(body)
+          if (input.platform === 'windows') { sendError(res, 422, 'windows_installation_unsupported'); return }
           const created = options.store.create(input, scopedIdempotencyKey(header(req, 'idempotency-key'), authorization.actor), tenantAttribution(authorization.actor))
           const origin = requestOrigin(req)
           const command = installCommand(origin, input.platform, input.mode, created.setupCode)
@@ -210,9 +213,9 @@ function bootstrapEnvironment(origin: string, snapshot: { id: string; mode: stri
     EXECUTOR_INSTALL_PLATFORM: snapshot.platform,
     EXECUTOR_INSTALL_ROOT: snapshot.workspaceRoot,
     RUNLAB_RELEASE_ASSETS_URL: `${origin}/install/assets`,
-    // The self-hosted release currently has checksums but no detached signing
-    // infrastructure. This authorization is scoped to the one-time Host-issued
-    // install session; the installer still verifies the downloaded executable.
+    // This explicit one-time Host-issued exception trusts the authenticated
+    // Host and its transport, not the public release signature. The installer
+    // still verifies its executable against this same Host's SHA-256 index.
     RUNLAB_INSTALLER_ALLOW_UNSIGNED: '1',
     ...(snapshot.label ? { EXECUTOR_INSTALL_LABEL: snapshot.label } : {}),
   }
@@ -313,5 +316,12 @@ function parseAllowedOriginsFromEnv(): string[] | null {
 }
 function sendJson(res: ServerResponse, status: number, body: unknown): void { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) }
 function sendError(res: ServerResponse, status: number, error: string): void { sendJson(res, status, { error }) }
-function handleError(res: ServerResponse, error: unknown): void { if (res.writableEnded) return; if (error instanceof ExecutorInstallationError) { sendError(res, error.status, error.message); return } sendError(res, 400, error instanceof Error ? error.message : String(error)) }
+function handleError(res: ServerResponse, error: unknown): void {
+  if (res.writableEnded) return
+  if (error instanceof ExecutorInstallationError) { sendError(res, error.status, error.message); return }
+  if (error instanceof ZodError || error instanceof SyntaxError) { sendError(res, 400, 'invalid_request'); return }
+  // An I/O or persistence fault is not a malformed client request. Do not
+  // disclose local filenames or operating-system errors to the caller.
+  sendError(res, 500, 'internal_error')
+}
 async function readJson(req: IncomingMessage): Promise<unknown> { const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk)); return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {} }

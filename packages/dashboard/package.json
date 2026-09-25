@@ -1,12 +1,12 @@
 {
   "name": "@agent-kernel/dashboard",
-  "version": "0.2.0-rc.1",
-  "description": "Vite + React SPA that subscribes to an agent-kernel host over Socket.IO.",
+  "version": "0.2.0-rc.13",
+  "description": "Kala Dashboard: React app that subscribes to the Kala Host over Socket.IO.",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "tsc -p tsconfig.json && node --max-old-space-size=4096 ./node_modules/vite/bin/vite.js build",
     "preview": "vite preview",
     "test": "vitest run && node --test scripts/splash-theme.test.mjs scripts/pwa-network-shell.test.mjs scripts/monaco-self-hosting.test.mjs scripts/desktop-download.test.mjs",
     "test:watch": "vitest",

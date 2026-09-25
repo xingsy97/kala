@@ -17,7 +17,7 @@ body:
     id: version
     attributes:
       label: Version or revision
-      placeholder: v0.2.0-rc.1 or a Git commit
+      placeholder: v0.2.0-rc.13 or a Git commit
     validations:
       required: true
   - type: textarea

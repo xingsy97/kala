@@ -14,7 +14,7 @@
 
 ## 1. Mission
 
-Migrate the existing legacy single-process installation to Agent RunLab Dedicated (`platform + single-tenant`) on the real systemd topology:
+Migrate the existing legacy single-process installation to Kala Dedicated (`platform + single-tenant`) on the real systemd topology:
 
 ```text
 public :13000
@@ -42,9 +42,9 @@ The executing Agent is external only if its command channel survives all of the 
 
 Acceptable control channels:
 
-- SSH from another machine/process that does not use Agent RunLab tools;
+- SSH from another machine/process that does not use Kala tools;
 - VM/LXD console;
-- a separately supervised operator shell outside all Agent RunLab service cgroups.
+- a separately supervised operator shell outside all Kala service cgroups.
 
 Not acceptable:
 
@@ -147,7 +147,7 @@ Replace ad hoc request-file assumptions with a validated schema and documented c
 - source release digest and target release digest;
 - target topology/unit and expected active route generation;
 - requested action (`deploy`, `abort`, `rollback`);
-- origin Session/call identity when initiated by Agent RunLab;
+- origin Session/call identity when initiated by Kala;
 - timestamps, fencing token, predecessor, candidate slot;
 - phase, quiescence blockers, continuation outcomes, health evidence, rollback outcome;
 - bounded redacted error.

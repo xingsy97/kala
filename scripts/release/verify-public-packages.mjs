@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '../..')
-const metadata = { repository: { type: 'git', url: 'git+https://github.com/xingsy97/akernel.git' }, homepage: 'https://github.com/xingsy97/akernel#readme', bugs: { url: 'https://github.com/xingsy97/akernel/issues' } }
+const metadata = { repository: { type: 'git', url: 'git+https://github.com/xingsy97/kala.git' }, homepage: 'https://github.com/xingsy97/kala#readme', bugs: { url: 'https://github.com/xingsy97/kala/issues' } }
 const failures = []
 const packages = workspacePackages().filter(({ manifest }) => manifest.private !== true)
 for (const item of packages) {

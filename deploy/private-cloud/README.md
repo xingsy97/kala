@@ -1,4 +1,4 @@
-# Agent RunLab Private Cloud
+# Kala Private Cloud
 
 Public installations use the versioned release bundle and its `runlab-private-cloud`
 operator. See `docs/operations/private-cloud-release.md`. No source checkout or

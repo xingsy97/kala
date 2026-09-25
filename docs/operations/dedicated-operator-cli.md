@@ -3,7 +3,7 @@
 **Status:** normative
 
 **Scope:** source-free installation and lifecycle operations for the Linux
-systemd distribution of Agent RunLab Dedicated
+systemd distribution of Kala Dedicated
 
 ## 1. Command surface
 
@@ -109,7 +109,7 @@ explicit operator cleanup.
 
 `status` publishes a stable installation ID. Uninstall requires the exact
 `UNINSTALL:<installation-id>` confirmation, then stops and disables only the six
-Agent RunLab Dedicated units, removes only their exact unit files, the installed
+Kala Dedicated units, removes only their exact unit files, the installed
 operator link, and the bounded `/opt/agent-runlab` control root. It preserves
 `/var/lib/agent-runlab`, `/etc/agent-runlab`, immutable releases, receipts,
 backups, service identity, and user data. This command has no data-purge mode.

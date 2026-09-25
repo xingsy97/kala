@@ -58,7 +58,7 @@ try {
   const evidence = createRcEvidence({
     category: 'portable', target, tag, version: tag.slice(1), revision, ok: true,
     artifact: { name: basename(asset), sha256: createHash('sha256').update(readFileSync(asset)).digest('hex') },
-    checks: { assetIntegrity: true, cleanInstall: true, boot: true, capabilities: true, dashboard: true, statePersistence: true, cleanStop: true, upgrade: true },
+    checks: { assetIntegrity: true, cleanInstall: true, boot: true, capabilities: true, dashboard: true, statePersistence: true, cleanStop: true, reinstall: true },
   })
   mkdirSync(resolve(output, '..'), { recursive: true, mode: 0o700 })
   writeFileSync(output, JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx', mode: 0o600 })

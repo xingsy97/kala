@@ -33,7 +33,7 @@ const signingKeyRegistry = new StaticSigningKeyRegistry({ schemaVersion: 1, keys
 const servers: Server[] = []
 afterEach(async () => Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))))
 
-async function harness(options: { backend?: Partial<EvaluationAgentBackend>; destroyVerified?: boolean; collect?: EvaluationSandboxProvider['collect'] } = {}) {
+async function harness(options: { backend?: Partial<EvaluationAgentBackend>; destroyVerified?: boolean; collect?: EvaluationSandboxProvider['collect']; now?: () => Date } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'eval-worker-integration-'))
   const spec = JSON.parse(await readFile(join(packageRoot, '..', 'eval-protocol', 'fixtures', 'canonical-run-spec-v1.json'), 'utf8')) as EvaluationRunSpec
   const task = ResolvedTaskSchema.parse({
@@ -45,7 +45,7 @@ async function harness(options: { backend?: Partial<EvaluationAgentBackend>; des
   })
   const catalog = new RegisteredTaskCatalog()
   catalog.register(spec.taskPack.evaluatedSlice.sliceManifestHash, [task, { ...task, taskId: 'task-two' }])
-  const controlPlane = new EvaluationControlPlane({ journalPath: join(directory, 'journal.jsonl'), taskCatalog: catalog, signingKeyRegistry })
+  const controlPlane = new EvaluationControlPlane({ journalPath: join(directory, 'journal.jsonl'), taskCatalog: catalog, signingKeyRegistry, ...(options.now ? { now: options.now } : {}) })
   await controlPlane.initialize()
   const authenticator = new BearerTokenAuthenticator({ schemaVersion: 1, keys: [
     { key: OPERATOR_TOKEN, principal: { schemaVersion: 1, principalId: 'operator-one', kind: 'user', role: 'operator', scopes: ['platform:read', 'evaluation:read', 'evaluation:write', 'evidence:read'] } },
@@ -255,18 +255,22 @@ describe('Worker durable Control Plane integration', () => {
   })
 
   it('classifies an in-flight trial indeterminate after hard Worker loss stops lease heartbeats', async () => {
-    const fixture = await harness()
+    let now = new Date()
+    const fixture = await harness({ now: () => now })
     await fixture.runner.run(fixture.lease)
     const lease = (await fixture.client.acquireLease('worker', 20))!
     await fixture.client.heartbeatLease({ schemaVersion: 1, leaseId: lease.leaseId, workerId: 'worker', at: new Date().toISOString(), lastEventSequence: 0 }, 'indeterminate')
-    await delay(30)
+    now = new Date(now.getTime() + 21)
     await expect(fixture.operatorClient.expireLeases()).resolves.toBe(1)
     expect(fixture.controlPlane.projection.trials.get(lease.trialId)?.state).toBe('indeterminate')
     expect(fixture.controlPlane.projection.leases.get(lease.leaseId)?.state).toBe('closed')
   })
 
   it('propagates durable run cancellation through a rejected lease heartbeat to the live Agent', async () => {
-    const fixture = await harness()
+    // Real worker timers remain active; only Control Plane lease time is fixed.
+    // Cancellation, not a loaded CI runner expiring a 120 ms lease, must reject it.
+    const now = new Date()
+    const fixture = await harness({ now: () => now })
     await fixture.runner.run(fixture.lease)
     const cancel = vi.fn(async () => undefined)
     const start = vi.spyOn(fixture.backend, 'start')

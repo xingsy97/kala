@@ -1735,17 +1735,9 @@ describe('wire protocol', () => {
       const powershell = await fetch(`http://localhost:${localServer.port}/install.ps1`, {
         headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'downloads.example.test' },
       })
-      expect(powershell.status).toBe(200)
-      expect(powershell.headers.get('content-type')).toContain('text/plain')
-      const script = await powershell.text()
-      expect(script).toContain("$ErrorActionPreference = 'Stop'")
-      expect(script).toContain('$code = $env:RUNLAB_SETUP_CODE')
-      expect(script).toContain('https://downloads.example.test/install/session')
-      expect(script).toContain('https://downloads.example.test/install/assets/install-executor.ps1')
-      expect(script).toContain('winget.Source install --id OpenJS.NodeJS.LTS')
-      expect(script.indexOf('winget.Source install')).toBeLessThan(script.indexOf('/install/session'))
-      expect(script).not.toContain('EXECUTOR_INVITE')
-      expect(script).not.toContain('<!DOCTYPE html>')
+      expect(powershell.status).toBe(410)
+      expect(powershell.headers.get('content-type')).toContain('application/json')
+      expect(await powershell.json()).toEqual({ error: 'windows_installation_unsupported' })
     } finally {
       await localServer.close()
       rmSync(releaseDir, { recursive: true, force: true })

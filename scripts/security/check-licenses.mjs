@@ -23,9 +23,17 @@ const reviewedUnknown = new Map([
     sha256: '66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49',
     classification: 'MIT',
   }],
+  // GitHub Copilot CLI's license permits unmodified redistribution within a
+  // larger application when its license accompanies the binary. The release
+  // builder ships COPILOT_CLI_LICENSE.md alongside each CLI asset.
+  ...['@github/copilot@1.0.80', ...['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64'].map((target) => `@github/copilot-${target}@1.0.80`)].map((name) => [name, {
+    licenseFile: 'LICENSE.md',
+    sha256: 'b9680937e10425bf19862908856c16ed274e6b81a1368bd62be7a757eab21628',
+    classification: 'LicenseRef-GitHub-Copilot-CLI',
+  }]),
 ])
 
-const result = spawnSync('pnpm', ['licenses', 'list', '--prod', '--json'], { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 })
+const result = spawnSync('pnpm', ['licenses', 'list', '--prod', '--json'], { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024, shell: process.platform === 'win32' })
 if (result.status !== 0) fail('pnpm license inventory failed')
 const inventory = JSON.parse(result.stdout)
 const failures = []

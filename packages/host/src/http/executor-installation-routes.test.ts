@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { attachExecutorInstallationRoutes } from './executor-installation-routes.js'
 import { ExecutorInstallationStore } from '../store/executor-installation.js'
@@ -20,7 +20,7 @@ describe('executor installation routes', () => {
     attachExecutorInstallationRoutes(server, { store, identities, tenancy })
     await new Promise<void>((resolve) => server.listen(0, resolve))
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('missing address')
-    return { url: `http://localhost:${address.port}`, dir }
+    return { url: `http://localhost:${address.port}`, dir, store }
   }
 
   it('allows browser preflight for cross-origin dashboard install API calls', async () => {
@@ -37,6 +37,43 @@ describe('executor installation routes', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
     expect(response.headers.get('access-control-allow-methods')).toContain('POST')
     expect(response.headers.get('access-control-allow-headers')).toContain('content-type')
+  })
+
+  it('supports Linux and macOS installs but clearly rejects Windows install requests and downloads', async () => {
+    const { url, dir } = await start()
+    for (const platform of ['linux', 'macos']) {
+      const response = await fetch(`${url}/api/executor-installs`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ platform, mode: 'service', workspaceRoot: '/work/example', label: `${platform}-fixture` }),
+      })
+      expect(response.status).toBe(201)
+      const created = await response.json() as { command: string; setupCode: string }
+      expect(created.command).toContain(`${url}/install`)
+      expect(created.command).not.toContain('install.ps1')
+      expect(readFileSync(join(dir, 'installs.json'), 'utf8')).not.toContain(created.setupCode)
+    }
+    for (const mode of ['temporary', 'service']) {
+      const response = await fetch(`${url}/api/executor-installs`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ platform: 'windows', mode, workspaceRoot: 'C:\\work\\example', label: 'windows-fixture' }),
+      })
+      expect(response.status).toBe(422)
+      expect(await response.json()).toEqual({ error: 'windows_installation_unsupported' })
+    }
+    const installer = await fetch(`${url}/install.ps1`)
+    expect(installer.status).toBe(410)
+    expect(await installer.json()).toEqual({ error: 'windows_installation_unsupported' })
+  })
+
+  it('rejects invalid input but never exposes server filesystem paths after a persistence fault', async () => {
+    const { url, store } = await start()
+    const invalid = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'invalid' }) })
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toEqual({ error: 'invalid_request' })
+    vi.spyOn(store, 'create').mockImplementation(() => { throw new Error('private filesystem location should never leave the server') })
+    const broken = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'macos', mode: 'temporary', workspaceRoot: '/work/example' }) })
+    expect(broken.status).toBe(500)
+    expect(await broken.json()).toEqual({ error: 'internal_error' })
   })
 
   it('creates, patches, reports progress, approves, redeems, and short-polls', async () => {
@@ -62,16 +99,6 @@ describe('executor installation routes', () => {
     expect(installerScript).toContain('[1/4] Downloading verified installer')
     expect(installerScript).toContain('[3/4] Installing Executor')
     expect(installerScript).not.toContain('curl -fSL')
-    const powerShellInstaller = await fetch(`${url}/install.ps1`).then((response) => response.text())
-    expect(powerShellInstaller).toContain("-Headers @{ Accept = 'application/json' }")
-    expect(powerShellInstaller).toContain('$null -eq $claim.env')
-    expect(powerShellInstaller).toContain('[1/4] Downloading verified installer')
-    expect(powerShellInstaller).toContain('[3/4] Starting Executor')
-    expect(powerShellInstaller).toContain("Read-Host 'Install the official Node.js LTS package with Windows Package Manager (winget)? [y/N]'")
-    expect(powerShellInstaller).toContain('winget.Source install --id OpenJS.NodeJS.LTS --exact --source winget')
-    expect(powerShellInstaller).toContain('The setup code was not consumed')
-    expect(powerShellInstaller.indexOf('winget.Source install')).toBeLessThan(powerShellInstaller.indexOf('/install/session'))
-    expect(powerShellInstaller.split('\n').length).toBeGreaterThan(40)
     const claimed = await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })
     expect(claimed.status).toBe(200)
     const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string; RUNLAB_RELEASE_ASSETS_URL: string; RUNLAB_INSTALLER_ALLOW_UNSIGNED: string } }

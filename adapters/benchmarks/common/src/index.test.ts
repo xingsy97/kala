@@ -30,14 +30,21 @@ describe('DeclarativeBenchmarkAdapter', () => {
       await execFileAsync('git', ['-C', workspace, '-c', 'user.name=Fixture', '-c', 'user.email=user5@example.com', 'add', 'fixture.txt'])
       await execFileAsync('git', ['-C', workspace, '-c', 'user.name=Fixture', '-c', 'user.email=user5@example.com', 'commit', '-qm', 'fixture'])
       const { stdout: revision } = await execFileAsync('git', ['-C', workspace, 'rev-parse', 'HEAD'])
-      await expect(execFileAsync('git', ['-C', workspace, 'status', '--porcelain'], { env: { ...process.env, GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' } })).rejects.toThrow()
+      // Hosted runners may trust every checkout globally. Remove that ambient
+      // configuration so the simulated foreign owner is rejected until the
+      // verifier explicitly trusts this exact sandbox workspace.
+      const foreignOwnerEnv = {
+        ...process.env, GIT_TEST_ASSUME_DIFFERENT_OWNER: '1',
+        GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_COUNT: '0',
+      }
+      await expect(execFileAsync('git', ['-C', workspace, 'status', '--porcelain'], { env: foreignOwnerEnv })).rejects.toThrow()
 
       const adapter = new DeclarativeBenchmarkAdapter({ descriptor: BenchmarkDescriptorSchema.parse({ schemaVersion: 1, id: 'code-understanding', label: 'Code Understanding', version: '1', official: false, nativePrimaryMetric: 'repository_readable', verifierId: 'ownership-verifier', verifierVersion: '1' }), taskPackId: 'code-understanding', failureCode: 'REPOSITORY_UNREADABLE', failureSummary: 'repository unreadable', deriveMetrics: (steps) => allStepsMetrics('repository_readable', steps) })
       const task = ResolvedTaskSchema.parse({ schemaVersion: 1, taskId: 'ownership', taskPackId: 'code-understanding', taskPackVersion: '1', title: 'Ownership fixture', prompt: 'Verify repository', repository: { kind: 'artifact', archiveRef: 'fixture.tar', archiveSha256: HASH, revision: revision.trim() }, fixtureManifestHash: HASH, faultScenarioIds: [], verification: [{ stepId: 'repository-readable', argv: ['git', 'diff', '--exit-code', 'HEAD', '--', 'fixture.txt'], cwd: '.', timeoutMs: 1_000, requiredExitCode: 0, nativeMetric: 'repository_readable' }], analysis: { constraints: [], protectedPaths: [], hiddenVerifierPaths: [] }, policy: { license: { status: 'granted', basis: 'MIT' }, permissions: { evaluation: { status: 'granted', basis: 'evaluation' }, training: { status: 'unreviewed' } }, sourceProvenance: { status: 'granted', sourceRefs: ['fixture:benchmark-common'] }, publication: { artifact: { status: 'granted', basis: 'test fixture' }, report: { status: 'granted', basis: 'test fixture' }, leaderboard: { status: 'granted', basis: 'test fixture' }, redistribution: { status: 'granted', basis: 'MIT' } } } })
       const execute = async (request: { argv: readonly string[]; cwd?: string; env?: Readonly<Record<string, string>> }) => {
         if (request.argv[0] === 'sh' && request.argv[2]?.includes('/artifacts/')) return { exitCode: 0, stdout: '', stderr: '', startedAt: '', completedAt: '', timedOut: false }
         try {
-          const result = await execFileAsync(request.argv[0]!, [...request.argv.slice(1)], { cwd: request.cwd, env: { ...process.env, GIT_TEST_ASSUME_DIFFERENT_OWNER: '1', ...request.env } })
+          const result = await execFileAsync(request.argv[0]!, [...request.argv.slice(1)], { cwd: request.cwd, env: { ...foreignOwnerEnv, ...request.env } })
           return { exitCode: 0, stdout: result.stdout, stderr: result.stderr, startedAt: '', completedAt: '', timedOut: false }
         } catch (error) {
           const failure = error as { code?: number; stdout?: string; stderr?: string }

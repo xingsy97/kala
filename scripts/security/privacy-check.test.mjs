@@ -43,6 +43,7 @@ test('blocks public-release narrative and credential URLs without over-matching 
 
 test('blocks unregistered images, binary files, and private denylist values', () => {
   assert(scan('docs/design/preview.png', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.design-image'))
+  assert(scan('docs/assets/kala-dashboard-preview.gif', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.unregistered-image'))
   assert(scan('fixtures/new.bin', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.unregistered-binary'))
   const marker = ['machine', 'only', 'marker'].join('-')
   assert(scan('docs/example.md', marker, [marker]).some(({ rule }) => rule === 'privacy.private-denylist'))
@@ -64,8 +65,12 @@ test('historical approved assets reject unreviewed bytes and findings never disc
   const oldBytes = firstAssetCommit ? spawnSync('git', ['show', `${firstAssetCommit}:${asset}`], { cwd: root }).stdout : Buffer.alloc(0)
   if (oldBytes.length) {
     assert.equal(scanEntry({ path: asset, content: oldBytes, policy, source: 'history-file' }).length, 0)
-    assert(scanEntry({ path: asset, content: oldBytes, policy, source: 'file' })
-      .some(({ rule }) => rule === 'privacy.asset-content-drift'))
+    // A shallow CI checkout treats HEAD as the first asset commit; in that case
+    // these bytes are current, not an earlier version that should be rejected.
+    if (!oldBytes.equals(readFileSync(join(root, asset)))) {
+      assert(scanEntry({ path: asset, content: oldBytes, policy, source: 'file' })
+        .some(({ rule }) => rule === 'privacy.asset-content-drift'))
+    }
   }
   const privateIp = [10, 23, 45, 67].join('.')
   const sensitive = `docs/${['private', 'user'].join('.')}@${['personal', 'example'].join('.')}/${privateIp}/secret.md`

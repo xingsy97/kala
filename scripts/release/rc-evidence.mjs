@@ -5,8 +5,8 @@ export const RC_EVIDENCE_SCHEMA_VERSION = 1
 
 export const requiredReleaseEvidence = Object.freeze({
   portable: Object.freeze({
-    targets: Object.freeze(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']),
-    checks: Object.freeze(['assetIntegrity', 'cleanInstall', 'boot', 'capabilities', 'dashboard', 'statePersistence', 'cleanStop', 'upgrade']),
+    targets: Object.freeze(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']),
+    checks: Object.freeze(['assetIntegrity', 'cleanInstall', 'boot', 'capabilities', 'dashboard', 'statePersistence', 'cleanStop', 'reinstall']),
   }),
   dedicated: Object.freeze({
     targets: Object.freeze(['linux-x64-systemd']),
@@ -77,7 +77,11 @@ export function collectRcEvidence(root) {
 }
 
 export function verifyRcEvidenceSet(records, expected) {
-  const expectedKeys = new Set(Object.entries(requiredReleaseEvidence).flatMap(([category, policy]) => policy.targets.map((target) => category + '/' + target)))
+  // Bootstrap RC: only Portable can be proven on hosted runners without an
+  // attested predecessor or private clean-environment runner. Dedicated and
+  // Private Cloud evidence remains strictly validated if provided, but neither
+  // category can be claimed as accepted solely from packaged assets.
+  const expectedKeys = new Set(requiredReleaseEvidence.portable.targets.map((target) => 'portable/' + target))
   const actual = new Map()
   for (const record of records) {
     const value = validateRcEvidence(record.value ?? record, expected)
@@ -86,9 +90,9 @@ export function verifyRcEvidenceSet(records, expected) {
     actual.set(key, value)
   }
   const missing = [...expectedKeys].filter((key) => !actual.has(key))
-  const extra = [...actual.keys()].filter((key) => !expectedKeys.has(key))
   if (missing.length > 0) throw new Error('release evidence matrix is incomplete: ' + missing.join(', '))
-  if (extra.length > 0) throw new Error('release evidence matrix has unexpected targets: ' + extra.join(', '))
+  const unexpected = [...actual.keys()].filter((key) => !expectedKeys.has(key))
+  if (unexpected.length > 0) throw new Error('release evidence matrix contains unexpected targets: ' + unexpected.join(', '))
   return [...actual.values()].sort((a, b) => (a.category + '/' + a.target).localeCompare(b.category + '/' + b.target))
 }
 

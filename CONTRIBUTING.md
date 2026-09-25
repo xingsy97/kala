@@ -1,6 +1,6 @@
-# Contributing to agent-kernel
+# Contributing to Kala
 
-Thanks for contributing to Agent RunLab. The project favors explicit contracts,
+Thanks for contributing to Kala. The project favors explicit contracts,
 recoverable state transitions, and readable implementations over feature velocity.
 
 ---

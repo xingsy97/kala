@@ -1,18 +1,50 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { resolve } from 'node:path'
-import { test } from 'node:test'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
+import { after, test } from 'node:test'
 import { desktopBootstrapScript, desktopInstallCommands, desktopLocalInstallCommands, loadDesktopRelease, validateDesktopOrigin, validateDesktopRelease } from '../public/downloads/desktop/release-data.js'
 import { aptInstallSnippet } from '../public/downloads/desktop/apt-snippet.js'
 
-const base = new URL('../public/downloads/desktop/', import.meta.url)
+const publishedBase = new URL('../public/downloads/desktop/', import.meta.url)
+// The immutable Desktop .deb is staged during deployment, not checked into
+// source. Test its real bytes when present; clean CI uses an isolated fixture.
+const base = existsSync(new URL('release.json', publishedBase)) ? publishedBase : await desktopFixture()
 const release = JSON.parse(await readFile(new URL('release.json', base), 'utf8'))
 
-test('published immutable metadata and actual package/checksum bytes match', async () => {
+async function desktopFixture() {
+  const directory = await mkdtemp(join(tmpdir(), 'kala-desktop-test-'))
+  after(() => rm(directory, { recursive: true, force: true }))
+  const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
+  const version = '0.2.0~rc.13'
+  const file = 'kala-desktop-fixture.deb'
+  const packageBytes = Buffer.from('test-only desktop package fixture\n')
+  const dependenciesBytes = Buffer.from('{"fixture":true}\n')
+  const prefix = `${version}-${digest(packageBytes)}`
+  const dependencies = `${prefix}.dependencies.json`
+  const checksums = `${prefix}.SHA256SUMS.txt`
+  const checksumBytes = Buffer.from(`${digest(packageBytes)}  ${file}\n${digest(dependenciesBytes)}  ${dependencies}\n`)
+  const manifest = {
+    schemaVersion: 2, version, platform: 'linux-amd64',
+    artifact: { file, sha256: digest(packageBytes), size: packageBytes.length },
+    dependencies: { file: dependencies, sha256: digest(dependenciesBytes) },
+    checksums: { file: checksums, sha256: digest(checksumBytes) },
+  }
+  await Promise.all([
+    writeFile(join(directory, file), packageBytes),
+    writeFile(join(directory, dependencies), dependenciesBytes),
+    writeFile(join(directory, checksums), checksumBytes),
+    writeFile(join(directory, 'release.json'), JSON.stringify(manifest)),
+  ])
+  return pathToFileURL(`${directory}/`)
+}
+
+test('immutable Desktop metadata matches actual package/checksum bytes', async () => {
   assert.equal(validateDesktopRelease(release).version, release.version)
   for (const item of [release.artifact, release.dependencies, release.checksums]) {
     const bytes = await readFile(new URL(item.file, base))

@@ -3,6 +3,7 @@ import { accessSync, constants, existsSync, readFileSync, readdirSync } from 'no
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { verifyReleaseChecksums } from './release-checksums.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const releaseDir = join(root, 'release')
@@ -11,6 +12,7 @@ const manifestPath = join(releaseDir, 'manifest.json')
 if (!existsSync(manifestPath)) fail('missing release/manifest.json')
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+const supportedNativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']
 if (!/^[0-9a-f]{40}$/u.test(manifest.source?.revision ?? '')
   || !/^[0-9a-f]{64}$/u.test(manifest.source?.snapshotSha256 ?? '')
   || typeof manifest.source?.dirty !== 'boolean') {
@@ -21,6 +23,19 @@ if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) {
 }
 if (new Set(manifest.assets).size !== manifest.assets.length) {
   fail('manifest.assets must not contain duplicates')
+}
+for (const asset of manifest.assets) assertSupportedReleaseAssetName(asset, 'manifest')
+if (!Array.isArray(manifest.nativeTargets)
+  || new Set(manifest.nativeTargets).size !== manifest.nativeTargets.length
+  || manifest.nativeTargets.some((target) => !supportedNativeTargets.includes(target))) {
+  fail('manifest.nativeTargets must contain only unique Linux/macOS x64/arm64 targets')
+}
+for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
+  if (!Array.isArray(assets)) fail(`manifest.nativeAssets.${product} must be an array`)
+  for (const asset of assets) {
+    assertSupportedReleaseAssetName(asset, `manifest.nativeAssets.${product}`)
+    if (!supportedNativeTargets.some((target) => asset.endsWith(`-${target}`))) fail(`unsupported native asset target in ${asset}`)
+  }
 }
 for (const asset of ['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt']) {
   if (!manifest.assets.includes(asset)) fail(`manifest missing supply-chain asset ${asset}`)
@@ -34,6 +49,7 @@ const notices = readFileSync(join(releaseDir, 'THIRD_PARTY_NOTICES.txt'), 'utf8'
 if (!notices.includes(`Kala ${manifest.version}`) || !notices.includes('third-party dependency inventory')) fail('release third-party notices are invalid')
 const expectedReleaseFiles = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort()
 const actualReleaseEntries = readdirSync(releaseDir, { withFileTypes: true })
+for (const entry of actualReleaseEntries) assertSupportedReleaseAssetName(entry.name, 'release directory')
 if (actualReleaseEntries.some((entry) => !entry.isFile())
   || JSON.stringify(actualReleaseEntries.map((entry) => entry.name).sort()) !== JSON.stringify(expectedReleaseFiles)) {
   fail('release file set does not exactly match its manifest')
@@ -70,6 +86,15 @@ if (includesHost) {
     fail('release deployment.json is not the canonical Dedicated configuration')
   }
   const hostBundle = readFileSync(join(releaseDir, 'bundle-dashboard-with-runtime.cjs'), 'utf8')
+  const embeddedAssetsPrefix = 'globalThis.__AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__='
+  const embeddedAssetsStart = hostBundle.indexOf(embeddedAssetsPrefix)
+  if (embeddedAssetsStart < 0) fail('release Host bundle is missing embedded release assets')
+  const embeddedAssetsEnd = hostBundle.indexOf(';\n', embeddedAssetsStart + embeddedAssetsPrefix.length)
+  if (embeddedAssetsEnd < 0) fail('release Host bundle has unterminated embedded release assets')
+  // The banner may contain hundreds of MB of base64. V8 regular expressions
+  // over that whole line overflow the call stack; locate its terminator instead.
+  const embeddedAssets = JSON.parse(hostBundle.slice(embeddedAssetsStart + embeddedAssetsPrefix.length, embeddedAssetsEnd))
+  for (const asset of embeddedAssets) assertSupportedReleaseAssetName(asset?.path, 'embedded Host assets')
   if (!hostBundle.includes('__AGENT_KERNEL_EMBEDDED_DOCS__')
     || !hostBundle.includes(Buffer.from('# Dedicated Platform Runtime Unit Refactor').toString('base64'))) {
     fail('release Host bundle is missing embedded product documentation')
@@ -120,6 +145,7 @@ for (const asset of manifest.assets) {
     if (!text.includes('wget -nv -O')) {
       fail(`${asset} user-facing examples must use diagnostic temp-file bootstrap commands`)
     }
+    if (/win32|mingw|msys|cygwin|\.exe|\.ps1|conpty/iu.test(text)) fail(`${asset} must not offer Windows release assets`)
     if (!text.includes('AGENT_KERNEL_RUNTIME:-auto')) {
       fail(`${asset} must support AGENT_KERNEL_RUNTIME=auto|cjs|native`)
     }
@@ -168,33 +194,23 @@ for (const asset of manifest.assets) {
   }
 }
 
-for (const installer of ['install-executor.sh', 'install-executor.ps1']) {
-  if (!manifest.assets.includes(installer)) fail(`manifest missing ${installer}`)
-  const text = readFileSync(join(releaseDir, installer), 'utf8')
-  for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'SHA256SUMS', 'runlab-executor-', '--internal-installer']) {
-    if (!text.includes(marker)) fail(`${installer} missing required installer marker: ${marker}`)
-  }
-  if (text.includes('manifest.json')) fail(`${installer} must use the Host-scoped checksum index without manifest fallback`)
-  if (installer === 'install-executor.sh' && (!text.includes('agent-kernel-executor.cjs') || !text.includes('Node.js 22+'))) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
-  if (installer === 'install-executor.ps1' && (!text.includes('agent-kernel-executor.cjs') || !text.includes('Get-Command node'))) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
+const installer = 'install-executor.sh'
+if (!manifest.assets.includes(installer)) fail(`manifest missing ${installer}`)
+const installerText = readFileSync(join(releaseDir, installer), 'utf8')
+for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'SHA256SUMS', 'runlab-executor-', '--internal-installer', 'Linux and macOS only']) {
+  if (!installerText.includes(marker)) fail(`${installer} missing required installer marker: ${marker}`)
 }
-for (const target of ['win32-x64', 'win32-arm64']) {
-  const archive = `node-pty-${target}.tar.gz`
-  if (!manifest.assets.includes(archive) || !existsSync(join(releaseDir, archive))) fail(`release missing Windows Terminal companion ${archive}`)
-  const listing = spawnSync('tar', ['-tzf', join(releaseDir, archive)], { encoding: 'utf8' })
-  if (listing.status !== 0) fail(`${archive} is not a readable tar archive`)
-  for (const required of [`${target}/conpty.node`, `${target}/pty.node`, `${target}/winpty-agent.exe`]) {
-    if (!listing.stdout.split('\n').includes(required)) fail(`${archive} missing ${required}`)
-  }
-}
+if (installerText.includes('manifest.json')) fail(`${installer} must use the Host-scoped checksum index without manifest fallback`)
+if (!installerText.includes('agent-kernel-executor.cjs') || !installerText.includes('Node.js 22+')) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
+if (/win32|mingw|msys|cygwin|\.exe|\.ps1|conpty/iu.test(installerText)) fail(`${installer} must support only the four Linux/macOS targets`)
 const installerSyntax = spawnSync('bash', ['-n', join(releaseDir, 'install-executor.sh')], { stdio: 'inherit' })
 if (installerSyntax.status !== 0) fail('install-executor.sh failed bash syntax check')
 
 const notesPath = join(releaseDir, 'RELEASE_NOTES.md')
 if (!existsSync(notesPath)) fail('missing release/RELEASE_NOTES.md')
 const notes = readFileSync(notesPath, 'utf8')
-if (manifest.assets.includes('run.sh') && (!notes.includes('wget -nv -O -') || !notes.includes('| COMPONENT='))) {
-  fail('release notes missing direct one-line wget-to-bash bootstrap command')
+if (manifest.assets.includes('run.sh') && (!notes.includes("set -o pipefail; curl --proto '=https' --tlsv1.2 -fsSL") || !notes.includes('| COMPONENT='))) {
+  fail('release notes missing direct HTTPS curl-to-bash bootstrap with pipefail')
 }
 if (manifest.assets.includes('run.sh') && !notes.includes('## Advanced Usage')) {
   fail('release notes missing advanced usage section')
@@ -208,9 +224,6 @@ if (/bash -c 'set -euo pipefail; tmp=\$\(mktemp\)/.test(notes)) {
 if (notes.includes('chmod +x run.sh') || notes.includes('./run.sh')) {
   fail('release notes must not require saving run.sh before execution')
 }
-if (notes.includes('curl ')) {
-  fail('release notes must not mention curl')
-}
 if (/wget\s+-qO-.*\|.*bash/.test(notes)) {
   fail('release notes must not pipe quiet wget output directly into bash')
 }
@@ -223,12 +236,16 @@ if (!notes.includes('sha256sum -c SHA256SUMS --ignore-missing')) {
 if (/agent-kernel-(host|executor)\.cjs\s*\|\s*node/.test(notes)) {
   fail('release notes must not pipe Node.js assets directly to node')
 }
+if (!notes.includes('Linux and macOS (x64 and arm64)') || !notes.includes('Windows release assets are not included')) {
+  fail('release notes must state the four-target Linux/macOS support scope')
+}
+if (/https?:\/\/\S*(?:win32|windows|\.ps1|\.exe|conpty)/iu.test(notes)) fail('release notes must not offer Windows downloads')
 
-const checksum = spawnSync('shasum', ['-a', '256', '-c', 'SHA256SUMS'], {
-  cwd: releaseDir,
-  stdio: 'inherit',
-})
-if (checksum.status !== 0) fail('SHA256SUMS verification failed')
+try {
+  await verifyReleaseChecksums(releaseDir, expectedReleaseFiles.filter((file) => file !== 'SHA256SUMS'))
+} catch {
+  fail('SHA256SUMS verification failed')
+}
 
 if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   const executorHelp = spawnSync('node', ['agent-kernel-executor.cjs', '--help'], {
@@ -307,13 +324,19 @@ if (nativeExecutor) {
 console.log('release assets verified')
 
 function isNativeAsset(asset) {
-  return /^(?:agent-kernel-(?:host|executor)|runlab-executor)-(linux|darwin|win32)-(x64|arm64)(\.exe)?$/.test(asset)
+  return /^(?:agent-kernel-(?:host|executor)|runlab-executor)-(linux|darwin)-(x64|arm64)$/.test(asset)
 }
 
 function nativeAssetName(base) {
-  const os = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : process.platform === 'linux' ? 'linux' : process.platform
-  const arch = process.arch === 'x64' ? 'x64' : process.arch === 'arm64' ? 'arm64' : process.arch
-  return `${base}-${os}-${arch}${os === 'win32' ? '.exe' : ''}`
+  const os = process.platform === 'darwin' ? 'darwin' : process.platform === 'linux' ? 'linux' : undefined
+  const arch = process.arch === 'x64' ? 'x64' : process.arch === 'arm64' ? 'arm64' : undefined
+  return os && arch ? `${base}-${os}-${arch}` : undefined
+}
+
+function assertSupportedReleaseAssetName(name, location) {
+  if (typeof name !== 'string' || /(?:win32|windows|conpty)/iu.test(name) || /\.(?:exe|ps1)$/iu.test(name) || /^node-pty-.*\.tar\.gz$/iu.test(name) || /^executor-update-(?:manifest\.json|public-key\.pem)$/u.test(name)) {
+    fail(`${location} contains unsupported or platform-ambiguous release asset ${String(name)}`)
+  }
 }
 
 function fail(message) {

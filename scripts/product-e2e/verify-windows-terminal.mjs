@@ -56,6 +56,8 @@ try {
     if (!workspaceId) await sleep(100)
   }
   if (!workspaceId) throw new Error('installed Windows Executor did not announce a Workspace')
+  const sessionCreated = await emitAck(dashboard, 'client:create_session', { sessionId, workspaceId })
+  if (!sessionCreated?.ok) throw new Error(`session create failed: ${sessionCreated?.error ?? 'missing success acknowledgement'}`)
   const requestId = `create-${Date.now()}`
   const createdTerminal = await emitAck(dashboard, 'terminal:create', { requestId, workspaceId, sessionId, cwd: stateRoot, cols: 100, rows: 30 })
   if (createdTerminal.error || !createdTerminal.terminalId) throw new Error(`terminal create failed: ${createdTerminal.error ?? 'missing terminalId'}`)
@@ -66,6 +68,13 @@ try {
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline && !output.join('').includes(marker)) await sleep(50)
   if (!output.join('').includes(marker)) throw new Error(`terminal did not echo marker; output=${output.join('').slice(-2000)}`)
+  // Pipe-backed PowerShell can also print the marker. Prove a real ConPTY
+  // console, whose stdout is not redirected, before accepting this lifecycle.
+  const ptyProbe = `KALA_PTY_${Date.now()}_`
+  dashboard.emit('terminal:input', { workspaceId, sessionId, terminalId: createdTerminal.terminalId, data: `Write-Output ("${ptyProbe}" + [Console]::IsOutputRedirected)\r` })
+  const ptyDeadline = Date.now() + 15_000
+  while (Date.now() < ptyDeadline && !output.join('').includes(`${ptyProbe}False`) && !output.join('').includes(`${ptyProbe}True`)) await sleep(50)
+  if (!output.join('').includes(`${ptyProbe}False`)) throw new Error('Windows Terminal used redirected pipes instead of ConPTY')
   const killed = await emitAck(dashboard, 'terminal:kill', { requestId: `kill-${Date.now()}`, workspaceId, sessionId, terminalId: createdTerminal.terminalId })
   if (!killed.killed) throw new Error(`terminal kill failed: ${killed.error ?? 'unknown'}`)
   if (logs.join('').includes('Failed to load native module: conpty.node')) throw new Error(`ConPTY native load failed:\n${logs.join('')}`)

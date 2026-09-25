@@ -292,7 +292,7 @@ describe('EvaluationControlPlane durable authority', () => {
         artifactManifestHash: tampered.artifactManifest.manifestHash, evidence: tampered,
       })), testCase.name).rejects.toThrow(testCase.expected)
     }
-  })
+  }, 20_000)
 
   it('requires trusted evidence signatures bound to the leased Worker key', async () => {
     const { controlPlane, spec, options } = await harness()

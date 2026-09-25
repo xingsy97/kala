@@ -1,6 +1,6 @@
 # Shared Identity Stack
 
-This Compose project owns the shared ZITADEL lifecycle independently of Agent RunLab.
+This Compose project owns the shared ZITADEL lifecycle independently of Kala.
 Its canonical OIDC issuer comes from the ignored `IDENTITY_DOMAIN` deployment environment;
 Cloudflare Tunnel should route that hostname to `http://127.0.0.1:13002`.
 
@@ -30,5 +30,5 @@ The Compose project owns its ZITADEL database, bootstrap, and configuration volu
 canonical Identity names. Do not run `down -v`; back up PostgreSQL before upgrades. Other
 applications should create their own OIDC application/client and use the configured issuer.
 
-Agent RunLab is only an OIDC client of this stack. Its callback is
+Kala is only an OIDC client of this stack. Its callback is
 `https://<runlab-domain>/auth/callback`.

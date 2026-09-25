@@ -1,9 +1,9 @@
 # Releasing
 
-Agent RunLab uses one product version and one Git tag across the monorepo.
-`v0.2.0-rc.1`, for example, identifies the source revision, npm workspace
-packages, Portable assets, Dedicated bundle, Dashboard manifest, and Private
-Cloud images produced by that release. Protocol and persisted-schema versions
+Kala uses one product version and one Git tag across the monorepo.
+A matching version tag identifies the source revision, Portable assets,
+Dedicated bundle, Dashboard manifest, and Private Cloud images produced by
+that release. Protocol and persisted-schema versions
 remain independent compatibility contracts.
 
 ## Version gate
@@ -13,7 +13,7 @@ must declare MIT and cannot depend on private workspace packages. Verify before
 cutting a tag:
 
 ```bash
-pnpm run verify:version -- --tag v0.2.0-rc.1
+pnpm run verify:version -- --tag v0.2.0-rc.13
 ```
 
 The release asset verifier repeats the check against `release/manifest.json`.
@@ -23,14 +23,9 @@ version of the source release from which they were built.
 
 ## npm packages
 
-The `Publish npm workspaces` workflow runs only on a matching `v*` tag. It runs
-privacy, license, build, type, and test gates, then publishes public workspace
-packages in dependency order with npm provenance. Existing exact versions are
-skipped, making a failed workflow resumable. Pre-release versions use the npm
-`next` dist-tag; stable versions use `latest`.
-
-The workflow requires the protected `npm` environment and `NPM_TOKEN`. A token
-does not replace npm provenance: GitHub OIDC permission remains required.
+This release does not publish workspace packages to npm. Product version tags
+trigger GitHub Release assets and Private Cloud images only. The local package
+validation tools remain available for a separately approved future npm release.
 
 ## GitHub Release assets
 
@@ -62,12 +57,14 @@ verify `SHA256SUMS` before execution.
 
 1. Update `CHANGELOG.md` and set the intended root/workspace version.
 2. Run `verify:version`, privacy history, licenses, build/typecheck/tests, and
-   clean-environment acceptance from the public release readiness runbook.
+   the six-platform Portable clean-environment acceptance from the release runbook.
 3. Commit from a clean worktree and create the matching annotated `v*` tag.
-4. Let npm and GitHub workflows build from the tag; do not upload local binaries.
-5. Keep the GitHub Release as a draft until signatures, provenance, SBOMs, all
-   native targets, clean installs, upgrades, rollbacks, and restore evidence pass.
-6. Publish the draft and move the npm stable dist-tag only for a stable release.
+4. Let GitHub Release and Private Cloud workflows build from the tag; do not upload local binaries.
+5. Keep the GitHub Release as a draft until signatures, provenance, SBOMs,
+   successful GHCR scans, all six native Portable clean installs/reinstalls,
+   and the exact revision-bound evidence pass. Dedicated and Private Cloud
+   bundles remain uncertified preview assets pending system-level acceptance.
+6. Publish the draft only after the required acceptance evidence is complete.
 
 The complete go/no-go criteria are in
 [`../operations/public-release-readiness.md`](../operations/public-release-readiness.md).

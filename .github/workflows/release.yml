@@ -10,9 +10,9 @@ on:
         description: 'Product release tag, for example v0.2.0-rc.1'
         required: true
       native_targets:
-        description: 'Comma-separated native targets. Empty builds Linux, macOS, and Windows on x64 and arm64.'
+        description: 'Comma-separated native targets. Empty builds Linux and macOS on x64 and arm64.'
         required: false
-        default: 'linux-x64,linux-arm64,darwin-x64,darwin-arm64,win32-x64,win32-arm64'
+        default: 'linux-x64,linux-arm64,darwin-x64,darwin-arm64'
 
 jobs:
   resolve:
@@ -39,7 +39,12 @@ jobs:
           node scripts/release/version-policy.mjs --tag "$TAG"
 
           if [ -z "$NATIVE_TARGETS" ]; then
-            NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64,win32-x64,win32-arm64"
+            NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64"
+          fi
+          REQUIRED_NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64"
+          if [ "$NATIVE_TARGETS" != "$REQUIRED_NATIVE_TARGETS" ]; then
+            echo "native_targets must be exactly $REQUIRED_NATIVE_TARGETS; partial four-platform RC releases are not supported" >&2
+            exit 1
           fi
           MATRIX_ENTRIES=""
           for t in $(echo "$NATIVE_TARGETS" | tr ',' ' '); do
@@ -48,8 +53,6 @@ jobs:
               linux-arm64) OS="ubuntu-24.04-arm" ;;
               darwin-x64) OS="macos-15-intel" ;;
               darwin-arm64) OS="macos-15" ;;
-              win32-x64) OS="windows-2025" ;;
-              win32-arm64) OS="windows-11-arm" ;;
               *) echo "Unsupported native target: $t" >&2; exit 1 ;;
             esac
             ENTRY="{\"os\":\"$OS\",\"target\":\"$t\"}"
@@ -93,18 +96,6 @@ jobs:
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
       - run: pnpm run build
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
-      - name: Build and verify real Windows Terminal release path
-        if: startsWith(matrix.target, 'win32-')
-        shell: pwsh
-        env:
-          PRODUCT_E2E_WINDOWS_SERVICE: '1'
-        run: |
-          pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }}
-          pnpm run verify:release-assets
-          tar -xzf release/node-pty-${{ matrix.target }}.tar.gz -C release
-          New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null
-          Move-Item release/${{ matrix.target }} release/prebuilds/${{ matrix.target }} -Force
-          node scripts/product-e2e/verify-windows-terminal.mjs
       - uses: actions/upload-artifact@v5
         with:
           name: native-${{ matrix.target }}
@@ -144,6 +135,9 @@ jobs:
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }} --manifest release/manifest.json
       - name: Install-time smoke on release assets
         run: pnpm run verify:release-install
+      - name: Remove Windows-only downloads from the candidate
+        run: |
+          rm -f release/*.ps1 release/*.exe release/*win32* release/*windows* release/*conpty* release/*winpty*
       - uses: actions/upload-artifact@v5
         with:
           name: cjs-release-assets
@@ -155,23 +149,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
+          set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --draft --notes-file release/RELEASE_NOTES.md
-            gh release delete-asset "$TAG" run-host.sh --yes || true
-            gh release delete-asset "$TAG" run-executor.sh --yes || true
-            gh release delete-asset "$TAG" agent-kernel-host.cjs --yes || true
-            for asset in \
-              agent-kernel-host-linux-x64 agent-kernel-host-linux-arm64 agent-kernel-host-darwin-x64 agent-kernel-host-darwin-arm64 agent-kernel-host-win32-x64.exe agent-kernel-host-win32-arm64.exe \
-              agent-kernel-executor-linux-x64 agent-kernel-executor-linux-arm64 agent-kernel-executor-darwin-x64 agent-kernel-executor-darwin-arm64 agent-kernel-executor-win32-x64.exe agent-kernel-executor-win32-arm64.exe; do
-              gh release delete-asset "$TAG" "$asset" --yes || true
-            done
-            gh release upload "$TAG" release/* --clobber
           else
-            gh release create "$TAG" release/* \
+            gh release create "$TAG" \
               --draft \
               --title "$TAG" \
               --notes-file release/RELEASE_NOTES.md
           fi
+          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release
 
   native-release:
     needs: [resolve, cjs-release, native-assets]
@@ -207,7 +194,7 @@ jobs:
           merge-multiple: true
       - name: Restore executable bit on downloaded assets
         run: |
-          find release -maxdepth 1 -type f \( -name 'agent-kernel-*' -o -name '*.cjs' -o -name '*.sh' \) -print0 \
+          find release -maxdepth 1 -type f \( -name 'agent-kernel-*' -o -name 'runlab-executor-*' -o -name '*.cjs' -o -name '*.sh' \) -print0 \
             | xargs -0 -r chmod +x
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --finalize-only
       - name: Require installable desktop Executor assets
@@ -216,9 +203,8 @@ jobs:
           test -f release/runlab-executor-linux-arm64
           test -f release/runlab-executor-darwin-x64
           test -f release/runlab-executor-darwin-arm64
-          test -f release/runlab-executor-win32-x64.exe
-          test -f release/runlab-executor-win32-arm64.exe
-          grep -q 'runlab-executor-win32-x64.exe' release/SHA256SUMS
+          test "$(find release -maxdepth 1 -type f -name 'runlab-executor-*' | wc -l)" -eq 4
+          ! find release -maxdepth 1 -type f \( -iname '*.ps1' -o -iname '*.exe' -o -iname '*.msi' -o -iname '*.dll' -o -iname '*win32*' -o -iname '*windows*' -o -iname '*conpty*' -o -iname '*winpty*' \) -print -quit | grep -q .
       - run: pnpm run verify:release-assets
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }} --manifest release/manifest.json
       - uses: sigstore/cosign-installer@v3
@@ -239,5 +225,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
+          set -euo pipefail
           gh release edit "$TAG" --draft --notes-file release/RELEASE_NOTES.md
-          gh release upload "$TAG" release/* --clobber
+          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release
