@@ -32,9 +32,10 @@ test('uses one Kala namespace for native asset names', () => {
   assert.throws(() => executorNativeAssetName('freebsd-x64'))
 })
 
-test('generates fail-closed installers with checksummed native or Node.js fallback', () => {
+test('generates HTTPS-only, checksummed installers with native or Node.js fallback', () => {
   const sh = generateExecutorInstallerSh({ repo: 'owner/repo', tag: 'v1.2.3' })
-  for (const marker of [/RUNLAB_INSTALLER_ALLOW_UNSIGNED/, /SHA256SUMS/, /kala-executor-/, /--internal-installer/]) assert.match(sh, marker)
+  for (const marker of [/release asset URL must use HTTPS/, /--https-only/, /SHA256SUMS/, /kala-executor-/, /--internal-installer/]) assert.match(sh, marker)
+  assert.doesNotMatch(sh, /ALLOW_UNSIGNED|unsigned install/)
   assert.match(sh, /kala-executor\.cjs/)
   assert.match(sh, /Node\.js 22\+/)
   assert.doesNotMatch(sh, /manifest\.json/)
@@ -43,13 +44,13 @@ test('generates fail-closed installers with checksummed native or Node.js fallba
 
   const dir = mkdtempSync(join(tmpdir(), 'runlab-installer-test-'))
   try {
-    const path = join(dir, 'install-executor.sh')
+    const path = join(dir, 'run.sh')
     writeFileSync(path, sh)
     const syntax = spawnSync('bash', ['-n', path], { encoding: 'utf8' })
     assert.equal(syntax.status, 0, syntax.stderr)
-    const closed = spawnSync('bash', [path], { encoding: 'utf8', env: { ...process.env, RUNLAB_INSTALLER_ALLOW_UNSIGNED: '' } })
+    const closed = spawnSync('bash', [path], { encoding: 'utf8', env: { ...process.env, RUNLAB_RELEASE_ASSETS_URL: 'http://downloads.example.test/release' } })
     assert.notEqual(closed.status, 0)
-    assert.match(`${closed.stdout}${closed.stderr}`, /signatures are not available/)
+    assert.match(`${closed.stdout}${closed.stderr}`, /must use HTTPS/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -59,14 +60,15 @@ test('release builder emits the three-target RC manifest while preserving instal
   const builder = readFileSync(new URL('./build-release-assets.mjs', import.meta.url), 'utf8')
   assert.match(builder, /sourceSnapshotSha256/u)
   assert.match(builder, /release source changed while assets were being built/u)
-  assert.match(builder, /generateExecutorInstallerSh/)
+  assert.match(builder, /bootstrapAssets\.push\('run\.sh'\)/)
+  assert.doesNotMatch(builder, /install-executor\.sh|generateExecutorInstallerSh/)
   assert.match(builder, /const nativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
   assert.match(builder, /name: 'kala-executor'/)
   assert.doesNotMatch(builder, /legacyExecutorNativeAssetName|runlab-executor/)
   assert.doesNotMatch(builder, /generateExecutorInstallerPs1|node-pty-win32|writeExecutorUpdateManifest/)
 })
 
-test('generated shell installer executes the checksummed Node fallback from a real release directory', () => {
+test('generated run.sh executes the checksummed Node fallback from a real release directory', () => {
   const dir = mkdtempSync(join(tmpdir(), 'runlab-installer-e2e-'))
   const release = join(dir, 'release')
   const bin = join(dir, 'bin')
@@ -84,7 +86,7 @@ test('generated shell installer executes the checksummed Node fallback from a re
     const installer = join(dir, 'install.sh')
     writeFileSync(installer, generateExecutorInstallerSh({ repo: 'owner/repo', tag: 'latest' }), { mode: 0o755 })
     const argsFile = join(dir, 'node-args')
-    const result = spawnSync('bash', [installer, '--host', 'https://host.invalid'], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNLAB_INSTALLER_ALLOW_UNSIGNED: '1', RUNLAB_RELEASE_ASSETS_URL: 'https://assets.invalid', RUNLAB_INSTALLER_WORK_DIR: work, FAKE_RELEASE_DIR: release, FAKE_NODE_ARGS: argsFile } })
+    const result = spawnSync('bash', [installer, '--host', 'https://host.invalid'], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNLAB_RELEASE_ASSETS_URL: 'https://assets.invalid', RUNLAB_INSTALLER_WORK_DIR: work, FAKE_RELEASE_DIR: release, FAKE_NODE_ARGS: argsFile } })
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
     const invoked = readFileSync(argsFile, 'utf8')
     assert.match(invoked, /kala-executor\.cjs/)
@@ -101,7 +103,7 @@ test('generated shell installer rejects Windows before downloading release metad
     writeFileSync(join(bin, 'wget'), '#!/bin/sh\necho unexpected-download >&2\nexit 99\n', { mode: 0o755 })
     const installer = join(dir, 'install.sh')
     writeFileSync(installer, generateExecutorInstallerSh({ repo: 'owner/repo', tag: 'latest' }), { mode: 0o755 })
-    const result = spawnSync('bash', [installer], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNLAB_INSTALLER_ALLOW_UNSIGNED: '1' } })
+    const result = spawnSync('bash', [installer], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } })
     assert.notEqual(result.status, 0)
     assert.match(`${result.stdout}${result.stderr}`, /supports Linux and macOS only/)
     assert.doesNotMatch(`${result.stdout}${result.stderr}`, /unexpected-download/)

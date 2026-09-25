@@ -8,10 +8,14 @@ import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { build } from 'esbuild'
+import { executorNativeAssetName } from './executor-installer.mjs'
+import { buildDedicatedSupportBundle, DEDICATED_SUPPORT_ARCHIVE } from './dedicated-support-bundle.mjs'
 import {
-  executorNativeAssetName,
-  generateExecutorInstallerSh,
-} from './executor-installer.mjs'
+  createDashboardArchive,
+  createReleaseMetadataArchive,
+  dashboardArchiveName,
+  releaseMetadataArchiveName,
+} from './release-archives.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
@@ -155,7 +159,6 @@ for (const item of buildEntries) {
 }
 
 if (nativeOnly) {
-  if (component === 'all' || component === 'host') prepareCopilotRuntimeAsset(nativeTarget, false)
   removeNativeBuildWorkspace()
   console.log(`native release assets written to ${outDir} for ${nativeTarget}`)
   for (const item of entries) console.log(` - ${basename(nativeAssetName(item.name, nativeTarget))}`)
@@ -163,8 +166,12 @@ if (nativeOnly) {
 }
 
 if (includeDashboard) {
-  await run('tar', ['-czf', join(outDir, 'kala-dashboard-dist.tar.gz'), '-C', dashboardDist, '.'])
   writeDashboardReleaseManifest(dashboardDist)
+  createDashboardArchive({
+    dashboardDist,
+    manifestPath: join(outDir, 'dashboard-release.json'),
+    outputPath: join(outDir, dashboardArchiveName),
+  })
   // Never package untracked local docs (captures, screenshots, notes). The
   // tracked showcase GIF is still unfinished and explicitly excluded.
   // CI supplies Git's tracked-docs list before creating a gitless Docker context.
@@ -199,39 +206,24 @@ for (const file of [...releaseFiles(), 'SHA256SUMS']) {
 
 function finalizeRelease() {
   assertSourceIdentityUnchanged()
+  assertStagedSourceIdentity()
   removeNativeBuildWorkspace()
   const bootstrapAssets = prepareBootstrapAssets()
-  const copilotRuntimeAssets = component === 'all' || component === 'host'
-    ? prepareCopilotRuntimeAsset(detectNativeTarget(), true)
-    : []
   if (includeDashboard && existsSync(modelCatalogSeed)) {
     copyFileSync(modelCatalogSeed, join(outDir, 'kala-model-catalog-seed.json'))
   }
   if (component !== 'dashboard') {
     if (component === 'all' || component === 'host') {
-      for (const [asset, publishedName] of [
-        ['deploy/dedicated-systemd/agent-runlab-dedicated-ingress.service', 'kala-dedicated-ingress.service'],
-        ['deploy/dedicated-systemd/agent-runlab-dedicated-unit@.service', 'kala-dedicated-unit@.service'],
-        ['deploy/dedicated-systemd/agent-runlab-dedicated-deploy-supervisor.service', 'kala-dedicated-deploy-supervisor.service'],
-        ['deploy/dedicated-systemd/agent-runlab-dedicated-control-updater.service', 'kala-dedicated-control-updater.service'],
-        ['deploy/dedicated-systemd/agent-runlab-dedicated-migration-finalizer.service', 'kala-dedicated-migration-finalizer.service'],
-        ['deploy/dedicated-systemd/deployment.json', 'deployment.json'],
-        ['scripts/deploy/install-dedicated-systemd.mjs', 'install-dedicated-systemd.mjs'],
-        ['scripts/deploy/runlab-dedicated.mjs', 'kala-dedicated.mjs'],
-        ['scripts/deploy/deploy-dedicated.mjs', 'deploy-dedicated.mjs'],
-        ['scripts/deploy/deploy-dashboard.mjs', 'deploy-dashboard.mjs'],
-        ['scripts/deploy/cutover-dedicated-systemd.mjs', 'cutover-dedicated-systemd.mjs'],
-        ['scripts/deploy/dedicated-data-migration.mjs', 'dedicated-data-migration.mjs'],
-        ['scripts/deploy/dedicated-settings-fingerprint.mjs', 'dedicated-settings-fingerprint.mjs'],
-        ['scripts/deploy/update-dedicated-control-plane.mjs', 'update-dedicated-control-plane.mjs'],
-        ['scripts/deploy/rollback-dedicated-systemd.mjs', 'rollback-dedicated-systemd.mjs'],
-      ]) {
-        const target = join(outDir, publishedName)
-        copyFileSync(join(root, asset), target)
-        bootstrapAssets.push(publishedName)
-      }
+      copyFileSync(join(root, 'scripts/deploy/runlab-dedicated.mjs'), join(outDir, 'kala-dedicated.mjs'))
+      chmodSync(join(outDir, 'kala-dedicated.mjs'), 0o755)
+      bootstrapAssets.push('kala-dedicated.mjs')
+      buildDedicatedSupportBundle({ root, output: join(outDir, DEDICATED_SUPPORT_ARCHIVE) })
     }
   }
+
+  // Desktop payloads are embedded into the Host banner only; they are not
+  // independent public release assets in the closed 27-file inventory.
+  for (const name of ['desktop-install.sh', 'desktop-package.deb', 'desktop-dependencies.json', 'desktop-SHA256SUMS.txt']) rmSync(join(outDir, name), { force: true })
 
   const builtEntries = entries.map((entry) => {
     const cjs = cjsAssetName(entry)
@@ -240,17 +232,13 @@ function finalizeRelease() {
       .filter((asset) => exists(asset))
     return { ...entry, cjs: exists(cjs) ? cjs : undefined, natives }
   })
-  const desktopPublicAssets = ['desktop-install.sh', 'desktop-package.deb', 'desktop-dependencies.json', 'desktop-SHA256SUMS.txt'].filter((name) => exists(name))
   writeDependencyMetadata()
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
-    .concat(copilotRuntimeAssets)
-    .concat(includeDashboard && exists('kala-dashboard-dist.tar.gz') ? ['kala-dashboard-dist.tar.gz'] : [])
-    .concat(includeDashboard && exists('dashboard-release.json') ? ['dashboard-release.json'] : [])
+    .concat(includeDashboard && exists(dashboardArchiveName) ? [dashboardArchiveName] : [])
     .concat(includeDashboard && exists('kala-docs.tar.gz') ? ['kala-docs.tar.gz'] : [])
+    .concat((component === 'all' || component === 'host') && exists(DEDICATED_SUPPORT_ARCHIVE) ? [DEDICATED_SUPPORT_ARCHIVE] : [])
     .concat(includeDashboard && exists('kala-model-catalog-seed.json') ? ['kala-model-catalog-seed.json'] : [])
     .concat(bootstrapAssets)
-    .concat(desktopPublicAssets)
-    .concat(['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt'])
   const hasNativeAssets = builtEntries.some((entry) => entry.natives.length > 0)
   const manifest = {
     name: 'kala',
@@ -271,37 +259,17 @@ function finalizeRelease() {
         ? 'runtime releases include native binaries plus Node.js .cjs fallback assets'
         : 'runtime releases include Node.js .cjs fallback assets; native binaries are added by the native release job',
       'run.sh is a wget-only bash bootstrap that uses compact .cjs assets when Node.js 22+ is available and falls back to native binaries otherwise',
-      'install-executor.sh installs only checksum-verified Linux or macOS kala-executor native assets; unsigned mode is development-only',
       'Portable uses kala-dashboard-with-runtime.cjs with embedded dashboard assets; Self-hosted Platform uses kala-runtime.cjs plus an independently activated dashboard release',
     ],
   }
 
   writeFileSync(join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   writeFileSync(join(outDir, 'RELEASE_NOTES.md'), releaseNotes(manifest))
-
+  createReleaseMetadataArchive({ releaseDir: outDir })
+  manifest.assets.push(releaseMetadataArchiveName)
+  writeFileSync(join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  for (const name of ['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt', 'RELEASE_NOTES.md', 'dashboard-release.json']) rmSync(join(outDir, name), { force: true })
   writeSha256Sums(releaseFiles())
-}
-
-function prepareCopilotRuntimeAsset(target, includeGenericAlias) {
-  const [platform, arch] = target.split('-')
-  const packageName = `@github/copilot-${platform}-${arch}`
-  const hostRequire = createRequire(new URL('../../packages/host/package.json', import.meta.url))
-  const sdkEntry = hostRequire.resolve('@github/copilot-sdk')
-  const sdkRequire = createRequire(sdkEntry)
-  const copilotPackage = sdkRequire.resolve('@github/copilot/package.json')
-  const copilotRequire = createRequire(copilotPackage)
-  const source = copilotRequire.resolve(packageName)
-  if (!existsSync(source)) throw new Error(`Copilot runtime binary is missing from ${packageName}`)
-  const binaryAsset = `copilot-cli-${target}`
-  const licenseAsset = 'COPILOT_CLI_LICENSE.md'
-  copyFileSync(source, join(outDir, binaryAsset))
-  copyFileSync(join(dirname(copilotPackage), 'LICENSE.md'), join(outDir, licenseAsset))
-  chmodSync(join(outDir, binaryAsset), 0o755)
-  if (includeGenericAlias) {
-    copyFileSync(source, join(outDir, 'copilot-cli'))
-    chmodSync(join(outDir, 'copilot-cli'), 0o755)
-  }
-  return [binaryAsset, ...(includeGenericAlias ? ['copilot-cli'] : []), licenseAsset]
 }
 
 function writeDependencyMetadata() {
@@ -359,12 +327,6 @@ function prepareBootstrapAssets() {
   writeFileSync(runPath, unifiedBootstrap({ repo, tag, component }))
   chmodSync(runPath, 0o755)
   bootstrapAssets.push('run.sh')
-  if (component === 'all' || component === 'executor') {
-    const shPath = join(outDir, 'install-executor.sh')
-    writeFileSync(shPath, generateExecutorInstallerSh({ repo, tag }))
-    chmodSync(shPath, 0o755)
-    bootstrapAssets.push('install-executor.sh')
-  }
   return bootstrapAssets
 }
 
@@ -378,7 +340,7 @@ function writeSha256Sums(files) {
 
 function releaseFiles() {
   const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json'), 'utf8'))
-  return [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md']
+  return [...manifest.assets, 'manifest.json']
 }
 
 function removeNativeBuildWorkspace() {
@@ -501,11 +463,9 @@ function resolveSocketAdminDist() {
 }
 
 function prepareEmbeddedReleaseAssetsForHost() {
-  if (nativeOnly) return ''
   const executorEntry = allEntries.find((entry) => entry.component === 'executor')
   if (!executorEntry) return ''
   const executorCjs = cjsAssetName(executorEntry)
-  if (!exists(executorCjs)) return ''
   if (!exists('run.sh')) {
     const path = join(outDir, 'run.sh')
     writeFileSync(path, unifiedBootstrap({ repo, tag, component }))
@@ -529,7 +489,7 @@ function prepareEmbeddedReleaseAssetsForHost() {
       desktopNames.push(target)
     }
   }
-  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', 'install-executor.sh', ...desktopNames]
+  const embeddedNames = [executorCjs, nativeExecutor, 'run.sh', ...desktopNames]
     .filter((name) => name && exists(name))
   writeSha256Sums(embeddedNames)
   return embeddedReleaseAssetsBanner(outDir, [...embeddedNames, 'SHA256SUMS'])
@@ -583,6 +543,14 @@ function assertSourceIdentityUnchanged() {
   const snapshot = existsSync(join(root, '.git')) ? sourceSnapshotSha256() : gitlessSourceSnapshotSha256()
   if (snapshot !== sourceIdentity.snapshotSha256) {
     throw new Error('release source changed while assets were being built')
+  }
+}
+
+function assertStagedSourceIdentity() {
+  if (!finalizeOnly || !exists('manifest.json')) return
+  const staged = JSON.parse(readFileSync(join(outDir, 'manifest.json'), 'utf8')).source
+  if (staged?.revision !== sourceIdentity.revision || staged?.snapshotSha256 !== sourceIdentity.snapshotSha256 || staged?.dirty !== sourceIdentity.dirty) {
+    throw new Error('staged release source identity does not match the finalizing checkout')
   }
 }
 
@@ -718,6 +686,11 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  DEFAULT_BASE_URL="https://github.com/${REPO}/releases/latest/download"',
     'fi',
     'BASE_URL="${AGENT_KERNEL_RELEASE_BASE_URL:-$DEFAULT_BASE_URL}"',
+    'case "$BASE_URL" in',
+    '  https://*) PUBLIC_RELEASE=1 ;;',
+    '  http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|http://\\[::1\\]|http://\\[::1\\]:*) PUBLIC_RELEASE=0 ;;',
+    '  *) echo "Release downloads require HTTPS except for loopback URLs" >&2; exit 1 ;;',
+    'esac',
     'COMPONENT="${COMPONENT:-${AGENT_KERNEL_COMPONENT:-${1:-$DEFAULT_COMPONENT}}}"',
     'BOOTSTRAP_LOG_LEVEL="${AGENT_KERNEL_BOOTSTRAP_LOG_LEVEL:-info}"',
     '',
@@ -758,7 +731,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     '    echo >&2',
     '    print_download_example frontend',
     '    echo >&2',
-    '    print_download_example executor HOST_URL=http://host-machine:3000',
+    '    print_download_example executor HOST_URL=http://127.0.0.1:3000',
     '    exit 1',
     '    echo "  tmp=\\$(mktemp)" >&2',
     '    echo "  wget -nv -O \"\\$tmp\" \"${BASE_URL}/run.sh\"" >&2',
@@ -781,7 +754,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     'if [ "$COMPONENT" = "executor" ] && [ -z "${HOST_URL:-}" ] && [ "$#" -eq 0 ]; then',
     '  echo "COMPONENT=executor requires HOST_URL (URL of the running host to dial into)." >&2',
     '  echo "  Example:" >&2',
-    '  print_download_example executor HOST_URL=http://host-machine:3000',
+    '  print_download_example executor HOST_URL=http://127.0.0.1:3000',
     '  exit 1',
     '  echo "    tmp=\\$(mktemp)" >&2',
     '  echo "    wget -nv -O \"\\$tmp\" \"${BASE_URL}/run.sh\"" >&2',
@@ -801,6 +774,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  fi',
     '}',
     'require_cmd wget',
+    'if [ "$PUBLIC_RELEASE" = "1" ]; then require_cmd cosign; fi',
     '',
     'log() {',
     '  printf "Kala bootstrap | %s\\n" "$*" >&2',
@@ -856,6 +830,10 @@ function unifiedBootstrap({ repo, tag, component }) {
     '}',
     '',
     'download SHA256SUMS',
+    'if [ "$PUBLIC_RELEASE" = "1" ]; then',
+    '  download SHA256SUMS.sigstore.json',
+    '  cosign verify-blob --bundle "${WORK_DIR}/SHA256SUMS.sigstore.json" --certificate-identity-regexp "^https://github.com/${REPO}/.github/workflows/release\\.yml@refs/tags/v" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" "${WORK_DIR}/SHA256SUMS" >/dev/null',
+    'fi',
     '',
     'platform_target() {',
     '  local os arch',
@@ -885,9 +863,9 @@ function unifiedBootstrap({ repo, tag, component }) {
     '',
     'download_and_extract_frontend() {',
     '  require_cmd tar',
-    '  download kala-dashboard-dist.tar.gz',
-    '  verify_file kala-dashboard-dist.tar.gz',
-    '  tar -xzf "${WORK_DIR}/kala-dashboard-dist.tar.gz" -C "$FRONTEND_DIR"',
+    '  download kala-dashboard.tar.gz',
+    '  verify_file kala-dashboard.tar.gz',
+    '  tar -xzf "${WORK_DIR}/kala-dashboard.tar.gz" -C "$FRONTEND_DIR"',
     '  if [ ! -f "${FRONTEND_DIR}/index.html" ]; then',
     '    echo "Extracted frontend bundle to $FRONTEND_DIR but index.html is missing" >&2',
     '    exit 1',
@@ -905,17 +883,6 @@ function unifiedBootstrap({ repo, tag, component }) {
     '    cjs="kala-dashboard-with-runtime.cjs"',
     '  fi',
     '  runtime="${AGENT_KERNEL_RUNTIME:-auto}"',
-    '  if [ "${AGENT_RUNLAB_COPILOT_ENABLED:-0}" = "1" ]; then',
-    '    local copilot_asset="copilot-cli-${target}"',
-    '    if [ -z "$target" ] || ! checksum_exists "$copilot_asset"; then',
-    '      log "Copilot runtime is enabled but no Copilot CLI is published for platform ${target:-unsupported}"',
-    '      exit 1',
-    '    fi',
-    '    download "$copilot_asset"',
-    '    verify_file "$copilot_asset"',
-    '    chmod +x "${WORK_DIR}/${copilot_asset}"',
-    '    export COPILOT_CLI_PATH="${WORK_DIR}/${copilot_asset}"',
-    '  fi',
     '  case "$runtime" in auto|cjs|native) ;; *) echo "AGENT_KERNEL_RUNTIME must be auto, cjs, or native" >&2; exit 1 ;; esac',
     '  if [ "$runtime" = "cjs" ] || { [ "$runtime" = "auto" ] && has_node22; }; then',
     '    if checksum_exists "$cjs"; then',
@@ -985,6 +952,10 @@ function unifiedBootstrap({ repo, tag, component }) {
     '    run_asset kala-host "$@"',
     '    ;;',
     '  executor)',
+    '    case "${HOST_URL:-}" in',
+    '      https://*|http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|http://\\[::1\\]|http://\\[::1\\]:*) ;;',
+    '      *) log "HOST_URL requires HTTPS except for loopback URLs"; exit 1 ;;',
+    '    esac',
     '    run_asset kala-executor "$@"',
     '    ;;',
     'esac',
@@ -1012,7 +983,7 @@ function releaseNotes(manifest) {
     '',
     '- Host + Dashboard bundle for running Kala locally or on a VM.',
     '- Separately deployable Executor for workspace tools.',
-    '- `SHA256SUMS` for release-asset verification.',
+    '- `SHA256SUMS` and its Sigstore bundle for release-asset verification.',
     hasNativeAssets
       ? '- Native fallback binaries when Node.js 22+ is unavailable.'
       : '- Node.js `.cjs` assets for environments with Node.js 22+.',
@@ -1043,10 +1014,10 @@ function releaseNotes(manifest) {
         'Run an executor that connects to the host:',
         '',
         '```bash',
-        run('executor', 'HOST_URL=http://host-machine:3000'),
+        run('executor', 'HOST_URL=https://agent.example.com'),
         '```',
         '',
-        'Standalone Executor installers refuse unsigned downloads by default. A one-time install initiated by an authenticated Host verifies SHA-256 against the same Host but trusts that Host and its transport rather than independently verifying the release signature; do not use the unsigned override with untrusted download URLs.',
+        'Public bootstrap downloads require HTTPS and verify the signed checksum index with Sigstore. Unsigned bootstrap is allowed only from a loopback URL for local development.',
         '',
         'Use `HOST_URL=https://agent.example.com` when the host is exposed through a public domain.',
         '',
@@ -1087,7 +1058,7 @@ function releaseNotes(manifest) {
       )
     }
   }
-  const verifyTargets = manifest.assets.filter((asset) => asset !== 'RELEASE_NOTES.md' && asset !== 'manifest.json' && asset !== 'SHA256SUMS')
+  const verifyTargets = manifest.assets
   lines.push(
     '## Verify Checksums',
     '',

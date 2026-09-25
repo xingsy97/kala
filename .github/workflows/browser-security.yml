@@ -57,10 +57,13 @@ jobs:
         run: |
           set -euo pipefail
           reports="${{ runner.temp }}/vulnerability-reports"
+          metadata="${{ runner.temp }}/release-metadata"
           mkdir -p "$reports"
+          node scripts/release/extract-release-metadata.mjs release/kala-release-metadata.tar.gz "$metadata"
           # The workspace includes build-only tools and an old Go compiler in
           # esbuild. Scan the actual release bytes and its complete --prod SBOM,
-          # not dev-only node_modules or the development lockfile.
+          # not dev-only node_modules or the development lockfile. The extractor
+          # first enforces the metadata archive's exact regular-file inventory.
           syft dir:release -o cyclonedx-json="$reports/release.cdx.json"
           grype sbom:"$reports/release.cdx.json" -o json > "$reports/release-grype.json"
           trivy fs --scanners vuln --format json --output "$reports/release-trivy.json" release
@@ -68,8 +71,8 @@ jobs:
             --grype "$reports/release-grype.json" \
             --trivy "$reports/release-trivy.json" \
             --output "$reports/release-normalized.json"
-          grype sbom:release/sbom.cdx.json -o json > "$reports/dependencies-grype.json"
-          trivy sbom --scanners vuln --format json --output "$reports/dependencies-trivy.json" release/sbom.cdx.json
+          grype sbom:"$metadata/sbom.cdx.json" -o json > "$reports/dependencies-grype.json"
+          trivy sbom --scanners vuln --format json --output "$reports/dependencies-trivy.json" "$metadata/sbom.cdx.json"
           node scripts/security/check-vulnerabilities.mjs \
             --grype "$reports/dependencies-grype.json" \
             --trivy "$reports/dependencies-trivy.json" \

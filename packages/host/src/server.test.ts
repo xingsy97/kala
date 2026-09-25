@@ -1848,12 +1848,12 @@ describe('wire protocol', () => {
       llm: scriptedLlm(),
       defaultConfig: config,
       embeddedReleaseAssets: [
-        { path: 'install-executor.sh', contentBase64: Buffer.from('#!/bin/sh\necho embedded installer\n').toString('base64') },
+        { path: 'run.sh', contentBase64: Buffer.from('#!/usr/bin/env bash\necho embedded installer\n').toString('base64') },
       ],
     })
 
     try {
-      const response = await fetch(`http://localhost:${localServer.port}/install/assets/install-executor.sh`)
+      const response = await fetch(`http://localhost:${localServer.port}/install/assets/run.sh`)
       expect(response.status).toBe(200)
       expect(response.headers.get('content-type')).toContain('text/x-shellscript')
       expect(await response.text()).toContain('embedded installer')

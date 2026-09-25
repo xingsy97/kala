@@ -11,19 +11,26 @@ const aggregatePath = resolve(required('--aggregate'))
 const tag = required('--tag')
 const revision = required('--revision')
 const manifest = json(join(directory, 'manifest.json'))
+const targets = [...requiredReleaseEvidence.portable.targets]
+const expectedAssets = [
+  ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor'].flatMap((name) => targets.map((target) => `${name}-${target}`)),
+  'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
+  'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-release-metadata.tar.gz',
+  'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
+].sort()
 
 if (manifest.version !== tag.slice(1)) fail('current release manifest version does not match the promoted tag')
 if (manifest.source?.revision !== revision) fail('current release manifest revision does not match the promoted revision')
 if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) fail('current release manifest has no assets')
 assertUnique(manifest.assets, 'current release manifest assets')
-const targets = [...requiredReleaseEvidence.portable.targets]
+if (JSON.stringify([...manifest.assets].sort()) !== JSON.stringify(expectedAssets)) fail('current release manifest does not contain the exact 24 checksummed assets')
 if (!Array.isArray(manifest.nativeTargets) || JSON.stringify([...manifest.nativeTargets].sort()) !== JSON.stringify([...targets].sort())) {
   fail('current release manifest does not contain exactly the three supported native targets')
 }
 
 const aggregateName = basename(aggregatePath)
 if (aggregateName !== 'rc-evidence.json') fail('aggregate evidence must be named rc-evidence.json')
-const expectedFiles = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS', 'SHA256SUMS.sigstore.json', aggregateName].sort()
+const expectedFiles = [...expectedAssets, 'manifest.json', 'SHA256SUMS', 'SHA256SUMS.sigstore.json'].sort()
 assertUnique(expectedFiles, 'promotion release inventory')
 const entries = readdirSync(directory, { withFileTypes: true })
 if (entries.some((entry) => !entry.isFile())) fail('current release inventory contains a non-file')
@@ -31,11 +38,9 @@ const actualFiles = entries.map((entry) => entry.name).sort()
 if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
   fail(`current release inventory is not closed; expected ${JSON.stringify(expectedFiles)}, received ${JSON.stringify(actualFiles)}`)
 }
-if (digest(readFileSync(join(directory, aggregateName))) !== digest(readFileSync(aggregatePath))) {
-  fail('uploaded aggregate evidence differs from the validated local record')
-}
+if (aggregatePath.startsWith(`${directory}/`) || aggregatePath === directory) fail('aggregate evidence must remain outside the 27-asset release inventory')
 
-await verifyReleaseChecksums(directory, [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md'])
+await verifyReleaseChecksums(directory, [...manifest.assets, 'manifest.json'])
 const evidence = verifyRcEvidenceSet(collectRcEvidence(evidenceDirectory), { tag, revision })
 for (const target of targets) {
   const record = evidence.find((entry) => entry.category === 'portable' && entry.target === target)

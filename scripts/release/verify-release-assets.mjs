@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { verifyReleaseChecksums } from './release-checksums.mjs'
+import { inspectDedicatedSupportBundle, DEDICATED_SUPPORT_ARCHIVE } from './dedicated-support-bundle.mjs'
+import { dashboardArchiveName, releaseMetadataArchiveName, verifyDashboardArchive, verifyReleaseMetadataArchive } from './release-archives.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const releaseDir = join(root, 'release')
@@ -38,17 +40,39 @@ for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
     if (!supportedNativeTargets.some((target) => asset.endsWith(`-${target}`))) fail(`unsupported native asset target in ${asset}`)
   }
 }
-for (const asset of ['sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt']) {
-  if (!manifest.assets.includes(asset)) fail(`manifest missing supply-chain asset ${asset}`)
+const targetsForInventory = actualNativeTargets.length === 0 ? [] : supportedNativeTargets
+const expectedManifestAssets = [
+  ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor'].flatMap((name) => targetsForInventory.map((target) => `${name}-${target}`)),
+  'kala-dashboard-with-runtime.cjs',
+  'kala-runtime.cjs',
+  'kala-executor.cjs',
+  'kala-dedicated-ingress.cjs',
+  'kala-dedicated-deploy-supervisor.cjs',
+  dashboardArchiveName,
+  'kala-docs.tar.gz',
+  DEDICATED_SUPPORT_ARCHIVE,
+  releaseMetadataArchiveName,
+  'run.sh',
+  'kala-dedicated.mjs',
+  'kala-model-catalog-seed.json',
+].sort()
+if (manifest.component === 'all' && JSON.stringify([...manifest.assets].sort()) !== JSON.stringify(expectedManifestAssets)) {
+  fail(`manifest assets do not match the ${targetsForInventory.length ? 'final' : 'CJS-stage'} release contract`)
 }
-const sbom = JSON.parse(readFileSync(join(releaseDir, 'sbom.cdx.json'), 'utf8'))
-if (sbom.bomFormat !== 'CycloneDX' || sbom.specVersion !== '1.6' || sbom.metadata?.component?.version !== manifest.version || !Array.isArray(sbom.components) || sbom.components.length === 0) {
-  fail('release CycloneDX SBOM is invalid or version-mismatched')
+let metadata
+try { metadata = verifyReleaseMetadataArchive(join(releaseDir, releaseMetadataArchiveName), { version: manifest.version }) } catch (error) { fail(error.message) }
+const sbom = JSON.parse(metadata.get('sbom.cdx.json'))
+const notices = metadata.get('THIRD_PARTY_NOTICES.txt').toString('utf8')
+const notes = metadata.get('RELEASE_NOTES.md').toString('utf8')
+const copilotDependency = sbom.components.find((component) => component.name === '@github/copilot')
+if (!copilotDependency || !copilotDependency.licenses?.some((entry) => entry.license?.id === 'LicenseRef-GitHub-Copilot-CLI') || !notices.includes('@github/copilot@')) {
+  fail('release metadata must retain the upstream Copilot npm dependency and license notice')
 }
-if (sbom.components.some((component) => component.licenses?.some((entry) => entry.license?.id === 'Unknown'))) fail('release SBOM contains an unknown license')
-const notices = readFileSync(join(releaseDir, 'THIRD_PARTY_NOTICES.txt'), 'utf8')
-if (!notices.includes(`Kala ${manifest.version}`) || !notices.includes('third-party dependency inventory')) fail('release third-party notices are invalid')
-const expectedReleaseFiles = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort()
+const signaturePresent = existsSync(join(releaseDir, 'SHA256SUMS.sigstore.json'))
+if (process.argv.includes('--require-signed') && (!signaturePresent || actualNativeTargets.length !== supportedNativeTargets.length)) {
+  fail('signed final release requires the signature bundle and all three native targets')
+}
+const expectedReleaseFiles = [...manifest.assets, 'manifest.json', 'SHA256SUMS', ...(signaturePresent ? ['SHA256SUMS.sigstore.json'] : [])].sort()
 const actualReleaseEntries = readdirSync(releaseDir, { withFileTypes: true })
 for (const entry of actualReleaseEntries) assertSupportedReleaseAssetName(entry.name, 'release directory')
 if (actualReleaseEntries.some((entry) => !entry.isFile())
@@ -61,31 +85,12 @@ if (includesHost) {
     'kala-dedicated-ingress.cjs',
     'kala-runtime.cjs',
     'kala-dedicated-deploy-supervisor.cjs',
-    'kala-dedicated-ingress.service',
-    'kala-dedicated-unit@.service',
-    'kala-dedicated-deploy-supervisor.service',
-    'kala-dedicated-control-updater.service',
-    'kala-dedicated-migration-finalizer.service',
-    'deployment.json',
-    'install-dedicated-systemd.mjs',
     'kala-dedicated.mjs',
-    'deploy-dedicated.mjs',
-    'deploy-dashboard.mjs',
-    'cutover-dedicated-systemd.mjs',
-    'dedicated-data-migration.mjs',
-    'dedicated-settings-fingerprint.mjs',
-    'update-dedicated-control-plane.mjs',
-    'rollback-dedicated-systemd.mjs',
+    DEDICATED_SUPPORT_ARCHIVE,
   ]) {
     if (!manifest.assets.includes(asset)) fail(`manifest missing Dedicated asset ${asset}`)
   }
-  const dedicatedDeployment = JSON.parse(readFileSync(join(releaseDir, 'deployment.json'), 'utf8'))
-  if (dedicatedDeployment.schemaVersion !== 1
-    || dedicatedDeployment.architecture !== 'platform'
-    || dedicatedDeployment.tenancy !== 'single-tenant'
-    || dedicatedDeployment.runtimeProfile !== 'full') {
-    fail('release deployment.json is not the canonical Dedicated configuration')
-  }
+  try { inspectDedicatedSupportBundle(join(releaseDir, DEDICATED_SUPPORT_ARCHIVE)) } catch (error) { fail(error.message) }
   const hostBundle = readFileSync(join(releaseDir, 'kala-dashboard-with-runtime.cjs'), 'utf8')
   const embeddedAssetsPrefix = 'globalThis.__AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__='
   const embeddedAssetsStart = hostBundle.indexOf(embeddedAssetsPrefix)
@@ -96,14 +101,19 @@ if (includesHost) {
   // over that whole line overflow the call stack; locate its terminator instead.
   const embeddedAssets = JSON.parse(hostBundle.slice(embeddedAssetsStart + embeddedAssetsPrefix.length, embeddedAssetsEnd))
   for (const asset of embeddedAssets) assertSupportedReleaseAssetName(asset?.path, 'embedded Host assets')
+  if (!embeddedAssets.some((asset) => asset.path === 'run.sh')) fail('release Host bundle must embed run.sh')
   if (!hostBundle.includes('__AGENT_KERNEL_EMBEDDED_DOCS__')
     || !hostBundle.includes(Buffer.from('# Dedicated Platform Runtime Unit Refactor').toString('base64'))) {
     fail('release Host bundle is missing embedded product documentation')
   }
   const platformRuntime = readFileSync(join(releaseDir, 'kala-runtime.cjs'), 'utf8')
   if (platformRuntime.includes('globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=')) fail('Self-hosted Platform Runtime must not embed Dashboard assets')
-  const dashboardRelease = JSON.parse(readFileSync(join(releaseDir, 'dashboard-release.json'), 'utf8'))
-  if (dashboardRelease.schemaVersion !== 1 || dashboardRelease.product !== 'kala-dashboard' || !dashboardRelease.files?.some((entry) => entry.path === 'index.html')) fail('release Dashboard manifest is invalid')
+  try {
+    const dashboard = verifyDashboardArchive(join(releaseDir, dashboardArchiveName)).manifest
+    if (dashboard.version !== manifest.version || JSON.stringify(dashboard.source) !== JSON.stringify(manifest.source)) {
+      fail('Dashboard archive version or source identity does not match the release manifest')
+    }
+  } catch (error) { fail(error.message) }
   const operatorHelp = spawnSync('node', ['kala-dedicated.mjs', '--help'], { cwd: releaseDir, encoding: 'utf8' })
   if (operatorHelp.status !== 0 || !['install', 'status', 'upgrade', 'rollback', 'backup', 'restore', 'uninstall'].every((command) => operatorHelp.stdout.includes(command))) fail('Dedicated operator CLI help is incomplete')
   accessSync(join(releaseDir, 'kala-dedicated.mjs'), constants.X_OK)
@@ -140,6 +150,8 @@ for (const asset of manifest.assets) {
     }
     accessSync(path, constants.X_OK)
     if (text.includes('curl')) fail(`${asset} must be wget-only and must not mention curl`)
+    if (text.includes('copilot-cli') || text.includes('COPILOT_CLI_PATH')) fail(`${asset} must not download a standalone Copilot CLI`)
+    if (!text.includes('Release downloads require HTTPS except for loopback URLs') || !text.includes('cosign verify-blob')) fail(`${asset} must reject public unsigned installs`)
     if (/wget\s+-qO-.*\|.*bash/.test(text)) {
       fail(`${asset} must not suggest quiet wget pipe-to-bash bootstrap commands`)
     }
@@ -173,7 +185,7 @@ for (const asset of manifest.assets) {
     })
     if (badComponent.status === 0) fail(`${asset} unknown component smoke test should fail`)
     const badComponentOutput = `${badComponent.stdout}\n${badComponent.stderr}`
-    if (!badComponentOutput.includes('Unknown COMPONENT') || !badComponentOutput.includes('wget -nv -O "$tmp"') || !badComponentOutput.includes('HOST_URL=http://host-machine:3000 COMPONENT=executor')) {
+    if (!badComponentOutput.includes('Unknown COMPONENT') || !badComponentOutput.includes('wget -nv -O "$tmp"') || !badComponentOutput.includes('HOST_URL=http://127.0.0.1:3000 COMPONENT=executor')) {
       fail(`${asset} unknown component smoke test did not print diagnostic usage`)
     }
     if (badComponentOutput.includes('unbound variable')) {
@@ -186,7 +198,7 @@ for (const asset of manifest.assets) {
     })
     if (missingHost.status === 0) fail(`${asset} executor missing HOST_URL smoke test should fail`)
     const missingHostOutput = `${missingHost.stdout}\n${missingHost.stderr}`
-    if (!missingHostOutput.includes('requires HOST_URL') || !missingHostOutput.includes('wget -nv -O "$tmp"') || !missingHostOutput.includes('HOST_URL=http://host-machine:3000 COMPONENT=executor')) {
+    if (!missingHostOutput.includes('requires HOST_URL') || !missingHostOutput.includes('wget -nv -O "$tmp"') || !missingHostOutput.includes('HOST_URL=http://127.0.0.1:3000 COMPONENT=executor')) {
       fail(`${asset} executor missing HOST_URL smoke test did not print diagnostic usage`)
     }
     if (missingHostOutput.includes('download SHA256SUMS') || missingHostOutput.includes('unbound variable')) {
@@ -195,21 +207,10 @@ for (const asset of manifest.assets) {
   }
 }
 
-const installer = 'install-executor.sh'
-if (!manifest.assets.includes(installer)) fail(`manifest missing ${installer}`)
-const installerText = readFileSync(join(releaseDir, installer), 'utf8')
-for (const marker of ['RUNLAB_INSTALLER_ALLOW_UNSIGNED', 'SHA256SUMS', 'kala-executor-', '--internal-installer', 'Linux and macOS only']) {
-  if (!installerText.includes(marker)) fail(`${installer} missing required installer marker: ${marker}`)
+for (const forbidden of ['install-executor.sh', 'COPILOT_CLI_LICENSE.md']) {
+  if (manifest.assets.includes(forbidden) || existsSync(join(releaseDir, forbidden))) fail(`release must not publish ${forbidden}`)
 }
-if (installerText.includes('manifest.json')) fail(`${installer} must use the Host-scoped checksum index without manifest fallback`)
-if (!installerText.includes('kala-executor.cjs') || !installerText.includes('Node.js 22+')) fail(`${installer} must provide the checksum-verified Node.js 22 fallback when a platform native is unavailable`)
-if (/win32|mingw|msys|cygwin|\.exe|\.ps1|conpty/iu.test(installerText)) fail(`${installer} must support only Linux and macOS targets`)
-const installerSyntax = spawnSync('bash', ['-n', join(releaseDir, 'install-executor.sh')], { stdio: 'inherit' })
-if (installerSyntax.status !== 0) fail('install-executor.sh failed bash syntax check')
-
-const notesPath = join(releaseDir, 'RELEASE_NOTES.md')
-if (!existsSync(notesPath)) fail('missing release/RELEASE_NOTES.md')
-const notes = readFileSync(notesPath, 'utf8')
+if (manifest.assets.some((asset) => asset === 'copilot-cli' || asset.startsWith('copilot-cli-'))) fail('release must not publish standalone Copilot CLI assets')
 if (manifest.assets.includes('run.sh') && (!notes.includes("set -o pipefail; curl --proto '=https' --tlsv1.2 -fsSL") || !notes.includes('| COMPONENT='))) {
   fail('release notes missing direct HTTPS curl-to-bash bootstrap with pipefail')
 }
@@ -243,7 +244,7 @@ if (!notes.includes('Linux x64 and macOS x64/arm64') || !notes.includes('Linux a
 if (/https?:\/\/\S*(?:win32|windows|\.ps1|\.exe|conpty)/iu.test(notes)) fail('release notes must not offer Windows downloads')
 
 try {
-  await verifyReleaseChecksums(releaseDir, expectedReleaseFiles.filter((file) => file !== 'SHA256SUMS'))
+  await verifyReleaseChecksums(releaseDir, [...manifest.assets, 'manifest.json'])
 } catch {
   fail('SHA256SUMS verification failed')
 }

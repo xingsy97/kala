@@ -42,6 +42,16 @@ test('Private Cloud scanner preserves failure while collecting all three image r
   assert.match(workflow, /trivy image [^\n]+\|\| return 1/u)
 })
 
+test('release workflow publishes archived metadata and verifies the signed 27-asset set', () => {
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/release.yml'), 'utf8')
+  assert.equal(workflow.match(/extract-release-metadata\.mjs release\/kala-release-metadata\.tar\.gz/g)?.length, 2)
+  assert.match(workflow, /Verify exact signed 27-asset inventory[\s\S]*pnpm run verify:release-assets -- --require-signed/u)
+  assert.match(workflow, /Verify exact signed 27-asset inventory[\s\S]*cosign verify-blob[\s\S]*certificate-oidc-issuer/u)
+  assert.match(workflow, /subject-path:[\s\S]*release\/kala-release-metadata\.tar\.gz/u)
+  assert.doesNotMatch(workflow, /notes-file release\/RELEASE_NOTES\.md/u)
+  assert.doesNotMatch(workflow, /release\/sbom\.cdx\.json/u)
+})
+
 test('release reconciliation deletes unrelated remote assets and proves exact local closure', () => {
   const temporary = mkdtempSync(join(tmpdir(), 'release-reconcile-'))
   try {
@@ -85,22 +95,30 @@ test('promotion verifier binds the closed current draft to all three accepted na
     const tag = 'v1.2.3-rc.1'
     const revision = 'a'.repeat(40)
     const targets = [...requiredReleaseEvidence.portable.targets]
-    const assets = targets.map((target) => `kala-host-${target}`)
-    for (const [index, name] of assets.entries()) writeFileSync(join(candidate, name), `native-${index}\n`)
-    writeFileSync(join(candidate, 'RELEASE_NOTES.md'), '# Notes\n')
+    const nativeAssets = ['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor']
+      .flatMap((name) => targets.map((target) => `${name}-${target}`))
+    const assets = [
+      ...nativeAssets,
+      'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
+      'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-release-metadata.tar.gz',
+      'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
+    ]
+    for (const [index, name] of assets.entries()) writeFileSync(join(candidate, name), `asset-${index}\n`)
     writeFileSync(join(candidate, 'manifest.json'), JSON.stringify({ version: tag.slice(1), source: { revision }, nativeTargets: targets, assets }, null, 2) + '\n')
     writeFileSync(join(candidate, 'SHA256SUMS.sigstore.json'), '{}\n')
-    writeFileSync(join(candidate, 'rc-evidence.json'), '{"ok":true}\n')
-    writeChecksums(candidate, [...assets, 'manifest.json', 'RELEASE_NOTES.md'])
-    for (const [index, target] of targets.entries()) {
-      const checks = Object.fromEntries(requiredReleaseEvidence.portable.checks.map((name) => [name, true]))
+    const aggregate = join(temporary, 'rc-evidence.json')
+    writeFileSync(aggregate, '{"ok":true}\n')
+    writeChecksums(candidate, [...assets, 'manifest.json'])
+    for (const target of targets) {
+      const name = `kala-host-${target}`
+      const checks = Object.fromEntries(requiredReleaseEvidence.portable.checks.map((check) => [check, true]))
       writeFileSync(join(evidence, `${target}.rc-evidence.json`), JSON.stringify({
         schemaVersion: 1, category: 'portable', tag, version: tag.slice(1), revision, target,
-        artifact: { name: assets[index], sha256: digest(readFileSync(join(candidate, assets[index]))) },
+        artifact: { name, sha256: digest(readFileSync(join(candidate, name))) },
         ok: true, checks, generatedAt: '2026-01-01T00:00:00.000Z',
       }))
     }
-    const args = [verifyPromotion, '--directory', candidate, '--evidence', evidence, '--aggregate', join(candidate, 'rc-evidence.json'), '--tag', tag, '--revision', revision]
+    const args = [verifyPromotion, '--directory', candidate, '--evidence', evidence, '--aggregate', aggregate, '--tag', tag, '--revision', revision]
     assert.equal(spawnSync(process.execPath, args, { encoding: 'utf8' }).status, 0)
 
     writeFileSync(join(candidate, 'stale-debug.zip'), 'stale')
@@ -110,7 +128,7 @@ test('promotion verifier binds the closed current draft to all three accepted na
     unlinkSync(join(candidate, 'stale-debug.zip'))
 
     writeFileSync(join(candidate, assets[0]), 'replaced-after-acceptance\n')
-    writeChecksums(candidate, [...assets, 'manifest.json', 'RELEASE_NOTES.md'])
+    writeChecksums(candidate, [...assets, 'manifest.json'])
     result = spawnSync(process.execPath, args, { encoding: 'utf8' })
     assert.notEqual(result.status, 0)
     assert.match(result.stderr, /differs from its validated acceptance evidence/u)

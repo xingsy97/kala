@@ -16,10 +16,10 @@ function fixture() {
   const release = join(root, 'release'), deploy = join(root, 'deploy')
   mkdirSync(join(root, 'assets', 'assets'), { recursive: true }); mkdirSync(release); mkdirSync(join(deploy, 'requests'), { recursive: true }); mkdirSync(join(deploy, 'submissions')); mkdirSync(join(deploy, 'receipts')); mkdirSync(join(deploy, 'releases'))
   writeFileSync(join(root, 'assets', 'index.html'), '<title>dashboard</title>'); writeFileSync(join(root, 'assets', 'assets', 'app.12345678.js'), 'export{}')
-  execFileSync('tar', ['-czf', join(release, 'kala-dashboard-dist.tar.gz'), '-C', join(root, 'assets'), '.'])
   const files = [{ path: 'assets/app.12345678.js', bytes: 8, sha256: sha('export{}') }, { path: 'index.html', bytes: 24, sha256: sha('<title>dashboard</title>') }].sort((a, b) => a.path.localeCompare(b.path))
   const manifest = { schemaVersion: 1, product: 'kala-dashboard', version: '1.0.0', builtAt: new Date().toISOString(), source: { revision: 'a'.repeat(40), snapshotSha256: 'b'.repeat(64), dirty: false }, protocol: { min: '1.0.0', max: '1.0.0' }, assetDigest: sha(JSON.stringify(files)), files }
-  writeFileSync(join(release, 'dashboard-release.json'), JSON.stringify(manifest))
+  writeFileSync(join(root, 'assets', 'dashboard-release.json'), JSON.stringify(manifest))
+  execFileSync('tar', ['--format=ustar', '-czf', join(release, 'kala-dashboard.tar.gz'), '-C', join(root, 'assets'), 'assets/app.12345678.js', 'index.html', 'dashboard-release.json'])
   writeFileSync(join(deploy, 'route-state.json'), JSON.stringify({ schemaVersion: 1, generation: 7, releaseId: 'old', releaseDigest: 'c'.repeat(64), assetDigest: 'd'.repeat(64), version: '0.9.0', protocol: { min: '1.0.0', max: '1.0.0' }, activatedAt: new Date().toISOString() }))
   return { root, release, deploy }
 }
@@ -31,7 +31,16 @@ describe('deploy:dashboard client', () => {
     expect(output).toMatchObject({ accepted: true, expectedGeneration: 7, releaseId: 'dashboard-r2' })
     const request = JSON.parse(readFileSync(join(value.deploy, 'requests', 'operation-dashboard-r2.json'), 'utf8'))
     expect(request).toMatchObject({ action: 'deploy', expectedGeneration: 7, stagedReleaseDir: join(value.deploy, 'submissions', 'operation-dashboard-r2') })
-    expect(readFileSync(join(request.stagedReleaseDir, 'dashboard.tar.gz')).length).toBeGreaterThan(0)
+    const stagedArchive = join(request.stagedReleaseDir, 'dashboard.tar.gz')
+    const stagedBytes = readFileSync(stagedArchive)
+    expect(stagedBytes.length).toBeGreaterThan(0)
+    expect(request.archiveSha256).toBe(sha(stagedBytes))
+    expect(execFileSync('tar', ['-tzf', stagedArchive], { encoding: 'utf8' }).trim().split('\n').sort()).toEqual(['assets/app.12345678.js', 'index.html'])
+    expect(JSON.parse(readFileSync(join(request.stagedReleaseDir, 'manifest.json'), 'utf8')).product).toBe('kala-dashboard')
+  })
+  it('rejects a tampered consolidated Dashboard archive before staging', () => {
+    const value = fixture(); const archive = join(value.release, 'kala-dashboard.tar.gz'); const bytes = readFileSync(archive); bytes[Math.floor(bytes.length / 2)] ^= 0xff; writeFileSync(archive, bytes)
+    expect(() => execFileSync(process.execPath, [script, 'stage', '--local', '--skip-build', '--release-dir', value.release, '--deploy-root', value.deploy], { encoding: 'utf8', stdio: 'pipe' })).toThrow()
   })
   it('finds a remote receipt by operation id when the file is named by deployment id', () => {
     const value = fixture()

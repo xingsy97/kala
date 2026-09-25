@@ -40,6 +40,13 @@ test('release builders remove native scratch files and verification rejects unde
   assert.match(builder, /rmSync\(join\(outDir, '\.sea'\), \{ recursive: true, force: true \}\)/)
   assert.match(verifier, /release file set does not exactly match its manifest/)
   assert.match(verifier, /actualReleaseEntries\.some\(\(entry\) => !entry\.isFile\(\)\)/)
+  assert.match(builder, /assertStagedSourceIdentity\(\)/)
+  assert.match(builder, /createDashboardArchive/)
+  assert.match(builder, /createReleaseMetadataArchive/)
+  assert.match(builder, /buildDedicatedSupportBundle/)
+  assert.match(verifier, /manifest assets do not match the .* release contract/)
+  assert.match(verifier, /verifyDashboardArchive/)
+  assert.match(verifier, /inspectDedicatedSupportBundle/)
 })
 
 test('both full and native-only SEA Executor builds resolve adjacent native addons', () => {
@@ -76,6 +83,9 @@ test('release scripts enforce Linux and macOS assets and reject Windows offers',
   assert.match(builder, /Windows release assets are not included in this release/)
   assert.doesNotMatch(builder, /name: '(?:agent-kernel|agent-runlab|runlab)-|cjsName: 'bundle-dashboard-with-runtime'/)
   assert.doesNotMatch(builder, /install-executor\.ps1|node-pty-win32|writeExecutorUpdateManifest/)
+  assert.doesNotMatch(builder, /prepareCopilotRuntimeAsset|generateExecutorInstallerSh|COPILOT_CLI_PATH/)
+  assert.match(builder, /Release downloads require HTTPS except for loopback URLs/)
+  assert.match(builder, /cosign verify-blob/)
   assert.match(verifier, /supportedNativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
   assert.match(verifier, /linux-arm64\|win32\|windows/)
   assert.match(verifier, /assertSupportedReleaseAssetName\(asset\?\.path, 'embedded Host assets'\)/)

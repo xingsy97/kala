@@ -82,9 +82,14 @@ export class CopilotAgentRuntime implements AgentRuntime {
   async start(): Promise<void> {
     if (!this.options.enabled) return
     try {
+      const configuredCliPath = process.env.COPILOT_CLI_PATH?.trim()
       this.client = new CopilotClient({
         mode: 'empty',
-        connection: RuntimeConnection.forStdio({ args: ['--no-remote-export'] }),
+        connection: RuntimeConnection.forStdio({
+          args: ['--no-remote-export'],
+          // With no override, the official SDK discovers its own platform package.
+          ...(configuredCliPath ? { path: configuredCliPath } : {}),
+        }),
         baseDirectory: join(this.options.sessionsDir, '..', 'copilot-runtime'),
         ...(this.options.gitHubToken ? { gitHubToken: this.options.gitHubToken, useLoggedInUser: false } : {}),
       })
@@ -96,7 +101,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
       this.reason = undefined
     } catch (error) {
       this.status = 'unavailable'
-      this.reason = error instanceof Error ? error.message : String(error)
+      this.reason = copilotStartupFailureReason(error)
       await this.client?.stop().catch(() => [])
       this.client = undefined
     }
@@ -916,6 +921,14 @@ function requiresApproval(mode: ApprovalMode, toolRequiresApproval: boolean): bo
   if (mode === 'ask') return true
   if (mode === 'deny') return false
   return toolRequiresApproval
+}
+
+function copilotStartupFailureReason(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error)
+  if (/could not (?:find|resolve).*@github\/copilot|copilot cli not found|path to copilot cli is required|\bENOENT\b/i.test(detail)) {
+    return `Copilot CLI unavailable: ${detail} Install the complete @github/copilot-sdk npm dependencies or set COPILOT_CLI_PATH to a compatible Copilot CLI executable.`
+  }
+  return detail
 }
 
 function approvalKey(sessionId: string, callId: string): string {

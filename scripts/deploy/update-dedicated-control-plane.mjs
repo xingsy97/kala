@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto'
-import { chmod, copyFile, lstat, mkdir, open, readFile, readdir, rename, rm, symlink } from 'node:fs/promises'
+import { createHash, randomBytes } from 'node:crypto'
+import { chmod, copyFile, lstat, mkdir, open, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import process from 'node:process'
+import { gunzipSync } from 'node:zlib'
 
 const deployRoot = resolve(process.env.AGENT_RUNLAB_DEPLOY_ROOT ?? '/var/lib/agent-runlab/deploy')
 const controlLink = resolve(process.env.AGENT_RUNLAB_CONTROL_CURRENT ?? join(deployRoot, 'control-current'))
 const updaterLink = resolve(process.env.AGENT_RUNLAB_CONTROL_UPDATER_CURRENT ?? join(deployRoot, 'control-updater-current'))
+const controlReleasesRoot = resolve(process.env.AGENT_RUNLAB_CONTROL_RELEASES_ROOT ?? join(deployRoot, 'control-releases'))
 const updateRoot = resolve(process.env.AGENT_RUNLAB_CONTROL_UPDATE_ROOT ?? join(deployRoot, 'control-updates'))
 const requestsDir = join(updateRoot, 'requests')
 const receiptsDir = join(updateRoot, 'receipts')
@@ -18,6 +20,9 @@ const operatorStatusPath = resolve(process.env.AGENT_RUNLAB_OPERATOR_STATUS ?? j
 const ingressReadinessPath = resolve(process.env.AGENT_RUNLAB_INGRESS_READINESS ?? '/run/agent-runlab/ingress-readiness.json')
 const systemctlBinary = resolve(process.env.AGENT_RUNLAB_SYSTEMCTL ?? '/usr/bin/systemctl')
 const chownBinary = resolve(process.env.AGENT_RUNLAB_CHOWN ?? '/usr/bin/chown')
+const supportArchive = 'kala-dedicated-support.tar.gz'
+const supportManifest = 'dedicated-support-manifest.json'
+const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const units = [
   { asset: 'kala-dedicated-ingress.service', service: 'agent-runlab-dedicated-ingress.service' },
   { asset: 'kala-dedicated-unit@.service', service: 'agent-runlab-dedicated-unit@.service' },
@@ -48,8 +53,8 @@ async function main() {
     receipt = { schemaVersion: 1, revision: 1, updateId: request.updateId, deploymentId: request.deploymentId, direction: request.direction, phase: 'requested', targetReleaseId: request.targetReleaseId, targetReleaseDigest: request.targetReleaseDigest, predecessorReleaseId: request.predecessorReleaseId, predecessorReleaseDigest: request.predecessorReleaseDigest, requestedAt: request.requestedAt, updatedAt: new Date().toISOString() }
     await persist(receipt)
   } else assertSameRequest(receipt, request)
-  if (receipt.phase === 'completed') { await activate(updaterLink, releasePath(receipt.targetReleaseId)); return }
-  if (receipt.phase === 'rolled_back') { await activate(updaterLink, releasePath(receipt.predecessorReleaseId)); return }
+  if (receipt.phase === 'completed') { await activate(updaterLink, await materializeControlRelease(receipt.targetReleaseId, receipt.targetReleaseDigest)); return }
+  if (receipt.phase === 'rolled_back') { await activate(updaterLink, await materializeControlRelease(receipt.predecessorReleaseId, receipt.predecessorReleaseDigest)); return }
   if (receipt.phase === 'rollback_failed') { process.exitCode = 1; return }
   try {
     receipt = await reconcile(receipt)
@@ -72,10 +77,8 @@ async function nextRequest() {
 }
 
 async function reconcile(receipt) {
-  const target = releasePath(receipt.targetReleaseId)
-  const predecessor = releasePath(receipt.predecessorReleaseId)
-  await verifyRelease(target, receipt.targetReleaseId, receipt.targetReleaseDigest)
-  await verifyRelease(predecessor, receipt.predecessorReleaseId, receipt.predecessorReleaseDigest)
+  const target = await materializeControlRelease(receipt.targetReleaseId, receipt.targetReleaseDigest)
+  await materializeControlRelease(receipt.predecessorReleaseId, receipt.predecessorReleaseDigest)
   if (receipt.phase === 'requested') receipt = await transition(receipt, 'activating', { previousSupervisorPid: await servicePid('agent-runlab-dedicated-deploy-supervisor.service'), previousIngressPid: await servicePid('agent-runlab-dedicated-ingress.service') })
   if (receipt.phase === 'activating') {
     await installControlRelease(target)
@@ -101,8 +104,7 @@ async function rollback(receipt, cause) {
   const message = redact(cause)
   try {
     if (receipt.phase !== 'rolling_back') receipt = await transition(receipt, 'rolling_back', { error: message })
-    const predecessor = releasePath(receipt.predecessorReleaseId)
-    await verifyRelease(predecessor, receipt.predecessorReleaseId, receipt.predecessorReleaseDigest)
+    const predecessor = await materializeControlRelease(receipt.predecessorReleaseId, receipt.predecessorReleaseDigest)
     await installControlRelease(predecessor)
     const ingressBefore = await servicePid('agent-runlab-dedicated-ingress.service').catch(() => 0)
     await systemctl('restart', 'agent-runlab-dedicated-ingress.service')
@@ -151,9 +153,12 @@ async function ensureIndependentDashboard(release) {
     await chmod(statePath, 0o640)
     return
   } catch (error) { if (error?.code !== 'ENOENT') throw error }
-  const manifestBytes = await readFile(join(release, 'dashboard-release.json'))
+  const modern = await pathExists(join(release, 'kala-dashboard.tar.gz'))
+  const archiveEntries = readExactTarGz(await readFile(join(release, modern ? 'kala-dashboard.tar.gz' : 'kala-dashboard-dist.tar.gz')), 'Dashboard')
+  const manifestBytes = modern ? archiveEntries.get('dashboard-release.json') : await readFile(join(release, 'dashboard-release.json'))
+  if (!manifestBytes) throw new Error('Dashboard archive is missing dashboard-release.json')
   const manifest = JSON.parse(String(manifestBytes))
-  if (manifest?.schemaVersion !== 1 || manifest.product !== 'kala-dashboard' || !Array.isArray(manifest.files) || !manifest.files.some((entry) => entry.path === 'index.html') || !digest(manifest.assetDigest)) throw new Error('initial Dashboard manifest is invalid')
+  verifyDashboardArchive(archiveEntries, manifest, modern)
   const initialReleaseId = basename(release)
   const target = join(releasesRoot, initialReleaseId)
   await mkdir(join(dashboardRoot, 'requests'), { recursive: true, mode: 0o3770 })
@@ -163,10 +168,9 @@ async function ensureIndependentDashboard(release) {
   const incoming = `${target}.incoming-${process.pid}`
   await mkdir(join(incoming, 'assets'), { recursive: true, mode: 0o755 })
   try {
-    await verifyDashboardArchive(join(release, 'kala-dashboard-dist.tar.gz'), manifest.files)
-    await command('/usr/bin/tar', ['-xzf', join(release, 'kala-dashboard-dist.tar.gz'), '-C', join(incoming, 'assets'), '--no-same-owner', '--no-same-permissions', '--keep-directory-symlink'])
+    for (const entry of manifest.files) { const path = join(incoming, 'assets', ...entry.path.split('/')); await mkdir(dirname(path), { recursive: true, mode: 0o755 }); await writeFile(path, archiveEntries.get(entry.path), { flag: 'wx', mode: 0o644 }) }
     await verifyDashboardFiles(join(incoming, 'assets'), manifest.files)
-    await copyFile(join(release, 'dashboard-release.json'), join(incoming, 'manifest.json'))
+    await writeFile(join(incoming, 'manifest.json'), manifestBytes, { flag: 'wx', mode: 0o644 })
     await command('/usr/bin/chmod', ['-R', 'a-w', incoming])
     await rename(incoming, target); await syncDirectory(dirname(target))
   } finally { await rm(incoming, { recursive: true, force: true }) }
@@ -182,34 +186,148 @@ async function verifyDashboardFiles(root, expected) {
   if (JSON.stringify(actual.sort()) !== JSON.stringify(names)) throw new Error('Dashboard archive file set does not match manifest')
   for (const entry of expected) { const bytes = await readFile(join(root, entry.path)); if (bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256) throw new Error(`Dashboard asset mismatch: ${entry.path}`) }
 }
-async function verifyDashboardArchive(archive, expected) {
-  const listing = (await command('/usr/bin/tar', ['-tzf', archive], true)).split('\n').filter(Boolean)
-  const verbose = (await command('/usr/bin/tar', ['-tvzf', archive], true)).split('\n').filter(Boolean)
-  if (listing.length !== verbose.length || verbose.some((line) => !['-', 'd'].includes(line[0] ?? ''))) throw new Error('Dashboard archive contains links or special entries')
-  const actual = []
-  for (let index = 0; index < listing.length; index += 1) { const listed = listing[index]; const type = verbose[index][0]; if (type === 'd' && (listed === '.' || listed === './')) continue; const path = listed.replace(/^\.\//u, '').replace(/\/$/u, ''); if (!path || path.startsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..') || path.includes('\0')) throw new Error('Dashboard archive contains an unsafe path'); if (type === '-') actual.push(path) }
-  if (JSON.stringify(actual.sort()) !== JSON.stringify(expected.map((entry) => entry.path).sort())) throw new Error('Dashboard archive file set does not match manifest')
+function verifyDashboardArchive(entries, manifest, embeddedManifest) {
+  if (manifest?.schemaVersion !== 1 || manifest.product !== 'kala-dashboard' || !Array.isArray(manifest.files) || !manifest.files.some((entry) => entry.path === 'index.html') || !digest(manifest.assetDigest)) throw new Error('initial Dashboard manifest is invalid')
+  const expected = [...manifest.files.map((entry) => entry.path), ...(embeddedManifest ? ['dashboard-release.json'] : [])].sort()
+  if (new Set(expected).size !== expected.length || JSON.stringify([...entries.keys()].sort()) !== JSON.stringify(expected)) throw new Error('Dashboard archive file set does not match manifest')
+  const sorted = [...manifest.files].sort((a, b) => a.path.localeCompare(b.path))
+  if (manifest.assetDigest !== sha256(Buffer.from(JSON.stringify(sorted)))) throw new Error('Dashboard manifest asset digest is invalid')
+  for (const entry of manifest.files) { const bytes = entries.get(entry.path); if (!bytes || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !digest(entry.sha256) || bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256) throw new Error(`Dashboard asset mismatch: ${String(entry.path)}`) }
 }
 
-async function verifyRelease(path, releaseId, expectedDigest) {
+async function inspectRelease(path, releaseId, expectedDigest) {
   if (path !== releasePath(releaseId) || basename(path) !== releaseId) throw new Error('control release path escaped releases root')
   const directory = await lstat(path)
   if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o222) !== 0) throw new Error('control release is not immutable')
   const sumsBytes = await readFile(join(path, 'SHA256SUMS'))
   if (sha256(sumsBytes) !== expectedDigest) throw new Error('control release digest mismatch')
   const manifest = JSON.parse(await readFile(join(path, 'manifest.json'), 'utf8'))
-  if (!Array.isArray(manifest.assets) || !units.every(({ asset }) => manifest.assets.includes(asset)) || !manifest.assets.includes('deployment.json') || !manifest.assets.includes('update-dedicated-control-plane.mjs')) throw new Error('control release assets are incomplete')
+  if (!Array.isArray(manifest.assets)) throw new Error('control release assets are invalid')
+  const bundled = manifest.assets.includes(supportArchive)
+  const modern = bundled && manifest.assets.includes('kala-dashboard.tar.gz')
+  if (bundled ? manifest.assets.some((name) => supportAssets.includes(name)) : (!units.every(({ asset }) => manifest.assets.includes(asset)) || !manifest.assets.includes('deployment.json') || !manifest.assets.includes('update-dedicated-control-plane.mjs'))) throw new Error('control release support assets are incomplete')
   if (manifest.assets.some((name) => typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/u.test(name) || ['manifest.json', 'SHA256SUMS', 'RELEASE_NOTES.md'].includes(name))) throw new Error('invalid control release manifest asset')
-  const sums = new Map(String(sumsBytes).trim().split('\n').map((line) => { const match = /^([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9._@-]*)$/u.exec(line); if (!match) throw new Error('invalid control release checksum entry'); return [match[2], match[1]] }))
-  const expectedFiles = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md'].sort()
-  if (new Set(expectedFiles).size !== expectedFiles.length || sums.size !== String(sumsBytes).trim().split('\n').length || JSON.stringify([...sums.keys()].sort()) !== JSON.stringify(expectedFiles)) throw new Error('control release manifest and checksum file set differ')
-  for (const name of expectedFiles) {
+  const sumLines = String(sumsBytes).trim().split('\n')
+  const sums = new Map(sumLines.map((line) => { const match = /^([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9._@-]*)$/u.exec(line); if (!match) throw new Error('invalid control release checksum entry'); return [match[2], match[1]] }))
+  const expectedFiles = [...manifest.assets, 'manifest.json', ...(!modern ? ['RELEASE_NOTES.md'] : [])].sort()
+  if (new Set(expectedFiles).size !== expectedFiles.length || sums.size !== sumLines.length || JSON.stringify([...sums.keys()].sort()) !== JSON.stringify(expectedFiles)) throw new Error('control release manifest and checksum file set differ')
+  const signature = await pathExists(join(path, 'SHA256SUMS.sigstore.json')) ? ['SHA256SUMS.sigstore.json'] : []
+  const outerFiles = [...expectedFiles, 'SHA256SUMS', ...signature].sort()
+  const expandedFiles = [...outerFiles, ...(bundled ? supportAssets : [])].sort()
+  const actual = await readdir(path, { withFileTypes: true })
+  const actualNames = actual.map((entry) => entry.name).sort()
+  const rawExact = JSON.stringify(actualNames) === JSON.stringify(outerFiles)
+  const expandedExact = bundled && JSON.stringify(actualNames) === JSON.stringify(expandedFiles)
+  if (actual.some((entry) => !entry.isFile() || entry.isSymbolicLink()) || !rawExact && !expandedExact) throw new Error('control release file set is not exact')
+  for (const name of outerFiles) {
     const file = await lstat(join(path, name))
     if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o222) !== 0) throw new Error(`control release asset is not immutable: ${name}`)
-    if (sha256(await readFile(join(path, name))) !== sums.get(name)) throw new Error(`control asset checksum mismatch: ${name}`)
+    if (!['SHA256SUMS', 'SHA256SUMS.sigstore.json'].includes(name) && sha256(await readFile(join(path, name))) !== sums.get(name)) throw new Error(`control asset checksum mismatch: ${name}`)
+  }
+  const supportEntries = bundled
+    ? verifySupportArchive(await readFile(join(path, supportArchive)))
+    : new Map(await Promise.all(supportAssets.map(async (name) => [name, await readFile(join(path, name))])))
+  if (expandedExact) await verifyExpandedSupport(path, supportEntries)
+  return { path, outerFiles, snapshotFiles: [...new Set([...outerFiles, ...supportAssets])].sort(), supportEntries, bundled }
+}
+
+function verifySupportArchive(bytes) {
+  const entries = readExactTarGz(bytes, 'Dedicated support')
+  const expected = [...supportAssets, supportManifest].sort()
+  if (JSON.stringify([...entries.keys()].sort()) !== JSON.stringify(expected)) throw new Error('Dedicated support archive entries are unsafe or incomplete')
+  let manifest
+  try { manifest = JSON.parse(String(entries.get(supportManifest))) } catch { throw new Error('invalid Dedicated support manifest') }
+  if (manifest?.schemaVersion !== 1 || manifest.product !== 'kala-dedicated-support' || JSON.stringify(manifest.assets?.map((entry) => entry.name)) !== JSON.stringify(supportAssets)) throw new Error('invalid Dedicated support manifest')
+  for (const entry of manifest.assets) {
+    const archived = entries.get(entry.name)
+    if (!Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !digest(entry.sha256) || archived.length !== entry.bytes || sha256(archived) !== entry.sha256) throw new Error('invalid Dedicated support manifest asset')
+  }
+  return new Map(supportAssets.map((name) => [name, entries.get(name)]))
+}
+
+async function verifyExpandedSupport(root, supportEntries) {
+  for (const [name, archived] of supportEntries) {
+    const file = await lstat(join(root, name)); const bytes = await readFile(join(root, name))
+    if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o222) !== 0 || !bytes.equals(archived)) throw new Error(`Dedicated support asset is mutable or mismatched: ${name}`)
   }
 }
 
+async function materializeControlRelease(releaseId, releaseDigest) {
+  const inspected = await inspectRelease(releasePath(releaseId), releaseId, releaseDigest)
+  await mkdir(controlReleasesRoot, { recursive: true, mode: 0o711 })
+  // The updater service uses UMask=0077, while Stable Ingress and the
+  // Supervisor run unprivileged. Explicitly restore traverse-only access.
+  await chmod(controlReleasesRoot, 0o711)
+  const parent = join(controlReleasesRoot, `${releaseId}-${releaseDigest}`)
+  const target = join(parent, releaseId)
+  try {
+    await verifyControlSnapshot(target, inspected)
+    return target
+  } catch (error) {
+    try { await lstat(parent) } catch (statError) { if (statError?.code === 'ENOENT') return await publishControlSnapshot(parent, target, releaseId, inspected); throw statError }
+    throw new Error(`immutable control snapshot already exists with different content: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+async function publishControlSnapshot(parent, target, releaseId, inspected) {
+  const incoming = join(controlReleasesRoot, `.incoming-${releaseId}-${randomBytes(12).toString('hex')}`)
+  const snapshot = join(incoming, releaseId)
+  await mkdir(snapshot, { recursive: true, mode: 0o700 })
+  try {
+    for (const name of inspected.outerFiles) await copyFile(join(inspected.path, name), join(snapshot, name))
+    if (inspected.bundled) for (const [name, bytes] of inspected.supportEntries) await writeFile(join(snapshot, name), bytes, { flag: 'wx', mode: 0o444 })
+    await verifyControlSnapshot(snapshot, inspected, false)
+    for (const name of inspected.snapshotFiles) {
+      const path = join(snapshot, name); const file = await open(path, 'r'); try { await file.sync() } finally { await file.close() }; await chmod(path, 0o444)
+    }
+    await chmod(snapshot, 0o555); await chmod(incoming, 0o555)
+    const directory = await open(snapshot, 'r'); try { await directory.sync() } finally { await directory.close() }
+    await rename(incoming, parent); await syncDirectory(controlReleasesRoot)
+    await verifyControlSnapshot(target, inspected)
+    return target
+  } finally {
+    await chmod(snapshot, 0o700).catch(() => undefined)
+    await chmod(incoming, 0o700).catch(() => undefined)
+    await rm(incoming, { recursive: true, force: true })
+  }
+}
+
+async function verifyControlSnapshot(path, inspected, immutable = true) {
+  const directory = await lstat(path)
+  if (!directory.isDirectory() || directory.isSymbolicLink() || immutable && (directory.mode & 0o222) !== 0) throw new Error('control snapshot is not immutable')
+  const actual = await readdir(path, { withFileTypes: true })
+  if (actual.some((entry) => !entry.isFile() || entry.isSymbolicLink()) || JSON.stringify(actual.map((entry) => entry.name).sort()) !== JSON.stringify(inspected.snapshotFiles)) throw new Error('control snapshot file set is not exact')
+  for (const name of inspected.snapshotFiles) {
+    const file = await lstat(join(path, name))
+    if (!file.isFile() || file.isSymbolicLink() || immutable && (file.mode & 0o222) !== 0) throw new Error(`control snapshot asset is not immutable: ${name}`)
+    const expected = inspected.supportEntries.get(name) ?? await readFile(join(inspected.path, name))
+    if (!(await readFile(join(path, name))).equals(expected)) throw new Error(`control snapshot asset mismatch: ${name}`)
+  }
+}
+
+function readExactTarGz(compressed, label) {
+  let tar
+  try { tar = gunzipSync(compressed, { maxOutputLength: 512 * 1024 * 1024 }) } catch { throw new Error(`${label} archive is unreadable`) }
+  const entries = new Map(); let offset = 0; let ended = false
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512); offset += 512
+    if (header.every((byte) => byte === 0)) { ended = true; break }
+    const expectedChecksum = tarNumber(header.subarray(148, 156), label); let actualChecksum = 0
+    for (let index = 0; index < 512; index += 1) actualChecksum += index >= 148 && index < 156 ? 32 : header[index]
+    if (actualChecksum !== expectedChecksum) throw new Error(`${label} archive has an invalid header checksum`)
+    const name = tarText(header.subarray(0, 100)), prefix = tarText(header.subarray(345, 500)); const path = prefix ? `${prefix}/${name}` : name
+    if (!path || path.includes('\\') || path.startsWith('/') || path.endsWith('/') || path.includes('\0') || path.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error(`${label} archive contains an unsafe path`)
+    if (![0, 48].includes(header[156])) throw new Error(`${label} archive contains a non-regular entry`)
+    const size = tarNumber(header.subarray(124, 136), label)
+    if (size > 512 * 1024 * 1024 || offset + size > tar.length || entries.has(path)) throw new Error(`${label} archive contains a duplicate, truncated, or oversized entry`)
+    entries.set(path, Buffer.from(tar.subarray(offset, offset + size))); offset += Math.ceil(size / 512) * 512
+  }
+  if (!ended || tar.subarray(offset).some((byte) => byte !== 0)) throw new Error(`${label} archive has an invalid terminator`)
+  return entries
+}
+function tarText(bytes) { const end = bytes.indexOf(0); return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, end < 0 ? bytes.length : end)) }
+function tarNumber(bytes, label) { if (bytes[0] & 0x80) throw new Error(`${label} archive uses an unsupported tar number`); const value = tarText(bytes).trim(); if (!/^[0-7]*$/u.test(value)) throw new Error(`${label} archive has an invalid tar number`); const number = Number.parseInt(value || '0', 8); if (!Number.isSafeInteger(number) || number < 0) throw new Error(`${label} archive has an invalid tar number`); return number }
+async function pathExists(path) { try { await lstat(path); return true } catch (error) { if (error?.code === 'ENOENT') return false; throw error } }
 function validateRequest(value) {
   const allowed = new Set(['schemaVersion', 'updateId', 'deploymentId', 'direction', 'targetReleaseId', 'targetReleaseDigest', 'predecessorReleaseId', 'predecessorReleaseDigest', 'requestedAt'])
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key)) || value.schemaVersion !== 1 || !identifier(value.updateId) || !identifier(value.deploymentId) || !['forward', 'rollback'].includes(value.direction) || !releaseId(value.targetReleaseId) || !digest(value.targetReleaseDigest) || !releaseId(value.predecessorReleaseId) || !digest(value.predecessorReleaseDigest) || !timestamp(value.requestedAt)) throw new Error('invalid Dedicated control update request')

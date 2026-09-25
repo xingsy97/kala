@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
+import { extractDedicatedSupportBundle, DEDICATED_SUPPORT_ARCHIVE } from './dedicated-support-bundle.mjs'
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 const releaseDir = join(repoRoot, 'release')
@@ -22,9 +23,9 @@ if (!existsSync(manifestPath)) fail('missing release/manifest.json — run build
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 if (!Array.isArray(manifest.assets)) fail('release manifest missing assets array')
 
-const requiredAssets = ['kala-dashboard-with-runtime.cjs', 'deployment.json']
+const requiredAssets = ['kala-dashboard-with-runtime.cjs', DEDICATED_SUPPORT_ARCHIVE]
 for (const asset of requiredAssets) {
-  if (!existsSync(join(releaseDir, asset))) fail(`missing required asset: ${asset}`)
+  if (!manifest.assets.includes(asset) || !existsSync(join(releaseDir, asset))) fail(`missing required manifest asset: ${asset}`)
 }
 
 const installDir = mkdtempSync(join(tmpdir(), 'agent-kernel-install-'))
@@ -36,6 +37,9 @@ mkdirSync(artifactsDir, { recursive: true })
 for (const asset of requiredAssets) {
   copyFileSync(join(releaseDir, asset), join(installDir, asset))
 }
+const supportDir = join(installDir, 'support')
+extractDedicatedSupportBundle(join(installDir, DEDICATED_SUPPORT_ARCHIVE), supportDir)
+copyFileSync(join(supportDir, 'deployment.json'), join(installDir, 'deployment.json'))
 
 const port = await findFreePort()
 const hostCjs = join(installDir, 'kala-dashboard-with-runtime.cjs')
@@ -89,7 +93,7 @@ try {
   if (!dashboardHtml.includes('<html')) {
     fail(`GET / did not return an HTML dashboard shell (got ${dashboardHtml.slice(0, 200)})`)
   }
-  const installerAsset = 'install-executor.sh'
+  const installerAsset = 'run.sh'
   const installerRes = await fetch(`${url}/install/assets/${installerAsset}`)
   if (installerRes.status !== 200) fail(`GET /install/assets/${installerAsset} returned ${installerRes.status}`)
   if (!installerRes.headers.get('content-type')?.includes('text/x-shellscript')) {
@@ -98,7 +102,7 @@ try {
   const actualInstaller = await installerRes.text()
   const expectedInstaller = readFileSync(join(releaseDir, installerAsset), 'utf8')
   if (actualInstaller !== expectedInstaller) fail(`GET /install/assets/${installerAsset} did not return the built release asset`)
-  for (const asset of ['install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json']) {
+  for (const asset of ['install-executor.sh', 'install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json']) {
     const assetRes = await fetch(`${url}/install/assets/${asset}`)
     if (assetRes.status !== 404) fail(`GET /install/assets/${asset} returned ${assetRes.status}, expected unsupported or platform-ambiguous asset to be absent`)
   }

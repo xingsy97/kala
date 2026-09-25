@@ -30,10 +30,11 @@ validation tools remain available for a separately approved future npm release.
 ## GitHub Release assets
 
 The `GitHub Release Assets` workflow also accepts only the unified `v*` tag. Its
-native matrix builds matching-runner Node SEA assets for Linux, macOS, and
-Windows on x64 and arm64. Node SEA assets are never cross-compiled or relabeled.
-The CJS job builds portable fallbacks, the Dashboard archive, Dedicated operator
-assets, release notes, manifest, and checksums. The final job merges exact
+current RC native matrix builds matching-runner Node SEA assets for Linux x64
+and macOS x64/arm64. Linux arm64 and Windows are paused; SEA binaries are never
+cross-compiled or relabeled. The CJS job builds portable fallbacks, the Dashboard
+archive, Dedicated support archive, release metadata archive, manifest, and
+checksums. The final job merges exact
 artifacts and regenerates all metadata before publication.
 
 Important assets include:
@@ -45,23 +46,27 @@ Important assets include:
 | `kala-executor.cjs` | Node.js Executor fallback |
 | `kala-executor-<os>-<arch>` | Native Executor |
 | `kala-runtime.cjs` | Platform Runtime without embedded Dashboard |
-| `kala-dashboard-dist.tar.gz` | Independent Platform Dashboard |
+| `kala-dashboard.tar.gz` | Independent Platform Dashboard static files with embedded `dashboard-release.json` |
+| `kala-release-metadata.tar.gz` | CycloneDX SBOM, third-party notices, and release notes |
 | `run.sh` | Checksum-verifying Portable bootstrap |
-| `manifest.json` and `SHA256SUMS` | Release identity and integrity |
+| `manifest.json` and `SHA256SUMS` | External release identity and integrity |
 
 The `.cjs` assets require Node.js 22+. `run.sh` prefers them when Node 22 is
 available and otherwise selects a matching native binary. Manual downloads must
-verify `SHA256SUMS` before execution.
+verify `SHA256SUMS` before execution. `manifest.json`, `SHA256SUMS`, and
+`SHA256SUMS.sigstore.json` remain external so consumers can authenticate the
+closed release inventory before opening either archive. Archive consumers must
+reject duplicate, linked, traversing, or unexpected members before extraction.
 
 ## Release sequence
 
 1. Update `CHANGELOG.md` and set the intended root/workspace version.
 2. Run `verify:version`, privacy history, licenses, build/typecheck/tests, and
-   the six-platform Portable clean-environment acceptance from the release runbook.
+   Portable clean-environment acceptance for the three currently supported native targets.
 3. Commit from a clean worktree and create the matching annotated `v*` tag.
 4. Let GitHub Release and Private Cloud workflows build from the tag; do not upload local binaries.
 5. Keep the GitHub Release as a draft until signatures, provenance, SBOMs,
-   successful GHCR scans, all six native Portable clean installs/reinstalls,
+   successful GHCR scans, all three supported native Portable clean installs/reinstalls,
    and the exact revision-bound evidence pass. Dedicated and Private Cloud
    bundles remain uncertified preview assets pending system-level acceptance.
 6. Publish the draft only after the required acceptance evidence is complete.

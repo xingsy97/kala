@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, readlink, symlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -16,6 +16,7 @@ const unitNames = [
   'agent-runlab-dedicated-migration-finalizer.service',
 ]
 const unitAssets = unitNames.map((name) => name.replace('agent-runlab-', 'kala-'))
+const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', ...unitAssets, 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs'].sort()
 
 test('control updater atomically activates target and advances its own executable last', async () => {
   const fixture = await createFixture()
@@ -28,8 +29,15 @@ test('control updater atomically activates target and advances its own executabl
   assert.equal(receipt.previousSupervisorPid, 201)
   assert.equal(receipt.supervisorPid, 202)
   assert.ok(receipt.revision >= 6)
-  assert.equal(basename(await readlink(fixture.controlLink)), 'target-release')
-  assert.equal(basename(await readlink(fixture.updaterLink)), 'target-release')
+  const controlTarget = await readlink(fixture.controlLink)
+  const updaterTarget = await readlink(fixture.updaterLink)
+  assert.equal(basename(controlTarget), 'target-release')
+  assert.equal(updaterTarget, controlTarget)
+  assert.match(controlTarget, /control-releases/u)
+  assert.deepEqual((await readdir(fixture.targetRelease)).sort(), ['SHA256SUMS', 'kala-dashboard.tar.gz', 'kala-dedicated-support.tar.gz', 'manifest.json'])
+  assert.deepEqual((await readdir(controlTarget)).sort(), [...supportAssets, 'SHA256SUMS', 'kala-dashboard.tar.gz', 'kala-dedicated-support.tar.gz', 'manifest.json'].sort())
+  assert.equal((await lstat(join(fixture.deployRoot, 'control-releases'))).mode & 0o777, 0o711)
+  assert.equal((await lstat(controlTarget)).mode & 0o222, 0)
   assert.match(await readFile(join(fixture.unitDir, unitNames[0]), 'utf8'), /target-release/u)
 })
 
@@ -76,6 +84,16 @@ test('control updater rejects a target release digest mismatch and retains prede
   assert.equal(basename(await readlink(fixture.updaterLink)), 'predecessor-release')
 })
 
+test('control updater can safely roll back a bundled target to an exact legacy flat predecessor', async () => {
+  const fixture = await createFixture({ failComponent: 'ingress', legacyPredecessor: true })
+  const result = await runUpdater(fixture)
+  const receipt = await fixture.receipt()
+  assert.equal(result.code, 0, `${result.stderr}${result.stdout}\n${JSON.stringify(receipt)}`)
+  assert.equal(receipt.phase, 'rolled_back')
+  assert.equal(basename(await readlink(fixture.controlLink)), 'predecessor-release')
+  assert.equal(basename(await readlink(fixture.updaterLink)), 'predecessor-release')
+})
+
 test('control updater refuses a mutable target release before changing control links', async () => {
   const fixture = await createFixture({ mutableTarget: true })
   const result = await runUpdater(fixture)
@@ -99,7 +117,7 @@ async function createFixture(options = {}) {
   const operatorStatus = join(deployRoot, 'operator-status.json')
   const crashMarker = join(root, 'crash-injected')
   await Promise.all([mkdir(releases, { recursive: true }), mkdir(join(updateRoot, 'requests'), { recursive: true }), mkdir(join(updateRoot, 'receipts'), { recursive: true }), mkdir(unitDir), mkdir(configDir)])
-  const predecessor = await createRelease(releases, 'predecessor-release')
+  const predecessor = await createRelease(releases, 'predecessor-release', options.legacyPredecessor)
   const target = await createRelease(releases, 'target-release')
   if (options.mutableTarget) await chmod(target.path, 0o755)
   const controlLink = join(deployRoot, 'control-current')
@@ -148,7 +166,7 @@ else if (args[0] === 'restart' && kind) {
 `)
   await chmod(fakeSystemctl, 0o755)
   return {
-    root, deployRoot, updateRoot, unitDir, controlLink, updaterLink,
+    root, deployRoot, updateRoot, unitDir, controlLink, updaterLink, targetRelease: target.path,
     env: {
       AGENT_RUNLAB_DEPLOY_ROOT: deployRoot, AGENT_RUNLAB_CONTROL_CURRENT: controlLink,
       AGENT_RUNLAB_CONTROL_UPDATER_CURRENT: updaterLink, AGENT_RUNLAB_CONTROL_UPDATE_ROOT: updateRoot,
@@ -163,26 +181,40 @@ else if (args[0] === 'restart' && kind) {
   }
 }
 
-async function createRelease(releases, releaseId) {
+async function createRelease(releases, releaseId, legacy = false) {
   const path = join(releases, releaseId)
   await mkdir(path)
-  const assets = [...unitAssets, 'deployment.json', 'update-dedicated-control-plane.mjs', 'kala-dashboard-dist.tar.gz', 'dashboard-release.json']
-  for (const name of unitAssets) await writeFile(join(path, name), `${releaseId} ${name}\n`)
+  const assets = legacy ? [...supportAssets, 'kala-dashboard-dist.tar.gz', 'dashboard-release.json'] : ['kala-dedicated-support.tar.gz', 'kala-dashboard.tar.gz']
+  for (const name of supportAssets) await writeFile(join(path, name), `${releaseId} ${name}\n`)
   await writeFile(join(path, 'deployment.json'), `${JSON.stringify({ schemaVersion: 1, releaseId })}\n`)
   await writeFile(join(path, 'update-dedicated-control-plane.mjs'), `// ${releaseId}\n`)
   const dashboardSource = join(path, '.dashboard-source')
   const dashboardBytes = Buffer.from(`<!doctype html><title>${releaseId}</title>`)
   await mkdir(dashboardSource)
   await writeFile(join(dashboardSource, 'index.html'), dashboardBytes)
-  await run('tar', ['-czf', join(path, 'kala-dashboard-dist.tar.gz'), '-C', dashboardSource, 'index.html'])
-  await writeFile(join(path, 'dashboard-release.json'), `${JSON.stringify({ schemaVersion: 1, product: 'kala-dashboard', version: '0.0.0-test', builtAt: new Date().toISOString(), source: { revision: '0'.repeat(40), snapshotSha256: '0'.repeat(64), dirty: false }, protocol: { min: '1.0.0', max: '1.0.0' }, assetDigest: sha256(dashboardBytes), files: [{ path: 'index.html', bytes: dashboardBytes.length, sha256: sha256(dashboardBytes) }] }, null, 2)}\n`)
-  await import('node:fs/promises').then(({ rm }) => rm(dashboardSource, { recursive: true, force: true }))
+  const files = [{ path: 'index.html', bytes: dashboardBytes.length, sha256: sha256(dashboardBytes) }]
+  const dashboardManifest = `${JSON.stringify({ schemaVersion: 1, product: 'kala-dashboard', version: '0.0.0-test', builtAt: new Date().toISOString(), source: { revision: '0'.repeat(40), snapshotSha256: '0'.repeat(64), dirty: false }, protocol: { min: '1.0.0', max: '1.0.0' }, assetDigest: sha256(Buffer.from(JSON.stringify(files))), files }, null, 2)}\n`
+  await writeFile(join(dashboardSource, 'dashboard-release.json'), dashboardManifest)
+  if (legacy) {
+    await run('tar', ['--format=ustar', '-czf', join(path, 'kala-dashboard-dist.tar.gz'), '-C', dashboardSource, 'index.html'])
+    await writeFile(join(path, 'dashboard-release.json'), dashboardManifest)
+  } else await run('tar', ['--format=ustar', '-czf', join(path, 'kala-dashboard.tar.gz'), '-C', dashboardSource, 'index.html', 'dashboard-release.json'])
+  await rm(dashboardSource, { recursive: true, force: true })
+  if (!legacy) {
+    const supportEntries = []
+    for (const name of supportAssets) { const bytes = await readFile(join(path, name)); supportEntries.push({ name, bytes: bytes.length, sha256: sha256(bytes) }) }
+    await writeFile(join(path, 'dedicated-support-manifest.json'), `${JSON.stringify({ schemaVersion: 1, product: 'kala-dedicated-support', assets: supportEntries }, null, 2)}\n`)
+    await run('tar', ['--format=ustar', '-czf', join(path, 'kala-dedicated-support.tar.gz'), '-C', path, ...supportAssets, 'dedicated-support-manifest.json'])
+    await rm(join(path, 'dedicated-support-manifest.json'))
+    await Promise.all(supportAssets.map(async (name) => await rm(join(path, name))))
+  }
   await writeFile(join(path, 'manifest.json'), `${JSON.stringify({ assets }, null, 2)}\n`)
-  await writeFile(join(path, 'RELEASE_NOTES.md'), `${releaseId}\n`)
+  if (legacy) await writeFile(join(path, 'RELEASE_NOTES.md'), `${releaseId}\n`)
+  const checksummed = [...assets, 'manifest.json', ...(legacy ? ['RELEASE_NOTES.md'] : [])].sort()
   const sums = []
-  for (const name of [...assets, 'manifest.json', 'RELEASE_NOTES.md'].sort()) sums.push(`${sha256(await readFile(join(path, name)))}  ${name}`)
+  for (const name of checksummed) sums.push(`${sha256(await readFile(join(path, name)))}  ${name}`)
   await writeFile(join(path, 'SHA256SUMS'), `${sums.join('\n')}\n`)
-  for (const name of [...assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS']) await chmod(join(path, name), 0o444)
+  for (const name of [...checksummed, ...(legacy ? supportAssets : []), 'SHA256SUMS']) await chmod(join(path, name), 0o444)
   await chmod(path, 0o555)
   const sumsBytes = await readFile(join(path, 'SHA256SUMS'))
   return { path: resolve(path), digest: sha256(sumsBytes) }

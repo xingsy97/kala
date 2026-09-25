@@ -151,13 +151,16 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
+          metadata="$(mktemp -d)"
+          trap 'rm -rf "$metadata"' EXIT
+          node scripts/release/extract-release-metadata.mjs release/kala-release-metadata.tar.gz "$metadata"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --draft --notes-file release/RELEASE_NOTES.md
+            gh release edit "$TAG" --draft --notes-file "$metadata/RELEASE_NOTES.md"
           else
             gh release create "$TAG" \
               --draft \
               --title "$TAG" \
-              --notes-file release/RELEASE_NOTES.md
+              --notes-file "$metadata/RELEASE_NOTES.md"
           fi
           node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release
 
@@ -211,13 +214,21 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - name: Sign the checksum index with Sigstore keyless identity
         run: cosign sign-blob --yes --bundle release/SHA256SUMS.sigstore.json release/SHA256SUMS
+      - name: Verify exact signed 27-asset inventory
+        run: |
+          pnpm run verify:release-assets -- --require-signed
+          cosign verify-blob \
+            --bundle release/SHA256SUMS.sigstore.json \
+            --certificate-identity-regexp "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@.*" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            release/SHA256SUMS
       - name: Attest final release assets
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             release/manifest.json
             release/SHA256SUMS
-            release/sbom.cdx.json
+            release/kala-release-metadata.tar.gz
             release/kala-dashboard-with-runtime.cjs
             release/kala-host-*
             release/kala-executor-*
@@ -227,5 +238,8 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release edit "$TAG" --draft --notes-file release/RELEASE_NOTES.md
+          metadata="$(mktemp -d)"
+          trap 'rm -rf "$metadata"' EXIT
+          node scripts/release/extract-release-metadata.mjs release/kala-release-metadata.tar.gz "$metadata"
+          gh release edit "$TAG" --draft --notes-file "$metadata/RELEASE_NOTES.md"
           node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release

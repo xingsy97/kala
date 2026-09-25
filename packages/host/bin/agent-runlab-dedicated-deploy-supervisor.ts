@@ -68,7 +68,7 @@ async function main(): Promise<void> {
         requestedAt: new Date().toISOString(),
       }
       await submitControlUpdateRequest(root, request)
-      await systemctl('start', '--no-block', 'agent-runlab-dedicated-control-updater.service')
+      await startControlUpdater()
     },
     controlPlaneUpdateStatus: async (receipt) => {
       const value = await readControlUpdateReceipt(root, `control-${receipt.deploymentId}`)
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
         requestedAt: new Date().toISOString(),
       }
       await submitControlUpdateRequest(root, request)
-      await systemctl('start', '--no-block', 'agent-runlab-dedicated-control-updater.service')
+      await startControlUpdater()
       const recovery = await readControlUpdateReceipt(root, recoveryUpdateId)
       if (!recovery) return { phase: 'pending' as const }
       if (recovery.phase === 'completed') return { phase: 'recovered' as const }
@@ -540,6 +540,17 @@ async function postJson<T>(url: string, body?: unknown, headers?: Record<string,
 
 async function systemctl(...args: string[]): Promise<void> {
   await command('/usr/bin/systemctl', args)
+}
+
+async function startControlUpdater(): Promise<void> {
+  try {
+    await systemctl('start', '--no-block', 'agent-runlab-dedicated-control-updater.service')
+  } catch (error) {
+    // The updater intentionally restarts this Supervisor. systemd can kill the
+    // still-running systemctl child with its parent cgroup after the durable
+    // request was accepted; the replacement Supervisor will reconcile it.
+    if (!(error instanceof Error) || !error.message.startsWith('/usr/bin/systemctl exited null:')) throw error
+  }
 }
 
 async function processOwnsPath(pid: number, expected: string): Promise<string | undefined> {

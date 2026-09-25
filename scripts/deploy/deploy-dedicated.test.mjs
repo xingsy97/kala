@@ -102,14 +102,11 @@ describe('deploy:dedicated client', () => {
     mkdirSync(predecessorDir, { recursive: true })
     mkdirSync(join(deployRoot, 'requests'), { recursive: true })
     mkdirSync(join(deployRoot, 'submissions'), { recursive: true })
-    const assets = ['kala-runtime.cjs']
-    writeFileSync(join(releaseDir, assets[0]), '#!/usr/bin/env node\nprocess.exit(0)\n')
-    writeFileSync(join(releaseDir, 'RELEASE_NOTES.md'), '# test release\n')
+    const assets = ['kala-runtime.cjs', 'kala-dedicated-support.tar.gz']
+    writeFileSync(join(releaseDir, 'kala-runtime.cjs'), '#!/usr/bin/env node\nprocess.exit(0)\n')
+    createSupportBundle(releaseDir, false)
     writeFileSync(join(releaseDir, 'manifest.json'), JSON.stringify({ assets }))
-    const bundle = execFileSync('sha256sum', [join(releaseDir, assets[0])], { encoding: 'utf8' }).split(' ')[0]
-    const notes = execFileSync('sha256sum', [join(releaseDir, 'RELEASE_NOTES.md')], { encoding: 'utf8' }).split(' ')[0]
-    const manifest = execFileSync('sha256sum', [join(releaseDir, 'manifest.json')], { encoding: 'utf8' }).split(' ')[0]
-    writeFileSync(join(releaseDir, 'SHA256SUMS'), `${bundle}  ${assets[0]}\n${notes}  RELEASE_NOTES.md\n${manifest}  manifest.json\n`)
+    writeSums(releaseDir, [...assets, 'manifest.json'])
     writeFileSync(join(predecessorDir, 'SHA256SUMS'), `${'a'.repeat(64)}  predecessor\n`)
     writeFileSync(join(deployRoot, 'route-state.json'), JSON.stringify({ schemaVersion: 1, generation: 3, activeSlot: 'blue', slots: { blue: { origin: 'http://127.0.0.1:13001', releaseId: 'predecessor' }, green: { origin: 'http://127.0.0.1:13002', releaseId: 'predecessor' } } }))
     const output = JSON.parse(execFileSync(process.execPath, [script, '--', 'stage', '--local', '--skip-build', '--release-dir', releaseDir, '--deploy-root', deployRoot, '--release-id', 'candidate', '--operation-id', 'operation-origin-0001', '--deployment-id', 'deployment-origin-0001'], { encoding: 'utf8', env: { ...process.env, AGENT_RUNLAB_SESSION_ID: 'session-origin-0001', AGENT_RUNLAB_CALL_ID: 'call-origin-0001' } }))
@@ -117,6 +114,9 @@ describe('deploy:dedicated client', () => {
     const request = JSON.parse(readFileSync(join(deployRoot, 'requests', 'operation-origin-0001.json'), 'utf8'))
     expect(request.origin).toEqual({ sessionId: 'session-origin-0001', callId: 'call-origin-0001' })
     expect(request.stagedReleaseDir).toBe(join(deployRoot, 'submissions', request.operationId))
+    expect(readdirSync(request.stagedReleaseDir).sort()).toEqual([...assets, 'manifest.json', 'SHA256SUMS'].sort())
+    expect(exists(request.stagedReleaseDir, 'deployment.json')).toBe(false)
+    expect(exists(request.stagedReleaseDir, 'RELEASE_NOTES.md')).toBe(false)
     expect(request.releaseDir).toBeUndefined()
   })
 
@@ -131,23 +131,34 @@ describe('deploy:dedicated client', () => {
     mkdirSync(join(deployRoot, 'submissions'), { recursive: true })
     copyFileSync(script, join(packaged, 'deploy-dedicated.mjs'))
     writeFileSync(join(packaged, 'kala-runtime.cjs'), '#!/usr/bin/env node\nprocess.exit(0)\n')
-    writeFileSync(join(packaged, 'RELEASE_NOTES.md'), '# packaged release\n')
-    writeFileSync(join(packaged, 'manifest.json'), JSON.stringify({ assets: ['kala-runtime.cjs', 'deploy-dedicated.mjs'] }))
-    const sum = (name) => execFileSync('sha256sum', [join(packaged, name)], { encoding: 'utf8' }).split(' ')[0]
-    writeFileSync(join(packaged, 'SHA256SUMS'), [
-      `${sum('RELEASE_NOTES.md')}  RELEASE_NOTES.md`,
-      `${sum('kala-runtime.cjs')}  kala-runtime.cjs`,
-      `${sum('deploy-dedicated.mjs')}  deploy-dedicated.mjs`,
-      `${sum('manifest.json')}  manifest.json`,
-    ].join('\n') + '\n')
+    createSupportBundle(packaged, true)
+    const assets = ['kala-runtime.cjs', 'kala-dedicated-support.tar.gz']
+    writeFileSync(join(packaged, 'manifest.json'), JSON.stringify({ assets }))
+    writeSums(packaged, [...assets, 'manifest.json'])
     writeFileSync(join(predecessorDir, 'SHA256SUMS'), `${'a'.repeat(64)}  predecessor\n`)
     writeFileSync(join(deployRoot, 'route-state.json'), JSON.stringify({ schemaVersion: 1, generation: 9, activeSlot: 'green', slots: { blue: { origin: 'http://127.0.0.1:13001', releaseId: 'predecessor' }, green: { origin: 'http://127.0.0.1:13002', releaseId: 'predecessor' } } }))
 
     const output = JSON.parse(execFileSync(process.execPath, [join(packaged, 'deploy-dedicated.mjs'), 'stage', '--local', '--skip-build', '--deploy-root', deployRoot, '--release-id', 'packaged-candidate', '--operation-id', 'operation-packaged-0001', '--deployment-id', 'deployment-packaged-0001'], { encoding: 'utf8' }))
     expect(output).toMatchObject({ accepted: true, operationId: 'operation-packaged-0001', expectedRouteGeneration: 9 })
-    expect(JSON.parse(readFileSync(join(deployRoot, 'requests', 'operation-packaged-0001.json'), 'utf8'))).toMatchObject({
+    const request = JSON.parse(readFileSync(join(deployRoot, 'requests', 'operation-packaged-0001.json'), 'utf8'))
+    expect(request).toMatchObject({
       releaseId: 'packaged-candidate',
       stagedReleaseDir: join(deployRoot, 'submissions', 'operation-packaged-0001'),
     })
+    expect(readdirSync(request.stagedReleaseDir).sort()).toEqual([...assets, 'manifest.json', 'SHA256SUMS'].sort())
+    for (const supportAsset of supportAssets) expect(exists(request.stagedReleaseDir, supportAsset)).toBe(false)
   })
 })
+
+const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
+function digest(path) { return execFileSync('sha256sum', [path], { encoding: 'utf8' }).split(' ')[0] }
+function writeSums(root, names) { writeFileSync(join(root, 'SHA256SUMS'), names.sort().map((name) => `${digest(join(root, name))}  ${name}`).join('\n') + '\n') }
+function createSupportBundle(root, expanded) {
+  for (const name of supportAssets) if (!exists(root, name)) writeFileSync(join(root, name), `${name}\n`)
+  const entries = supportAssets.map((name) => { const bytes = readFileSync(join(root, name)); return { name, bytes: bytes.length, sha256: digest(join(root, name)) } })
+  writeFileSync(join(root, 'dedicated-support-manifest.json'), `${JSON.stringify({ schemaVersion: 1, product: 'kala-dedicated-support', assets: entries }, null, 2)}\n`)
+  execFileSync('tar', ['-czf', join(root, 'kala-dedicated-support.tar.gz'), '-C', root, ...supportAssets, 'dedicated-support-manifest.json'])
+  rmSync(join(root, 'dedicated-support-manifest.json'))
+  if (!expanded) for (const name of supportAssets) rmSync(join(root, name))
+}
+function exists(root, name) { try { statSync(join(root, name)); return true } catch { return false } }

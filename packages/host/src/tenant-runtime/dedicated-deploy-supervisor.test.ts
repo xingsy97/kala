@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,11 +8,25 @@ import type { HostRestartAttempt, HostRestartStatus } from '@agent-kernel/shared
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DedicatedDeploySupervisor } from './dedicated-deploy-supervisor.js'
-import type { DedicatedDeployRequest } from './dedicated-deploy-protocol.js'
+import { verifyImmutableRelease, type DedicatedDeployRequest } from './dedicated-deploy-protocol.js'
 import type { DedicatedRouteState, DedicatedSlot } from './dedicated-slot-state.js'
 
 const roots: string[] = []
 const digest = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex')
+const modernAssets = [
+  ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor']
+    .flatMap((name) => ['linux-x64', 'darwin-x64', 'darwin-arm64'].map((target) => `${name}-${target}`)),
+  'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs',
+  'kala-dedicated-deploy-supervisor.cjs', 'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz',
+  'kala-release-metadata.tar.gz', 'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
+]
+const supportAssets = [
+  'cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs',
+  'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs',
+  'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service',
+  'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs',
+  'update-dedicated-control-plane.mjs',
+]
 const safe = { safe: true, queueStable: true, activeLlmCalls: 0, activeToolCalls: 0, activeCompactions: 0, unsafeSessions: [], observedAt: new Date().toISOString() }
 
 async function makeTreeRemovable(dir: string): Promise<void> {
@@ -29,7 +44,7 @@ async function makeTreeRemovable(dir: string): Promise<void> {
 
 async function release(root: string, name: string, content: string): Promise<{ dir: string; bundle: string; release: string }> {
   const dir = join(root, 'releases', name)
-  const result = await writeRelease(dir, content)
+  const result = await writeRelease(dir, content, true)
   await chmod(dir, 0o500)
   await Promise.all(result.files.map(async (file) => await chmod(join(dir, file), 0o400)))
   return result
@@ -39,17 +54,20 @@ async function submission(root: string, operationId: string, content: string): P
   return await writeRelease(join(root, 'submissions', operationId), content)
 }
 
-async function writeRelease(dir: string, content: string): Promise<{ dir: string; bundle: string; release: string; files: string[] }> {
+async function writeRelease(dir: string, content: string, legacy = false): Promise<{ dir: string; bundle: string; release: string; files: string[] }> {
   await mkdir(dir, { recursive: true })
-  const files = new Map([
-    ['kala-runtime.cjs', content],
-    ['manifest.json', JSON.stringify({ assets: ['kala-runtime.cjs'] })],
-    ['RELEASE_NOTES.md', '# test'],
-  ])
-  for (const [file, value] of files) await writeFile(join(dir, file), value)
-  const sums = [...files].map(([file, value]) => digest(value) + '  ' + file).join('\n') + '\n'
+  const assets = legacy ? ['kala-runtime.cjs'] : modernAssets
+  const checksummed = new Map(assets.map((name) => [name, name === 'kala-runtime.cjs' ? content : `${name}:${content}`]))
+  checksummed.set('manifest.json', JSON.stringify({ assets }))
+  if (legacy) checksummed.set('RELEASE_NOTES.md', '# predecessor release')
+  for (const [file, value] of checksummed) await writeFile(join(dir, file), value)
+  const sums = [...checksummed].map(([file, value]) => digest(value) + '  ' + file).join('\n') + '\n'
   await writeFile(join(dir, 'SHA256SUMS'), sums)
-  return { dir, bundle: digest(content), release: digest(sums), files: [...files.keys(), 'SHA256SUMS'] }
+  if (!legacy) await writeFile(join(dir, 'SHA256SUMS.sigstore.json'), JSON.stringify({ fixture: true }))
+  return {
+    dir, bundle: digest(content), release: digest(sums),
+    files: [...checksummed.keys(), 'SHA256SUMS', ...(!legacy ? ['SHA256SUMS.sigstore.json'] : [])],
+  }
 }
 
 function initialRoute(): DedicatedRouteState {
@@ -157,24 +175,41 @@ describe('Dedicated Deploy Supervisor protocol', () => {
     await expect(supervisor.accept({ ...input, bundleSha256: digest('different') })).rejects.toThrow('conflicts')
   })
 
-  it('publishes only an exact verified submission and accepts systemd asset names', async () => {
+  it('publishes the exact modern 27-file release with archived metadata and no standalone notes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-publish-')); roots.push(root)
     const old = await release(root, 'old', 'old')
     const next = await submission(root, 'operation-deploy-0001', 'next')
-    const manifestPath = join(next.dir, 'manifest.json')
-    const bundle = await readFile(join(next.dir, 'kala-runtime.cjs'))
-    const unitName = 'agent-runlab-dedicated-unit@.service'
-    const unit = '[Service]\nType=exec\n'
-    const manifest = JSON.stringify({ assets: ['kala-runtime.cjs', unitName] })
-    await writeFile(manifestPath, manifest)
-    await writeFile(join(next.dir, unitName), unit)
-    const notes = await readFile(join(next.dir, 'RELEASE_NOTES.md'))
-    const sums = `${digest(bundle)}  kala-runtime.cjs\n${digest(unit)}  ${unitName}\n${digest(manifest)}  manifest.json\n${digest(notes)}  RELEASE_NOTES.md\n`
-    await writeFile(join(next.dir, 'SHA256SUMS'), sums)
     const h = harness(); const supervisor = new DedicatedDeploySupervisor(root, h.adapter)
-    const staged = await supervisor.accept(request({ ...next, release: digest(sums) }, { sourceReleaseDigest: old.release }))
+    const staged = await supervisor.accept(request(next, { sourceReleaseDigest: old.release }))
     expect(staged.releaseDir).toBe(join(root, 'releases', 'next'))
-    expect(await readFile(join(staged.releaseDir, unitName), 'utf8')).toBe(unit)
+    expect(await readdir(staged.releaseDir)).toHaveLength(27)
+    expect(await readFile(join(staged.releaseDir, 'kala-release-metadata.tar.gz'), 'utf8')).toBe('kala-release-metadata.tar.gz:next')
+    await expect(readFile(join(staged.releaseDir, 'RELEASE_NOTES.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('accepts only archive-verified support expansion in an immutable modern predecessor', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-expanded-support-')); roots.push(root)
+    const modern = await writeRelease(join(root, 'releases', 'modern'), 'modern')
+    const supportEntries = []
+    for (const name of supportAssets) {
+      const bytes = Buffer.from(`support:${name}\n`); await writeFile(join(modern.dir, name), bytes)
+      supportEntries.push({ name, bytes: bytes.length, sha256: digest(bytes) })
+    }
+    await writeFile(join(modern.dir, 'dedicated-support-manifest.json'), JSON.stringify({ schemaVersion: 1, product: 'kala-dedicated-support', assets: supportEntries }))
+    const archived = spawnSync('tar', ['--format=ustar', '-czf', join(modern.dir, 'kala-dedicated-support.tar.gz'), '-C', modern.dir, ...supportAssets, 'dedicated-support-manifest.json'])
+    expect(archived.status).toBe(0)
+    await rm(join(modern.dir, 'dedicated-support-manifest.json'))
+    const manifest = JSON.parse(await readFile(join(modern.dir, 'manifest.json'), 'utf8')) as { assets: string[] }
+    const checksummed = [...manifest.assets, 'manifest.json'].sort()
+    const sums = (await Promise.all(checksummed.map(async (name) => `${digest(await readFile(join(modern.dir, name)))}  ${name}`))).join('\n') + '\n'
+    await writeFile(join(modern.dir, 'SHA256SUMS'), sums)
+    for (const name of await readdir(modern.dir)) await chmod(join(modern.dir, name), 0o400)
+    await chmod(modern.dir, 0o500)
+    const input = { deployRoot: root, releaseDir: modern.dir, releaseId: 'modern', releaseDigest: digest(sums), bundleSha256: modern.bundle }
+    await expect(verifyImmutableRelease(input)).resolves.toBeUndefined()
+    await chmod(modern.dir, 0o700); await chmod(join(modern.dir, supportAssets[0]!), 0o600)
+    await writeFile(join(modern.dir, supportAssets[0]!), 'tampered'); await chmod(join(modern.dir, supportAssets[0]!), 0o400); await chmod(modern.dir, 0o500)
+    await expect(verifyImmutableRelease(input)).rejects.toThrow('expanded Dedicated support asset mismatch')
   })
 
   it('rejects extra submission files before immutable publication', async () => {
@@ -183,6 +218,40 @@ describe('Dedicated Deploy Supervisor protocol', () => {
     await writeFile(join(next.dir, 'unexpected'), 'not in manifest')
     const supervisor = new DedicatedDeploySupervisor(root, harness().adapter)
     await expect(supervisor.accept(request(next, { sourceReleaseDigest: old.release }))).rejects.toThrow('file set')
+  })
+
+  it('rejects standalone notes and predecessor-format submissions while retaining immutable predecessor rollback', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-layouts-')); roots.push(root)
+    const old = await release(root, 'old', 'old')
+    const withNotes = await submission(root, 'operation-deploy-0001', 'next')
+    await writeFile(join(withNotes.dir, 'RELEASE_NOTES.md'), '# no longer external')
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter).accept(request(withNotes, { sourceReleaseDigest: old.release }))).rejects.toThrow('file set')
+
+    const legacy = await writeRelease(join(root, 'submissions', 'operation-deploy-0002'), 'legacy-next', true)
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter).accept(request(legacy, {
+      operationId: 'operation-deploy-0002', deploymentId: 'deployment-0002', sourceReleaseDigest: old.release,
+    }))).rejects.toThrow('missing kala-release-metadata.tar.gz')
+
+    const rollbackRequest: DedicatedDeployRequest = {
+      schemaVersion: 1, action: 'restart', operationId: 'operation-restart-0001', deploymentId: 'deployment-restart-0001',
+      topology: 'dedicated-slots', unitId: 'local', requestedAt: new Date().toISOString(), expectedRouteGeneration: 1,
+      fencingToken: 'fencing-token-restart-0001', sourceReleaseDigest: old.release, targetReleaseDigest: old.release,
+      predecessorReleaseId: 'old', candidateSlot: 'green',
+    }
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter).accept(rollbackRequest)).resolves.toMatchObject({ releaseId: 'old' })
+  })
+
+  it('rejects a metadata archive checksum mismatch and a mismatched SHA256SUMS digest', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-digests-')); roots.push(root)
+    const old = await release(root, 'old', 'old')
+    const changed = await submission(root, 'operation-deploy-0001', 'next')
+    await writeFile(join(changed.dir, 'kala-release-metadata.tar.gz'), 'changed')
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter).accept(request(changed, { sourceReleaseDigest: old.release }))).rejects.toThrow('invalid release asset')
+
+    const intact = await submission(root, 'operation-deploy-0002', 'next')
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter).accept(request(intact, {
+      operationId: 'operation-deploy-0002', deploymentId: 'deployment-0002', sourceReleaseDigest: old.release, targetReleaseDigest: digest('wrong'),
+    }))).rejects.toThrow('release digest mismatch')
   })
 
   it('rebuilds a missing operation index from the authoritative receipt after a crash', async () => {

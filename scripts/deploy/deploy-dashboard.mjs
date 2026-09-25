@@ -4,7 +4,10 @@ import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFi
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gunzipSync, gzipSync } from 'node:zlib'
 
+const dashboardArchive = 'kala-dashboard.tar.gz'
+const dashboardManifest = 'dashboard-release.json'
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const args = process.argv.slice(2); if (args[0] === '--') args.shift()
 if (!args.length || args.includes('--help') || args.includes('-h')) {
@@ -33,8 +36,8 @@ function stage() {
   const state = readJson(join(deployRoot, 'route-state.json'))
   const staged = join(deployRoot, 'submissions', operationId)
   transport.stage(releaseDir, staged, [
-    { source: 'kala-dashboard-dist.tar.gz', target: 'dashboard.tar.gz' },
-    { source: 'dashboard-release.json', target: 'manifest.json' },
+    { bytes: release.payloadArchiveBytes, target: 'dashboard.tar.gz' },
+    { bytes: release.manifestBytes, target: 'manifest.json' },
   ])
   const request = { schemaVersion: 1, action: 'deploy', operationId, deploymentId, requestedAt: new Date().toISOString(), expectedGeneration: state.generation, releaseId, releaseDigest: release.manifestSha256, manifestSha256: release.manifestSha256, archiveSha256: release.archiveSha256, stagedReleaseDir: staged }
   submit(request); printAccepted(request, false)
@@ -62,22 +65,35 @@ function findRequest(value) { const names = transport.list(join(deployRoot, 'req
 function findReceipt(value) { const direct = join(deployRoot, 'receipts', `${value}.json`); if (transport.exists(direct)) return readJson(direct); for (const name of transport.list(join(deployRoot, 'receipts')).filter((x) => x.endsWith('.json'))) { const receipt = readJson(join(deployRoot, 'receipts', name)); if (receipt.operationId === value) return receipt } }
 function printAccepted(x, replayed) { process.stdout.write(JSON.stringify({ accepted: true, replayed, operationId: x.operationId, deploymentId: x.deploymentId, releaseId: x.releaseId, releaseDigest: x.releaseDigest, expectedGeneration: x.expectedGeneration }, null, 2) + '\n') }
 function inspectRelease(root) {
-  const archive = join(root, 'kala-dashboard-dist.tar.gz'), manifestPath = join(root, 'dashboard-release.json')
-  const manifestBytes = readFileSync(manifestPath), archiveBytes = readFileSync(archive), manifest = JSON.parse(String(manifestBytes))
+  const archiveBytes = readFileSync(join(root, dashboardArchive))
+  const entries = readExactTarGz(archiveBytes)
+  const manifestBytes = entries.get(dashboardManifest)
+  if (!manifestBytes) throw new Error('Dashboard archive is missing its manifest')
+  let manifest
+  try { manifest = JSON.parse(String(manifestBytes)) } catch { throw new Error('invalid Dashboard release manifest') }
   if (manifest.schemaVersion !== 1 || manifest.product !== 'kala-dashboard' || !Array.isArray(manifest.files) || !manifest.files.some((x) => x.path === 'index.html')) throw new Error('invalid Dashboard release manifest')
-  const listing = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8' }); if (listing.status !== 0) throw new Error('Dashboard archive is unreadable')
-  const paths = listing.stdout.split('\n').filter((x) => x && x !== './' && !x.endsWith('/')).map((x) => x.replace(/^\.\//u, '')).sort()
-  const expected = manifest.files.map((x) => x.path).sort(); if (JSON.stringify(paths) !== JSON.stringify(expected)) throw new Error('Dashboard archive file set does not match manifest')
-  return { manifest, manifestSha256: sha(manifestBytes), archiveSha256: sha(archiveBytes) }
+  const expected = [...manifest.files.map((x) => x.path), dashboardManifest].sort()
+  if (new Set(expected).size !== expected.length || JSON.stringify([...entries.keys()].sort()) !== JSON.stringify(expected)) throw new Error('Dashboard archive file set does not match manifest')
+  const sorted = [...manifest.files].sort((a, b) => a.path.localeCompare(b.path))
+  if (manifest.assetDigest !== sha(Buffer.from(JSON.stringify(sorted)))) throw new Error('Dashboard manifest asset digest is invalid')
+  for (const entry of manifest.files) {
+    const bytes = entries.get(entry.path)
+    if (!bytes || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !/^[a-f0-9]{64}$/u.test(entry.sha256) || bytes.length !== entry.bytes || sha(bytes) !== entry.sha256) throw new Error('Dashboard archive asset mismatch: ' + String(entry.path))
+  }
+  // The release archive is self-describing, while the installed Host Supervisor
+  // accepts the manifest separately and requires the extracted payload to match
+  // manifest.files exactly. Strip only the already-verified embedded manifest.
+  const payloadArchiveBytes = writeTarGz(manifest.files.map((entry) => [entry.path, entries.get(entry.path)]))
+  return { manifest, manifestBytes, payloadArchiveBytes, manifestSha256: sha(manifestBytes), archiveSha256: sha(payloadArchiveBytes) }
 }
 function createTransport(values) { const lxd = option('--lxd'), ssh = option('--ssh'); if (lxd && ssh) throw new Error('choose one transport'); if (lxd) return shellTransport('lxd', lxd); if (ssh) return shellTransport('ssh', ssh); return localTransport() }
 function localTransport() { return { read: (p) => readFileSync(p), exists: existsSync, list: (p) => existsSync(p) ? readdirSync(p) : [], atomic: atomicLocal, stage: (source, target, files) => stageLocal(source, target, files) } }
 function shellTransport(kind, target) {
   if (!(kind === 'lxd' ? /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u : /^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$/u).test(target)) throw new Error('invalid transport target')
   const shell = (script, input) => { const command = kind === 'lxd' ? 'lxc' : 'ssh'; const commandArgs = kind === 'lxd' ? ['exec', target, '--', 'bash', '-lc', script] : [target, 'bash', '-lc', quote(script)]; const result = spawnSync(command, commandArgs, { input, encoding: input ? undefined : 'utf8', maxBuffer: 128 * 1024 * 1024 }); if (result.status !== 0) throw new Error(kind + ' command failed: ' + String(result.stderr)); return result.stdout }
-  return { read: (p) => Buffer.from(shell('cat -- ' + quote(p))), exists: (p) => { try { shell('test -e ' + quote(p)); return true } catch { return false } }, list: (p) => { try { return String(shell('find ' + quote(p) + ' -mindepth 1 -maxdepth 1 -printf ' + quote('%f\\n'))).trim().split('\n').filter(Boolean) } catch { return [] } }, atomic: (p, b) => String(shell(atomicScript(p), b)).trim() === 'created', stage: (source, destination, files) => { if (transportPath(shell, destination)) throw new Error('immutable Dashboard submission already exists'); const incoming = `${destination}.incoming-${randomBytes(10).toString('hex')}`; shell('mkdir -m 0700 -- ' + quote(incoming)); try { for (const file of files) { if (kind === 'lxd') run('lxc', ['file', 'push', join(source, file.source), `${target}${join(incoming, file.target)}`]); else run('scp', [join(source, file.source), `${target}:${join(incoming, file.target)}`]) } shell('find ' + quote(incoming) + ' -type f -exec chmod 0440 {} + && sync -f ' + quote(incoming) + ' && mv -Tn -- ' + quote(incoming) + ' ' + quote(destination)) } catch (e) { shell('rm -rf -- ' + quote(incoming)); throw e } } }
+  return { read: (p) => Buffer.from(shell('cat -- ' + quote(p))), exists: (p) => { try { shell('test -e ' + quote(p)); return true } catch { return false } }, list: (p) => { try { return String(shell('find ' + quote(p) + ' -mindepth 1 -maxdepth 1 -printf ' + quote('%f\\n'))).trim().split('\n').filter(Boolean) } catch { return [] } }, atomic: (p, b) => String(shell(atomicScript(p), b)).trim() === 'created', stage: (source, destination, files) => { if (transportPath(shell, destination)) throw new Error('immutable Dashboard submission already exists'); const incoming = `${destination}.incoming-${randomBytes(10).toString('hex')}`; shell('mkdir -m 0700 -- ' + quote(incoming)); try { for (const file of files) { if (file.bytes) shell('cat > ' + quote(join(incoming, file.target)), file.bytes); else if (kind === 'lxd') run('lxc', ['file', 'push', join(source, file.source), `${target}${join(incoming, file.target)}`]); else run('scp', [join(source, file.source), `${target}:${join(incoming, file.target)}`]) } shell('find ' + quote(incoming) + ' -type f -exec chmod 0440 {} + && sync -f ' + quote(incoming) + ' && mv -Tn -- ' + quote(incoming) + ' ' + quote(destination)) } catch (e) { shell('rm -rf -- ' + quote(incoming)); throw e } } }
 }
-function stageLocal(source, target, files) { if (existsSync(target)) throw new Error('immutable Dashboard submission already exists'); const incoming = `${target}.incoming-${randomBytes(10).toString('hex')}`; mkdirSync(incoming, { recursive: false, mode: 0o700 }); try { for (const file of files) { const bytes = readFileSync(join(source, file.source)); const fd = openSync(join(incoming, file.target), 'wx', 0o440); try { writeFileSync(fd, bytes); fsyncSync(fd) } finally { closeSync(fd) } } const directory = openSync(incoming, 'r'); try { fsyncSync(directory) } finally { closeSync(directory) } renameSync(incoming, target) } finally { rmSync(incoming, { recursive: true, force: true }) } }
+function stageLocal(source, target, files) { if (existsSync(target)) throw new Error('immutable Dashboard submission already exists'); const incoming = `${target}.incoming-${randomBytes(10).toString('hex')}`; mkdirSync(incoming, { recursive: false, mode: 0o700 }); try { for (const file of files) { const bytes = file.bytes ?? readFileSync(join(source, file.source)); const fd = openSync(join(incoming, file.target), 'wx', 0o440); try { writeFileSync(fd, bytes); fsyncSync(fd) } finally { closeSync(fd) } } const directory = openSync(incoming, 'r'); try { fsyncSync(directory) } finally { closeSync(directory) } renameSync(incoming, target) } finally { rmSync(incoming, { recursive: true, force: true }) } }
 function atomicLocal(path, bytes) { mkdirSync(dirname(path), { recursive: true }); const temp = `${path}.tmp-${randomBytes(8).toString('hex')}`; const file = openSync(temp, 'wx', 0o640); try { writeFileSync(file, bytes); fsyncSync(file) } finally { closeSync(file) } try { linkSync(temp, path) } catch (error) { if (error.code === 'EEXIST') return false; throw error } finally { unlinkSync(temp) } const directory = openSync(dirname(path), 'r'); try { fsyncSync(directory) } finally { closeSync(directory) } return true }
 function atomicScript(path) { return `set -e; p=${quote(path)}; d=$(dirname -- \"$p\"); mkdir -p -- \"$d\"; t=\"$p.tmp-${randomBytes(8).toString('hex')}\"; trap 'rm -f -- \"$t\"' EXIT; cat > \"$t\"; chmod 0640 \"$t\"; sync -f \"$t\"; if ln \"$t\" \"$p\" 2>/dev/null; then rm -f \"$t\"; sync -f \"$d\"; echo created; else echo exists; fi` }
 function transportPath(shell, path) { try { shell('test -e ' + quote(path)); return true } catch { return false } }
@@ -89,5 +105,42 @@ function identity(value) { if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-
 function targetPath(value) { const path = resolve(value); if (['/', '/var', '/var/lib'].includes(path)) throw new Error('unsafe deploy root'); return path }
 function positive(value, fallback) { const n = Number(value ?? fallback); if (!Number.isSafeInteger(n) || n <= 0) throw new Error('expected positive integer'); return n }
 function sha(value) { return createHash('sha256').update(value).digest('hex') }
+function readExactTarGz(compressed) {
+  let tar
+  try { tar = gunzipSync(compressed, { maxOutputLength: 512 * 1024 * 1024 }) } catch { throw new Error('Dashboard archive is unreadable') }
+  const entries = new Map(); let offset = 0; let ended = false
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512); offset += 512
+    if (header.every((byte) => byte === 0)) { ended = true; break }
+    verifyTarChecksum(header)
+    const name = tarText(header.subarray(0, 100)), prefix = tarText(header.subarray(345, 500)); const path = prefix ? `${prefix}/${name}` : name
+    if (!path || path.includes('\\') || path.startsWith('/') || path.endsWith('/') || path.includes('\0') || path.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('Dashboard archive contains an unsafe path')
+    if (![0, 48].includes(header[156])) throw new Error('Dashboard archive contains a non-regular entry')
+    const size = tarNumber(header.subarray(124, 136)); if (size > 512 * 1024 * 1024 || offset + size > tar.length || entries.has(path)) throw new Error('Dashboard archive contains a duplicate, truncated, or oversized entry')
+    entries.set(path, Buffer.from(tar.subarray(offset, offset + size))); offset += Math.ceil(size / 512) * 512
+  }
+  if (!ended || tar.subarray(offset).some((byte) => byte !== 0)) throw new Error('Dashboard archive has an invalid terminator')
+  return entries
+}
+function verifyTarChecksum(header) { const expected = tarNumber(header.subarray(148, 156)); let actual = 0; for (let i = 0; i < 512; i++) actual += i >= 148 && i < 156 ? 32 : header[i]; if (actual !== expected) throw new Error('Dashboard archive has an invalid header checksum') }
+function tarText(bytes) { const end = bytes.indexOf(0); return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, end < 0 ? bytes.length : end)) }
+function tarNumber(bytes) { if (bytes[0] & 0x80) throw new Error('Dashboard archive uses an unsupported tar number'); const value = tarText(bytes).trim(); if (!/^[0-7]*$/u.test(value)) throw new Error('Dashboard archive has an invalid tar number'); const number = Number.parseInt(value || '0', 8); if (!Number.isSafeInteger(number) || number < 0) throw new Error('Dashboard archive has an invalid tar number'); return number }
+function writeTarGz(entries) {
+  const blocks = []
+  for (const [path, bytes] of entries) {
+    const header = Buffer.alloc(512)
+    const parts = path.split('/'); const name = parts.pop(); const prefix = parts.join('/')
+    if (Buffer.byteLength(name) > 100 || Buffer.byteLength(prefix) > 155) throw new Error('Dashboard archive path exceeds portable tar limits')
+    writeTarText(header, 0, 100, name); writeTarOctal(header, 100, 8, 0o644); writeTarOctal(header, 108, 8, 0); writeTarOctal(header, 116, 8, 0); writeTarOctal(header, 124, 12, bytes.length); writeTarOctal(header, 136, 12, 0)
+    header.fill(32, 148, 156); header[156] = 48; writeTarText(header, 257, 6, 'ustar'); writeTarText(header, 263, 2, '00'); writeTarText(header, 345, 155, prefix)
+    let checksum = 0; for (const byte of header) checksum += byte
+    const checksumText = checksum.toString(8).padStart(6, '0'); header.write(checksumText, 148, 6, 'ascii'); header[154] = 0; header[155] = 32
+    blocks.push(header, bytes, Buffer.alloc((512 - bytes.length % 512) % 512))
+  }
+  blocks.push(Buffer.alloc(1024))
+  return gzipSync(Buffer.concat(blocks), { level: 9 })
+}
+function writeTarText(header, offset, length, value) { const bytes = Buffer.from(value); if (bytes.length > length) throw new Error('Dashboard archive path exceeds portable tar limits'); bytes.copy(header, offset) }
+function writeTarOctal(header, offset, length, value) { const text = value.toString(8).padStart(length - 1, '0') + '\0'; if (text.length !== length) throw new Error('Dashboard archive entry is too large'); header.write(text, offset, length, 'ascii') }
 function quote(value) { return `'${String(value).replaceAll(`'`, `'\''`)}'` }
 function run(command, commandArgs) { const result = spawnSync(command, commandArgs, { cwd: repositoryRoot, stdio: 'inherit' }); if (result.status !== 0) throw new Error(command + ' failed') }

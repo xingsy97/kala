@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildDeployPlan,
   installScript,
+  EXTERNAL_RELEASE_ASSETS,
   RETIRED_RELEASE_ASSETS,
   releaseFiles,
   rollbackScript,
@@ -71,15 +72,12 @@ describe('deploy plan', () => {
     ])
   })
 
-  it('includes the complete Dedicated control-plane update payload', () => {
-    const names = [
-      'kala-dedicated-control-updater.service',
-      'update-dedicated-control-plane.mjs',
-      'dedicated-data-migration.mjs',
-      'rollback-dedicated-systemd.mjs',
-    ]
-    const fs = fakeFs([...REQUIRED, ...names])
-    expect(releaseFiles(`${ROOT}/release`, fs)).toEqual(expect.arrayContaining(names))
+  it('defines the exact 27-file external release and archives Dedicated support and metadata', () => {
+    expect(EXTERNAL_RELEASE_ASSETS).toHaveLength(27)
+    expect(EXTERNAL_RELEASE_ASSETS).toEqual(expect.arrayContaining(['kala-dashboard.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-release-metadata.tar.gz']))
+    expect(EXTERNAL_RELEASE_ASSETS).not.toEqual(expect.arrayContaining(['RELEASE_NOTES.md', 'dashboard-release.json', 'kala-dashboard-dist.tar.gz', 'update-dedicated-control-plane.mjs']))
+    const fs = fakeFs([...new Set([...REQUIRED, ...EXTERNAL_RELEASE_ASSETS])])
+    expect(releaseFiles(`${ROOT}/release`, fs)).toEqual([...EXTERNAL_RELEASE_ASSETS].sort())
   })
 
   it('builds a deploy plan from explicit options', () => {

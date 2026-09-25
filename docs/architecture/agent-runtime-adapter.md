@@ -91,6 +91,15 @@ directory. A Session `cwd` belongs to its Workspace Executor and is passed only
 through RunLab custom Tool dispatch; it must never be used as the SDK process
 working directory.
 
+Kala does not select a separately published CLI by default. The official
+`@github/copilot-sdk` first discovers the platform-specific `@github/copilot`
+package installed in its npm dependency tree. Operators may instead set
+`COPILOT_CLI_PATH` to a compatible, executable Copilot CLI. If neither source is
+available, the runtime remains visibly `unavailable` with remediation rather
+than being reported as disabled. The platform package and its license remain
+part of an npm deployment of the SDK; that is distinct from copying its binary
+into a Kala release or container as a separately managed asset.
+
 Copilot must not be implemented through `LLMAdapter.call()`. Doing so would
 create two competing Agent loops and make Tool, approval, replay, and
 compaction ownership ambiguous.

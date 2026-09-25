@@ -1,7 +1,18 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="packages/dashboard/public/brand/kala-wordmark-light.svg">
-  <img src="packages/dashboard/public/brand/kala-wordmark.svg" alt="Kala" width="220">
-</picture>
+<p align="center">
+  <img src="packages/dashboard/public/icons/octopus-web.svg" alt="Kala octopus logo" width="64" height="64">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="packages/dashboard/public/brand/kala-wordmark-light.svg">
+    <img src="packages/dashboard/public/brand/kala-wordmark.svg" alt="Kala" width="145" height="64">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="https://github.com/xingsy97/kala/actions/workflows/ci.yml"><img src="https://github.com/xingsy97/kala/actions/workflows/ci.yml/badge.svg?branch=main" alt="Fast PR CI status"></a>
+  <a href="https://github.com/xingsy97/kala/actions/workflows/integration.yml"><img src="https://github.com/xingsy97/kala/actions/workflows/integration.yml/badge.svg?branch=main" alt="Integration CI status"></a>
+  <a href="https://github.com/xingsy97/kala/actions/workflows/browser-security.yml"><img src="https://github.com/xingsy97/kala/actions/workflows/browser-security.yml/badge.svg?branch=main" alt="Browser and Security CI status"></a>
+  <a href="https://github.com/xingsy97/kala/actions/workflows/release.yml"><img src="https://github.com/xingsy97/kala/actions/workflows/release.yml/badge.svg" alt="Release assets workflow status"></a>
+  <a href="https://github.com/xingsy97/kala/actions/workflows/private-cloud-release.yml"><img src="https://github.com/xingsy97/kala/actions/workflows/private-cloud-release.yml/badge.svg" alt="Private Cloud release workflow status"></a>
+</p>
 
 # Kala
 

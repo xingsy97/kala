@@ -32,17 +32,29 @@ WORK_DIR="\${RUNLAB_INSTALLER_WORK_DIR:-$(mktemp -d)}"
 mkdir -p "$WORK_DIR"
 trap 'rm -rf "$WORK_DIR"' EXIT
 fail() { printf 'Kala installer: %s\\n' "$*" >&2; exit 1; }
-[ "\${RUNLAB_INSTALLER_ALLOW_UNSIGNED:-0}" = 1 ] || fail "release signatures are not available; refusing unsigned install (set RUNLAB_INSTALLER_ALLOW_UNSIGNED=1 only for development)"
 command -v wget >/dev/null 2>&1 || fail "wget is required"
 command -v uname >/dev/null 2>&1 || fail "uname is required"
+case "$BASE_URL" in
+  https://*) HTTPS_ONLY=1 ;;
+  http://localhost/*|http://localhost:*/*|http://127.0.0.1/*|http://127.0.0.1:*/*|http://\\[::1\\]/*|http://\\[::1\\]:*/*) HTTPS_ONLY=0 ;;
+  *) fail "release asset URL must use HTTPS" ;;
+esac
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m | tr '[:upper:]' '[:lower:]')
 case "$os" in linux) os=linux ;; darwin) os=darwin ;; *) fail "unsupported OS: $os (this release supports Linux and macOS only)" ;; esac
 case "$arch" in x86_64|amd64) arch=x64 ;; arm64|aarch64) arch=arm64 ;; *) fail "unsupported architecture: $arch" ;; esac
 target="$os-$arch"
 asset="kala-executor-$target"
+download_file() {
+  name="$1"
+  if [ "$HTTPS_ONLY" = 1 ]; then
+    wget -q --https-only --tries=3 --timeout=30 -O "$WORK_DIR/$name" "$BASE_URL/$name" || fail "failed to download $name"
+  else
+    wget -q --tries=3 --timeout=30 -O "$WORK_DIR/$name" "$BASE_URL/$name" || fail "failed to download $name"
+  fi
+}
 download_metadata() {
-  name="$1"; wget -q --https-only --tries=3 --timeout=30 -O "$WORK_DIR/$name" "$BASE_URL/$name" || fail "failed to download $name"
+  name="$1"; download_file "$name"
   size=$(wc -c < "$WORK_DIR/$name" | tr -d ' '); [ "$size" -le "$MAX_METADATA_BYTES" ] || fail "$name exceeds metadata size limit"
 }
 download_metadata SHA256SUMS
@@ -57,7 +69,7 @@ if [ -z "$expected" ]; then
   [ "$node_major" -ge 22 ] || fail "Node.js 22+ is required for the Executor fallback (found $(node --version 2>/dev/null || printf unknown))"
   use_node=1
 fi
-wget -q --https-only --tries=3 --timeout=30 -O "$WORK_DIR/$asset" "$BASE_URL/$asset" || fail "failed to download $asset"
+download_file "$asset"
 if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$WORK_DIR/$asset" | awk '{print $1}'); elif command -v shasum >/dev/null 2>&1; then actual=$(shasum -a 256 "$WORK_DIR/$asset" | awk '{print $1}'); else fail "sha256sum or shasum is required"; fi
 [ "$actual" = "$expected" ] || fail "checksum mismatch for $asset"
 if [ "$use_node" = 1 ]; then exec node "$WORK_DIR/$asset" --internal-installer "$@"; fi

@@ -19,7 +19,7 @@ const runId = randomBytes(8).toString('hex')
 const container = 'runlab-rc-dedicated-' + runId
 const scratch = mkdtempSync(join(tmpdir(), 'runlab-rc-dedicated-'))
 const candidate = materializeRelease(candidateInput, join(scratch, 'candidate'))
-const predecessor = materializeRelease(predecessorInput, join(scratch, 'predecessor'))
+const predecessor = materializeRelease(predecessorInput, join(scratch, 'predecessor'), candidateInput)
 const token = randomBytes(24).toString('base64url')
 const sessionId = 'session-self-deploy-' + runId
 const operationId = 'operation-self-deploy-acceptance'
@@ -36,13 +36,15 @@ try {
   run('lxc', ['start', container])
   await waitFor(async () => /running|degraded/u.test(exec(['systemctl', 'is-system-running'], true).stdout), 90_000, 'clean systemd')
   run('lxc', ['file', 'push', process.execPath, container + '/usr/bin/node'])
-  run('lxc', ['file', 'push', '--recursive', candidate + '/', container + '/tmp/candidate'])
-  run('lxc', ['file', 'push', '--recursive', predecessor + '/', container + '/tmp/predecessor'])
-  run('lxc', ['file', 'push', join(predecessorInput, 'kala-executor-linux-x64'), container + '/tmp/kala-executor-linux-x64'])
-  run('lxc', ['file', 'push', join(root, 'scripts/release/fixtures/dedicated-acceptance-provider.mjs'), container + '/tmp/dedicated-acceptance-provider.mjs'])
-  exec(['chmod', '+x', '/usr/bin/node', '/tmp/kala-executor-linux-x64'])
+  exec(['mkdir', '-p', '/tmp/candidate', '/tmp/predecessor'])
+  pushRelease(candidate, '/tmp/candidate')
+  pushRelease(predecessor, '/tmp/predecessor')
+  exec(['mkdir', '-p', '/usr/local/lib/agent-runlab-acceptance', '/var/lib/agent-runlab-acceptance/workspace'])
+  run('lxc', ['file', 'push', join(predecessorInput, 'kala-executor-linux-x64'), container + '/usr/local/lib/agent-runlab-acceptance/kala-executor-linux-x64'])
+  run('lxc', ['file', 'push', join(root, 'scripts/release/fixtures/dedicated-acceptance-provider.mjs'), container + '/usr/local/lib/agent-runlab-acceptance/dedicated-acceptance-provider.mjs'])
+  exec(['chmod', '+x', '/usr/bin/node', '/usr/local/lib/agent-runlab-acceptance/kala-executor-linux-x64'])
   if (!exec(['node', '--version']).stdout.startsWith('v22.')) throw new Error('clean Dedicated environment did not receive Node.js 22')
-  exec(['mkdir', '-p', '/etc/agent-runlab', '/tmp/workspace'])
+  exec(['mkdir', '-p', '/etc/agent-runlab'])
   const deployCommand = "runlab-dedicated upgrade --release-dir /tmp/candidate --no-wait --operation-id " + operationId
   pushText('/etc/agent-runlab/dedicated.env', [
     'AGENT_KERNEL_PROVIDER=anthropic',
@@ -52,14 +54,14 @@ try {
     'AK_ALLOW_ALL_OK=1',
     'EXECUTOR_TOKENS=' + JSON.stringify([{ token }]),
   ].join('\n') + '\n')
-  pushText('/etc/systemd/system/runlab-acceptance-provider.service', service('Acceptance provider', '/usr/bin/node /tmp/dedicated-acceptance-provider.mjs', 'Environment=' + quoteSystemd('RUNLAB_ACCEPTANCE_DEPLOY_COMMAND=' + deployCommand)))
-  pushText('/etc/systemd/system/runlab-acceptance-executor.service', service('Acceptance Executor', '/tmp/kala-executor-linux-x64 --host http://127.0.0.1:13000 --sandbox-root /tmp/workspace', 'Environment=EXECUTOR_TOKEN=' + token + '\nEnvironment=WORKSPACE_NAME=acceptance-workspace'))
+  pushText('/etc/systemd/system/runlab-acceptance-provider.service', service('Acceptance provider', '/usr/bin/node /usr/local/lib/agent-runlab-acceptance/dedicated-acceptance-provider.mjs', 'Environment=' + quoteSystemd('RUNLAB_ACCEPTANCE_DEPLOY_COMMAND=' + deployCommand)))
+  pushText('/etc/systemd/system/runlab-acceptance-executor.service', service('Acceptance Executor', '/usr/local/lib/agent-runlab-acceptance/kala-executor-linux-x64 --host http://127.0.0.1:13000 --sandbox-root /var/lib/agent-runlab-acceptance/workspace', 'Environment=EXECUTOR_TOKEN=' + token + '\nEnvironment=WORKSPACE_NAME=acceptance-workspace'))
   exec(['systemctl', 'daemon-reload'])
   exec(['systemctl', 'enable', '--now', 'runlab-acceptance-provider.service'])
 
   const staged = execNode('/tmp/predecessor/kala-dedicated.mjs', ['install', '--release-dir', '/tmp/predecessor', '--stage-only'])
   if (staged.phase !== 'installed_disabled') throw new Error('Dedicated staged install did not produce installed_disabled')
-  exec(['chown', '-R', 'agent-runlab:agent-runlab', '/tmp/workspace'])
+  exec(['chown', '-R', 'agent-runlab:agent-runlab', '/var/lib/agent-runlab-acceptance/workspace'])
   for (const unit of ['agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@blue.service', 'agent-runlab-dedicated-unit@green.service', 'agent-runlab-dedicated-deploy-supervisor.service']) {
     if (exec(['systemctl', 'is-active', unit], true).stdout.trim() === 'active') throw new Error('staged Dedicated service became active: ' + unit)
     if (exec(['systemctl', 'is-enabled', unit], true).stdout.trim() === 'enabled') throw new Error('staged Dedicated service became enabled: ' + unit)
@@ -83,11 +85,16 @@ try {
   const executors = await responseEvent(socket, 'client:list_executors', 'server:executors', {})
   const executor = executors.executors.find((entry) => entry.workspaceName === 'acceptance-workspace')
   if (!executor?.workspaceId) throw new Error('Dedicated Executor did not connect through Stable Ingress')
-  assertAck(await ack(socket, 'client:create_session', { operationId: 'operation-create-' + runId, sessionId, workspaceId: executor.workspaceId, workspaceName: executor.workspaceName, cwd: '/tmp/workspace' }))
+  assertAck(await ack(socket, 'client:create_session', { operationId: 'operation-create-' + runId, sessionId, workspaceId: executor.workspaceId, workspaceName: executor.workspaceName, cwd: '/var/lib/agent-runlab-acceptance/workspace' }))
   assertAck(await ack(socket, 'client:set_approval_mode', { sessionId, mode: 'allow_all' }))
   assertAck(await ack(socket, 'client:user_message', { operationId: 'operation-message-' + runId, sessionId, text: 'SELF_DEPLOY_ACCEPTANCE' }))
 
-  await waitFor(() => { const value = latestDeployment(); return value?.operationId === operationId && value.phase === 'completed' }, 180_000, 'self-deployment completion')
+  await waitFor(() => {
+    const value = latestDeployment()
+    if (value?.operationId !== operationId) return false
+    if (['rolled_back', 'rollback_failed', 'failed', 'aborted'].includes(value.phase)) throw fatal(`self-deployment ended in ${value.phase}: ${JSON.stringify(value.error ?? null)}`)
+    return value.phase === 'completed'
+  }, 180_000, 'self-deployment completion')
   const deployment = latestDeployment()
   if (!deployment.originResultPersistedAt || deployment.continuation?.failed !== 0 || deployment.health?.publicRoute !== true) throw new Error('self-deployment receipt lacks continuation proof')
   await waitFor(async () => (await history()).some((entry) => JSON.stringify(entry).includes('SELF_DEPLOY_CONTINUED')), 90_000, 'automatic continuation')
@@ -130,7 +137,12 @@ try {
   if (!restored.ok || exec(['cat', '/var/lib/agent-runlab/.agent-kernel/acceptance-marker']).stdout !== 'before\n') throw new Error('Dedicated backup restore did not restore exact state')
 
   const rollbackRequest = execNode('/usr/local/bin/runlab-dedicated', ['rollback', deployment.deploymentId, '--operation-id', 'operation-rollback-' + runId, '--no-wait'])
-  await waitFor(() => { const value = deploymentReceipt(rollbackRequest.deploymentId); return value?.action === 'rollback' && value.phase === 'completed' }, 180_000, 'Supervisor rollback')
+  await waitFor(() => {
+    const value = deploymentReceipt(rollbackRequest.deploymentId)
+    if (value?.action !== 'rollback') return false
+    if (['rolled_back', 'rollback_failed', 'failed', 'aborted'].includes(value.phase)) throw fatal(`Supervisor rollback ended in ${value.phase}: ${JSON.stringify(value.error ?? null)}`)
+    return value.phase === 'completed'
+  }, 180_000, 'Supervisor rollback')
   await waitForHttp(origin + '/runtime/capabilities', 60_000)
   await assertBrowserReady(page, origin)
   socket.close()
@@ -147,6 +159,17 @@ try {
   mkdirSync(resolve(output, '..'), { recursive: true, mode: 0o700 })
   writeFileSync(output, JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
   process.stdout.write(JSON.stringify({ ok: true, category: 'dedicated', target: 'linux-x64-systemd', evidence: basename(output) }) + '\n')
+} catch (error) {
+  if (created) {
+    for (const args of [
+      ['systemctl', '--no-pager', '--full', 'status', 'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-deploy-supervisor.service', 'runlab-acceptance-executor.service'],
+      ['journalctl', '--no-pager', '-n', '300', '-u', 'agent-runlab-dedicated-ingress.service', '-u', 'agent-runlab-dedicated-deploy-supervisor.service', '-u', 'runlab-acceptance-executor.service'],
+    ]) {
+      const diagnostic = exec(args, true)
+      process.stderr.write(`\n[Dedicated failure diagnostic: ${args[0]}]\n${diagnostic.stdout}${diagnostic.stderr}`)
+    }
+  }
+  throw error
 } finally {
   socket?.close()
   await browser?.close().catch(() => undefined)
@@ -154,16 +177,29 @@ try {
   rmSync(scratch, { recursive: true, force: true })
 }
 
-function materializeRelease(input, outputDir) {
+function materializeRelease(input, outputDir, currentControlSource) {
   const manifest = json(readFileSync(join(input, 'manifest.json'), 'utf8'))
   mkdirSync(outputDir, { recursive: true })
-  for (const name of [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS']) cpSync(join(input, name), join(outputDir, name))
+  const legacyNotes = manifest.assets.includes('kala-dashboard-dist.tar.gz') && existsSync(join(input, 'RELEASE_NOTES.md')) ? ['RELEASE_NOTES.md'] : []
+  const signature = existsSync(join(input, 'SHA256SUMS.sigstore.json')) ? ['SHA256SUMS.sigstore.json'] : []
+  for (const name of [...manifest.assets, 'manifest.json', 'SHA256SUMS', ...legacyNotes, ...signature]) cpSync(join(input, name), join(outputDir, name))
+  if (currentControlSource && manifest.assets.includes('kala-dedicated-support.tar.gz')) {
+    const refreshed = ['kala-dedicated-support.tar.gz', 'kala-dedicated-deploy-supervisor.cjs']
+    for (const name of refreshed) cpSync(join(currentControlSource, name), join(outputDir, name))
+    const replacements = new Map(refreshed.map((name) => [name, digest(readFileSync(join(currentControlSource, name)))]))
+    const sums = readFileSync(join(outputDir, 'SHA256SUMS'), 'utf8').split(/(?<=\n)/u).map((line) => {
+      const name = line.trimEnd().split('  ')[1]
+      return replacements.has(name) ? `${replacements.get(name)}  ${name}\n` : line
+    }).join('')
+    writeFileSync(join(outputDir, 'SHA256SUMS'), sums)
+  }
   return outputDir
 }
 function assertRelease(path, expectedRevision) { const manifest = json(readFileSync(join(path, 'manifest.json'), 'utf8')); if (expectedRevision && manifest.source?.revision !== expectedRevision) throw new Error('candidate release revision mismatch'); run('sha256sum', ['-c', 'SHA256SUMS'], false, path) }
 function service(description, start, extra) { return '[Unit]\nDescription=' + description + '\nAfter=network-online.target\n\n[Service]\nType=simple\n' + extra + '\nExecStart=' + start + '\nRestart=always\nRestartSec=1s\n\n[Install]\nWantedBy=multi-user.target\n' }
 function quoteSystemd(value) { return '"' + value.replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"' }
 function pushText(path, value) { const local = join(scratch, 'push-' + randomUUID()); writeFileSync(local, value); run('lxc', ['file', 'push', local, container + path]); rmSync(local) }
+function pushRelease(source, target) { for (const name of readdirSync(source)) run('lxc', ['file', 'push', join(source, name), container + target + '/' + name]) }
 function exec(args, allowFailure = false) { return run('lxc', ['exec', container, '--', ...args], allowFailure) }
 function execNode(path, args) { return json(exec(['node', path, ...args]).stdout) }
 function serviceActive(name) { return exec(['systemctl', 'is-active', name], true).stdout.trim() === 'active' }
@@ -178,17 +214,18 @@ function latestDeployment() {
 function deploymentReceipt(deploymentId) {
   try { return json(exec(['cat', '/var/lib/agent-runlab/deploy/receipts/' + deploymentId + '.json']).stdout) } catch { return null }
 }
-function containerAddress() { const value = run('lxc', ['list', container, '--format', 'json']).stdout; const item = json(value)[0]; const addresses = Object.values(item.state?.network ?? {}).flatMap((entry) => entry.addresses ?? []); const address = addresses.find((entry) => entry.family === 'inet' && entry.scope === 'global')?.address; if (!address) throw new Error('clean LXD environment has no reachable address'); return address }
+function containerAddress() { const value = run('lxc', ['list', container, '--format', 'json']).stdout; const item = json(value)[0]; const network = item.state?.network ?? {}; const addresses = [...(network.eth0?.addresses ?? []), ...Object.entries(network).filter(([name]) => name !== 'eth0' && name !== 'docker0').flatMap(([, entry]) => entry.addresses ?? [])]; const address = addresses.find((entry) => entry.family === 'inet' && entry.scope === 'global')?.address; if (!address) throw new Error('clean LXD environment has no reachable address'); return address }
 async function history() { const value = await responseEvent(socket, 'client:load_history', 'server:history', { sessionId }); return value.entries ?? [] }
 async function connectDashboard(origin) { const client = io(origin + '/dashboard', { transports: ['websocket'], auth: { role: 'dashboard', sessionId, clientVersion: '1' }, reconnection: true, reconnectionAttempts: 100 }); await once(client, 'session:ready', 30_000); return client }
-async function assertBrowserReady(page, origin) { await page.goto(origin, { waitUntil: 'networkidle2' }); await page.waitForFunction(() => document.querySelector('[data-testid="connection-status"]')?.getAttribute('data-status') === 'ready', { timeout: 30_000 }) }
+async function assertBrowserReady(page, origin) { const response = await page.goto(origin, { waitUntil: 'networkidle2' }); if (!response?.ok()) throw new Error('Dashboard browser request failed'); await page.waitForFunction(() => Boolean(document.querySelector('[data-testid="workbench"]') && document.querySelector('[data-testid="composer"]')), { timeout: 30_000 }) }
 function responseEvent(client, request, response, payload) { return new Promise((resolveValue, reject) => { const timer = setTimeout(() => reject(new Error(response + ' timed out')), 10_000); client.once(response, (value) => { clearTimeout(timer); resolveValue(value) }); client.emit(request, payload) }) }
 function ack(client, event, payload) { return client.timeout(10_000).emitWithAck(event, payload) }
 function assertAck(value) { if (!value?.ok) throw new Error('Socket operation failed: ' + String(value?.error)) }
 function once(client, event, timeout) { return new Promise((resolveValue, reject) => { const timer = setTimeout(() => reject(new Error(event + ' timed out')), timeout); client.once(event, (value) => { clearTimeout(timer); resolveValue(value) }); client.once('connect_error', reject) }) }
 async function waitForHttp(url, timeout) { await waitFor(async () => { try { return (await fetch(url)).ok } catch { return false } }, timeout, url) }
 async function okJson(response) { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json() }
-async function waitFor(check, timeout, label) { const deadline = Date.now() + timeout; let last; while (Date.now() < deadline) { try { const value = await check(); if (value) return value } catch (error) { last = error }; await new Promise((resolveWait) => setTimeout(resolveWait, 500)) }; throw new Error('timed out waiting for ' + label + (last ? ': ' + String(last) : '')) }
+async function waitFor(check, timeout, label) { const deadline = Date.now() + timeout; let last; while (Date.now() < deadline) { try { const value = await check(); if (value) return value } catch (error) { if (error?.fatal) throw error; last = error }; await new Promise((resolveWait) => setTimeout(resolveWait, 500)) }; throw new Error('timed out waiting for ' + label + (last ? ': ' + String(last) : '')) }
+function fatal(message) { return Object.assign(new Error(message), { fatal: true }) }
 function run(command, args, allowFailure = false, cwd = root) { const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); if (result.status !== 0 && !allowFailure) throw new Error(command + ' failed: ' + (result.stderr || result.stdout)); return result }
 function json(value) { return JSON.parse(String(value)) }
 function digest(value) { return createHash('sha256').update(value).digest('hex') }

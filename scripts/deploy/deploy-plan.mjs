@@ -1,30 +1,27 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
+export const EXTERNAL_RELEASE_ASSETS = Object.freeze([
+  ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor']
+    .flatMap((name) => ['linux-x64', 'darwin-x64', 'darwin-arm64'].map((target) => `${name}-${target}`)),
   'kala-dashboard-with-runtime.cjs',
+  'kala-runtime.cjs',
+  'kala-executor.cjs',
   'kala-dedicated-ingress.cjs',
   'kala-dedicated-deploy-supervisor.cjs',
-  'kala-executor.cjs',
-  'kala-dashboard-dist.tar.gz',
-  'kala-model-catalog-seed.json',
-  'kala-dedicated-ingress.service',
-  'kala-dedicated-unit@.service',
-  'kala-dedicated-deploy-supervisor.service',
-  'kala-dedicated-control-updater.service',
-  'kala-dedicated-migration-finalizer.service',
-  'deployment.json',
-  'install-dedicated-systemd.mjs',
-  'cutover-dedicated-systemd.mjs',
-  'dedicated-data-migration.mjs',
-  'update-dedicated-control-plane.mjs',
-  'rollback-dedicated-systemd.mjs',
-  'kala-dedicated.mjs',
+  'kala-dashboard.tar.gz',
+  'kala-docs.tar.gz',
+  'kala-dedicated-support.tar.gz',
+  'kala-release-metadata.tar.gz',
   'run.sh',
+  'kala-dedicated.mjs',
+  'kala-model-catalog-seed.json',
   'manifest.json',
-  'RELEASE_NOTES.md',
   'SHA256SUMS',
+  'SHA256SUMS.sigstore.json',
 ])
+
+export const DEPLOYABLE_RELEASE_ASSETS = EXTERNAL_RELEASE_ASSETS
 
 export const REQUIRED_RELEASE_ASSETS = Object.freeze([
   'kala-dashboard-with-runtime.cjs',

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
+import { gunzipSync } from 'node:zlib'
 
 const argv = process.argv.slice(2)
 if (argv[0] === '--') argv.shift()
@@ -20,6 +21,9 @@ const systemdDir = boundedRoot(process.env.AGENT_RUNLAB_SYSTEMD_DIR ?? '/etc/sys
 const operatorRoot = boundedRoot(process.env.AGENT_RUNLAB_OPERATOR_ROOT ?? '/var/lib/agent-runlab-operator', 'operator root')
 const operatorBin = resolve(process.env.AGENT_RUNLAB_OPERATOR_BIN ?? '/usr/local/bin/runlab-dedicated')
 const deployRoot = join(dataRoot, 'deploy')
+const supportArchive = 'kala-dedicated-support.tar.gz'
+const supportManifest = 'dedicated-support-manifest.json'
+const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const services = [
   'agent-runlab-dedicated-ingress.service',
   'agent-runlab-dedicated-unit@blue.service',
@@ -91,17 +95,19 @@ async function install() {
   const release = inspectRelease(releaseDir)
   const releaseId = option('--release-id') ?? `release-${release.version}-${release.releaseDigest.slice(0, 12)}`
   identifier(releaseId, 'release id')
-  const installer = join(releaseDir, 'install-dedicated-systemd.mjs')
-  if (!existsSync(installer)) throw new Error('release does not contain the Dedicated installer')
+  const expandedRelease = materializeRelease(releaseDir, release.files, release.supportEntries)
+  const installer = join(expandedRelease, 'install-dedicated-systemd.mjs')
   const legacyDataRoot = option('--legacy-data-root')
   if (legacyDataRoot) boundedRoot(legacyDataRoot, 'legacy data root')
-  run(process.execPath, [installer, releaseDir], {
-    env: {
-      ...process.env, AGENT_RUNLAB_INSTALL_ROOT: installRoot, AGENT_RUNLAB_DATA_ROOT: dataRoot,
-      AGENT_RUNLAB_SYSTEMD_DIR: systemdDir, AGENT_RUNLAB_RELEASE_ID: releaseId,
-      ...(legacyDataRoot ? { AGENT_RUNLAB_LEGACY_DATA_ROOT: resolve(legacyDataRoot) } : {}),
-    },
-  })
+  try {
+    run(process.execPath, [installer, expandedRelease], {
+      env: {
+        ...process.env, AGENT_RUNLAB_INSTALL_ROOT: installRoot, AGENT_RUNLAB_DATA_ROOT: dataRoot,
+        AGENT_RUNLAB_SYSTEMD_DIR: systemdDir, AGENT_RUNLAB_RELEASE_ID: releaseId,
+        ...(legacyDataRoot ? { AGENT_RUNLAB_LEGACY_DATA_ROOT: resolve(legacyDataRoot) } : {}),
+      },
+    })
+  } finally { rmSync(expandedRelease, { recursive: true, force: true }) }
   mkdirSync(operatorRoot, { recursive: true, mode: 0o700 })
   const installationPath = join(operatorRoot, 'installation.json')
   const existing = readJsonOptional(installationPath)
@@ -484,12 +490,60 @@ function installOperatorLink(target) {
 }
 function inspectRelease(root) {
   const manifest = readJson(join(root, 'manifest.json')); if (!Array.isArray(manifest.assets) || !manifest.version) throw new Error('invalid release manifest')
-  const expected = [...manifest.assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort()
+  if (!manifest.assets.includes(supportArchive) || manifest.assets.some((name) => supportAssets.includes(name))) throw new Error('release does not use the Dedicated support bundle contract')
+  const signature = existsSync(join(root, 'SHA256SUMS.sigstore.json')) ? ['SHA256SUMS.sigstore.json'] : []
+  const expected = [...manifest.assets, 'manifest.json', 'SHA256SUMS', ...signature].sort()
   const actual = readdirSync(root, { withFileTypes: true }); if (actual.some((entry) => !entry.isFile()) || JSON.stringify(actual.map((entry) => entry.name).sort()) !== JSON.stringify(expected)) throw new Error('release file set does not match manifest')
-  const sums = parseSums(readFileSync(join(root, 'SHA256SUMS'), 'utf8')); if (sums.size !== expected.length - 1) throw new Error('release checksum set is incomplete')
-  for (const name of expected) if (name !== 'SHA256SUMS' && sums.get(name) !== sha256(readFileSync(join(root, name)))) throw new Error(`release checksum mismatch: ${name}`)
-  return { version: manifest.version, releaseDigest: sha256(readFileSync(join(root, 'SHA256SUMS'))) }
+  const sums = parseSums(readFileSync(join(root, 'SHA256SUMS'), 'utf8')); const checksummed = [...manifest.assets, 'manifest.json'].sort(); if (JSON.stringify([...sums.keys()].sort()) !== JSON.stringify(checksummed)) throw new Error('release checksum set is incomplete')
+  for (const name of checksummed) if (sums.get(name) !== sha256(readFileSync(join(root, name)))) throw new Error(`release checksum mismatch: ${name}`)
+  const supportEntries = inspectSupportArchive(join(root, supportArchive))
+  return { version: manifest.version, releaseDigest: sha256(readFileSync(join(root, 'SHA256SUMS'))), files: expected, supportEntries }
 }
+function materializeRelease(root, files, supportEntries) {
+  const target = mkdtempSync(join(tmpdir(), 'kala-dedicated-release-'))
+  try {
+    for (const name of files) copyFileSync(join(root, name), join(target, name))
+    for (const name of supportAssets) { const path = join(target, name); writeFileSync(path, supportEntries.get(name), { flag: 'wx', mode: 0o600 }); chmodSync(path, 0o644) }
+    verifyExpandedSupport(target)
+    return target
+  } catch (error) { rmSync(target, { recursive: true, force: true }); throw error }
+}
+function inspectSupportArchive(archive) {
+  const entries = readExactTarGz(readFileSync(archive), 'Dedicated support')
+  const expected = [...supportAssets, supportManifest].sort()
+  if (JSON.stringify([...entries.keys()].sort()) !== JSON.stringify(expected)) throw new Error('Dedicated support archive entries are unsafe or incomplete')
+  let manifest
+  try { manifest = JSON.parse(String(entries.get(supportManifest))) } catch { throw new Error('invalid Dedicated support manifest') }
+  if (manifest?.schemaVersion !== 1 || manifest.product !== 'kala-dedicated-support' || JSON.stringify(manifest.assets?.map((entry) => entry.name)) !== JSON.stringify(supportAssets)) throw new Error('invalid Dedicated support manifest')
+  for (const entry of manifest.assets) { const bytes = entries.get(entry.name); if (!Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !/^[a-f0-9]{64}$/u.test(entry.sha256) || bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256) throw new Error(`Dedicated support asset mismatch: ${entry.name}`) }
+  return new Map(supportAssets.map((name) => [name, entries.get(name)]))
+}
+function verifyExpandedSupport(root) {
+  const entries = inspectSupportArchive(join(root, supportArchive))
+  for (const name of supportAssets) { const path = join(root, name); const value = lstatSync(path); const bytes = readFileSync(path); if (!value.isFile() || value.isSymbolicLink() || !bytes.equals(entries.get(name))) throw new Error(`Dedicated support extracted asset mismatch: ${name}`) }
+}
+function readExactTarGz(compressed, label) {
+  let tar
+  try { tar = gunzipSync(compressed, { maxOutputLength: 512 * 1024 * 1024 }) } catch { throw new Error(`${label} archive is unreadable`) }
+  const entries = new Map(); let offset = 0; let ended = false
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512); offset += 512
+    if (header.every((byte) => byte === 0)) { ended = true; break }
+    const expectedChecksum = tarNumber(header.subarray(148, 156), label); let actualChecksum = 0
+    for (let index = 0; index < 512; index += 1) actualChecksum += index >= 148 && index < 156 ? 32 : header[index]
+    if (actualChecksum !== expectedChecksum) throw new Error(`${label} archive has an invalid header checksum`)
+    const name = tarText(header.subarray(0, 100)), prefix = tarText(header.subarray(345, 500)); const path = prefix ? `${prefix}/${name}` : name
+    if (!path || path.includes('\\') || path.startsWith('/') || path.endsWith('/') || path.includes('\0') || path.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error(`${label} archive contains an unsafe path`)
+    if (![0, 48].includes(header[156])) throw new Error(`${label} archive contains a non-regular entry`)
+    const size = tarNumber(header.subarray(124, 136), label)
+    if (size > 512 * 1024 * 1024 || offset + size > tar.length || entries.has(path)) throw new Error(`${label} archive contains a duplicate, truncated, or oversized entry`)
+    entries.set(path, Buffer.from(tar.subarray(offset, offset + size))); offset += Math.ceil(size / 512) * 512
+  }
+  if (!ended || tar.subarray(offset).some((byte) => byte !== 0)) throw new Error(`${label} archive has an invalid terminator`)
+  return entries
+}
+function tarText(bytes) { const end = bytes.indexOf(0); return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, end < 0 ? bytes.length : end)) }
+function tarNumber(bytes, label) { if (bytes[0] & 0x80) throw new Error(`${label} archive uses an unsupported tar number`); const value = tarText(bytes).trim(); if (!/^[0-7]*$/u.test(value)) throw new Error(`${label} archive has an invalid tar number`); const number = Number.parseInt(value || '0', 8); if (!Number.isSafeInteger(number) || number < 0) throw new Error(`${label} archive has an invalid tar number`); return number }
 function parseSums(value) { const map = new Map(); for (const line of value.trim().split('\n')) { const match = line.match(/^([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9._@-]*)$/u); if (!match || map.has(match[2])) throw new Error('invalid release checksum index'); map.set(match[2], match[1]) } return map }
 function releaseDirectory() { const value = option('--release-dir') ?? (existsSync(join(scriptDir, 'manifest.json')) ? scriptDir : undefined); if (!value) throw new Error('--release-dir is required'); return boundedRoot(value, 'release directory') }
 function ensureEmptyPrivateDirectory(path) {
@@ -506,7 +560,7 @@ function fsyncFile(path) { const fd = openSync(path, 'r'); try { fsyncSync(fd) }
 function fsyncDirectory(path) { const fd = openSync(path, 'r'); try { fsyncSync(fd) } finally { closeSync(fd) } }
 function readJson(path) { return JSON.parse(readFileSync(path, 'utf8')) }
 function readJsonOptional(path) { try { return readJson(path) } catch (error) { if (error?.code === 'ENOENT') return undefined; throw error } }
-function run(command, args, options = {}) { const result = spawnSync(command, args, { encoding: 'utf8', stdio: options.stdio ?? 'pipe', env: options.env ?? process.env }); if (result.status !== 0 && !options.allowFailure) throw new Error(`${command} failed: ${result.stderr || result.stdout || result.status}`); return result }
+function run(command, args, options = {}) { const result = spawnSync(command, args, { encoding: options.encoding === null ? null : 'utf8', stdio: options.stdio ?? 'pipe', env: options.env ?? process.env, maxBuffer: 64 * 1024 * 1024 }); if (result.status !== 0 && !options.allowFailure) throw new Error(`${command} failed: ${result.stderr || result.stdout || result.status}`); return result }
 function capture(command, args) { return String(run(command, args).stdout) }
 function runJson(command, args) { const result = run(command, args); try { return JSON.parse(result.stdout) } catch { throw new Error(`${command} returned invalid JSON`) } }
 function requireRoot() { if (typeof process.getuid === 'function' && process.getuid() !== 0 && !safeTestSandbox()) throw new Error('this command requires root') }

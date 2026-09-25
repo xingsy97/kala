@@ -1,12 +1,26 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, copyFile, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
+import { gunzipSync } from 'node:zlib'
 
 import type { UnitQuiescence } from './quiescence.js'
 import type { DedicatedSlot } from './dedicated-slot-state.js'
 
 export const DEDICATED_DEPLOY_SCHEMA_VERSION = 1 as const
 export const DEDICATED_DEPLOY_TOPOLOGY = 'dedicated-slots' as const
+
+const releaseMetadataArchive = 'kala-release-metadata.tar.gz'
+const releaseChecksumSignature = 'SHA256SUMS.sigstore.json'
+const modernReleaseFileCount = 27
+const dedicatedSupportArchive = 'kala-dedicated-support.tar.gz'
+const dedicatedSupportManifest = 'dedicated-support-manifest.json'
+const dedicatedSupportAssets = [
+  'cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs',
+  'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs',
+  'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service',
+  'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs',
+  'update-dedicated-control-plane.mjs',
+] as const
 
 export type DedicatedDeployAction = 'deploy' | 'restart' | 'abort' | 'rollback'
 
@@ -291,28 +305,71 @@ export async function verifyImmutableRelease(input: {
   if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) throw new Error('release manifest assets are required')
   const assets = manifest.assets.map((asset) => safeFileName(asset, 'manifest asset'))
   if (new Set(assets).size !== assets.length) throw new Error('release manifest contains duplicate assets')
-  if (assets.some((name) => ['manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].includes(name))) throw new Error('release manifest assets contain a reserved metadata name')
-  const expected = new Set([...assets, 'manifest.json', 'SHA256SUMS'])
-  if (!expected.has('RELEASE_NOTES.md')) expected.add('RELEASE_NOTES.md')
+  const layout = releaseLayout(assets, true)
+  const expected = new Set(layout.files)
   const entries = await readdir(releaseDir, { withFileTypes: true })
   if (entries.some((entry) => !entry.isFile())) throw new Error('immutable release contains a non-file entry')
   const actual = new Set(entries.map((entry) => entry.name))
-  if (expected.size !== actual.size || [...expected].some((name) => !actual.has(name))) throw new Error('immutable release file set does not match manifest')
+  const exact = expected.size === actual.size && [...expected].every((name) => actual.has(name))
+  const expandedExpected = assets.includes(dedicatedSupportArchive) ? new Set([...expected, ...dedicatedSupportAssets]) : undefined
+  const exactExpanded = expandedExpected !== undefined && expandedExpected.size === actual.size && [...expandedExpected].every((name) => actual.has(name))
+  if (!exact && !exactExpanded) throw new Error('immutable release file set does not match manifest')
   const sums = parseSums(String(sumsBytes))
-  const checksummed = new Set([...expected].filter((name) => name !== 'SHA256SUMS'))
+  const checksummed = new Set(layout.checksummed)
   if (sums.size !== checksummed.size || [...sums.keys()].some((name) => !checksummed.has(name))) throw new Error('immutable release checksum file set does not match manifest')
   for (const name of expected) {
-    if (name === 'SHA256SUMS') continue
-    const expectedDigest = sums.get(name)
-    if (!expectedDigest) throw new Error(`release checksum missing for ${name}`)
     const path = join(releaseDir, name)
     const stat = await lstat(path)
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`release asset must be a regular file: ${name}`)
     if ((stat.mode & 0o222) !== 0) throw new Error(`immutable release asset must not be writable: ${name}`)
-    if (sha256(await readFile(path)) !== expectedDigest) throw new Error(`release checksum mismatch for ${name}`)
+    if (checksummed.has(name) && sha256(await readFile(path)) !== sums.get(name)) throw new Error(`release checksum mismatch for ${name}`)
   }
+  if (exactExpanded) await verifyExpandedDedicatedSupport(releaseDir)
   if (sums.get('kala-runtime.cjs') !== input.bundleSha256) throw new Error('bundle digest does not match release checksum manifest')
 }
+
+async function verifyExpandedDedicatedSupport(releaseDir: string): Promise<void> {
+  const entries = readExactTarGz(await readFile(join(releaseDir, dedicatedSupportArchive)))
+  const expected = [...dedicatedSupportAssets, dedicatedSupportManifest].sort()
+  if (JSON.stringify([...entries.keys()].sort()) !== JSON.stringify(expected)) throw new Error('Dedicated support archive file set is invalid')
+  let manifest: unknown
+  try { manifest = JSON.parse(String(entries.get(dedicatedSupportManifest))) } catch { throw new Error('Dedicated support manifest is invalid') }
+  const value = record(manifest, 'Dedicated support manifest')
+  if (value.schemaVersion !== 1 || value.product !== 'kala-dedicated-support' || !Array.isArray(value.assets)) throw new Error('Dedicated support manifest is invalid')
+  const manifestAssets = value.assets.map((entry) => record(entry, 'Dedicated support asset'))
+  if (JSON.stringify(manifestAssets.map((entry) => entry.name)) !== JSON.stringify(dedicatedSupportAssets)) throw new Error('Dedicated support manifest asset set is invalid')
+  for (const entry of manifestAssets) {
+    if (typeof entry.name !== 'string' || !Number.isSafeInteger(entry.bytes) || (entry.bytes as number) < 0 || typeof entry.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(entry.sha256)) throw new Error('Dedicated support manifest asset is invalid')
+    const archived = entries.get(entry.name)
+    const installed = await readFile(join(releaseDir, entry.name))
+    if (!archived || archived.length !== entry.bytes || sha256(archived) !== entry.sha256 || !installed.equals(archived)) throw new Error(`expanded Dedicated support asset mismatch: ${entry.name}`)
+    const stat = await lstat(join(releaseDir, entry.name))
+    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o222) !== 0) throw new Error(`expanded Dedicated support asset is not immutable: ${entry.name}`)
+  }
+}
+
+function readExactTarGz(compressed: Buffer): Map<string, Buffer> {
+  let tar: Buffer
+  try { tar = gunzipSync(compressed, { maxOutputLength: 512 * 1024 * 1024 }) } catch { throw new Error('Dedicated support archive is unreadable') }
+  const entries = new Map<string, Buffer>(); let offset = 0; let ended = false
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512); offset += 512
+    if (header.every((byte) => byte === 0)) { ended = true; break }
+    const expectedChecksum = tarNumber(header.subarray(148, 156)); let actualChecksum = 0
+    for (let index = 0; index < 512; index += 1) actualChecksum += index >= 148 && index < 156 ? 32 : header[index]!
+    if (actualChecksum !== expectedChecksum) throw new Error('Dedicated support archive header checksum is invalid')
+    const name = tarText(header.subarray(0, 100)); const prefix = tarText(header.subarray(345, 500)); const path = prefix ? `${prefix}/${name}` : name
+    if (!path || path.includes('\\') || path.startsWith('/') || path.endsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..') || ![0, 48].includes(header[156]!)) throw new Error('Dedicated support archive entry is unsafe')
+    const size = tarNumber(header.subarray(124, 136))
+    if (size > 512 * 1024 * 1024 || offset + size > tar.length || entries.has(path)) throw new Error('Dedicated support archive entry is invalid')
+    entries.set(path, Buffer.from(tar.subarray(offset, offset + size))); offset += Math.ceil(size / 512) * 512
+  }
+  if (!ended || tar.subarray(offset).some((byte) => byte !== 0)) throw new Error('Dedicated support archive terminator is invalid')
+  return entries
+}
+
+function tarText(bytes: Buffer): string { const end = bytes.indexOf(0); return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, end < 0 ? bytes.length : end)) }
+function tarNumber(bytes: Buffer): number { if (bytes[0]! & 0x80) throw new Error('Dedicated support archive number is invalid'); const value = tarText(bytes).trim(); if (!/^[0-7]*$/u.test(value)) throw new Error('Dedicated support archive number is invalid'); const number = Number.parseInt(value || '0', 8); if (!Number.isSafeInteger(number) || number < 0) throw new Error('Dedicated support archive number is invalid'); return number }
 
 export async function promoteStagedRelease(input: {
   deployRoot: string
@@ -375,15 +432,31 @@ async function verifyReleaseContents(directory: string, releaseDigest: string, b
   const manifest = record(JSON.parse(String(manifestBytes)), 'release manifest')
   if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) throw new Error('release manifest assets are required')
   const assets = manifest.assets.map((asset) => safeFileName(asset, 'manifest asset'))
-  if (new Set(assets).size !== assets.length || assets.some((name) => ['manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].includes(name))) throw new Error('invalid release manifest asset set')
-  const expected = [...assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort()
+  if (new Set(assets).size !== assets.length) throw new Error('invalid release manifest asset set')
+  const layout = releaseLayout(assets, false)
+  const expected = layout.files
   const entries = await readdir(directory, { withFileTypes: true })
   if (entries.some((entry) => !entry.isFile()) || JSON.stringify(entries.map((entry) => entry.name).sort()) !== JSON.stringify(expected)) throw new Error('release file set does not match manifest')
-  const sums = parseSums(String(sumsBytes)); const checksummed = expected.filter((name) => name !== 'SHA256SUMS')
+  const sums = parseSums(String(sumsBytes)); const checksummed = layout.checksummed
   if (sums.size !== checksummed.length || checksummed.some((name) => !sums.has(name))) throw new Error('release checksum file set does not match manifest')
   for (const name of checksummed) { const path = join(directory, name); const stat = await lstat(path); if (!stat.isFile() || stat.isSymbolicLink() || immutable && (stat.mode & 0o222) !== 0 || sha256(await readFile(path)) !== sums.get(name)) throw new Error(`invalid release asset: ${name}`) }
   if (sums.get('kala-runtime.cjs') !== bundleSha256) throw new Error('bundle digest does not match release checksum manifest')
   return expected
+}
+
+function releaseLayout(assets: string[], allowLegacyPredecessor: boolean): { files: string[]; checksummed: string[] } {
+  const reserved = new Set(['manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS', releaseChecksumSignature])
+  if (assets.some((name) => reserved.has(name))) throw new Error('invalid release manifest asset set')
+  if (assets.includes(releaseMetadataArchive)) {
+    const files = [...assets, 'manifest.json', 'SHA256SUMS', releaseChecksumSignature].sort()
+    if (files.length !== modernReleaseFileCount) throw new Error(`modern release must contain exactly ${modernReleaseFileCount} files`)
+    return { files, checksummed: [...assets, 'manifest.json'].sort() }
+  }
+  if (!allowLegacyPredecessor) throw new Error(`modern release manifest is missing ${releaseMetadataArchive}`)
+  return {
+    files: [...assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort(),
+    checksummed: [...assets, 'manifest.json', 'RELEASE_NOTES.md'].sort(),
+  }
 }
 
 export function redactedDeploymentError(error: unknown, code = 'deployment_failed'): RedactedDeploymentError {

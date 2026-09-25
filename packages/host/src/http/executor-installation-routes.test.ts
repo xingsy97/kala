@@ -92,8 +92,9 @@ describe('executor installation routes', () => {
     const installerScript = await installer.text()
     expect(installerScript).toContain('RUNLAB_SETUP_CODE')
     expect(installerScript).toContain('/install/session')
-    expect(installerScript).toContain('bash "$installer"')
-    expect(installerScript.indexOf('/install/assets/install-executor.sh')).toBeLessThan(installerScript.indexOf('/install/session'))
+    expect(installerScript).toContain('COMPONENT=executor bash "$installer" --internal-installer')
+    expect(installerScript.indexOf('/install/assets/run.sh')).toBeLessThan(installerScript.indexOf('/install/session'))
+    expect(installerScript).not.toContain('install-executor.sh')
     expect(installerScript).not.toContain('| sh')
     expect(installerScript).toContain('curl --fail --silent --show-error --location')
     expect(installerScript).toContain('[1/4] Downloading verified installer')
@@ -101,11 +102,12 @@ describe('executor installation routes', () => {
     expect(installerScript).not.toContain('curl -fSL')
     const claimed = await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })
     expect(claimed.status).toBe(200)
-    const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string; RUNLAB_RELEASE_ASSETS_URL: string; RUNLAB_INSTALLER_ALLOW_UNSIGNED: string } }
+    const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string; AGENT_KERNEL_RELEASE_BASE_URL: string; RUNLAB_RELEASE_ASSETS_URL: string; RUNLAB_INSTALLER_ALLOW_UNSIGNED?: string } }
     const bootstrap = claim.env.EXECUTOR_INSTALL_BOOTSTRAP
     expect(bootstrap).toMatch(/^ak_install_/u)
+    expect(claim.env.AGENT_KERNEL_RELEASE_BASE_URL).toBe(`${url}/install/assets`)
     expect(claim.env.RUNLAB_RELEASE_ASSETS_URL).toBe(`${url}/install/assets`)
-    expect(claim.env.RUNLAB_INSTALLER_ALLOW_UNSIGNED).toBe('1')
+    expect(claim.env.RUNLAB_INSTALLER_ALLOW_UNSIGNED).toBeUndefined()
     expect((await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })).status).toBe(401)
     for (const status of ['asset_verified', 'pairing_pending']) {
       expect((await fetch(`${url}/api/executor-installs/${created.id}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap, status }) })).status).toBe(200)
@@ -115,6 +117,29 @@ describe('executor installation routes', () => {
     expect((await fetch(`${url}/api/executor-installs/${created.id}/redeem`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap, workspaceId: 'ws-api' }) })).status).toBe(409)
     const events = await fetch(`${url}/api/executor-installs/${created.id}/events?after=1`).then((response) => response.json()) as { events: Array<{ seq: number }> }
     expect(events.events.every((event) => event.seq > 1)).toBe(true)
+  })
+
+  it('rejects non-loopback plaintext bootstrap and claim requests without consuming the setup code', async () => {
+    const { url } = await start()
+    const created = await fetch(`${url}/api/executor-installs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'linux', mode: 'temporary', workspaceRoot: '/work' }),
+    }).then((response) => response.json()) as { setupCode: string }
+    const insecureHeaders = { 'x-forwarded-proto': 'http', 'x-forwarded-host': 'downloads.example.test' }
+    const bootstrap = await fetch(`${url}/install`, { headers: insecureHeaders })
+    expect(bootstrap.status).toBe(400)
+    expect(await bootstrap.json()).toEqual({ error: 'https_required' })
+    const rejectedClaim = await fetch(`${url}/install/session`, {
+      method: 'POST', headers: { ...insecureHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ setupCode: created.setupCode }),
+    })
+    expect(rejectedClaim.status).toBe(400)
+    expect(await rejectedClaim.json()).toEqual({ error: 'https_required' })
+    const secureClaim = await fetch(`${url}/install/session`, {
+      method: 'POST', headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'downloads.example.test', 'content-type': 'application/json' },
+      body: JSON.stringify({ setupCode: created.setupCode }),
+    })
+    expect(secureClaim.status).toBe(200)
   })
 
   it('requires ingress admin for multi-tenant Platform while single-tenant no-auth remains explicitly usable', async () => {

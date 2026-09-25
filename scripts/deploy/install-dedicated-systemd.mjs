@@ -3,6 +3,7 @@ import { chmod, copyFile, lstat, mkdir, open, readFile, readdir, rename, rm, sta
 import { basename, dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import process from 'node:process'
+import { gunzipSync } from 'node:zlib'
 
 const source = resolve(process.argv[2] ?? 'release')
 const root = resolve(process.env.AGENT_RUNLAB_INSTALL_ROOT ?? '/opt/agent-runlab')
@@ -11,6 +12,9 @@ const unitDir = resolve(process.env.AGENT_RUNLAB_SYSTEMD_DIR ?? '/etc/systemd/sy
 const releaseId = process.env.AGENT_RUNLAB_RELEASE_ID?.trim() || `release-${Date.now()}`
 const legacyDataRoot = process.env.AGENT_RUNLAB_LEGACY_DATA_ROOT?.trim()
 const releaseDir = join(dataRoot, 'deploy', 'releases', releaseId)
+const supportArchive = 'kala-dedicated-support.tar.gz'
+const supportManifest = 'dedicated-support-manifest.json'
+const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const dedicatedServices = [
   'agent-runlab-dedicated-ingress.service',
   'agent-runlab-dedicated-unit@blue.service',
@@ -26,11 +30,14 @@ async function main() {
   if (new Set(manifest.assets).size !== manifest.assets.length) throw new Error('release manifest contains duplicate assets')
   if (manifest.assets.some((name) => ['manifest.json', 'SHA256SUMS', 'RELEASE_NOTES.md'].includes(name))) throw new Error('release manifest assets contain a reserved metadata name')
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(releaseId)) throw new Error('invalid release id')
-  const releaseFiles = [...manifest.assets, 'manifest.json', 'SHA256SUMS', 'RELEASE_NOTES.md'].sort()
+  if (!manifest.assets.includes(supportArchive) || manifest.assets.some((name) => supportAssets.includes(name))) throw new Error('release does not use the Dedicated support bundle contract')
+  const signature = await exists(join(source, 'SHA256SUMS.sigstore.json')) ? ['SHA256SUMS.sigstore.json'] : []
+  const outerReleaseFiles = [...manifest.assets, 'manifest.json', 'SHA256SUMS', ...signature].sort()
+  const releaseFiles = [...outerReleaseFiles, ...supportAssets].sort()
   for (const name of releaseFiles) {
     if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/u.test(name)) throw new Error(`invalid release asset name: ${String(name)}`)
   }
-  await verifyExactRelease(releaseFiles)
+  await verifyExactRelease(outerReleaseFiles, releaseFiles)
   await assertNode22()
   await assertStagedServicesDisabled()
   await ensureServiceUser()
@@ -102,27 +109,45 @@ async function main() {
   process.stdout.write(`${JSON.stringify({ ok: true, phase: 'installed_disabled', releaseId })}\n`)
 }
 
-async function verifyExactRelease(releaseFiles) {
+async function verifyExactRelease(outerReleaseFiles, releaseFiles) {
   const entries = await readdir(source, { withFileTypes: true })
-  if (entries.some((entry) => !entry.isFile()) || JSON.stringify(entries.map((entry) => entry.name).sort()) !== JSON.stringify(releaseFiles)) throw new Error('release file set does not exactly match manifest')
+  if (entries.some((entry) => !entry.isFile()) || JSON.stringify(entries.map((entry) => entry.name).sort()) !== JSON.stringify(releaseFiles)) throw new Error('expanded release file set does not exactly match the bundle contract')
   const sums = parseSums(await readFile(join(source, 'SHA256SUMS'), 'utf8'))
-  const expectedSums = releaseFiles.filter((name) => name !== 'SHA256SUMS')
+  const expectedSums = outerReleaseFiles.filter((name) => !['SHA256SUMS', 'SHA256SUMS.sigstore.json'].includes(name))
   if (JSON.stringify([...sums].sort()) !== JSON.stringify(expectedSums)) throw new Error('release checksum file set does not exactly match manifest')
   await verifyChecksums(source)
+  await verifySupport(source)
+}
+
+async function verifySupport(root) {
+  const entries = readExactTarGz(await readFile(join(root, supportArchive)), 'Dedicated support')
+  const expected = [...supportAssets, supportManifest].sort()
+  if (JSON.stringify([...entries.keys()].sort()) !== JSON.stringify(expected)) throw new Error('Dedicated support archive entries are unsafe or incomplete')
+  let manifest
+  try { manifest = JSON.parse(String(entries.get(supportManifest))) } catch { throw new Error('invalid Dedicated support manifest') }
+  if (manifest?.schemaVersion !== 1 || manifest.product !== 'kala-dedicated-support' || JSON.stringify(manifest.assets?.map((entry) => entry.name)) !== JSON.stringify(supportAssets)) throw new Error('invalid Dedicated support manifest')
+  for (const entry of manifest.assets) {
+    const archived = entries.get(entry.name)
+    if (!Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !/^[a-f0-9]{64}$/u.test(entry.sha256) || archived.length !== entry.bytes || createHash('sha256').update(archived).digest('hex') !== entry.sha256) throw new Error('invalid Dedicated support manifest asset')
+    const value = await lstat(join(root, entry.name)); const bytes = await readFile(join(root, entry.name))
+    if (!value.isFile() || value.isSymbolicLink() || !bytes.equals(archived)) throw new Error(`Dedicated support extracted asset mismatch: ${entry.name}`)
+  }
 }
 
 async function installInitialDashboardRelease(sourceRoot, targetDataRoot, targetReleaseId) {
   const dashboardRoot = join(targetDataRoot, 'deploy', 'dashboard')
   const target = join(dashboardRoot, 'releases', targetReleaseId)
-  const manifestBytes = await readFile(join(sourceRoot, 'dashboard-release.json'))
+  const archiveEntries = readExactTarGz(await readFile(join(sourceRoot, 'kala-dashboard.tar.gz')), 'Dashboard')
+  const manifestBytes = archiveEntries.get('dashboard-release.json')
+  if (!manifestBytes) throw new Error('Dashboard archive is missing dashboard-release.json')
   const manifest = JSON.parse(String(manifestBytes))
-  await verifyDashboardArchive(join(sourceRoot, 'kala-dashboard-dist.tar.gz'), manifest.files)
+  verifyDashboardArchive(archiveEntries, manifest)
   const incoming = `${target}.incoming-${randomBytes(12).toString('hex')}`
   await mkdir(join(incoming, 'assets'), { recursive: true, mode: 0o700 })
   try {
-    await run('tar', ['-xzf', join(sourceRoot, 'kala-dashboard-dist.tar.gz'), '-C', join(incoming, 'assets'), '--no-same-owner', '--no-same-permissions', '--keep-directory-symlink'])
+    for (const entry of manifest.files) { const path = join(incoming, 'assets', ...entry.path.split('/')); await mkdir(dirname(path), { recursive: true, mode: 0o700 }); await writeFile(path, archiveEntries.get(entry.path), { flag: 'wx', mode: 0o600 }) }
     await verifyDashboardFiles(join(incoming, 'assets'), manifest.files)
-    await copyFile(join(sourceRoot, 'dashboard-release.json'), join(incoming, 'manifest.json'))
+    await writeFile(join(incoming, 'manifest.json'), manifestBytes, { flag: 'wx', mode: 0o600 })
     await syncDashboardTree(incoming)
     await sealDashboardTree(incoming)
     await rename(incoming, target)
@@ -131,20 +156,13 @@ async function installInitialDashboardRelease(sourceRoot, targetDataRoot, target
   await writeAtomicJson(join(dashboardRoot, 'route-state.json'), { schemaVersion: 1, generation: 1, releaseId: targetReleaseId, releaseDigest: createHash('sha256').update(manifestBytes).digest('hex'), assetDigest: manifest.assetDigest, version: manifest.version, protocol: manifest.protocol, activatedAt: new Date().toISOString() }, 0o640)
 }
 
-async function verifyDashboardArchive(archive, expected) {
-  const listing = (await capture('tar', ['-tzf', archive])).split('\n').filter(Boolean)
-  const verbose = (await capture('tar', ['-tvzf', archive])).split('\n').filter(Boolean)
-  if (listing.length !== verbose.length || verbose.some((line) => !['-', 'd'].includes(line[0] ?? ''))) throw new Error('Dashboard archive contains links or special entries')
-  const files = []
-  for (let index = 0; index < listing.length; index += 1) {
-    const listed = listing[index]
-    const type = verbose[index][0]
-    if (type === 'd' && (listed === '.' || listed === './')) continue
-    const path = listed.replace(/^\.\//u, '').replace(/\/$/u, '')
-    if (!path || path.startsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..') || path.includes('\0')) throw new Error('Dashboard archive contains an unsafe path')
-    if (type === '-') files.push(path)
-  }
-  if (JSON.stringify(files.sort()) !== JSON.stringify(expected.map((entry) => entry.path).sort())) throw new Error('Dashboard archive file set does not match manifest')
+function verifyDashboardArchive(entries, manifest) {
+  if (manifest?.schemaVersion !== 1 || manifest.product !== 'kala-dashboard' || !Array.isArray(manifest.files) || !manifest.files.some((entry) => entry.path === 'index.html')) throw new Error('invalid Dashboard release manifest')
+  const expected = [...manifest.files.map((entry) => entry.path), 'dashboard-release.json'].sort()
+  if (new Set(expected).size !== expected.length || JSON.stringify([...entries.keys()].sort()) !== JSON.stringify(expected)) throw new Error('Dashboard archive file set does not match manifest')
+  const sorted = [...manifest.files].sort((a, b) => a.path.localeCompare(b.path))
+  if (manifest.assetDigest !== createHash('sha256').update(Buffer.from(JSON.stringify(sorted))).digest('hex')) throw new Error('Dashboard manifest asset digest is invalid')
+  for (const entry of manifest.files) { const bytes = entries.get(entry.path); if (!bytes || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !/^[a-f0-9]{64}$/u.test(entry.sha256) || bytes.length !== entry.bytes || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`Dashboard asset mismatch: ${String(entry.path)}`) }
 }
 
 async function verifyDashboardFiles(root, expected) {
@@ -201,6 +219,7 @@ async function exactReleaseExists(path, releaseFiles) {
     for (const entry of entries) if (((await lstat(join(path, entry.name))).mode & 0o222) !== 0) return false
     if (await readFile(join(path, 'SHA256SUMS'), 'utf8') !== await readFile(join(source, 'SHA256SUMS'), 'utf8')) return false
     await verifyChecksums(path)
+    await verifySupport(path)
     return true
   } catch { return false }
 }
@@ -218,6 +237,29 @@ async function syncTree(path, releaseFiles) {
   const directory = await open(path, 'r'); try { await directory.sync() } finally { await directory.close() }
 }
 
+function readExactTarGz(compressed, label) {
+  let tar
+  try { tar = gunzipSync(compressed, { maxOutputLength: 512 * 1024 * 1024 }) } catch { throw new Error(`${label} archive is unreadable`) }
+  const entries = new Map(); let offset = 0; let ended = false
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512); offset += 512
+    if (header.every((byte) => byte === 0)) { ended = true; break }
+    const expectedChecksum = tarNumber(header.subarray(148, 156), label); let actualChecksum = 0
+    for (let index = 0; index < 512; index += 1) actualChecksum += index >= 148 && index < 156 ? 32 : header[index]
+    if (actualChecksum !== expectedChecksum) throw new Error(`${label} archive has an invalid header checksum`)
+    const name = tarText(header.subarray(0, 100)), prefix = tarText(header.subarray(345, 500)); const path = prefix ? `${prefix}/${name}` : name
+    if (!path || path.includes('\\') || path.startsWith('/') || path.endsWith('/') || path.includes('\0') || path.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error(`${label} archive contains an unsafe path`)
+    if (![0, 48].includes(header[156])) throw new Error(`${label} archive contains a non-regular entry`)
+    const size = tarNumber(header.subarray(124, 136), label)
+    if (size > 512 * 1024 * 1024 || offset + size > tar.length || entries.has(path)) throw new Error(`${label} archive contains a duplicate, truncated, or oversized entry`)
+    entries.set(path, Buffer.from(tar.subarray(offset, offset + size))); offset += Math.ceil(size / 512) * 512
+  }
+  if (!ended || tar.subarray(offset).some((byte) => byte !== 0)) throw new Error(`${label} archive has an invalid terminator`)
+  return entries
+}
+function tarText(bytes) { const end = bytes.indexOf(0); return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, end < 0 ? bytes.length : end)) }
+function tarNumber(bytes, label) { if (bytes[0] & 0x80) throw new Error(`${label} archive uses an unsupported tar number`); const value = tarText(bytes).trim(); if (!/^[0-7]*$/u.test(value)) throw new Error(`${label} archive has an invalid tar number`); const number = Number.parseInt(value || '0', 8); if (!Number.isSafeInteger(number) || number < 0) throw new Error(`${label} archive has an invalid tar number`); return number }
+async function exists(path) { try { await lstat(path); return true } catch (error) { if (error?.code === 'ENOENT') return false; throw error } }
 function parseSums(value) {
   const names = []
   for (const line of value.trim().split('\n')) {

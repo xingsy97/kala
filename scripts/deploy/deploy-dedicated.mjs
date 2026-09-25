@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { closeSync, copyFileSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gunzipSync } from 'node:zlib'
 
 const scriptPath = fileURLToPath(import.meta.url)
 const scriptDir = dirname(scriptPath)
@@ -13,6 +14,9 @@ const repositoryRoot = existsSync(join(sourceRepositoryRoot, 'scripts', 'release
   ? sourceRepositoryRoot
   : undefined
 const defaultReleaseDir = repositoryRoot ? join(repositoryRoot, 'release') : packagedReleaseRoot
+const supportArchive = 'kala-dedicated-support.tar.gz'
+const supportManifest = 'dedicated-support-manifest.json'
+const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const args = process.argv.slice(2)
 // pnpm versions differ on whether the conventional script argument separator
 // is consumed or forwarded. Keep the documented command surface identical in
@@ -268,18 +272,27 @@ function inspectLocalRelease(releaseDir) {
   const assets = manifest.assets.map((name) => safeAssetName(name))
   if (new Set(assets).size !== assets.length) throw new Error('release manifest contains duplicate assets')
   if (assets.some((name) => ['manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].includes(name))) throw new Error('release manifest assets contain a reserved metadata name')
-  const files = [...assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort()
+  if (!assets.includes(supportArchive) || assets.some((name) => supportAssets.includes(name))) throw new Error('release does not use the Dedicated support bundle contract')
+  const signature = existsSync(join(releaseDir, 'SHA256SUMS.sigstore.json')) ? ['SHA256SUMS.sigstore.json'] : []
+  const sourceFiles = [...assets, 'manifest.json', 'SHA256SUMS', ...signature].sort()
   const actual = readdirSync(releaseDir, { withFileTypes: true })
-  if (actual.some((entry) => !entry.isFile()) || JSON.stringify(actual.map((entry) => entry.name).sort()) !== JSON.stringify(files)) throw new Error('release file set does not exactly match its manifest')
-  for (const name of files) if (!statSync(join(releaseDir, name)).isFile()) throw new Error('missing release asset: ' + name)
+  const actualNames = actual.map((entry) => entry.name).sort()
+  const expandedFiles = [...sourceFiles, ...supportAssets].sort()
+  const isExpanded = JSON.stringify(actualNames) === JSON.stringify(expandedFiles)
+  if (actual.some((entry) => !entry.isFile()) || (!isExpanded && JSON.stringify(actualNames) !== JSON.stringify(sourceFiles))) throw new Error('release file set does not exactly match the raw or expanded bundle contract')
+  for (const name of sourceFiles) if (!statSync(join(releaseDir, name)).isFile()) throw new Error('missing release asset: ' + name)
   const sums = readFileSync(join(releaseDir, 'SHA256SUMS'))
   const parsedSums = parseSums(String(sums))
-  const checksummed = files.filter((name) => name !== 'SHA256SUMS')
+  const checksummed = [...assets, 'manifest.json'].sort()
   if (JSON.stringify([...parsedSums.keys()].sort()) !== JSON.stringify(checksummed)) throw new Error('release checksum file set does not exactly match its manifest')
   for (const name of checksummed) if (sha256(readFileSync(join(releaseDir, name))) !== parsedSums.get(name)) throw new Error('release checksum mismatch: ' + name)
   const bundleSha256 = parsedSums.get('kala-runtime.cjs')
   if (!bundleSha256) throw new Error('bundle checksum missing from SHA256SUMS')
-  return { files, sums, releaseDigest: sha256(sums), bundleSha256 }
+  inspectSupportArchive(join(releaseDir, supportArchive))
+  if (isExpanded) verifyExpandedSupport(releaseDir)
+  // Expanded support assets may exist beside an installed control client, but
+  // modern submissions must preserve the checksummed outer release contract.
+  return { files: sourceFiles, sums, releaseDigest: sha256(sums), bundleSha256 }
 }
 
 function createTransport(values) {
@@ -333,7 +346,7 @@ function commandTransport(kind, target) {
           if (kind === 'lxd') runCommand('lxc', ['file', 'push', local, target + remote])
           else runCommand('scp', [local, target + ':' + remote])
         }
-        shell('chmod -R a-w -- ' + quote(incoming) + '; chmod 511 -- ' + quote(incoming) + '; sync -f ' + quote(incoming) + '; mv -Tn -- ' + quote(incoming) + ' ' + quote(destination) + '; sync -f ' + quote(dirname(destination)))
+        shell('set -e; cd ' + quote(incoming) + ' && sha256sum -c SHA256SUMS >/dev/null; chmod -R a-w -- ' + quote(incoming) + '; chmod 511 -- ' + quote(incoming) + '; sync -f ' + quote(incoming) + '; mv -Tn -- ' + quote(incoming) + ' ' + quote(destination) + '; sync -f ' + quote(dirname(destination)))
         if (transportPathExists(shell, incoming)) shell('rm -rf -- ' + quote(incoming))
         if (!remoteReleaseMatches(shell, destination, files, sums)) throw new Error('immutable release destination won a race with different content')
       } catch (error) {
@@ -356,6 +369,8 @@ function stageReleaseLocal(source, target, files, sums) {
   mkdirSync(incoming, { recursive: false, mode: 0o700 })
   try {
     for (const file of files) copyFileSync(join(source, file), join(incoming, file))
+    const verified = spawnSync('sha256sum', ['-c', 'SHA256SUMS'], { cwd: incoming, encoding: 'utf8' })
+    if (verified.status !== 0) throw new Error('transferred release checksum verification failed')
     const immutable = spawnSync('chmod', ['-R', 'a-w', incoming], { encoding: 'utf8' })
     if (immutable.status !== 0) throw new Error('failed to make transferred release immutable')
     const traversable = spawnSync('chmod', ['511', incoming], { encoding: 'utf8' })
@@ -407,8 +422,41 @@ function requiredIdentity(value) { if (!value) throw new Error('deployment or op
 function assertReleaseId(value) { if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value)) throw new Error('invalid release id') }
 function assertIdentifier(value, name) { if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(value)) throw new Error('invalid ' + name) }
 function safeAssetName(value) { if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/u.test(value)) throw new Error('invalid release asset name'); return value }
+function inspectSupportArchive(archive) {
+  const entries = readExactTarGz(readFileSync(archive), 'Dedicated support')
+  const expected = [...supportAssets, supportManifest].sort()
+  if (JSON.stringify([...entries.keys()].sort()) !== JSON.stringify(expected)) throw new Error('Dedicated support archive entries are unsafe or incomplete')
+  let manifest
+  try { manifest = JSON.parse(String(entries.get(supportManifest))) } catch { throw new Error('invalid Dedicated support manifest') }
+  if (manifest?.schemaVersion !== 1 || manifest.product !== 'kala-dedicated-support' || JSON.stringify(manifest.assets?.map((entry) => entry.name)) !== JSON.stringify(supportAssets)) throw new Error('invalid Dedicated support manifest')
+  for (const entry of manifest.assets) { const bytes = entries.get(entry.name); if (!Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !/^[a-f0-9]{64}$/u.test(entry.sha256) || bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256) throw new Error(`Dedicated support asset mismatch: ${entry.name}`) }
+  return new Map(supportAssets.map((name) => [name, entries.get(name)]))
+}
+function verifyExpandedSupport(root) { const entries = inspectSupportArchive(join(root, supportArchive)); for (const name of supportAssets) { const path = join(root, name); const value = lstatSync(path); const bytes = readFileSync(path); if (!value.isFile() || value.isSymbolicLink() || !bytes.equals(entries.get(name))) throw new Error(`Dedicated support extracted asset mismatch: ${name}`) } }
+function readExactTarGz(compressed, label) {
+  let tar
+  try { tar = gunzipSync(compressed, { maxOutputLength: 512 * 1024 * 1024 }) } catch { throw new Error(`${label} archive is unreadable`) }
+  const entries = new Map(); let offset = 0; let ended = false
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512); offset += 512
+    if (header.every((byte) => byte === 0)) { ended = true; break }
+    const expectedChecksum = tarNumber(header.subarray(148, 156), label); let actualChecksum = 0
+    for (let index = 0; index < 512; index += 1) actualChecksum += index >= 148 && index < 156 ? 32 : header[index]
+    if (actualChecksum !== expectedChecksum) throw new Error(`${label} archive has an invalid header checksum`)
+    const name = tarText(header.subarray(0, 100)), prefix = tarText(header.subarray(345, 500)); const path = prefix ? `${prefix}/${name}` : name
+    if (!path || path.includes('\\') || path.startsWith('/') || path.endsWith('/') || path.includes('\0') || path.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error(`${label} archive contains an unsafe path`)
+    if (![0, 48].includes(header[156])) throw new Error(`${label} archive contains a non-regular entry`)
+    const size = tarNumber(header.subarray(124, 136), label)
+    if (size > 512 * 1024 * 1024 || offset + size > tar.length || entries.has(path)) throw new Error(`${label} archive contains a duplicate, truncated, or oversized entry`)
+    entries.set(path, Buffer.from(tar.subarray(offset, offset + size))); offset += Math.ceil(size / 512) * 512
+  }
+  if (!ended || tar.subarray(offset).some((byte) => byte !== 0)) throw new Error(`${label} archive has an invalid terminator`)
+  return entries
+}
+function tarText(bytes) { const end = bytes.indexOf(0); return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, end < 0 ? bytes.length : end)) }
+function tarNumber(bytes, label) { if (bytes[0] & 0x80) throw new Error(`${label} archive uses an unsupported tar number`); const value = tarText(bytes).trim(); if (!/^[0-7]*$/u.test(value)) throw new Error(`${label} archive has an invalid tar number`); const number = Number.parseInt(value || '0', 8); if (!Number.isSafeInteger(number) || number < 0) throw new Error(`${label} archive has an invalid tar number`); return number }
 function parseSums(value) { const result = new Map(); for (const line of value.trim().split('\n')) { const match = line.match(/^([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9._@-]*)$/u); if (!match || result.has(match[2])) throw new Error('invalid or duplicate SHA256SUMS entry'); result.set(match[2], match[1]) } return result }
-function localReleaseMatches(path, files, sums) { if (!existsSync(path) || !statSync(path).isDirectory() || (statSync(path).mode & 0o222) !== 0) return false; const entries = readdirSync(path, { withFileTypes: true }); if (entries.some((entry) => !entry.isFile() || (statSync(join(path, entry.name)).mode & 0o222) !== 0) || JSON.stringify(entries.map((entry) => entry.name).sort()) !== JSON.stringify([...files].sort())) return false; if (sha256(readFileSync(join(path, 'SHA256SUMS'))) !== sha256(sums)) return false; const verification = spawnSync('sha256sum', ['-c', 'SHA256SUMS'], { cwd: path, encoding: 'utf8' }); return verification.status === 0 }
+function localReleaseMatches(path, files, sums) { try { if (!existsSync(path) || !statSync(path).isDirectory() || (statSync(path).mode & 0o222) !== 0) return false; const entries = readdirSync(path, { withFileTypes: true }); if (entries.some((entry) => !entry.isFile() || (statSync(join(path, entry.name)).mode & 0o222) !== 0) || JSON.stringify(entries.map((entry) => entry.name).sort()) !== JSON.stringify([...files].sort())) return false; if (sha256(readFileSync(join(path, 'SHA256SUMS'))) !== sha256(sums)) return false; const verification = spawnSync('sha256sum', ['-c', 'SHA256SUMS'], { cwd: path, encoding: 'utf8' }); return verification.status === 0 } catch { return false } }
 function syncRelease(path, files) { for (const name of files) { const file = openSync(join(path, name), 'r'); try { fsyncSync(file) } finally { closeSync(file) } } const directory = openSync(path, 'r'); try { fsyncSync(directory) } finally { closeSync(directory) } }
 function transportPathExists(shell, path) { try { shell('test -e ' + quote(path)); return true } catch { return false } }
 function remoteReleaseMatches(shell, path, files, sums) { try { const entries = String(shell('test -d ' + quote(path) + ' && ! find ' + quote(path) + ' -perm /222 -print -quit | grep -q . && find ' + quote(path) + ' -mindepth 1 -maxdepth 1 -printf ' + quote('%f\t%y\n'))).trim().split('\n').filter(Boolean).map((line) => { const [name, type] = line.split('\t'); if (type !== 'f') throw new Error('non-file release entry'); return name }).sort(); if (JSON.stringify(entries) !== JSON.stringify([...files].sort())) return false; if (sha256(Buffer.from(shell('cat -- ' + quote(path + '/SHA256SUMS')))) !== sha256(sums)) return false; shell('cd ' + quote(path) + ' && sha256sum -c SHA256SUMS >/dev/null'); return true } catch { return false } }
@@ -425,4 +473,9 @@ function runSourceCommand(command, commandArgs) {
 function runCommand(command, commandArgs) {
   const result = spawnSync(command, commandArgs, { stdio: 'inherit' })
   if (result.status !== 0) throw new Error(command + ' failed with exit code ' + result.status)
+}
+function captureCommand(command, commandArgs) {
+  const result = spawnSync(command, commandArgs, { encoding: null, maxBuffer: 64 * 1024 * 1024 })
+  if (result.status !== 0) throw new Error(command + ' failed: ' + String(result.stderr || result.status))
+  return result.stdout
 }

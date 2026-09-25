@@ -26,6 +26,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
       const shell = path === '/install'
       if (!shell) { sendError(res, 410, 'windows_installation_unsupported'); return }
       const origin = requestOrigin(req)
+      if (!isSecureInstallOrigin(origin)) { sendError(res, 400, 'https_required'); return }
       const body = shell ? renderShellBootstrap(origin) : renderPowerShellBootstrap(origin)
       res.writeHead(200, { 'content-type': shell ? 'text/x-shellscript; charset=utf-8' : 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
       res.end(body)
@@ -50,6 +51,8 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
     const action = match?.[2] ?? installSessionMatch?.[2]
 
     if ((id === 'claim' || (installSession && !id)) && !action && req.method === 'POST') {
+      const origin = requestOrigin(req)
+      if (!isSecureInstallOrigin(origin)) { sendError(res, 400, 'https_required'); return }
       const claimKey = clientAddress(req)
       if (!allowClaimAttempt(claimAttempts, claimKey)) { sendError(res, 429, 'setup_code_rate_limited'); return }
       void readJson(req).then((body) => {
@@ -57,7 +60,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
         const claimed = options.store.claim(setupCode)
         if (!claimed) { sendError(res, 401, 'invalid_or_consumed_setup_code'); return }
         claimAttempts.delete(claimKey)
-        const env = bootstrapEnvironment(requestOrigin(req), claimed.install, claimed.bootstrap)
+        const env = bootstrapEnvironment(origin, claimed.install, claimed.bootstrap)
         if (header(req, 'accept') === 'text/x-shellscript') {
           res.writeHead(200, { 'content-type': 'text/x-shellscript; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
           res.end(Object.entries(env).map(([key, value]) => `export ${key}=${quoteSh(value)}`).join('\n'))
@@ -212,11 +215,8 @@ function bootstrapEnvironment(origin: string, snapshot: { id: string; mode: stri
     EXECUTOR_INSTALL_MODE: snapshot.mode,
     EXECUTOR_INSTALL_PLATFORM: snapshot.platform,
     EXECUTOR_INSTALL_ROOT: snapshot.workspaceRoot,
+    AGENT_KERNEL_RELEASE_BASE_URL: `${origin}/install/assets`,
     RUNLAB_RELEASE_ASSETS_URL: `${origin}/install/assets`,
-    // This explicit one-time Host-issued exception trusts the authenticated
-    // Host and its transport, not the public release signature. The installer
-    // still verifies its executable against this same Host's SHA-256 index.
-    RUNLAB_INSTALLER_ALLOW_UNSIGNED: '1',
     ...(snapshot.label ? { EXECUTOR_INSTALL_LABEL: snapshot.label } : {}),
   }
 }
@@ -226,7 +226,7 @@ function installCommand(origin: string, platform: string, mode: string, setupCod
     : `curl -fsSL ${quoteSh(`${origin}/install`)} | RUNLAB_SETUP_CODE=${quoteSh(setupCode)} RUNLAB_INSTALL_MODE=${quoteSh(mode)} sh`
 }
 function renderShellBootstrap(origin: string): string {
-  return `#!/bin/sh\nset -eu\ncode=\${RUNLAB_SETUP_CODE:-}\nif [ -z "$code" ]; then printf 'Kala setup code: ' >&2; IFS= read -r code; fi\ncase "$code" in *[!A-Fa-f0-9-]*|'') echo 'Invalid setup code' >&2; exit 1;; esac\ncommand -v bash >/dev/null 2>&1 || { echo 'Kala installer: bash is required' >&2; exit 1; }\ninstaller=\$(mktemp)\ntrap 'rm -f "$installer"' EXIT HUP INT TERM\nprintf '\\nKala Executor setup\\n'\nprintf '[1/4] Downloading verified installer...\\n'\ncurl --fail --silent --show-error --location --retry 3 --retry-connrefused -o "$installer" ${quoteSh(`${origin}/install/assets/install-executor.sh`)} || { echo 'Kala installer: failed to download installer asset' >&2; exit 1; }\nprintf '[2/4] Validating setup code...\\n'\nclaim=\$(curl --fail --silent --show-error --location --retry 3 --retry-connrefused -X POST -H 'content-type: application/json' -H 'accept: text/x-shellscript' --data "{\\"setupCode\\":\\"$code\\"}" ${quoteSh(`${origin}/install/session`)}) || { echo 'Kala installer: setup code is invalid, expired, or already used' >&2; exit 1; }\neval "$claim"\nprintf '[3/4] Installing Executor...\\n'\nbash "$installer"\n`
+  return `#!/bin/sh\nset -eu\ncode=\${RUNLAB_SETUP_CODE:-}\nif [ -z "$code" ]; then printf 'Kala setup code: ' >&2; IFS= read -r code; fi\ncase "$code" in *[!A-Fa-f0-9-]*|'') echo 'Invalid setup code' >&2; exit 1;; esac\ncommand -v bash >/dev/null 2>&1 || { echo 'Kala installer: bash is required' >&2; exit 1; }\ncommand -v curl >/dev/null 2>&1 || { echo 'Kala installer: curl is required' >&2; exit 1; }\ninstaller=\$(mktemp)\ntrap 'rm -f "$installer"' EXIT HUP INT TERM\nprintf '\\nKala Executor setup\\n'\nprintf '[1/4] Downloading verified installer...\\n'\ncurl --fail --silent --show-error --location --retry 3 --retry-connrefused -o "$installer" ${quoteSh(`${origin}/install/assets/run.sh`)} || { echo 'Kala installer: failed to download installer asset' >&2; exit 1; }\nprintf '[2/4] Validating setup code...\\n'\nclaim=\$(curl --fail --silent --show-error --location --retry 3 --retry-connrefused -X POST -H 'content-type: application/json' -H 'accept: text/x-shellscript' --data "{\\"setupCode\\":\\"$code\\"}" ${quoteSh(`${origin}/install/session`)}) || { echo 'Kala installer: setup code is invalid, expired, or already used' >&2; exit 1; }\neval "$claim"\nprintf '[3/4] Installing Executor...\\n'\nCOMPONENT=executor bash "$installer" --internal-installer\n`
 }
 function renderPowerShellBootstrap(origin: string): string {
   return `$ErrorActionPreference = 'Stop'
@@ -290,6 +290,12 @@ function allowClaimAttempt(attempts: Map<string, { count: number; resetAt: numbe
 }
 function clientAddress(req: IncomingMessage): string { return header(req, 'cf-connecting-ip') ?? header(req, 'x-real-ip') ?? req.socket.remoteAddress ?? 'unknown' }
 function requestOrigin(req: IncomingMessage): string { return `${header(req, 'x-forwarded-proto') ?? 'http'}://${header(req, 'x-forwarded-host') ?? req.headers.host ?? 'localhost'}` }
+function isSecureInstallOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin)
+    return url.protocol === 'https:' || (url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'))
+  } catch { return false }
+}
 function bearer(req: IncomingMessage): string | undefined { const value = header(req, 'authorization'); return value?.startsWith('Bearer ') ? value.slice(7) : undefined }
 function header(req: IncomingMessage, name: string): string | undefined { const value = req.headers[name]; return Array.isArray(value) ? value[0] : value }
 function quoteSh(value: string): string { return `'${value.replaceAll("'", "'\\''")}'` }

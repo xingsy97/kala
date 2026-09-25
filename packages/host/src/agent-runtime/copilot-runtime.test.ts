@@ -21,7 +21,8 @@ type CapturedTool = {
 }
 
 const sdk = vi.hoisted(() => ({
-  clientOptions: [] as Array<{ connection?: { kind: string; args?: readonly string[] } }>,
+  clientOptions: [] as Array<{ connection?: { kind: string; args?: readonly string[]; path?: string } }>,
+  startError: undefined as Error | undefined,
   configs: [] as Array<{
     tools: CapturedTool[]
     workingDirectory?: string
@@ -105,10 +106,12 @@ vi.mock('@github/copilot-sdk', () => ({
     }
   },
   CopilotClient: class {
-    constructor(options: { connection?: { kind: string; args?: readonly string[] } }) {
+    constructor(options: { connection?: { kind: string; args?: readonly string[]; path?: string } }) {
       sdk.clientOptions.push(options)
     }
-    async start() {}
+    async start() {
+      if (sdk.startError) throw sdk.startError
+    }
     async stop() {}
     async getAuthStatus() {
       return { isAuthenticated: true }
@@ -171,6 +174,7 @@ describe('Copilot runtime custom tools', () => {
     sdk.clientOptions.length = 0
     sdk.resumeConfigs.length = 0
     sdk.resumeSucceeds = false
+    sdk.startError = undefined
     sdk.listeners.length = 0
     sdk.historyEvents.length = 0
     sdk.responses.length = 0
@@ -197,6 +201,54 @@ describe('Copilot runtime custom tools', () => {
     }
     throw new Error(`usage projection did not reach ${inputTokens}`)
   }
+
+  it('uses SDK platform-package discovery unless COPILOT_CLI_PATH is supplied', async () => {
+    const previous = process.env.COPILOT_CLI_PATH
+    try {
+      delete process.env.COPILOT_CLI_PATH
+      const discovered = new CopilotAgentRuntime({
+        store,
+        tools: { async callTool() { return { ok: true, content: '' } }, cancelPending() {} },
+        broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+      }, { enabled: true, sessionsDir: dir })
+      await discovered.start()
+      expect(sdk.clientOptions.at(-1)?.connection).toEqual({
+        kind: 'stdio',
+        args: ['--no-remote-export'],
+      })
+      await discovered.close()
+
+      process.env.COPILOT_CLI_PATH = '/opt/copilot/bin/copilot'
+      const overridden = new CopilotAgentRuntime({
+        store,
+        tools: { async callTool() { return { ok: true, content: '' } }, cancelPending() {} },
+        broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+      }, { enabled: true, sessionsDir: dir })
+      await overridden.start()
+      expect(sdk.clientOptions.at(-1)?.connection?.path).toBe('/opt/copilot/bin/copilot')
+      await overridden.close()
+    } finally {
+      if (previous === undefined) delete process.env.COPILOT_CLI_PATH
+      else process.env.COPILOT_CLI_PATH = previous
+    }
+  })
+
+  it('reports a missing SDK CLI clearly instead of silently disabling Copilot', async () => {
+    sdk.startError = new Error('Could not resolve a @github/copilot platform package')
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: '' } }, cancelPending() {} },
+      broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+    }, { enabled: true, sessionsDir: dir })
+
+    await runtime.start()
+
+    expect(runtime.descriptor()).toMatchObject({
+      available: false,
+      status: 'unavailable',
+      reason: expect.stringContaining('set COPILOT_CLI_PATH'),
+    })
+  })
 
   it('persists a model-change notice only after the SDK accepts the model', async () => {
     const runtime = new CopilotAgentRuntime({
