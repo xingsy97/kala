@@ -71,3 +71,26 @@ jobs:
       - run: pnpm run verify:licenses
       - name: Recent product regression matrix
         run: node scripts/testing/verify-recent-product-regressions.mjs
+
+  kernel-formal:
+    name: kernel formal model
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install pinned TLA+ tools
+        run: |
+          curl -sSfL --retry 3 -o "${RUNNER_TEMP}/tla2tools.jar" \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  ${RUNNER_TEMP}/tla2tools.jar" \
+            | sha256sum -c -
+      - name: Model-check Kernel safety and progress
+        run: |
+          java -XX:+UseParallelGC -cp "${RUNNER_TEMP}/tla2tools.jar" tlc2.TLC \
+            -workers auto \
+            -config formal/kernel/Kernel.cfg \
+            formal/kernel/Kernel.tla
