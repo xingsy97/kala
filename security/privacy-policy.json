@@ -94,8 +94,11 @@
     "packages/dashboard/public/icons/badge-72.png": ["eecaddf8c7d2b42f6c9921f7140dce62bd277da6ee17c10cf19a0ceadd7170a3"],
     "packages/dashboard/public/icons/icon-192.png": ["d12d0cc75f11f7c36c27f72e3599cfdc3367bf5dea37b12cb3b97d8a1aded1fe"],
     "packages/dashboard/public/icons/icon-512.png": ["2bdbd2c9f7583bba84d069b6fc4c6707d0f6ee49b12bd42e9c91999e354babf0"],
+    "packages/dashboard/public/icons/linux.svg": ["f262932ac85eed81a79b47184b52210c83d6edb09408f50245ef285435f86f8b"],
     "packages/dashboard/public/icons/maskable-192.png": ["dd6c53472bad37519a5e8ac1c2a9f359ce911938385154b34bbffb12f3695dad"],
-    "packages/dashboard/public/icons/maskable-512.png": ["fd9ce2ec31b9cc94987474aeb6b1c35826c10e94c3567cb9c6573baf5c730d50"]
+    "packages/dashboard/public/icons/maskable-512.png": ["fd9ce2ec31b9cc94987474aeb6b1c35826c10e94c3567cb9c6573baf5c730d50"],
+    "packages/dashboard/public/icons/macos.svg": ["8e6eef82e047f040249bc0ed50d288cfddfa52176cf5adcb9b17bae46b472e12"],
+    "packages/dashboard/public/icons/windows.svg": ["11ac9b1e84c8c36c21629d03f26ce699b7d2e56bf702ea2e8eb2637cd2271c56"]
   },
   "allowedBinaryHashes": {
     "docs/assets/kala-dashboard-preview.png": "6b7546ce92a20f82432f67206bae084aa9dff4ea89ade4c277c8b38c35c17dce",
