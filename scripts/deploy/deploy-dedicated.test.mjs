@@ -53,11 +53,12 @@ describe('deploy:dedicated client', () => {
   it('stages an unsigned 16-file local-development release without changing release/', () => {
     const root = mkdtempSync(join(tmpdir(), 'deploy-dedicated-local-dev-')); roots.push(root)
     const deployRoot = createDeployRoot(root)
-    const sourceRelease = fileURLToPath(new URL('../../release', import.meta.url))
+    const sourceCheckout = createSourceCheckout(root)
+    const sourceRelease = sourceCheckout.release
     const originalManifest = readFileSync(join(sourceRelease, 'manifest.json'))
     const originalEntries = readdirSync(sourceRelease).sort()
     const tempBefore = localDevelopmentTempDirectories()
-    execFileSync(process.execPath, [script, 'stage', '--local-development', '--local', '--skip-build', '--deploy-root', deployRoot, '--operation-id', 'operation-local-dev-0001', '--deployment-id', 'deployment-local-dev-0001'], { encoding: 'utf8' })
+    execFileSync(process.execPath, [sourceCheckout.script, 'stage', '--local-development', '--local', '--skip-build', '--deploy-root', deployRoot, '--operation-id', 'operation-local-dev-0001', '--deployment-id', 'deployment-local-dev-0001'], { encoding: 'utf8' })
 
     const staged = join(deployRoot, 'submissions', 'operation-local-dev-0001')
     const manifest = JSON.parse(readFileSync(join(staged, 'manifest.json'), 'utf8'))
@@ -72,8 +73,9 @@ describe('deploy:dedicated client', () => {
 
   it('cleans the derived release when immutable staging fails', () => {
     const root = mkdtempSync(join(tmpdir(), 'deploy-dedicated-local-dev-failure-')); roots.push(root)
+    const sourceCheckout = createSourceCheckout(root)
     const tempBefore = localDevelopmentTempDirectories()
-    expectFailure([script, 'stage', '--local-development', '--local', '--skip-build', '--deploy-root', join(root, 'missing')], 'ENOENT')
+    expectFailure([sourceCheckout.script, 'stage', '--local-development', '--local', '--skip-build', '--deploy-root', join(root, 'missing')], 'ENOENT')
     expect(localDevelopmentTempDirectories()).toEqual(tempBefore)
   }, 120_000)
 
@@ -194,6 +196,26 @@ describe('deploy:dedicated client', () => {
 
 const localDevelopmentAssets = ['kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs', 'kala-copilot-runtime-linux-x64', 'kala-copilot-runtime-node-linux-x64.node', 'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-model-catalog-seed.json', 'run.sh', 'kala-dedicated.mjs', 'kala-release-metadata.tar.gz']
 const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
+
+function createSourceCheckout(root) {
+  const checkout = join(root, 'checkout')
+  const fixtureScript = join(checkout, 'scripts', 'deploy', 'deploy-dedicated.mjs')
+  const verifier = join(checkout, 'scripts', 'release', 'verify-release-assets.mjs')
+  const release = join(checkout, 'release')
+  mkdirSync(join(checkout, 'scripts', 'deploy'), { recursive: true })
+  mkdirSync(join(checkout, 'scripts', 'release'), { recursive: true })
+  mkdirSync(release, { recursive: true })
+  copyFileSync(script, fixtureScript)
+  writeFileSync(verifier, '')
+  for (const asset of localDevelopmentAssets) {
+    if (asset !== 'kala-dedicated-support.tar.gz') writeFileSync(join(release, asset), `${asset}\n`)
+  }
+  createSupportBundle(release, false)
+  writeFileSync(join(release, 'manifest.json'), JSON.stringify({ assets: localDevelopmentAssets }))
+  writeSums(release, [...localDevelopmentAssets, 'manifest.json'])
+  return { script: fixtureScript, release }
+}
+
 function digest(path) { return execFileSync('sha256sum', [path], { encoding: 'utf8' }).split(' ')[0] }
 function writeSums(root, names) { writeFileSync(join(root, 'SHA256SUMS'), names.sort().map((name) => `${digest(join(root, name))}  ${name}`).join('\n') + '\n') }
 function createSupportBundle(root, expanded) {
