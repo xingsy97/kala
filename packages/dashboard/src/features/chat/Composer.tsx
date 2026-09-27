@@ -796,12 +796,11 @@ export function Composer({
       onSubmit={handleSubmit}
       className={cn(
         'bg-transparent',
-        // Split the difference between the original full iOS safe-area shelf
-        // and the too-tight fixed padding: half the safe area plus half the
-        // compact baseline (2px simple / 4px full).
+        // Keep a small baseline gap while retaining only half the iOS safe-area
+        // shelf, so the compact composer does not sit against the viewport edge.
         mode === 'simple'
-          ? 'pt-0.5 pb-[calc(env(safe-area-inset-bottom)/2)] sm:pt-1 sm:pb-1'
-          : 'pt-1 pb-[calc(env(safe-area-inset-bottom)/2)] sm:pt-1 sm:pb-2',
+          ? 'pt-0.5 pb-[calc(env(safe-area-inset-bottom)/2+0.125rem)] sm:pt-1 sm:pb-1.5'
+          : 'pt-1 pb-[calc(env(safe-area-inset-bottom)/2+0.25rem)] sm:pt-1 sm:pb-2.5',
       )}
       style={displayStyle}
       data-testid="composer"

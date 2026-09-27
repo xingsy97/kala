@@ -560,10 +560,11 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('pasted text', 'steer', undefined, undefined)
   })
 
-  it('keeps the iOS safe area while removing extra fixed bottom padding', () => {
+  it('keeps a compact baseline gap in addition to half the iOS safe area', () => {
     renderComposer()
     const composer = screen.getByTestId('composer')
-    expect(composer.className).toContain('pb-[calc(env(safe-area-inset-bottom)/2)]')
+    expect(composer.className).toContain('pb-[calc(env(safe-area-inset-bottom)/2+0.25rem)]')
+    expect(composer.className).toContain('sm:pb-2.5')
     expect(composer.className).not.toContain('max(env(safe-area-inset-bottom)')
   })
 

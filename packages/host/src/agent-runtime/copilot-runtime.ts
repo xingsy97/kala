@@ -68,6 +68,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   private readonly turnGenerations = new Map<string, number>()
   private readonly cancelledTurnGenerations = new Set<string>()
   private readonly requestGenerations = new Map<string, number>()
+  private readonly sdkInteractionGenerations = new Map<string, number>()
   private readonly sdkTurnGenerations = new Map<string, number>()
   private readonly eventGenerations = new Map<string, number>()
   private readonly toolCallGenerations = new Map<string, number>()
@@ -263,6 +264,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
     this.turnGenerations.clear()
     this.cancelledTurnGenerations.clear()
     this.requestGenerations.clear()
+    this.sdkInteractionGenerations.clear()
     this.sdkTurnGenerations.clear()
     this.eventGenerations.clear()
     this.toolCallGenerations.clear()
@@ -600,6 +602,12 @@ export class CopilotAgentRuntime implements AgentRuntime {
     let generation = requestId
       ? this.requestGenerations.get(approvalKey(sessionId, requestId))
       : undefined
+    if (generation === undefined && event.type === 'user.message' && interactionId) {
+      generation = this.turnGenerations.get(sessionId)
+    }
+    if (generation === undefined && interactionId) {
+      generation = this.sdkInteractionGenerations.get(sdkInteractionGenerationKey(sessionId, interactionId))
+    }
     if (generation === undefined && event.parentId) {
       generation = this.eventGenerations.get(approvalKey(sessionId, event.parentId))
     }
@@ -610,6 +618,9 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
     if (generation !== undefined) {
       this.eventGenerations.set(approvalKey(sessionId, event.id), generation)
+      if (interactionId) {
+        this.sdkInteractionGenerations.set(sdkInteractionGenerationKey(sessionId, interactionId), generation)
+      }
       if (turnId && interactionId) {
         this.sdkTurnGenerations.set(sdkTurnGenerationKey(sessionId, interactionId, turnId), generation)
       }
@@ -1134,6 +1145,10 @@ function approvalKey(sessionId: string, callId: string): string {
 
 function turnGenerationKey(sessionId: string, generation: number): string {
   return `${sessionId}:${generation}`
+}
+
+function sdkInteractionGenerationKey(sessionId: string, interactionId: string): string {
+  return `${sessionId}:${interactionId}`
 }
 
 function sdkTurnGenerationKey(sessionId: string, interactionId: string, turnId: string): string {

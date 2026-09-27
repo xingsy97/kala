@@ -936,7 +936,7 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
-  it('does not confuse reused SDK turn ids across interactions', async () => {
+  it('does not inherit a stale generation when a new interaction follows a session event', async () => {
     const callTool = vi.fn(async () => ({ ok: true, content: 'ok' }))
     const runtime = new CopilotAgentRuntime({
       store,
@@ -977,7 +977,12 @@ describe('Copilot runtime custom tools', () => {
     await vi.waitFor(() => expect(sdk.sentMessages).toHaveLength(1))
     const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'inspect')
     emit({
-      type: 'assistant.turn_start', id: 'first-start', parentId: null,
+      type: 'user.message', id: 'first-user', parentId: null,
+      timestamp: '2026-09-27T15:00:00.000Z',
+      data: { turnId: '0', interactionId: 'first-interaction' },
+    })
+    emit({
+      type: 'assistant.turn_start', id: 'first-start', parentId: 'first-user',
       timestamp: '2026-09-27T15:00:00.000Z',
       data: { turnId: '0', interactionId: 'first-interaction' },
     })
@@ -994,10 +999,19 @@ describe('Copilot runtime custom tools', () => {
     resolveFirst(firstResponse)
     await vi.waitFor(() => expect(record.state.status).toBe('done'))
 
+    emit({
+      type: 'session.model_change', id: 'between-interactions', parentId: 'first-response',
+      timestamp: '2026-09-27T15:00:01.500Z', data: {},
+    })
     await runtime.send(record, { text: 'second turn' })
     await vi.waitFor(() => expect(sdk.sentMessages).toHaveLength(2))
     emit({
-      type: 'assistant.turn_start', id: 'second-start', parentId: null,
+      type: 'user.message', id: 'second-user', parentId: 'between-interactions',
+      timestamp: '2026-09-27T15:00:02.000Z',
+      data: { turnId: '0', interactionId: 'second-interaction' },
+    })
+    emit({
+      type: 'assistant.turn_start', id: 'second-start', parentId: 'second-user',
       timestamp: '2026-09-27T15:00:02.000Z',
       data: { turnId: '0', interactionId: 'second-interaction' },
     })
