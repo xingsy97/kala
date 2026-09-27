@@ -14,6 +14,7 @@ const manifest = json(join(directory, 'manifest.json'))
 const targets = [...requiredReleaseEvidence.portable.targets]
 const expectedAssets = [
   ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor'].flatMap((name) => targets.map((target) => `${name}-${target}`)),
+  ...targets.flatMap((target) => [`kala-copilot-runtime-${target}`, `kala-copilot-runtime-node-${target}.node`]),
   'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
   'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-release-metadata.tar.gz',
   'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
@@ -23,7 +24,7 @@ if (manifest.version !== tag.slice(1)) fail('current release manifest version do
 if (manifest.source?.revision !== revision) fail('current release manifest revision does not match the promoted revision')
 if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) fail('current release manifest has no assets')
 assertUnique(manifest.assets, 'current release manifest assets')
-if (JSON.stringify([...manifest.assets].sort()) !== JSON.stringify(expectedAssets)) fail('current release manifest does not contain the exact 24 checksummed assets')
+if (JSON.stringify([...manifest.assets].sort()) !== JSON.stringify(expectedAssets)) fail('current release manifest does not contain the exact 30 checksummed assets')
 if (!Array.isArray(manifest.nativeTargets) || JSON.stringify([...manifest.nativeTargets].sort()) !== JSON.stringify([...targets].sort())) {
   fail('current release manifest does not contain exactly the three supported native targets')
 }

@@ -379,8 +379,8 @@ describe('Stable Ingress admission', () => {
     expect(effects).toBe(1)
   })
 
-  it('keeps the ledger pending until Runtime proves the operation exists in Session JSONL', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dedicated-ingress-jsonl-barrier-')); roots.push(root)
+  it('terminalizes a durably accepted pending queue item without retrying for a Session cursor', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dedicated-ingress-queue-acceptance-')); roots.push(root)
     const ledgerPath = join(root, 'ledger.json')
     let attempts = 0
     const server = createServer(async (request, response) => {
@@ -388,22 +388,22 @@ describe('Stable Ingress admission', () => {
       for await (const _chunk of request) { /* consume request body */ }
       attempts += 1
       response.writeHead(200, { 'content-type': 'application/json' })
-      response.end(attempts === 1 ? JSON.stringify({ committed: false }) : JSON.stringify({ committed: true, cursor: 31 }))
+      response.end(JSON.stringify({ accepted: true, committed: false }))
     })
     servers.push(server)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     const active = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: active, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
-    const body = { sessionId: 'session-1', operationId: 'operation-jsonl-barrier', text: 'durable first', mode: 'queue' }
+    const body = { sessionId: 'session-1', operationId: 'operation-queue-accepted', text: 'durable first', mode: 'queue' }
     expect((await fetch(`http://127.0.0.1:${ingress.port}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(202)
-    await eventually(async () => { expect(attempts).toBeGreaterThanOrEqual(1) })
-    const afterFirst = JSON.parse(await readFile(ledgerPath, 'utf8')) as { records: Array<{ state: string }> }
-    expect(afterFirst.records[0]?.state).not.toBe('committed')
     await eventually(async () => {
-      expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [{ operationId: body.operationId, state: 'committed', sessionCursor: 31 }] })
+      expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [{ operationId: body.operationId, state: 'committed' }] })
     })
-    expect(attempts).toBeGreaterThanOrEqual(2)
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    expect(attempts).toBe(1)
+    const record = JSON.parse(await readFile(ledgerPath, 'utf8')) as { records: Array<{ sessionCursor?: number }> }
+    expect(record.records[0]?.sessionCursor).toBeUndefined()
   })
 
   it('does not let one uncommitted Session block admission for another Session', async () => {
@@ -428,13 +428,13 @@ describe('Stable Ingress admission', () => {
     }
     await eventually(async () => {
       expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [
-        { operationId: 'operation-blocked', state: 'pending', attempts: expect.any(Number), error: expect.stringContaining('not committed') },
+        { operationId: 'operation-blocked', state: 'pending', attempts: expect.any(Number), error: expect.stringContaining('did not durably accept') },
         { operationId: 'operation-ready', state: 'committed', sessionCursor: 41 },
       ] })
     })
     expect(commits).toContain('session-ready')
     const status = await fetch(`${origin}/runtime/admission/messages/operation-blocked`).then((response) => response.json())
-    expect(status).toMatchObject({ operationId: 'operation-blocked', state: 'pending', attempts: expect.any(Number), lastError: expect.stringContaining('not committed') })
+    expect(status).toMatchObject({ operationId: 'operation-blocked', state: 'pending', attempts: expect.any(Number), lastError: expect.stringContaining('did not durably accept') })
   })
 
   it('marks an explicitly missing target Session as failed instead of retrying forever', async () => {

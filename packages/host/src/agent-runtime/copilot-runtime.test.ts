@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { createConfig } from '@agent-kernel/kernel'
+import type { ContextUsageSnapshot } from '@agent-kernel/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ToolDispatcher } from '../loop-types.js'
@@ -25,6 +26,7 @@ const sdk = vi.hoisted(() => ({
   startError: undefined as Error | undefined,
   configs: [] as Array<{
     tools: CapturedTool[]
+    streaming?: boolean
     workingDirectory?: string
     availableTools?: readonly string[]
     excludedTools?: readonly string[]
@@ -46,6 +48,7 @@ const sdk = vi.hoisted(() => ({
   }>,
   resumeConfigs: [] as Array<{
     tools: CapturedTool[]
+    streaming?: boolean
     workingDirectory?: string
     availableTools?: readonly string[]
     excludedTools?: readonly string[]
@@ -123,12 +126,12 @@ vi.mock('@github/copilot-sdk', () => ({
         capabilities: { limits: { max_context_window_tokens: 128_000 } },
       }]
     }
-    async resumeSession(_sessionId: string, config: { tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }) {
+    async resumeSession(_sessionId: string, config: { tools: CapturedTool[]; streaming?: boolean; workingDirectory?: string; remoteSession?: string }) {
       sdk.resumeConfigs.push(config)
       if (!sdk.resumeSucceeds) throw new Error('not found')
       return this.session()
     }
-    async createSession(config: { tools: CapturedTool[]; workingDirectory?: string; remoteSession?: string }) {
+    async createSession(config: { tools: CapturedTool[]; streaming?: boolean; workingDirectory?: string; remoteSession?: string }) {
       sdk.configs.push(config)
       return this.session()
     }
@@ -233,6 +236,32 @@ describe('Copilot runtime custom tools', () => {
     }
   })
 
+  it('materializes the packaged Copilot runtime beside writable session storage', async () => {
+    const releaseDir = join(dir, 'release')
+    const sessionsDir = join(dir, 'state', 'sessions')
+    const target = `${process.platform}-${process.arch}`
+    mkdirSync(releaseDir, { recursive: true })
+    writeFileSync(join(releaseDir, `kala-copilot-runtime-${target}`), 'runtime-wrapper')
+    writeFileSync(join(releaseDir, `kala-copilot-runtime-node-${target}.node`), 'runtime-library')
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: '' } }, cancelPending() {} },
+      broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+    }, {
+      enabled: true,
+      sessionsDir,
+      runtimeEntryPath: join(releaseDir, 'kala-runtime.cjs'),
+    })
+
+    await runtime.start()
+
+    const materialized = sdk.clientOptions.at(-1)?.connection?.path
+    expect(materialized).toBe(join(dir, 'state', 'copilot-runtime', `sdk-1.0.14-${target}`, 'copilot-runtime'))
+    expect(existsSync(materialized!)).toBe(true)
+    expect(readFileSync(join(dirname(materialized!), 'runtime.node'), 'utf8')).toBe('runtime-library')
+    await runtime.close()
+  })
+
   it('reports a missing SDK CLI clearly instead of silently disabling Copilot', async () => {
     sdk.startError = new Error('Could not resolve a @github/copilot platform package')
     const runtime = new CopilotAgentRuntime({
@@ -334,6 +363,7 @@ describe('Copilot runtime custom tools', () => {
     expect(sdk.configs.at(-1)?.workingDirectory).toBe(join(dir, '..'))
     expect(sdk.configs.at(-1)?.remoteSession).toBe('off')
     expect(sdk.configs.at(-1)).toMatchObject({
+      streaming: true,
       additionalDirectories: [],
       skipEmbeddingRetrieval: true,
       embeddingCacheStorage: 'in-memory',
@@ -434,7 +464,7 @@ describe('Copilot runtime custom tools', () => {
     })
     await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
 
-    expect(sdk.sentMessages).toContainEqual({
+    expect(sdk.sentMessages).toContainEqual(expect.objectContaining({
       prompt: 'Describe this screenshot.',
       attachments: [{
         type: 'blob',
@@ -442,7 +472,7 @@ describe('Copilot runtime custom tools', () => {
         mimeType: 'image/png',
         displayName: 'pasted-image.png',
       }],
-    })
+    }))
     expect(store.get(record.sessionId)?.state.messages[0]).toMatchObject({
       role: 'user',
       content: expect.arrayContaining([
@@ -490,7 +520,7 @@ describe('Copilot runtime custom tools', () => {
     })
     await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
 
-    expect(sdk.sentMessages).toContainEqual({
+    expect(sdk.sentMessages).toContainEqual(expect.objectContaining({
       prompt: 'Review this file.',
       attachments: [{
         type: 'blob',
@@ -498,7 +528,7 @@ describe('Copilot runtime custom tools', () => {
         mimeType: 'application/json',
         displayName: 'config.json',
       }],
-    })
+    }))
     await runtime.close()
   })
 
@@ -540,7 +570,7 @@ describe('Copilot runtime custom tools', () => {
     })
     await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
 
-    expect(sdk.sentMessages).toContainEqual({
+    expect(sdk.sentMessages).toContainEqual(expect.objectContaining({
       prompt: 'Review this file.',
       attachments: [{
         type: 'blob',
@@ -548,7 +578,7 @@ describe('Copilot runtime custom tools', () => {
         mimeType: 'application/json',
         displayName: 'config.json',
       }],
-    })
+    }))
     expect(JSON.stringify(sdk.sentMessages)).not.toContain(messageAttachments.resolve(record.sessionId, reference).path)
     const config = sdk.configs.at(-1)
     expect(config?.workingDirectory).toBe(join(dir, '..'))
@@ -714,6 +744,283 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
+  it('updates provider context after autonomous tool iterations and ignores stale snapshots', async () => {
+    const snapshots: ContextUsageSnapshot[] = []
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'tool output' } }, cancelPending() {} },
+      broadcast: {
+        onState(record, _state, snapshot) {
+          if (!snapshot) return
+          snapshots.push(snapshot)
+          void store.updateRuntimeContextSnapshot(record, snapshot)
+        },
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-autonomous-context',
+      agentRuntime: 'copilot',
+      config: createConfig({
+        tools: [{
+          name: 'inspect',
+          description: 'Inspect something',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'inspect',
+        }],
+      }),
+    })
+    await store.updatePreferences(record.sessionId, { selectedModel: 'gpt-5.4-mini' })
+    sdk.responses.push({
+      type: 'assistant.message', id: 'first-response', timestamp: '2026-09-26T14:00:00.000Z',
+      data: { content: 'Working.', messageId: 'first-message' },
+    })
+    await runtime.start()
+    await runtime.send(record, { text: 'Inspect twice.', model: 'gpt-5.4-mini' })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+
+    const emit = (event: unknown): void => {
+      for (const listener of sdk.listeners) listener(event)
+    }
+    emit({
+      type: 'session.usage_info', id: 'initial-context', parentId: null,
+      timestamp: '2026-09-26T14:00:01.000Z', ephemeral: true,
+      data: { currentTokens: 70_000, tokenLimit: 272_000, messagesLength: 10 },
+    })
+    const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'inspect')
+    await tool?.handler({ step: 1 }, { toolCallId: 'tool-1' })
+    emit({
+      type: 'assistant.usage', id: 'tool-usage-1', parentId: null,
+      timestamp: '2026-09-26T14:00:02.000Z',
+      data: { model: 'gpt-5.4-mini', inputTokens: 75_000, outputTokens: 100, apiCallId: 'api-tool-1' },
+    })
+    await tool?.handler({ step: 2 }, { toolCallId: 'tool-2' })
+    emit({
+      type: 'assistant.usage', id: 'tool-usage-2', parentId: null,
+      timestamp: '2026-09-26T14:00:03.000Z',
+      data: { model: 'gpt-5.4-mini', inputTokens: 80_000, outputTokens: 100, apiCallId: 'api-tool-2' },
+    })
+    await vi.waitFor(() => expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(80_000))
+    expect(record.runtimeContextSnapshot).toMatchObject({
+      contextWindow: { tokens: 272_000, source: 'api_reported' },
+      usage: { inputTokens: 80_000, totalTokens: 80_000 },
+      estimator: { total: { kind: 'provider_reported', confidence: 'exact' } },
+    })
+
+    emit({
+      type: 'session.usage_info', id: 'late-stale-context', parentId: null,
+      timestamp: '2026-09-26T14:00:01.500Z', ephemeral: true,
+      data: { currentTokens: 71_000, tokenLimit: 272_000, messagesLength: 11 },
+    })
+    expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(80_000)
+
+    sdk.responses.push({
+      type: 'assistant.message', id: 'second-response', timestamp: '2026-09-26T14:00:04.000Z',
+      data: { content: 'Continuing.', messageId: 'second-message' },
+    })
+    await runtime.send(record, { text: 'Continue.', model: 'gpt-5.4-mini' })
+    emit({
+      type: 'assistant.usage', id: 'next-turn-usage', parentId: null,
+      timestamp: '2026-09-26T14:00:05.000Z',
+      data: { model: 'gpt-5.4-mini', inputTokens: 30_000, outputTokens: 50, apiCallId: 'api-next-turn' },
+    })
+    await vi.waitFor(() => expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(30_000))
+    expect(store.get(record.sessionId)?.state.usage.inputTokens).toBe(185_000)
+    expect(snapshots.at(-1)?.estimator.version).toBe('copilot-sdk-assistant-usage-v1')
+    await vi.waitFor(async () => {
+      const reloaded = await new SessionStore(dir).load(record.sessionId)
+      expect(reloaded.runtimeContextSnapshot?.usage.inputTokens).toBe(30_000)
+    })
+    await runtime.close()
+  })
+
+  it('ignores late cancelled-turn messages and tools without suppressing the next turn', async () => {
+    const callTool = vi.fn(async () => ({ ok: true, content: 'should not run' }))
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { callTool, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-cancelled-generation',
+      agentRuntime: 'copilot',
+      config: createConfig({
+        tools: [{
+          name: 'inspect',
+          description: 'Inspect something',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'inspect',
+        }],
+      }),
+    })
+    let resolveOld!: (value: unknown) => void
+    let resolveNew!: (value: unknown) => void
+    sdk.responses.push(
+      new Promise((resolve) => { resolveOld = resolve }),
+      new Promise((resolve) => { resolveNew = resolve }),
+    )
+    const emit = (event: unknown): void => {
+      for (const listener of [...sdk.listeners]) listener(event)
+    }
+
+    await runtime.start()
+    await runtime.send(record, { text: 'old turn' })
+    await vi.waitFor(() => expect(sdk.sentMessages).toHaveLength(1))
+    const oldRequestId = (sdk.sentMessages[0] as { requestHeaders: Record<string, string> }).requestHeaders['x-request-id']
+    await runtime.cancel(record)
+    expect(record.state.status).toBe('done')
+
+    emit({
+      type: 'assistant.message', id: 'late-before-new', parentId: null,
+      timestamp: '2026-09-26T15:00:00.000Z',
+      data: { content: 'stale before new', messageId: 'late-1', clientRequestId: oldRequestId, turnId: 'old-turn' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(record.state.status).toBe('done')
+    expect(record.state.messages.some((message) => message.content.some((content) => content.type === 'text' && content.text === 'stale before new'))).toBe(false)
+
+    await runtime.send(record, { text: 'new turn' })
+    await vi.waitFor(() => expect(sdk.sentMessages).toHaveLength(2))
+    const newRequestId = (sdk.sentMessages[1] as { requestHeaders: Record<string, string> }).requestHeaders['x-request-id']
+    emit({
+      type: 'assistant.message', id: 'late-after-new', parentId: 'late-before-new',
+      timestamp: '2026-09-26T15:00:01.000Z',
+      data: {
+        content: 'stale after new', messageId: 'late-2', clientRequestId: oldRequestId, turnId: 'old-turn',
+        toolRequests: [{ toolCallId: 'late-tool', name: 'inspect', arguments: {} }],
+      },
+    })
+    const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'inspect')
+    await expect(tool?.handler({}, { toolCallId: 'late-tool' })).resolves.toMatchObject({ error: 'cancelled' })
+    expect(callTool).not.toHaveBeenCalled()
+
+    const newResponse = {
+      type: 'assistant.message', id: 'new-response', parentId: null,
+      timestamp: '2026-09-26T15:00:02.000Z',
+      data: { content: 'fresh response', messageId: 'new-message', clientRequestId: newRequestId, turnId: 'new-turn' },
+    }
+    emit(newResponse)
+    resolveNew(newResponse)
+    resolveOld({
+      type: 'assistant.message', id: 'old-response', parentId: null,
+      timestamp: '2026-09-26T15:00:03.000Z',
+      data: { content: 'stale resolved response', messageId: 'old-message', clientRequestId: oldRequestId, turnId: 'old-turn' },
+    })
+    await vi.waitFor(() => expect(record.state.status).toBe('done'))
+    emit({
+      type: 'assistant.message', id: 'late-after-new-done', parentId: 'late-after-new',
+      timestamp: '2026-09-26T15:00:04.000Z',
+      data: { content: 'stale status reset', messageId: 'late-3', clientRequestId: oldRequestId, turnId: 'old-turn' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(record.state.status).toBe('done')
+
+    const text = record.state.messages.flatMap((message) => message.content)
+      .filter((content) => content.type === 'text')
+      .map((content) => content.text)
+    expect(text).toContain('fresh response')
+    expect(text).not.toContain('stale after new')
+    expect(text).not.toContain('stale resolved response')
+    expect(text).not.toContain('stale status reset')
+    await runtime.close()
+  })
+
+  it('does not confuse reused SDK turn ids across interactions', async () => {
+    const callTool = vi.fn(async () => ({ ok: true, content: 'ok' }))
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { callTool, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-reused-sdk-turn-id',
+      agentRuntime: 'copilot',
+      config: createConfig({
+        tools: [{
+          name: 'inspect',
+          description: 'Inspect something',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'inspect',
+        }],
+      }),
+    })
+    let resolveFirst!: (value: unknown) => void
+    let resolveSecond!: (value: unknown) => void
+    sdk.responses.push(
+      new Promise((resolve) => { resolveFirst = resolve }),
+      new Promise((resolve) => { resolveSecond = resolve }),
+    )
+    const emit = (event: unknown): void => {
+      for (const listener of [...sdk.listeners]) listener(event)
+    }
+    await runtime.start()
+    await runtime.start()
+    await runtime.send(record, { text: 'first turn' })
+    await vi.waitFor(() => expect(sdk.sentMessages).toHaveLength(1))
+    const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'inspect')
+    emit({
+      type: 'assistant.turn_start', id: 'first-start', parentId: null,
+      timestamp: '2026-09-27T15:00:00.000Z',
+      data: { turnId: '0', interactionId: 'first-interaction' },
+    })
+    const firstResponse = {
+      type: 'assistant.message', id: 'first-response', parentId: 'first-start',
+      timestamp: '2026-09-27T15:00:01.000Z',
+      data: {
+        content: '', messageId: 'first-message', turnId: '0', interactionId: 'first-interaction',
+        toolRequests: [{ toolCallId: 'first-tool', name: 'inspect', arguments: {} }],
+      },
+    }
+    emit(firstResponse)
+    await expect(tool?.handler({}, { toolCallId: 'first-tool' })).resolves.toMatchObject({ resultType: 'success' })
+    resolveFirst(firstResponse)
+    await vi.waitFor(() => expect(record.state.status).toBe('done'))
+
+    await runtime.send(record, { text: 'second turn' })
+    await vi.waitFor(() => expect(sdk.sentMessages).toHaveLength(2))
+    emit({
+      type: 'assistant.turn_start', id: 'second-start', parentId: null,
+      timestamp: '2026-09-27T15:00:02.000Z',
+      data: { turnId: '0', interactionId: 'second-interaction' },
+    })
+    const secondResponse = {
+      type: 'assistant.message', id: 'second-response', parentId: 'second-start',
+      timestamp: '2026-09-27T15:00:03.000Z',
+      data: {
+        content: '', messageId: 'second-message', turnId: '0', interactionId: 'second-interaction',
+        toolRequests: [{ toolCallId: 'second-tool', name: 'inspect', arguments: {} }],
+      },
+    }
+    emit(secondResponse)
+    await expect(tool?.handler({}, { toolCallId: 'second-tool' })).resolves.toMatchObject({ resultType: 'success' })
+    resolveSecond(secondResponse)
+    await vi.waitFor(() => expect(record.state.status).toBe('done'))
+
+    expect(callTool).toHaveBeenCalledTimes(2)
+    expect(record.state.messages.some((message) => message.content.some((content) =>
+      content.type === 'tool_call' && content.callId === 'second-tool'
+    ))).toBe(true)
+    await runtime.close()
+  })
+
   it('runs manual compaction through the Copilot history RPC', async () => {
     const onState = vi.fn()
     const runtime = new CopilotAgentRuntime({
@@ -795,7 +1102,7 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
-  it('disables remote export when resuming an existing SDK session', async () => {
+  it('keeps streaming enabled when resuming an existing SDK session', async () => {
     sdk.resumeSucceeds = true
     const runtime = new CopilotAgentRuntime({
       store,
@@ -821,6 +1128,7 @@ describe('Copilot runtime custom tools', () => {
 
     expect(sdk.resumeConfigs).toHaveLength(1)
     expect(sdk.resumeConfigs[0]?.remoteSession).toBe('off')
+    expect(sdk.resumeConfigs[0]?.streaming).toBe(true)
     expect(sdk.configs).toHaveLength(0)
     expect(sdk.clientOptions[0]?.connection?.args).toEqual(['--no-remote-export'])
     await runtime.close()

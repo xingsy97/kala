@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
+import { COPILOT_AGENT_RUNTIME_CAPABILITIES, KERNEL_AGENT_RUNTIME_CAPABILITIES, type ClientUserMessage, type RuntimeMetadataEntry } from '@agent-kernel/shared'
 
-import { buildCompactionMetadataIndex, consumeCompactionMetadata, loadDashboardSession, terminalOwnerSessionId } from './dashboard-ns.js'
+import { buildCompactionMetadataIndex, consumeCompactionMetadata, handleUserMessage, loadDashboardSession, type DashboardDeps } from './dashboard-ns.js'
+import { terminalOwnerSessionId, terminalSessionRoom } from './rooms.js'
 import type { SessionStore } from '../store/session.js'
 
 function makeMeta(
@@ -18,10 +19,150 @@ function makeMeta(
   }
 }
 
+describe('dashboard user message routing', () => {
+  function messageHarness(
+    status: 'idle' | 'thinking',
+    agentRuntime: 'kernel' | 'copilot' = 'copilot',
+    pending = 0,
+  ) {
+    const order: string[] = []
+    const send = vi.fn(async () => { order.push('send') })
+    const cancel = vi.fn(async () => { order.push('cancel') })
+    const enqueue = vi.fn(async () => { order.push('enqueue') })
+    const drain = vi.fn(async () => { order.push('drain') })
+    const commitReferences = vi.fn(async () => { order.push('commit') })
+    const requestStopAtBoundary = vi.fn()
+    const record = {
+      sessionId: 'copilot-session',
+      agentRuntime,
+      preferences: { selectedModel: 'copilot:gpt-5' },
+      state: { status },
+    }
+    const deps = {
+      store: { get: vi.fn(() => record) },
+      agentRuntimes: {
+        require: vi.fn(() => ({
+          descriptor: () => ({
+            label: agentRuntime === 'copilot' ? 'Copilot' : 'Kernel',
+            capabilities: agentRuntime === 'copilot' ? COPILOT_AGENT_RUNTIME_CAPABILITIES : KERNEL_AGENT_RUNTIME_CAPABILITIES,
+          }),
+          send,
+          cancel,
+        })),
+      },
+      loop: {
+        hasActiveTurn: vi.fn(() => status === 'thinking'),
+        hasActiveLlmCall: vi.fn(() => status === 'thinking'),
+        recoverInterruptedLlm: vi.fn(),
+        requestStopAtBoundary,
+      },
+      loopDeps: { messageAttachments: { commitReferences } },
+      messageQueues: {
+        pending: vi.fn(() => pending),
+        enqueue,
+        drain,
+      },
+      broadcastError: vi.fn(),
+    } as unknown as DashboardDeps
+    return { deps, order, send, cancel, enqueue, drain, commitReferences, requestStopAtBoundary }
+  }
+
+  it.each(['kernel', 'copilot'] as const)('durably queues a %s queue-mode message with committed references while another turn is active', async (agentRuntime) => {
+    const { deps, order, send, enqueue, drain, commitReferences } = messageHarness('thinking', agentRuntime)
+    const content = [{ type: 'text' as const, text: 'details' }]
+    const message: ClientUserMessage = {
+      sessionId: 'copilot-session',
+      operationId: 'copilot-follow-up',
+      text: 'follow up',
+      content,
+      mode: 'queue',
+    }
+
+    await handleUserMessage(deps, message)
+
+    expect(send).not.toHaveBeenCalled()
+    expect(commitReferences).toHaveBeenCalledWith(message.sessionId, content)
+    expect(enqueue).toHaveBeenCalledWith(message.sessionId, expect.objectContaining({
+      operationId: message.operationId,
+      text: message.text,
+      content,
+      model: 'copilot:gpt-5',
+      mode: 'queue',
+    }), undefined)
+    expect(drain).toHaveBeenCalledWith(message.sessionId)
+    expect(order.indexOf('commit')).toBeLessThan(order.indexOf('enqueue'))
+  })
+
+  it('keeps an idle Copilot steer immediate but commits references before sending', async () => {
+    const { deps, order, send, enqueue } = messageHarness('idle')
+    const message: ClientUserMessage = {
+      sessionId: 'copilot-session',
+      operationId: 'copilot-steer',
+      text: 'redirect',
+      mode: 'steer',
+    }
+
+    await handleUserMessage(deps, message)
+
+    expect(enqueue).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      text: message.text,
+      operationId: message.operationId,
+      model: 'copilot:gpt-5',
+    }))
+    expect(order.indexOf('commit')).toBeLessThan(order.indexOf('send'))
+  })
+
+  it('defers a busy Copilot steer without cancelling or starting an overlapping generation', async () => {
+    const { deps, order, send, cancel, enqueue, drain, requestStopAtBoundary } = messageHarness('thinking')
+    const message: ClientUserMessage = {
+      sessionId: 'copilot-session',
+      operationId: 'copilot-busy-steer',
+      text: 'redirect after the child finishes',
+      mode: 'steer',
+    }
+
+    await handleUserMessage(deps, message)
+
+    expect(send).not.toHaveBeenCalled()
+    expect(cancel).not.toHaveBeenCalled()
+    expect(enqueue).toHaveBeenCalledWith(message.sessionId, expect.objectContaining({
+      operationId: message.operationId,
+      text: message.text,
+      model: 'copilot:gpt-5',
+      mode: 'steer',
+    }), 'front')
+    expect(drain).toHaveBeenCalledWith(message.sessionId)
+    expect(requestStopAtBoundary).not.toHaveBeenCalled()
+    expect(order.indexOf('commit')).toBeLessThan(order.indexOf('enqueue'))
+  })
+
+  it('does not bypass an existing Copilot queue with an otherwise resting steer', async () => {
+    const { deps, send, enqueue } = messageHarness('idle', 'copilot', 1)
+    const message: ClientUserMessage = {
+      sessionId: 'copilot-session',
+      operationId: 'copilot-steer-behind-claim',
+      text: 'redirect safely',
+      mode: 'steer',
+    }
+
+    await handleUserMessage(deps, message)
+
+    expect(send).not.toHaveBeenCalled()
+    expect(enqueue).toHaveBeenCalledWith(message.sessionId, expect.objectContaining({
+      text: message.text,
+      operationId: message.operationId,
+      model: 'copilot:gpt-5',
+      mode: 'steer',
+    }), 'front')
+  })
+})
+
 describe('temporary workspace terminal identity', () => {
   it('maps an isolated PTY id to its authorized owner session and rejects malformed ids', () => {
     expect(terminalOwnerSessionId('session-1')).toBe('session-1')
     expect(terminalOwnerSessionId('workspace-terminal:session-1:request-1')).toBe('session-1')
+    expect(terminalSessionRoom('workspace-terminal:session-1:request-1')).toBe('session:session-1')
     expect(terminalOwnerSessionId('workspace-terminal:')).toBeUndefined()
     expect(terminalOwnerSessionId('workspace-terminal::request-1')).toBeUndefined()
   })

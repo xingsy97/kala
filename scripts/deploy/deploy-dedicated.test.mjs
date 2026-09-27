@@ -32,8 +32,50 @@ describe('deploy:dedicated client', () => {
     expect(output).toContain('--local')
     expect(output).toContain('--lxd')
     expect(output).toContain('--ssh')
+    expect(output).toContain('--local-development')
     expect(output).toContain('never invokes the legacy single-service')
   })
+
+  it('rejects local-development over SSH, with a custom release, or from a packaged CLI', () => {
+    expectFailure([script, 'stage', '--local-development', '--ssh', 'deployer@example'], 'does not support SSH')
+    expectFailure([script, 'stage', '--local-development', '--local', '--release-dir', '/tmp/release'], 'always derives from the repository release/')
+
+    const root = mkdtempSync(join(tmpdir(), 'deploy-dedicated-packaged-local-dev-')); roots.push(root)
+    const packagedScript = join(root, 'deploy-dedicated.mjs')
+    copyFileSync(script, packagedScript)
+    expectFailure([packagedScript, 'stage', '--local-development', '--local', '--skip-build'], 'only from a source repository checkout')
+  })
+
+  it('rejects ambiguous transport selection', () => {
+    expectFailure([script, 'stage', '--local', '--lxd', 'candidate', '--skip-build'], 'choose exactly one transport')
+  })
+
+  it('stages an unsigned 16-file local-development release without changing release/', () => {
+    const root = mkdtempSync(join(tmpdir(), 'deploy-dedicated-local-dev-')); roots.push(root)
+    const deployRoot = createDeployRoot(root)
+    const sourceRelease = fileURLToPath(new URL('../../release', import.meta.url))
+    const originalManifest = readFileSync(join(sourceRelease, 'manifest.json'))
+    const originalEntries = readdirSync(sourceRelease).sort()
+    const tempBefore = localDevelopmentTempDirectories()
+    execFileSync(process.execPath, [script, 'stage', '--local-development', '--local', '--skip-build', '--deploy-root', deployRoot, '--operation-id', 'operation-local-dev-0001', '--deployment-id', 'deployment-local-dev-0001'], { encoding: 'utf8' })
+
+    const staged = join(deployRoot, 'submissions', 'operation-local-dev-0001')
+    const manifest = JSON.parse(readFileSync(join(staged, 'manifest.json'), 'utf8'))
+    expect(manifest.localDevelopment).toBe(true)
+    expect([...manifest.assets].sort()).toEqual([...localDevelopmentAssets].sort())
+    expect(readdirSync(staged).sort()).toEqual([...localDevelopmentAssets, 'manifest.json', 'SHA256SUMS'].sort())
+    expect(exists(staged, 'SHA256SUMS.sigstore.json')).toBe(false)
+    expect(readFileSync(join(sourceRelease, 'manifest.json'))).toEqual(originalManifest)
+    expect(readdirSync(sourceRelease).sort()).toEqual(originalEntries)
+    expect(localDevelopmentTempDirectories()).toEqual(tempBefore)
+  }, 120_000)
+
+  it('cleans the derived release when immutable staging fails', () => {
+    const root = mkdtempSync(join(tmpdir(), 'deploy-dedicated-local-dev-failure-')); roots.push(root)
+    const tempBefore = localDevelopmentTempDirectories()
+    expectFailure([script, 'stage', '--local-development', '--local', '--skip-build', '--deploy-root', join(root, 'missing')], 'ENOENT')
+    expect(localDevelopmentTempDirectories()).toEqual(tempBefore)
+  }, 120_000)
 
   it('reads authoritative receipts by deployment or operation id without mutating state', () => {
     const root = mkdtempSync(join(tmpdir(), 'deploy-dedicated-status-')); roots.push(root)
@@ -150,6 +192,7 @@ describe('deploy:dedicated client', () => {
   })
 })
 
+const localDevelopmentAssets = ['kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs', 'kala-copilot-runtime-linux-x64', 'kala-copilot-runtime-node-linux-x64.node', 'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-model-catalog-seed.json', 'run.sh', 'kala-dedicated.mjs', 'kala-release-metadata.tar.gz']
 const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 function digest(path) { return execFileSync('sha256sum', [path], { encoding: 'utf8' }).split(' ')[0] }
 function writeSums(root, names) { writeFileSync(join(root, 'SHA256SUMS'), names.sort().map((name) => `${digest(join(root, name))}  ${name}`).join('\n') + '\n') }
@@ -162,3 +205,21 @@ function createSupportBundle(root, expanded) {
   if (!expanded) for (const name of supportAssets) rmSync(join(root, name))
 }
 function exists(root, name) { try { statSync(join(root, name)); return true } catch { return false } }
+function expectFailure(args, message) {
+  try {
+    execFileSync(process.execPath, args, { encoding: 'utf8', stdio: 'pipe' })
+    throw new Error('command unexpectedly succeeded')
+  } catch (error) {
+    expect(String(error.stderr ?? error.message)).toContain(message)
+  }
+}
+function createDeployRoot(root) {
+  const deployRoot = join(root, 'deploy')
+  mkdirSync(join(deployRoot, 'releases', 'predecessor'), { recursive: true })
+  mkdirSync(join(deployRoot, 'requests'), { recursive: true })
+  mkdirSync(join(deployRoot, 'submissions'), { recursive: true })
+  writeFileSync(join(deployRoot, 'releases', 'predecessor', 'SHA256SUMS'), `${'a'.repeat(64)}  predecessor\n`)
+  writeFileSync(join(deployRoot, 'route-state.json'), JSON.stringify({ schemaVersion: 1, generation: 1, activeSlot: 'blue', slots: { blue: { origin: 'http://127.0.0.1:13001', releaseId: 'predecessor' }, green: { origin: 'http://127.0.0.1:13002', releaseId: 'predecessor' } } }))
+  return deployRoot
+}
+function localDevelopmentTempDirectories() { return readdirSync(tmpdir()).filter((name) => name.startsWith('kala-local-development-release-')).sort() }

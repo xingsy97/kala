@@ -44,6 +44,7 @@ type ActiveSubAgent = {
   startedAt: Date
   cancelled: boolean
   cancelReason?: string
+  runtimeCancellation?: Promise<{ ok: true; childSessionId: string }>
   cancelRuntime?: () => Promise<void>
 }
 
@@ -144,6 +145,40 @@ export function markSubAgentInterrupted(
   active.cancelled = true
   active.cancelReason = reason
   return { ok: true, childSessionId: active.childSessionId }
+}
+
+/**
+ * Cancel an external-runtime child before publishing the wrapper's cancelled
+ * state. Concurrent Stop requests share the same runtime cancellation so the
+ * operation remains idempotent while cancellation is in flight.
+ */
+export async function interruptSubAgentAfterRuntimeCancel(
+  parentSessionId: string,
+  parentCallId: string,
+  childSessionId: string | undefined,
+  cancelRuntime: (childSessionId: string) => Promise<void>,
+  reason = 'sub-agent interrupted by user',
+): Promise<{ ok: true; childSessionId: string } | { ok: false; error: string }> {
+  const active = activeSubAgentFor(parentSessionId, parentCallId)
+  if (!active) return { ok: false, error: 'sub-agent is not running' }
+  if (childSessionId && active.childSessionId !== childSessionId) {
+    return { ok: false, error: 'sub-agent child session mismatch' }
+  }
+  if (active.cancelled) return { ok: true, childSessionId: active.childSessionId }
+  if (active.runtimeCancellation) return await active.runtimeCancellation
+
+  const cancellation = (async () => {
+    await cancelRuntime(active.childSessionId)
+    active.cancelled = true
+    active.cancelReason = reason
+    return { ok: true as const, childSessionId: active.childSessionId }
+  })()
+  active.runtimeCancellation = cancellation
+  try {
+    return await cancellation
+  } finally {
+    if (active.runtimeCancellation === cancellation) active.runtimeCancellation = undefined
+  }
 }
 
 export async function interruptSubAgentsForParent(

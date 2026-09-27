@@ -79,6 +79,16 @@ export function loadPrivateDenylist(root, env = process.env, gitLocalPath) {
   return [...new Set(values)]
 }
 
+// A `word:` entry is for usernames: plain substring matching would flag
+// ordinary words containing the same short sequence of characters.
+function privateDenylistIndex(text, value) {
+  if (!value.startsWith('word:')) return text.indexOf(value)
+  const term = value.slice(5)
+  if (!term) return -1
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu').exec(text)?.index ?? -1
+}
+
 export function scanEntry({ path, content, policy, denylist = [], source = 'file' }) {
   const findings = []
   const binary = Buffer.isBuffer(content) && content.subarray(0, 8192).includes(0)
@@ -95,7 +105,7 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
 
   if (source === 'path') {
     for (const value of denylist) {
-      if (path.includes(value)) add('privacy.private-denylist', 0, 'Replace the private path segment with a public example.')
+      if (privateDenylistIndex(path, value) >= 0) add('privacy.private-denylist', 0, 'Replace the private path segment with a public example.')
     }
   }
 
@@ -120,7 +130,7 @@ export function scanEntry({ path, content, policy, denylist = [], source = 'file
   }
 
   for (const value of denylist) {
-    const index = text.indexOf(value)
+    const index = privateDenylistIndex(text, value)
     if (index >= 0) add('privacy.private-denylist', index, 'Replace the private value with a public example.')
   }
   for (const match of text.matchAll(PRIVATE_IPV4)) add('privacy.private-ipv4', match.index, 'Use an RFC 5737 documentation address.')

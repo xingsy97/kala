@@ -16,6 +16,21 @@ import { SessionStore } from './session.js'
 import { appendEventEntry, appendSnapshotEntry, readSessionLog, snapshotSidecarPath, writeHeader } from './log.js'
 import { createInitialState } from '@agent-kernel/kernel'
 
+const contextWriteTest = vi.hoisted(() => ({
+  beforeWrite: undefined as undefined | ((value: unknown) => Promise<void>),
+}))
+
+vi.mock('../tenant-runtime/atomic-json-file.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../tenant-runtime/atomic-json-file.js')>()
+  return {
+    ...actual,
+    async writeJsonFile(path: string, value: unknown, mode?: number) {
+      await contextWriteTest.beforeWrite?.(value)
+      await actual.writeJsonFile(path, value, mode)
+    },
+  }
+})
+
 const config = createConfig({ tools: [], systemPrompt: 'sys' })
 
 describe('SessionStore.ensure', () => {
@@ -805,7 +820,10 @@ describe('SessionStore runtime context snapshots', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'ak-runtime-context-'))
   })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  afterEach(() => {
+    contextWriteTest.beforeWrite = undefined
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   it('restores provider-reported context usage after a Host restart', async () => {
     const store = new SessionStore(dir)
@@ -838,6 +856,51 @@ describe('SessionStore runtime context snapshots', () => {
     const reloaded = await new SessionStore(dir).load(record.sessionId)
 
     expect(reloaded.runtimeContextSnapshot).toEqual(contextSnapshot)
+  })
+
+  it('orders concurrent writes and never restores an older snapshot', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-context-concurrent',
+      agentRuntime: 'copilot',
+      config,
+    })
+    const snapshot = (inputTokens: number, updatedAt: number) => ({
+      model: { ref: 'gpt-5.4-mini', provider: 'github-copilot', id: 'gpt-5.4-mini' },
+      contextWindow: { tokens: 272_000, source: 'api_reported' as const },
+      usage: { inputTokens, totalTokens: inputTokens },
+      estimator: {
+        total: { kind: 'provider_reported' as const, confidence: 'exact' as const },
+        version: 'copilot-sdk-usage-info-v1',
+      },
+      updatedAt,
+    })
+    const older = snapshot(90_000, 1_000)
+    // A newer compaction result is allowed to have a lower token total.
+    const newer = snapshot(30_000, 2_000)
+    let releaseOlder!: () => void
+    const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve })
+    contextWriteTest.beforeWrite = async (value) => {
+      const updatedAt = (value as { contextSnapshot?: { updatedAt?: number } }).contextSnapshot?.updatedAt
+      if (updatedAt === older.updatedAt) await olderGate
+      // In the broken implementation the concurrent newer write reaches disk
+      // first, then releases the older write to overwrite it.
+      if (updatedAt === newer.updatedAt) releaseOlder()
+    }
+
+    const olderWrite = store.updateRuntimeContextSnapshot(record, older)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const newerWrite = store.updateRuntimeContextSnapshot(record, newer)
+    const fallback = setTimeout(releaseOlder, 25)
+    await Promise.all([olderWrite, newerWrite])
+    clearTimeout(fallback)
+
+    expect(record.runtimeContextSnapshot).toEqual(newer)
+    expect((await new SessionStore(dir).load(record.sessionId)).runtimeContextSnapshot).toEqual(newer)
+
+    await store.updateRuntimeContextSnapshot(record, older)
+    expect(record.runtimeContextSnapshot).toEqual(newer)
+    expect((await new SessionStore(dir).load(record.sessionId)).runtimeContextSnapshot).toEqual(newer)
   })
 })
 

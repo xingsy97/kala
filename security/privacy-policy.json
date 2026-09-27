@@ -22,6 +22,7 @@
   ],
   "allowedImagePaths": [
     "docs/assets/kala-dashboard-preview.png",
+    "docs/assets/kala-dashboard-preview.gif",
     "deploy/identity/favicon.svg",
     "deploy/saas/branding/icon-dark.svg",
     "deploy/saas/branding/icon.svg",
@@ -57,6 +58,7 @@
     "packages/desktop/src-tauri/icons/icon.svg"
   ],
   "allowedBinaryPaths": [
+    "docs/assets/kala-dashboard-preview.mp4",
     "deploy/evaluation/fixtures/compose-smoke.tar",
     "deploy/evaluation/fixtures/config-schema-recovery.tar",
     "deploy/evaluation/fixtures/configuration-runtime-trace.tar",
@@ -73,7 +75,9 @@
     { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "bef5365935acb0c459c750e26b4e4987952418f162fa5745fd45d8254cdbb9b6", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
     { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "09c4c90bd5d81b38a997b5bddf132e55321b5a9214a3f8b2963aa64529a9e751", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
     { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "9414268907620b0fa4192030ed830ea08a8270f496db20b0e57bb905c62e9d28", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
-    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "730c80b4e35d0c9ab494dfe0e6779e39f61a6958bb971ede21783ad6ab458797", "reason": "Current dependency lockfile contains the same public maintainer notice; exact bytes only, not project or user data." }
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "730c80b4e35d0c9ab494dfe0e6779e39f61a6958bb971ede21783ad6ab458797", "reason": "Current dependency lockfile contains the same public maintainer notice; exact bytes only, not project or user data." },
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "f1d11713de23ea8549c2aad51700da028aa58e428e7dcc37b5bdc1ce9a69ac29", "reason": "TipTap lockfile update retains the same third-party glob deprecation notice with a public maintainer contact; exact bytes only." },
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "e35354d90aef6d454ce70be679d910e99a9c9dad932b8872559c0aeb0719455e", "reason": "Current lockfile retains the same public third-party glob deprecation notice; exact bytes only, not project or user data." }
   ],
   "allowedHistoricalAssetHashes": {
     "deploy/identity/favicon.svg": ["fe588e5f2ad0261bc0e9ae4fda5fd538d5bad1baec28141d2368a5ea30bd2631"],
@@ -93,6 +97,8 @@
   },
   "allowedBinaryHashes": {
     "docs/assets/kala-dashboard-preview.png": "6b7546ce92a20f82432f67206bae084aa9dff4ea89ade4c277c8b38c35c17dce",
+    "docs/assets/kala-dashboard-preview.gif": "066defdbd55284e21f9917bf21c8dbd935e8028e47041499b8695a567c3ce1d8",
+    "docs/assets/kala-dashboard-preview.mp4": "4831bdf041beda44ed26f24082c1d154612ca1340b788e5ede0f4a99a1b6dc8b",
     "deploy/identity/favicon.svg": "8bc90f77b1f8dbe0375fac6581f67ee69929952a3361c2274fdef1b4c32fc94a",
     "deploy/saas/branding/icon-dark.svg": "c8056baa0e15de9b0ae580003fefd617c70b6fd5575eb0c7d5dc4c80b0224b71",
     "deploy/saas/branding/icon.svg": "a9e9fe0907ce4654b5e0e9ca07c5289592166deb4ee7facf9f137b08d9b48ee3",
@@ -110,9 +116,9 @@
     "packages/dashboard/public/icons/icon-512.png": "2cd591cf9b28f8a7b63ee2455674634c3ae1da09471c3e1b1e1e8148775b0744",
     "packages/dashboard/public/icons/maskable-192.png": "ed782b2e83149abad9f22591b1f6d272ee4eb1e3bb808789e2cf61b31cf96e59",
     "packages/dashboard/public/icons/maskable-512.png": "f43ddc3386a0822d87b930137cf1d872e977caaf52b240051d946a0349500228",
-    "packages/dashboard/public/icons/linux.svg": "f262932ac85eed81a79b47184b52210c83d6edb09408f50245ef285435f86f8b",
-    "packages/dashboard/public/icons/macos.svg": "8e6eef82e047f040249bc0ed50d288cfddfa52176cf5adcb9b17bae46b472e12",
-    "packages/dashboard/public/icons/windows.svg": "11ac9b1e84c8c36c21629d03f26ce699b7d2e56bf702ea2e8eb2637cd2271c56",
+    "packages/dashboard/public/icons/linux.svg": "39b2da888badcd3ad71ff65a418c43ce49d63c9a5a4403e15bcf336aaad8d0f3",
+    "packages/dashboard/public/icons/macos.svg": "2850c79d78ab879d102b5dde270c90459ccb92cc0df425f910f642cceff87b8c",
+    "packages/dashboard/public/icons/windows.svg": "816059e0145e02473fb90c901230a9da5009d130c9ecd9db53078000b74d7b6f",
     "packages/dashboard/public/icons/octopus-desktop.svg": "6d714de48319937d74e2acd76d6231b40b8af46b0890caf09284af14ac818670",
     "packages/dashboard/public/icons/octopus-maskable-192.png": "ed782b2e83149abad9f22591b1f6d272ee4eb1e3bb808789e2cf61b31cf96e59",
     "packages/dashboard/public/icons/octopus-maskable-512.png": "f43ddc3386a0822d87b930137cf1d872e977caaf52b240051d946a0349500228",

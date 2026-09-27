@@ -11,7 +11,15 @@ export const DEDICATED_DEPLOY_TOPOLOGY = 'dedicated-slots' as const
 
 const releaseMetadataArchive = 'kala-release-metadata.tar.gz'
 const releaseChecksumSignature = 'SHA256SUMS.sigstore.json'
-const modernReleaseFileCount = 27
+const modernReleaseFileCount = 33
+const localDevelopmentAssets = [
+  'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs',
+  'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
+  'kala-copilot-runtime-linux-x64', 'kala-copilot-runtime-node-linux-x64.node',
+  'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz',
+  'kala-release-metadata.tar.gz', 'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
+] as const
+const legacyLocalDevelopmentAssets = localDevelopmentAssets.filter((asset) => !asset.startsWith('kala-copilot-runtime-'))
 const dedicatedSupportArchive = 'kala-dedicated-support.tar.gz'
 const dedicatedSupportManifest = 'dedicated-support-manifest.json'
 const dedicatedSupportAssets = [
@@ -291,7 +299,46 @@ export async function verifyImmutableRelease(input: {
   releaseId: string
   releaseDigest: string
   bundleSha256: string
+  allowLocalDevelopment?: boolean
 }): Promise<void> {
+  await verifyImmutableReleaseRuntime(input, 'kala-runtime.cjs')
+}
+
+export async function verifyImmutablePredecessorRelease(input: {
+  deployRoot: string
+  releaseDir: string
+  releaseId: string
+  releaseDigest: string
+  allowLocalDevelopment?: boolean
+}): Promise<string> {
+  const releaseDir = resolve(input.releaseDir)
+  if (releaseDir !== resolve(input.deployRoot, 'releases', input.releaseId) || basename(releaseDir) !== input.releaseId) throw new Error('release directory does not match releaseId under releases root')
+  const manifest = record(JSON.parse(String(await readFile(join(releaseDir, 'manifest.json')))), 'release manifest')
+  if (!Array.isArray(manifest.assets)) throw new Error('release manifest assets are required')
+  const assets = manifest.assets.map((asset) => safeFileName(asset, 'manifest asset'))
+  let runtimeAsset = 'kala-runtime.cjs'
+  if (!assets.includes(runtimeAsset)) {
+    const fallbackAssets = record(manifest.fallbackAssets, 'release manifest fallbackAssets')
+    runtimeAsset = 'agent-runlab-runtime.cjs'
+    if (fallbackAssets['agent-runlab-runtime'] !== runtimeAsset
+      || !assets.includes(runtimeAsset)
+      || !assets.includes('agent-runlab-dedicated-unit@.service')) {
+      throw new Error('installed predecessor does not contain a supported Runtime asset')
+    }
+  }
+  const bundleSha256 = sha256(await readFile(join(input.releaseDir, runtimeAsset)))
+  await verifyImmutableReleaseRuntime({ ...input, bundleSha256 }, runtimeAsset)
+  return bundleSha256
+}
+
+async function verifyImmutableReleaseRuntime(input: {
+  deployRoot: string
+  releaseDir: string
+  releaseId: string
+  releaseDigest: string
+  bundleSha256: string
+  allowLocalDevelopment?: boolean
+}, runtimeAsset: string): Promise<void> {
   const releasesRoot = resolve(input.deployRoot, 'releases')
   const releaseDir = resolve(input.releaseDir)
   if (releaseDir !== resolve(releasesRoot, input.releaseId) || basename(releaseDir) !== input.releaseId) throw new Error('release directory does not match releaseId under releases root')
@@ -305,13 +352,13 @@ export async function verifyImmutableRelease(input: {
   if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) throw new Error('release manifest assets are required')
   const assets = manifest.assets.map((asset) => safeFileName(asset, 'manifest asset'))
   if (new Set(assets).size !== assets.length) throw new Error('release manifest contains duplicate assets')
-  const layout = releaseLayout(assets, true)
+  const layout = releaseLayout(manifest, assets, true, input.allowLocalDevelopment === true)
   const expected = new Set(layout.files)
   const entries = await readdir(releaseDir, { withFileTypes: true })
   if (entries.some((entry) => !entry.isFile())) throw new Error('immutable release contains a non-file entry')
   const actual = new Set(entries.map((entry) => entry.name))
   const exact = expected.size === actual.size && [...expected].every((name) => actual.has(name))
-  const expandedExpected = assets.includes(dedicatedSupportArchive) ? new Set([...expected, ...dedicatedSupportAssets]) : undefined
+  const expandedExpected = manifest.localDevelopment !== true && assets.includes(dedicatedSupportArchive) ? new Set([...expected, ...dedicatedSupportAssets]) : undefined
   const exactExpanded = expandedExpected !== undefined && expandedExpected.size === actual.size && [...expandedExpected].every((name) => actual.has(name))
   if (!exact && !exactExpanded) throw new Error('immutable release file set does not match manifest')
   const sums = parseSums(String(sumsBytes))
@@ -325,7 +372,7 @@ export async function verifyImmutableRelease(input: {
     if (checksummed.has(name) && sha256(await readFile(path)) !== sums.get(name)) throw new Error(`release checksum mismatch for ${name}`)
   }
   if (exactExpanded) await verifyExpandedDedicatedSupport(releaseDir)
-  if (sums.get('kala-runtime.cjs') !== input.bundleSha256) throw new Error('bundle digest does not match release checksum manifest')
+  if (sums.get(runtimeAsset) !== input.bundleSha256) throw new Error('bundle digest does not match release checksum manifest')
 }
 
 async function verifyExpandedDedicatedSupport(releaseDir: string): Promise<void> {
@@ -378,13 +425,14 @@ export async function promoteStagedRelease(input: {
   releaseId: string
   releaseDigest: string
   bundleSha256: string
+  allowLocalDevelopment?: boolean
 }): Promise<string> {
   const submissionsRoot = resolve(input.deployRoot, 'submissions')
   const staged = resolve(input.stagedReleaseDir)
   if (staged !== resolve(submissionsRoot, input.operationId)) throw new Error('staged release directory does not match operationId under submissions root')
   const target = resolve(input.deployRoot, 'releases', input.releaseId)
   try {
-    await verifyImmutableRelease({ deployRoot: input.deployRoot, releaseDir: target, releaseId: input.releaseId, releaseDigest: input.releaseDigest, bundleSha256: input.bundleSha256 })
+    await verifyImmutableRelease({ deployRoot: input.deployRoot, releaseDir: target, releaseId: input.releaseId, releaseDigest: input.releaseDigest, bundleSha256: input.bundleSha256, allowLocalDevelopment: input.allowLocalDevelopment })
     return target
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -395,14 +443,14 @@ export async function promoteStagedRelease(input: {
   return await publishStagedRelease(input, staged, target)
 }
 
-async function publishStagedRelease(input: { deployRoot: string; releaseId: string; releaseDigest: string; bundleSha256: string }, staged: string, target: string): Promise<string> {
-  const files = await verifyReleaseContents(staged, input.releaseDigest, input.bundleSha256, false)
+async function publishStagedRelease(input: { deployRoot: string; releaseId: string; releaseDigest: string; bundleSha256: string; allowLocalDevelopment?: boolean }, staged: string, target: string): Promise<string> {
+  const files = await verifyReleaseContents(staged, input.releaseDigest, input.bundleSha256, false, input.allowLocalDevelopment === true)
   await mkdir(resolve(input.deployRoot, 'releases'), { recursive: true, mode: 0o711 })
   const incoming = resolve(input.deployRoot, 'releases', `.incoming-${input.releaseId}-${randomBytes(12).toString('hex')}`)
   await mkdir(incoming, { mode: 0o700 })
   try {
     for (const name of files) await copyFile(join(staged, name), join(incoming, name))
-    await verifyReleaseContents(incoming, input.releaseDigest, input.bundleSha256, false)
+    await verifyReleaseContents(incoming, input.releaseDigest, input.bundleSha256, false, input.allowLocalDevelopment === true)
     for (const name of files) {
       const path = join(incoming, name)
       const file = await open(path, 'r'); try { await file.sync() } finally { await file.close() }
@@ -410,20 +458,20 @@ async function publishStagedRelease(input: { deployRoot: string; releaseId: stri
       await chmod(path, 0o444 | (stat.mode & 0o111))
     }
     await chmod(incoming, 0o555)
-    await verifyReleaseContents(incoming, input.releaseDigest, input.bundleSha256, true)
+    await verifyReleaseContents(incoming, input.releaseDigest, input.bundleSha256, true, input.allowLocalDevelopment === true)
     const directory = await open(incoming, 'r'); try { await directory.sync() } finally { await directory.close() }
     try { await rename(incoming, target) } catch (error) {
-      await verifyImmutableRelease({ deployRoot: input.deployRoot, releaseDir: target, releaseId: input.releaseId, releaseDigest: input.releaseDigest, bundleSha256: input.bundleSha256 }).catch(() => { throw error })
+      await verifyImmutableRelease({ deployRoot: input.deployRoot, releaseDir: target, releaseId: input.releaseId, releaseDigest: input.releaseDigest, bundleSha256: input.bundleSha256, allowLocalDevelopment: input.allowLocalDevelopment }).catch(() => { throw error })
     }
     const parent = await open(resolve(input.deployRoot, 'releases'), 'r'); try { await parent.sync() } finally { await parent.close() }
-    await verifyImmutableRelease({ deployRoot: input.deployRoot, releaseDir: target, releaseId: input.releaseId, releaseDigest: input.releaseDigest, bundleSha256: input.bundleSha256 })
+    await verifyImmutableRelease({ deployRoot: input.deployRoot, releaseDir: target, releaseId: input.releaseId, releaseDigest: input.releaseDigest, bundleSha256: input.bundleSha256, allowLocalDevelopment: input.allowLocalDevelopment })
     return target
   } finally {
     await rm(incoming, { recursive: true, force: true })
   }
 }
 
-async function verifyReleaseContents(directory: string, releaseDigest: string, bundleSha256: string, immutable: boolean): Promise<string[]> {
+async function verifyReleaseContents(directory: string, releaseDigest: string, bundleSha256: string, immutable: boolean, allowLocalDevelopment: boolean): Promise<string[]> {
   const dirStat = await lstat(directory)
   if (!dirStat.isDirectory() || dirStat.isSymbolicLink() || immutable && (dirStat.mode & 0o222) !== 0) throw new Error('release directory is invalid')
   const manifestBytes = await readFile(join(directory, 'manifest.json'))
@@ -433,7 +481,7 @@ async function verifyReleaseContents(directory: string, releaseDigest: string, b
   if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) throw new Error('release manifest assets are required')
   const assets = manifest.assets.map((asset) => safeFileName(asset, 'manifest asset'))
   if (new Set(assets).size !== assets.length) throw new Error('invalid release manifest asset set')
-  const layout = releaseLayout(assets, false)
+  const layout = releaseLayout(manifest, assets, false, allowLocalDevelopment)
   const expected = layout.files
   const entries = await readdir(directory, { withFileTypes: true })
   if (entries.some((entry) => !entry.isFile()) || JSON.stringify(entries.map((entry) => entry.name).sort()) !== JSON.stringify(expected)) throw new Error('release file set does not match manifest')
@@ -444,9 +492,31 @@ async function verifyReleaseContents(directory: string, releaseDigest: string, b
   return expected
 }
 
-function releaseLayout(assets: string[], allowLegacyPredecessor: boolean): { files: string[]; checksummed: string[] } {
+function releaseLayout(manifest: Record<string, unknown>, assets: string[], allowLegacyPredecessor: boolean, allowLocalDevelopment: boolean): { files: string[]; checksummed: string[] } {
   const reserved = new Set(['manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS', releaseChecksumSignature])
   if (assets.some((name) => reserved.has(name))) throw new Error('invalid release manifest asset set')
+  if (manifest.localDevelopment === true) {
+    if (!allowLocalDevelopment) throw new Error('local development release is not enabled on this machine')
+    const sortedAssets = JSON.stringify([...assets].sort())
+    if (![localDevelopmentAssets, legacyLocalDevelopmentAssets].some((expected) => sortedAssets === JSON.stringify([...expected].sort()))) {
+      throw new Error('local development release must contain the exact current or legacy CJS asset set')
+    }
+    return { files: [...assets, 'manifest.json', 'SHA256SUMS'].sort(), checksummed: [...assets, 'manifest.json'].sort() }
+  }
+  if (manifest.localDevelopmentBridge !== undefined) {
+    if (!allowLocalDevelopment) throw new Error('local development bridge is not enabled on this machine')
+    const bridge = record(manifest.localDevelopmentBridge, 'local development bridge')
+    if (bridge.schemaVersion !== 1 || typeof bridge.legacyReleaseDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(bridge.legacyReleaseDigest)
+      || typeof bridge.localReleaseDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(bridge.localReleaseDigest)
+      || assets.includes(releaseMetadataArchive) || !assets.includes('kala-runtime.cjs')
+      || !assets.includes('agent-runlab-runtime.cjs') || !assets.includes('agent-runlab-dedicated-deploy-supervisor.cjs')
+      || !assets.includes('kala-dedicated-deploy-supervisor.cjs') || !assets.includes(dedicatedSupportArchive)
+      || record(manifest.fallbackAssets, 'bridge fallbackAssets')['agent-runlab-runtime'] !== 'agent-runlab-runtime.cjs') throw new Error('invalid local development bridge')
+    return {
+      files: [...assets, 'manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort(),
+      checksummed: [...assets, 'manifest.json', 'RELEASE_NOTES.md'].sort(),
+    }
+  }
   if (assets.includes(releaseMetadataArchive)) {
     const files = [...assets, 'manifest.json', 'SHA256SUMS', releaseChecksumSignature].sort()
     if (files.length !== modernReleaseFileCount) throw new Error(`modern release must contain exactly ${modernReleaseFileCount} files`)

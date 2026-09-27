@@ -57,6 +57,16 @@ test('blocks unregistered images, binary files, and private denylist values', ()
   assert(scan('docs/example.md', credential).some(({ rule }) => rule === 'privacy.api-token'))
 })
 
+test('word-scoped private usernames are case insensitive without matching ordinary substrings', () => {
+  const first = ['er', 'ic'].join('')
+  const second = ['lucky', first].join('')
+  const denylist = [`word:${first}`, `word:${second}`]
+  assert.equal(scan('docs/example.md', 'generic numeric', denylist).length, 0)
+  assert(scan('docs/example.md', `account=${first.toUpperCase()}`, denylist).some(({ rule }) => rule === 'privacy.private-denylist'))
+  assert(scan('docs/example.md', `account=${second.toUpperCase()}`, denylist).some(({ rule }) => rule === 'privacy.private-denylist'))
+  assert(scanEntry({ path: `docs/${second}/notes.md`, content: '', policy, denylist, source: 'path' }).some(({ rule }) => rule === 'privacy.private-denylist'))
+})
+
 test('historical approved assets reject unreviewed bytes and findings never disclose sensitive paths', () => {
   const asset = 'packages/dashboard/public/favicon.svg'
   assert(scanEntry({ path: asset, content: Buffer.from('altered'), policy, source: 'history-file' })

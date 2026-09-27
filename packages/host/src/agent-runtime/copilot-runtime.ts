@@ -1,4 +1,6 @@
-import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 import type {
   AgentState,
@@ -54,6 +56,7 @@ export type CopilotAgentRuntimeOptions = {
   enabled: boolean
   sessionsDir: string
   gitHubToken?: string
+  runtimeEntryPath?: string
 }
 
 export class CopilotAgentRuntime implements AgentRuntime {
@@ -62,11 +65,17 @@ export class CopilotAgentRuntime implements AgentRuntime {
   private readonly sessions = new Map<string, CopilotSession>()
   private readonly approvals = new Map<string, PendingApproval>()
   private readonly cancelledCalls = new Set<string>()
-  private readonly cancelledSessions = new Set<string>()
+  private readonly turnGenerations = new Map<string, number>()
+  private readonly cancelledTurnGenerations = new Set<string>()
+  private readonly requestGenerations = new Map<string, number>()
+  private readonly sdkTurnGenerations = new Map<string, number>()
+  private readonly eventGenerations = new Map<string, number>()
+  private readonly toolCallGenerations = new Map<string, number>()
   private readonly compactions = new Map<string, { attemptId: string; tokensBefore: number }>()
   private readonly tails = new Map<string, Promise<void>>()
   private readonly accountedUsageCallIds = new Set<string>()
   private readonly turnCaptures = new Map<string, TurnCapture>()
+  private readonly contextEventTimes = new Map<string, number>()
   private status: AgentRuntimeDescriptor['status']
   private reason: string | undefined
   private models: readonly ModelInfo[] = []
@@ -83,12 +92,17 @@ export class CopilotAgentRuntime implements AgentRuntime {
     if (!this.options.enabled) return
     try {
       const configuredCliPath = process.env.COPILOT_CLI_PATH?.trim()
+      const packagedCliPath = configuredCliPath
+        ? undefined
+        : materializePackagedCopilotRuntime(
+            this.options.runtimeEntryPath ?? process.argv[1] ?? process.execPath,
+            join(this.options.sessionsDir, '..', 'copilot-runtime'),
+          )
       this.client = new CopilotClient({
         mode: 'empty',
         connection: RuntimeConnection.forStdio({
           args: ['--no-remote-export'],
-          // With no override, the official SDK discovers its own platform package.
-          ...(configuredCliPath ? { path: configuredCliPath } : {}),
+          ...(configuredCliPath || packagedCliPath ? { path: configuredCliPath ?? packagedCliPath } : {}),
         }),
         baseDirectory: join(this.options.sessionsDir, '..', 'copilot-runtime'),
         ...(this.options.gitHubToken ? { gitHubToken: this.options.gitHubToken, useLoggedInUser: false } : {}),
@@ -124,7 +138,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
   async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {
     const session = await this.ensureSession(record, input.model)
     if (input.model) await session.setModel(input.model)
-    this.cancelledSessions.delete(record.sessionId)
+    const generation = (this.turnGenerations.get(record.sessionId) ?? 0) + 1
+    const requestId = randomUUID()
+    this.turnGenerations.set(record.sessionId, generation)
+    this.requestGenerations.set(approvalKey(record.sessionId, requestId), generation)
     await this.project(record, 'copilot.user_message', {
       text: input.text,
       ...(input.operationId ? { operationId: input.operationId } : {}),
@@ -136,12 +153,15 @@ export class CopilotAgentRuntime implements AgentRuntime {
       pendingCalls: [],
       error: undefined,
     }))
-    void this.runTurn(record, session, input)
+    void this.runTurn(record, session, input, generation, requestId)
   }
 
   async cancel(record: SessionRecord): Promise<void> {
     const session = this.sessions.get(record.sessionId)
-    this.cancelledSessions.add(record.sessionId)
+    const generation = this.turnGenerations.get(record.sessionId)
+    if (generation !== undefined) {
+      this.cancelledTurnGenerations.add(turnGenerationKey(record.sessionId, generation))
+    }
     if (session) await session.abort()
     for (const call of record.state.pendingCalls) {
       this.cancelledCalls.add(approvalKey(record.sessionId, call.callId))
@@ -197,11 +217,12 @@ export class CopilotAgentRuntime implements AgentRuntime {
     const result = await session.rpc.history.compact({ trigger: 'manual' })
     if (!result.success) throw new Error('Copilot compaction did not complete successfully')
     if (result.contextWindow) {
-      this.context.broadcast.onState(
+      const snapshot = this.freshContextSnapshot(
         record,
-        record.state,
         copilotContextSnapshot(record, result.contextWindow),
+        new Date().toISOString(),
       )
+      if (snapshot) this.context.broadcast.onState(record, record.state, snapshot)
     }
   }
 
@@ -226,7 +247,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   async delete(record: SessionRecord): Promise<void> {
     const session = this.sessions.get(record.sessionId)
-    this.cancelledSessions.add(record.sessionId)
+    const generation = this.turnGenerations.get(record.sessionId)
+    if (generation !== undefined) {
+      this.cancelledTurnGenerations.add(turnGenerationKey(record.sessionId, generation))
+    }
     if (session) {
       await session.disconnect()
       this.sessions.delete(record.sessionId)
@@ -236,7 +260,12 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   async close(): Promise<void> {
     this.sessions.clear()
-    this.cancelledSessions.clear()
+    this.turnGenerations.clear()
+    this.cancelledTurnGenerations.clear()
+    this.requestGenerations.clear()
+    this.sdkTurnGenerations.clear()
+    this.eventGenerations.clear()
+    this.toolCallGenerations.clear()
     if (this.client) await this.client.stop()
     this.client = undefined
   }
@@ -286,6 +315,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
     return {
       clientName: 'agent-runlab',
       ...(model ? { model } : {}),
+      // The SDK defaults this to false. Without it, only the terminal
+      // assistant.message event is emitted and the Dashboard stays on
+      // "Thinking" until the complete response arrives at once.
+      streaming: true,
       // The Copilot CLI runs with the Host, while record.state.cwd belongs to
       // the remote Workspace Executor. Never expose Host-only paths as message
       // attachments; persisted attachments are sent to the SDK as blobs below.
@@ -342,6 +375,12 @@ export class CopilotAgentRuntime implements AgentRuntime {
       overridesBuiltInTool: true,
       handler: async (args, invocation) => {
         const input = asRecord(args)
+        const callKey = approvalKey(record.sessionId, invocation.toolCallId)
+        const generation = this.toolCallGenerations.get(callKey)
+          ?? this.turnGenerations.get(record.sessionId)
+        if (generation === undefined || !this.isCurrentTurn(record.sessionId, generation)) {
+          return toolResult(false, 'cancelled', 'failure')
+        }
         const pending: PendingToolCall = {
           callId: invocation.toolCallId,
           name: schema.name,
@@ -366,6 +405,9 @@ export class CopilotAgentRuntime implements AgentRuntime {
             throw error
           }
           const decision = await decisionPromise
+          if (!this.isCurrentTurn(record.sessionId, generation)) {
+            return toolResult(false, 'cancelled', 'failure')
+          }
           if (!decision.approved) {
             await this.projectToolResult(record, pending, false, decision.reason ?? 'rejected by user')
             return toolResult(false, decision.reason ?? 'rejected by user', 'rejected')
@@ -388,8 +430,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
           input: pending.input,
           ...(record.state.cwd ? { cwd: record.state.cwd } : {}),
         })
-        const callKey = approvalKey(record.sessionId, pending.callId)
-        if (this.cancelledCalls.delete(callKey)) {
+        if (this.cancelledCalls.delete(callKey) || !this.isCurrentTurn(record.sessionId, generation)) {
           return toolResult(false, 'cancelled', 'failure')
         }
         await this.projectToolResult(record, pending, result.ok, result.content)
@@ -399,6 +440,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
   }
 
   private handleEvent(record: SessionRecord, event: SessionEvent): void {
+    const generation = this.trackEventGeneration(record.sessionId, event)
+    if (isTurnScopedEvent(event) && generation !== undefined && !this.isCurrentTurn(record.sessionId, generation)) {
+      return
+    }
     if (event.type === 'assistant.usage') {
       if (event.data.apiCallId) this.accountedUsageCallIds.add(event.data.apiCallId)
       void this.project(record, 'copilot.assistant_usage', nativeEventPayload(event), (state) => ({
@@ -409,11 +454,22 @@ export class CopilotAgentRuntime implements AgentRuntime {
           cacheCreationTokens: state.usage.cacheCreationTokens + (event.data.cacheWriteTokens ?? 0),
           cacheReadTokens: state.usage.cacheReadTokens + (event.data.cacheReadTokens ?? 0),
         },
-      }))
+      }), event.data.inputTokens === undefined
+        ? undefined
+        : (latest) => this.freshContextSnapshot(
+            latest,
+            copilotAssistantContextSnapshot(latest, event.data.inputTokens!, event.data.model, this.models),
+            event.timestamp,
+          ))
       return
     }
     if (event.type === 'session.usage_info') {
-      this.context.broadcast.onState(record, record.state, copilotContextSnapshot(record, event.data))
+      const snapshot = this.freshContextSnapshot(
+        record,
+        copilotContextSnapshot(record, event.data),
+        event.timestamp,
+      )
+      if (snapshot) this.context.broadcast.onState(record, record.state, snapshot)
       return
     }
     if (event.type === 'session.compaction_start') {
@@ -421,17 +477,14 @@ export class CopilotAgentRuntime implements AgentRuntime {
       const tokensBefore = event.data.currentTokens ?? event.data.conversationTokens ?? 0
       this.compactions.set(record.sessionId, { attemptId, tokensBefore })
       if (event.data.tokenLimit && event.data.currentTokens !== undefined) {
-        this.context.broadcast.onState(
-          record,
-          record.state,
-          copilotContextSnapshot(record, {
-            currentTokens: event.data.currentTokens,
-            tokenLimit: event.data.tokenLimit,
-            ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
-            ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
-            ...(event.data.toolDefinitionsTokens !== undefined ? { toolDefinitionsTokens: event.data.toolDefinitionsTokens } : {}),
-          }),
-        )
+        const snapshot = this.freshContextSnapshot(record, copilotContextSnapshot(record, {
+          currentTokens: event.data.currentTokens,
+          tokenLimit: event.data.tokenLimit,
+          ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
+          ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
+          ...(event.data.toolDefinitionsTokens !== undefined ? { toolDefinitionsTokens: event.data.toolDefinitionsTokens } : {}),
+        }), event.timestamp)
+        if (snapshot) this.context.broadcast.onState(record, record.state, snapshot)
       }
       this.context.broadcast.onCompactStatus?.({
         sessionId: record.sessionId,
@@ -459,13 +512,14 @@ export class CopilotAgentRuntime implements AgentRuntime {
         })
         const currentTokens = completeCompactionContextTokens(event.data)
         if (event.data.tokenLimit && currentTokens !== undefined) {
-          this.context.broadcast.onState(record, record.state, copilotContextSnapshot(record, {
+          const snapshot = this.freshContextSnapshot(record, copilotContextSnapshot(record, {
             currentTokens,
             tokenLimit: event.data.tokenLimit,
             ...(event.data.systemTokens !== undefined ? { systemTokens: event.data.systemTokens } : {}),
             ...(event.data.conversationTokens !== undefined ? { conversationTokens: event.data.conversationTokens } : {}),
             ...(event.data.toolDefinitionsTokens !== undefined ? { toolDefinitionsTokens: event.data.toolDefinitionsTokens } : {}),
-          }))
+          }), event.timestamp)
+          if (snapshot) this.context.broadcast.onState(record, record.state, snapshot)
         }
       } else {
         this.context.broadcast.onCompactStatus?.({
@@ -536,7 +590,56 @@ export class CopilotAgentRuntime implements AgentRuntime {
     }
   }
 
-  private async runTurn(record: SessionRecord, session: CopilotSession, input: AgentRuntimeSendInput): Promise<void> {
+  private trackEventGeneration(sessionId: string, event: SessionEvent): number | undefined {
+    const data = event.data && typeof event.data === 'object'
+      ? event.data as Record<string, unknown>
+      : {}
+    const requestId = typeof data.clientRequestId === 'string' ? data.clientRequestId : undefined
+    const turnId = typeof data.turnId === 'string' ? data.turnId : undefined
+    const interactionId = typeof data.interactionId === 'string' ? data.interactionId : undefined
+    let generation = requestId
+      ? this.requestGenerations.get(approvalKey(sessionId, requestId))
+      : undefined
+    if (generation === undefined && event.parentId) {
+      generation = this.eventGenerations.get(approvalKey(sessionId, event.parentId))
+    }
+    if (generation === undefined && turnId && interactionId) {
+      generation = this.sdkTurnGenerations.get(sdkTurnGenerationKey(sessionId, interactionId, turnId))
+    }
+    if (generation === undefined) generation = this.turnGenerations.get(sessionId)
+
+    if (generation !== undefined) {
+      this.eventGenerations.set(approvalKey(sessionId, event.id), generation)
+      if (turnId && interactionId) {
+        this.sdkTurnGenerations.set(sdkTurnGenerationKey(sessionId, interactionId, turnId), generation)
+      }
+      const toolRequests = Array.isArray(data.toolRequests) ? data.toolRequests : []
+      for (const request of toolRequests) {
+        if (!request || typeof request !== 'object') continue
+        const toolCallId = (request as Record<string, unknown>).toolCallId
+        if (typeof toolCallId === 'string') {
+          this.toolCallGenerations.set(approvalKey(sessionId, toolCallId), generation)
+        }
+      }
+      if (event.type === 'tool.execution_start' && typeof data.toolCallId === 'string') {
+        this.toolCallGenerations.set(approvalKey(sessionId, data.toolCallId), generation)
+      }
+    }
+    return generation
+  }
+
+  private isCurrentTurn(sessionId: string, generation: number): boolean {
+    return this.turnGenerations.get(sessionId) === generation
+      && !this.cancelledTurnGenerations.has(turnGenerationKey(sessionId, generation))
+  }
+
+  private async runTurn(
+    record: SessionRecord,
+    session: CopilotSession,
+    input: AgentRuntimeSendInput,
+    generation: number,
+    requestId: string,
+  ): Promise<void> {
     const capture: TurnCapture = {
       assistantEventIds: new Set(), reasoningTexts: new Set(), eventIds: new Set(), projections: [],
     }
@@ -544,9 +647,9 @@ export class CopilotAgentRuntime implements AgentRuntime {
     try {
       const response = await sendAndWaitWithActivityTimeout(
         session,
-        await copilotMessageOptions(this.context, record, input),
+        await copilotMessageOptions(this.context, record, input, requestId),
       )
-      if (this.cancelledSessions.delete(record.sessionId)) return
+      if (!this.isCurrentTurn(record.sessionId, generation)) return
       await Promise.all(capture.projections)
       if (capture.projectionError) throw capture.projectionError
       const pendingProjection = this.tails.get(record.sessionId)
@@ -582,7 +685,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
         error: undefined,
       }))
     } catch (error) {
-      if (this.cancelledSessions.delete(record.sessionId)) return
+      if (!this.isCurrentTurn(record.sessionId, generation)) return
       const message = error instanceof Error ? error.message : String(error)
       if (message.includes('waiting for session.idle') || message.includes('without Copilot session activity')) {
         await session.abort().catch(() => undefined)
@@ -749,6 +852,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
     action: string,
     payload: Record<string, unknown>,
     update: (state: AgentState) => Omit<AgentState, 'cursor'>,
+    contextSnapshot?: (record: SessionRecord) => ContextUsageSnapshot | undefined,
   ): Promise<void> {
     const previous = this.tails.get(record.sessionId) ?? Promise.resolve()
     const current = previous.catch(() => undefined).then(async () => {
@@ -756,7 +860,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
       const projected = { ...update(latest.state), cursor: latest.state.cursor + 1 } as AgentState
       const next = await this.externalizeInlineImages(record.sessionId, projected)
       await this.context.store.recordRuntimeProjection(record.sessionId, next, action, payload)
-      this.context.broadcast.onState(latest, next)
+      this.context.broadcast.onState(latest, next, contextSnapshot?.(latest))
     })
     this.tails.set(record.sessionId, current)
     try {
@@ -764,6 +868,21 @@ export class CopilotAgentRuntime implements AgentRuntime {
     } finally {
       if (this.tails.get(record.sessionId) === current) this.tails.delete(record.sessionId)
     }
+  }
+
+  private freshContextSnapshot(
+    record: SessionRecord,
+    snapshot: ContextUsageSnapshot,
+    eventTimestamp: string,
+  ): ContextUsageSnapshot | undefined {
+    const eventTime = Date.parse(eventTimestamp)
+    const updatedAt = Number.isFinite(eventTime) ? eventTime : Date.now()
+    const latestTime = this.contextEventTimes.get(record.sessionId)
+      ?? record.runtimeContextSnapshot?.updatedAt
+      ?? 0
+    if (updatedAt < latestTime) return undefined
+    this.contextEventTimes.set(record.sessionId, updatedAt)
+    return { ...snapshot, updatedAt }
   }
 }
 
@@ -815,6 +934,7 @@ async function copilotMessageOptions(
   context: AgentRuntimeContext,
   record: SessionRecord,
   input: AgentRuntimeSendInput,
+  requestId: string,
 ): Promise<MessageOptions> {
   const attachments: NonNullable<MessageOptions['attachments']> = []
   for (const block of input.content ?? []) {
@@ -853,6 +973,7 @@ async function copilotMessageOptions(
   }
   return {
     prompt: input.text,
+    requestHeaders: { 'x-request-id': requestId },
     ...(attachments.length > 0 ? { attachments } : {}),
   }
 }
@@ -910,6 +1031,43 @@ function copilotContextSnapshot(
   }
 }
 
+function copilotAssistantContextSnapshot(
+  record: SessionRecord,
+  inputTokens: number,
+  reportedModel: string | undefined,
+  models: readonly ModelInfo[],
+): ContextUsageSnapshot {
+  const current = record.runtimeContextSnapshot
+  const model = reportedModel ?? record.preferences?.selectedModel ?? current?.model.ref ?? 'unknown'
+  const registeredLimit = models.find((candidate) => candidate.ref === model)?.contextWindow
+  const contextWindow = current?.contextWindow
+    ?? (registeredLimit
+      ? { tokens: registeredLimit, source: 'model_registry' as const }
+      : { tokens: null, source: 'unknown' as const })
+  const total = Math.max(0, inputTokens)
+  const system = Math.min(total, current?.breakdown.system ?? 0)
+  const tools = Math.min(total - system, current?.breakdown.tools ?? 0)
+  return {
+    model: { ref: model, provider: 'github-copilot', id: model },
+    contextWindow,
+    usage: { inputTokens: total, totalTokens: total },
+    breakdown: {
+      system,
+      transcript: total - system - tools,
+      tools,
+      memory: 0,
+      attachments: 0,
+      pendingUserInput: 0,
+    },
+    estimator: {
+      total: { kind: 'provider_reported', confidence: 'exact' },
+      breakdown: { kind: 'heuristic', confidence: 'estimated' },
+      version: 'copilot-sdk-assistant-usage-v1',
+    },
+    updatedAt: Date.now(),
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -923,6 +1081,45 @@ function requiresApproval(mode: ApprovalMode, toolRequiresApproval: boolean): bo
   return toolRequiresApproval
 }
 
+function materializePackagedCopilotRuntime(runtimeEntryPath: string, cacheRoot: string): string | undefined {
+  const target = copilotRuntimeTarget()
+  if (!target) return undefined
+  const releaseDir = dirname(runtimeEntryPath)
+  const sourceWrapper = join(releaseDir, `kala-copilot-runtime-${target}`)
+  const sourceLibrary = join(releaseDir, `kala-copilot-runtime-node-${target}.node`)
+  if (!existsSync(sourceWrapper) || !existsSync(sourceLibrary)) return undefined
+
+  const installDir = join(cacheRoot, `sdk-1.0.14-${target}`)
+  const installedWrapper = join(installDir, process.platform === 'win32' ? 'copilot-runtime.exe' : 'copilot-runtime')
+  const installedLibrary = join(installDir, 'runtime.node')
+  if (sameSize(sourceWrapper, installedWrapper) && sameSize(sourceLibrary, installedLibrary)) return installedWrapper
+
+  mkdirSync(cacheRoot, { recursive: true })
+  const stagingDir = join(cacheRoot, `.sdk-runtime-${randomUUID()}`)
+  mkdirSync(stagingDir, { mode: 0o700 })
+  try {
+    const stagedWrapper = join(stagingDir, process.platform === 'win32' ? 'copilot-runtime.exe' : 'copilot-runtime')
+    copyFileSync(sourceWrapper, stagedWrapper)
+    copyFileSync(sourceLibrary, join(stagingDir, 'runtime.node'))
+    chmodSync(stagedWrapper, 0o700)
+    rmSync(installDir, { recursive: true, force: true })
+    renameSync(stagingDir, installDir)
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true })
+  }
+  return installedWrapper
+}
+
+function copilotRuntimeTarget(): string | undefined {
+  if ((process.arch !== 'x64' && process.arch !== 'arm64')
+    || (process.platform !== 'linux' && process.platform !== 'darwin' && process.platform !== 'win32')) return undefined
+  return `${process.platform}-${process.arch}`
+}
+
+function sameSize(source: string, target: string): boolean {
+  return existsSync(target) && statSync(source).size === statSync(target).size
+}
+
 function copilotStartupFailureReason(error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error)
   if (/could not (?:find|resolve).*@github\/copilot|copilot cli not found|path to copilot cli is required|\bENOENT\b/i.test(detail)) {
@@ -933,6 +1130,21 @@ function copilotStartupFailureReason(error: unknown): string {
 
 function approvalKey(sessionId: string, callId: string): string {
   return `${sessionId}:${callId}`
+}
+
+function turnGenerationKey(sessionId: string, generation: number): string {
+  return `${sessionId}:${generation}`
+}
+
+function sdkTurnGenerationKey(sessionId: string, interactionId: string, turnId: string): string {
+  return `${sessionId}:${interactionId}:${turnId}`
+}
+
+function isTurnScopedEvent(event: SessionEvent): boolean {
+  return event.type.startsWith('assistant.')
+    || event.type.startsWith('tool.')
+    || event.type === 'session.error'
+    || event.type === 'session.usage_info'
 }
 
 function toolResult(ok: boolean, content: string, resultType: ToolResultObject['resultType']): ToolResultObject {

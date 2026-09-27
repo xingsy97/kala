@@ -24,11 +24,11 @@ const supportArchive = 'kala-dedicated-support.tar.gz'
 const supportManifest = 'dedicated-support-manifest.json'
 const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const units = [
-  { asset: 'kala-dedicated-ingress.service', service: 'agent-runlab-dedicated-ingress.service' },
-  { asset: 'kala-dedicated-unit@.service', service: 'agent-runlab-dedicated-unit@.service' },
-  { asset: 'kala-dedicated-deploy-supervisor.service', service: 'agent-runlab-dedicated-deploy-supervisor.service' },
-  { asset: 'kala-dedicated-control-updater.service', service: 'agent-runlab-dedicated-control-updater.service' },
-  { asset: 'kala-dedicated-migration-finalizer.service', service: 'agent-runlab-dedicated-migration-finalizer.service' },
+  { asset: 'kala-dedicated-ingress.service', legacyAsset: 'agent-runlab-dedicated-ingress.service', service: 'agent-runlab-dedicated-ingress.service' },
+  { asset: 'kala-dedicated-unit@.service', legacyAsset: 'agent-runlab-dedicated-unit@.service', service: 'agent-runlab-dedicated-unit@.service' },
+  { asset: 'kala-dedicated-deploy-supervisor.service', legacyAsset: 'agent-runlab-dedicated-deploy-supervisor.service', service: 'agent-runlab-dedicated-deploy-supervisor.service' },
+  { asset: 'kala-dedicated-control-updater.service', legacyAsset: 'agent-runlab-dedicated-control-updater.service', service: 'agent-runlab-dedicated-control-updater.service' },
+  { asset: 'kala-dedicated-migration-finalizer.service', legacyAsset: 'agent-runlab-dedicated-migration-finalizer.service', service: 'agent-runlab-dedicated-migration-finalizer.service' },
 ]
 
 const transitions = {
@@ -128,7 +128,10 @@ async function rollback(receipt, cause) {
 
 async function installControlRelease(release) {
   await ensureIndependentDashboard(release)
-  for (const unit of units) await copyAtomic(join(release, unit.asset), join(unitDir, unit.service), 0o644)
+  for (const unit of units) {
+    const source = await pathExists(join(release, unit.asset)) ? unit.asset : unit.legacyAsset
+    await copyAtomic(join(release, source), join(unitDir, unit.service), 0o644)
+  }
   await copyAtomic(join(release, 'deployment.json'), deploymentConfig, 0o644)
   await activate(controlLink, release)
   await systemctl('daemon-reload')
@@ -205,7 +208,10 @@ async function inspectRelease(path, releaseId, expectedDigest) {
   if (!Array.isArray(manifest.assets)) throw new Error('control release assets are invalid')
   const bundled = manifest.assets.includes(supportArchive)
   const modern = bundled && manifest.assets.includes('kala-dashboard.tar.gz')
-  if (bundled ? manifest.assets.some((name) => supportAssets.includes(name)) : (!units.every(({ asset }) => manifest.assets.includes(asset)) || !manifest.assets.includes('deployment.json') || !manifest.assets.includes('update-dedicated-control-plane.mjs'))) throw new Error('control release support assets are incomplete')
+  const modernFlat = units.every(({ asset }) => manifest.assets.includes(asset))
+  const legacyFlat = units.every(({ legacyAsset }) => manifest.assets.includes(legacyAsset))
+    && manifest.fallbackAssets?.['agent-runlab-runtime'] === 'agent-runlab-runtime.cjs'
+  if (bundled ? manifest.assets.some((name) => supportAssets.includes(name) && !legacyFlat) : (!modernFlat && !legacyFlat || !manifest.assets.includes('deployment.json') || !manifest.assets.includes('update-dedicated-control-plane.mjs'))) throw new Error('control release support assets are incomplete')
   if (manifest.assets.some((name) => typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/u.test(name) || ['manifest.json', 'SHA256SUMS', 'RELEASE_NOTES.md'].includes(name))) throw new Error('invalid control release manifest asset')
   const sumLines = String(sumsBytes).trim().split('\n')
   const sums = new Map(sumLines.map((line) => { const match = /^([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9._@-]*)$/u.exec(line); if (!match) throw new Error('invalid control release checksum entry'); return [match[2], match[1]] }))
@@ -226,9 +232,9 @@ async function inspectRelease(path, releaseId, expectedDigest) {
   }
   const supportEntries = bundled
     ? verifySupportArchive(await readFile(join(path, supportArchive)))
-    : new Map(await Promise.all(supportAssets.map(async (name) => [name, await readFile(join(path, name))])))
+    : modernFlat ? new Map(await Promise.all(supportAssets.map(async (name) => [name, await readFile(join(path, name))]))) : new Map()
   if (expandedExact) await verifyExpandedSupport(path, supportEntries)
-  return { path, outerFiles, snapshotFiles: [...new Set([...outerFiles, ...supportAssets])].sort(), supportEntries, bundled }
+  return { path, outerFiles, snapshotFiles: [...new Set([...outerFiles, ...supportEntries.keys()])].sort(), supportEntries, bundled }
 }
 
 function verifySupportArchive(bytes) {
@@ -275,7 +281,11 @@ async function publishControlSnapshot(parent, target, releaseId, inspected) {
   await mkdir(snapshot, { recursive: true, mode: 0o700 })
   try {
     for (const name of inspected.outerFiles) await copyFile(join(inspected.path, name), join(snapshot, name))
-    if (inspected.bundled) for (const [name, bytes] of inspected.supportEntries) await writeFile(join(snapshot, name), bytes, { flag: 'wx', mode: 0o444 })
+    if (inspected.bundled) for (const [name, bytes] of inspected.supportEntries) {
+      if (inspected.outerFiles.includes(name)) {
+        if (!(await readFile(join(snapshot, name))).equals(bytes)) throw new Error(`flat bridge support asset mismatch: ${name}`)
+      } else await writeFile(join(snapshot, name), bytes, { flag: 'wx', mode: 0o444 })
+    }
     await verifyControlSnapshot(snapshot, inspected, false)
     for (const name of inspected.snapshotFiles) {
       const path = join(snapshot, name); const file = await open(path, 'r'); try { await file.sync() } finally { await file.close() }; await chmod(path, 0o444)

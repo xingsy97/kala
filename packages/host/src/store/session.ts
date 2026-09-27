@@ -402,6 +402,8 @@ export class SessionStore {
    * stale caller-computed states rather than append duplicate cursor values.
    */
   private readonly recordTails = new Map<string, Promise<void>>()
+  /** Serializes the sidecar write because onState intentionally does not await it. */
+  private readonly runtimeContextSnapshotTails = new Map<string, Promise<void>>()
 
   constructor(private readonly sessionsDir: string, private readonly options: SessionStoreOptions = {}) {
     mkdirSync(this.sessionsDir, { recursive: true })
@@ -1078,12 +1080,27 @@ export class SessionStore {
     record: SessionRecord,
     contextSnapshot: ContextUsageSnapshot,
   ): Promise<void> {
-    record.runtimeContextSnapshot = contextSnapshot
-    await writeJsonFile(runtimeContextCachePath(record.logPath), {
-      schemaVersion: 1,
-      sessionId: record.sessionId,
-      contextSnapshot,
+    const previous = this.runtimeContextSnapshotTails.get(record.sessionId) ?? Promise.resolve()
+    const update = previous.catch(() => undefined).then(async () => {
+      const latest = record.runtimeContextSnapshot
+      // Provider totals may legitimately fall after compaction, so timestamp —
+      // not token count — is the ordering authority.
+      if (latest && contextSnapshot.updatedAt < latest.updatedAt) return
+      await writeJsonFile(runtimeContextCachePath(record.logPath), {
+        schemaVersion: 1,
+        sessionId: record.sessionId,
+        contextSnapshot,
+      })
+      record.runtimeContextSnapshot = contextSnapshot
     })
+    this.runtimeContextSnapshotTails.set(record.sessionId, update)
+    try {
+      await update
+    } finally {
+      if (this.runtimeContextSnapshotTails.get(record.sessionId) === update) {
+        this.runtimeContextSnapshotTails.delete(record.sessionId)
+      }
+    }
   }
 
   async listSummaries(): Promise<SessionSummary[]> {

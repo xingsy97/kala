@@ -248,17 +248,20 @@ export async function startDedicatedIngress(options: {
             }
             throw new Error(`runtime admission commit returned ${response.status}${failure.code ? ` (${failure.code})` : ''}`)
           }
-          const outcome = await response.json() as { committed?: boolean; cursor?: number }
-          if (outcome.committed !== true || !Number.isSafeInteger(outcome.cursor) || (outcome.cursor ?? -1) < 1) {
-            await ledger.release(record.operationId, owner, 'Runtime accepted the operation but has not committed it to the Session log')
+          const outcome = await response.json() as { accepted?: boolean; committed?: boolean; cursor?: number }
+          const terminal = outcome.accepted === true || outcome.committed === true
+          const validCursor = outcome.cursor === undefined
+            || (Number.isSafeInteger(outcome.cursor) && outcome.cursor >= 1)
+          if (!terminal || !validCursor) {
+            await ledger.release(record.operationId, owner, 'Runtime did not durably accept the operation')
             blockedSessionIds.add(record.sessionId)
             retryRequested = true
             continue
           }
-          // Runtime has durably deduplicated operationId before responding. If
-          // an earlier Ingress process died after that response but before the
-          // ledger rename, the restarted process may own the reclaimed lease;
-          // the Runtime acknowledgement is still authoritative.
+          // A durable queue snapshot is a terminal handoff even before user
+          // execution appends a Session event. If an earlier Ingress process
+          // died before recording this receipt, Host's operationId tombstone or
+          // queue entry makes the retry authoritative and idempotent.
           await ledger.committed(record.operationId, route.generation, outcome.cursor)
         } catch (error) {
           await ledger.release(record.operationId, owner, error instanceof Error ? error.message : String(error))

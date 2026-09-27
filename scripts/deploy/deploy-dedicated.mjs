@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { closeSync, copyFileSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, linkSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
@@ -15,6 +16,8 @@ const repositoryRoot = existsSync(join(sourceRepositoryRoot, 'scripts', 'release
   : undefined
 const defaultReleaseDir = repositoryRoot ? join(repositoryRoot, 'release') : packagedReleaseRoot
 const supportArchive = 'kala-dedicated-support.tar.gz'
+const localDevelopmentAssets = ['kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs', 'kala-copilot-runtime-linux-x64', 'kala-copilot-runtime-node-linux-x64.node', 'kala-dashboard.tar.gz', 'kala-docs.tar.gz', supportArchive, 'kala-model-catalog-seed.json', 'run.sh', 'kala-dedicated.mjs', 'kala-release-metadata.tar.gz']
+const legacyLocalDevelopmentAssets = localDevelopmentAssets.filter((asset) => !asset.startsWith('kala-copilot-runtime-'))
 const supportManifest = 'dedicated-support-manifest.json'
 const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const args = process.argv.slice(2)
@@ -48,6 +51,8 @@ Stage options:
   --origin-session <id> --origin-call <id>
                               Defaults to AGENT_RUNLAB_SESSION_ID/CALL_ID inside a Tool
   --skip-build               Reuse release assets after verification
+  --local-development        Stage a repository-built localDevelopment release (local/LXD only)
+  --legacy-local-development Stage the old asset set once to upgrade a pre-Copilot-runtime Supervisor
 
 This command never invokes the legacy single-service restart/finalizer path.
 `)
@@ -55,6 +60,7 @@ This command never invokes the legacy single-service restart/finalizer path.
 }
 
 const command = args[0]
+if (args.includes('--local-development') && command !== 'stage') throw new Error('--local-development is a stage-only option')
 const positional = args.slice(1).filter((value, index, all) => !value.startsWith('--') && (index === 0 || !optionTakesValue(all[index - 1])))
 const transport = createTransport(args)
 const deployRoot = resolveTargetPath(optionValue(args, '--deploy-root') ?? '/var/lib/agent-runlab/deploy')
@@ -68,15 +74,21 @@ else if (command === 'rollback') mutate('rollback', requiredIdentity(positional[
 else throw new Error('unknown deploy:dedicated command: ' + command)
 
 function stage() {
+  const localDevelopment = args.includes('--local-development')
+  const legacyLocalDevelopment = args.includes('--legacy-local-development')
+  if (legacyLocalDevelopment && !localDevelopment) throw new Error('--legacy-local-development requires --local-development')
+  if (localDevelopment && !repositoryRoot) throw new Error('--local-development is available only from a source repository checkout')
+  if (localDevelopment && transport.kind === 'ssh') throw new Error('--local-development does not support SSH transport')
+  if (localDevelopment && optionValue(args, '--release-dir')) throw new Error('--local-development always derives from the repository release/ directory')
   const operationId = optionValue(args, '--operation-id') ?? 'operation-' + randomUUID()
   assertIdentifier(operationId, 'operation id')
   const replay = findRequest(operationId) ?? findReceipt(operationId)
-  if (replay) {
+  if (replay && !localDevelopment) {
     assertStageReplay(replay)
     writeStageAccepted(replay, true)
     return
   }
-  const releaseDir = optionValue(args, '--release-dir')
+  let releaseDir = optionValue(args, '--release-dir')
     ? resolve(optionValue(args, '--release-dir'))
     : defaultReleaseDir
   if (!args.includes('--skip-build')) {
@@ -87,32 +99,46 @@ function stage() {
   // A caller-supplied --release-dir must instead be verified in place below;
   // otherwise a valid default release could mask a tampered staged directory.
   if (repositoryRoot && releaseDir === join(repositoryRoot, 'release')) runSourceCommand(process.execPath, ['scripts/release/verify-release-assets.mjs'])
-  const release = inspectLocalRelease(releaseDir)
-  const releaseId = optionValue(args, '--release-id') ?? 'release-' + release.releaseDigest.slice(0, 20)
-  assertReleaseId(releaseId)
-  assertNoActiveDeployment()
-  const route = readRemoteJson(join(deployRoot, 'route-state.json'))
-  validateRoute(route)
-  const predecessorReleaseId = route.slots[route.activeSlot].releaseId
-  const predecessorSums = transport.read(join(deployRoot, 'releases', predecessorReleaseId, 'SHA256SUMS'))
-  const sourceReleaseDigest = sha256(predecessorSums)
-  const stagedReleaseDir = join(deployRoot, 'submissions', operationId)
-  transport.stageRelease(releaseDir, stagedReleaseDir, release.files, release.sums)
-  const deploymentId = optionValue(args, '--deployment-id') ?? 'deployment-' + randomUUID()
-  assertIdentifier(deploymentId, 'deployment id')
-  const originSession = optionValue(args, '--origin-session') ?? process.env.AGENT_RUNLAB_SESSION_ID
-  const originCall = optionValue(args, '--origin-call') ?? process.env.AGENT_RUNLAB_CALL_ID
-  if (Boolean(originSession) !== Boolean(originCall)) throw new Error('origin Session and call identity must be supplied together')
-  const request = {
-    schemaVersion: 1, action: 'deploy', operationId, deploymentId, topology: 'dedicated-slots', unitId: 'local',
-    requestedAt: new Date().toISOString(), expectedRouteGeneration: route.generation,
-    fencingToken: randomBytes(24).toString('base64url'), sourceReleaseDigest, targetReleaseDigest: release.releaseDigest,
-    predecessorReleaseId, candidateSlot: route.activeSlot === 'blue' ? 'green' : 'blue',
-    releaseId, stagedReleaseDir, bundleSha256: release.bundleSha256,
-    ...(originSession && originCall ? { origin: { sessionId: originSession, callId: originCall } } : {}),
+  let temporaryReleaseDir
+  try {
+    if (localDevelopment) {
+      temporaryReleaseDir = createLocalDevelopmentRelease(releaseDir, legacyLocalDevelopment ? legacyLocalDevelopmentAssets : localDevelopmentAssets)
+      releaseDir = temporaryReleaseDir
+    }
+    if (replay) {
+      assertStageReplay(replay, releaseDir)
+      writeStageAccepted(replay, true)
+      return
+    }
+    const release = inspectLocalRelease(releaseDir)
+    const releaseId = optionValue(args, '--release-id') ?? 'release-' + release.releaseDigest.slice(0, 20)
+    assertReleaseId(releaseId)
+    assertNoActiveDeployment()
+    const route = readRemoteJson(join(deployRoot, 'route-state.json'))
+    validateRoute(route)
+    const predecessorReleaseId = route.slots[route.activeSlot].releaseId
+    const predecessorSums = transport.read(join(deployRoot, 'releases', predecessorReleaseId, 'SHA256SUMS'))
+    const sourceReleaseDigest = sha256(predecessorSums)
+    const stagedReleaseDir = join(deployRoot, 'submissions', operationId)
+    transport.stageRelease(releaseDir, stagedReleaseDir, release.files, release.sums)
+    const deploymentId = optionValue(args, '--deployment-id') ?? 'deployment-' + randomUUID()
+    assertIdentifier(deploymentId, 'deployment id')
+    const originSession = optionValue(args, '--origin-session') ?? process.env.AGENT_RUNLAB_SESSION_ID
+    const originCall = optionValue(args, '--origin-call') ?? process.env.AGENT_RUNLAB_CALL_ID
+    if (Boolean(originSession) !== Boolean(originCall)) throw new Error('origin Session and call identity must be supplied together')
+    const request = {
+      schemaVersion: 1, action: 'deploy', operationId, deploymentId, topology: 'dedicated-slots', unitId: 'local',
+      requestedAt: new Date().toISOString(), expectedRouteGeneration: route.generation,
+      fencingToken: randomBytes(24).toString('base64url'), sourceReleaseDigest, targetReleaseDigest: release.releaseDigest,
+      predecessorReleaseId, candidateSlot: route.activeSlot === 'blue' ? 'green' : 'blue',
+      releaseId, stagedReleaseDir, bundleSha256: release.bundleSha256,
+      ...(originSession && originCall ? { origin: { sessionId: originSession, callId: originCall } } : {}),
+    }
+    const accepted = submitRequest(request)
+    writeStageAccepted(accepted, accepted !== request)
+  } finally {
+    if (temporaryReleaseDir) rmSync(temporaryReleaseDir, { recursive: true, force: true })
   }
-  const accepted = submitRequest(request)
-  writeStageAccepted(accepted, accepted !== request)
 }
 
 function status(identity) {
@@ -231,7 +257,7 @@ function sameRequestIntent(existing, requested) {
   return existing
 }
 
-function assertStageReplay(request) {
+function assertStageReplay(request, releaseDir = optionValue(args, '--release-dir') ? resolve(optionValue(args, '--release-dir')) : defaultReleaseDir) {
   if (request.action !== 'deploy' || !request.operationIds?.includes?.(optionValue(args, '--operation-id')) && request.operationId !== optionValue(args, '--operation-id')) throw new Error('operationId conflicts with an existing deployment request')
   const explicitDeployment = optionValue(args, '--deployment-id')
   const explicitRelease = optionValue(args, '--release-id')
@@ -243,7 +269,7 @@ function assertStageReplay(request) {
   if (explicitOrigin && (request.origin?.sessionId !== explicitOrigin || request.origin?.callId !== explicitCall)) throw new Error('operationId conflicts with a different origin')
   const operationRequest = findRequest(optionValue(args, '--operation-id'))
   if (!operationRequest && !terminal(request.phase)) throw new Error('active operation receipt exists without its authoritative request')
-  const release = inspectLocalRelease(optionValue(args, '--release-dir') ? resolve(optionValue(args, '--release-dir')) : defaultReleaseDir)
+  const release = inspectLocalRelease(releaseDir)
   const expectedReleaseDigest = operationRequest?.targetReleaseDigest ?? request.releaseDigest
   if (release.releaseDigest !== expectedReleaseDigest || release.bundleSha256 !== request.bundleSha256) throw new Error('operationId conflicts with a different release')
 }
@@ -264,6 +290,25 @@ function findReceipt(identity) {
   const index = readRemoteJson(indexPath)
   const deploymentId = index[identity]
   return typeof deploymentId === 'string' ? readRemoteJson(join(deployRoot, 'receipts', deploymentId + '.json')) : undefined
+}
+
+function createLocalDevelopmentRelease(sourceReleaseDir, assets) {
+  const manifest = JSON.parse(readFileSync(join(sourceReleaseDir, 'manifest.json'), 'utf8'))
+  if (!assets.every((asset) => manifest.assets.includes(asset))) throw new Error('repository release does not contain the required local-development asset set')
+  const temporaryReleaseDir = mkdtempSync(join(tmpdir(), 'kala-local-development-release-'))
+  try {
+    for (const asset of assets) copyFileSync(join(sourceReleaseDir, asset), join(temporaryReleaseDir, asset))
+    const localManifest = { ...manifest, localDevelopment: true, assets: [...assets] }
+    writeFileSync(join(temporaryReleaseDir, 'manifest.json'), JSON.stringify(localManifest, null, 2) + '\n')
+    const checksummed = [...assets, 'manifest.json'].sort()
+    const sums = checksummed.map((name) => `${sha256(readFileSync(join(temporaryReleaseDir, name)))}  ${name}`).join('\n') + '\n'
+    writeFileSync(join(temporaryReleaseDir, 'SHA256SUMS'), sums)
+    if (readdirSync(temporaryReleaseDir).length !== assets.length + 2) throw new Error('local-development release has an incomplete file set')
+    return temporaryReleaseDir
+  } catch (error) {
+    rmSync(temporaryReleaseDir, { recursive: true, force: true })
+    throw error
+  }
 }
 
 function inspectLocalRelease(releaseDir) {
@@ -296,9 +341,14 @@ function inspectLocalRelease(releaseDir) {
 }
 
 function createTransport(values) {
+  const local = values.includes('--local')
+  const hasLxd = values.includes('--lxd') || values.some((value) => value.startsWith('--lxd='))
+  const hasSsh = values.includes('--ssh') || values.some((value) => value.startsWith('--ssh='))
   const lxd = optionValue(values, '--lxd')
   const ssh = optionValue(values, '--ssh')
-  if (lxd && ssh) throw new Error('choose exactly one transport')
+  if (Number(local) + Number(hasLxd) + Number(hasSsh) > 1) throw new Error('choose exactly one transport')
+  if (hasLxd && !lxd) throw new Error('--lxd requires a container')
+  if (hasSsh && !ssh) throw new Error('--ssh requires a target')
   if (lxd) return commandTransport('lxd', lxd)
   if (ssh) return commandTransport('ssh', ssh)
   return localTransport()
@@ -306,6 +356,7 @@ function createTransport(values) {
 
 function localTransport() {
   return {
+    kind: 'local',
     read: (path) => readFileSync(path),
     exists: (path) => existsSync(path),
     list: (path) => existsSync(path) ? readdirSync(path) : [],
@@ -331,6 +382,7 @@ function commandTransport(kind, target) {
     return result.stdout
   }
   return {
+    kind,
     read: (path) => Buffer.from(shell('cat -- ' + quote(path))),
     exists: (path) => { try { shell('test -e ' + quote(path)); return true } catch { return false } },
     list: (path) => { try { return String(shell('find ' + quote(path) + ' -mindepth 1 -maxdepth 1 -printf %f\\n')).trim().split('\n').filter(Boolean) } catch { return [] } },

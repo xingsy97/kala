@@ -34,7 +34,7 @@ import { runHostLoop } from './loop.js'
 import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
 import { selectHooks } from './extensions/hooks.js'
 import { createSkillManager, defaultSkillRoots, discoverSkills, type SkillManager, type SkillRegistry } from './extensions/skills.js'
-import { SessionStore, type SessionRecord } from './store/session.js'
+import { SessionNotFoundError, SessionStore, type SessionRecord } from './store/session.js'
 import { findSessionOperation, slimEffect } from './store/log.js'
 import { WorkspaceAliasStore } from './store/workspace-alias.js'
 import { PushSubscriptionStore } from './push/store.js'
@@ -80,7 +80,7 @@ import type { SocketAdminConfig } from './socket-admin.js'
 import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinator.js'
 import { inspectUnitQuiescence } from './tenant-runtime/quiescence.js'
 import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
-import { loadPersistedMessageQueue, persistMessageQueueSnapshot } from './message-queue-store.js'
+import { loadPersistedMessageQueueState, persistMessageQueueSnapshot, type PersistedMessageQueueState } from './message-queue-store.js'
 import { readSessionLog } from './store/log.js'
 import { modelIdFromRef, resolveModelContextWindow } from './model-capabilities.js'
 import type { WebSearchCredentialStore } from './web-search/index.js'
@@ -108,6 +108,8 @@ export type HostServerOptions = {
     enabled?: boolean
     gitHubToken?: string
   }
+  /** Test synchronization seam: runs after a queue head is claimed, before dispatch I/O. */
+  queueDispatchBarrier?: (claimed: { sessionId: string; operationId: string; runtime: string }) => Promise<void>
   defaultConfig: AgentConfig | (() => AgentConfig)
   toolTimeoutMs?: number
   /**
@@ -443,40 +445,30 @@ export async function startHostServer(
       if (!record) record = await store.load(sessionId, { recoverDangling: false })
       validateMessageAttachmentReferences(messageAttachments, sessionId, content)
       const existingCursor = await sessionUserOperationCursor(store, sessionId, operationId)
-      if (existingCursor !== undefined) return { committed: true, cursor: existingCursor }
+      if (existingCursor !== undefined) return { accepted: true, committed: true, cursor: existingCursor }
       if (record.agentRuntime !== 'kernel') {
-        const runtime = agentRuntimes?.require(record.agentRuntime)
-        if (!runtime) throw new Error(`agent runtime is not ready: ${record.agentRuntime}`)
-        if (!isRestingStatus(record.state.status)) {
-          const queued: QueuedUserMessage = {
-            id: operationId,
-            operationId,
-            text,
-            mode,
-            createdAt: new Date().toISOString(),
-            ...(content ? { content } : {}),
-            ...(effectiveModelForSession(sessionId) ? { model: effectiveModelForSession(sessionId) } : {}),
-          }
-          await messageQueues.enqueue(sessionId, queued, mode === 'steer' ? 'front' : undefined)
-          if (mode === 'steer') {
-            await runtime.cancel(record)
-            await messageQueues.drain(sessionId)
-          } else {
-            void messageQueues.drain(sessionId)
-          }
-          const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
-          return committedCursor === undefined ? { committed: false } : { committed: true, cursor: committedCursor }
-        }
-        await runtime.send(record, {
+        const resting = isRestingStatus(record.state.status)
+        await messageQueues.enqueue(sessionId, {
+          id: operationId,
+          operationId,
           text,
+          mode,
+          createdAt: new Date().toISOString(),
           ...(content ? { content } : {}),
           ...(effectiveModelForSession(sessionId) ? { model: effectiveModelForSession(sessionId) } : {}),
-          operationId,
-        })
-        return {
-          committed: true,
-          cursor: store.get(sessionId)?.state.cursor ?? record.state.cursor,
+        }, mode === 'steer' ? 'front' : undefined)
+        if (mode === 'steer' && !resting) {
+          await agentRuntimes!.require(record.agentRuntime).cancel(record)
+          await messageQueues.drain(sessionId)
+        } else if (resting) {
+          await messageQueues.drain(sessionId)
+        } else {
+          void messageQueues.drain(sessionId)
         }
+        const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
+        return committedCursor === undefined
+          ? { accepted: true, committed: false }
+          : { accepted: true, committed: true, cursor: committedCursor }
       }
       if (record.state.status === 'thinking' && !loop.hasActiveLlmCall(sessionId)) {
         await loop.recoverInterruptedLlm(sessionId)
@@ -494,7 +486,9 @@ export async function startHostServer(
       if (effectiveMode === 'steer' && !isRestingStatus(record.state.status)) loop.requestStopAtBoundary(sessionId)
       void messageQueues.drain(sessionId)
       const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
-      return committedCursor === undefined ? { committed: false } : { committed: true, cursor: committedCursor }
+      return committedCursor === undefined
+        ? { accepted: true, committed: false }
+        : { accepted: true, committed: true, cursor: committedCursor }
     },
   })
 
@@ -569,8 +563,10 @@ export async function startHostServer(
   }
 
   const queuedMessages = new Map<string, QueuedUserMessage[]>()
+  const cancelledQueueOperations = new Map<string, Set<string>>()
+  const claimedQueueOperations = new Map<string, QueuedUserMessage>()
   const drainingQueues = new Set<string>()
-  const queueLoads = new Map<string, Promise<QueuedUserMessage[]>>()
+  const queueLoads = new Map<string, Promise<PersistedMessageQueueState>>()
   const queueMutations = new Map<string, Promise<void>>()
 
   const dashboardNs: DashboardNs = io.of('/dashboard') as unknown as DashboardNs
@@ -606,22 +602,34 @@ export async function startHostServer(
 
   const loadQueue = async (sessionId: string): Promise<QueuedUserMessage[]> => {
     const existing = queuedMessages.get(sessionId)
-    if (existing) return existing
+    if (existing || cancelledQueueOperations.has(sessionId)) return existing ?? []
     let pending = queueLoads.get(sessionId)
     if (!pending) {
-      pending = loadPersistedMessageQueue(store, sessionId).catch(() => [])
+      pending = loadPersistedMessageQueueState(store, sessionId).catch((error) => {
+        // Dashboard sockets may subscribe before creating their Session. Preserve
+        // that empty-queue behavior, but fail closed for all actual read errors
+        // so tombstones are never silently discarded.
+        if (error instanceof SessionNotFoundError) return { items: [], cancelledOperationIds: [] }
+        throw error
+      })
       queueLoads.set(sessionId, pending)
     }
-    const restored = await pending
-    queueLoads.delete(sessionId)
-    if (restored.length > 0) queuedMessages.set(sessionId, restored)
+    let restored: PersistedMessageQueueState
+    try {
+      restored = await pending
+    } finally {
+      queueLoads.delete(sessionId)
+    }
+    if (restored.items.length > 0) queuedMessages.set(sessionId, restored.items)
+    cancelledQueueOperations.set(sessionId, new Set(restored.cancelledOperationIds))
     return queuedMessages.get(sessionId) ?? []
   }
 
-  const persistQueue = async (sessionId: string, queue: readonly QueuedUserMessage[]): Promise<void> => {
-    await persistMessageQueueSnapshot(store, sessionId, queue)
+  const persistQueue = async (sessionId: string, queue: readonly QueuedUserMessage[], cancelled = cancelledQueueOperations.get(sessionId) ?? new Set<string>()): Promise<void> => {
+    await persistMessageQueueSnapshot(store, sessionId, queue, [...cancelled])
     if (queue.length === 0) queuedMessages.delete(sessionId)
     else queuedMessages.set(sessionId, [...queue])
+    cancelledQueueOperations.set(sessionId, new Set(cancelled))
   }
 
   const withQueueMutation = async <T>(sessionId: string, fn: () => Promise<T>): Promise<T> => {
@@ -640,6 +648,54 @@ export async function startHostServer(
       if (queueMutations.get(sessionId) === chain) queueMutations.delete(sessionId)
     }
   }
+
+  const claimedQueueMutationError = (claimed: QueuedUserMessage): Error =>
+    new Error(`queued message ${claimed.id} is already dispatching`)
+
+  const claimQueueHead = async (sessionId: string): Promise<QueuedUserMessage | undefined> =>
+    await withQueueMutation(sessionId, async () => {
+      if (closed || claimedQueueOperations.has(sessionId)) return undefined
+      const next = (await loadQueue(sessionId))[0]
+      if (!next) return undefined
+      // Capture the exact payload while holding the same lock as edit/delete.
+      // The lock is released before runtime I/O; this short-lived claim protects
+      // the snapshot until dispatch commits or fails.
+      const claimed = {
+        ...next,
+        ...(next.content ? { content: [...next.content] } : {}),
+      }
+      claimedQueueOperations.set(sessionId, claimed)
+      return claimed
+    })
+
+  const releaseQueueClaim = (sessionId: string, id: string): void => {
+    if (claimedQueueOperations.get(sessionId)?.id === id) claimedQueueOperations.delete(sessionId)
+  }
+
+  const dequeueClaimedQueueHead = async (sessionId: string, claimed: QueuedUserMessage): Promise<boolean> => {
+    let changed = false
+    await withQueueMutation(sessionId, async () => {
+      if (closed) return
+      const queue = [...await loadQueue(sessionId)]
+      if (queue[0]?.id !== claimed.id) return
+      queue.shift()
+      await persistQueue(sessionId, queue)
+      releaseQueueClaim(sessionId, claimed.id)
+      changed = true
+    })
+    if (changed && !closed) emitQueueUpdate(sessionId)
+    return changed
+  }
+
+  const isClaimedQueueHeadDispatchable = async (sessionId: string, claimed: QueuedUserMessage): Promise<boolean> =>
+    await withQueueMutation(sessionId, async () => {
+      if (closed) return false
+      const activeClaim = claimedQueueOperations.get(sessionId)
+      if (activeClaim?.id !== claimed.id || activeClaim.operationId !== claimed.operationId) return false
+      const queueHead = (await loadQueue(sessionId))[0]
+      if (queueHead?.id !== claimed.id || queueHead.operationId !== claimed.operationId) return false
+      return !cancelledQueueOperations.get(sessionId)?.has(claimed.operationId)
+    })
 
   const messageQueues: MessageQueueManager = {
     isStable() {
@@ -662,6 +718,7 @@ export async function startHostServer(
         // operationId survives ACK loss, reconnect and Host restart. A retry is
         // already accepted when it is still queued or has a durable user event.
         if (queue.some((item) => item.operationId === msg.operationId)) return
+        if (cancelledQueueOperations.get(sessionId)?.has(msg.operationId)) return
         if (await sessionUserOperationCursor(store, sessionId, msg.operationId) !== undefined) return
         if (priority === 'front') queue.unshift(msg)
         else queue.push(msg)
@@ -673,6 +730,10 @@ export async function startHostServer(
     async reorder(sessionId, id, beforeId) {
       let changed = false
       await withQueueMutation(sessionId, async () => {
+        const claimed = claimedQueueOperations.get(sessionId)
+        if (claimed && (id === claimed.id || id === claimed.operationId || beforeId === claimed.id || beforeId === claimed.operationId)) {
+          throw claimedQueueMutationError(claimed)
+        }
         const queue = [...await loadQueue(sessionId)]
         const from = queue.findIndex((item) => item.id === id)
         if (from === -1) return
@@ -690,6 +751,8 @@ export async function startHostServer(
     async update(sessionId, id, text, content) {
       let changed = false
       await withQueueMutation(sessionId, async () => {
+        const claimed = claimedQueueOperations.get(sessionId)
+        if (claimed && (id === claimed.id || id === claimed.operationId)) throw claimedQueueMutationError(claimed)
         const queue = [...await loadQueue(sessionId)]
         const index = queue.findIndex((item) => item.id === id)
         if (index === -1) return
@@ -708,22 +771,32 @@ export async function startHostServer(
     async delete(sessionId, id) {
       let changed = false
       await withQueueMutation(sessionId, async () => {
+        const claimed = claimedQueueOperations.get(sessionId)
+        if (claimed && (id === claimed.id || id === claimed.operationId)) throw claimedQueueMutationError(claimed)
         const queue = await loadQueue(sessionId)
-        const next = queue.filter((item) => item.id !== id)
-        if (next.length === queue.length) return
-        await persistQueue(sessionId, next)
-        changed = true
+        const cancelled = new Set(cancelledQueueOperations.get(sessionId) ?? [])
+        const removed = queue.filter((item) => item.id === id || item.operationId === id)
+        const next = queue.filter((item) => item.id !== id && item.operationId !== id)
+        const cancellationIds = [id, ...removed.map((item) => item.operationId)]
+        const addedTombstone = cancellationIds.some((operationId) => !cancelled.has(operationId))
+        for (const operationId of cancellationIds) cancelled.add(operationId)
+        if (next.length === queue.length && !addedTombstone) return
+        await persistQueue(sessionId, next, cancelled)
+        changed = next.length !== queue.length
       })
-      if (!changed) return
-      emitQueueUpdate(sessionId)
+      if (changed) emitQueueUpdate(sessionId)
     },
     async stop(sessionId) {
       let changed = false
       await withQueueMutation(sessionId, async () => {
         const queue = await loadQueue(sessionId)
-        if (queue.length === 0) return
-        await persistQueue(sessionId, [])
-        changed = true
+        const claimed = claimedQueueOperations.get(sessionId)
+        if (queue.length === 0 && !claimed) return
+        const cancelled = new Set(cancelledQueueOperations.get(sessionId) ?? [])
+        for (const item of queue) cancelled.add(item.operationId)
+        if (claimed) cancelled.add(claimed.operationId)
+        await persistQueue(sessionId, [], cancelled)
+        changed = queue.length > 0
       })
       if (changed) emitQueueUpdate(sessionId)
     },
@@ -750,32 +823,29 @@ export async function startHostServer(
           if (record.agentRuntime !== 'kernel') {
             record = await store.load(sessionId)
             if (!isRestingStatus(record.state.status)) return
-            const next = (await loadQueue(sessionId))[0]
+            const next = await claimQueueHead(sessionId)
             if (!next || closed) return
-            const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, next.operationId) !== undefined
-            if (!alreadyDispatched) {
-              const runtime = agentRuntimes?.require(record.agentRuntime)
-              if (!runtime) return
-              await runtime.send(record, {
-                text: next.text,
-                ...(next.content ? { content: next.content } : {}),
-                ...(next.model ?? effectiveModelForSession(sessionId)
-                  ? { model: next.model ?? effectiveModelForSession(sessionId) }
-                  : {}),
-                operationId: next.operationId,
-                queuedAt: next.createdAt,
-              })
+            try {
+              await options.queueDispatchBarrier?.({ sessionId, operationId: next.operationId, runtime: record.agentRuntime })
+              if (!await isClaimedQueueHeadDispatchable(sessionId, next)) continue
+              const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, next.operationId) !== undefined
+              if (!alreadyDispatched) {
+                const runtime = agentRuntimes?.require(record.agentRuntime)
+                if (!runtime) return
+                await runtime.send(record, {
+                  text: next.text,
+                  ...(next.content ? { content: next.content } : {}),
+                  ...(next.model ?? effectiveModelForSession(sessionId)
+                    ? { model: next.model ?? effectiveModelForSession(sessionId) }
+                    : {}),
+                  operationId: next.operationId,
+                  queuedAt: next.createdAt,
+                })
+              }
+              await dequeueClaimedQueueHead(sessionId, next)
+            } finally {
+              releaseQueueClaim(sessionId, next.id)
             }
-            let changed = false
-            await withQueueMutation(sessionId, async () => {
-              if (closed) return
-              const queue = [...await loadQueue(sessionId)]
-              if (queue[0]?.id !== next.id) return
-              queue.shift()
-              await persistQueue(sessionId, queue)
-              changed = true
-            })
-            if (changed && !closed) emitQueueUpdate(sessionId)
             continue
           }
           // `state.status` can briefly be `done` while dispatchOne is still
@@ -794,40 +864,32 @@ export async function startHostServer(
             record = store.get(sessionId)
           }
           if (!record || !isRestingStatus(record.state.status)) return
-          const next = (await loadQueue(sessionId))[0]
+          const next = await claimQueueHead(sessionId)
           if (!next || closed) return
           // Dispatch first and persist the dequeue only after the durable
           // user_message commit. A crash before commit leaves the item queued;
           // a crash after commit is recognized by operationId and only removes
           // the already-dispatched item on recovery.
           const dequeueCommitted = async (): Promise<void> => {
-            if (closed) return
-            let changed = false
-            await withQueueMutation(sessionId, async () => {
-              if (closed) return
-              const queue = [...await loadQueue(sessionId)]
-              if (queue[0]?.id !== next.id) return
-              queue.shift()
-              await persistQueue(sessionId, queue)
-              changed = true
-            })
-            if (changed && !closed) emitQueueUpdate(sessionId)
+            await dequeueClaimedQueueHead(sessionId, next)
           }
-          const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, next.operationId) !== undefined
-          // Stop may clear the persisted queue while this drain was waiting on
-          // the active turn or log read. Re-check identity immediately before
-          // dispatch so an item removed by Stop cannot start a new turn.
-          if ((await loadQueue(sessionId))[0]?.id !== next.id) return
-          if (!alreadyDispatched) {
-            await loop.dispatch(sessionId, {
-              kind: 'user_message',
-              operationId: next.operationId,
-              queuedAt: next.createdAt,
-              text: next.text,
-              ...(next.content ? { content: next.content } : {}),
-            }, { ...(next.model ? { model: next.model } : {}), onCommitted: dequeueCommitted })
-          } else {
-            await dequeueCommitted()
+          try {
+            await options.queueDispatchBarrier?.({ sessionId, operationId: next.operationId, runtime: record.agentRuntime })
+            if (!await isClaimedQueueHeadDispatchable(sessionId, next)) continue
+            const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, next.operationId) !== undefined
+            if (!alreadyDispatched) {
+              await loop.dispatch(sessionId, {
+                kind: 'user_message',
+                operationId: next.operationId,
+                queuedAt: next.createdAt,
+                text: next.text,
+                ...(next.content ? { content: next.content } : {}),
+              }, { ...(next.model ? { model: next.model } : {}), onCommitted: dequeueCommitted })
+            } else {
+              await dequeueCommitted()
+            }
+          } finally {
+            releaseQueueClaim(sessionId, next.id)
           }
         }
       } finally {

@@ -35,8 +35,42 @@ import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import { startHostServer, type HostServer } from './server.js'
-import { readSessionLog } from './store/log.js'
+import { appendRuntimeMetadataEntry, readSessionLog } from './store/log.js'
+import { persistMessageQueueSnapshot } from './message-queue-store.js'
 import { ExecutorIdentityStore } from './store/executor-identity.js'
+
+type HostCopilotTool = {
+  name: string
+  handler(args: unknown, invocation: { toolCallId: string }): Promise<unknown>
+}
+
+type HostCopilotSessionConfig = {
+  sessionId?: string
+  tools: HostCopilotTool[]
+}
+
+const copilotSdk = vi.hoisted(() => ({
+  createSession: undefined as ((config: HostCopilotSessionConfig) => unknown) | undefined,
+}))
+
+vi.mock('@github/copilot-sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@github/copilot-sdk')>()
+  return {
+    ...actual,
+    CopilotClient: class {
+      async start(): Promise<void> {}
+      async stop(): Promise<readonly unknown[]> { return [] }
+      async getAuthStatus(): Promise<{ isAuthenticated: boolean }> { return { isAuthenticated: true } }
+      async listModels(): Promise<readonly never[]> { return [] }
+      async resumeSession(): Promise<never> { throw new Error('not found') }
+      async createSession(config: HostCopilotSessionConfig): Promise<unknown> {
+        if (!copilotSdk.createSession) throw new Error('unexpected Copilot session creation')
+        return copilotSdk.createSession(config)
+      }
+      async deleteSession(): Promise<void> {}
+    },
+  }
+})
 
 const WRITE = {
   name: 'write',
@@ -253,6 +287,7 @@ describe('wire protocol', () => {
   let config: AgentConfig
 
   beforeEach(async () => {
+    copilotSdk.createSession = undefined
     dir = mkdtempSync(join(tmpdir(), 'agent-kernel-wire-'))
     config = createConfig({ tools: [WRITE], systemPrompt: 'sys' })
     const http = createServer()
@@ -1522,7 +1557,7 @@ describe('wire protocol', () => {
     expect(server.restartStatus().current).toBeNull()
   })
 
-  it('acknowledges internal admission as committed only after the operation reaches Session JSONL', async () => {
+  it('acknowledges internal admission as durably accepted before the operation reaches Session JSONL', async () => {
     const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
     process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'admission-jsonl-test-secret'
     try {
@@ -1534,8 +1569,8 @@ describe('wire protocol', () => {
         body: JSON.stringify({ sessionId, operationId: 'operation-admission-jsonl', text: 'deliver exactly once', mode: 'queue' }),
       })
       expect(first.status).toBe(200)
-      const initial = await first.json() as { committed: boolean; cursor?: number }
-      expect(initial.committed).toBe(false)
+      const initial = await first.json() as { accepted: boolean; committed: boolean; cursor?: number }
+      expect(initial).toMatchObject({ accepted: true, committed: false })
       await vi.waitFor(async () => {
         const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
         expect(parsed.events.some((entry) => entry.event.kind === 'user_message' && entry.event.operationId === 'operation-admission-jsonl')).toBe(true)
@@ -1549,6 +1584,145 @@ describe('wire protocol', () => {
       expect(committed).toMatchObject({ committed: true, cursor: expect.any(Number) })
       const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
       expect(parsed.events.filter((entry) => entry.event.kind === 'user_message' && entry.event.operationId === 'operation-admission-jsonl')).toHaveLength(1)
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+    }
+  })
+
+  it('keeps deleted, stopped, and delete-before-arrival operationIds cancelled across retries and restart', async () => {
+    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'admission-cancellation-test-secret'
+    let releaseFirst!: () => void
+    try {
+      await server.close()
+      const firstRelease = new Promise<void>((resolve) => { releaseFirst = resolve })
+      const seenPrompts: string[] = []
+      const http = createServer()
+      await new Promise<void>((resolve) => http.listen(0, resolve))
+      server = await startHostServer({
+        port: (http.address() as AddressInfo).port,
+        sessionsDir: dir,
+        defaultConfig: config,
+        httpServer: http,
+        llm: {
+          name: 'queue-cancellation-test',
+          async call(params) {
+            const prompt = params.messages.filter((message) => message.role === 'user').map((message) => message.content.map((part) => ('text' in part ? part.text : '')).join('')).join('|')
+            seenPrompts.push(prompt)
+            if (seenPrompts.length === 1) await firstRelease
+            return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+          },
+        },
+      })
+      url = `http://localhost:${server.port}`
+      const sessionId = 'admission-cancellation-session'
+      await server.store.create({ sessionId, config })
+      const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+        transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+      })
+      let latestQueue: ServerMessageQueueEvent | undefined
+      dashboard.on('server:message_queue', (payload) => { if (payload.sessionId === sessionId) latestQueue = payload })
+      await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+      dashboard.emit('client:user_message', { sessionId, text: 'active turn', mode: 'steer' })
+      await vi.waitFor(() => expect(seenPrompts).toHaveLength(1))
+
+      const admit = async (operationId: string, text = operationId): Promise<{ accepted: boolean; committed: boolean }> => {
+        const response = await fetch(`${url}/internal/runtime/admission/commit`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'admission-cancellation-test-secret' },
+          body: JSON.stringify({ sessionId, operationId, text, mode: 'queue' }),
+        })
+        expect(response.status).toBe(200)
+        return await response.json() as { accepted: boolean; committed: boolean }
+      }
+      const deleteQueued = async (id: string): Promise<void> => {
+        const result = await new Promise<RpcAck>((resolve) => dashboard.emit('client:delete_queued_message', { sessionId, id, operationId: `delete-${id}` }, resolve))
+        expect(result).toEqual({ ok: true })
+      }
+
+      expect(await admit('operation-deleted')).toMatchObject({ accepted: true, committed: false })
+      await vi.waitFor(() => expect(latestQueue?.items.some((item) => item.id === 'operation-deleted')).toBe(true))
+      await deleteQueued('operation-deleted')
+      expect(await admit('operation-deleted', 'retry must stay cancelled')).toMatchObject({ accepted: true, committed: false })
+
+      await deleteQueued('operation-before-arrival')
+      expect(await admit('operation-before-arrival')).toMatchObject({ accepted: true, committed: false })
+
+      const [, concurrentAdmission] = await Promise.all([
+        deleteQueued('operation-concurrent-delete'),
+        admit('operation-concurrent-delete'),
+      ])
+      expect(concurrentAdmission).toMatchObject({ accepted: true, committed: false })
+      expect(await admit('operation-concurrent-delete', 'concurrent retry')).toMatchObject({ accepted: true, committed: false })
+
+      await admit('operation-stopped-one')
+      await admit('operation-stopped-two')
+      await vi.waitFor(() => expect(latestQueue?.pending).toBe(2))
+      const stopped = await new Promise<RpcAck>((resolve) => dashboard.emit('client:cancel', { sessionId, operationId: 'stop-pending-admissions' }, resolve))
+      expect(stopped).toEqual({ ok: true })
+      await vi.waitFor(() => expect(latestQueue?.pending).toBe(0))
+      expect(await admit('operation-stopped-one', 'stopped retry one')).toMatchObject({ accepted: true, committed: false })
+      expect(await admit('operation-stopped-two', 'stopped retry two')).toMatchObject({ accepted: true, committed: false })
+
+      releaseFirst()
+      await vi.waitFor(() => expect(server.store.get(sessionId)?.state.status).toBe('done'))
+      dashboard.close()
+      await server.close()
+
+      const restartedHttp = createServer()
+      await new Promise<void>((resolve) => restartedHttp.listen(0, resolve))
+      server = await startHostServer({
+        port: (restartedHttp.address() as AddressInfo).port,
+        sessionsDir: dir,
+        defaultConfig: config,
+        httpServer: restartedHttp,
+        llm: { name: 'queue-cancellation-restart-test', async call() { throw new Error('cancelled admission was resurrected') } },
+      })
+      url = `http://localhost:${server.port}`
+      expect(await admit('operation-deleted', 'restart retry')).toMatchObject({ accepted: true, committed: false })
+      expect(await admit('operation-before-arrival', 'restart race retry')).toMatchObject({ accepted: true, committed: false })
+      expect(await admit('operation-concurrent-delete', 'restart concurrent retry')).toMatchObject({ accepted: true, committed: false })
+      expect(await admit('operation-stopped-one', 'restart stopped retry')).toMatchObject({ accepted: true, committed: false })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
+      for (const operationId of ['operation-deleted', 'operation-before-arrival', 'operation-concurrent-delete', 'operation-stopped-one', 'operation-stopped-two']) {
+        expect(parsed.events.some((entry) => entry.event.kind === 'user_message' && entry.event.operationId === operationId)).toBe(false)
+      }
+    } finally {
+      releaseFirst?.()
+      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+    }
+  })
+
+  it('honors a delete-before-arrival tombstone for a Copilot Session without invoking its runtime', async () => {
+    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'copilot-cancellation-test-secret'
+    try {
+      const sessionId = 'copilot-admission-cancellation'
+      await server.store.create({ sessionId, agentRuntime: 'copilot', agentRuntimeVersion: '1.0.11', externalSessionId: sessionId, config })
+      await server.close()
+      await persistMessageQueueSnapshot(server.store, sessionId, [], ['operation-copilot-before-arrival'])
+      const http = createServer()
+      await new Promise<void>((resolve) => http.listen(0, resolve))
+      server = await startHostServer({
+        port: (http.address() as AddressInfo).port,
+        sessionsDir: dir,
+        defaultConfig: config,
+        httpServer: http,
+        llm: scriptedLlm(),
+      })
+      url = `http://localhost:${server.port}`
+
+      const response = await fetch(`${url}/internal/runtime/admission/commit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'copilot-cancellation-test-secret' },
+        body: JSON.stringify({ sessionId, operationId: 'operation-copilot-before-arrival', text: 'must not reach Copilot', mode: 'queue' }),
+      })
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toMatchObject({ accepted: true, committed: false })
+      expect(server.store.get(sessionId)?.state.messages.some((message) => message.role === 'user')).toBe(false)
     } finally {
       if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
       else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
@@ -3850,6 +4024,143 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('aborts a Copilot sub-agent SDK turn and pending tool before reporting it cancelled', async () => {
+    await server.close()
+    const sessionId = 'wire-copilot-subagent-interrupt-parent'
+    const agentConfig = createConfig({ tools: [AGENT, WRITE], systemPrompt: 'sys' })
+    const abortCounts = new Map<string, number>()
+    let releaseChildAbort!: () => void
+    const childAbortGate = new Promise<void>((resolve) => { releaseChildAbort = resolve })
+    let childAbortStarted!: () => void
+    const childAborting = new Promise<void>((resolve) => { childAbortStarted = resolve })
+
+    copilotSdk.createSession = (sessionConfig) => {
+      const sdkSessionId = sessionConfig.sessionId!
+      const listeners = new Set<(event: unknown) => void>()
+      let rejectPending: ((error: Error) => void) | undefined
+      return {
+        rpc: { model: { async getCurrent() { return { modelId: 'gpt-5.4-mini' } } } },
+        async getEvents() { return [] },
+        on(listener: (event: unknown) => void) {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
+        async sendAndWait() {
+          if (sdkSessionId === sessionId) {
+            const agent = sessionConfig.tools.find((tool) => tool.name === 'agent')!
+            await agent.handler({ prompt: 'run a pending tool' }, { toolCallId: 'copilot-agent-call' })
+            return { id: 'parent-response', type: 'assistant.message', data: { content: 'parent recovered' } }
+          }
+          const write = sessionConfig.tools.find((tool) => tool.name === 'write')!
+          const pendingTool = write.handler({ path: '/tmp/pending' }, { toolCallId: 'copilot-child-write' })
+          const aborted = new Promise<never>((_resolve, reject) => { rejectPending = reject })
+          return await Promise.race([pendingTool.then(() => new Promise<never>(() => {})), aborted])
+        },
+        async abort() {
+          abortCounts.set(sdkSessionId, (abortCounts.get(sdkSessionId) ?? 0) + 1)
+          rejectPending?.(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+          if (sdkSessionId !== sessionId) {
+            childAbortStarted()
+            await childAbortGate
+          }
+        },
+        async setModel() {},
+        async disconnect() {},
+      }
+    }
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: agentConfig,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      detachGraceMs: 0,
+      copilot: { enabled: true },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({
+      sessionId,
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: sessionId,
+      config: agentConfig,
+    })
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    executor.emit('executor:announce', {
+      executorId: 'ex-copilot-subagent-cancel',
+      workspaceId: 'ws-copilot-subagent-cancel',
+      workspaceName: 'copilot-subagent-cancel',
+      tools: ['write'],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+    await waitForAnyExecutor(server)
+
+    const started = new Promise<ServerSubAgentStartedEvent>((resolve) => {
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'sub_agent_started') resolve(payload)
+      })
+    })
+    let finishedSeen = false
+    const finished = new Promise<ServerSubAgentFinishedEvent>((resolve) => {
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'sub_agent_finished') {
+          finishedSeen = true
+          resolve(payload)
+        }
+      })
+    })
+    const toolCalled = new Promise<ToolCallMessage>((resolve) => executor.on('tool:call', resolve))
+    const toolCancelled = new Promise<{ sessionId: string; callId: string }>((resolve) => executor.on('tool:cancel', resolve))
+    dashboard.emit('client:user_message', { sessionId, text: 'go' })
+    const start = await started
+    const pendingCall = await toolCalled
+    expect(pendingCall.sessionId).toBe(start.childSessionId)
+
+    const interrupt = {
+      parentSessionId: sessionId,
+      parentCallId: 'copilot-agent-call',
+      childSessionId: start.childSessionId,
+    }
+    dashboard.emit('client:interrupt_sub_agent', interrupt)
+    dashboard.emit('client:interrupt_sub_agent', interrupt)
+    await childAborting
+    expect(abortCounts.get(start.childSessionId)).toBe(1)
+    expect(finishedSeen).toBe(false)
+    releaseChildAbort()
+
+    await expect(toolCancelled).resolves.toEqual({
+      sessionId: start.childSessionId,
+      callId: 'copilot-child-write',
+    })
+    await expect(finished).resolves.toMatchObject({
+      childSessionId: start.childSessionId,
+      status: 'cancelled',
+      error: expect.stringContaining('sub-agent interrupted by user'),
+    })
+    expect(server.store.get(start.childSessionId)?.state).toMatchObject({ status: 'done', pendingCalls: [] })
+    expect(abortCounts.get(start.childSessionId)).toBe(1)
+
+    dashboard.close()
+    executor.close()
+  })
+
   it('surfaces a failed sub-agent to the dashboard and lets the parent recover', async () => {
     // End-to-end coverage for the doc-declared failure path: parent LLM
     // spawns a child agent, the child's LLM throws → the host emits a
@@ -5505,6 +5816,174 @@ describe('wire protocol', () => {
     expect(seenPrompts).toEqual(['first', 'first|third edited', 'first|third edited|second'])
 
     dashboard.close()
+  })
+
+  it.each(['kernel', 'copilot'] as const)('lets Stop tombstone a %s queue item during the post-claim barrier', async (agentRuntime) => {
+    const previousSecret = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'claimed-queue-race-secret'
+    const sessionId = `wire-claimed-queue-${agentRuntime}`
+    const operationId = `claimed-operation-${agentRuntime}`
+    let releaseClaim!: () => void
+    const claimBarrier = new Promise<void>((resolve) => { releaseClaim = resolve })
+    let observedClaim!: (value: { sessionId: string; operationId: string; runtime: string }) => void
+    const claimed = new Promise<{ sessionId: string; operationId: string; runtime: string }>((resolve) => { observedClaim = resolve })
+    try {
+      await server.close()
+      const http = createServer()
+      await new Promise<void>((resolve) => http.listen(0, resolve))
+      server = await startHostServer({
+        port: (http.address() as AddressInfo).port,
+        sessionsDir: dir,
+        defaultConfig: config,
+        httpServer: http,
+        copilot: { enabled: agentRuntime === 'copilot' },
+        llm: {
+          name: 'claimed-queue-race-test',
+          async call() {
+            return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+          },
+        },
+        queueDispatchBarrier: async (operation) => {
+          if (operation.operationId !== operationId) return
+          observedClaim(operation)
+          await claimBarrier
+        },
+      })
+      url = `http://localhost:${server.port}`
+      if (agentRuntime === 'copilot') {
+        await server.store.create({ sessionId, agentRuntime: 'copilot', agentRuntimeVersion: '1.0.11', externalSessionId: sessionId, config })
+      } else {
+        await server.store.ensure({ sessionId, defaultConfig: config })
+      }
+
+      const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+        transports: ['websocket'],
+        auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+        reconnection: false,
+      })
+      await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+      const admission = fetch(`${url}/internal/runtime/admission/commit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'claimed-queue-race-secret' },
+        body: JSON.stringify({ sessionId, operationId, text: 'dispatch this exact text', mode: 'queue' }),
+      })
+      await expect(claimed).resolves.toEqual({ sessionId, operationId, runtime: agentRuntime })
+
+      const cancelDispatch = agentRuntime === 'kernel' ? vi.spyOn(server.loop, 'dispatch') : undefined
+      const conflicts: RpcAck[] = [
+        await new Promise<RpcAck>((resolve) => dashboard.emit('client:delete_queued_message', { sessionId, id: operationId }, resolve)),
+      ]
+      if (agentRuntime === 'kernel') {
+        conflicts.push(
+          await new Promise<RpcAck>((resolve) => dashboard.emit('client:update_queued_message', { sessionId, id: operationId, text: 'must not replace claimed text' }, resolve)),
+          await new Promise<RpcAck>((resolve) => dashboard.emit('client:reorder_queued_message', { sessionId, id: operationId, beforeId: null }, resolve)),
+        )
+      }
+      for (const result of conflicts) {
+        expect(result).toEqual({ ok: false, error: `queued message ${operationId} is already dispatching` })
+      }
+
+      const stopped = await new Promise<RpcAck>((resolve) => dashboard.emit('client:cancel', { sessionId, operationId: `stop-${agentRuntime}` }, resolve))
+      expect(stopped).toEqual({ ok: true })
+      const stoppedLog = await readSessionLog(server.store.get(sessionId)!.logPath, { allowExternalRuntime: true })
+      if (agentRuntime === 'kernel') expect(cancelDispatch).toHaveBeenCalledWith(sessionId, { kind: 'cancel' })
+      else expect(stoppedLog.runtimeMetadata.some((entry) => entry.action === 'copilot.cancelled')).toBe(true)
+
+      releaseClaim()
+      await expect(admission.then((response) => response.json())).resolves.toMatchObject({ accepted: true })
+      expect(server.store.get(sessionId)!.state.messages.some((message) =>
+        message.role === 'user' && message.content.some((part) => part.type === 'text' && (part.text === 'dispatch this exact text' || part.text === 'must not replace claimed text')),
+      )).toBe(false)
+      const finalLog = await readSessionLog(server.store.get(sessionId)!.logPath, { allowExternalRuntime: true })
+      expect(finalLog.runtimeMetadata.some((entry) => entry.action === 'copilot.user_message' && entry.payload.operationId === operationId)).toBe(false)
+      const afterRelease = await new Promise<RpcAck>((resolve) => dashboard.emit('client:delete_queued_message', { sessionId, id: operationId }, resolve))
+      expect(afterRelease).toEqual({ ok: true })
+      dashboard.close()
+    } finally {
+      releaseClaim?.()
+      if (previousSecret === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previousSecret
+    }
+  })
+
+  it.each(['kernel', 'copilot'] as const)('still cancels the %s runtime when Stop races a claimed item whose dispatch already committed', async (agentRuntime) => {
+    const previousSecret = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'committed-queue-race-secret'
+    const sessionId = `wire-committed-queue-${agentRuntime}`
+    const operationId = `committed-operation-${agentRuntime}`
+    let releaseClaim!: () => void
+    const claimBarrier = new Promise<void>((resolve) => { releaseClaim = resolve })
+    let observedClaim!: () => void
+    const claimed = new Promise<void>((resolve) => { observedClaim = resolve })
+    try {
+      await server.close()
+      const http = createServer()
+      await new Promise<void>((resolve) => http.listen(0, resolve))
+      server = await startHostServer({
+        port: (http.address() as AddressInfo).port,
+        sessionsDir: dir,
+        defaultConfig: config,
+        httpServer: http,
+        copilot: { enabled: agentRuntime === 'copilot' },
+        llm: {
+          name: 'committed-queue-race-test',
+          async call() {
+            return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+          },
+        },
+        queueDispatchBarrier: async (operation) => {
+          if (operation.operationId !== operationId) return
+          observedClaim()
+          await claimBarrier
+        },
+      })
+      url = `http://localhost:${server.port}`
+      if (agentRuntime === 'copilot') {
+        await server.store.create({ sessionId, agentRuntime: 'copilot', agentRuntimeVersion: '1.0.11', externalSessionId: sessionId, config })
+      } else {
+        await server.store.ensure({ sessionId, defaultConfig: config })
+      }
+      const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+        transports: ['websocket'],
+        auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+        reconnection: false,
+      })
+      await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+      const admission = fetch(`${url}/internal/runtime/admission/commit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'committed-queue-race-secret' },
+        body: JSON.stringify({ sessionId, operationId, text: 'already committed text', mode: 'queue' }),
+      })
+      await claimed
+      if (agentRuntime === 'kernel') {
+        await server.loop.dispatch(sessionId, { kind: 'user_message', operationId, text: 'already committed text' })
+      } else {
+        await appendRuntimeMetadataEntry(server.store.get(sessionId)!.logPath, {
+          sessionId,
+          action: 'copilot.user_message',
+          payload: { operationId, text: 'already committed text' },
+        })
+      }
+
+      const cancelDispatch = agentRuntime === 'kernel' ? vi.spyOn(server.loop, 'dispatch') : undefined
+      const claimedDelete = await new Promise<RpcAck>((resolve) => dashboard.emit('client:delete_queued_message', { sessionId, id: operationId }, resolve))
+      expect(claimedDelete).toEqual({ ok: false, error: `queued message ${operationId} is already dispatching` })
+      const stopped = await new Promise<RpcAck>((resolve) => dashboard.emit('client:cancel', { sessionId, operationId: `stop-committed-${agentRuntime}` }, resolve))
+      expect(stopped).toEqual({ ok: true })
+      const stoppedLog = await readSessionLog(server.store.get(sessionId)!.logPath, { allowExternalRuntime: true })
+      if (agentRuntime === 'kernel') expect(cancelDispatch).toHaveBeenCalledWith(sessionId, { kind: 'cancel' })
+      else expect(stoppedLog.runtimeMetadata.some((entry) => entry.action === 'copilot.cancelled')).toBe(true)
+
+      releaseClaim()
+      await expect(admission.then((response) => response.json())).resolves.toMatchObject({ accepted: true })
+      dashboard.close()
+    } finally {
+      releaseClaim?.()
+      if (previousSecret === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previousSecret
+    }
   })
 
   it('persists queued user messages across host restart and syncs them to dashboards', async () => {

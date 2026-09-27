@@ -98,7 +98,7 @@ import { ulid } from 'ulid'
 
 import type { HostLoopDeps, LoopHandle } from '../loop.js'
 import { consolidateMemory, type ConsolidationOutcome } from '../extensions/memory-consolidation.js'
-import { markSubAgentInterrupted } from '../extensions/agent-tool.js'
+import { activeSubAgentFor, interruptSubAgentAfterRuntimeCancel, markSubAgentInterrupted } from '../extensions/agent-tool.js'
 import { resetCompactRuntime } from '../extensions/compaction.js'
 import { readSessionHistory, readSessionLog } from '../store/log.js'
 import { SessionStore, type SessionRecord } from '../store/session.js'
@@ -112,7 +112,7 @@ import type { DashboardActor } from '../auth-control.js'
 import { parseWire, type WireValidationContext } from '../wire-validation.js'
 import { isSkillManager } from '../extensions/skills.js'
 import { contextSnapshot, snapshotFromConfig, type ContextWindowOverride } from '../context/manager.js'
-import { sessionRoom } from './rooms.js'
+import { sessionRoom, terminalOwnerSessionId } from './rooms.js'
 import { dashboardConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
 import { OperationDeduper } from './operation-deduper.js'
 import type { AgentRuntimeRegistry } from '../agent-runtime/types.js'
@@ -334,6 +334,17 @@ export function configureDashboardNamespace(
       }
       return parseWire(s, raw, ctx)
     }
+    const runOperation = <T>(
+      eventKind: string,
+      targetSessionId: string,
+      operationId: string | undefined,
+      payload: unknown,
+      operation: () => Promise<T>,
+    ): Promise<RpcAck<T>> => operations.run(operationId, {
+      principal: operationPrincipal(socket.data.dashboardActor as DashboardActor | undefined),
+      sessionId: targetSessionId,
+      eventKind,
+    }, payload, operation)
     const subscribedSessions = new Set<string>()
     const subscribedWorkspaces = new Set<string>()
     socket.on('client:executor_ping', async (workspaceId, ack) => {
@@ -707,7 +718,7 @@ export function configureDashboardNamespace(
       if (!imageValidation.ok) { ack?.({ ok: false, error: `${imageValidation.error.code}: ${imageValidation.error.message}` }); return }
       const fileValidation = validateInlineMessageFiles(p.content)
       if (!fileValidation.ok) { ack?.({ ok: false, error: `${fileValidation.error.code}: ${fileValidation.error.message}` }); return }
-      const result = await operations.run(p.operationId, async () => {
+      const result = await runOperation('client:user_message', p.sessionId, p.operationId, p, async () => {
         deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
         await handleUserMessage(deps, p, socket.data.dashboardActor as DashboardActor | undefined)
       })
@@ -728,7 +739,7 @@ export function configureDashboardNamespace(
     socket.on('client:ask_user_choice', async (raw: ClientAskUserChoice, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientAskUserChoiceSchema, raw, 'client:ask_user_choice', (raw as ClientAskUserChoice | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid ask_user_choice payload' }); return }
-      const result = await operations.run(p.operationId, async () => {
+      const result = await runOperation('client:ask_user_choice', p.sessionId, p.operationId, p, async () => {
         if (!deps.askUserChoice) throw new Error('ask_user_choice is not configured on this host')
         const response = p.customText !== undefined
           ? { kind: 'custom' as const, text: p.customText }
@@ -763,7 +774,7 @@ export function configureDashboardNamespace(
     socket.on('client:cancel', async (raw: ClientCancel, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientCancelSchema, raw, 'client:cancel', (raw as ClientCancel | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid cancel payload' }); return }
-      const result = await operations.run(p.operationId, async () => {
+      const result = await runOperation('client:cancel', p.sessionId, p.operationId, p, async () => {
         // Establish the queue boundary before cancelling the turn. Otherwise the
         // queue drainer can observe the resulting resting state and immediately
         // start a queued steer/follow-up, making Stop appear ineffective.
@@ -779,12 +790,34 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientInterruptSubAgentSchema, raw, 'client:interrupt_sub_agent')
       if (!p) return
       try {
-        const result = markSubAgentInterrupted(p.parentSessionId, p.parentCallId, p.childSessionId)
+        const active = activeSubAgentFor(p.parentSessionId, p.parentCallId)
+        if (!active) throw new Error('sub-agent is not running')
+        if (p.childSessionId && active.childSessionId !== p.childSessionId) {
+          throw new Error('sub-agent child session mismatch')
+        }
+        const child = await loadRecordForDashboard(deps, active.childSessionId)
+        if (!child) throw new Error('unknown sub-agent session')
+        // A late or repeated click after the child reached a terminal state is a
+        // no-op; do not rewrite a naturally completed wrapper as cancelled.
+        if (child.state.status === 'done' || child.state.status === 'error') return
+        const runtime = deps.agentRuntimes.require(child.agentRuntime)
+        // Kernel cancellation must mark first: its serialized dispatch can wait
+        // for the agent tool wrapper to settle. External runtimes abort their
+        // SDK generation/tools directly and can therefore confirm cancellation
+        // before the wrapper tells the dashboard it was stopped.
+        const result = child.agentRuntime === 'kernel'
+          ? markSubAgentInterrupted(p.parentSessionId, p.parentCallId, p.childSessionId)
+          : await interruptSubAgentAfterRuntimeCancel(
+              p.parentSessionId,
+              p.parentCallId,
+              p.childSessionId,
+              async () => await runtime.cancel(child),
+            )
         if (!result.ok) {
           deps.broadcastError(p.parentSessionId, 'host', result.error ?? 'sub-agent interrupt failed')
           return
         }
-        await deps.loop.dispatch(result.childSessionId, { kind: 'cancel' })
+        if (child.agentRuntime === 'kernel') await runtime.cancel(child)
       } catch (err) {
         deps.broadcastError(
           p.parentSessionId,
@@ -865,7 +898,7 @@ export function configureDashboardNamespace(
         ack?.({ ok: false, error: 'approval mode "allow_all" is disabled by the host' })
         return
       }
-      const result = await operations.run(p.operationId, async () => {
+      const result = await runOperation('client:set_approval_mode', p.sessionId, p.operationId, p, async () => {
         const record = await loadRecordForDashboard(deps, p.sessionId)
         if (!record) throw new Error('unknown session')
         const runtime = deps.agentRuntimes.require(record.agentRuntime)
@@ -920,21 +953,21 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientReorderQueuedMessageSchema, raw, 'client:reorder_queued_message', (raw as ClientReorderQueuedMessage | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
       if (!await requireRuntimeCapability(deps, p.sessionId, 'queue', 'message queues')) { ack?.({ ok: false, error: 'runtime does not support message queues' }); return }
-      const result = await operations.run(p.operationId, () => deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId))
+      const result = await runOperation('client:reorder_queued_message', p.sessionId, p.operationId, p, () => deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId))
       ack?.(result)
     })
     socket.on('client:update_queued_message', async (raw: ClientUpdateQueuedMessage, ack) => {
       const p = vparse(schema.ClientUpdateQueuedMessageSchema, raw, 'client:update_queued_message', (raw as ClientUpdateQueuedMessage | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
       if (!await requireRuntimeCapability(deps, p.sessionId, 'queue', 'message queues')) { ack?.({ ok: false, error: 'runtime does not support message queues' }); return }
-      const result = await operations.run(p.operationId, () => deps.messageQueues.update(p.sessionId, p.id, p.text, p.content))
+      const result = await runOperation('client:update_queued_message', p.sessionId, p.operationId, p, () => deps.messageQueues.update(p.sessionId, p.id, p.text, p.content))
       ack?.(result)
     })
     socket.on('client:delete_queued_message', async (raw: ClientDeleteQueuedMessage, ack) => {
       const p = vparse(schema.ClientDeleteQueuedMessageSchema, raw, 'client:delete_queued_message', (raw as ClientDeleteQueuedMessage | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
       if (!await requireRuntimeCapability(deps, p.sessionId, 'queue', 'message queues')) { ack?.({ ok: false, error: 'runtime does not support message queues' }); return }
-      const result = await operations.run(p.operationId, () => deps.messageQueues.delete(p.sessionId, p.id))
+      const result = await runOperation('client:delete_queued_message', p.sessionId, p.operationId, p, () => deps.messageQueues.delete(p.sessionId, p.id))
       ack?.(result)
     })
     socket.on('client:rename_session', async (raw: ClientRenameSession) => {
@@ -1424,7 +1457,7 @@ export function configureDashboardNamespace(
     socket.on('client:delete_session', async (raw: ClientDeleteSession, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientDeleteSessionSchema, raw, 'client:delete_session', (raw as ClientDeleteSession | undefined)?.sessionId)
       if (!p) { ack?.({ ok: false, error: 'invalid delete session request' }); return }
-      const result = await operations.run(p.operationId, async () => {
+      const result = await runOperation('client:delete_session', p.sessionId, p.operationId, p, async () => {
         // A child Session has no independent lifecycle: deleting its root while
         // retaining descendants produces unreachable sub-agent records. Resolve
         // the complete tree first, reject the whole operation if any member is
@@ -1463,7 +1496,7 @@ export function configureDashboardNamespace(
         ack?.({ ok: false, error: 'invalid preferences update' })
         return
       }
-      const result = await operations.run(p.operationId, async () => {
+      const result = await runOperation('client:update_preferences', p.sessionId, p.operationId, p, async () => {
         if ('selectedModel' in p.preferences) {
           if (!await requireRuntimeCapability(deps, p.sessionId, 'modelSelection', 'model selection')) {
             throw new Error('model selection is unavailable for this Session Runtime')
@@ -1504,6 +1537,13 @@ async function refreshSessionSkillsIfNeeded(
 function auditActor(socket: { data: Record<string, unknown> }): AuditActor {
   const actor = socket.data.dashboardActor as AuditActor | undefined
   return actor ?? { kind: 'anonymous' }
+}
+
+function operationPrincipal(actor: DashboardActor | undefined): string {
+  if (!actor || actor.kind === 'anonymous') return 'anonymous'
+  if (actor.kind === 'token') return 'token'
+  if (actor.kind === 'github_user') return `github:${actor.id ?? actor.login}`
+  return `ingress:${actor.organizationId}:${actor.principal}`
 }
 
 function validateIngressSessionAccess(
@@ -1683,7 +1723,7 @@ async function safeDispatch(
   }
 }
 
-async function handleUserMessage(
+export async function handleUserMessage(
   deps: DashboardDeps,
   p: ClientUserMessage,
   actor?: DashboardActor,
@@ -1708,24 +1748,34 @@ async function handleUserMessage(
     return
   }
   validateMessageAttachmentReferences(deps.loopDeps.messageAttachments, p.sessionId, p.content)
-  if (record.agentRuntime !== 'kernel') {
-    const runtime = deps.agentRuntimes.require(record.agentRuntime)
+  const runtime = deps.agentRuntimes.require(record.agentRuntime)
+  const requestedMode = p.mode ?? 'steer'
+  const messageModel = effectiveModelForRecord(deps, record)
+  const hostQueueIdle = deps.messageQueues.pending(p.sessionId) === 0
+  if (
+    record.agentRuntime !== 'kernel'
+    && requestedMode === 'steer'
+    && isRestingStatus(record.state.status)
+    && hostQueueIdle
+  ) {
+    // An idle external runtime can accept the steer immediately. When it is
+    // busy, use the durable front queue below: calling send here would start a
+    // new runtime generation while the previous generation's tools may still
+    // be running.
+    await deps.loopDeps.messageAttachments?.commitReferences(p.sessionId, p.content)
     await runtime.send(record, {
       text: p.text,
       ...(p.content ? { content: p.content } : {}),
       ...(p.operationId ? { operationId: p.operationId } : {}),
-      ...(effectiveModelForRecord(deps, record) ? { model: effectiveModelForRecord(deps, record) } : {}),
+      ...(messageModel ? { model: messageModel } : {}),
     })
-    await deps.loopDeps.messageAttachments?.commitReferences(p.sessionId, p.content)
     return
   }
-  const messageModel = effectiveModelForRecord(deps, record)
-  if (record.state.status === 'thinking' && !deps.loop.hasActiveLlmCall(p.sessionId)) {
+  if (record.agentRuntime === 'kernel' && record.state.status === 'thinking' && !deps.loop.hasActiveLlmCall(p.sessionId)) {
     await deps.loop.recoverInterruptedLlm(p.sessionId)
     record = await loadRecordForDashboard(deps, p.sessionId)
     if (!record) return
   }
-  const requestedMode = p.mode ?? 'steer'
   // Queue is a follow-up while another accepted message or turn is active.
   // The durable ACK for the first message can arrive before its background
   // drain changes the kernel status, so status alone has a race: a second
@@ -1733,8 +1783,7 @@ async function handleUserMessage(
   // ahead of the item whose commit callback owns the dequeue fence. Include
   // both host-owned queue and Loop activity in the admission state. Only a
   // truly quiescent queue-mode send becomes a hidden immediate steer.
-  const messagePipelineIdle = deps.messageQueues.pending(p.sessionId) === 0
-    && !deps.loop.hasActiveTurn(p.sessionId)
+  const messagePipelineIdle = hostQueueIdle && !deps.loop.hasActiveTurn(p.sessionId)
   const mode = requestedMode === 'queue' && isRestingStatus(record.state.status) && messagePipelineIdle
     ? 'steer'
     : requestedMode
@@ -1768,9 +1817,13 @@ async function handleUserMessage(
   // background. Awaiting loop.dispatch here made an idle direct send hold its
   // ACK for the entire LLM/tool turn; the dashboard timed out and restored a
   // draft that had already been sent.
-  await deps.messageQueues.enqueue(p.sessionId, queued, mode === 'steer' ? 'front' : undefined)
+  // Commitment must precede the durable queue snapshot: once enqueue returns,
+  // the item may survive a restart and dispatch without another dashboard call.
+  // commitReferences is idempotent, so retries and HTTP admission's independent
+  // post-enqueue commitment remain safe.
   await deps.loopDeps.messageAttachments?.commitReferences(p.sessionId, p.content)
-  if (mode === 'steer' && !isRestingStatus(record.state.status)) {
+  await deps.messageQueues.enqueue(p.sessionId, queued, mode === 'steer' ? 'front' : undefined)
+  if (record.agentRuntime === 'kernel' && mode === 'steer' && !isRestingStatus(record.state.status)) {
     // Do not truncate an in-flight response/tool. Stop at the next safe boundary
     // and let the persisted front-queued steer become the next user turn.
     deps.loop.requestStopAtBoundary(p.sessionId)
@@ -1797,13 +1850,6 @@ async function loadRecordForDashboard(
     }
   }
   return record
-}
-
-export function terminalOwnerSessionId(sessionId: string): string | undefined {
-  const prefix = 'workspace-terminal:'
-  if (!sessionId.startsWith(prefix)) return sessionId
-  const separator = sessionId.lastIndexOf(':')
-  return separator > prefix.length ? sessionId.slice(prefix.length, separator) : undefined
 }
 
 export async function loadDashboardSession(

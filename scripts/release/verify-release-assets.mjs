@@ -15,6 +15,7 @@ if (!existsSync(manifestPath)) fail('missing release/manifest.json')
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const supportedNativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64']
+const supportedCopilotRuntimeTargets = supportedNativeTargets
 if (!/^[0-9a-f]{40}$/u.test(manifest.source?.revision ?? '')
   || !/^[0-9a-f]{64}$/u.test(manifest.source?.snapshotSha256 ?? '')
   || typeof manifest.source?.dirty !== 'boolean') {
@@ -41,8 +42,23 @@ for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
   }
 }
 const targetsForInventory = actualNativeTargets.length === 0 ? [] : supportedNativeTargets
+const actualCopilotRuntimeTargets = Array.isArray(manifest.copilotRuntimeTargets)
+  ? [...manifest.copilotRuntimeTargets].sort()
+  : undefined
+const expectedCopilotRuntimeTargets = actualNativeTargets.length === 0
+  ? [`${process.platform}-${process.arch}`]
+  : supportedCopilotRuntimeTargets
+if (!actualCopilotRuntimeTargets
+  || JSON.stringify(actualCopilotRuntimeTargets) !== JSON.stringify([...expectedCopilotRuntimeTargets].sort())) {
+  fail('manifest.copilotRuntimeTargets must contain the build platform for a CJS stage or all supported release targets')
+}
+const copilotRuntimeAssets = actualCopilotRuntimeTargets.flatMap((target) => [
+  `kala-copilot-runtime-${target}`,
+  `kala-copilot-runtime-node-${target}.node`,
+])
 const expectedManifestAssets = [
   ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor'].flatMap((name) => targetsForInventory.map((target) => `${name}-${target}`)),
+  ...copilotRuntimeAssets,
   'kala-dashboard-with-runtime.cjs',
   'kala-runtime.cjs',
   'kala-executor.cjs',
@@ -64,9 +80,10 @@ try { metadata = verifyReleaseMetadataArchive(join(releaseDir, releaseMetadataAr
 const sbom = JSON.parse(metadata.get('sbom.cdx.json'))
 const notices = metadata.get('THIRD_PARTY_NOTICES.txt').toString('utf8')
 const notes = metadata.get('RELEASE_NOTES.md').toString('utf8')
-const copilotDependency = sbom.components.find((component) => component.name === '@github/copilot')
-if (!copilotDependency || !copilotDependency.licenses?.some((entry) => entry.license?.id === 'LicenseRef-GitHub-Copilot-CLI') || !notices.includes('@github/copilot@')) {
-  fail('release metadata must retain the upstream Copilot npm dependency and license notice')
+const copilotDependency = sbom.components.find((component) => component.name === '@github/copilot-sdk')
+const copilotRuntimeDependency = sbom.components.find((component) => component.name === `@github/copilot-sdk-${process.platform}-${process.arch}`)
+if (!copilotDependency || !copilotRuntimeDependency || !notices.includes('@github/copilot-sdk@')) {
+  fail('release metadata must retain the upstream Copilot SDK and platform runtime dependencies')
 }
 const signaturePresent = existsSync(join(releaseDir, 'SHA256SUMS.sigstore.json'))
 if (process.argv.includes('--require-signed') && (!signaturePresent || actualNativeTargets.length !== supportedNativeTargets.length)) {
@@ -89,6 +106,10 @@ if (includesHost) {
     DEDICATED_SUPPORT_ARCHIVE,
   ]) {
     if (!manifest.assets.includes(asset)) fail(`manifest missing Dedicated asset ${asset}`)
+  }
+  for (const asset of copilotRuntimeAssets) {
+    if (!manifest.assets.includes(asset)) fail(`manifest missing Copilot runtime asset ${asset}`)
+    accessSync(join(releaseDir, asset), constants.R_OK)
   }
   try { inspectDedicatedSupportBundle(join(releaseDir, DEDICATED_SUPPORT_ARCHIVE)) } catch (error) { fail(error.message) }
   const hostBundle = readFileSync(join(releaseDir, 'kala-dashboard-with-runtime.cjs'), 'utf8')

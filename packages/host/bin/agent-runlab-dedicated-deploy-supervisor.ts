@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     commitPlannedRestart: async (slot, attemptId) => await postJson<HostRestartAttempt>(`${await slotOrigin(slot)}/internal/runtime/restart/commit`, { attemptId }, handoffHeaders()),
     abortPlannedRestart: async (slot, attemptId) => { await postJson(`${await slotOrigin(slot)}/internal/runtime/restart/abort`, attemptId ? { attemptId } : {}, handoffHeaders()) },
     selfTestRelease: async (releaseDir) => {
-      const result = await command('/usr/bin/node', ['--check', join(releaseDir, 'kala-runtime.cjs')], true)
+      const result = await command('/usr/bin/node', ['--check', join(releaseDir, await runtimeAssetName(releaseDir))], true)
       if (result.trim()) process.stdout.write(result)
     },
     startControlPlaneUpdate: async (receipt) => {
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
             || capabilities.deployment.runtimeProfile !== 'full'
             || !capabilities.capabilities.operations
             || !capabilities.capabilities.pipeline) throw new Error('Dedicated capability profile mismatch')
-          const activeBundle = join(root, 'slots', slot, 'kala-runtime.cjs')
+          const activeBundle = join(root, 'slots', slot, await runtimeAssetName(join(root, 'slots', slot)))
           const actual = createHash('sha256').update(await readFile(activeBundle)).digest('hex')
           if (actual !== expected.bundleSha256) throw new Error('active bundle digest mismatch')
           const restart = await fetchJson<HostRestartStatus>(`${origin}/internal/runtime/restart/status`, handoffHeaders())
@@ -193,6 +193,11 @@ async function main(): Promise<void> {
       throw new Error(`Unit slot ${slot} verification timed out${lastError instanceof Error ? `: ${lastError.message}` : ''}`)
     },
     switchRoute: async (state) => { await writeDedicatedRouteState(routeStatePath, state) },
+  }, {
+    // Deliberately process-local configuration: operators opt in on this machine
+    // with a persistent systemd Environment= override, which is read again after
+    // a control-plane update restarts the Supervisor.
+    allowLocalDevelopment: process.env.AGENT_RUNLAB_ALLOW_LOCAL_DEVELOPMENT_DEPLOY === '1',
   })
   let stopping = false
   process.stdout.write(`${JSON.stringify({ event: 'deploy_supervisor_ready' })}\n`)
@@ -581,6 +586,19 @@ function sameDeploymentFence(
     && actual.targetReleaseDigest === expected.targetReleaseDigest
     && actual.expectedRouteGeneration === expected.expectedRouteGeneration
     && actual.fencingToken === expected.fencingToken
+}
+
+async function runtimeAssetName(releaseDir: string): Promise<string> {
+  const manifest = JSON.parse(String(await readFile(join(releaseDir, 'manifest.json')))) as {
+    assets?: unknown
+    fallbackAssets?: Record<string, unknown>
+  }
+  if (!Array.isArray(manifest.assets)) throw new Error('release manifest assets are invalid')
+  if (manifest.assets.includes('kala-runtime.cjs')) return 'kala-runtime.cjs'
+  if (manifest.assets.includes('agent-runlab-runtime.cjs')
+    && manifest.fallbackAssets?.['agent-runlab-runtime'] === 'agent-runlab-runtime.cjs'
+    && manifest.assets.includes('agent-runlab-dedicated-unit@.service')) return 'agent-runlab-runtime.cjs'
+  throw new Error('release has no supported Runtime asset')
 }
 
 async function systemctlOutput(...args: string[]): Promise<string> {

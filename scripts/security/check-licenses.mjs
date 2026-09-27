@@ -24,14 +24,6 @@ const reviewedUnknown = new Map([
     sha256: '66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49',
     classification: 'MIT',
   }],
-  // The official SDK depends on @github/copilot and one platform package. Keep
-  // their exact license texts reviewed while they remain in the npm dependency
-  // tree; this is not approval to publish a second, Kala-managed CLI asset.
-  ...['@github/copilot@1.0.80', ...['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64'].map((target) => `@github/copilot-${target}@1.0.80`)].map((name) => [name, {
-    licenseFile: 'LICENSE.md',
-    sha256: 'b9680937e10425bf19862908856c16ed274e6b81a1368bd62be7a757eab21628',
-    classification: 'LicenseRef-GitHub-Copilot-CLI',
-  }]),
 ])
 
 export function reviewedUnknownLicense(key) { return reviewedUnknown.get(key) }

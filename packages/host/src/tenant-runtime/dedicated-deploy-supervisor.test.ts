@@ -20,6 +20,25 @@ const modernAssets = [
   'kala-dedicated-deploy-supervisor.cjs', 'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz',
   'kala-release-metadata.tar.gz', 'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
 ]
+const localDevelopmentAssets = [
+  'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs',
+  'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
+  'kala-copilot-runtime-linux-x64', 'kala-copilot-runtime-node-linux-x64.node',
+  'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz',
+  'kala-release-metadata.tar.gz', 'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
+]
+const legacyPredecessorAssets = [
+  'bundle-dashboard-with-runtime.cjs', 'agent-runlab-runtime.cjs', 'agent-kernel-executor.cjs',
+  'agent-runlab-dedicated-ingress.cjs', 'agent-runlab-dedicated-deploy-supervisor.cjs',
+  'agent-kernel-dashboard-dist.tar.gz', 'dashboard-release.json', 'agent-runlab-docs.tar.gz',
+  'agent-runlab-model-catalog-seed.json', 'run.sh', 'install-executor.sh',
+  'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@.service',
+  'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service',
+  'agent-runlab-dedicated-migration-finalizer.service', 'deployment.json', 'install-dedicated-systemd.mjs',
+  'runlab-dedicated.mjs', 'deploy-dedicated.mjs', 'deploy-dashboard.mjs', 'cutover-dedicated-systemd.mjs',
+  'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'update-dedicated-control-plane.mjs',
+  'rollback-dedicated-systemd.mjs', 'sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt',
+]
 const supportAssets = [
   'cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs',
   'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs',
@@ -52,6 +71,55 @@ async function release(root: string, name: string, content: string): Promise<{ d
 
 async function submission(root: string, operationId: string, content: string): Promise<{ dir: string; bundle: string; release: string }> {
   return await writeRelease(join(root, 'submissions', operationId), content)
+}
+
+async function localDevelopmentRelease(dir: string, content: string, immutable = false): Promise<{ dir: string; bundle: string; release: string; files: string[] }> {
+  await mkdir(dir, { recursive: true })
+  const checksummed = new Map(localDevelopmentAssets.map((name) => [name, name === 'kala-runtime.cjs' ? content : `${name}:${content}`]))
+  checksummed.set('manifest.json', JSON.stringify({ localDevelopment: true, source: { dirty: true }, assets: localDevelopmentAssets }))
+  for (const [file, value] of checksummed) await writeFile(join(dir, file), value)
+  const sums = [...checksummed].map(([file, value]) => digest(value) + '  ' + file).join('\n') + '\n'
+  await writeFile(join(dir, 'SHA256SUMS'), sums)
+  const files = [...checksummed.keys(), 'SHA256SUMS']
+  if (immutable) {
+    await Promise.all(files.map(async (file) => await chmod(join(dir, file), 0o400)))
+    await chmod(dir, 0o500)
+  }
+  return { dir, bundle: digest(content), release: digest(sums), files }
+}
+
+async function legacyPredecessorRelease(dir: string, content: string, immutable = false): Promise<{ dir: string; bundle: string; release: string; files: string[] }> {
+  await mkdir(dir, { recursive: true })
+  const manifest = JSON.stringify({
+    name: 'kala', version: '0.2.0-rc.12', assets: legacyPredecessorAssets,
+    fallbackAssets: {
+      'agent-kernel-host': 'bundle-dashboard-with-runtime.cjs',
+      'agent-runlab-runtime': 'agent-runlab-runtime.cjs',
+      'agent-kernel-executor': 'agent-kernel-executor.cjs',
+      'agent-runlab-dedicated-ingress': 'agent-runlab-dedicated-ingress.cjs',
+      'agent-runlab-dedicated-deploy-supervisor': 'agent-runlab-dedicated-deploy-supervisor.cjs',
+    },
+  })
+  const checksummed = new Map(legacyPredecessorAssets.map((name) => [name, name === 'agent-runlab-runtime.cjs' ? content : `${name}:${content}`]))
+  checksummed.set('manifest.json', manifest)
+  checksummed.set('RELEASE_NOTES.md', '# Agent RunLab predecessor release')
+  for (const [file, value] of checksummed) await writeFile(join(dir, file), value)
+  const sums = [...checksummed].map(([file, value]) => digest(value) + '  ' + file).join('\n') + '\n'
+  await writeFile(join(dir, 'SHA256SUMS'), sums)
+  const files = [...checksummed.keys(), 'SHA256SUMS']
+  if (immutable) {
+    await Promise.all(files.map(async (file) => await chmod(join(dir, file), 0o400)))
+    await chmod(dir, 0o500)
+  }
+  return { dir, bundle: digest(content), release: digest(sums), files }
+}
+
+async function rehashRelease(dir: string): Promise<string> {
+  const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as { assets: string[] }
+  const names = [...manifest.assets, 'manifest.json']
+  const sums = (await Promise.all(names.map(async (name) => `${digest(await readFile(join(dir, name)))}  ${name}`))).join('\n') + '\n'
+  await writeFile(join(dir, 'SHA256SUMS'), sums)
+  return digest(sums)
 }
 
 async function writeRelease(dir: string, content: string, legacy = false): Promise<{ dir: string; bundle: string; release: string; files: string[] }> {
@@ -175,16 +243,66 @@ describe('Dedicated Deploy Supervisor protocol', () => {
     await expect(supervisor.accept({ ...input, bundleSha256: digest('different') })).rejects.toThrow('conflicts')
   })
 
-  it('publishes the exact modern 27-file release with archived metadata and no standalone notes', async () => {
+  it('publishes the exact modern 33-file release with archived metadata and no standalone notes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-publish-')); roots.push(root)
     const old = await release(root, 'old', 'old')
     const next = await submission(root, 'operation-deploy-0001', 'next')
     const h = harness(); const supervisor = new DedicatedDeploySupervisor(root, h.adapter)
     const staged = await supervisor.accept(request(next, { sourceReleaseDigest: old.release }))
     expect(staged.releaseDir).toBe(join(root, 'releases', 'next'))
-    expect(await readdir(staged.releaseDir)).toHaveLength(27)
+    expect(await readdir(staged.releaseDir)).toHaveLength(33)
     expect(await readFile(join(staged.releaseDir, 'kala-release-metadata.tar.gz'), 'utf8')).toBe('kala-release-metadata.tar.gz:next')
     await expect(readFile(join(staged.releaseDir, 'RELEASE_NOTES.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('accepts an explicitly marked dirty local CJS candidate only with machine opt-in', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-local-')); roots.push(root)
+    const old = await release(root, 'old', 'old')
+    const next = await localDevelopmentRelease(join(root, 'submissions', 'operation-deploy-0001'), 'local-next')
+    const input = request(next, { sourceReleaseDigest: old.release })
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter).accept(input)).rejects.toThrow('not enabled on this machine')
+
+    const staged = await new DedicatedDeploySupervisor(root, harness().adapter, { allowLocalDevelopment: true }).accept(input)
+    expect((await readdir(staged.releaseDir)).sort()).toEqual([...localDevelopmentAssets, 'manifest.json', 'SHA256SUMS'].sort())
+    expect(localDevelopmentAssets).toContain('kala-release-metadata.tar.gz')
+    expect(JSON.parse(await readFile(join(staged.releaseDir, 'manifest.json'), 'utf8'))).toMatchObject({
+      localDevelopment: true, source: { dirty: true },
+    })
+    await expect(readFile(join(staged.releaseDir, 'SHA256SUMS.sigstore.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects local candidates without the marker, exact asset set, no-signature layout, or valid hashes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-local-invalid-')); roots.push(root)
+    const old = await release(root, 'old', 'old')
+    const options = { allowLocalDevelopment: true }
+
+    const unmarked = await localDevelopmentRelease(join(root, 'submissions', 'operation-local-unmarked'), 'unmarked')
+    const unmarkedManifest = JSON.parse(await readFile(join(unmarked.dir, 'manifest.json'), 'utf8'))
+    delete unmarkedManifest.localDevelopment
+    await writeFile(join(unmarked.dir, 'manifest.json'), JSON.stringify(unmarkedManifest)); unmarked.release = await rehashRelease(unmarked.dir)
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter, options).accept(request(unmarked, {
+      operationId: 'operation-local-unmarked', deploymentId: 'deployment-local-unmarked', sourceReleaseDigest: old.release,
+    }))).rejects.toThrow('exactly 33 files')
+
+    const extra = await localDevelopmentRelease(join(root, 'submissions', 'operation-local-extra'), 'extra')
+    const extraManifest = JSON.parse(await readFile(join(extra.dir, 'manifest.json'), 'utf8'))
+    extraManifest.assets.push('unexpected.cjs'); await writeFile(join(extra.dir, 'unexpected.cjs'), 'unexpected')
+    await writeFile(join(extra.dir, 'manifest.json'), JSON.stringify(extraManifest)); extra.release = await rehashRelease(extra.dir)
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter, options).accept(request(extra, {
+      operationId: 'operation-local-extra', deploymentId: 'deployment-local-extra', sourceReleaseDigest: old.release,
+    }))).rejects.toThrow('exact current or legacy CJS asset set')
+
+    const signed = await localDevelopmentRelease(join(root, 'submissions', 'operation-local-signed'), 'signed')
+    await writeFile(join(signed.dir, 'SHA256SUMS.sigstore.json'), '{}')
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter, options).accept(request(signed, {
+      operationId: 'operation-local-signed', deploymentId: 'deployment-local-signed', sourceReleaseDigest: old.release,
+    }))).rejects.toThrow('file set')
+
+    const changed = await localDevelopmentRelease(join(root, 'submissions', 'operation-local-changed'), 'changed')
+    await writeFile(join(changed.dir, 'kala-docs.tar.gz'), 'tampered')
+    await expect(new DedicatedDeploySupervisor(root, harness().adapter, options).accept(request(changed, {
+      operationId: 'operation-local-changed', deploymentId: 'deployment-local-changed', sourceReleaseDigest: old.release,
+    }))).rejects.toThrow('invalid release asset')
   })
 
   it('accepts only archive-verified support expansion in an immutable modern predecessor', async () => {
@@ -222,12 +340,12 @@ describe('Dedicated Deploy Supervisor protocol', () => {
 
   it('rejects standalone notes and predecessor-format submissions while retaining immutable predecessor rollback', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-layouts-')); roots.push(root)
-    const old = await release(root, 'old', 'old')
+    const old = await legacyPredecessorRelease(join(root, 'releases', 'old'), 'old', true)
     const withNotes = await submission(root, 'operation-deploy-0001', 'next')
     await writeFile(join(withNotes.dir, 'RELEASE_NOTES.md'), '# no longer external')
     await expect(new DedicatedDeploySupervisor(root, harness().adapter).accept(request(withNotes, { sourceReleaseDigest: old.release }))).rejects.toThrow('file set')
 
-    const legacy = await writeRelease(join(root, 'submissions', 'operation-deploy-0002'), 'legacy-next', true)
+    const legacy = await legacyPredecessorRelease(join(root, 'submissions', 'operation-deploy-0002'), 'legacy-next')
     await expect(new DedicatedDeploySupervisor(root, harness().adapter).accept(request(legacy, {
       operationId: 'operation-deploy-0002', deploymentId: 'deployment-0002', sourceReleaseDigest: old.release,
     }))).rejects.toThrow('missing kala-release-metadata.tar.gz')
@@ -398,6 +516,34 @@ describe('Dedicated Deploy Supervisor protocol', () => {
     expect(h.adapter.startControlPlaneUpdate).toHaveBeenCalledTimes(2)
   })
 
+  it('revalidates local opt-in after a control-plane Supervisor restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-local-control-restart-')); roots.push(root)
+    const old = await release(root, 'old', 'old')
+    const next = await localDevelopmentRelease(join(root, 'submissions', 'operation-deploy-0001'), 'local-next')
+    const h = harness(); h.setControlStatus({ phase: 'pending' })
+    const staged = await new DedicatedDeploySupervisor(root, h.adapter, { allowLocalDevelopment: true }).accept(request(next, { sourceReleaseDigest: old.release }))
+    expect(await new DedicatedDeploySupervisor(root, h.adapter, { allowLocalDevelopment: true }).reconcile(staged.deploymentId)).toMatchObject({ phase: 'control_updating' })
+
+    const rejected = await new DedicatedDeploySupervisor(root, h.adapter).reconcile(staged.deploymentId)
+    expect(rejected).toMatchObject({ phase: 'rolled_back', error: { message: expect.stringContaining('not enabled on this machine') } })
+    expect(h.adapter.requestPlannedRestart).not.toHaveBeenCalled()
+  })
+
+  it('continues a local deployment after restart when the machine opt-in remains configured', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-local-control-opted-')); roots.push(root)
+    const old = await release(root, 'old', 'old')
+    const next = await localDevelopmentRelease(join(root, 'submissions', 'operation-deploy-0001'), 'local-next')
+    const h = harness(); h.setControlStatus({ phase: 'pending' })
+    const options = { allowLocalDevelopment: true }
+    const staged = await new DedicatedDeploySupervisor(root, h.adapter, options).accept(request(next, { sourceReleaseDigest: old.release }))
+    expect(await new DedicatedDeploySupervisor(root, h.adapter, options).reconcile(staged.deploymentId)).toMatchObject({ phase: 'control_updating' })
+    h.setControlStatus({
+      phase: 'completed', previousSupervisorPid: 8, previousIngressPid: 9, ingressPid: 19, supervisorPid: 18,
+      activatedAt: new Date().toISOString(), readyAt: new Date().toISOString(),
+    })
+    await expect(new DedicatedDeploySupervisor(root, h.adapter, options).reconcile(staged.deploymentId)).resolves.toMatchObject({ phase: 'completed' })
+  })
+
   it('restores the control plane before rolling Runtime back after target control failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-control-rollback-')); roots.push(root)
     const old = await release(root, 'old', 'old'); const next = await submission(root, 'operation-deploy-0001', 'next')
@@ -434,15 +580,38 @@ describe('Dedicated Deploy Supervisor protocol', () => {
 
   it('restores the predecessor and resumes persisted rollback after Supervisor restart', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-rollback-')); roots.push(root)
-    const old = await release(root, 'old', 'old'); const next = await submission(root, 'operation-deploy-0001', 'next')
+    const old = await legacyPredecessorRelease(join(root, 'releases', 'old'), 'old', true); const next = await submission(root, 'operation-deploy-0001', 'next')
     const h = harness(); h.failNextVerification(); const supervisor = new DedicatedDeploySupervisor(root, h.adapter)
     const staged = await supervisor.accept(request(next, { sourceReleaseDigest: old.release }))
     const receipt = await supervisor.reconcile(staged.deploymentId)
     expect(receipt.phase).toBe('rolled_back')
+    expect(h.adapter.verifySlot).toHaveBeenCalledWith('blue', expect.objectContaining({ bundleSha256: old.bundle }))
     const persisted = JSON.parse(await readFile(join(root, 'receipts', staged.deploymentId + '.json'), 'utf8'))
     await writeFile(join(root, 'receipts', staged.deploymentId + '.json'), JSON.stringify({ ...persisted, phase: 'rolling_back', receiptRevision: persisted.receiptRevision + 1, rollback: { predecessorReleaseId: 'old', outcome: 'pending' } }))
     const resumed = await new DedicatedDeploySupervisor(root, h.adapter).reconcile(staged.deploymentId)
     expect(resumed.phase).toBe('rolled_back')
+  })
+
+  it('revalidates local predecessor opt-in when rollback resumes after restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deploy-protocol-local-rollback-restart-')); roots.push(root)
+    const old = await localDevelopmentRelease(join(root, 'releases', 'old'), 'local-old', true)
+    const next = await submission(root, 'operation-deploy-0001', 'next')
+    const h = harness(); h.failNextVerification()
+    const options = { allowLocalDevelopment: true }
+    const staged = await new DedicatedDeploySupervisor(root, h.adapter, options).accept(request(next, { sourceReleaseDigest: old.release }))
+    const rolledBack = await new DedicatedDeploySupervisor(root, h.adapter, options).reconcile(staged.deploymentId)
+    expect(rolledBack.phase).toBe('rolled_back')
+
+    const receiptPath = join(root, 'receipts', staged.deploymentId + '.json')
+    const persisted = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await writeFile(receiptPath, JSON.stringify({
+      ...persisted, phase: 'rolling_back', receiptRevision: persisted.receiptRevision + 1,
+      rollback: { predecessorReleaseId: 'old', outcome: 'pending', stage: 'verifying_live' },
+    }))
+    const rejected = await new DedicatedDeploySupervisor(root, h.adapter).reconcile(staged.deploymentId)
+    expect(rejected).toMatchObject({
+      phase: 'rollback_failed', error: { message: expect.stringContaining('local development release is not enabled on this machine') },
+    })
   })
 
   it('runs an operator rollback through a new planned handoff deployment', async () => {

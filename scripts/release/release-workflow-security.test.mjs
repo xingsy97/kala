@@ -99,6 +99,7 @@ test('promotion verifier binds the closed current draft to all three accepted na
       .flatMap((name) => targets.map((target) => `${name}-${target}`))
     const assets = [
       ...nativeAssets,
+      ...targets.flatMap((target) => [`kala-copilot-runtime-${target}`, `kala-copilot-runtime-node-${target}.node`]),
       'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
       'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-release-metadata.tar.gz',
       'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',

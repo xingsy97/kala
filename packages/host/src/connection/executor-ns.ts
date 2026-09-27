@@ -29,7 +29,7 @@ import type { AuthConfig, ExecutorIdentity } from '../auth-control.js'
 import { authenticateExecutorToken, validateExecutorAnnouncement } from '../auth-control.js'
 import type { AuditLogger } from '../audit-log.js'
 import { parseWire } from '../wire-validation.js'
-import { sessionRoom } from './rooms.js'
+import { sessionRoom, terminalOwnerSessionId, terminalSessionRoom } from './rooms.js'
 import { executorAnnouncedConnectionMeta, executorPendingConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
 import type { ExecutorInstallationStore } from '../store/executor-installation.js'
 
@@ -260,16 +260,22 @@ export function configureExecutorNamespace(
         channel: 'executor:terminal_output',
         peer: socket.id,
       })
-      if (!payload || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, payload.workspaceId, payload.sessionId)) return
-      deps.dashboardNs.to(sessionRoom(payload.sessionId)).emit('server:terminal_output', payload)
+      if (!payload) return
+      const ownerSessionId = terminalOwnerSessionId(payload.sessionId)
+      const room = terminalSessionRoom(payload.sessionId)
+      if (!ownerSessionId || !room || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, payload.workspaceId, ownerSessionId)) return
+      deps.dashboardNs.to(room).emit('server:terminal_output', payload)
     })
     socket.on('executor:terminal_exit', async (rawPayload: ServerTerminalExit) => {
       const payload = parseWire(schema.ServerTerminalExitSchema, rawPayload, {
         channel: 'executor:terminal_exit',
         peer: socket.id,
       })
-      if (!payload || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, payload.workspaceId, payload.sessionId)) return
-      deps.dashboardNs.to(sessionRoom(payload.sessionId)).emit('server:terminal_exit', payload)
+      if (!payload) return
+      const ownerSessionId = terminalOwnerSessionId(payload.sessionId)
+      const room = terminalSessionRoom(payload.sessionId)
+      if (!ownerSessionId || !room || !await acceptsExecutorSessionPayload(socket, deps.store, executorAnnouncements, payload.workspaceId, ownerSessionId)) return
+      deps.dashboardNs.to(room).emit('server:terminal_exit', payload)
     })
     socket.on('disconnect', () => {
       deps.executors.detach(socket)

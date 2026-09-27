@@ -252,7 +252,7 @@ export function attachJsonRoutes(
      * browser is closing" beacon path. Lets the HTTP layer enqueue+drain a
      * user message without a live socket.
      */
-    enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ committed: boolean; cursor?: number }>
+    enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ accepted?: boolean; committed: boolean; cursor?: number }>
     capabilities?: import('@agent-kernel/shared').RuntimeCapabilities
     evaluationUrl?: string
     deployment?: import('@agent-kernel/shared').ProductDeploymentConfig
@@ -828,7 +828,7 @@ export function attachJsonRoutes(
         const content = Array.isArray(input.content) ? input.content as readonly import('@agent-kernel/kernel').MessageContent[] : undefined
         if (!text.trim() && !content?.length) throw new Error('message content is required')
         validateMessageAttachmentReferences(payloads.messageAttachments, sessionId, content)
-        let outcome: { committed: boolean; cursor?: number }
+        let outcome: { accepted?: boolean; committed: boolean; cursor?: number }
         try {
           outcome = await payloads.enqueueUserMessage!({ sessionId, operationId, text, mode, ...(content ? { content } : {}) })
         } catch (error) {
@@ -843,7 +843,7 @@ export function attachJsonRoutes(
         } catch (error) {
           throw new HttpRouteError(503, `message was accepted but attachment commitment must be retried: ${error instanceof Error ? error.message : String(error)}`)
         }
-        sendJson(req, res, { committed: outcome.committed, operationId, ...(outcome.cursor !== undefined ? { cursor: outcome.cursor } : {}) })
+        sendJson(req, res, { accepted: outcome.accepted ?? outcome.committed, committed: outcome.committed, operationId, ...(outcome.cursor !== undefined ? { cursor: outcome.cursor } : {}) })
       }).catch((error) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
       return
     }
@@ -1363,7 +1363,7 @@ async function runEnhancementAction(
     artifactRootDir?: string | false
     sessions?: SessionStore
     executorsSnapshot?: () => readonly AttachedExecutor[]
-    enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ committed: boolean; cursor?: number }>
+    enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ accepted?: boolean; committed: boolean; cursor?: number }>
   },
 ): Promise<unknown> {
   const action = requiredString(body.action, 'action')

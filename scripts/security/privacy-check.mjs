@@ -71,8 +71,8 @@ function scanPushInput(input, remoteName) {
 function scanCommit(commit) {
   const message = gitBuffer(['show', '-s', '--format=%B', commit])
   const messageFindings = scanEntry({ path: `COMMIT_MESSAGE@${commit.slice(0, 12)}`, content: message, policy, denylist, source: 'message' })
-  const metadata = git(['show', '-s', '--format=%aE%n%cE', commit]).trim().split('\n')
-  const metadataFindings = metadata.flatMap((email, index) => scanEntry({ path: `${index ? 'COMMITTER' : 'AUTHOR'}@${commit.slice(0, 12)}`, content: email, policy, denylist, source: 'message' }))
+  const metadata = git(['show', '-s', '--format=%aN%n%aE%n%cN%n%cE', commit]).trim().split('\n')
+  const metadataFindings = metadata.flatMap((value, index) => scanEntry({ path: `${index < 2 ? 'AUTHOR' : 'COMMITTER'}@${commit.slice(0, 12)}`, content: value, policy, denylist, source: 'message' }))
   const entries = parseNameStatus(gitBuffer(['diff-tree', '--root', '-m', '--no-commit-id', '--name-status', '-r', '-z', '--diff-filter=ACMR', commit]))
   const paths = entries.map(({ path }) => path)
   return [...messageFindings, ...metadataFindings, ...scanPaths(paths, (path) => gitBuffer(['show', `${commit}:${path}`]), 'history-file')]

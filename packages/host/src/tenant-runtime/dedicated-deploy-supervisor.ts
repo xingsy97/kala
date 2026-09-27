@@ -13,6 +13,7 @@ import {
   promoteStagedRelease,
   redactedDeploymentError,
   verifyImmutableRelease,
+  verifyImmutablePredecessorRelease,
   type DeploymentPhase,
   type DeploymentReceipt,
   type DedicatedDeployRequest,
@@ -20,6 +21,10 @@ import {
 import { advanceDedicatedRoute, otherSlot, type DedicatedRouteState, type DedicatedSlot } from './dedicated-slot-state.js'
 
 export type { DeploymentPhase, DeploymentReceipt } from './dedicated-deploy-protocol.js'
+
+export type DedicatedDeploySupervisorOptions = {
+  allowLocalDevelopment?: boolean
+}
 
 export type DeploySupervisorAdapter = {
   routeState(): Promise<DedicatedRouteState>
@@ -104,6 +109,7 @@ export class DedicatedDeploySupervisor {
   constructor(
     private readonly root: string,
     private readonly adapter: DeploySupervisorAdapter,
+    private readonly options: DedicatedDeploySupervisorOptions = {},
   ) {}
 
   async accept(raw: unknown): Promise<DeploymentReceipt> {
@@ -130,8 +136,7 @@ export class DedicatedDeploySupervisor {
     const releaseId = route.slots[route.activeSlot].releaseId
     if (request.predecessorReleaseId !== releaseId || request.sourceReleaseDigest !== request.targetReleaseDigest) throw new Error('restart release identity mismatch')
     const releaseDir = resolve(this.root, 'releases', releaseId)
-    const bundleSha256 = sha256(await readFile(join(releaseDir, 'kala-runtime.cjs')))
-    await verifyImmutableRelease({ deployRoot: this.root, releaseDir, releaseId, releaseDigest: request.targetReleaseDigest, bundleSha256 })
+    const bundleSha256 = await verifyImmutablePredecessorRelease({ deployRoot: this.root, releaseDir, releaseId, releaseDigest: request.targetReleaseDigest, allowLocalDevelopment: this.options.allowLocalDevelopment })
     const now = new Date().toISOString()
     const receipt: DeploymentReceipt = {
       schemaVersion: 1, receiptRevision: 1, deploymentId: request.deploymentId, operationId: request.operationId,
@@ -158,6 +163,7 @@ export class DedicatedDeploySupervisor {
       releaseId: request.releaseId!,
       releaseDigest: request.targetReleaseDigest,
       bundleSha256: request.bundleSha256!,
+      allowLocalDevelopment: this.options.allowLocalDevelopment,
     })
     const now = new Date().toISOString()
     const receipt: DeploymentReceipt = {
@@ -223,10 +229,9 @@ export class DedicatedDeploySupervisor {
     if (request.predecessorReleaseId !== receipt.predecessorReleaseId || request.candidateSlot !== otherSlot(route.activeSlot) || request.targetReleaseDigest !== receipt.sourceReleaseDigest || request.sourceReleaseDigest !== receipt.releaseDigest) throw new Error('rollback release identity mismatch')
     const rollbackReleaseId = receipt.predecessorReleaseId
     const rollbackReleaseDir = resolve(this.root, 'releases', rollbackReleaseId)
-    const rollbackBundleSha256 = sha256(await readFile(join(rollbackReleaseDir, 'kala-runtime.cjs')))
-    await verifyImmutableRelease({
+    const rollbackBundleSha256 = await verifyImmutablePredecessorRelease({
       deployRoot: this.root, releaseDir: rollbackReleaseDir, releaseId: rollbackReleaseId,
-      releaseDigest: receipt.sourceReleaseDigest, bundleSha256: rollbackBundleSha256,
+      releaseDigest: receipt.sourceReleaseDigest, allowLocalDevelopment: this.options.allowLocalDevelopment,
     })
     const next: DeploymentReceipt = {
       ...receipt, receiptRevision: 1, deploymentId: request.deploymentId,
@@ -270,13 +275,18 @@ export class DedicatedDeploySupervisor {
     if (receipt.phase === 'abort_requested') return await this.transition(receipt, 'aborted')
     if (receipt.phase === 'rolling_back') return await this.rollback(receipt, receipt.error?.message ?? 'deployment rollback resumed')
     try {
+      // Re-evaluate machine-local policy on every process incarnation and phase,
+      // including after the candidate updates and restarts this Supervisor.
+      await this.verifyRelease(receipt)
       if (receipt.phase === 'staged') receipt = await this.transition(receipt, 'validating')
       if (receipt.phase === 'validating') {
         const route = await this.adapter.routeState()
         assertReceiptRoute(receipt, route)
         await this.verifyRelease(receipt)
-        const predecessorSums = await readFile(join(receipt.previousRelease!, 'SHA256SUMS'))
-        if (sha256(predecessorSums) !== receipt.sourceReleaseDigest) throw new Error('predecessor immutable release changed')
+        await verifyImmutablePredecessorRelease({
+          deployRoot: this.root, releaseDir: receipt.previousRelease!, releaseId: receipt.predecessorReleaseId,
+          releaseDigest: receipt.sourceReleaseDigest, allowLocalDevelopment: this.options.allowLocalDevelopment,
+        })
         await this.adapter.selfTestRelease(receipt.releaseDir)
         if (receipt.origin && !receipt.originResultPersistedAt) {
           receipt = await this.transition(receipt, 'waiting_for_origin_result', { blockers: ['origin_tool_result'] })
@@ -440,6 +450,10 @@ export class DedicatedDeploySupervisor {
     const previousSlot = receipt.previousSlot
     if (!previousRelease || !previousSlot) return await this.transition(receipt, 'failed', { error: redactedDeploymentError(`${message}; rollback predecessor missing`) })
     try {
+      const previousBundleSha256 = await verifyImmutablePredecessorRelease({
+        deployRoot: this.root, releaseDir: previousRelease, releaseId: basename(previousRelease),
+        releaseDigest: receipt.sourceReleaseDigest, allowLocalDevelopment: this.options.allowLocalDevelopment,
+      })
       // Control installation precedes Runtime handoff, so every rollback must
       // first prove that the predecessor control plane is live. The adapter is
       // idempotent when no update started and resumes a persisted updater
@@ -447,7 +461,7 @@ export class DedicatedDeploySupervisor {
       const controlRecovery = await this.adapter.recoverControlPlane(receipt)
       if (controlRecovery.phase === 'pending') return receipt
       if (controlRecovery.phase === 'failed') throw new Error(controlRecovery.error ?? 'control-plane rollback failed')
-      if (receipt.rollback?.mode === 'cancel') return await this.cancelBeforeHandoff(receipt, message, previousRelease, previousSlot)
+      if (receipt.rollback?.mode === 'cancel') return await this.cancelBeforeHandoff(receipt, message, previousRelease, previousSlot, previousBundleSha256)
       const routeAtRecovery = await this.adapter.routeState()
       const candidateContinued = Boolean(receipt.continuation) || await this.candidateContinuationCompleted(receipt)
       const routeAlreadyCommitted = routeAtRecovery.generation === receipt.expectedRouteGeneration + 1
@@ -507,9 +521,9 @@ export class DedicatedDeploySupervisor {
       }
       if (receipt.rollback!.stage === 'verifying_live') {
         const verified = await this.adapter.verifySlot(previousSlot, {
-          bundleSha256: sha256(await readFile(join(previousRelease, 'kala-runtime.cjs'))),
+          bundleSha256: previousBundleSha256,
         })
-        const recoveryReceipt = await rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deployment)
+        const recoveryReceipt = rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deployment, previousBundleSha256)
         const route = await this.adapter.routeState()
         await this.adapter.persistRuntimeReady(recoveryReceipt, {
           ...verified, publicRoute: true, routeGeneration: route.generation,
@@ -532,7 +546,7 @@ export class DedicatedDeploySupervisor {
       }
       if (receipt.rollback!.stage === 'verifying') {
         const verified = await this.adapter.verifySlot(previousSlot, {
-          bundleSha256: sha256(await readFile(join(previousRelease, 'kala-runtime.cjs'))),
+          bundleSha256: previousBundleSha256,
           deployment, requireContinuation: true,
         })
         await this.adapter.writeCandidateState({
@@ -553,7 +567,7 @@ export class DedicatedDeploySupervisor {
           admission: { pending: pendingAdmission, reconciled: reconciledAdmission, oldestAgeMs: admission.oldestAgeMs },
           blockers: ['admission_queue'],
         })
-        const recoveryReceipt = await rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deployment)
+        const recoveryReceipt = rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deployment, previousBundleSha256)
         await this.adapter.persistRuntimeReady(recoveryReceipt, {
           pid: receipt.activatedPid!, processReadyAt: receipt.processReadyAt!, runtimeReadyAt: receipt.runtimeReadyAt!, publicRoute: false,
         })
@@ -562,7 +576,7 @@ export class DedicatedDeploySupervisor {
           rollback: { ...receipt.rollback!, stage: 'route_committing' },
         })
       }
-      const recoveryReceipt = await rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deployment)
+      const recoveryReceipt = rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deployment, previousBundleSha256)
       const route = await this.adapter.routeState()
       if (route.generation === deployment.expectedRouteGeneration) {
         await this.adapter.switchRoute(advanceDedicatedRoute(route, { slot: previousSlot, releaseId: basename(previousRelease) }))
@@ -592,16 +606,16 @@ export class DedicatedDeploySupervisor {
   }
 
   private async cancelBeforeHandoff(
-    receipt: DeploymentReceipt, message: string, previousRelease: string, previousSlot: DedicatedSlot,
+    receipt: DeploymentReceipt, message: string, previousRelease: string, previousSlot: DedicatedSlot, previousBundleSha256: string,
   ): Promise<DeploymentReceipt> {
     if (receipt.plannedRestart?.attemptId) await this.adapter.abortPlannedRestart(previousSlot, receipt.plannedRestart.attemptId).catch(() => undefined)
     await this.adapter.writeCandidateState(undefined)
     await this.adapter.writeRuntimeFence(undefined)
     const verified = await this.adapter.verifySlot(previousSlot, {
-      bundleSha256: sha256(await readFile(join(previousRelease, 'kala-runtime.cjs'))),
+      bundleSha256: previousBundleSha256,
     })
     const route = await this.adapter.routeState()
-    const recoveryReceipt = await rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deploymentOwnership(receipt))
+    const recoveryReceipt = rollbackRuntimeReceipt(receipt, previousRelease, previousSlot, deploymentOwnership(receipt), previousBundleSha256)
     await this.adapter.persistRuntimeReady(recoveryReceipt, { ...verified, publicRoute: true, routeGeneration: route.generation })
     return await this.transition(receipt, 'rolled_back', {
       routeGeneration: route.generation, observedRouteGeneration: route.generation,
@@ -705,7 +719,12 @@ export class DedicatedDeploySupervisor {
   }
 
   private async verifyRelease(receipt: DeploymentReceipt): Promise<void> {
-    await verifyImmutableRelease({ deployRoot: this.root, releaseDir: receipt.releaseDir, releaseId: receipt.releaseId, releaseDigest: receipt.releaseDigest, bundleSha256: receipt.bundleSha256 })
+    if (receipt.action === 'restart' || receipt.action === 'rollback') {
+      const bundleSha256 = await verifyImmutablePredecessorRelease({ deployRoot: this.root, releaseDir: receipt.releaseDir, releaseId: receipt.releaseId, releaseDigest: receipt.releaseDigest, allowLocalDevelopment: this.options.allowLocalDevelopment })
+      if (bundleSha256 !== receipt.bundleSha256) throw new Error('bundle digest does not match deployment receipt')
+      return
+    }
+    await verifyImmutableRelease({ deployRoot: this.root, releaseDir: receipt.releaseDir, releaseId: receipt.releaseId, releaseDigest: receipt.releaseDigest, bundleSha256: receipt.bundleSha256, allowLocalDevelopment: this.options.allowLocalDevelopment })
   }
 
   private async persist(receipt: DeploymentReceipt): Promise<void> {
@@ -815,18 +834,19 @@ async function automaticRollbackOwnership(
   }
 }
 
-async function rollbackRuntimeReceipt(
+function rollbackRuntimeReceipt(
   receipt: DeploymentReceipt,
   releaseDir: string,
   slot: DedicatedSlot,
   deployment: NonNullable<HostRestartAttempt['deployment']>,
-): Promise<DeploymentReceipt> {
+  bundleSha256: string,
+): DeploymentReceipt {
   return {
     ...receipt,
     deploymentId: deployment.deploymentId,
     releaseId: basename(releaseDir),
     releaseDir,
-    bundleSha256: sha256(await readFile(join(releaseDir, 'kala-runtime.cjs'))),
+    bundleSha256,
     releaseDigest: receipt.sourceReleaseDigest,
     expectedRouteGeneration: deployment.expectedRouteGeneration,
     fencingToken: deployment.fencingToken,

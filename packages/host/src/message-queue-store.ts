@@ -1,3 +1,5 @@
+import { open } from 'node:fs/promises'
+
 import type { MessageContent } from '@agent-kernel/kernel'
 import { schema, type RuntimeMetadataEntry } from '@agent-kernel/shared'
 
@@ -6,12 +8,25 @@ import { appendRuntimeMetadataEntry, findLatestRuntimeMetadata } from './store/l
 import type { QueuedUserMessage } from './connection/dashboard-ns.js'
 
 const ACTION = 'message_queue_snapshot'
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
+export const MAX_CANCELLED_OPERATION_IDS = 10_000
+
+export type PersistedMessageQueueState = {
+  items: QueuedUserMessage[]
+  cancelledOperationIds: string[]
+}
 
 export async function loadPersistedMessageQueue(
   store: SessionStore,
   sessionId: string,
 ): Promise<QueuedUserMessage[]> {
+  return (await loadPersistedMessageQueueState(store, sessionId)).items
+}
+
+export async function loadPersistedMessageQueueState(
+  store: SessionStore,
+  sessionId: string,
+): Promise<PersistedMessageQueueState> {
   // Queue hydration runs before RestartCoordinator cursor fencing on a
   // replacement Runtime. It is an observational read of runtime metadata, not
   // crash recovery ownership: using the Store default here would synthesize a
@@ -19,14 +34,19 @@ export async function loadPersistedMessageQueue(
   // Session JSONL before planned continuation can verify its frozen cursor.
   const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
   const entry = await findLatestRuntimeMetadata(record.logPath, ACTION, { maxScanBytes: 64 * 1024 * 1024 })
-  return entry ? normalizeQueueSnapshot(entry) : []
+  return entry ? normalizeQueueSnapshot(entry) : { items: [], cancelledOperationIds: [] }
 }
 
 export async function persistMessageQueueSnapshot(
   store: SessionStore,
   sessionId: string,
   items: readonly QueuedUserMessage[],
+  cancelledOperationIds: readonly string[] = [],
 ): Promise<void> {
+  const uniqueCancelledOperationIds = [...new Set(cancelledOperationIds)]
+  if (uniqueCancelledOperationIds.length > MAX_CANCELLED_OPERATION_IDS) {
+    throw new Error(`message queue cancellation tombstone limit of ${MAX_CANCELLED_OPERATION_IDS} exceeded; existing cancellations were preserved`)
+  }
   // Persisting host-owned queue metadata must likewise never claim recovery
   // ownership for an unloaded planned-restart participant.
   const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
@@ -36,17 +56,58 @@ export async function persistMessageQueueSnapshot(
     payload: {
       schemaVersion: SCHEMA_VERSION,
       items: items.map(serializeQueuedMessage),
+      cancelledOperationIds: uniqueCancelledOperationIds,
     },
   })
+  // Queue acceptance and cancellation are externally acknowledged durability
+  // boundaries. appendFile alone may still be resident in the page cache, so
+  // flush the Session JSONL before returning to ingress or the dashboard.
+  const handle = await open(record.logPath, 'r')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
 }
 
-function normalizeQueueSnapshot(entry: RuntimeMetadataEntry): QueuedUserMessage[] {
+function normalizeQueueSnapshot(entry: RuntimeMetadataEntry): PersistedMessageQueueState {
   const payload = entry.payload
-  if (!payload || payload.schemaVersion !== SCHEMA_VERSION || !Array.isArray(payload.items)) return []
+  if (!payload || (payload.schemaVersion !== 1 && payload.schemaVersion !== SCHEMA_VERSION) || !Array.isArray(payload.items)) {
+    throw new Error('unsupported persisted message queue snapshot')
+  }
   const out: QueuedUserMessage[] = []
   for (const raw of payload.items) {
     const item = normalizeQueuedMessage(raw)
     if (item) out.push(item)
+  }
+  const cancelledOperationIds = payload.schemaVersion === SCHEMA_VERSION
+    ? normalizeCancelledOperationIds(payload.cancelledOperationIds)
+    : []
+  const cancelled = new Set(cancelledOperationIds)
+  return { items: out.filter((item) => !cancelled.has(item.operationId)), cancelledOperationIds }
+}
+
+function normalizeCancelledOperationIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    throw new Error('invalid persisted message queue cancellation tombstones: expected an array')
+  }
+  // Check the raw list before allocating a Set or normalizing entries. Malformed
+  // snapshots must never use duplicates or invalid values to bypass the bound.
+  if (raw.length > MAX_CANCELLED_OPERATION_IDS) {
+    throw new Error(`persisted message queue cancellation tombstone limit of ${MAX_CANCELLED_OPERATION_IDS} exceeded`)
+  }
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const value of raw) {
+    const operationId = stringValue(value)
+    if (!operationId) {
+      throw new Error('invalid persisted message queue cancellation tombstones: expected non-empty strings')
+    }
+    if (seen.has(operationId)) {
+      throw new Error(`invalid persisted message queue cancellation tombstones: duplicate operation ID ${JSON.stringify(operationId)}`)
+    }
+    seen.add(operationId)
+    out.push(operationId)
   }
   return out
 }

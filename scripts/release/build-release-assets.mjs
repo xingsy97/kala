@@ -75,6 +75,7 @@ const allEntries = [
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
 const nativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64']
+const copilotRuntimeTargets = nativeTargets
 if (finalizeOnly) {
   finalizeRelease()
   process.exit(0)
@@ -98,6 +99,9 @@ if (includeDashboard && !skipDashboardBuild) {
 }
 if (includeDashboard && skipDashboardBuild) {
   assertDashboardDistReady(dashboardDist)
+}
+if (component === 'all' || component === 'host') {
+  stageCopilotRuntime(nativeTarget ?? detectNativeTarget())
 }
 
 // The host bundle is built before finalizeRelease(), so every asset that must be
@@ -162,6 +166,7 @@ if (nativeOnly) {
   removeNativeBuildWorkspace()
   console.log(`native release assets written to ${outDir} for ${nativeTarget}`)
   for (const item of entries) console.log(` - ${basename(nativeAssetName(item.name, nativeTarget))}`)
+  for (const asset of copilotRuntimeAssetNames(nativeTarget)) console.log(` - ${asset}`)
   process.exit(0)
 }
 
@@ -222,7 +227,7 @@ function finalizeRelease() {
   }
 
   // Desktop payloads are embedded into the Host banner only; they are not
-  // independent public release assets in the closed 27-file inventory.
+  // independent public release assets.
   for (const name of ['desktop-install.sh', 'desktop-package.deb', 'desktop-dependencies.json', 'desktop-SHA256SUMS.txt']) rmSync(join(outDir, name), { force: true })
 
   const builtEntries = entries.map((entry) => {
@@ -232,8 +237,11 @@ function finalizeRelease() {
       .filter((asset) => exists(asset))
     return { ...entry, cjs: exists(cjs) ? cjs : undefined, natives }
   })
+  const packagedCopilotRuntimeTargets = copilotRuntimeTargets
+    .filter((target) => copilotRuntimeAssetNames(target).every((asset) => exists(asset)))
   writeDependencyMetadata()
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
+    .concat(packagedCopilotRuntimeTargets.flatMap(copilotRuntimeAssetNames))
     .concat(includeDashboard && exists(dashboardArchiveName) ? [dashboardArchiveName] : [])
     .concat(includeDashboard && exists('kala-docs.tar.gz') ? ['kala-docs.tar.gz'] : [])
     .concat((component === 'all' || component === 'host') && exists(DEDICATED_SUPPORT_ARCHIVE) ? [DEDICATED_SUPPORT_ARCHIVE] : [])
@@ -249,6 +257,7 @@ function finalizeRelease() {
     tag,
     node: '>=22',
     nativeTargets: nativeTargets.filter((target) => builtEntries.some((entry) => entry.natives.includes(nativeAssetName(entry.name, target)))),
+    copilotRuntimeTargets: packagedCopilotRuntimeTargets,
     assets,
     nativeAssets: {
       ...Object.fromEntries(builtEntries.map((entry) => [entry.name, entry.natives])),
@@ -382,6 +391,24 @@ function detectNativeTarget() {
 function nativeAssetName(name, target) {
   if (!nativeTargets.includes(target)) throw new Error(`unsupported native release target ${target}`)
   return `${name}-${target}`
+}
+
+function copilotRuntimeAssetNames(target) {
+  if (!copilotRuntimeTargets.includes(target)) throw new Error(`unsupported Copilot runtime target ${target}`)
+  return [`kala-copilot-runtime-${target}`, `kala-copilot-runtime-node-${target}.node`]
+}
+
+function stageCopilotRuntime(target) {
+  const hostRequire = createRequire(join(root, 'packages/host/package.json'))
+  const sdkRequire = createRequire(hostRequire.resolve('@github/copilot-sdk'))
+  const packageName = `@github/copilot-sdk-${target}`
+  const packageRoot = dirname(sdkRequire.resolve(`${packageName}/package.json`))
+  const sourceDir = join(packageRoot, 'prebuilds', target)
+  const wrapperName = process.platform === 'win32' ? 'copilot-runtime.exe' : 'copilot-runtime'
+  const [wrapperAsset, libraryAsset] = copilotRuntimeAssetNames(target)
+  copyFileSync(join(sourceDir, wrapperName), join(outDir, wrapperAsset))
+  copyFileSync(join(sourceDir, 'runtime.node'), join(outDir, libraryAsset))
+  chmodSync(join(outDir, wrapperAsset), 0o755)
 }
 
 function cjsAssetName(entry) {
