@@ -224,11 +224,9 @@ function AskUserChoiceRequestCard({
           data-testid="ask-user-choice-custom"
           data-selected={draft.kind === 'custom' ? 'true' : 'false'}
         >
-          <label htmlFor={`ask-user-choice-custom-${request.callId}`} className="block text-xs font-medium text-muted-foreground">
-            {t('chat.askUser.customLabel')}
-          </label>
           <Textarea
             id={`ask-user-choice-custom-${request.callId}`}
+            aria-label={t('chat.askUser.customLabel')}
             value={draft.kind === 'custom' ? draft.text : ''}
             onChange={(event) => {
               setDraft({ kind: 'custom', text: event.target.value })
@@ -238,7 +236,7 @@ function AskUserChoiceRequestCard({
             maxLength={4000}
             placeholder={t('chat.askUser.customPlaceholder')}
             data-testid="ask-user-choice-custom-input"
-            className="mt-1 min-h-[84px] border-border/60 bg-card/80 text-foreground placeholder:text-muted-foreground/60 focus-visible:ring-primary/35"
+            className="min-h-[84px] border-border/60 bg-card/80 text-foreground placeholder:text-muted-foreground/60 focus-visible:ring-primary/35"
           />
         </div>
         {phase.kind === 'error' ? (

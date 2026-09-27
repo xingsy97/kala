@@ -58,6 +58,7 @@ import type { TFunction } from 'i18next'
 import type {
   Message,
   MessageContent,
+  ReasoningContent,
   ToolCallContent,
   ToolResultContent,
 } from '@agent-kernel/kernel'
@@ -255,13 +256,14 @@ export function ChatPanel({
     .filter((message) => message.role !== 'system')
     .map((message) => ({ kind: 'message', message })), [messages])
   const rawItems = items ?? fallbackItems
+  const displayItems = useMemo(() => mergeAdjacentThinkingMessages(rawItems), [rawItems])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchCategory, setSearchCategory] = useState<TranscriptSearchCategory>('all')
   const [activeSearchIndex, setActiveSearchIndex] = useState(-1)
   const [searchNavigationToken, setSearchNavigationToken] = useState(0)
   const [viewportAnchor, setViewportAnchor] = useState<TranscriptViewportAnchor>({ firstVisibleIndex: null, firstVisibleAligned: false })
   const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const searchMatches = useMemo(() => searchTranscript(rawItems, searchQuery, searchCategory), [rawItems, searchQuery, searchCategory])
+  const searchMatches = useMemo(() => searchTranscript(displayItems, searchQuery, searchCategory), [displayItems, searchQuery, searchCategory])
   useEffect(() => {
     if (!searchOpen) return
     requestAnimationFrame(() => searchInputRef.current?.focus())
@@ -276,7 +278,7 @@ export function ChatPanel({
   }, [sessionId])
   const { toolNameByCallId, allMessages, resultsByCallId, intraMessageGroupedCallIds } = useMemo(() => {
     const names = new Map<string, string>()
-    const messageItems = rawItems
+    const messageItems = displayItems
       .filter((item): item is Extract<TranscriptItem, { kind: 'message' }> => item.kind === 'message')
       .map((item) => item.message)
     for (const message of messageItems) {
@@ -293,7 +295,7 @@ export function ChatPanel({
       }
     }
     return { toolNameByCallId: names, allMessages: messageItems, resultsByCallId: results, intraMessageGroupedCallIds: groupedIds }
-  }, [rawItems])
+  }, [displayItems])
   const approvalByCallId = useMemo(() => new Map((pendingApprovals ?? []).map((approval) => [approval.callId, approval])), [pendingApprovals])
   const effectiveParentSessionId = parentSessionId ?? sessionId ?? undefined
   // Null preserves the isolated/demo fallback. The product App always
@@ -317,9 +319,9 @@ export function ChatPanel({
     let mi = -1
     let prevRole: 'user' | 'assistant' | 'tool' | null = null
     let i = 0
-    while (i < rawItems.length) {
+    while (i < displayItems.length) {
       const transcriptGroup = collectTranscriptToolActivity(
-        rawItems,
+        displayItems,
         i,
         mi,
         resultsByCallId,
@@ -357,7 +359,7 @@ export function ChatPanel({
         continue
       }
 
-      const it = rawItems[i]!
+      const it = displayItems[i]!
       if (it.kind === 'message') {
         mi += 1
         const m = it.message
@@ -389,7 +391,7 @@ export function ChatPanel({
       hideHeader.push(false)
     }
     return { transcriptItems: kept, messageIndexByItem: mapping, hideHeaderByItem: hideHeader, groupedCallIds: groupedIds }
-  }, [rawItems, intraMessageGroupedCallIds, resultsByCallId, compactStatus, effectiveParentSessionId, toolCardMode])
+  }, [displayItems, intraMessageGroupedCallIds, resultsByCallId, compactStatus, effectiveParentSessionId, toolCardMode])
 
   // Translate message-index highlight into item-index so VirtualTranscript
   // can scroll to the right row. -1 means "no highlight" or unresolved.
@@ -420,11 +422,11 @@ export function ChatPanel({
         if (item?.kind === 'tool_activity' && match.messageIndex >= item.firstMessageIndex && match.messageIndex <= item.lastMessageIndex) return index
       }
     }
-    const raw = rawItems[match.rawItemIndex]
+    const raw = displayItems[match.rawItemIndex]
     if (raw?.kind === 'pending_user_message') return transcriptItems.findIndex((item) => item.kind === 'pending_user_message' && item.id === raw.id)
     if (raw?.kind === 'compact_boundary') return transcriptItems.findIndex((item) => item.kind === 'compact_boundary' && item.seq === raw.seq)
     return null
-  }, [activeSearchMatch, messageIndexByItem, rawItems, transcriptItems])
+  }, [activeSearchMatch, messageIndexByItem, displayItems, transcriptItems])
 
   const isEmpty = transcriptItems.length === 0
   const userMessageAnchors = useMemo(() => transcriptItems.flatMap((item, index) =>
@@ -1112,9 +1114,7 @@ function collectDotsTranscriptToolActivity(
 
   const calls: ToolCallContent[] = []
   const knownCallIds = new Set<string>()
-  const before: TranscriptToolActivityMessage[] = []
-  const after: TranscriptToolActivityMessage[] = []
-  let foundFirstCall = false
+  const narratives: Array<TranscriptToolActivityMessage & { callsSeen: number }> = []
   let i = startIndex
   let messageIndex = previousMessageIndex
   let firstMessageIndex: number | null = null
@@ -1133,28 +1133,31 @@ function collectDotsTranscriptToolActivity(
 
       messageIndex += 1
       lastMessageIndex = messageIndex
-      const beforeContent: MessageContent[] = []
-      const afterContent: MessageContent[] = []
+      const narrativeContent: MessageContent[] = []
+      const flushNarrative = (): void => {
+        if (narrativeContent.length === 0) return
+        narratives.push({
+          item: withMessageContent(item, [...narrativeContent]),
+          messageIndex,
+          callsSeen: calls.length,
+        })
+        narrativeContent.length = 0
+      }
       for (const content of item.message.content) {
         if (content.type === 'tool_call') {
+          flushNarrative()
           if (firstMessageIndex === null) {
             firstMessageIndex = messageIndex
             firstSeq = item.seq
             firstTs = item.ts
           }
-          foundFirstCall = true
           calls.push(content)
           knownCallIds.add(content.callId)
           continue
         }
-        ;(foundFirstCall ? afterContent : beforeContent).push(content)
+        narrativeContent.push(content)
       }
-      if (beforeContent.length > 0) {
-        before.push({ item: withMessageContent(item, beforeContent), messageIndex })
-      }
-      if (afterContent.length > 0) {
-        after.push({ item: withMessageContent(item, afterContent), messageIndex })
-      }
+      flushNarrative()
       i += 1
       continue
     }
@@ -1170,6 +1173,12 @@ function collectDotsTranscriptToolActivity(
   }
 
   if (calls.length === 0 || firstMessageIndex === null) return null
+  const before = narratives
+    .filter((entry) => entry.callsSeen < calls.length)
+    .map(({ callsSeen: _callsSeen, ...entry }) => entry)
+  const after = narratives
+    .filter((entry) => entry.callsSeen === calls.length)
+    .map(({ callsSeen: _callsSeen, ...entry }) => entry)
   return {
     group: makeToolCallGroup(calls, resultsByCallId, calls.length > 1),
     firstMessageIndex,
@@ -1633,6 +1642,32 @@ function isRenderableMessageContent(content: MessageContent): boolean {
   return true
 }
 
+function mergeAdjacentThinkingMessages(items: readonly TranscriptItem[]): TranscriptItem[] {
+  const merged: TranscriptItem[] = []
+  for (const item of items) {
+    const previous = merged.at(-1)
+    if (
+      item.kind === 'message'
+      && item.message.role === 'assistant'
+      && item.message.content.every((content) => content.type === 'thinking')
+      && previous?.kind === 'message'
+      && previous.message.role === 'assistant'
+      && previous.message.content.every((content) => content.type === 'thinking')
+    ) {
+      merged[merged.length - 1] = {
+        ...previous,
+        message: {
+          ...previous.message,
+          content: [...previous.message.content, ...item.message.content],
+        },
+      }
+      continue
+    }
+    merged.push(item)
+  }
+  return merged
+}
+
 function MessageRow({
   index,
   message,
@@ -1856,6 +1891,9 @@ function MessageRow({
                 />
               )
             }
+            if (item.kind === 'thinking_group') {
+              return <ThinkingBlock key={`thinking-${i}`} updates={item.updates} />
+            }
             return (
               <ContentBlock
                 key={i}
@@ -2015,7 +2053,7 @@ function ContentBlock({
       />
     )
   }
-  if (content.type === 'thinking') return <ThinkingBlock content={content} />
+  if (content.type === 'thinking') return <ThinkingBlock updates={[content]} />
   if (content.type === 'image') return <ImageBlock content={content} />
   return <FileBlock content={content} />
 }
@@ -2270,34 +2308,84 @@ function AttachmentFileChip({ name, mediaType }: { name: string; mediaType: stri
 }
 
 function ThinkingBlock({
-  content,
+  updates,
 }: {
-  content: import('@agent-kernel/kernel').ThinkingContent
+  updates: readonly ReasoningContent[]
 }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(true)
+  const count = updates.length
+  const presentations = updates.map((update) => thinkingPresentation(update.text))
+  let titledUpdateIndex = -1
+  for (let index = presentations.length - 1; index >= 0; index -= 1) {
+    if (!presentations[index]!.title) continue
+    titledUpdateIndex = index
+    break
+  }
+  const title = titledUpdateIndex >= 0 ? presentations[titledUpdateIndex]!.title : undefined
   return (
-    <div className="min-w-0 max-w-full">
+    <div
+      className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/35 bg-muted/[0.18]"
+      data-testid="thinking-block"
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex min-w-0 items-center gap-2 rounded-full bg-muted/40 px-3 py-1 text-[0.8125rem] text-muted-foreground hover:bg-muted"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-[0.8125rem] text-muted-foreground transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        aria-expanded={open}
       >
         <Sparkles className="h-3 w-3 flex-none" />
-        <span className="font-medium">{t('chat.transcript.thinking')}</span>
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="flex-none font-medium">
+            {count > 1
+              ? t('chat.transcript.thinkingUpdates', { count })
+              : t('chat.transcript.thinking')}
+          </span>
+          {title ? (
+            <span className="min-w-0 truncate text-foreground/80" data-testid="thinking-title">
+              <span className="mr-1.5 text-muted-foreground/70" aria-hidden="true">·</span>
+              {title}
+            </span>
+          ) : null}
+        </span>
         {open ? (
-          <ChevronDown className="h-3 w-3 flex-none" />
+          <ChevronDown className="ml-auto h-3 w-3 flex-none" />
         ) : (
-          <ChevronRight className="h-3 w-3 flex-none" />
+          <ChevronRight className="ml-auto h-3 w-3 flex-none" />
         )}
       </button>
       {open ? (
-        <div className="ak-expand-in mt-2 rounded-lg bg-muted/30 px-3 py-2 text-muted-foreground">
-          <AssistantMarkdown text={content.text} />
+        <div className="ak-expand-in border-t border-border/25 px-3 py-2 text-muted-foreground">
+          {updates.map((update, index) => (
+            <div
+              key={`${index}:${update.text}`}
+              className={cn(index > 0 && 'mt-2 border-t border-border/25 pt-2')}
+              data-testid="thinking-update"
+            >
+              <AssistantMarkdown text={index === titledUpdateIndex ? presentations[index]!.body : update.text} />
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
   )
+}
+
+function thinkingPresentation(text: string): { title?: string; body: string } {
+  const trimmed = text.trim()
+  const [firstLine = '', ...remainingLines] = trimmed.split('\n')
+  const body = remainingLines.join('\n').trim()
+  if (!body) return { body: text }
+
+  const markdownHeading = firstLine.match(/^#{1,6}\s+(.+?)\s*#*$/)
+  const boldHeading = firstLine.match(/^\*\*(.+?)\*\*\s*:?\s*$/)
+  const plainHeading = remainingLines[0]?.trim() === ''
+    && firstLine.length <= 96
+    && !/[.!?。！？]$/.test(firstLine)
+      ? firstLine.replace(/:\s*$/, '')
+      : undefined
+  const title = (markdownHeading?.[1] ?? boldHeading?.[1] ?? plainHeading)?.trim()
+  return title ? { title, body } : { body: text }
 }
 
 export function isLocalMarkdownImageSource(value: string): boolean {

@@ -350,6 +350,15 @@ function NestedGroupItem({
   if (item.kind === 'single') {
     return <NestedContent content={item.content} role="assistant" compact={compact} />
   }
+  if (item.kind === 'thinking_group') {
+    return (
+      <div className="space-y-2">
+        {item.updates.map((update, index) => (
+          <NestedContent key={`${index}:${update.text}`} content={update} role="assistant" compact={compact} />
+        ))}
+      </div>
+    )
+  }
   return <NestedToolGroup group={item} />
 }
 

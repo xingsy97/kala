@@ -16,18 +16,100 @@
 
 # Kala
 
-Kala is a self-hosted command center for coding agents. Run agents across
-machines, keep concurrent sessions organized, and see plans, tool activity, and
-workspace changes as they happen.
+Kala is a complete, self-hosted, cloud-native agent system for running agents
+across models, workspaces, machines, and tenants. It combines
+deterministic agent semantics, real-world execution, durable session
+infrastructure, and multi-tenant operations in one architecture.
+
+Its three layers form a single system: the Agent Kernel defines behavior, the
+Agent Runtime executes it, and the cloud-native service operates it reliably at
+deployment scale.
+
+## One system, three layers
+
+### Pure-function Agent Kernel
+
+At the center of Kala is a pure-function finite-state machine:
+
+```text
+step(state, event, config) → { next, effects }
+```
+
+This function defines how an agent moves through model calls, tool execution,
+approval, cancellation, and completion. It returns explicit effects instead of
+performing I/O, keeping agent behavior predictable across providers,
+workspaces, and deployments.
+
+The result is an Agent Kernel that remains small enough to understand and
+strict enough to act as the common behavioral contract for every deployment.
+See the
+[kernel implementation](packages/kernel/src/core.ts) and
+[pure-reducer design](docs/meta/adr/0001-pure-reducer.md).
+
+### Agent Runtime
+
+A pure core does not call a model or edit a file. The Agent Runtime turns its
+effects into real work: it connects model and agent providers, streams their
+output, coordinates tools and subagents, manages context, and sends workspace
+operations to remote Executors.
+
+That separation lets Kala support Copilot, Claude Code, Codex, compatible model
+providers, and different workspace environments without moving
+provider-specific behavior into the Kernel.
+
+### Cloud-native Agent Service
+
+Kala's service layer operates Agent Runtimes as a durable system across
+processes, workspaces, machines, and tenants. It provides persistent sessions,
+remote workspace connectivity, concurrent task and subagent coordination,
+recovery, deployment control, and a consistent surface through the Dashboard,
+Desktop client, APIs, and automation.
+
+For Private Cloud, isolated Tenant Runtime Units share the surrounding
+platform instead of requiring a complete service stack for every tenant. This
+is designed to keep multi-tenant deployments cost-efficient while preserving
+separate sessions, workspaces, Executors, artifacts, and runtime state.
+Dedicated and Portable deployments use the same Agent Kernel and Runtime with
+simpler operating topologies.
+
+```mermaid
+flowchart TB
+    Service["Cloud-native Agent Service<br/>Durability, tenancy, routing, deployment"]
+    Runtime["Agent Runtime<br/>Models, tools, context, subagents, workspaces"]
+    Kernel["Agent Kernel<br/>Pure-function FSM"]
+    Providers["Model and agent providers"]
+    Executors["Workspace Executors"]
+
+    Service -->|"operates"| Runtime
+    Runtime -->|"state + event + config"| Kernel
+    Kernel -->|"next state + effects"| Runtime
+    Runtime --> Providers
+    Runtime --> Executors
+```
+
+## Deployment modes
+
+| Mode | Tenancy | Shape |
+|---|---|---|
+| **Portable** | Effectively single-tenant | One directly managed runtime for local and small installations |
+| **Dedicated** | Single-tenant | The complete Platform dedicated to one organization |
+| **Private Cloud** | Multi-tenant | A shared Platform with isolated Tenant Runtime Units |
+
+The deployment topology changes; agent behavior does not. All three modes share
+the same Kernel, Runtime contracts, workspace Executor model, and Dashboard.
+See the
+[deployment mode contract](docs/architecture/deployment-mode-contract.md)
+for the normative boundaries.
 
 ## What you can do
 
 - **Work across machines** — connect workspace executors, see their online
   status, and switch between sessions from one dashboard.
 - **DAG-first task planning & tracking** — map dependencies, see what is done
-  or blocked, and follow delegated sub-agents alongside live tool activity.
+  or blocked, and follow delegated subagents alongside their messages and tool
+  activity.
 - **Keep context in view** — check context usage, inspect attachments and
-  conversation history, and choose between simple and full composer modes.
+  conversation history, thinking, and runtime state.
 - **Inspect without leaving the session** — use the right panel for files, Git
   changes, a workspace terminal, and runtime status and trace events.
 - **Stay in control** — review approvals and choose a supported agent runtime
@@ -96,46 +178,17 @@ Release and deployment details live in the runbooks instead of this README:
 - [Private Cloud release](docs/operations/private-cloud-release.md)
 - [Release support policy](docs/operations/release-support-policy.md)
 
-## Architecture at a glance
-
-```text
-Browser Dashboard ── Socket.IO ──► Host (session orchestration + event log)
-                                       │ calls with (state, event, config)
-                                       ▼
-                              Microkernel / state machine
-                   step(state, event, config) → { next, effects }
-                                       │ declarative effects (no I/O in kernel)
-                                       ▼
-                                Host effect runner
-                                  ├──► model provider
-                                  └──► workspace executors ──► file / shell / Git tools
-                                       │
-                            results return as new events to the Host
-```
-
-The microkernel is a **pure-function reducer**: its transition table determines
-which events are valid in each state and returns a new state plus declarative
-effects. The Host persists session events, executes those effects, then feeds
-results back as events. Planning and subagent orchestration live outside the
-kernel. See the [kernel implementation](packages/kernel/src/core.ts) and
-[pure-reducer design](docs/meta/adr/0001-pure-reducer.md).
-
-Deployment modes share the same core runtime model:
-
-- **Portable** for one-person or quick local/VM installs.
-- **Dedicated** for a single tenant with blue/green Runtime slots.
-- **Private Cloud** for multi-tenant self-hosted control planes.
-
-See the [deployment mode contract](docs/architecture/deployment-mode-contract.md)
-for the normative boundary between these modes.
-
 ## Repository map
 
-- [packages/kernel](packages/kernel/) — reducer, session state, and runtime contracts
-- [packages/host](packages/host/) — runtime, persistence, providers, HTTP and Socket.IO
-- [packages/executor](packages/executor/) — outbound tool runner and service lifecycle
+- [packages/kernel](packages/kernel/) — pure Agent Kernel, FSMs, effects, and
+  runtime contracts
+- [packages/host](packages/host/) — Agent Runtime, persistence, providers,
+  session services, HTTP, and Socket.IO
+- [packages/executor](packages/executor/) — isolated outbound workspace and
+  tool execution
 - [packages/dashboard](packages/dashboard/) — responsive product UI and PWA
-- [deploy](deploy/) — Dedicated, Private Cloud, Identity, and evaluation deployment assets
+- [deploy](deploy/) — cloud-native Dedicated, Private Cloud, Identity, and
+  evaluation deployment assets
 - [docs](docs/) — architecture, operations, protocols, and design notes
 - [scripts](scripts/) — build, verification, security, release, and acceptance tooling
 

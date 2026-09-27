@@ -1,14 +1,16 @@
 import type {
   Message,
   MessageContent,
+  ReasoningContent,
   ToolCallContent,
   ToolResultContent,
 } from '@agent-kernel/kernel'
 
 /**
- * View-model item emitted after grouping. A "group" represents one or more
- * consecutive tool_call blocks inside one assistant message.content, and hides
- * tool_result blocks that belong to grouped calls.
+ * View-model item emitted after grouping. Tool groups represent consecutive
+ * tool_call blocks inside one assistant message.content and hide tool_result
+ * blocks that belong to grouped calls. Thinking groups preserve adjacent
+ * reasoning updates as individually rendered Markdown entries.
  *
  * Multi-call runs become one activity block; the UI then summarizes lifecycle,
  * tool mix, and per-call detail without changing the protocol transcript.
@@ -24,6 +26,7 @@ export type ToolCallGroup = {
 
 export type GroupedContentItem =
   | { kind: 'single'; content: MessageContent }
+  | { kind: 'thinking_group'; updates: ReasoningContent[] }
   | ToolCallGroup
 
 export function groupConsecutiveToolCalls(
@@ -34,6 +37,17 @@ export function groupConsecutiveToolCalls(
   let i = 0
   while (i < content.length) {
     const c = content[i]!
+    if (c.type === 'thinking') {
+      const updates: ReasoningContent[] = [c]
+      let j = i + 1
+      while (j < content.length && content[j]!.type === 'thinking') {
+        updates.push(content[j] as ReasoningContent)
+        j += 1
+      }
+      out.push({ kind: 'thinking_group', updates })
+      i = j
+      continue
+    }
     if (c.type !== 'tool_call') {
       out.push({ kind: 'single', content: c })
       i += 1

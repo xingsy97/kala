@@ -44,6 +44,8 @@ describe('AskUserChoiceCard', () => {
     expect(screen.getByRole('group').className).toContain('sm:grid-cols-2')
     expect(screen.getByText('Choose the implementation scope.')).toBeTruthy()
     expect(screen.getByText('Minimal surface area.')).toBeTruthy()
+    expect(screen.getAllByText('Or type a different response')).toHaveLength(1)
+    expect(screen.getByRole('textbox', { name: 'Or type a different response' })).toBeTruthy()
     expect(screen.getAllByText('Confirm')).toHaveLength(1)
     expect(screen.queryByTestId('ask-user-choice-custom-submit')).toBeNull()
   })

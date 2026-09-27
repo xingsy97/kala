@@ -178,11 +178,49 @@ describe('ChatPanel', () => {
       />,
     )
 
-    const toggle = screen.getByRole('button', { name: /Thinking/i })
-    expect(screen.getByRole('heading', { name: 'Plan' })).toBeTruthy()
+    const toggle = screen.getByRole('button', { name: /Thinking.*Plan/i })
+    expect(screen.getByTestId('thinking-title').textContent).toContain('Plan')
+    expect(screen.queryByRole('heading', { name: 'Plan' })).toBeNull()
     expect(screen.getByText('inspect the implementation')).toBeTruthy()
     fireEvent.click(toggle)
-    expect(screen.queryByRole('heading', { name: 'Plan' })).toBeNull()
+    expect(screen.getByTestId('thinking-title').textContent).toContain('Plan')
+    expect(screen.queryByText('inspect the implementation')).toBeNull()
+  })
+
+  it('merges adjacent thinking updates into one shallow block', () => {
+    render(
+      <ChatPanel
+        messages={[
+          { role: 'assistant', content: [{ type: 'thinking', text: '**Inspecting** the implementation.' }] },
+          { role: 'assistant', content: [{ type: 'thinking', text: '`Tests` are next.' }] },
+          { role: 'assistant', content: [{ type: 'thinking', text: '## Final checks\n\nPreparing the final answer.' }] },
+        ]}
+      />,
+    )
+
+    expect(screen.getAllByTestId('thinking-block')).toHaveLength(1)
+    expect(screen.getAllByTestId('thinking-update')).toHaveLength(3)
+    expect(screen.getByRole('button', { name: /Thinking · 3 updates.*Final checks/ })).toBeTruthy()
+    expect(screen.getByText('Inspecting')).toBeTruthy()
+    expect(screen.getByText('Tests')).toBeTruthy()
+  })
+
+  it('does not merge thinking updates across a tool call', () => {
+    render(
+      <ChatPanel
+        messages={[{
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: 'Before the tool.' },
+            { type: 'tool_call', callId: 'call-1', name: 'read_file', input: { path: 'README.md' } },
+            { type: 'thinking', text: 'After the tool.' },
+          ],
+        }]}
+      />,
+    )
+
+    expect(screen.getAllByTestId('thinking-block')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Thinking' })).toHaveLength(2)
   })
 
   it('renders grouped sub-agent replay when only the active sessionId is provided', () => {
@@ -2606,6 +2644,9 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-card-dot-count-rail-1').textContent).toBe('×2')
     expect(screen.getByTestId('tool-card-dot-rail-3')).toBeTruthy()
     expect(screen.getAllByText('Thinking')).toHaveLength(2)
+    const lastThinking = screen.getAllByTestId('thinking-block').at(-1)!
+    const rail = screen.getByTestId('tool-card-dots-rail-1')
+    expect(Boolean(lastThinking.compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   })
 
   it('keeps one compact dots rail when narration and blank protocol content separate tool turns', () => {
