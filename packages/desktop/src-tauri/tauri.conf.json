@@ -13,9 +13,9 @@
         "label": "launcher",
         "title": "Kala — Connect",
         "width": 560,
-        "height": 430,
+        "height": 520,
         "minWidth": 480,
-        "minHeight": 380,
+        "minHeight": 440,
         "decorations": false
       }
     ],

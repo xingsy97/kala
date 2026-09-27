@@ -167,11 +167,20 @@ fn notification_service_available() -> bool {
     })
 }
 
-pub(crate) fn authorize_dashboard(app: &tauri::AppHandle, window: &tauri::WebviewWindow) -> Result<String, String> {
+pub(crate) fn authorize_selected_dashboard(app: &tauri::AppHandle, window: &tauri::WebviewWindow) -> Result<String, String> {
     let origin = app.state::<crate::ConnectionOrigin>().0.lock().unwrap().clone();
     if window.label() != "dashboard" || window.url().map_err(|e| e.to_string())?.origin().ascii_serialization() != origin
         || crate::endpoint_url(&origin).is_err() {
-        return Err("UI hints are accepted only from the selected Dashboard origin.".into());
+        return Err("Desktop requests are accepted only from the selected Dashboard origin.".into());
+    }
+    Ok(origin)
+}
+
+pub(crate) fn authorize_dashboard(app: &tauri::AppHandle, window: &tauri::WebviewWindow) -> Result<String, String> {
+    let origin = authorize_selected_dashboard(app, window)?;
+    let url = crate::endpoint_url(&origin)?;
+    if !crate::native_integration_allowed(&url) {
+        return Err("Native desktop integration requires HTTPS or an explicit loopback origin.".into());
     }
     Ok(origin)
 }
@@ -210,7 +219,7 @@ pub async fn desktop_status(app: tauri::AppHandle, window: tauri::WebviewWindow)
 #[tauri::command]
 pub async fn desktop_connection_ready(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
     on_ui(app, move |app| {
-        let origin = authorize_dashboard(app, &window)?;
+        let origin = authorize_selected_dashboard(app, &window)?;
         crate::connection::confirm(app, &origin)
     }).await
 }
@@ -228,12 +237,18 @@ pub fn publish_window_state(app: &tauri::AppHandle) {
 }
 
 pub fn prepare_origin(app: &tauri::AppHandle, origin: &str) -> Result<(), String> {
+    let url = crate::endpoint_url(origin)?;
     let state = app.state::<State>();
     let mut origins = state.origins.lock().unwrap();
     if !origins.iter().any(|existing| existing == origin) {
-        app.add_capability(tauri::ipc::CapabilityBuilder::new(format!("desktop-ui-{}", origins.len()))
-            .local(false).window("dashboard").remote(format!("{origin}/*")).permission("allow-desktop-ui"))
-            .map_err(|e| e.to_string())?;
+        let capability = tauri::ipc::CapabilityBuilder::new(format!("desktop-ui-{}", origins.len()))
+            .local(false).window("dashboard").remote(format!("{origin}/*"));
+        let capability = if crate::native_integration_allowed(&url) {
+            capability.permission("allow-desktop-ui")
+        } else {
+            capability.permission("allow-window-control").permission("allow-connection-ready")
+        };
+        app.add_capability(capability).map_err(|e| e.to_string())?;
         origins.push(origin.to_owned());
     }
     drop(origins);

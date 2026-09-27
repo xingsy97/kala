@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-connection-ready"
+description = "Allows the selected Dashboard to confirm a successful connection without exposing native desktop integration."
+commands.allow = ["desktop_connection_ready"]

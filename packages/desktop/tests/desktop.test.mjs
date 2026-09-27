@@ -22,21 +22,22 @@ test('native window stays menu-free with local keyboard shortcuts and safe close
   assert.equal(config.productName, 'kala-desktop')
   assert.equal(config.app.windows[0].title, 'Kala — Connect')
   assert.equal(config.app.windows[0].width, 560)
-  assert.equal(config.app.windows[0].height, 430)
+  assert.equal(config.app.windows[0].height, 520)
   assert.equal(config.app.windows[0].decorations, false)
   assert.match(config.app.security.csp, /media-src blob:; frame-src blob:; object-src 'none'/)
   assert.doesNotMatch(config.app.security.csp, /media-src[^;]*(?:https?:|'self')/)
   assert.doesNotMatch(config.app.security.csp, /frame-src[^;]*(?:https?:|'self')/)
   assert.match(native, /\.decorations\(false\)/)
-  assert.match(html, /class="launcher-heading"[\s\S]*<h1>Kala<\/h1>[\s\S]*data-window-action="minimize"[\s\S]*data-window-action="toggle-maximize"[\s\S]*data-window-action="close"/)
+  assert.match(html, /class="launcher-heading"[\s\S]*data-window-action="minimize"[\s\S]*data-window-action="toggle-maximize"[\s\S]*data-window-action="close"/)
+  assert.match(html, /Connect to your Dashboard[\s\S]*id="http-warning"[\s\S]*Unencrypted remote connection/)
   assert.doesNotMatch(html, /class="titlebar"|<header/)
   const init = read('../src-tauri/src/desktop-init.js')
   assert.match(init, /data-kala-desktop-window-controls-slot[\s\S]*appendChild\(host\)/)
   assert.match(init, /data-docked[\s\S]*background:transparent[\s\S]*box-shadow:none/)
   assert.doesNotMatch(init, /workbench-toolbar[\s\S]*appendChild\(host\)|margin-left:auto|ak-app-shell|kala-desktop-titlebar|viewport-h[^']*- 36px/)
-  assert.match(html, /<details>\s*<summary>Help and shortcuts<\/summary>/)
+  assert.match(html, /<details>\s*<summary>Connection help<\/summary>/)
   assert.doesNotMatch(html, /<details[^>]*\bopen|Connection.*menu/)
-  assert.match(html, /<details>[\s\S]*Remote servers require HTTPS[\s\S]*Ctrl\+Shift\+O[\s\S]*<\/details>/)
+  assert.match(html, /<details>[\s\S]*HTTPS is recommended[\s\S]*Ctrl\+Shift\+O[\s\S]*<\/details>/)
 })
 
 test('official tray is minimal and cannot hide an app without registered host support', () => {
@@ -72,7 +73,12 @@ test('official tray is minimal and cannot hide an app without registered host su
 })
 
 async function launcherPage({ saved = null, legacy = null, autoConnect = false, failure = '' } = {}) {
-  const nodes = Object.fromEntries(['endpoint', 'status', 'submit', 'connect'].map(id => [id, { value: 'http://remote.example', textContent: '' }]))
+  const nodes = Object.fromEntries(['endpoint', 'status', 'submit', 'connect', 'http-warning', 'endpoint-security'].map(id => [id, {
+    value: id === 'endpoint' ? 'http://remote.example' : '', textContent: '', dataset: {}, hidden: id === 'http-warning',
+    setCustomValidity(value) { this.validationMessage = value },
+    setAttribute(name, value) { this[name] = value },
+    addEventListener() {},
+  }]))
   let submitHandler
   const events = new Map(), calls = []
   nodes.connect.addEventListener = (_, callback) => { submitHandler = callback }
@@ -92,7 +98,7 @@ async function launcherPage({ saved = null, legacy = null, autoConnect = false, 
       querySelector: () => ({ addEventListener() {} }),
     },
     localStorage: { getItem: () => legacy, setItem: () => assert.fail('Native confirmed settings are the only write source') },
-    window, console,
+    window, console, URL,
   })
   await new Promise(resolve => setImmediate(resolve))
   return { nodes, window, calls, events, submit: () => submitHandler({ preventDefault() {} }) }
@@ -108,6 +114,41 @@ test('local launcher exposes validation errors and never remembers a merely acce
   assert.equal(nodes.endpoint.value, 'https://dashboard.example')
   assert.equal(nodes.status.textContent, '')
   assert.equal(calls[0].command, 'launcher_bootstrap')
+})
+
+test('launcher accepts remote HTTP with a warning and HTTPS with native integration', async () => {
+  const http = await launcherPage()
+  assert.equal(http.nodes['http-warning'].hidden, false)
+  assert.match(http.nodes['endpoint-security'].textContent, /browser-safe mode/)
+  await http.submit()
+  assert.deepEqual(JSON.parse(JSON.stringify(http.calls.at(-1))), {
+    command: 'connect', args: { endpoint: 'http://remote.example' },
+  })
+
+  const https = await launcherPage({ saved: 'https://dashboard.example:8443/' })
+  await https.submit()
+  assert.equal(https.nodes.endpoint.value, 'https://dashboard.example:8443')
+  assert.deepEqual(JSON.parse(JSON.stringify(https.calls.at(-1))), {
+    command: 'connect', args: { endpoint: 'https://dashboard.example:8443' },
+  })
+  assert.equal(https.nodes['http-warning'].hidden, true)
+  assert.match(https.nodes['endpoint-security'].textContent, /native desktop features available/)
+
+  const local = await launcherPage({ saved: 'http://localhost:13000' })
+  assert.equal(local.nodes['http-warning'].hidden, true)
+  assert.match(local.nodes['endpoint-security'].textContent, /Local loopback/)
+})
+
+test('launcher rejects unsafe schemes and credentials before invoking native navigation', async () => {
+  for (const value of ['javascript:alert(1)', 'file:///etc/passwd', `https://${'user'}:${'pass'}@example.org`, 'https://example.org/path?token=secret']) {
+    const page = await launcherPage()
+    page.nodes.endpoint.value = value
+    const before = page.calls.length
+    await page.submit()
+    assert.equal(page.calls.length, before, value)
+    assert.equal(page.nodes.endpoint['aria-invalid'], 'true')
+    assert.doesNotMatch(page.nodes.status.textContent, /secret|token/u)
+  }
 })
 
 test('normal startup automatically reuses native saved origin rather than stale localStorage', async () => {
@@ -165,7 +206,7 @@ test('connect remains local; selected-origin v1 UI hints get no general native p
   assert.match(read('../src-tauri/src/main.rs'), /set_do_overwrite_confirmation\(true\)/)
   assert.match(read('../src-tauri/src/main.rs'), /\.data_directory\(profile\)/)
   const desktop = read('../src-tauri/src/desktop.rs')
-  assert.match(desktop, /\.local\(false\)\.window\("dashboard"\)\.remote\(format!\("\{origin\}\/\*"\)\)\.permission\("allow-desktop-ui"\)/)
+  assert.match(desktop, /native_integration_allowed[\s\S]*permission\("allow-desktop-ui"\)[\s\S]*permission\("allow-window-control"\)\.permission\("allow-connection-ready"\)/)
   assert.match(desktop, /window\.label\(\) != "dashboard"/)
   assert.match(desktop, /ascii_serialization\(\) != origin/)
   assert.match(desktop, /deny_unknown_fields/)
@@ -207,7 +248,7 @@ function nativePage(url = 'https://dashboard.example/') {
   }
   window.addEventListener = (name, handler) => handlers.set(name, handler)
   window.__TAURI__ = { core: { invoke: async (command, args) => { calls.push({ command, args }); return command === 'desktop_status' ? { version: '0.2.0-rc.5', focused: true, visible: true } : undefined } } }
-  const location = { href: url }
+  const location = new URL(url)
   const history = { state: {}, replaceState: (_state, _title, value) => { location.href = String(value) } }
   vm.runInNewContext(read('../src-tauri/src/desktop-init.js'), {
     window, Element, URL, location, history, document: { addEventListener: (_, handler) => { click = handler } },
@@ -224,6 +265,14 @@ test('desktop marker and public v1 bridge cannot be replaced; blank links remain
   const link = new Element()
   click({ target: link })
   assert.equal(link.target, '_self')
+})
+
+test('remote HTTP exposes confirmation and window controls without the privileged desktop bridge', async () => {
+  const { window, calls } = nativePage('http://remote.example/')
+  assert.equal(window.__RUNLAB_DESKTOP_BRIDGE__, undefined)
+  assert.equal(Object.isFrozen(window.__RUNLAB_DESKTOP_CONNECTION__), true)
+  await window.__RUNLAB_DESKTOP_CONNECTION__.confirmConnection()
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ command: 'desktop_connection_ready' }])
 })
 
 test('public v1 methods preserve exact payloads and promise errors', async () => {

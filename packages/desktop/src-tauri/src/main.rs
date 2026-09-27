@@ -72,11 +72,10 @@ fn install_shortcuts(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 fn endpoint_url(input: &str) -> Result<tauri::Url, String> {
     let input = input.trim();
     if input.chars().any(char::is_control) || input.contains('\\') {
-        return Err("Enter an HTTPS origin (HTTP is allowed only on loopback).".into());
+        return Err("Enter a valid HTTP or HTTPS Dashboard origin.".into());
     }
     let url = tauri::Url::parse(input).map_err(|_| "Enter a valid Dashboard origin.")?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    if !(url.scheme() == "https" || url.scheme() == "http" && loopback)
+    if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -84,9 +83,14 @@ fn endpoint_url(input: &str) -> Result<tauri::Url, String> {
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err("Use an HTTPS origin without credentials, paths, query or fragment. HTTP requires localhost, 127.0.0.1 or [::1].".into());
+        return Err("Use an HTTP or HTTPS origin without credentials, paths, query or fragment.".into());
     }
     Ok(url)
+}
+
+fn native_integration_allowed(url: &tauri::Url) -> bool {
+    url.scheme() == "https"
+        || url.scheme() == "http" && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
 }
 
 fn navigation_allowed(url: &tauri::Url, origin: &str) -> bool {
@@ -119,7 +123,7 @@ fn authorize_window_control(app: &tauri::AppHandle, window: &tauri::WebviewWindo
     if window.label() == "launcher" && window.url().map_err(|e| e.to_string())?.scheme() == "tauri" {
         return Ok(());
     }
-    desktop::authorize_dashboard(app, window).map(|_| ())
+    desktop::authorize_selected_dashboard(app, window).map(|_| ())
 }
 
 #[tauri::command]
@@ -327,12 +331,22 @@ mod tests {
     }
 
     #[test]
-    fn accepts_only_secure_remote_or_explicit_loopback_origins() {
-        for endpoint in ["https://runlab.example", "https://runlab.example:13000/", "http://127.0.0.1:13000", "http://localhost:13000", "http://[::1]:13000"] {
+    fn accepts_http_and_https_origins_without_url_secrets() {
+        for endpoint in ["https://runlab.example", "https://runlab.example:13000/", "http://remote.example", "http://192.0.2.4:13000", "http://127.0.0.1:13000", "http://localhost:13000", "http://[::1]:13000"] {
             assert!(endpoint_url(endpoint).is_ok(), "{endpoint}");
         }
-        for endpoint in ["http://remote.example", "http://192.0.2.4:13000", concat!("https://", "user", ":", "secret", "@example.org"), "https://example.org/path", "https://example.org?token=secret", "https://example.org/#token", "javascript:alert(1)", "file:///etc/passwd", "https://example.org%40evil.example.invalid", concat!("https", "://exam", "\n", "ple.org")] {
+        for endpoint in [concat!("https://", "user", ":", "secret", "@example.org"), "https://example.org/path", "https://example.org?token=secret", "https://example.org/#token", "javascript:alert(1)", "file:///etc/passwd", "data:text/html,hello", "https://example.org%40evil.example.invalid", concat!("https", "://exam", "\n", "ple.org")] {
             assert!(endpoint_url(endpoint).is_err(), "{endpoint}");
+        }
+    }
+
+    #[test]
+    fn native_integration_requires_tls_except_on_explicit_loopback() {
+        for endpoint in ["https://runlab.example", "https://192.0.2.4:13000", "http://127.0.0.1:13000", "http://localhost:13000", "http://[::1]:13000"] {
+            assert!(native_integration_allowed(&endpoint_url(endpoint).unwrap()), "{endpoint}");
+        }
+        for endpoint in ["http://remote.example", "http://192.0.2.4:13000"] {
+            assert!(!native_integration_allowed(&endpoint_url(endpoint).unwrap()), "{endpoint}");
         }
     }
 
