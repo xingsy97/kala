@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "kala-desktop"
-version = "0.2.0-rc.14"
+version = "0.2.0-rc.15"
 dependencies = [
  "base64 0.22.1",
  "gtk",

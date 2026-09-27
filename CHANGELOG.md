@@ -19,6 +19,8 @@ Versioning while pre-1.0 and uses one product version across release artifacts.
 
 ### Changed
 
+- Private Cloud runtime images now use a digest-pinned, non-root distroless
+  Node.js base with a substantially smaller vulnerability surface.
 - README architecture narrative now presents the pure-function Agent Kernel,
   Agent Runtime, and cloud-native service as one complete system.
 - Thinking titles remain visible when collapsed, and reasoning direction now
@@ -29,5 +31,5 @@ Versioning while pre-1.0 and uses one product version across release artifacts.
 
 ### Release target
 
-- `v0.2.0-rc.14` after every gate in the public release readiness runbook passes.
+- `v0.2.0-rc.15` after every gate in the public release readiness runbook passes.
 - Kala branding and safer installation documentation; no automatic npm publishing.
