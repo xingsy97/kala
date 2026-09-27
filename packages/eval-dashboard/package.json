@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-dashboard",
-  "version": "0.2.0-rc.13",
+  "version": "0.2.0-rc.14",
   "description": "Standalone production Web UI for the Agent Evaluation Platform.",
   "private": true,
   "type": "module",
