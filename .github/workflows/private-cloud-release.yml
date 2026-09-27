@@ -145,10 +145,19 @@ jobs:
       - uses: docker/login-action@v3
         with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
       - name: Install pinned vulnerability scanners
-        env: { GRYPE_VERSION: v0.99.1, TRIVY_VERSION: v0.74.0 }
+        env:
+          GRYPE_VERSION: v0.99.1
+          GRYPE_SHA256: 7fde4d45fe097daa2554078cd9e81faa43e51266a888337f5446c1ffc42d451f
+          TRIVY_VERSION: v0.74.0
+          TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin "${GRYPE_VERSION}"
-          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+          set -euo pipefail
+          curl -sSfL --retry 3 -o /tmp/grype.tar.gz "https://github.com/anchore/grype/releases/download/${GRYPE_VERSION}/grype_${GRYPE_VERSION#v}_linux_amd64.tar.gz"
+          echo "${GRYPE_SHA256}  /tmp/grype.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/grype.tar.gz -C /usr/local/bin grype
+          curl -sSfL --retry 3 -o /tmp/trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}/trivy_${TRIVY_VERSION#v}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
       - name: Scan each immutable image digest
         run: |
           set -euo pipefail

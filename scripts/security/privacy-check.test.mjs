@@ -43,7 +43,7 @@ test('blocks public-release narrative and credential URLs without over-matching 
 
 test('blocks unregistered images, binary files, and private denylist values', () => {
   assert(scan('docs/design/preview.png', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.design-image'))
-  assert(scan('docs/assets/kala-dashboard-preview.gif', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.unregistered-image'))
+  assert(scan('docs/assets/kala-dashboard-preview.gif', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.asset-content-drift'))
   assert(scan('fixtures/new.bin', Buffer.from([0, 1, 2])).some(({ rule }) => rule === 'privacy.unregistered-binary'))
   const marker = ['machine', 'only', 'marker'].join('-')
   assert(scan('docs/example.md', marker, [marker]).some(({ rule }) => rule === 'privacy.private-denylist'))

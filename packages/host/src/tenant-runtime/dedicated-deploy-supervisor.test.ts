@@ -16,6 +16,8 @@ const digest = (value: string | Uint8Array): string => createHash('sha256').upda
 const modernAssets = [
   ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor']
     .flatMap((name) => ['linux-x64', 'darwin-x64', 'darwin-arm64'].map((target) => `${name}-${target}`)),
+  ...['linux-x64', 'darwin-x64', 'darwin-arm64']
+    .flatMap((target) => [`kala-copilot-runtime-${target}`, `kala-copilot-runtime-node-${target}.node`]),
   'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs',
   'kala-dedicated-deploy-supervisor.cjs', 'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz',
   'kala-release-metadata.tar.gz', 'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',

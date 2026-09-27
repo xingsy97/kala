@@ -6,11 +6,7 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
     fileParallelism: false,
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
+    singleFork: true,
   },
   resolve: {
     alias: {

@@ -12,7 +12,7 @@
   "files": ["dist", "src", "templates", "README.md"],
   "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run", "test:watch": "vitest", "typecheck": "tsc --noEmit" },
   "dependencies": { "@agent-kernel/eval-protocol": "workspace:*" },
-  "devDependencies": { "typescript": "^5.6.3", "vitest": "^2.1.5" },
+  "devDependencies": { "typescript": "^5.6.3", "vitest": "4.1.11" },
   "sideEffects": false,
   "license": "MIT"
 }

@@ -4,8 +4,12 @@ export DEBIAN_FRONTEND=noninteractive
 extra_packages=
 if [ -n "${AGENT_EVAL_SWEBENCH_OFFICIAL_IMAGE:-}" ]; then extra_packages='systemd-sysv dbus'; fi
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl git jq python3 python3-pip python3-venv build-essential ripgrep patch bubblewrap $extra_packages
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y --no-install-recommends ca-certificates curl git gnupg jq python3 python3-pip python3-venv build-essential ripgrep patch bubblewrap $extra_packages
+curl -fsSL --retry 3 https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o /tmp/nodesource-repo.gpg.key
+echo 'b42e0321dabdc24e892115da705cf061167eac12a317f23d329862d0aa0a271d  /tmp/nodesource-repo.gpg.key' | sha256sum -c -
+gpg --batch --yes --dearmor -o /usr/share/keyrings/nodesource.gpg /tmp/nodesource-repo.gpg.key
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+apt-get update
 apt-get install -y --no-install-recommends nodejs=22.23.2-1nodesource1
 npm install --global --ignore-scripts @openai/codex@0.146.0 @anthropic-ai/claude-code@2.1.83
 npm install --prefix /opt/agent-eval --ignore-scripts jsonc-parser@3.3.1

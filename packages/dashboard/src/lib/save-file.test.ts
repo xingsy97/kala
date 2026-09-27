@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { saveFile } from './save-file.js'
 
@@ -6,6 +6,11 @@ describe('saveFile', () => {
   beforeEach(() => {
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test') })
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('writes through the native picker when supported', async () => {
@@ -34,7 +39,6 @@ describe('saveFile', () => {
     vi.advanceTimersByTime(60_000)
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test')
     expect(document.querySelector('a[download="a.txt"]')).toBeNull()
-    vi.useRealTimers()
   })
 
   it('falls back to a browser download when the picker fails', async () => {

@@ -14,7 +14,7 @@ if (files.length === 0) {
 }
 
 if (nodeFiles.length > 0) run(process.execPath, ['--test', ...nodeFiles])
-if (vitestFiles.length > 0) run('pnpm', ['exec', 'vitest', 'run', ...vitestFiles])
+if (vitestFiles.length > 0) run('pnpm', ['exec', 'vitest', 'run', '--dir', join(root, 'scripts'), ...vitestFiles])
 
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

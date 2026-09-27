@@ -24,6 +24,7 @@ const prefs: DesktopNotificationPrefs = {
 
 describe('desktop notification helpers', () => {
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -44,13 +45,15 @@ describe('desktop notification helpers', () => {
       },
       connect: vi.fn(),
     }
-    const AudioContextMock = vi.fn().mockImplementation(() => ({
-      currentTime: 1,
-      destination: {},
-      createOscillator: vi.fn(() => oscillator),
-      createGain: vi.fn(() => gain),
-      close,
-    }))
+    const AudioContextMock = vi.fn().mockImplementation(function AudioContext() {
+      return {
+        currentTime: 1,
+        destination: {},
+        createOscillator: vi.fn(() => oscillator),
+        createGain: vi.fn(() => gain),
+        close,
+      }
+    })
     vi.stubGlobal('AudioContext', AudioContextMock)
     return { AudioContextMock, close }
   }
@@ -73,7 +76,9 @@ describe('desktop notification helpers', () => {
   })
 
   it('sends only when global and per-kind prefs are enabled and permission is granted', () => {
-    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    const NotificationMock = vi.fn().mockImplementation(function Notification() {
+      return { close: vi.fn(), onclick: null }
+    })
     Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
     const { AudioContextMock } = stubAudioContext()
@@ -87,7 +92,9 @@ describe('desktop notification helpers', () => {
   })
 
   it('plays notification sound only when the sound preference is enabled', () => {
-    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    const NotificationMock = vi.fn().mockImplementation(function Notification() {
+      return { close: vi.fn(), onclick: null }
+    })
     Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
     const { AudioContextMock } = stubAudioContext()
@@ -101,7 +108,9 @@ describe('desktop notification helpers', () => {
 
   it('notifies on intervention state transitions without repeating the same signature', () => {
     localStorage.setItem('ak-desktop-notifications-enabled', '1')
-    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    const NotificationMock = vi.fn().mockImplementation(function Notification() {
+      return { close: vi.fn(), onclick: null }
+    })
     Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
 
@@ -137,7 +146,9 @@ describe('desktop notification helpers', () => {
 
   it('suppresses the approval desktop notification when approvalMode is allow_all', () => {
     localStorage.setItem('ak-desktop-notifications-enabled', '1')
-    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    const NotificationMock = vi.fn().mockImplementation(function Notification() {
+      return { close: vi.fn(), onclick: null }
+    })
     Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
 
@@ -165,7 +176,9 @@ describe('desktop notification helpers', () => {
 
   it('notifies when a busy session becomes ready for user input', () => {
     localStorage.setItem('ak-desktop-notifications-enabled', '1')
-    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    const NotificationMock = vi.fn().mockImplementation(function Notification() {
+      return { close: vi.fn(), onclick: null }
+    })
     Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
 
@@ -194,7 +207,9 @@ describe('desktop notification helpers', () => {
 
   it('can suppress the ready notification for a user-initiated message round trip', () => {
     localStorage.setItem('ak-desktop-notifications-enabled', '1')
-    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    const NotificationMock = vi.fn().mockImplementation(function Notification() {
+      return { close: vi.fn(), onclick: null }
+    })
     Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
     const { AudioContextMock } = stubAudioContext()
@@ -227,7 +242,9 @@ describe('desktop notification helpers', () => {
 
   it('plays only local sound when the focused dashboard becomes ready for user input', () => {
     localStorage.setItem('ak-desktop-notifications-enabled', '1')
-    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    const NotificationMock = vi.fn().mockImplementation(function Notification() {
+      return { close: vi.fn(), onclick: null }
+    })
     Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
     const { AudioContextMock } = stubAudioContext()
@@ -256,7 +273,9 @@ describe('desktop notification helpers', () => {
 
   it('does not treat switching sessions as a new waiting-for-user transition', () => {
     localStorage.setItem('ak-desktop-notifications-enabled', '1')
-    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    const NotificationMock = vi.fn().mockImplementation(function Notification() {
+      return { close: vi.fn(), onclick: null }
+    })
     Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
     const { AudioContextMock } = stubAudioContext()
