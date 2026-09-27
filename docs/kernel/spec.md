@@ -17,6 +17,8 @@ This spec is written so that a competent developer (or code agent) can re-implem
 - **Invariants** (§5): properties that must always hold
 - **Fold / Fork** (§6): replay and branching semantics
 - **What the kernel deliberately does NOT do** (§7)
+- **Verification contract**: the exact proof claims, assumptions, and
+  non-claims are defined in [Kernel verification](./verification.md)
 
 The reference implementation lives in `packages/kernel/src/`. Every claim below can be verified against `core.test.ts`.
 
