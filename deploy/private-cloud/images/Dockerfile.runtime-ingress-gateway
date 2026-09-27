@@ -13,10 +13,9 @@ RUN pnpm --filter @agent-kernel/kernel build && pnpm --filter @agent-kernel/shar
 RUN pnpm deploy --legacy --filter @agent-kernel/runtime-ingress-gateway --prod /out/ingress \
  && rm -rf /out/ingress/src
 
-FROM node@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS runtime
+FROM gcr.io/distroless/nodejs22-debian13@sha256:5ef534d3db0ac0c43bee379af4ae49cfbfc0ef38a46c94c52d87c68f32f34d8a AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN groupadd --system --gid 10001 runlab && useradd --system --uid 10001 --gid runlab --home /nonexistent --shell /usr/sbin/nologin runlab
-COPY --from=build --chown=runlab:runlab /out/ingress/ /app/packages/runtime-ingress-gateway/
-USER 10001:10001
-CMD ["node", "packages/runtime-ingress-gateway/dist/src/bin/agent-runlab-runtime-ingress.js"]
+COPY --from=build --chown=65532:65532 /out/ingress/ /app/packages/runtime-ingress-gateway/
+USER 65532:65532
+CMD ["packages/runtime-ingress-gateway/dist/src/bin/agent-runlab-runtime-ingress.js"]

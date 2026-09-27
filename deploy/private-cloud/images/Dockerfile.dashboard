@@ -11,11 +11,10 @@ COPY packages/shared packages/shared
 COPY packages/kernel packages/kernel
 RUN pnpm --filter @agent-kernel/kernel build && pnpm --filter @agent-kernel/shared build && pnpm --filter @agent-kernel/dashboard build
 
-FROM node@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS runtime
+FROM gcr.io/distroless/nodejs22-debian13@sha256:5ef534d3db0ac0c43bee379af4ae49cfbfc0ef38a46c94c52d87c68f32f34d8a AS runtime
 ENV NODE_ENV=production DASHBOARD_PORT=8080 DASHBOARD_ROOT=/app/dashboard
 WORKDIR /app
-RUN groupadd --system --gid 10001 runlab && useradd --system --uid 10001 --gid runlab --home /nonexistent --shell /usr/sbin/nologin runlab
 COPY --from=build --chown=root:root /app/packages/dashboard/dist /app/dashboard
 COPY --chown=root:root deploy/private-cloud/images/dashboard-server.mjs /app/dashboard-server.mjs
-USER 10001:10001
-CMD ["node", "/app/dashboard-server.mjs"]
+USER 65532:65532
+CMD ["/app/dashboard-server.mjs"]
