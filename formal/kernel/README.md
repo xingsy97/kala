@@ -17,6 +17,17 @@ every modeled step to advance it.
 - progress from LLM, approval, and tool waiting states when the corresponding
   environment action is weakly fair.
 
+`KernelContract.tla` is generated from the compiled TypeScript transition
+matrix. After changing statuses, events, or handlers:
+
+```bash
+pnpm --filter @agent-kernel/kernel build
+node scripts/formal/generate-kernel-contract.mjs
+```
+
+CI runs the same generator with `--check` and fails if the committed contract
+does not match production.
+
 Run the pinned TLC version from the repository root:
 
 ```bash

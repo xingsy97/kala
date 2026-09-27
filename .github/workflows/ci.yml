@@ -78,6 +78,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Verify TypeScript/TLA+ transition conformance
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
+          pnpm install --frozen-lockfile --filter @agent-kernel/kernel...
+          pnpm --filter @agent-kernel/kernel build
+          node scripts/formal/generate-kernel-contract.mjs --check
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
