@@ -21,8 +21,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Cpu,
   Loader2,
+  MoreHorizontal,
   Shield,
   Square,
   Workflow,
@@ -63,15 +63,18 @@ export function SubAgentCard(props: Props): JSX.Element {
   if (calls.length >= 2) {
     return (
       <div
-        className="ak-subagent-card-surface min-w-0 overflow-hidden rounded-2xl border border-border/60 p-2.5"
+        className="min-w-0"
         data-testid={`sub-agent-group-${props.group.firstCallId}`}
       >
-        <div className="mb-2 flex min-h-8 items-center gap-2 px-1">
-          <Workflow className="h-4 w-4 flex-none text-primary/80" aria-hidden="true" />
-          <span className="text-sm font-medium text-foreground">{t('chat.subAgent.groupLabel')}</span>
-          <span className="rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[0.75rem] text-muted-foreground ring-1 ring-border/50">{calls.length}</span>
+        <div className="mb-1.5 flex min-h-7 items-center gap-2 px-1 text-muted-foreground">
+          <Workflow className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+          <span className="text-[0.75rem] font-medium">{t('chat.subAgent.groupLabel')}</span>
+          <span className="font-mono text-[0.6875rem] text-muted-foreground/80">{calls.length}</span>
         </div>
-        <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2" data-testid={`sub-agent-group-list-${props.group.firstCallId}`}>
+        <div
+          className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card/35 divide-y divide-border/40"
+          data-testid={`sub-agent-group-list-${props.group.firstCallId}`}
+        >
           {calls.map((call) => (
             <SubAgentRow
               key={call.callId}
@@ -82,7 +85,6 @@ export function SubAgentCard(props: Props): JSX.Element {
               socket={props.socket}
               result={props.group.results.get(call.callId) ?? null}
               approval={props.approvalByCallId.get(call.callId) ?? null}
-              dotsMode={props.toolCardMode === 'dots'}
             />
           ))}
         </div>
@@ -238,36 +240,6 @@ const SubAgentRow = memo(function SubAgentRow({
     if (compact && terminal) setOpen(false)
   }, [status, compact, grouped])
 
-  if (grouped && !open) {
-    const label = `${t('chat.subAgent.label')}${agentType ? ` · ${agentType}` : ''} · ${statusLabel(status, t)}${turns > 0 ? ` · ${t('chat.subAgent.turn', { count: turns })}` : ''}`
-    return (
-      <div className="min-w-0 max-w-full" data-testid={`sub-agent-row-${call.callId}`} data-sub-agent-status={status}>
-        <button
-          type="button"
-          onClick={() => withViewTransition(() => setOpen(true))}
-          className={cn(
-            'grid min-h-20 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] grid-rows-[auto_auto_auto] items-start gap-x-2 gap-y-1.5 rounded-2xl bg-background/80 px-3 py-2.5 text-left text-sm text-foreground shadow-sm ring-1 ring-border/50 transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-rows-[auto_auto]',
-            status === 'completed' ? 'ring-emerald-300/45 dark:ring-emerald-500/25' : status === 'failed' || status === 'cancelled' ? 'ring-rose-300/45 dark:ring-rose-500/25' : '',
-          )}
-          title={`${label} · ${intention}`}
-          aria-label={`${label} · ${intention}`}
-          data-testid={`sub-agent-chip-${call.callId}`}
-          data-sub-agent-toggle={call.callId}
-        >
-          <span className="row-span-3 mt-0.5 flex h-5 w-5 items-center justify-center sm:row-span-2">
-            <StatusIcon status={status} />
-          </span>
-          <span className="flex min-w-0 items-center gap-2">
-            {agentType ? <span className="flex-none rounded-md bg-muted/70 px-1.5 py-0.5 text-[0.8125rem] font-medium text-muted-foreground">{agentType}</span> : null}
-            <span className="truncate text-[0.8125rem] font-medium uppercase tracking-wide text-muted-foreground">{t('chat.subAgent.label')}</span>
-          </span>
-          <span className="col-start-2 row-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end"><StatusBadge status={status} turns={turns} durationMs={totalMs} /></span>
-          <span className="col-start-2 col-end-3 row-start-3 line-clamp-2 min-w-0 break-words text-[0.9375rem] leading-snug text-foreground/90 [overflow-wrap:anywhere] sm:col-end-4 sm:row-start-2">{intention}</span>
-        </button>
-      </div>
-    )
-  }
-
   if (dotsMode && !open && terminal) {
     const label = `${t('chat.subAgent.label')}${agentType ? ` · ${agentType}` : ''} · ${statusLabel(status, t)}${turns > 0 ? ` · ${t('chat.subAgent.turn', { count: turns })}` : ''}`
     return (
@@ -290,49 +262,62 @@ const SubAgentRow = memo(function SubAgentRow({
     )
   }
 
+  const childSessionId = view.lifecycle.status === 'idle'
+    ? envelope?.sessionId
+    : view.lifecycle.childSessionId
+
   return (
     <div
       className={cn(
-        'ak-subagent-card-surface relative min-w-0 max-w-full overflow-hidden rounded-2xl border border-border/60 transition-colors',
-        grouped && 'w-full',
+        'relative min-w-0 max-w-full overflow-hidden transition-colors',
+        grouped ? 'w-full' : 'rounded-xl border border-border/70 bg-card/55',
+        open && !grouped && 'border-border bg-card/80',
       )}
       data-testid={`sub-agent-row-${call.callId}`}
       data-sub-agent-status={status}
     >
-      <div className="flex min-w-0 items-center rounded-2xl text-sm text-foreground transition-colors hover:bg-accent/35">
+      <div className={cn(
+        'group/subagent flex min-w-0 items-center text-sm text-foreground transition-colors hover:bg-muted/45',
+        open && 'bg-muted/30',
+      )}>
         <button
           type="button"
           onClick={() => withViewTransition(() => setOpen((v) => !v))}
-          className={cn('flex min-w-0 flex-1 items-center gap-2 text-left', compact ? 'px-2 py-2' : 'px-3 py-2.5')}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+            compact ? 'px-3 py-2' : 'px-3 py-2.5',
+          )}
           data-testid={`sub-agent-toggle-${call.callId}`}
         >
+          <span className="flex h-5 w-5 flex-none items-center justify-center">
+            <StatusIcon status={status} />
+          </span>
+          <span className={cn('flex-none font-semibold text-foreground', compact ? 'text-[0.8125rem]' : 'text-sm')}>
+            {agentType ?? t('chat.subAgent.label')}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-muted-foreground" title={intention}>
+            {intention}
+          </span>
           {open ? (
             <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           ) : (
             <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           )}
-          <StatusIcon status={status} />
-          <span className={cn('flex-none rounded-full bg-background/65 px-1.5 py-0.5 font-medium text-muted-foreground ring-1 ring-border/45', compact ? 'text-[0.75rem]' : 'text-[0.8125rem]')}>
-            {t('chat.subAgent.label')}
-          </span>
-          {agentType ? (
-            <span className={cn('flex-none rounded-full bg-primary/10 px-1.5 py-0.5 text-primary ring-1 ring-primary/20', compact ? 'text-[0.75rem]' : 'text-[0.8125rem]')}>
-              {agentType}
-            </span>
-          ) : null}
-          <span className={cn('line-clamp-2 min-w-0 flex-1 break-words text-foreground/85 [overflow-wrap:anywhere]', compact ? 'text-sm leading-snug' : 'text-sm leading-snug')}>
-            {intention}
-          </span>
-          {model ? (
-            <span
-              className="hidden flex-none items-center gap-1 rounded-full bg-background/65 px-1.5 py-0.5 font-mono text-[0.75rem] text-muted-foreground ring-1 ring-border/45 sm:flex"
-              title={`model=${model}`}
-            >
-              <Cpu className="h-3 w-3" aria-hidden="true" />
-              {model}
-            </span>
-          ) : null}
         </button>
+        <div className="hidden flex-none sm:block">
+          <StatusBadge status={status} turns={turns} durationMs={totalMs} />
+        </div>
+        <SubAgentDetails
+          callId={call.callId}
+          agentType={agentType}
+          model={model}
+          role={roleInput}
+          status={status}
+          turns={turns}
+          durationMs={totalMs}
+          childSessionId={childSessionId}
+          policy={policy}
+        />
         {runningChildSessionId && socket ? (
           <button
             type="button"
@@ -344,7 +329,7 @@ const SubAgentRow = memo(function SubAgentRow({
                 childSessionId: runningChildSessionId,
               })
             }}
-            className="mr-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-background/65 text-muted-foreground ring-1 ring-border/50 hover:bg-rose-500/10 hover:text-rose-700 dark:hover:text-rose-300"
+            className="mr-2 inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground opacity-65 transition hover:bg-rose-500/10 hover:text-rose-700 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-rose-300"
             title={t('chat.subAgent.interrupt')}
             aria-label={t('chat.subAgent.interrupt')}
             data-testid={`sub-agent-interrupt-${call.callId}`}
@@ -352,26 +337,19 @@ const SubAgentRow = memo(function SubAgentRow({
             <Square className="h-3 w-3" aria-hidden="true" />
           </button>
         ) : null}
-        <div className={cn(compact ? 'pr-2' : 'pr-3')}>
-          <StatusBadge status={status} turns={turns} durationMs={totalMs} />
-        </div>
       </div>
 
       {open ? (
-        <div className="border-t border-border/45 bg-background/45">
-          <div className="border-b border-border/40 px-4 py-3 text-[0.9375rem] leading-6 text-foreground" data-testid={`sub-agent-intention-${call.callId}`}>
-            <span className="mr-1 font-medium text-muted-foreground">{t('chat.subAgent.intention')}</span>
-            <span>{intention}</span>
-          </div>
+        <div className="border-t border-border/50 bg-background/45 px-2 pb-2 pt-1.5">
           {failureText ? (
-            <div className="border-b border-rose-200/60 bg-rose-50/60 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/30 dark:text-rose-200">
+            <div className="my-1 rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground">
               <strong className="font-semibold">{status === 'cancelled' ? t('chat.subAgent.cancelled') : t('chat.subAgent.failed')}</strong> {failureText}
             </div>
           ) : null}
           {displayedMessages.length > 0 ? (
             <div
               className={cn(
-                'flex min-h-0 flex-col',
+                'flex min-h-0 flex-col py-1',
                 virtualizeTranscript
                   ? 'max-h-[min(20rem,55dvh)]'
                   : compact ? 'max-h-[22rem] overflow-y-auto' : 'max-h-96 overflow-y-auto',
@@ -389,7 +367,6 @@ const SubAgentRow = memo(function SubAgentRow({
           ) : (
             <EmptyChild status={status} />
           )}
-          {policy ? <SubAgentPolicyPanel policy={policy} callId={call.callId} /> : null}
         </div>
       ) : null}
     </div>
@@ -454,7 +431,7 @@ function StatusBadge({
   return (
     <span
       className={cn(
-        'flex-none whitespace-nowrap rounded px-1.5 py-0.5 text-[0.75rem] font-medium uppercase tracking-wider',
+        'flex-none whitespace-nowrap px-1.5 py-0.5 text-[0.6875rem] font-medium',
         badgeClassFor(status),
       )}
       data-testid="sub-agent-status-badge"
@@ -468,15 +445,15 @@ function StatusBadge({
 function badgeClassFor(status: SubAgentLifecycle['status']): string {
   switch (status) {
     case 'completed':
-      return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+      return 'text-emerald-700 dark:text-emerald-300'
     case 'failed':
-      return 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+      return 'text-rose-700 dark:text-rose-300'
     case 'cancelled':
-      return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+      return 'text-amber-700 dark:text-amber-300'
     case 'running':
-      return 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300'
+      return 'text-sky-700 dark:text-sky-300'
     default:
-      return 'bg-background/80 text-muted-foreground'
+      return 'text-muted-foreground'
   }
 }
 
@@ -582,91 +559,103 @@ function readRole(call: ToolCallContent): string | undefined {
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined
 }
 
-function SubAgentPolicyPanel({
+function SubAgentDetails({
+  agentType,
+  model,
+  role,
+  status,
+  turns,
+  durationMs,
+  childSessionId,
   policy,
   callId,
 }: {
-  policy: SubAgentPolicyView
+  agentType?: string
+  model?: string
+  role?: string
+  status: SubAgentLifecycle['status']
+  turns: number
+  durationMs: number
+  childSessionId?: string
+  policy: SubAgentPolicyView | null
   callId: string
 }): JSX.Element {
   const { t } = useTranslation()
   return (
     <details
-      className="border-t border-border/40 bg-muted/20 text-sm leading-6 text-muted-foreground"
-      data-testid={`sub-agent-policy-${callId}`}
+      className="relative flex-none"
+      data-testid={`sub-agent-details-${callId}`}
     >
-      <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 font-medium text-muted-foreground hover:text-foreground">
-        <Shield className="h-4 w-4" aria-hidden="true" />
-        {t('chat.subAgent.executionDetails')}
+      <summary
+        className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground opacity-55 transition hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+        title={t('chat.subAgent.executionDetails')}
+        aria-label={t('chat.subAgent.executionDetails')}
+      >
+        <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
       </summary>
-      <div className="border-t border-border/30 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
-        {policy.role ? (
-          <PolicyChip label={t('chat.subAgent.role')} value={policy.role} />
-        ) : null}
-        {policy.maxTurns !== undefined ? (
-          <PolicyChip label={t('chat.subAgent.maxTurns')} value={String(policy.maxTurns)} />
-        ) : null}
-        {policy.idleTimeoutMs !== undefined ? (
-          <PolicyChip label="idle" value={formatPolicyDuration(policy.idleTimeoutMs)} />
-        ) : null}
-        {policy.toolIdleTimeoutMs !== undefined ? (
-          <PolicyChip label="tool idle" value={formatPolicyDuration(policy.toolIdleTimeoutMs)} />
-        ) : null}
-        {policy.timeoutMs !== undefined ? (
-          <PolicyChip label="absolute" value={formatPolicyDuration(policy.timeoutMs)} />
-        ) : null}
-        {policy.gracePeriodMs !== undefined ? (
-          <PolicyChip label="grace" value={formatPolicyDuration(policy.gracePeriodMs)} />
-        ) : null}
-        {policy.maxDepth !== undefined ? (
-          <PolicyChip
-            label={t('chat.subAgent.depth')}
-            value={
-              policy.resolvedDepth !== undefined
-                ? `${policy.resolvedDepth}/${policy.maxDepth}`
-                : String(policy.maxDepth)
-            }
-          />
-        ) : null}
-        {policy.maxFanOut !== undefined ? (
-          <PolicyChip
-            label={t('chat.subAgent.fanOut')}
-            value={
-              policy.concurrentSiblingCount !== undefined
-                ? `${policy.concurrentSiblingCount}/${policy.maxFanOut}`
-                : String(policy.maxFanOut)
-            }
-          />
-        ) : null}
-        {policy.allowedTools && policy.allowedTools.length > 0 ? (
-          <PolicyChip label={t('chat.subAgent.tools')} value={policy.allowedTools.join(', ')} />
-        ) : null}
+      <div
+        className="absolute right-0 top-full z-30 mt-1 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-border/70 bg-popover p-3 text-popover-foreground shadow-xl"
+        data-sub-agent-details-popover
+      >
+        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+          <Shield className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          {t('chat.subAgent.executionDetails')}
         </div>
+        <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
+          <DetailRow label={t('chat.subAgent.agentType')} value={agentType ?? t('chat.subAgent.label')} />
+          {model ? <DetailRow label={t('chat.subAgent.model')} value={model} mono /> : null}
+          {role || policy?.role ? <DetailRow label={t('chat.subAgent.role')} value={policy?.role ?? role!} /> : null}
+          <DetailRow label={t('chat.subAgent.status')} value={statusLabel(status, t)} />
+          {turns > 0 ? <DetailRow label={t('chat.subAgent.turns')} value={String(turns)} /> : null}
+          {durationMs > 0 ? <DetailRow label={t('chat.subAgent.duration')} value={formatDuration(durationMs)} /> : null}
+          {childSessionId ? <DetailRow label={t('chat.subAgent.childSession')} value={childSessionId} mono /> : null}
+          {policy?.maxTurns !== undefined ? <DetailRow label={t('chat.subAgent.maxTurns')} value={String(policy.maxTurns)} /> : null}
+          {policy?.idleTimeoutMs !== undefined ? <DetailRow label="Idle timeout" value={formatPolicyDuration(policy.idleTimeoutMs)} /> : null}
+          {policy?.toolIdleTimeoutMs !== undefined ? <DetailRow label="Tool idle" value={formatPolicyDuration(policy.toolIdleTimeoutMs)} /> : null}
+          {policy?.timeoutMs !== undefined ? <DetailRow label={t('chat.subAgent.timeout')} value={formatPolicyDuration(policy.timeoutMs)} /> : null}
+          {policy?.gracePeriodMs !== undefined ? <DetailRow label="Grace" value={formatPolicyDuration(policy.gracePeriodMs)} /> : null}
+          {policy?.maxDepth !== undefined ? (
+            <DetailRow
+              label={t('chat.subAgent.depth')}
+              value={policy.resolvedDepth !== undefined ? `${policy.resolvedDepth}/${policy.maxDepth}` : String(policy.maxDepth)}
+            />
+          ) : null}
+          {policy?.maxFanOut !== undefined ? (
+            <DetailRow
+              label={t('chat.subAgent.fanOut')}
+              value={policy.concurrentSiblingCount !== undefined ? `${policy.concurrentSiblingCount}/${policy.maxFanOut}` : String(policy.maxFanOut)}
+            />
+          ) : null}
+          {policy?.allowedTools && policy.allowedTools.length > 0 ? (
+            <DetailRow label={t('chat.subAgent.tools')} value={policy.allowedTools.join(', ')} mono />
+          ) : null}
+        </dl>
+        {policy ? <div data-testid={`sub-agent-policy-${callId}`}>
         {policy.intention ?? policy.objective ? (
-        <div className="mt-3 text-sm leading-6">
+        <div className="mt-3 border-t border-border/50 pt-2 text-xs leading-5">
           <span className="font-medium text-foreground/80">{t('chat.subAgent.intention')}</span>{' '}
-          <span className="italic">{policy.intention ?? policy.objective}</span>
+          <span className="text-muted-foreground">{policy.intention ?? policy.objective}</span>
         </div>
         ) : null}
         {policy.expectedOutput ? (
-        <div className="mt-2 text-sm leading-6">
+        <div className="mt-2 text-xs leading-5">
           <span className="font-medium text-foreground/80">{t('chat.subAgent.expectedOutput')}</span>{' '}
-          <span className="italic">{policy.expectedOutput}</span>
+          <span className="text-muted-foreground">{policy.expectedOutput}</span>
         </div>
         ) : null}
         {policy.reasons.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1">
+        <div className="mt-2 flex flex-wrap gap-1 border-t border-border/50 pt-2">
           {policy.reasons.map((reason) => (
             <span
               key={reason}
-              className="rounded-md bg-background/80 px-2 py-1 font-mono text-[0.8125rem] ring-1 ring-border/50"
+              className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground"
             >
               {reason}
             </span>
           ))}
         </div>
         ) : null}
+        </div> : null}
       </div>
     </details>
   )
@@ -677,11 +666,11 @@ function formatPolicyDuration(ms: number): string {
   return `${Math.round(ms / 1000)}s`
 }
 
-function PolicyChip({ label, value }: { label: string; value: string }): JSX.Element {
+function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }): JSX.Element {
   return (
-    <span className="inline-flex items-baseline gap-1">
-      <span className="text-xs uppercase tracking-wider text-muted-foreground/80">{label}</span>
-      <span className="font-mono text-sm text-foreground">{value}</span>
-    </span>
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn('min-w-0 break-all text-foreground', mono && 'font-mono text-[0.6875rem]')}>{value}</dd>
+    </>
   )
 }

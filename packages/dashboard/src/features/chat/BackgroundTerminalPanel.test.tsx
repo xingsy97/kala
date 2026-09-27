@@ -41,7 +41,7 @@ describe('BackgroundShellsButton', () => {
     expect(trigger.textContent).toBe('')
     expect(trigger.getAttribute('aria-label') ?? '').toContain('workspace background shell')
     expect(trigger.className).toContain('h-11')
-    expect(trigger.className).toContain('w-11')
+    expect(trigger.className).toContain('w-10')
 
     fireEvent.click(trigger)
     expect(await screen.findByText('Workspace shells')).toBeTruthy()

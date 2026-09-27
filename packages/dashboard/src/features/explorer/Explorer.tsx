@@ -26,7 +26,7 @@ import {
   GitFork,
   Info,
   LoaderCircle,
-  MessageCircle,
+  Sparkles,
   Monitor,
   MoreHorizontal,
   Pencil,
@@ -1058,7 +1058,7 @@ function WorkspaceRow({
         />
       ) : (
         <div className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2">
-          {w.workspaceId === null ? <span className="inline-flex h-5 w-5 flex-none items-center justify-center"><MessageCircle className="h-4 w-4 text-primary" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{statusLabel}</span></span> : <span className={cn('inline-flex h-5 w-5 flex-none items-center justify-center transition-colors', workspaceIconCls)} data-testid="workspace-status-icon" data-os={w.os ?? 'unknown'} title={iconLabel} role="img" aria-label={iconLabel}><WorkspaceOsIcon os={w.os} /></span>}
+          {w.workspaceId === null ? <span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-md bg-primary/10 text-primary"><Sparkles className="h-3.5 w-3.5" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{statusLabel}</span></span> : <span className={cn('inline-flex h-5 w-5 flex-none items-center justify-center transition-colors', workspaceIconCls)} data-testid="workspace-status-icon" data-os={w.os ?? 'unknown'} title={iconLabel} role="img" aria-label={iconLabel}><WorkspaceOsIcon os={w.os} /></span>}
           <span
             className="min-w-0 truncate font-semibold leading-5 text-foreground"
             style={{ fontSize: fontSizePx, lineHeight: 1.35 }}
@@ -1074,7 +1074,7 @@ function WorkspaceRow({
           </span>
         </div>
       )}
-      <div data-row-action className="ak-touch-reveal pointer-events-none flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/ws:pointer-events-auto group-hover/ws:opacity-100">
+      <div data-row-action className="ak-touch-reveal pointer-events-none flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100">
         {canOpenTerminal && !editing ? (
           <button
             type="button"
@@ -1082,7 +1082,7 @@ function WorkspaceRow({
             title={w.online ? t('terminal.workspaceOpen') : t('explorer.workspaceOffline')}
             aria-label={t('terminal.workspaceOpen')}
             disabled={!w.online || w.children.length === 0}
-            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+            className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
             onClick={(e) => {
               e.stopPropagation()
               if (w.online && w.children.length > 0) onOpenWorkspaceTerminal?.(w)
@@ -1091,78 +1091,78 @@ function WorkspaceRow({
             <SquareTerminal className="h-3.5 w-3.5" />
           </button>
         ) : null}
-        {canRename && !editing ? (
-          <button
-            type="button"
-            data-testid={`workspace-rename-${w.workspaceId}`}
-            title={t('explorer.renameWorkspace')}
-            aria-label={t('explorer.renameWorkspaceAria', { workspaceId: w.workspaceId })}
-            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={(e) => {
-              e.stopPropagation()
-              onStartEdit(w)
-            }}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-        ) : null}
-        {canCreateSession ? (
-          <button
-            type="button"
-            data-testid={`workspace-new-session-${w.workspaceId}`}
-            title={w.online ? t('explorer.newSessionInWorkspace') : t('explorer.workspaceOffline')}
-            aria-label={t('explorer.newSessionInWorkspace')}
-            disabled={!w.online}
-            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-            onClick={(e) => {
-              e.stopPropagation()
-              if (!w.online) return
-              onNewSession(w.workspaceId ?? undefined)
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        ) : null}
-        {canShowInfo ? (
-          <button
-            type="button"
-            data-testid={`workspace-info-${w.workspaceId}`}
-            title={t('explorer.workspaceInfo')}
-            aria-label={t('explorer.workspaceInfo')}
-            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={(e) => {
-              e.stopPropagation()
-              if (w.workspaceId !== null) onWorkspaceInfo?.(w.workspaceId)
-            }}
-          >
-            <Info className="h-3.5 w-3.5" />
-          </button>
-        ) : null}
-        {canHide ? (
-          <button
-            type="button"
-            data-testid={`workspace-hide-${w.workspaceId}`}
-            title={t('explorer.hideWorkspace')}
-            aria-label={t('explorer.hideWorkspaceAria', { workspaceId: w.workspaceId })}
-            className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={(e) => {
-              e.stopPropagation()
-              if (w.workspaceId !== null) onHideWorkspace(w.workspaceId)
-            }}
-          >
-            <EyeOff className="h-3.5 w-3.5" />
-          </button>
-        ) : null}
+          {canRename && !editing ? (
+            <button
+              type="button"
+              data-testid={`workspace-rename-${w.workspaceId}`}
+              title={t('explorer.renameWorkspace')}
+              aria-label={t('explorer.renameWorkspaceAria', { workspaceId: w.workspaceId })}
+              className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation()
+                onStartEdit(w)
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {canCreateSession ? (
+            <button
+              type="button"
+              data-testid={`workspace-new-session-${w.workspaceId}`}
+              title={w.online ? t('explorer.newSessionInWorkspace') : t('explorer.workspaceOffline')}
+              aria-label={t('explorer.newSessionInWorkspace')}
+              disabled={!w.online}
+              className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (!w.online) return
+                onNewSession(w.workspaceId ?? undefined)
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {canShowInfo ? (
+            <button
+              type="button"
+              data-testid={`workspace-info-${w.workspaceId}`}
+              title={t('explorer.workspaceInfo')}
+              aria-label={t('explorer.workspaceInfo')}
+              className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (w.workspaceId !== null) onWorkspaceInfo?.(w.workspaceId)
+              }}
+            >
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {canHide ? (
+            <button
+              type="button"
+              data-testid={`workspace-hide-${w.workspaceId}`}
+              title={t('explorer.hideWorkspace')}
+              aria-label={t('explorer.hideWorkspaceAria', { workspaceId: w.workspaceId })}
+              className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (w.workspaceId !== null) onHideWorkspace(w.workspaceId)
+              }}
+            >
+              <EyeOff className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
       </div>
     </div>
   )
 }
 
 function WorkspaceOsIcon({ os }: { os: WorkspaceNode['os'] }): JSX.Element {
-  // Devicon v2.16.0 OS artwork (MIT); shipped locally, never loaded from a CDN.
+  // Local OS artwork; shipped with the Dashboard and never loaded from a CDN.
   const icon = os === 'linux' ? 'linux' : os === 'darwin' ? 'macos' : os === 'win32' ? 'windows' : null
   if (icon) {
-    return <img src={`/icons/${icon}.svg`} alt="" className="h-4 w-4" data-testid="workspace-os-icon" data-os-icon={icon} aria-hidden="true" />
+    return <img src={`/icons/${icon}.svg`} alt="" className="h-4 w-4 object-contain" data-testid="workspace-os-icon" data-os-icon={icon} aria-hidden="true" />
   }
   return <Monitor className="h-4 w-4" data-testid="workspace-os-icon" data-os-icon="generic" aria-hidden="true" />
 }

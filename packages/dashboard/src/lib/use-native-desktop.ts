@@ -4,6 +4,7 @@ import type { SessionSummary } from '@agent-kernel/shared'
 import type { DashboardSocket } from '../session.js'
 import { DesktopActivityTracker, type DesktopSessionSignal } from '../domain/desktop-activity.js'
 import { notify } from '../notify.js'
+import { getDesktopConnection } from './desktop.js'
 import { useDesktopNotificationPrefs } from './desktop-notifications.js'
 import { subscribeDesktopSessionOpen, useDesktopBridge, validDesktopSessionId } from './desktop-bridge.js'
 import { DASHBOARD_PREFERENCES, useBooleanPref } from './prefs.js'
@@ -22,6 +23,7 @@ export function useNativeDesktop(input: {
 }): void {
   const { t } = useTranslation()
   const native = useDesktopBridge()
+  const [desktopConnection] = useState(getDesktopConnection)
   const prefs = useDesktopNotificationPrefs()
   const [showDetails] = useBooleanPref(DASHBOARD_PREFERENCES.desktopNotificationDetails.key, false)
   const [connected, setConnected] = useState(input.socket?.connected ?? false)
@@ -64,7 +66,7 @@ export function useNativeDesktop(input: {
   }, [native.bridge, input.socket, fail])
 
   useEffect(() => {
-    if (!native.bridge || !input.socket) return
+    if ((!native.bridge && !desktopConnection) || !input.socket) return
     const socket = input.socket
     const connect = () => { readyAfterConnect.current = false; connectionConfirmed.current = false; classifier.current?.reset(); setConnected(true); activitySignature.current = '' }
     const disconnect = () => { readyAfterConnect.current = false; connectionConfirmed.current = false; classifier.current?.reset(); setConnected(false) }
@@ -77,14 +79,14 @@ export function useNativeDesktop(input: {
     socket.on('disconnect', disconnect)
     socket.on('server:sessions', snapshot)
     return () => { socket.off('connect', connect); socket.off('disconnect', disconnect); socket.off('server:sessions', snapshot) }
-  }, [input.socket, native.bridge])
+  }, [input.socket, native.bridge, desktopConnection])
 
   useEffect(() => {
-    const bridge = native.bridge
-    if (typeof bridge?.confirmConnection !== 'function' || !input.ready || !connected || !readyAfterConnect.current || connectionConfirmed.current) return
+    const confirmConnection = native.bridge?.confirmConnection ?? desktopConnection?.confirmConnection
+    if (typeof confirmConnection !== 'function' || !input.ready || !connected || !readyAfterConnect.current || connectionConfirmed.current) return
     connectionConfirmed.current = true
-    void bridge.confirmConnection().catch(fail)
-  }, [native.bridge, input.socket, input.ready, connected, clock, fail])
+    void confirmConnection().catch(fail)
+  }, [native.bridge, desktopConnection, input.socket, input.ready, connected, clock, fail])
 
   useEffect(() => {
     const bridge = native.bridge

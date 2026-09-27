@@ -44,11 +44,12 @@ describe('SubAgentCard', () => {
     )
     const badge = screen.getByTestId('sub-agent-status-badge')
     expect(badge.textContent).toContain('Pending')
-    expect(screen.getByText('Explore')).toBeTruthy()
+    expect(screen.getAllByText('Explore').length).toBeGreaterThan(0)
     expect(screen.getAllByText('find the bug').length).toBeGreaterThan(0)
     const row = screen.getByTestId('sub-agent-row-c1')
-    expect(row.className).toContain('ak-subagent-card-surface')
-    expect(row.className).toContain('rounded-2xl')
+    expect(row.className).toContain('rounded-xl')
+    expect(row.className).toContain('border')
+    expect(row.className).not.toContain('ak-subagent-card-surface')
     // Beam is only drawn when a child session is actively running.
     expect(screen.queryByTestId('border-beam')).toBeNull()
   })
@@ -73,7 +74,8 @@ describe('SubAgentCard', () => {
     const row = screen.getByTestId('sub-agent-row-c-intent')
     expect(row.textContent).toContain('Explain the user-visible session behavior.')
     expect(row.textContent).not.toContain('/workspace/private/file.ts')
-    expect(screen.getByTestId('sub-agent-intention-c-intent').textContent).toContain('Intention:')
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c-intent'))
+    expect(row.textContent?.match(/Explain the user-visible session behavior\./g)).toHaveLength(1)
   })
 
   it('uses a generic historical fallback instead of exposing a path or giant prompt', () => {
@@ -360,7 +362,7 @@ describe('SubAgentCard', () => {
     const group = makeGroup([call], [['c1', result]])
     const socket = makeImmediateReadySocket('child-9', [
       { role: 'user', content: [{ type: 'text', text: 'child prompt' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'child answer visible with $a^2$' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'child answer visible with $$a^2$$' }] },
     ])
 
     render(
@@ -374,7 +376,9 @@ describe('SubAgentCard', () => {
 
     fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
     await waitFor(() => expect(screen.getByText(/child answer visible/)).toBeTruthy())
-    expect(screen.getByText(/\$a\^2\$/)).toBeTruthy()
+    const nestedMarkdown = screen.getAllByTestId('nested-markdown')
+    expect(nestedMarkdown).toHaveLength(2)
+    expect(nestedMarkdown.some((entry) => entry.querySelector('.katex'))).toBe(true)
     expect(screen.getByTestId('sub-agent-transcript-frame-c1').getAttribute('data-layout')).toBe('content')
     expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('false')
   })
@@ -439,7 +443,8 @@ describe('SubAgentCard', () => {
     expect(frame.className).toContain('max-h-[min(20rem,55dvh)]')
     expect(frame.className).not.toContain('h-[min(28rem,55dvh)]')
     expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('true')
-    expect(screen.getByTestId('sub-agent-intention-c-compact-live').textContent).toContain('Inspect the compact live transcript.')
+    expect(screen.getByTestId('sub-agent-toggle-c-compact-live').textContent).toContain('Inspect the compact live transcript.')
+    fireEvent.click(screen.getByLabelText('Execution details'))
     expect(screen.getByText('claude-sonnet')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-interrupt-c-compact-live')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-status-badge').textContent).toContain('Running')
@@ -490,14 +495,15 @@ describe('SubAgentCard', () => {
           { cache: 'no-store' },
         ),
       )
-      const panel = await screen.findByTestId('sub-agent-policy-c1') as HTMLDetailsElement
-      expect(panel.open).toBe(false)
-      fireEvent.click(screen.getByText('Execution details'))
-      expect(panel.open).toBe(true)
-      expect(panel.textContent).toContain('research')
-      expect(panel.textContent).toContain('read, grep')
-      expect(panel.textContent).toContain('12')
-      expect(panel.textContent).toContain('90s')
+      const details = screen.getByTestId('sub-agent-details-c1') as HTMLDetailsElement
+      expect(details.open).toBe(false)
+      fireEvent.click(screen.getByLabelText('Execution details'))
+      expect(details.open).toBe(true)
+      const panel = await screen.findByTestId('sub-agent-policy-c1')
+      expect(details.textContent).toContain('research')
+      expect(details.textContent).toContain('read, grep')
+      expect(details.textContent).toContain('12')
+      expect(details.textContent).toContain('90s')
       expect(panel.textContent).toContain('summarize the repo layout')
       expect(panel.textContent).toContain('role_template_applied')
       expect(panel.textContent).toContain('policy_allowed_tools_intersected')
@@ -565,11 +571,13 @@ describe('SubAgentCard', () => {
           approvalByCallId={new Map()}
         />,
       )
-      const panel = await screen.findByTestId('sub-agent-policy-c3')
-      expect(panel.textContent).toContain('depth')
-      expect(panel.textContent).toContain('2/3')
-      expect(panel.textContent).toContain('fan-out')
-      expect(panel.textContent).toContain('1/4')
+      fireEvent.click(screen.getByLabelText('Execution details'))
+      await screen.findByTestId('sub-agent-policy-c3')
+      const details = screen.getByTestId('sub-agent-details-c3')
+      expect(details.textContent).toContain('depth')
+      expect(details.textContent).toContain('2/3')
+      expect(details.textContent).toContain('fan-out')
+      expect(details.textContent).toContain('1/4')
     } finally {
       vi.unstubAllGlobals()
     }
@@ -631,24 +639,55 @@ describe('ChatPanel sub-agent dispatch', () => {
     )
     const grouped = screen.getByTestId(`sub-agent-group-${group.firstCallId}`)
     const groupList = screen.getByTestId(`sub-agent-group-list-${group.firstCallId}`)
-    expect(groupList.className).toContain('grid')
-    expect(groupList.className).toContain('lg:grid-cols-2')
+    expect(grouped.className).not.toContain('border')
+    expect(groupList.className).toContain('rounded-xl')
+    expect(groupList.className).toContain('border')
+    expect(groupList.className).toContain('divide-y')
+    expect(groupList.className).not.toContain('border-l')
+    expect(groupList.className).not.toContain('grid')
     expect(grouped.textContent).toContain('Subagents')
     expect(screen.getByTestId('sub-agent-row-c1')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-row-c2')).toBeTruthy()
     expect(screen.getByTestId('sub-agent-row-c3')).toBeTruthy()
-    expect(screen.getByTestId('sub-agent-chip-c1')).toBeTruthy()
-    expect(screen.getByTestId('sub-agent-chip-c2')).toBeTruthy()
-    expect(screen.getByTestId('sub-agent-chip-c3')).toBeTruthy()
-    expect(screen.getByTestId('sub-agent-chip-c1').className).toContain('grid-cols-[auto_minmax(0,1fr)]')
-    expect(screen.getByTestId('sub-agent-chip-c1').className).toContain('sm:grid-cols-[auto_minmax(0,1fr)_auto]')
+    expect(screen.getByTestId('sub-agent-toggle-c1')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-toggle-c2')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-toggle-c3')).toBeTruthy()
     expect(screen.getAllByTestId('sub-agent-status-badge')[0].className).toContain('whitespace-nowrap')
-    expect(screen.getByTestId('sub-agent-chip-c1').textContent).toContain('Find the source of behavior A.')
-    expect(screen.queryByTestId('sub-agent-intention-c1')).toBeNull()
+    expect(screen.getByTestId('sub-agent-toggle-c1').textContent).toContain('Find the source of behavior A.')
 
-    fireEvent.click(screen.getByTestId('sub-agent-chip-c1'))
-    expect(screen.getByTestId('sub-agent-intention-c1').textContent).toContain('Find the source of behavior A.')
-    expect(screen.getByTestId('sub-agent-chip-c2')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
+    expect(screen.getByTestId('sub-agent-row-c1').className).not.toContain('border-l')
+    expect(screen.getByTestId('sub-agent-toggle-c2')).toBeTruthy()
+  })
+
+  it('keeps completed grouped sub-agents as readable task rows in dots mode', () => {
+    const calls = [
+      makeCall('c1', { intention: 'Review the API behavior.', agent_type: 'Review' }),
+      makeCall('c2', { intention: 'Inspect the release assets.', agent_type: 'Explore' }),
+    ]
+    const results: Array<[string, ToolResultContent]> = calls.map((call, index) => [
+      call.callId,
+      {
+        type: 'tool_result',
+        callId: call.callId,
+        ok: true,
+        content: `<sub_agent session_id="child-${index}" agent_type="${call.input.agent_type}" status="completed" turns="2" duration_ms="1000"><result>Done.</result></sub_agent>`,
+      },
+    ])
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={null}
+        group={makeGroup(calls, results)}
+        approvalByCallId={new Map()}
+        toolCardMode="dots"
+      />,
+    )
+
+    expect(screen.queryByTestId('sub-agent-dot-c1')).toBeNull()
+    expect(screen.queryByTestId('sub-agent-dot-c2')).toBeNull()
+    expect(screen.getByTestId('sub-agent-toggle-c1').textContent).toContain('Review the API behavior.')
+    expect(screen.getByTestId('sub-agent-toggle-c2').textContent).toContain('Inspect the release assets.')
   })
 
   it('keeps grouped children collapsed when one starts running until the user expands it', async () => {
@@ -676,8 +715,8 @@ describe('ChatPanel sub-agent dispatch', () => {
     }))
 
     await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-running').getAttribute('data-sub-agent-status')).toBe('running'))
-    expect(screen.getByTestId('sub-agent-chip-c-running').textContent).toContain('Trace the live child lifecycle.')
-    expect(screen.queryByTestId('sub-agent-intention-c-running')).toBeNull()
+    expect(screen.getByTestId('sub-agent-toggle-c-running').textContent).toContain('Trace the live child lifecycle.')
+    expect(screen.getByTestId('sub-agent-row-c-running').className).not.toContain('border-l-primary')
   })
 
   it('keeps single-agent groups in the stacked list layout (no matrix)', () => {

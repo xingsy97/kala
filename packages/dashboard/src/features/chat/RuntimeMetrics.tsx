@@ -18,6 +18,7 @@ type Props = {
   queuedMessages: number
   timeline?: readonly TimelineEntry[]
   density?: 'default' | 'simple'
+  frameShape?: 'compact' | 'full'
   onCompact?: () => void
   compactDisabled?: boolean
 }
@@ -40,6 +41,7 @@ export function RuntimeMetrics({
   queuedMessages: _queuedMessages,
   timeline = [],
   density = 'default',
+  frameShape = 'compact',
   onCompact,
   compactDisabled,
 }: Props): JSX.Element {
@@ -142,7 +144,8 @@ export function RuntimeMetrics({
       .map((seg) => ({ ...seg, percent: (seg.tokens / window) * 100 }))
   }, [contextSnapshot, t, userContextWindow])
   const borderInset = 1.5
-  const borderRadius = Math.max(0, Math.min(21, simpleGeometry.height / 2 - borderInset, simpleGeometry.width / 2 - borderInset))
+  const frameRadius = frameShape === 'full' ? 16 : 21
+  const borderRadius = Math.max(0, Math.min(frameRadius, simpleGeometry.height / 2 - borderInset, simpleGeometry.width / 2 - borderInset))
   // Intentionally open upper cap: left shoulder, top edge, right shoulder.
   // Track and aggregate-pressure progress share this exact continuous path.
   const contextBorderPath =
@@ -164,7 +167,12 @@ export function RuntimeMetrics({
         type="button"
         className={cn(
           'flex flex-none items-center gap-1.5 text-[0.6875rem] text-muted-foreground transition-colors hover:text-foreground',
-          isSimple ? 'pointer-events-auto absolute -inset-x-px -top-px h-5 overflow-visible rounded-t-[22px] p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400/30' : 'h-9 rounded-lg px-1.5 hover:bg-accent sm:h-7 sm:px-1',
+          isSimple
+            ? cn(
+                'pointer-events-auto absolute -inset-x-px -top-px h-5 overflow-visible p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400/30',
+                frameShape === 'full' ? 'rounded-t-2xl' : 'rounded-t-[22px]',
+              )
+            : 'h-9 rounded-lg px-1.5 hover:bg-accent sm:h-7 sm:px-1',
         )}
         title={title}
         aria-label={title}

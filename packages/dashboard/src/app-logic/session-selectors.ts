@@ -9,14 +9,19 @@ import type { TimelineEntry } from '../session.js'
 export function mergeOptimisticQueuedMessages(
   serverMessages: readonly QueuedMessagePreview[],
   optimisticMessages: readonly QueuedMessagePreview[],
+  deletedMessageIds: ReadonlySet<string> = new Set(),
 ): readonly QueuedMessagePreview[] {
-  if (optimisticMessages.length === 0) return serverMessages
+  const visibleServerMessages = deletedMessageIds.size === 0
+    ? serverMessages
+    : serverMessages.filter((item) => !deletedMessageIds.has(item.id))
+  if (optimisticMessages.length === 0) return visibleServerMessages
   const serverIds = new Set(serverMessages.map((item) => item.id))
   const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
   return [
-    ...serverMessages,
+    ...visibleServerMessages,
     ...optimisticMessages.filter((item) =>
-      !serverIds.has(item.id)
+      !deletedMessageIds.has(item.id)
+      && !serverIds.has(item.id)
       && !(item.id.startsWith('optimistic-') && serverKeys.has(queuedMessageKey(item))),
     ),
   ]
@@ -24,12 +29,10 @@ export function mergeOptimisticQueuedMessages(
 
 export function reconcileOptimisticQueuedMessages(
   optimisticMessages: readonly QueuedMessagePreview[],
-  serverMessages: readonly QueuedMessagePreview[],
+  _serverMessages: readonly QueuedMessagePreview[],
   timeline: readonly TimelineEntry[] = [],
 ): readonly QueuedMessagePreview[] {
   if (optimisticMessages.length === 0) return optimisticMessages
-  const serverIds = new Set(serverMessages.map((item) => item.id))
-  const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
   const committedOperationIds = new Set<string>()
   const ackedUserTexts = new Map<string, number[]>()
   for (const entry of timeline) {
@@ -42,10 +45,12 @@ export function reconcileOptimisticQueuedMessages(
     ackedUserTexts.set(text, bucket)
   }
   const next = optimisticMessages.filter((item) => {
-    if (serverIds.has(item.id) || committedOperationIds.has(item.id)) return false
+    // Queue snapshots can arrive as [item] followed immediately by [] when the
+    // Host drains a queue. Seeing either snapshot is not an acknowledgement:
+    // retain the optimistic identity until its committed timeline event lands.
+    if (committedOperationIds.has(item.id)) return false
     // Compatibility for placeholders created before operationId was shared.
     if (!item.id.startsWith('optimistic-')) return true
-    if (serverKeys.has(queuedMessageKey(item))) return false
     const bucket = ackedUserTexts.get(item.text)
     if (!bucket || bucket.length === 0) return true
     const createdAt = Date.parse(item.createdAt)
@@ -65,6 +70,18 @@ export function queuedMessageKey(item: QueuedMessagePreview): string {
       ? `text:${part.text}`
       : part.type).join('|') ?? ''
   return `${item.mode}\u0000${item.text}\u0000${attachments}`
+}
+
+export function addQueuedMessageTombstone(ids: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  if (ids.has(id)) return ids
+  return new Set(ids).add(id)
+}
+
+export function removeQueuedMessageTombstone(ids: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  if (!ids.has(id)) return ids
+  const next = new Set(ids)
+  next.delete(id)
+  return next
 }
 
 export function sessionExists(

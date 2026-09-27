@@ -10,14 +10,14 @@ import { DASHBOARD_PREFERENCES } from './prefs.js'
 import { notify } from '../notify.js'
 
 vi.mock('../notify.js', () => ({ notify: { error: vi.fn() } }))
-const desktopWindow = window as Window & { __RUNLAB_DESKTOP__?: boolean; __RUNLAB_DESKTOP_BRIDGE__?: unknown }
+const desktopWindow = window as Window & { __RUNLAB_DESKTOP__?: boolean; __RUNLAB_DESKTOP_BRIDGE__?: unknown; __RUNLAB_DESKTOP_CONNECTION__?: unknown }
 const summary = (sessionId: string, status: SessionSummary['status'], eventCount = 1): SessionSummary => ({
   sessionId, status, eventCount, agentRuntime: 'kernel', createdAt: '2026-09-15', label: 'Private conversation',
 })
 
 describe('native desktop runtime signals', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); localStorage.clear() })
-  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); delete desktopWindow.__RUNLAB_DESKTOP__; delete desktopWindow.__RUNLAB_DESKTOP_BRIDGE__ })
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); delete desktopWindow.__RUNLAB_DESKTOP__; delete desktopWindow.__RUNLAB_DESKTOP_BRIDGE__; delete desktopWindow.__RUNLAB_DESKTOP_CONNECTION__ })
 
   async function fixture({ enabled = true, focused = false, visible = false, details = false, ready = true, earlySession = '', infoError = '', subscribeError = '' } = {}) {
     desktopWindow.__RUNLAB_DESKTOP__ = true
@@ -62,6 +62,21 @@ describe('native desktop runtime signals', () => {
     expect(bridge.confirmConnection).toHaveBeenCalledTimes(1)
     act(() => { socket.emit('server:sessions') })
     expect(bridge.confirmConnection).toHaveBeenCalledTimes(2)
+  })
+
+  it('confirms remote HTTP through the narrow connection channel without enabling native features', async () => {
+    const confirmConnection = vi.fn(async () => {})
+    desktopWindow.__RUNLAB_DESKTOP__ = true
+    desktopWindow.__RUNLAB_DESKTOP_CONNECTION__ = { confirmConnection }
+    const socket = Object.assign(new EventEmitter(), { connected: true })
+    const initial = { sessions: [], activeSessionId: null, viewedSessionId: null, socket: socket as unknown as DashboardSocket, ready: false, workspaceOnline: true, onOpenSession: vi.fn() }
+    const hook = renderHook((props) => useNativeDesktop(props), { initialProps: initial })
+    await act(async () => {})
+    expect(confirmConnection).not.toHaveBeenCalled()
+    hook.rerender({ ...initial, ready: true })
+    act(() => { socket.emit('server:sessions') })
+    expect(confirmConnection).toHaveBeenCalledOnce()
+    expect(notify.error).not.toHaveBeenCalled()
   })
 
   it('notifies selected hidden and background sessions once, privately, without history/reconnect spam', async () => {

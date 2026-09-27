@@ -64,6 +64,8 @@ describe('SessionTerminalPanel', () => {
     await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:create', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1' }), expect.any(Function)))
     await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:resize', expect.objectContaining({ terminalId: 'term-1', cols: 100, rows: 12 })))
     expect(screen.getByTestId('session-terminal-panel').getAttribute('data-terminal-status')).toBe('running')
+    expect(screen.getByTestId('terminal-toolbar').className).toContain('flex-nowrap')
+    expect(screen.getByTestId('terminal-toolbar').className).toContain('overflow-hidden')
     expect(screen.getByTestId('terminal-status').querySelector('span')?.className).toContain('bg-emerald-500')
     expect(screen.getByTestId('terminal-viewport').className).toContain('focus-within:ring-1')
     expect(focusMock).toHaveBeenCalled()

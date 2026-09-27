@@ -18,6 +18,10 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
+import rehypeKatex from 'rehype-katex'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 
 import type {
   Message,
@@ -301,7 +305,7 @@ function RoleColumn({
       >
         {label}
       </div>
-      <div className="flex min-w-0 flex-col gap-1 pl-2 [border-left:2px_solid_hsl(var(--border)/0.5)]">
+      <div className="flex min-w-0 flex-col gap-1">
         {children}
       </div>
     </div>
@@ -318,12 +322,7 @@ function NestedContent({
   compact: boolean
 }): JSX.Element | null {
   if (content.type === 'text') {
-    if (role === 'assistant') return <NestedPreviewText text={content.text} compact={compact} />
-    return (
-      <div className="min-w-0 whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere]">
-        {content.text}
-      </div>
-    )
+    return <NestedPreviewText text={content.text} compact={compact} />
   }
   if (content.type === 'tool_call') {
     return <NestedToolCall call={content} />
@@ -333,8 +332,8 @@ function NestedContent({
   }
   if (content.type === 'thinking') {
     return (
-      <div className="italic text-muted-foreground">
-        {truncate(firstLine(content.text), 200)}
+      <div className="text-muted-foreground" data-testid="nested-thinking-markdown">
+        <NestedPreviewText text={content.text} compact={compact} muted />
       </div>
     )
   }
@@ -404,41 +403,104 @@ function NestedToolRows({
   rows: NestedSummaryRow[]
   group: ToolCallGroup
 }): JSX.Element {
-  const { t } = useTranslation()
+  const rowsByCallId = new Map(rows.map((row) => [row.callId, row]))
   return (
     <div className="flex min-w-0 flex-col gap-0.5" data-testid={`nested-tool-group-${group.firstCallId}`}>
-      {rows.map((row) => {
-        const result = group.results.get(row.callId)
-        const ok = result ? result.ok : true
-        return (
-          <div
-            key={row.callId}
-            className={cn(
-              'flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 font-mono text-[0.8125rem]',
-              ok
-                ? 'text-muted-foreground'
-                : 'bg-rose-50/60 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200',
-            )}
-          >
-            <span
-              className={cn(
-                'flex-none rounded bg-background/70 px-1 text-[0.75rem] uppercase tracking-wider',
-                ok ? 'text-muted-foreground' : 'text-rose-700 dark:text-rose-300',
-              )}
-            >
-              {row.toolName}
-            </span>
-            <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">
-              {group.calls.find((call) => call.callId === row.callId)?.intent ?? row.primary}
-            </span>
-            {!ok ? (
-              <span className="flex-none text-[0.75rem] uppercase tracking-wider">{t('chat.transcript.failed')}</span>
-            ) : null}
-          </div>
-        )
-      })}
+      {group.calls.map((call) => (
+        <NestedToolDetail
+          key={call.callId}
+          call={call}
+          result={group.results.get(call.callId)}
+          summary={rowsByCallId.get(call.callId)}
+        />
+      ))}
     </div>
   )
+}
+
+function NestedToolDetail({
+  call,
+  result,
+  summary,
+}: {
+  call: ToolCallContent
+  result?: ToolResultContent
+  summary?: NestedSummaryRow
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const ok = result?.ok !== false
+  const preview = call.intent ?? summary?.primary ?? previewToolInput(call.input) ?? call.callId
+  return (
+    <div
+      className={cn(
+        'min-w-0 rounded font-mono text-[0.8125rem]',
+        ok ? 'text-muted-foreground' : 'bg-muted/55 text-foreground',
+      )}
+      data-testid={`nested-tool-detail-${call.callId}`}
+    >
+      <button
+        type="button"
+        className="flex w-full min-w-0 items-center gap-1.5 px-1.5 py-1 text-left"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <span
+          className={cn(
+            'flex-none rounded bg-background/70 px-1 text-[0.75rem] uppercase tracking-wider',
+            ok ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-300',
+          )}
+        >
+          {call.name}
+        </span>
+        <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">{preview}</span>
+        {!ok ? (
+          <span className="flex-none text-[0.75rem] uppercase tracking-wider">{t('chat.transcript.failed')}</span>
+        ) : null}
+        <span className="flex-none text-[0.75rem] text-muted-foreground">{open ? '⌄' : '›'}</span>
+      </button>
+      {open ? (
+        <div className="mx-1.5 mb-1.5 grid min-w-0 gap-2 rounded-md border border-border/60 bg-background/70 p-2 text-[0.75rem]">
+          <NestedToolPayload label={t('chatCommon.inputs')} value={formatCompleteInput(call.input)} />
+          {result ? (
+            <NestedToolPayload
+              label={t('chatCommon.result')}
+              value={result.content || t('chatCommon.noOutput')}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function NestedToolPayload({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 font-sans text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <pre className="max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/45 p-2 text-foreground [overflow-wrap:anywhere]">
+        {value}
+      </pre>
+    </div>
+  )
+}
+
+function previewToolInput(input: ToolCallContent['input']): string | undefined {
+  const preview = Object.entries(input)
+    .slice(0, 2)
+    .map(([key, value]) => `${key}=${truncate(previewValue(value), 40)}`)
+    .join(' · ')
+  return preview || undefined
+}
+
+function formatCompleteInput(input: ToolCallContent['input']): string {
+  try {
+    return JSON.stringify(input, null, 2)
+  } catch {
+    return String(input)
+  }
 }
 
 function NestedStatusBadge({
@@ -484,76 +546,98 @@ function NestedToolCall({ call }: { call: ToolCallContent }): JSX.Element {
 }
 
 function NestedToolResult({ result }: { result: ToolResultContent }): JSX.Element {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
   const preview = truncate(firstLine(result.content), 140)
   return (
     <div
       className={cn(
-        'flex min-w-0 items-start gap-1.5 rounded px-1.5 py-0.5 font-mono text-[0.75rem]',
-        result.ok
-          ? 'text-muted-foreground'
-          : 'bg-rose-50/60 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200',
+        'min-w-0 rounded font-mono text-[0.75rem]',
+        result.ok ? 'text-muted-foreground' : 'bg-muted/55 text-foreground',
       )}
+      data-testid={`nested-tool-result-${result.callId}`}
     >
-      <span
-        className={cn(
-          'flex-none rounded bg-background/70 px-1 text-[0.75rem] uppercase tracking-wider',
-          result.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-300',
-        )}
+      <button
+        type="button"
+        className="flex w-full min-w-0 items-start gap-1.5 px-1.5 py-0.5 text-left"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
       >
-        {result.ok ? '✓' : '✗'}
-      </span>
-      <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">{preview}</span>
-    </div>
-  )
-}
-
-const NESTED_PREVIEW_TEXT_LIMIT = 1_200
-
-function NestedPreviewText({ text, compact }: { text: string; compact: boolean }): JSX.Element {
-  const { t } = useTranslation()
-  const parts = useMemo(() => lightweightPreviewParts(text), [text])
-  return (
-    <div className={cn('min-w-0 max-w-full space-y-1 break-words leading-snug text-foreground [overflow-wrap:anywhere]', compact ? 'text-[0.8125rem]' : 'text-[0.875rem]')}>
-      {parts.map((part, index) => part.kind === 'text' ? (
-        <div key={index} className="whitespace-pre-wrap">{part.text}</div>
-      ) : (
-        <div key={index} className="flex items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/40 px-2 py-1.5 text-[0.75rem] text-muted-foreground" data-testid="nested-complex-content-omitted">
-          <span className="rounded bg-background/80 px-1.5 py-0.5 font-medium uppercase tracking-wider">{part.label}</span>
-          <span>{t('chatCommon.complexContentOmitted')}</span>
+        <span
+          className={cn(
+            'flex-none rounded bg-background/70 px-1 text-[0.75rem] uppercase tracking-wider',
+            result.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300',
+          )}
+        >
+          {result.ok ? '✓' : '✗'}
+        </span>
+        <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">{preview}</span>
+        <span className="flex-none text-muted-foreground">{open ? '⌄' : '›'}</span>
+      </button>
+      {open ? (
+        <div className="mx-1.5 mb-1.5">
+          <NestedToolPayload
+            label={t('chatCommon.result')}
+            value={result.content || t('chatCommon.noOutput')}
+          />
         </div>
-      ))}
+      ) : null}
     </div>
   )
 }
 
-type NestedPreviewPart = { kind: 'text'; text: string } | { kind: 'omitted'; label: string }
+const NESTED_MARKDOWN_TEXT_LIMIT = 12_000
 
-function lightweightPreviewParts(source: string): NestedPreviewPart[] {
-  const parts: NestedPreviewPart[] = []
-  const fence = /```([^\n`]*)\n?[\s\S]*?```/g
-  let cursor = 0
-  let match: RegExpExecArray | null
-  while ((match = fence.exec(source)) !== null) {
-    appendPreviewText(parts, source.slice(cursor, match.index))
-    const language = match[1]?.trim().toLowerCase()
-    parts.push({ kind: 'omitted', label: language === 'mermaid' ? 'Diagram' : language ? `${language} code` : 'Code block' })
-    cursor = match.index + match[0].length
-  }
-  appendPreviewText(parts, source.slice(cursor))
-  if (parts.length === 0) parts.push({ kind: 'text', text: '' })
-  return parts
-}
-
-function appendPreviewText(parts: NestedPreviewPart[], raw: string): void {
-  const normalized = raw
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .trim()
-  if (!normalized) return
-  const consumed = parts.reduce((total, part) => total + (part.kind === 'text' ? part.text.length : 0), 0)
-  const remaining = NESTED_PREVIEW_TEXT_LIMIT - consumed
-  if (remaining <= 0) return
-  const clipped = normalized.length > remaining ? `${normalized.slice(0, Math.max(0, remaining - 1))}…` : normalized
-  parts.push({ kind: 'text', text: clipped })
+function NestedPreviewText({ text, compact, muted = false }: { text: string; compact: boolean; muted?: boolean }): JSX.Element {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
+  const truncated = text.length > NESTED_MARKDOWN_TEXT_LIMIT
+  const markdown = truncated && !expanded
+    ? `${text.slice(0, NESTED_MARKDOWN_TEXT_LIMIT)}…`
+    : text
+  return (
+    <div
+      className={cn(
+        'ak-markdown-body min-w-0 max-w-full break-words [overflow-wrap:anywhere]',
+        muted ? 'text-muted-foreground' : 'text-foreground',
+        '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2',
+        '[&_pre]:my-2 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border/70 [&_pre]:bg-muted/45 [&_pre]:p-3',
+        '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
+        '[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border/70 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border/70 [&_th]:bg-muted/50 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left',
+        compact ? 'text-[0.8125rem]' : 'text-[0.875rem]',
+      )}
+      data-testid="nested-markdown"
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}
+        rehypePlugins={[rehypeKatex]}
+        skipHtml
+        urlTransform={defaultUrlTransform}
+        components={{
+          img({ alt }) {
+            return (
+              <span className="inline-flex rounded-md border border-dashed border-border/70 bg-muted/40 px-2 py-1 text-[0.75rem] text-muted-foreground">
+                {alt || t('chatCommon.complexContentOmitted')}
+              </span>
+            )
+          },
+          a({ children, ...props }) {
+            return <a {...props} target="_blank" rel="noreferrer">{children}</a>
+          },
+        }}
+      >
+        {markdown}
+      </ReactMarkdown>
+      {truncated ? (
+        <button
+          type="button"
+          className="mt-2 rounded-md border border-border/70 bg-background px-2.5 py-1 text-[0.75rem] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          onClick={() => setExpanded((value) => !value)}
+          data-testid="nested-markdown-toggle"
+        >
+          {expanded ? t('chatCommon.showLessContent') : t('chatCommon.showFullContent')}
+        </button>
+      ) : null}
+    </div>
+  )
 }

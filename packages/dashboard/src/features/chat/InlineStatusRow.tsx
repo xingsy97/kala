@@ -26,7 +26,7 @@ import type { AgentProgress } from './agent-progress.js'
 export type CompactStatus =
   | { kind: 'idle' }
   | { kind: 'queued' }
-  | { kind: 'running'; startedAt: number; tokensBefore: number }
+  | { kind: 'running'; startedAt: number; tokensBefore: number; trigger?: 'auto' | 'manual' | 'preflight' | 'tool_result' }
   | { kind: 'done' }
   | { kind: 'empty'; message: string }
   | { kind: 'error'; message: string }
@@ -93,12 +93,14 @@ export function CompactFeedbackRow({
   message,
   startedAt,
   tokensBefore,
+  trigger,
   onDismiss,
 }: {
   kind: 'queued' | 'running' | 'done' | 'empty' | 'error'
   message?: string
   startedAt?: number
   tokensBefore?: number
+  trigger?: 'auto' | 'manual' | 'preflight' | 'tool_result'
   onDismiss?: () => void
 }): JSX.Element {
   const { t } = useTranslation()
@@ -131,6 +133,11 @@ export function CompactFeedbackRow({
       >
         <Loader2 className="h-3.5 w-3.5 flex-none animate-spin" />
         <span className="font-medium">{t('chatStatus.compacting')}</span>
+        {trigger === 'auto' ? (
+          <span className="truncate text-amber-700/70 dark:text-amber-300/70">
+            {t('chatStatus.compactBackgroundHint')}
+          </span>
+        ) : null}
         <span className="ml-auto tabular-nums text-amber-700/70 dark:text-amber-300/70">
           ↳ {(elapsedMs / 1000).toFixed(1)}s
           {typeof tokensBefore === 'number' ? ` · context ${formatTokensShort(tokensBefore)}` : ''}

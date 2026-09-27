@@ -11,7 +11,11 @@ type MarkdownAstNode = {
 export function remarkStripEmphasisAdjacencyMarker(): (tree: MarkdownAstNode) => void {
   return (tree) => {
     const visit = (node: MarkdownAstNode): void => {
-      if (node.type === 'text' && typeof node.value === 'string') {
+      if (
+        typeof node.value === 'string'
+        && node.type !== 'code'
+        && node.type !== 'inlineCode'
+      ) {
         node.value = node.value.split(EMPHASIS_ADJACENCY_MARKER).join('')
       }
       node.children?.forEach(visit)

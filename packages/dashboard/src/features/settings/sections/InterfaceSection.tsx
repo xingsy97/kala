@@ -38,6 +38,7 @@ import {
   PREF_TOOL_ACTIVITY_ICON_SCALE,
   PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES,
+  PREF_SHOW_PINNED_MESSAGE,
   PREF_SHOW_TOOL_CALL_TAB,
   PREF_SMOOTH_STREAMING_TEXT,
   PREF_TOPBAR_OPEN,
@@ -88,6 +89,7 @@ function LanguageSetting(): JSX.Element {
 export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessionViewCache }): JSX.Element {
   const { t } = useTranslation()
   const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
+  const [showPinnedMessage, setShowPinnedMessage] = useBooleanPref(PREF_SHOW_PINNED_MESSAGE, true)
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
   const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
   const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
@@ -335,6 +337,13 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
           checked={smoothStreamingText}
           onChange={setSmoothStreamingText}
           testId="settings-toggle-smooth-streaming-text"
+        />
+        <InterfaceToggle
+          label={t('settings.interface.showPinnedMessage')}
+          description={t('settings.interface.showPinnedMessageDesc')}
+          checked={showPinnedMessage}
+          onChange={setShowPinnedMessage}
+          testId="settings-toggle-show-pinned-message"
         />
         <InterfaceToggle
           label={t('settings.interface.topbarOpen')}

@@ -143,6 +143,7 @@ type Props = {
    */
   pinnedToBottom?: boolean
   onPinnedChange?: (pinned: boolean) => void
+  showPinnedMessage?: boolean
   /** Bump this to make ChatPanel scroll to the current bottom. */
   scrollToBottomToken?: number
   /** UI-level compaction operation status rendered inline at transcript tail. */
@@ -236,6 +237,7 @@ export function ChatPanel({
   socket,
   pinnedToBottom,
   onPinnedChange,
+  showPinnedMessage = true,
   scrollToBottomToken,
   compactStatus,
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -568,8 +570,8 @@ export function ChatPanel({
   )
   const nextUserAnchor = viewportIndex === null ? undefined : userMessageAnchors.find((index) => index > viewportIndex)
   const stickyPrompt = useMemo(
-    () => currentStickyUserPrompt(transcriptItems, viewportAnchor),
-    [transcriptItems, viewportAnchor],
+    () => showPinnedMessage ? currentStickyUserPrompt(transcriptItems, viewportAnchor) : undefined,
+    [showPinnedMessage, transcriptItems, viewportAnchor],
   )
   const navigateUserMessage = useCallback((target: number | undefined) => {
     if (target === undefined) return
@@ -825,13 +827,13 @@ function StickyUserPrompt({
       <button
         type="button"
         onClick={onClick}
-        className="ak-chat-container ak-sticky-user-prompt-surface pointer-events-auto mx-auto grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-2xl border border-border/70 px-3.5 py-2.5 text-left text-card-foreground shadow-[0_14px_34px_hsl(var(--foreground)/0.11)] ring-1 ring-background/60 backdrop-blur-xl transition-colors hover:border-border sm:max-w-[min(var(--ak-chat-content-width,84rem),calc(100%-2rem))] sm:px-4 sm:py-3"
+        className="ak-chat-container ak-sticky-user-prompt-surface pointer-events-auto mx-auto grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 px-3 py-1.5 text-left text-card-foreground shadow-[0_10px_26px_hsl(var(--foreground)/0.09)] ring-1 ring-background/60 backdrop-blur-xl transition-colors hover:border-border sm:max-w-[min(var(--ak-chat-content-width,84rem),calc(100%-2rem))] sm:px-3.5 sm:py-2"
         aria-label={t('chat.transcript.currentPromptJump')}
       >
-        <span className="flex h-7 w-7 flex-none items-center justify-center self-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
+        <span className="flex h-6 w-6 flex-none items-center justify-center self-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
           <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
-        <span className="min-w-0 border-l border-primary/20 py-0.5 pl-3">
+        <span className="min-w-0 border-l border-primary/20 pl-2.5">
           {prompt.text ? (
             <span className="ak-chat-text line-clamp-1 whitespace-pre-wrap break-words text-[0.9375rem] font-medium leading-6 tracking-[-0.01em] [overflow-wrap:anywhere] sm:text-base">
               {prompt.text}
@@ -842,7 +844,7 @@ function StickyUserPrompt({
             </span>
           )}
           {hasAttachments ? (
-            <span className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
               {prompt.imageCount > 0 ? (
                 <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-[0.8125rem] text-muted-foreground">
                   <Image className="h-3 w-3 flex-none" aria-hidden="true" />
@@ -895,6 +897,7 @@ function CompactFeedbackTranscriptRow({
         message={status.kind === 'empty' || status.kind === 'error' ? status.message : undefined}
         startedAt={status.kind === 'running' ? status.startedAt : undefined}
         tokensBefore={status.kind === 'running' ? status.tokensBefore : undefined}
+        trigger={status.kind === 'running' ? status.trigger : undefined}
         onDismiss={status.kind === 'running' || status.kind === 'queued' ? undefined : onDismiss}
       />
     </div>
@@ -1368,7 +1371,7 @@ function AssistantAvatarRail({ hidden, label, tool = false }: { hidden: boolean;
         </div>
       ) : (
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500/20 via-violet-500/20 to-fuchsia-500/20 text-violet-600 ring-1 ring-violet-500/25 shadow-sm dark:text-violet-300" aria-label={label}>
-          <Sparkles className="h-4 w-4" aria-hidden="true" />
+          <img src="/icons/octopus-web.svg" alt="" className="h-4 w-4" aria-hidden="true" />
         </div>
       )}
     </div>
@@ -2272,7 +2275,7 @@ function ThinkingBlock({
   content: import('@agent-kernel/kernel').ThinkingContent
 }): JSX.Element {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   return (
     <div className="min-w-0 max-w-full">
       <button
@@ -2289,12 +2292,8 @@ function ThinkingBlock({
         )}
       </button>
       {open ? (
-        <div className="ak-expand-in mt-2 rounded-lg bg-muted/30">
-          <ScrollArea>
-            <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
-              {content.text}
-            </pre>
-          </ScrollArea>
+        <div className="ak-expand-in mt-2 rounded-lg bg-muted/30 px-3 py-2 text-muted-foreground">
+          <AssistantMarkdown text={content.text} />
         </div>
       ) : null}
     </div>
@@ -2350,7 +2349,11 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkStripEmphasisAdjacencyMarker]}
+        remarkPlugins={[
+          remarkGfm,
+          [remarkMath, { singleDollarTextMath: false }],
+          remarkStripEmphasisAdjacencyMarker,
+        ]}
         rehypePlugins={[rehypeKatex]}
         urlTransform={(url, key) => key === 'src' && url.startsWith('artifact://') ? url : defaultUrlTransform(url)}
         components={{
@@ -3576,10 +3579,11 @@ function ToolCallGroupBlock({
     ? dots.find((dot) => dot.callId === previewCallId)?.status ?? null
     : null
   const previewResult = previewCallId ? group.results.get(previewCallId) ?? null : null
-  const runningIntentCall = [...group.calls].reverse().find((call) => dots.find((dot) => dot.callId === call.callId)?.status === 'running' && call.intent?.trim())
   const inspectedIntent = previewCallId !== badgeIntentionCallId ? previewCall?.intent?.trim() : ''
-  const groupOwnsBadgeIntention = group.calls.some((call) => call.callId === badgeIntentionCallId)
-  const displayedIntent = inspectedIntent || (!runningIntentCall && !groupOwnsBadgeIntention ? fallbackIntent : '')
+  // The persistent activity badge is transient and may be outside the visible
+  // transcript. Keep the contextual Intention on the Dot Line; badge ownership
+  // only prevents hover from replacing it with the same text.
+  const displayedIntent = inspectedIntent || fallbackIntent
   const [previewPosition, setPreviewPosition] = useState<ToolPreviewGeometry | null>(null)
   const [previewElement, setPreviewElement] = useState<HTMLDivElement | null>(null)
   const [previewHeight, setPreviewHeight] = useState<number | undefined>()
@@ -3670,7 +3674,7 @@ function ToolCallGroupBlock({
           data-testid={`tool-card-dots-${group.firstCallId}`}
           aria-label={`${group.calls.length} tool calls`}
         >
-          <div className="min-w-0 flex-none overflow-hidden" style={{ width: railBudget || undefined, maxWidth: '100%' }} data-testid="tool-activity-rail">
+          <div className="w-fit min-w-0 flex-none overflow-hidden" style={{ maxWidth: railBudget || '100%' }} data-testid="tool-activity-rail">
             <div className="relative flex w-max min-w-0 items-center gap-2.5 py-1.5">
               {visibleDotGroups.length > 1 ? (
                 <span className="pointer-events-none absolute top-1/2 z-0 h-[3px] -translate-y-1/2 rounded-full bg-muted-foreground/60 shadow-[0_0_4px_hsl(var(--muted-foreground)/0.28)]" style={{ left: nodePixels / 2, right: nodePixels / 2 }} data-testid="tool-activity-connector" aria-hidden="true" />
@@ -3765,7 +3769,9 @@ function ToolCallGroupBlock({
                       approval={approvalByCallId.get(previewCallId) ?? null}
                       compactNarrative
                     />
-                    {previewResult ? <ToolResultInlineDetail result={previewResult} compactNarrative /> : <GroupSummaryPreview row={previewRow} status={previewStatus} />}
+                    {previewResult ? <ToolResultInlineDetail result={previewResult} compactNarrative /> : (
+                      <GroupSummaryPreview row={previewRow} status={previewStatus === 'partial' ? 'failed' : previewStatus} />
+                    )}
                   </div>
                 </div>,
                 document.body,
@@ -3965,7 +3971,7 @@ function ToolCallGroupBlock({
 type ToolActivityDot = {
   callId: string
   toolName: string
-  status: 'succeeded' | 'failed' | 'approval' | 'running' | 'orphaned'
+  status: 'succeeded' | 'failed' | 'partial' | 'approval' | 'running' | 'orphaned'
   kind: 'read' | 'search' | 'write' | 'shell' | 'web' | 'todo' | 'memory' | 'agent' | 'other'
   title: string
 }
@@ -3997,7 +4003,12 @@ function toolActivityDots(
 
 function aggregateToolDotGroup(dots: readonly ToolActivityDot[]): ToolActivityDot {
   const first = dots[0]!
-  const statusPriority: Record<ToolActivityDot['status'], number> = { succeeded: 0, orphaned: 1, running: 2, approval: 3, failed: 4 }
+  const terminalStatuses = new Set(dots.map((dot) => dot.status))
+  if (terminalStatuses.has('failed') && terminalStatuses.has('succeeded')) {
+    const failed = dots.filter((dot) => dot.status === 'failed').length
+    return { ...first, status: 'partial', title: `${dots.length} calls · ${failed} failed` }
+  }
+  const statusPriority: Record<ToolActivityDot['status'], number> = { succeeded: 0, orphaned: 1, partial: 2, running: 3, approval: 4, failed: 5 }
   const status = dots.reduce<ToolActivityDot['status']>((current, dot) => statusPriority[dot.status] > statusPriority[current] ? dot.status : current, first.status)
   return { ...first, status }
 }
@@ -4022,11 +4033,12 @@ function toolActivityKind(toolName: string): ToolActivityDot['kind'] {
 function ToolActivityGlyph({ dot, size }: { dot: ToolActivityDot; size: number }): JSX.Element {
   const Icon = dot.kind === 'read' ? Eye : dot.kind === 'search' ? FileSearch : dot.kind === 'write' ? PenLine : dot.kind === 'shell' ? Terminal : dot.kind === 'web' ? Globe : dot.kind === 'todo' ? ListChecks : dot.kind === 'memory' ? Brain : dot.kind === 'agent' ? Bot : Wrench
   return (
-    <span data-shape={dot.kind} className={cn('relative flex items-center justify-center rounded-full transition-transform group-hover/dot:scale-110', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300', dot.status === 'orphaned' && 'text-muted-foreground/70')} style={{ width: size, height: size }}>
+    <span data-shape={dot.kind} className={cn('relative flex items-center justify-center rounded-full transition-transform group-hover/dot:scale-110', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'partial' && 'text-amber-600 dark:text-amber-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300', dot.status === 'orphaned' && 'text-muted-foreground/70')} style={{ width: size, height: size }}>
       {dot.status === 'running' ? <span className="absolute inset-[-3px] animate-ping rounded-full bg-violet-500/25" aria-hidden="true" /> : null}
       {dot.status === 'running' ? <span className="absolute inset-[-2px] animate-pulse rounded-full ring-2 ring-violet-500/70 shadow-[0_0_8px_hsl(263_70%_60%/0.65)]" aria-hidden="true" /> : null}
       <Icon className={cn('relative stroke-[2.2]', dot.status === 'running' && 'animate-pulse')} style={{ width: size, height: size }} aria-hidden="true" />
       {dot.status === 'failed' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-rose-500 ring-1 ring-background" aria-hidden="true" /> : null}
+      {dot.status === 'partial' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-amber-500 ring-1 ring-background" aria-hidden="true" /> : null}
       {dot.status === 'approval' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 ring-1 ring-background" aria-hidden="true" /> : null}
     </span>
   )

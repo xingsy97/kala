@@ -11,11 +11,16 @@ export function sanitizeMemoHtml(input: string): string {
       clean(element)
       if (!ALLOWED_TAGS.has(element.tagName)) { element.replaceWith(...Array.from(element.childNodes)); continue }
       const src = element.tagName === 'IMG' ? element.getAttribute('src') ?? '' : ''
+      const alt = element.tagName === 'IMG' ? element.getAttribute('alt') ?? '' : ''
+      const title = element.tagName === 'IMG' ? element.getAttribute('title') ?? '' : ''
       const href = element.tagName === 'A' ? element.getAttribute('href') ?? '' : ''
       for (const attribute of Array.from(element.attributes)) element.removeAttribute(attribute.name)
       if (element.tagName === 'IMG') {
-        if (/^data:image\/(png|jpeg|webp|gif);base64,/u.test(src)) element.setAttribute('src', src)
-        else element.remove()
+        if (/^data:image\/(png|jpeg|webp|gif);base64,/u.test(src)) {
+          element.setAttribute('src', src)
+          if (alt) element.setAttribute('alt', alt)
+          if (title) element.setAttribute('title', title)
+        } else element.remove()
       }
       if (element.tagName === 'A' && /^https?:\/\//u.test(href)) {
         element.setAttribute('href', href); element.setAttribute('rel', 'noreferrer noopener'); element.setAttribute('target', '_blank')

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NarrowContextualRow, NoSessionArea, WorkbenchToolbar, connectionStatusForTransport, readInitialConfig, resolveSessionDirectoryLoadingOwner, selectedSessionHistoryIsLoading, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar } from './app.js'
+import { NarrowContextualRow, NoSessionArea, TopbarRestoreButton, WorkbenchToolbar, connectionStatusForTransport, readInitialConfig, resolveSessionDirectoryLoadingOwner, selectedSessionHistoryIsLoading, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar, workspaceTerminalDialogSizeClass } from './app.js'
 import { DesktopSessionRail } from './app-shell/AppShellNav.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity } from './app-logic/session-activity.js'
 
@@ -26,6 +26,13 @@ function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]
 }
 
 describe('bounded busy-indicator rendering', () => {
+  it('expands the workspace terminal close to the application viewport', () => {
+    expect(workspaceTerminalDialogSizeClass(false)).toContain('1100px')
+    expect(workspaceTerminalDialogSizeClass(false)).toContain('720px')
+    expect(workspaceTerminalDialogSizeClass(true)).toContain('sm:w-[calc(100vw-2rem)]')
+    expect(workspaceTerminalDialogSizeClass(true)).toContain('sm:h-[calc(var(--ak-viewport-h,100dvh)-2rem)]')
+  })
+
   it('stops the history spinner if a selected session subscription or replay fails', () => {
     const pending = { selectedSessionId: 'next', historyLoadedSessionId: 'previous', eventCount: 8, firstUserMessage: null }
     expect(selectedSessionHistoryIsLoading({ ...pending, status: 'connecting' })).toBe(true)
@@ -191,7 +198,9 @@ describe('WorkbenchToolbar', () => {
   it('hides the session bar while the full desktop Session sidebar is expanded', () => {
     expect(shouldRenderWorkbenchToolbar(true, true)).toBe(false)
     expect(shouldRenderWorkbenchToolbar(true, false)).toBe(true)
+    expect(shouldRenderWorkbenchToolbar(true, false, false)).toBe(false)
     expect(shouldRenderWorkbenchToolbar(false, true)).toBe(true)
+    expect(shouldRenderWorkbenchToolbar(false, true, false)).toBe(false)
     expect(shouldRenderWorkbenchToolbar(false, false)).toBe(true)
   })
 
@@ -226,6 +235,30 @@ describe('WorkbenchToolbar', () => {
     expect(toggle.getAttribute('aria-label')).toBe('Expand top bar')
     expect(toggle.querySelector('.lucide-chevron-down')).toBeTruthy()
     expect(toggle.querySelector('.lucide-chevron-up')).toBeNull()
+  })
+
+  it('uses an upward arrow to collapse an expanded Topbar', () => {
+    const onToggle = vi.fn()
+    renderToolbar({ topbarAvailable: true, topbarExpanded: true, onOpenTopbar: onToggle })
+
+    const toggle = screen.getByTestId('topbar-toggle')
+    expect(toggle.getAttribute('aria-label')).toBe('Collapse top bar')
+    expect(toggle.querySelector('.lucide-chevron-up')).toBeTruthy()
+    fireEvent.click(toggle)
+    expect(onToggle).toHaveBeenCalledOnce()
+  })
+
+  it('leaves a compact restore control after the Topbar is collapsed', () => {
+    const onOpen = vi.fn()
+    render(<TopbarRestoreButton onClick={onOpen} />)
+
+    const restore = screen.getByTestId('topbar-restore')
+    const button = screen.getByRole('button', { name: 'Expand top bar' })
+    expect(restore.className).toContain('absolute')
+    expect(button.className).toContain('rounded-full')
+    expect(button.querySelector('.lucide-chevron-down')).toBeTruthy()
+    fireEvent.click(button)
+    expect(onOpen).toHaveBeenCalledOnce()
   })
 
   it('can render as a capsule inside the collapsed workbench topbar', () => {

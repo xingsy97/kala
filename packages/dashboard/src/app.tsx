@@ -28,6 +28,7 @@ import type {
 import { isSessionResting } from '@agent-kernel/shared'
 
 import { Button, buttonVariants } from './components/ui/button.js'
+import { ModalSizeToggle } from './components/ui/modal-size-toggle.js'
 import { ProductState } from './components/ui/product-state.js'
 import {
   AlertDialog,
@@ -43,6 +44,7 @@ import { cn } from './lib/utils.js'
 import { randomId } from './lib/random-id.js'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -104,6 +106,16 @@ const SessionFilesPanel = lazy(() => loadDashboardExport(import('./features/sess
 const SessionTerminalPanel = lazy(() => loadDashboardExport(import('./features/session-terminal/SessionTerminalPanel.js'), 'SessionTerminalPanel', 'SessionTerminalPanel'))
 const WorkspaceFileViewDialog = lazy(() => loadDashboardExport(import('./features/session-files/SessionFilesPanel.js'), 'WorkspaceFileViewDialog', 'SessionFilesPanel'))
 const SourceControlPanel = lazy(() => loadDashboardExport(import('./features/source-control/SourceControlPanel.js'), 'SourceControlPanel', 'SourceControlPanel'))
+
+export function workspaceTerminalDialogSizeClass(expanded: boolean): string {
+  return cn(
+    '!left-0 !top-0 flex h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 pb-[env(safe-area-inset-bottom)] sm:!left-[50%] sm:!top-[calc(50%+(env(safe-area-inset-top)-env(safe-area-inset-bottom))/2)] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-xl sm:border sm:pb-0 [&_[data-testid=terminal-toolbar]]:pr-24',
+    expanded
+      ? 'sm:h-[calc(var(--ak-viewport-h,100dvh)-2rem)] sm:max-h-[calc(var(--ak-viewport-h,100dvh)-2rem)] sm:w-[calc(100vw-2rem)]'
+      : 'sm:h-[min(calc(var(--ak-viewport-h,100dvh)-2rem),720px)] sm:max-h-[calc(var(--ak-viewport-h,100dvh)-2rem)] sm:w-[min(calc(100vw-2rem),1100px)]',
+  )
+}
+
 import {
   cancelSession,
   clearSession,
@@ -131,7 +143,7 @@ import { emitRpc } from './socket-rpc.js'
 import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage, releaseMessageAttachments, uploadMessageAttachment } from './admission-client.js'
 import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, type TranscriptItem } from './transcript.js'
 import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent, shouldShowQueuedAutoCompact } from './app-logic/compaction.js'
-import { mergeOptimisticQueuedMessages, nextSessionSelection, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
+import { addQueuedMessageTombstone, mergeOptimisticQueuedMessages, nextSessionSelection, reconcileOptimisticQueuedMessages, removeQueuedMessageTombstone, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity, isRunningSessionActivity } from './app-logic/session-activity.js'
 import { modelKey, resolveModelKey } from './app-logic/model-key.js'
 import { useModels } from './app-logic/use-models.js'
@@ -160,10 +172,12 @@ import {
   PREF_EXPLORER_OPEN,
   PREF_FILE_EXPLORER_FONT_SIZE,
   PREF_INSPECTOR_OPEN,
+  PREF_TOPBAR_OPEN,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   PREF_MODEL,
   PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_KEEP_SCREEN_AWAKE,
+  PREF_SHOW_PINNED_MESSAGE,
   PREF_AGENT_RUNTIME,
   writeStringPref,
   useBooleanPref,
@@ -251,6 +265,7 @@ export function App(): JSX.Element {
   }, [authSession.checked, authSession.session, privateCloudMode])
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
   const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
+  const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string; workspaceId?: string } | null
   >(null)
@@ -272,7 +287,9 @@ export function App(): JSX.Element {
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false)
   const [userMessageNavigationPortalTarget, setUserMessageNavigationPortalTarget] = useState<HTMLDivElement | null>(null)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
-  const [workspaceTerminal, setWorkspaceTerminal] = useState<{ workspaceId: string; workspaceName: string; sessionId: string; cwd?: string } | null>(null)
+  const [workspaceTerminal, setWorkspaceTerminal] = useState<{ workspaceId: string; workspaceName: string; ownerSessionId: string; sessionId: string; cwd?: string } | null>(null)
+  const [workspaceTerminalReady, setWorkspaceTerminalReady] = useState(false)
+  const [workspaceTerminalExpanded, setWorkspaceTerminalExpanded] = useState(false)
   const [workspaceFileViewTarget, setWorkspaceFileViewTarget] = useState<WorkspaceFileTarget | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const [awaitingAck, setAwaitingAck] = useState(false)
@@ -284,6 +301,10 @@ export function App(): JSX.Element {
   const [forkingFromSeq, setForkingFromSeq] = useState<number | null>(null)
   const [pendingUserMessages, setPendingUserMessages] = useState<readonly PendingUserTranscriptMessage[]>([])
   const [optimisticQueuedMessages, setOptimisticQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
+  // Keep local deletes tombstoned for the lifetime of the selected Session.
+  // Queue snapshots are not ordered acknowledgements, so removing a tombstone
+  // after one empty snapshot could let a later stale snapshot revive the row.
+  const [deletedQueuedMessageIds, setDeletedQueuedMessageIds] = useState<ReadonlySet<string>>(() => new Set())
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
   const inferredCompactSeq = useRef<number | null>(null)
@@ -323,6 +344,7 @@ export function App(): JSX.Element {
   const [durableSessionCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
   const [appBadgeEnabled] = useBooleanPref(PREF_APP_BADGE_ENABLED, true)
   const [keepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
+  const [showPinnedMessage] = useBooleanPref(PREF_SHOW_PINNED_MESSAGE, true)
   const sessionExplorerFontSizePx = (SESSION_EXPLORER_FONT_SIZE_PX[sessionExplorerFontSize] ?? 13) * interfaceScale
   const fileExplorerFontSizePx = (FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? 11) * interfaceScale
   const cachedSessionIdsRef = useRef<ReadonlySet<string>>(new Set())
@@ -470,6 +492,27 @@ export function App(): JSX.Element {
     const releaseWorkspace = dashboardConnectionManager(controlSocket).acquire(`workspace:${currentSession.workspaceId}`)
     return releaseWorkspace
   }, [controlSocket, currentSession?.sessionId, currentSession?.workspaceId])
+  useEffect(() => {
+    setWorkspaceTerminalReady(false)
+    if (!controlSocket || !workspaceTerminal) return
+    let cancelled = false
+    const manager = dashboardConnectionManager(controlSocket)
+    const sessionChannel = `session:${workspaceTerminal.ownerSessionId}` as const
+    const workspaceChannel = `workspace:${workspaceTerminal.workspaceId}` as const
+    const releaseSession = manager.acquire(sessionChannel)
+    const releaseWorkspace = manager.acquire(workspaceChannel)
+    void Promise.all([
+      manager.waitUntilActive(sessionChannel),
+      manager.waitUntilActive(workspaceChannel),
+    ]).then(([sessionActive, workspaceActive]) => {
+      if (!cancelled && sessionActive && workspaceActive) setWorkspaceTerminalReady(true)
+    })
+    return () => {
+      cancelled = true
+      releaseWorkspace()
+      releaseSession()
+    }
+  }, [controlSocket, workspaceTerminal])
   const activeSessionId = currentSession?.sessionId ?? null
   const explorerSelectedSessionId = optimisticSelectedSessionId ?? activeSessionId
   useEffect(() => {
@@ -531,51 +574,6 @@ export function App(): JSX.Element {
     return () => window.removeEventListener('pagehide', flushCache)
   }, [sessionViewCache])
 
-  // Reliable queued-message delivery on close. A `queue` message is emitted
-  // over the WebSocket, which can be lost if the browser/PWA is hard-killed
-  // before the frame flushes — the user then sees the message "stuck" until
-  // they reopen the app. On pagehide/hidden we re-send any queued messages the
-  // host hasn't yet confirmed via navigator.sendBeacon, which the browser
-  // delivers even during unload. The host enqueues + drains them with no live
-  // socket required. Duplicate suppression is not needed: if the socket emit
-  // already landed, this is a rare double at worst; queued follow-ups are
-  // idempotent enough that reliability wins over that edge.
-  const pendingBeaconRef = useRef<{ sessionId: string | null; texts: readonly string[]; url: string; token?: string }>({
-    sessionId: null,
-    texts: [],
-    url: hostEndpoint.url,
-  })
-  useEffect(() => {
-    pendingBeaconRef.current = {
-      sessionId: activeSessionId,
-      texts: optimisticQueuedMessages.map((m) => m.text).filter((t) => t.trim().length > 0),
-      url: hostEndpoint.url,
-      ...(config.token !== undefined ? { token: config.token } : {}),
-    }
-  }, [activeSessionId, optimisticQueuedMessages, hostEndpoint.url, config.token])
-  useEffect(() => {
-    const flush = (): void => {
-      const { sessionId, texts, url, token } = pendingBeaconRef.current
-      if (!sessionId || texts.length === 0 || typeof navigator.sendBeacon !== 'function') return
-      const endpoint = `${url.replace(/\/$/, '')}/enhancement/action`
-      for (const text of texts) {
-        try {
-          const payload = JSON.stringify({ action: 'enqueue-user-message', sessionId, text, ...(token ? { token } : {}) })
-          navigator.sendBeacon(endpoint, new Blob([payload], { type: 'application/json' }))
-        } catch {
-          // Best-effort; nothing else we can do while the page is unloading.
-        }
-      }
-    }
-    const onHide = (): void => { if (document.visibilityState === 'hidden') flush() }
-    window.addEventListener('pagehide', flush)
-    document.addEventListener('visibilitychange', onHide)
-    return () => {
-      window.removeEventListener('pagehide', flush)
-      document.removeEventListener('visibilitychange', onHide)
-    }
-  }, [])
-
   useEffect(() => {
     if (!control.sessionsLoaded) return
     const nextIds = new Set(control.sessions.map((s) => s.sessionId))
@@ -603,6 +601,7 @@ export function App(): JSX.Element {
     setCancelPendingSessionId(null)
     setPendingUserMessages([])
     setOptimisticQueuedMessages([])
+    setDeletedQueuedMessageIds(new Set())
     setForkingFromSeq(null)
     suppressNextWaitingNotification.current = false
   }, [config.sessionId])
@@ -698,6 +697,7 @@ export function App(): JSX.Element {
         kind: 'running',
         startedAt: Date.parse(remoteCompact.startedAt) || Date.now(),
         tokensBefore: remoteCompact.tokensBefore,
+        trigger: remoteCompact.trigger,
       })
       return
     }
@@ -810,6 +810,7 @@ export function App(): JSX.Element {
     setCompactStatus({
       kind: 'running',
       startedAt: Date.now(),
+      trigger: 'manual',
       // Session state usage is lifetime/cumulative provider usage and can reach
       // billions of tokens in a long-lived Session. Compact operates on the
       // currently assembled context, so display the same bounded snapshot used
@@ -1166,8 +1167,8 @@ export function App(): JSX.Element {
   const slashDeleteRequiredPhrase = slashDelete ? `DELETE ${slashDeleteShortId}` : ''
   const slashDeleteConfirmed = slashDeletePhrase.trim() === slashDeleteRequiredPhrase
   const visibleQueuedMessages = useMemo(
-    () => mergeOptimisticQueuedMessages(session.queuedMessages, optimisticQueuedMessages),
-    [session.queuedMessages, optimisticQueuedMessages],
+    () => mergeOptimisticQueuedMessages(session.queuedMessages, optimisticQueuedMessages, deletedQueuedMessageIds),
+    [session.queuedMessages, optimisticQueuedMessages, deletedQueuedMessageIds],
   )
   // Split the transcript into a memoized, timeline-derived base (recomputed
   // only when the timeline / state messages actually change) and a cheap live
@@ -1749,12 +1750,18 @@ export function App(): JSX.Element {
     if (!workspace.workspaceId || !workspace.online) return
     const owner = workspace.children[0]
     if (!owner) return
+    setWorkspaceTerminalExpanded(false)
     setWorkspaceTerminal({
       workspaceId: workspace.workspaceId,
       workspaceName: workspace.name,
+      ownerSessionId: owner.sessionId,
       sessionId: `workspace-terminal:${owner.sessionId}:${randomId()}`,
       cwd: owner.currentCwd ?? workspace.workingDir,
     })
+  }
+  const openWorkspaceTerminalFromExplorerDrawer = (workspace: WorkspaceNode): void => {
+    openWorkspaceTerminal(workspace)
+    setExplorerDrawerOpen(false)
   }
 
   return (
@@ -1861,13 +1868,14 @@ export function App(): JSX.Element {
           data-testid="workbench-panel"
         >
           <div className="relative h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
-            {shouldRenderWorkbenchToolbar(wideLayout, explorerOpen) ? <WorkbenchToolbar
+            {shouldRenderWorkbenchToolbar(wideLayout, explorerOpen, topbarOpen) ? <WorkbenchToolbar
               sessionLabel={sessionLabel}
               sessionActivityStatus={indicatorActiveSessionStatus}
               cwd={currentSession?.workspaceId ? currentCwd : ''}
               simpleChat={hasSelectedSession && !currentSession?.workspaceId}
-              onOpenTopbar={() => {}}
-              topbarAvailable={false}
+              onOpenTopbar={() => setTopbarOpen(false)}
+              topbarAvailable
+              topbarExpanded
               onOpenExplorer={() => {
                 if (wideLayout) setExplorerOpen(true)
                 else setExplorerDrawerOpen(true)
@@ -1883,7 +1891,9 @@ export function App(): JSX.Element {
               sessionDirectoryLoading={sessionListLoading && !hasSelectedSession}
               draft={config.sessionId === null}
               sessionTabs={sessionTabsNode}
-            /> : null}
+            /> : !topbarOpen && (!wideLayout || !explorerOpen) ? (
+              <TopbarRestoreButton onClick={() => setTopbarOpen(true)} />
+            ) : null}
             {config.sessionId === null ? (
               <SimpleChatDraft
                 key={`${cacheNamespace}:${draftKey}`}
@@ -1949,6 +1959,7 @@ export function App(): JSX.Element {
                         highlightIndex={highlightIndex}
                         pinnedToBottom={chatPinnedToBottom}
                         onPinnedChange={setChatPinnedToBottom}
+                        showPinnedMessage={showPinnedMessage}
                         scrollToBottomToken={chatScrollToBottomToken}
                         userMessageNavigationPortalTarget={userMessageNavigationPortalTarget}
                         topRightAccessory={wideLayout && explorerOpen && (isDesktopClient() || !inspectorOpen) ? (
@@ -2131,7 +2142,16 @@ export function App(): JSX.Element {
                             ? (id, text, content) => updateQueuedMessage(session.socket!, activeSessionId, id, text, content)
                             : undefined}
                           onQueuedDelete={currentAgentRuntimeCapabilities.queue && session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
-                            ? (id) => deleteQueuedMessage(session.socket!, activeSessionId, id)
+                            ? (id) => {
+                                setDeletedQueuedMessageIds((previous) => addQueuedMessageTombstone(previous, id))
+                                return deleteQueuedMessage(session.socket!, activeSessionId, id).catch((error) => {
+                                  // A rejected delete was not authoritative. Roll
+                                  // back only this tombstone so concurrent queue
+                                  // items and deletes retain their local state.
+                                  setDeletedQueuedMessageIds((previous) => removeQueuedMessageTombstone(previous, id))
+                                  throw error
+                                })
+                              }
                             : undefined}
                           onCompact={currentAgentRuntimeCapabilities.compact ? runCompactNow : undefined}
                           onClearSession={currentAgentRuntimeCapabilities.clear ? clearCurrentSession : undefined}
@@ -2171,7 +2191,7 @@ export function App(): JSX.Element {
                               <TaskGraphButton graph={taskGraph} />
                             </>
                           }
-                          simpleFooterExtras={<TaskGraphButton graph={taskGraph} />}
+                          simpleFooterExtras={<TaskGraphButton graph={taskGraph} appearance="menu" />}
                           onUploadFiles={async (files) => {
                             if (activeSessionId === null) throw new Error('No active Session for attachment upload')
                             const uploaded: ReferencedFileContent[] = []
@@ -2261,7 +2281,7 @@ export function App(): JSX.Element {
                             setAwaitingAck(true)
                             setMessageDeliveryError(null)
                             try {
-                              const admission = await admitUserMessage({
+                              await admitUserMessage({
                                 host: hostEndpoint.url,
                                 ...(config.token ? { token: config.token } : {}),
                                 sessionId: activeSessionId,
@@ -2270,9 +2290,7 @@ export function App(): JSX.Element {
                                 operationId,
                                 ...(content ? { content } : {}),
                               })
-                              if (effectiveOptimisticMode === 'queue' && admission.state === 'committed') {
-                                setOptimisticQueuedMessages((prev) => prev.filter((item) => item.id !== operationId))
-                              } else if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
+                              if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
                             } catch (error) {
                               setPendingUserMessages((prev) => prev.filter((item) => item.id !== operationId))
                               // A delivery-pending error means the Queue operation is
@@ -2420,7 +2438,7 @@ export function App(): JSX.Element {
             </div>
             {section === 'agent' ? (
               <div className="min-h-0 flex-1 overflow-hidden">
-                <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={runtimeCapabilities.workspace ? connectWorkspaceFromExplorerDrawer : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} />
+                <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={runtimeCapabilities.workspace ? connectWorkspaceFromExplorerDrawer : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} onOpenWorkspaceTerminal={openWorkspaceTerminalFromExplorerDrawer} />
               </div>
             ) : <div className="min-h-0 flex-1" />}
             <div className="flex min-h-14 flex-none items-center justify-end border-t border-border/35 px-3 py-2" data-testid="narrow-drawer-footer">
@@ -2450,7 +2468,7 @@ export function App(): JSX.Element {
               contextSnapshot={session.contextSnapshot}
               timeline={session.timeline}
               visibleMessagesCount={chatMessagesCount}
-              socket={session.socket}
+              socket={controlSocket}
               parentSessionId={session.parentSessionId}
               parentCursor={session.parentCursor}
               onFork={currentAgentRuntimeCapabilities.fork ? (cursor) => {
@@ -2602,18 +2620,44 @@ export function App(): JSX.Element {
         onRename={(name) => renameWorkspaceAt(workspaceInfoId ?? '', name)}
         onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }}
       />
-      <Dialog open={workspaceTerminal !== null} onOpenChange={(open) => { if (!open) setWorkspaceTerminal(null) }}>
-        <DialogContent className="flex h-[min(78vh,720px)] w-[min(92vw,1100px)] max-w-none flex-col overflow-hidden p-0" data-testid="workspace-terminal-dialog">
-          <DialogHeader className="flex-none border-b border-border/35 px-4 py-3">
-            <DialogTitle>{t('terminal.workspaceTitle', { workspace: workspaceTerminal?.workspaceName ?? '' })}</DialogTitle>
-            <DialogDescription>{workspaceTerminal?.cwd ?? ''}</DialogDescription>
-          </DialogHeader>
+      <Dialog open={workspaceTerminal !== null} onOpenChange={(open) => {
+        if (!open) {
+          setWorkspaceTerminal(null)
+          setWorkspaceTerminalExpanded(false)
+        }
+      }}>
+        <DialogContent
+          className={workspaceTerminalDialogSizeClass(workspaceTerminalExpanded)}
+          data-expanded={workspaceTerminalExpanded ? 'true' : 'false'}
+          data-testid="workspace-terminal-dialog"
+        >
+          <DialogTitle className="sr-only">{t('terminal.workspaceTitle', { workspace: workspaceTerminal?.workspaceName ?? '' })}</DialogTitle>
+          <DialogDescription className="sr-only">{workspaceTerminal?.cwd ?? ''}</DialogDescription>
+          <ModalSizeToggle
+            expanded={workspaceTerminalExpanded}
+            onToggle={() => setWorkspaceTerminalExpanded((value) => !value)}
+            className="absolute right-12 top-[max(0.375rem,env(safe-area-inset-top))] z-20 hidden sm:inline-flex sm:top-1.5"
+            testId="workspace-terminal-size-toggle"
+          />
+          <DialogClose asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-2 top-[max(0.25rem,env(safe-area-inset-top))] z-20 h-10 w-10 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground sm:top-1"
+              title={t('common.close')}
+              aria-label={t('common.close')}
+              data-testid="workspace-terminal-close"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </DialogClose>
           <div className="min-h-0 flex-1">
-            {workspaceTerminal ? (
+            {workspaceTerminal && workspaceTerminalReady ? (
               <Suspense fallback={<PageLoadingFallback />}>
                 <SessionTerminalPanel
                   key={`${workspaceTerminal.workspaceId}:${workspaceTerminal.sessionId}`}
-                  socket={session.socket}
+                  socket={controlSocket}
                   workspaceId={workspaceTerminal.workspaceId}
                   sessionId={workspaceTerminal.sessionId}
                   cwd={workspaceTerminal.cwd}
@@ -2622,7 +2666,7 @@ export function App(): JSX.Element {
                   destroyOnUnmount
                 />
               </Suspense>
-            ) : null}
+            ) : <PageLoadingFallback />}
           </div>
         </DialogContent>
       </Dialog>
@@ -2771,8 +2815,8 @@ export function selectedSessionHistoryIsLoading({
 
 export type SessionDirectoryLoadingOwner = 'explorer' | 'workbench' | null
 
-export function shouldRenderWorkbenchToolbar(wideLayout: boolean, explorerOpen: boolean): boolean {
-  return !wideLayout || !explorerOpen
+export function shouldRenderWorkbenchToolbar(wideLayout: boolean, explorerOpen: boolean, topbarOpen = true): boolean {
+  return topbarOpen && (!wideLayout || !explorerOpen)
 }
 
 /**
@@ -3046,6 +3090,7 @@ export function WorkbenchToolbar({
   cwd,
   onOpenTopbar,
   topbarAvailable,
+  topbarExpanded = false,
   onOpenExplorer,
   explorerAvailable,
   onOpenSidebar,
@@ -3065,6 +3110,7 @@ export function WorkbenchToolbar({
   cwd: string
   onOpenTopbar(): void
   topbarAvailable: boolean
+  topbarExpanded?: boolean
   onOpenExplorer(): void
   explorerAvailable: boolean
   onOpenSidebar(): void
@@ -3092,12 +3138,12 @@ export function WorkbenchToolbar({
       variant="ghost"
       size="icon"
       onClick={onOpenTopbar}
-      title={t('app.expandTopbar')}
-      aria-label={t('app.expandTopbar')}
+      title={topbarExpanded ? t('app.collapseTopbar') : t('app.expandTopbar')}
+      aria-label={topbarExpanded ? t('app.collapseTopbar') : t('app.expandTopbar')}
       data-testid="topbar-toggle"
       className="h-8 w-8 flex-none"
     >
-      <ChevronDown className="h-4 w-4" />
+      {topbarExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
     </Button>
   ) : null
   const isTopbarPlacement = placement === 'topbar'
@@ -3172,6 +3218,7 @@ export function WorkbenchToolbar({
       </div>
     )
   }
+
   return (
     <div
       className="flex flex-none items-start gap-1.5 p-1.5 sm:gap-2 sm:p-2 min-[1180px]:pl-0"
@@ -3197,6 +3244,25 @@ export function WorkbenchToolbar({
           <PanelRight className="h-4 w-4" />
         </Button>
       ) : null}
+    </div>
+  )
+}
+
+export function TopbarRestoreButton({ onClick }: { onClick(): void }): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="absolute left-2 top-2 z-30 sm:left-3 sm:top-3" data-testid="topbar-restore">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        onClick={onClick}
+        title={t('app.expandTopbar')}
+        aria-label={t('app.expandTopbar')}
+        className="h-9 w-9 rounded-full border-border/55 bg-background/85 text-muted-foreground shadow-sm backdrop-blur-xl hover:bg-accent hover:text-foreground"
+      >
+        <ChevronDown className="h-4 w-4" aria-hidden="true" />
+      </Button>
     </div>
   )
 }

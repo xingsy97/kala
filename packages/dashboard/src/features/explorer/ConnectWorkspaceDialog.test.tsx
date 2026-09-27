@@ -57,6 +57,8 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.queryByText(/no sudo required/i)).toBeNull()
     expect(screen.getByRole('region', { name: 'Installation options' })).toBeTruthy()
     expect(screen.getByTestId('connect-workspace-linux').className).toContain('bg-accent')
+    expect(screen.getByTestId('connect-workspace-linux').querySelector('img')?.getAttribute('src')).toBe('/icons/linux.svg')
+    expect(screen.getByTestId('connect-workspace-macos').querySelector('img')?.getAttribute('src')).toBe('/icons/macos.svg')
     expect(screen.queryByTestId('connect-workspace-windows')).toBeNull()
     expect(screen.getByTestId('connect-workspace-service').className).toContain('bg-background')
     expect(screen.getByTestId('connect-workspace-service').textContent).toContain('Recommended')

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Apple, Check, CheckCircle2, Clipboard, Clock3, LoaderCircle, ShieldCheck, Terminal, XCircle } from 'lucide-react'
+import { Check, CheckCircle2, Clipboard, Clock3, LoaderCircle, ShieldCheck, Terminal, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type {
   CreateExecutorInstall,
@@ -263,7 +263,10 @@ function SectionLabel({ index, label }: { index: string; label: string }): JSX.E
 }
 
 function PlatformGroup({ label, selected, labelFor, onChange }: { label: string; selected: ExecutorInstallPlatform; labelFor(value: ExecutorInstallPlatform): string; onChange(value: ExecutorInstallPlatform): void }): JSX.Element {
-  const icons = { linux: <LinuxMark />, macos: <Apple className="h-5 w-5" /> }
+  const icons = {
+    linux: <img src="/icons/linux.svg" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
+    macos: <img src="/icons/macos.svg" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
+  }
   return <fieldset className="min-w-0"><legend className="sr-only">{label}</legend><div className="grid grid-cols-2 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-medium transition-[background-color,color,box-shadow,transform] active:scale-[0.98] ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.5)]' : 'bg-muted/20 text-muted-foreground hover:bg-accent/55 hover:text-foreground'}`}>{icons[value]}<span className="truncate">{labelFor(value)}</span></button>)}</div></fieldset>
 }
 
@@ -308,15 +311,6 @@ function InstallStatus({ status, label }: { status: string; label: string }): JS
       <Icon className={`h-3.5 w-3.5 flex-none ${!completed && !failed && !waiting ? 'animate-spin' : ''}`} aria-hidden="true" />
       <span className="truncate">{label}</span>
     </span>
-  )
-}
-
-function LinuxMark(): JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" aria-hidden="true">
-      <path d="M8.2 15.7c-.8 1-1.4 2.2-1.5 3.5m9.1-3.5c.8 1 1.4 2.2 1.5 3.5M9.2 8.3c0-3 1.2-5.3 2.8-5.3s2.8 2.3 2.8 5.3c0 1.2-.2 2.3-.5 3.2 1.4 1 2.2 2.6 2.2 4.4 0 3-2 5.1-4.5 5.1s-4.5-2.1-4.5-5.1c0-1.8.8-3.4 2.2-4.4-.3-.9-.5-2-.5-3.2Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M10.6 8.2h.01M13.4 8.2h.01M10.8 10.4c.8.6 1.6.6 2.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
   )
 }
 

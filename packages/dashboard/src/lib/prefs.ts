@@ -45,6 +45,7 @@ function definePreferenceRegistry<const T extends PreferenceRegistry>(registry: 
 export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   interfaceScale: { key: 'ak-interface-scale', type: 'number', defaultValue: DEFAULT_INTERFACE_SCALE, min: INTERFACE_SCALE_MIN, max: INTERFACE_SCALE_MAX },
   showToolCallTab: { key: 'ak-show-tool-call-tab', type: 'boolean', defaultValue: true },
+  showPinnedMessage: { key: 'ak-show-pinned-message', type: 'boolean', defaultValue: true },
   liveToolActivityTailCount: { key: 'ak-live-tool-activity-tail-count', type: 'number', defaultValue: 3, min: 0, max: 50 },
   toolActivityIconScale: { key: 'ak-tool-activity-icon-scale', type: 'number', defaultValue: 150, min: 100, max: 300 },
   explorerOpen: { key: 'ak-explorer-open', type: 'boolean', defaultValue: true },
@@ -239,6 +240,7 @@ export function useNumberPref(
 }
 
 export const PREF_SHOW_TOOL_CALL_TAB = DASHBOARD_PREFERENCES.showToolCallTab.key
+export const PREF_SHOW_PINNED_MESSAGE = DASHBOARD_PREFERENCES.showPinnedMessage.key
 export const PREF_INTERFACE_SCALE = DASHBOARD_PREFERENCES.interfaceScale.key
 export const PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT = DASHBOARD_PREFERENCES.liveToolActivityTailCount.key
 export const PREF_TOOL_ACTIVITY_ICON_SCALE = DASHBOARD_PREFERENCES.toolActivityIconScale.key

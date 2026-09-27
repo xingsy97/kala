@@ -115,6 +115,20 @@ describe('ChatPanel', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(source))
   })
 
+  it('renders dollar-denominated prose as text instead of cross-paragraph math', () => {
+    const source = [
+      '本轮曾触及约 **$5.78 万**，之后反弹到约 **$8.5 万**。',
+      '',
+      '从约 **$8.5 万**到模型价格区间上沿 **$5.05 万**，还需约 **41%** 跌幅。',
+    ].join('\n')
+    const { container } = render(<AssistantMarkdown text={source} />)
+
+    expect(container.querySelector('.katex')).toBeNull()
+    expect(container.textContent).toBe('本轮曾触及约 $5.78 万，之后反弹到约 $8.5 万。\n从约 $8.5 万到模型价格区间上沿 $5.05 万，还需约 41% 跌幅。')
+    expect(container.textContent).not.toContain('ak-emphasis-adjacency')
+    expect(container.querySelectorAll('strong')).toHaveLength(5)
+  })
+
   it('uses the shared markdown typography layer for mixed markdown blocks', () => {
     const { container } = render(<AssistantMarkdown text={[
       'Paragraph text.',
@@ -154,6 +168,23 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()
   })
 
+  it('renders thinking Markdown expanded by default and allows collapsing it', () => {
+    render(
+      <ChatPanel
+        messages={[{
+          role: 'assistant',
+          content: [{ type: 'thinking', text: '## Plan\n\n- inspect the implementation\n- run tests' }],
+        }]}
+      />,
+    )
+
+    const toggle = screen.getByRole('button', { name: /Thinking/i })
+    expect(screen.getByRole('heading', { name: 'Plan' })).toBeTruthy()
+    expect(screen.getByText('inspect the implementation')).toBeTruthy()
+    fireEvent.click(toggle)
+    expect(screen.queryByRole('heading', { name: 'Plan' })).toBeNull()
+  })
+
   it('renders grouped sub-agent replay when only the active sessionId is provided', () => {
     render(
       <ChatPanel
@@ -180,7 +211,7 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getByTestId('sub-agent-group-agent-impl')).toBeTruthy()
-    expect(screen.getAllByTestId(/^sub-agent-chip-/)).toHaveLength(2)
+    expect(screen.getAllByTestId(/^sub-agent-toggle-/)).toHaveLength(2)
     expect(screen.queryByTestId('tool-call-group-agent-impl')).toBeNull()
   })
 
@@ -907,7 +938,7 @@ describe('ChatPanel', () => {
     const rails = screen.getAllByTestId('message-avatar-rail')
     expect(rails).toHaveLength(2)
     expect(rails.map((rail) => rail.getAttribute('data-avatar-visible'))).toEqual(['true', 'false'])
-    expect(rails[0]?.querySelector('.lucide-sparkles')).toBeTruthy()
+    expect(rails[0]?.querySelector('img[src="/icons/octopus-web.svg"].h-4.w-4')).toBeTruthy()
     expect(rails[0]?.textContent).not.toContain('AK')
     expect(screen.queryByTestId('message-grip-rail')).toBeNull()
   })
@@ -1136,6 +1167,8 @@ describe('ChatPanel', () => {
     expect(buttonClass).toContain('ak-sticky-user-prompt-surface')
     expect(buttonClass).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
     expect(buttonClass).toContain('items-center')
+    expect(buttonClass).toContain('py-1.5')
+    expect(buttonClass).not.toContain('py-2.5')
     expect(sticky.querySelector('.text-\\[0\\.9375rem\\]')).toBeTruthy()
     expect(sticky.querySelector('.lucide-user-round')).toBeTruthy()
     expect(sticky.querySelector('.lucide-pen-line')).toBeNull()
@@ -1244,6 +1277,28 @@ describe('ChatPanel', () => {
     rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: index === 0 ? -80 : 100, bottom: index === 0 ? 0 : 180, left: 0, right: 800, width: 800, height: 80, x: 0, y: index === 0 ? -80 : 100, toJSON() {} }) }))
     fireEvent.scroll(scroller)
     expect(screen.getByTestId('transcript-search')).toBeTruthy()
+    expect(screen.queryByTestId('sticky-user-prompt')).toBeNull()
+  })
+
+  it('hides the pinned prompt when the interface preference disables it', () => {
+    render(
+      <ChatPanel
+        showPinnedMessage={false}
+        pinnedToBottom={false}
+        onPinnedChange={() => {}}
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'hidden pinned prompt' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+        ]}
+      />,
+    )
+
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-virt-index]')]
+    Object.defineProperty(scroller, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 100, bottom: 500, left: 0, right: 800, width: 800, height: 400, x: 0, y: 100, toJSON() {} }) })
+    rows.forEach((row, index) => Object.defineProperty(row, 'getBoundingClientRect', { configurable: true, value: () => ({ top: index === 0 ? -80 : 100, bottom: index === 0 ? 0 : 180, left: 0, right: 800, width: 800, height: 80, x: 0, y: index === 0 ? -80 : 100, toJSON() {} }) }))
+    fireEvent.scroll(scroller)
+
     expect(screen.queryByTestId('sticky-user-prompt')).toBeNull()
   })
 
@@ -1405,7 +1460,7 @@ describe('ChatPanel', () => {
         messages={[
           {
             role: 'assistant',
-            content: [{ type: 'text', text: 'Inline $x^2$ and block:\n\n$$\\int_0^1 x dx$$' }],
+            content: [{ type: 'text', text: 'Inline $$x^2$$ and block:\n\n$$\n\\int_0^1 x dx\n$$' }],
           },
         ]}
       />,
@@ -1915,16 +1970,34 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('try-again-message-1')).toBeNull()
   })
 
-  it('shows settled intent as history but suppresses the running intent owned by the badge', () => {
-    const message = { role: 'assistant' as const, content: [{ type: 'tool_call' as const, callId: 'intent-card', name: 'read', input: { path: '/repo/a.ts' }, intent: 'Inspect the current implementation before editing it.' }] }
-    const { rerender } = render(<DashboardChatPanel messages={[message]} activeToolCallIds={[]} />)
-    expect(screen.getByTestId('tool-card-dots-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
+  it('keeps the running Intention on a sufficiently wide Dot Line when badge dedupe is active', async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      bottom: 80,
+      height: 40,
+      left: 0,
+      right: 1000,
+      top: 40,
+      width: 1000,
+      x: 0,
+      y: 40,
+      toJSON: () => ({}),
+    })
+    try {
+      const message = { role: 'assistant' as const, content: [{ type: 'tool_call' as const, callId: 'intent-card', name: 'read', input: { path: '/repo/a.ts' }, intent: 'Inspect the current implementation before editing it.' }] }
+      render(<DashboardChatPanel messages={[message]} activeToolCallIds={['intent-card']} badgeIntentionCallId="intent-card" />)
 
-    rerender(<DashboardChatPanel messages={[message]} activeToolCallIds={['intent-card']} badgeIntentionCallId="intent-card" />)
-    expect(screen.queryByTestId('tool-card-dots-intent-intent-card')).toBeNull()
-    fireEvent.mouseEnter(screen.getByTestId('tool-card-dot-intent-card'))
-    expect(screen.getByTestId('tool-call-detail-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
-    expect(screen.queryByTestId('tool-card-dots-intent-intent-card')).toBeNull()
+      const intent = await screen.findByTestId('tool-card-dots-intent-intent-card')
+      expect(intent.textContent).toBe('Inspect the current implementation before editing it.')
+      const rail = screen.getByTestId('tool-activity-rail')
+      expect(rail.className).toContain('w-fit')
+      expect(rail.style.maxWidth).toBe('840px')
+
+      fireEvent.mouseEnter(screen.getByTestId('tool-card-dot-intent-card'))
+      expect(screen.getByTestId('tool-call-detail-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
+      expect(screen.getByTestId('tool-card-dots-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
+    } finally {
+      rectSpy.mockRestore()
+    }
   })
 
   it('lets inspection text replace the settled group summary and restores it after hover', () => {
@@ -1940,13 +2013,13 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-card-dots-intent-history-1').textContent).toBe('Confirm the final historical summary remains useful after execution.')
   })
 
-  it('keeps another inspected historical Intention visible while the badge owns a running call', () => {
+  it('lets another inspected historical Intention replace the badge-owned running summary', () => {
     const messages = [{ role: 'assistant' as const, content: [
       { type: 'tool_call' as const, callId: 'old', name: 'read', input: {}, intent: 'Inspect the earlier projection behavior for comparison.' },
       { type: 'tool_call' as const, callId: 'live', name: 'grep', input: {}, intent: 'Validate the current live activity de-duplication contract.' },
     ] }]
     render(<DashboardChatPanel messages={messages} activeToolCallIds={['live']} badgeIntentionCallId="live" />)
-    expect(screen.queryByTestId('tool-card-dots-intent-old')).toBeNull()
+    expect(screen.getByTestId('tool-card-dots-intent-old').textContent).toBe('Validate the current live activity de-duplication contract.')
     fireEvent.mouseEnter(screen.getByTestId('tool-card-dot-old'))
     expect(screen.getByTestId('tool-card-dots-intent-old').textContent).toBe('Inspect the earlier projection behavior for comparison.')
   })
@@ -2122,7 +2195,7 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-card-dot-count-repeat-grep-1').textContent).toBe('×2')
     expect(screen.getByTestId('tool-card-dot-repeat-read-3')).toBeTruthy()
     expect(screen.getByTestId('tool-card-dot-group-repeat-read-1').textContent).toContain('×2')
-    expect(screen.getByTestId('tool-card-dot-group-repeat-read-1').querySelector('.text-rose-600')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dot-group-repeat-read-1').querySelector('.text-amber-600')).toBeTruthy()
     expect(screen.queryByTestId('tool-card-dot-count-repeat-read-3')).toBeNull()
   })
 

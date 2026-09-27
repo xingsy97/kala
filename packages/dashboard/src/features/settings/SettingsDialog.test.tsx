@@ -779,6 +779,18 @@ describe('SettingsDialog', () => {
     expect(localStorage.getItem('ak-hide-sub-agent-sessions')).toBe('0')
   })
 
+  it('defaults pinned messages on and persists hiding them', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+
+    const toggle = await screen.findByTestId('settings-toggle-show-pinned-message')
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(toggle)
+    expect(localStorage.getItem('ak-show-pinned-message')).toBe('0')
+  })
+
   it('stores the session view cache memory limit preference', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)

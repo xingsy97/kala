@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 
-import { mergeOptimisticQueuedMessages, nextSessionSelection, reconcileOptimisticQueuedMessages, removedSessionIds, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
+import { addQueuedMessageTombstone, mergeOptimisticQueuedMessages, nextSessionSelection, reconcileOptimisticQueuedMessages, removeQueuedMessageTombstone, removedSessionIds, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
 import type { TimelineEntry } from './session.js'
 
 function session(id: string, eventCount: number): SessionSummary {
@@ -131,14 +131,17 @@ describe('optimistic queued messages', () => {
     ).toEqual([])
   })
 
-  it('replaces the optimistic row with the Host row and clears it after dequeue', () => {
+  it('keeps the optimistic identity across a queued snapshot followed by a stale empty snapshot', () => {
     const optimistic = [{ id: 'operation-queue', text: 'follow up', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }]
     const server = [{ ...optimistic[0]!, createdAt: '2026-07-07T00:00:01.000Z' }]
 
-    const reconciled = reconcileOptimisticQueuedMessages(optimistic, server, [])
-    expect(reconciled).toEqual([])
-    expect(mergeOptimisticQueuedMessages(server, reconciled).map((item) => item.id)).toEqual(['operation-queue'])
-    expect(mergeOptimisticQueuedMessages([], reconciled)).toEqual([])
+    const afterQueuedSnapshot = reconcileOptimisticQueuedMessages(optimistic, server, [])
+    expect(afterQueuedSnapshot).toBe(optimistic)
+    expect(mergeOptimisticQueuedMessages(server, afterQueuedSnapshot).map((item) => item.id)).toEqual(['operation-queue'])
+
+    const afterEmptySnapshot = reconcileOptimisticQueuedMessages(afterQueuedSnapshot, [], [])
+    expect(afterEmptySnapshot).toBe(optimistic)
+    expect(mergeOptimisticQueuedMessages([], afterEmptySnapshot).map((item) => item.id)).toEqual(['operation-queue'])
   })
 
   it('reconciles the exact queued operation even when browser and Host clocks differ', () => {
@@ -164,5 +167,39 @@ describe('optimistic queued messages', () => {
     const optimistic = [{ id: 'operation-pending', text: 'still pending', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }]
 
     expect(reconcileOptimisticQueuedMessages(optimistic, [], [])).toBe(optimistic)
+  })
+
+  it('immediately hides a delete-before-ACK row from optimistic and stale Host snapshots', () => {
+    const deleted = { id: 'operation-deleted', text: 'remove me', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }
+    const kept = { id: 'operation-kept', text: 'keep me', mode: 'queue' as const, createdAt: '2026-07-07T00:00:01.000Z' }
+    const tombstones = new Set([deleted.id])
+
+    expect(mergeOptimisticQueuedMessages([], [deleted, kept], tombstones).map((item) => item.id)).toEqual([kept.id])
+    expect(mergeOptimisticQueuedMessages([deleted, kept], [deleted, kept], tombstones).map((item) => item.id)).toEqual([kept.id])
+  })
+
+  it('rolls back only the failed delete tombstone', () => {
+    const initial = new Set<string>()
+    const deletingFirst = addQueuedMessageTombstone(initial, 'operation-1')
+    const deletingBoth = addQueuedMessageTombstone(deletingFirst, 'operation-2')
+    const afterFirstFails = removeQueuedMessageTombstone(deletingBoth, 'operation-1')
+
+    expect([...afterFirstFails]).toEqual(['operation-2'])
+    expect(initial.size).toBe(0)
+  })
+
+  it('acknowledges one operation without losing other concurrent queues', () => {
+    const first = { id: 'operation-1', text: 'same text', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }
+    const second = { id: 'operation-2', text: 'same text', mode: 'queue' as const, createdAt: '2026-07-07T00:00:01.000Z' }
+    const timeline: TimelineEntry[] = [{
+      seq: 1,
+      ts: '2026-07-07T00:00:02.000Z',
+      event: { kind: 'user_message', operationId: first.id, text: first.text },
+      effects: [],
+    }]
+
+    const reconciled = reconcileOptimisticQueuedMessages([first, second], [], timeline)
+    expect(reconciled.map((item) => item.id)).toEqual([second.id])
+    expect(mergeOptimisticQueuedMessages([], reconciled).map((item) => item.id)).toEqual([second.id])
   })
 })

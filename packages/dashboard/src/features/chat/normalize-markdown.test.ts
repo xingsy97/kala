@@ -36,16 +36,18 @@ describe('normalizeMarkdownEmphasisAdjacency', () => {
     expect(normalizeMarkdownEmphasisAdjacency(source)).toBe(source)
   })
 
-  it('strips only the complete parser marker from Markdown text nodes', () => {
+  it('strips the complete parser marker from prose and math nodes', () => {
     const tree = {
       type: 'root',
       children: [
         { type: 'text', value: `label${EMPHASIS_ADJACENCY_MARKER}value` },
+        { type: 'inlineMath', value: `8.5${EMPHASIS_ADJACENCY_MARKER}value` },
         { type: 'code', value: EMPHASIS_ADJACENCY_MARKER },
       ],
     }
     remarkStripEmphasisAdjacencyMarker()(tree)
     expect(tree.children[0]?.value).toBe('labelvalue')
-    expect(tree.children[1]?.value).toBe(EMPHASIS_ADJACENCY_MARKER)
+    expect(tree.children[1]?.value).toBe('8.5value')
+    expect(tree.children[2]?.value).toBe(EMPHASIS_ADJACENCY_MARKER)
   })
 })

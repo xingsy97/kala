@@ -3,15 +3,17 @@ import { Check, Circle, CircleDashed, GitBranch, LockKeyhole, X } from 'lucide-r
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
+import { ModalSizeToggle } from '../../components/ui/modal-size-toggle.js'
 import { cn } from '../../lib/utils.js'
 import type { TaskGraphNode, TaskGraphSnapshot, TaskGraphStatus } from './task-graph-from-timeline.js'
 
-type Props = { graph: TaskGraphSnapshot | null }
+type Props = { graph: TaskGraphSnapshot | null; appearance?: 'icon' | 'menu' }
 
-export function TaskGraphButton({ graph }: Props): JSX.Element | null {
+export function TaskGraphButton({ graph, appearance = 'icon' }: Props): JSX.Element | null {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [graphView, setGraphView] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const root = useRef<HTMLDivElement | null>(null)
   const popover = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -24,24 +26,40 @@ export function TaskGraphButton({ graph }: Props): JSX.Element | null {
     document.addEventListener('mousedown', close); document.addEventListener('keydown', key)
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key) }
   }, [open])
+  useEffect(() => {
+    if (!open) setExpanded(false)
+  }, [open])
   if (!graph || graph.nodes.length === 0) return null
   const { summary } = graph
   const done = summary.completed + summary.cancelled
   const allDone = done === summary.total
   const allBlocked = summary.blocked > 0 && summary.active === 0 && summary.ready === 0
-  return <div className="relative flex-none" ref={root}>
+  return <div className={cn('relative flex-none', appearance === 'menu' && 'w-full')} ref={root}>
     <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-haspopup="dialog" aria-label={t('taskGraph.summary', summary)} data-testid="task-graph-trigger"
       title={t('taskGraph.summary', summary)}
-      className={cn('inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent sm:h-9 sm:w-9', open && 'bg-accent text-foreground', allDone && 'text-emerald-700 dark:text-emerald-300', allBlocked && 'text-amber-700 dark:text-amber-300')}>
-      <GitBranch className="h-4 w-4" aria-hidden="true" />
-      {summary.active > 0 ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" aria-hidden="true" /> : null}
+      className={cn(
+        'relative inline-flex items-center text-muted-foreground transition-colors hover:bg-accent',
+        appearance === 'menu' ? 'h-10 w-full gap-3 rounded-lg px-3 text-left text-sm' : 'h-11 w-10 justify-center rounded-xl sm:h-10 sm:w-10',
+        open && 'bg-accent text-foreground',
+        allDone && 'text-emerald-700 dark:text-emerald-300',
+        allBlocked && 'text-amber-700 dark:text-amber-300',
+      )}>
+      <GitBranch className="h-[18px] w-[18px]" aria-hidden="true" />
+      {summary.active > 0 && appearance !== 'menu' ? <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500 shadow-[0_0_0_2px_hsl(var(--background))]" aria-hidden="true" /> : null}
+      {appearance === 'menu' ? <span className="min-w-0 flex-1">{t('taskGraph.title')}</span> : null}
     </button>
-    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label={t('taskGraph.aria')} data-testid="task-graph-popover" className="fixed inset-x-2 bottom-[5.5rem] z-[70] flex max-h-[min(76dvh,42rem)] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-2xl md:inset-x-4 md:bottom-4 lg:left-1/2 lg:right-auto lg:bottom-20 lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2">
+    {open && typeof document !== 'undefined' ? createPortal(<div ref={popover} role="dialog" aria-label={t('taskGraph.aria')} data-testid="task-graph-popover" data-expanded={expanded ? 'true' : 'false'} data-composer-tools-portal className={cn(
+      'fixed z-[70] flex flex-col overflow-hidden rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-2xl',
+      expanded
+        ? 'inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] top-[max(0.75rem,env(safe-area-inset-top))] max-h-none'
+        : 'inset-x-2 bottom-[5.5rem] max-h-[min(76dvh,42rem)] md:inset-x-4 md:bottom-4 lg:left-1/2 lg:right-auto lg:bottom-20 lg:w-[min(72rem,calc(100vw-2rem))] lg:-translate-x-1/2',
+    )}>
       <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
         <GitBranch className="h-4 w-4" /><span className="text-sm font-medium">{t('taskGraph.title')}</span><span className="text-xs text-muted-foreground">{t('taskGraph.revision', { revision: graph.revision })}</span>
         <button className="ml-auto rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => setGraphView((value) => !value)}>{graphView ? t('taskGraph.listView') : t('taskGraph.graphView')}</button>
+        <ModalSizeToggle expanded={expanded} onToggle={() => setExpanded((value) => !value)} testId="task-graph-size-toggle" />
       </div>
-      <div className="overflow-auto p-3">
+      <div className="min-h-0 flex-1 overflow-auto p-3">
         {graphView ? <GraphView graph={graph} /> : <GroupedList graph={graph} />}
       </div>
     </div>, document.body) : null}

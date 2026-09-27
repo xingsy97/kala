@@ -30,7 +30,9 @@ describe('TaskGraphButton responsive graph view', () => {
       expect(trigger.getAttribute('aria-label') ?? '').toContain('1 completed')
       expect(trigger.getAttribute('aria-label') ?? '').toContain('0 ready')
       expect(trigger.className).toContain('h-11')
-      expect(trigger.className).toContain('w-11')
+      expect(trigger.className).toContain('w-10')
+      expect(trigger.className).toContain('items-center')
+      expect(trigger.querySelector('.animate-pulse')?.getAttribute('class')).toContain('absolute')
       fireEvent.click(trigger)
       expect(screen.getByText('List view')).toBeTruthy()
       expect(screen.getByTestId('task-graph-view').getAttribute('data-layout')).toBe('vertical')
@@ -51,5 +53,32 @@ describe('TaskGraphButton responsive graph view', () => {
     } finally {
       window.matchMedia = original
     }
+  })
+
+  it('keeps the menu appearance aligned without an animated activity dot', () => {
+    render(<TaskGraphButton graph={graph} appearance="menu" />)
+    const trigger = screen.getByTestId('task-graph-trigger')
+    expect(trigger.className).toContain('gap-3')
+    expect(trigger.textContent).toContain('Task Graph')
+    expect(trigger.querySelector('.animate-pulse')).toBeNull()
+    expect(trigger.querySelector('.lucide-git-branch')?.getAttribute('class')).toContain('h-[18px]')
+  })
+
+  it('expands and restores the task graph within the application viewport', () => {
+    render(<TaskGraphButton graph={graph} />)
+    fireEvent.click(screen.getByTestId('task-graph-trigger'))
+
+    const popover = screen.getByTestId('task-graph-popover')
+    const toggle = screen.getByTestId('task-graph-size-toggle')
+    expect(popover.getAttribute('data-expanded')).toBe('false')
+    expect(toggle.getAttribute('aria-label')).toBe('Enter full screen')
+
+    fireEvent.click(toggle)
+    expect(popover.getAttribute('data-expanded')).toBe('true')
+    expect(popover.className).toContain('top-[max(0.75rem,env(safe-area-inset-top))]')
+    expect(toggle.getAttribute('aria-label')).toBe('Exit full screen')
+
+    fireEvent.click(toggle)
+    expect(popover.getAttribute('data-expanded')).toBe('false')
   })
 })

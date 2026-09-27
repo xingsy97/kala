@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react'
-import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, FileText, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Paperclip, Pencil, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
+import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, FileText, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Paperclip, Pencil, Plus, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -728,6 +728,45 @@ export function Composer({
   const canSubmit = !disabled && !submitting && workspaceOnline !== false && (text.trim().length > 0 || pastedImages.length > 0 || attachedFiles.length > 0)
   const canStop = typeof onCancel === 'function' && (awaitingAck || isActiveTurnStatus(state?.status))
   const showStopButton = !canSubmit && canStop
+  const simpleTools = (
+    <SimpleComposerToolsMenu
+      disabled={Boolean(disabled)}
+      allowAttachments={allowAttachments}
+      onAttach={() => fileInputRef.current?.click()}
+      onToggleMode={toggleMode}
+      config={<ComposerConfigButton
+        model={model}
+        models={models}
+        onModelChange={onModelChange}
+        approvalMode={approvalMode}
+        approvalModeLabel={approvalModeLabel}
+        onApprovalModeChange={onApprovalModeChange}
+        composerMode={mode}
+        onComposerModeChange={toggleMode}
+        sendMode={sendMode}
+        onSendModeChange={updateSendMode}
+        allowModelSelection={allowModelSelection}
+        allowApprovalMode={allowApprovalMode}
+        allowQueue={allowQueue}
+        appearance="menu"
+      />}
+      extras={simpleFooterExtras}
+    />
+  )
+  const contextUsageBar = (frameShape: 'compact' | 'full'): JSX.Element => (
+    <RuntimeMetrics
+      state={state}
+      config={config}
+      contextSnapshot={contextSnapshot}
+      modelInfo={modelInfoFor(models, model)}
+      queuedMessages={queuedMessages.length}
+      timeline={timeline}
+      density="simple"
+      frameShape={frameShape}
+      onCompact={onCompact}
+      compactDisabled={disabled}
+    />
+  )
 
   if (serviceUnavailable) {
     return (
@@ -761,8 +800,8 @@ export function Composer({
         // and the too-tight fixed padding: half the safe area plus half the
         // compact baseline (2px simple / 4px full).
         mode === 'simple'
-          ? 'pt-1 pb-[calc(env(safe-area-inset-bottom)/2+0.0625rem)] sm:pt-1.5 sm:pb-2'
-          : 'pt-1.5 pb-[calc(env(safe-area-inset-bottom)/2+0.125rem)] sm:pt-2 sm:pb-4',
+          ? 'pt-0.5 pb-[calc(env(safe-area-inset-bottom)/2)] sm:pt-1 sm:pb-1'
+          : 'pt-1 pb-[calc(env(safe-area-inset-bottom)/2)] sm:pt-1 sm:pb-2',
       )}
       style={displayStyle}
       data-testid="composer"
@@ -802,27 +841,16 @@ export function Composer({
         />
         {mode === 'simple' ? (
           <div className="flex min-w-0 flex-col gap-1" data-testid="composer-simple-frame">
-            <div className="flex min-w-0 items-end gap-2">
+            <div className="flex min-w-0 items-end gap-2 sm:-ml-8" data-testid="composer-simple-row">
               <ComposerLeftAccessory mode={mode}>{leftAccessory}</ComposerLeftAccessory>
               <div
-                className="ak-composer-surface relative flex min-h-14 min-w-0 flex-1 flex-col overflow-visible rounded-[22px] transition-[border-color,background-color,box-shadow]"
+                className="ak-composer-surface relative flex min-h-12 min-w-0 flex-1 flex-col overflow-visible rounded-[20px] transition-[border-color,background-color,box-shadow]"
                 data-testid="composer-simple-shell"
                 data-layout="mobile-input-first"
               >
+                {contextUsageBar('compact')}
                 <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
-                <div className="flex min-w-0 flex-wrap items-center justify-between gap-1 px-1.5 py-1 sm:min-h-14 sm:flex-nowrap sm:justify-start sm:px-1.5">
-                  <RuntimeMetrics
-                    state={state}
-                    config={config}
-                    contextSnapshot={contextSnapshot}
-                    modelInfo={modelInfoFor(models, model)}
-                    queuedMessages={queuedMessages.length}
-                    timeline={timeline}
-                    density="simple"
-                    onCompact={onCompact}
-                    compactDisabled={disabled}
-                  />
-                  <ComposerModeToggle mode={mode} onToggle={toggleMode} />
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-1 px-1 py-0.5 sm:min-h-12 sm:flex-nowrap sm:justify-start">
                   <SlashCommandMenu
                     commands={matchingCommands}
                     disabled={disabled}
@@ -832,7 +860,8 @@ export function Composer({
                     }}
                     className="absolute inset-x-0 bottom-full z-20 mb-2"
                   />
-                  <div className="order-first w-full min-w-0 flex-none sm:order-none sm:w-auto sm:flex-1">
+                  {simpleTools}
+                  <div className="min-w-0 flex-1">
                     <SimpleComposerInput
                       text={text}
                       images={[]}
@@ -846,29 +875,6 @@ export function Composer({
                       className="border-0 bg-transparent shadow-none focus-within:border-0 focus-within:bg-transparent focus-within:ring-0"
                     />
                   </div>
-                  <ComposerConfigButton
-                    model={model}
-                    models={models}
-                    onModelChange={onModelChange}
-                    approvalMode={approvalMode}
-                    approvalModeLabel={approvalModeLabel}
-                    onApprovalModeChange={onApprovalModeChange}
-                    composerMode={mode}
-                    onComposerModeChange={toggleMode}
-                    sendMode={sendMode}
-                    onSendModeChange={updateSendMode}
-                    allowModelSelection={allowModelSelection}
-                    allowApprovalMode={allowApprovalMode}
-                    allowQueue={allowQueue}
-                  />
-                  {(allowAttachments || simpleFooterExtras) ? <div
-                    className="flex min-w-0 flex-none flex-row items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                    data-layout="horizontal"
-                    data-testid="composer-simple-footer-extras"
-                  >
-                    {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
-                    {simpleFooterExtras}
-                  </div> : null}
                   <div className="flex flex-none items-center justify-center" data-testid="composer-simple-send-column">
                     <SendButton
                       disabled={!canSubmit}
@@ -891,6 +897,7 @@ export function Composer({
             'ak-composer-surface relative min-w-0 flex-1 rounded-2xl transition-[border-color,background-color,box-shadow]',
           )}
         >
+          {contextUsageBar('full')}
           <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
           <div className="relative">
             <Textarea
@@ -908,7 +915,7 @@ export function Composer({
               rows={1}
               disabled={disabled}
               placeholder={placeholderText}
-              className="max-h-[min(240px,35vh)] min-h-14 w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-3.5 text-[1.125rem] leading-7 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+              className="max-h-[min(240px,35vh)] min-h-12 w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-2.5 text-[1.125rem] leading-7 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
               data-testid="composer-input"
               onPaste={(e) => {
                 void handlePaste(e)
@@ -996,7 +1003,7 @@ export function Composer({
             ) : null}
           </div>
           <div
-            className="flex min-h-12 min-w-0 flex-col items-stretch gap-1 border-t border-border/25 px-2 py-1.5 sm:flex-row sm:flex-nowrap sm:items-center sm:overflow-hidden"
+            className="flex min-h-10 min-w-0 flex-col items-stretch gap-0.5 border-t border-border/25 px-2 py-1 sm:flex-row sm:flex-nowrap sm:items-center sm:overflow-hidden"
             data-testid="composer-footer"
           >
             <div
@@ -1092,16 +1099,6 @@ export function Composer({
               {footerExtras}
             </div>
             <div className="flex flex-none items-center justify-end gap-0.5" data-testid="composer-footer-actions">
-              <RuntimeMetrics
-                state={state}
-                config={config}
-                contextSnapshot={contextSnapshot}
-                modelInfo={modelInfoFor(models, model)}
-                queuedMessages={queuedMessages.length}
-                timeline={timeline}
-                onCompact={onCompact}
-                compactDisabled={disabled}
-              />
               <HumanAttentionIndicator timeline={humanAttention} />
               <SendButton
                 disabled={!canSubmit}
@@ -1134,7 +1131,9 @@ function ComposerLeftAccessory({ mode, children }: { mode: 'simple' | 'full'; ch
     <div
       className={cn(
         'hidden flex-none items-center justify-center sm:flex',
-        mode === 'simple' ? 'self-center' : 'self-stretch py-1',
+        mode === 'simple'
+          ? 'self-center [&_[data-testid=user-message-navigation]]:flex-col [&_[data-testid=user-message-navigation]]:gap-0 [&_[data-testid=user-message-navigation]_button]:h-6 [&_[data-testid=user-message-navigation]_button]:w-6'
+          : 'self-stretch py-1',
       )}
       data-testid="composer-left-accessory"
     >
@@ -1143,7 +1142,7 @@ function ComposerLeftAccessory({ mode, children }: { mode: 'simple' | 'full'; ch
   )
 }
 
-function AttachmentButton({ disabled, onClick }: { disabled?: boolean; onClick(): void }): JSX.Element {
+function AttachmentButton({ disabled, onClick, appearance = 'icon' }: { disabled?: boolean; onClick(): void; appearance?: 'icon' | 'menu' }): JSX.Element {
   const { t } = useTranslation()
   return (
     <button
@@ -1153,9 +1152,15 @@ function AttachmentButton({ disabled, onClick }: { disabled?: boolean; onClick()
       aria-label={t('composer.attachFile')}
       title={t('composer.attachFile')}
       data-testid="composer-attach-file"
-      className="relative z-[1] flex h-11 w-10 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors active:text-foreground disabled:cursor-not-allowed disabled:opacity-40 sm:h-10 sm:w-10 sm:rounded-xl sm:hover:bg-accent/70 sm:hover:text-foreground"
+      className={cn(
+        'relative z-[1] flex flex-none border-0 bg-transparent text-muted-foreground transition-colors active:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
+        appearance === 'menu'
+          ? 'h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-accent hover:text-foreground'
+          : 'h-11 w-10 items-center justify-center sm:h-10 sm:w-10 sm:rounded-xl sm:hover:bg-accent/70 sm:hover:text-foreground',
+      )}
     >
       <Paperclip className="h-[18px] w-[18px]" aria-hidden="true" />
+      {appearance === 'menu' ? <span>{t('composer.attachFile')}</span> : null}
     </button>
   )
 }
@@ -1250,7 +1255,7 @@ function formatAttachmentBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function ComposerModeToggle({ mode, onToggle }: { mode: 'simple' | 'full'; onToggle(): void }): JSX.Element {
+function ComposerModeToggle({ mode, onToggle, appearance = 'icon' }: { mode: 'simple' | 'full'; onToggle(): void; appearance?: 'icon' | 'menu' }): JSX.Element {
   const { t } = useTranslation()
   const label = mode === 'simple' ? t('composer.mode.toFull') : t('composer.mode.toSimple')
   return (
@@ -1263,14 +1268,89 @@ function ComposerModeToggle({ mode, onToggle }: { mode: 'simple' | 'full'; onTog
       data-testid="composer-mode-toggle"
       data-composer-mode={mode}
       className={cn(
-        'relative z-[1] flex h-11 w-10 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors sm:h-10 sm:w-10 sm:rounded-xl',
-        'active:text-foreground sm:hover:bg-accent/70 sm:hover:text-foreground focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+        'relative z-[1] flex flex-none border-0 bg-transparent text-muted-foreground transition-colors',
+        appearance === 'menu'
+          ? 'h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-accent hover:text-foreground'
+          : 'h-11 w-10 items-center justify-center sm:h-10 sm:w-10 sm:rounded-xl active:text-foreground sm:hover:bg-accent/70 sm:hover:text-foreground',
+        'focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
       )}
     >
       {mode === 'simple'
         ? <PanelTopClose className="h-[18px] w-[18px]" aria-hidden="true" />
         : <PanelTopOpen className="h-[18px] w-[18px]" aria-hidden="true" />}
+      {appearance === 'menu' ? <span>{label}</span> : null}
     </button>
+  )
+}
+
+function SimpleComposerToolsMenu({
+  disabled,
+  allowAttachments,
+  onAttach,
+  onToggleMode,
+  config,
+  extras,
+}: {
+  disabled: boolean
+  allowAttachments: boolean
+  onAttach(): void
+  onToggleMode(): void
+  config: ReactNode
+  extras?: ReactNode
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent): void => {
+      const target = event.target as Element | null
+      if (root.current?.contains(target) || target?.closest('[data-composer-tools-portal], [data-composer-config-select]')) return
+      setOpen(false)
+    }
+    const key = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', key)
+    }
+  }, [open])
+
+  return (
+    <div className="relative flex-none" ref={root} data-testid="composer-simple-tools">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-label={t('composer.tools.open')}
+        title={t('composer.tools.open')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid="composer-tools-trigger"
+        className={cn(
+          'relative z-[1] flex h-11 w-10 flex-none items-center justify-center rounded-xl border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground',
+          open && 'bg-accent/70 text-foreground',
+        )}
+      >
+        <Plus className={cn('h-[19px] w-[19px] transition-transform', open && 'rotate-45')} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          aria-label={t('composer.tools.title')}
+          className="absolute bottom-full left-0 z-30 mb-2 w-[min(19rem,calc(100vw-1rem))] rounded-xl border border-border/60 bg-popover p-1.5 text-popover-foreground shadow-xl"
+          data-testid="composer-tools-menu"
+        >
+          {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => { onAttach(); setOpen(false) }} appearance="menu" /> : null}
+          {config}
+          {extras}
+          <ComposerModeToggle mode="simple" onToggle={() => { onToggleMode(); setOpen(false) }} appearance="menu" />
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -1330,7 +1410,7 @@ function SendButton({
         data-testid="composer-stop"
         className={cn(
           'flex-none rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90',
-          isSimple ? 'h-11 w-11 p-0 shadow-[0_2px_8px_hsl(var(--destructive)/0.2)]' : 'h-11 text-sm font-medium px-4',
+          isSimple ? 'h-10 w-10 p-0 shadow-[0_2px_8px_hsl(var(--destructive)/0.2)]' : 'h-10 px-4 text-sm font-medium',
         )}
         aria-label={t('chatStatus.stopTitle')}
         title={t('chatStatus.stopTitle')}
@@ -1353,8 +1433,8 @@ function SendButton({
         data-testid="composer-send"
         className={cn(
           !allowQueue
-            ? 'h-11 min-w-11 rounded-xl p-0 text-sm font-medium shadow-sm'
-            : 'h-11 min-w-11 rounded-r-none rounded-l-xl p-0 text-sm font-medium',
+            ? 'h-10 min-w-10 rounded-xl p-0 text-sm font-medium shadow-sm'
+            : 'h-10 min-w-10 rounded-r-none rounded-l-xl p-0 text-sm font-medium',
           disabled ? 'opacity-50' : '',
         )}
         aria-label={t('composer.sendMessage', { mode: modeLabel })}
@@ -1368,7 +1448,7 @@ function SendButton({
         onClick={() => setMenuOpen((v) => !v)}
         className={cn(
           'flex flex-none items-center justify-center rounded-r-xl border-l border-primary-foreground/30 bg-primary text-primary-foreground transition-colors hover:bg-primary/90',
-          isSimple ? 'h-11 w-7 px-0 shadow-sm' : 'h-11 w-7 px-0',
+          isSimple ? 'h-10 w-7 px-0 shadow-sm' : 'h-10 w-7 px-0',
         )}
         data-testid="send-mode-toggle"
         aria-label={t('chat.transcript.sendMode')}
@@ -1455,6 +1535,7 @@ function ComposerConfigButton({
   allowApprovalMode,
   allowQueue,
   className,
+  appearance = 'icon',
 }: {
   model: string
   models: readonly ModelInfo[]
@@ -1470,6 +1551,7 @@ function ComposerConfigButton({
   allowApprovalMode: boolean
   allowQueue: boolean
   className?: string
+  appearance?: 'icon' | 'menu'
 }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -1513,12 +1595,16 @@ function ComposerConfigButton({
         aria-expanded={open}
         data-testid="composer-config-trigger"
         className={cn(
-          'relative inline-flex h-11 w-10 flex-none items-center justify-center border-0 bg-transparent text-muted-foreground transition-colors active:text-foreground sm:h-10 sm:w-10 sm:rounded-xl sm:hover:bg-accent/70 sm:hover:text-foreground',
+          'relative inline-flex flex-none border-0 bg-transparent text-muted-foreground transition-colors active:text-foreground',
+          appearance === 'menu'
+            ? 'h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-accent hover:text-foreground'
+            : 'h-11 w-10 items-center justify-center sm:h-10 sm:w-10 sm:rounded-xl sm:hover:bg-accent/70 sm:hover:text-foreground',
           open && 'text-foreground sm:bg-accent/70',
-          approvalTone,
+          appearance === 'icon' && approvalTone,
         )}
       >
         <SlidersHorizontal className="h-[18px] w-[18px] stroke-[1.75]" aria-hidden="true" />
+        {appearance === 'menu' ? <span>{t('composer.config.title')}</span> : null}
       </button>
       {open ? (
         <div

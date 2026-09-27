@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -40,6 +41,7 @@ function renderComposer(props?: {
   onApprovalModeChange?: React.ComponentProps<typeof Composer>['onApprovalModeChange']
   footerExtras?: React.ReactNode
   simpleFooterExtras?: React.ReactNode
+  leftAccessory?: React.ReactNode
 }) {
   return render(
     <Composer
@@ -72,12 +74,13 @@ function renderComposer(props?: {
       awaitingAck={props?.awaitingAck}
       footerExtras={props?.footerExtras}
       simpleFooterExtras={props?.simpleFooterExtras}
+      leftAccessory={props?.leftAccessory}
     />,
   )
 }
 
 describe('Composer', () => {
-  it('keeps runtime state out of the composer footer', () => {
+  it('keeps runtime state out of the footer while preserving the full Composer usage frame', () => {
     render(
       <Composer
         model=""
@@ -96,11 +99,11 @@ describe('Composer', () => {
 
     expect(screen.queryByTestId('composer-state-chips')).toBeNull()
     expect(screen.queryByTestId('connection-status')).toBeNull()
-    const indicator = screen.getByTestId('context-usage-indicator')
-    expect(indicator.textContent ?? '').toContain('?')
-    expect(indicator.textContent ?? '').not.toContain('Events')
-    expect(indicator.textContent ?? '').not.toContain('Tools')
-    expect(indicator.textContent ?? '').not.toContain('Tokens')
+    const indicator = screen.getByTestId('context-usage-bar')
+    expect(screen.getByTestId('composer-full-shell').contains(indicator)).toBe(true)
+    expect(indicator.getAttribute('title') ?? '').toContain('unavailable')
+    expect(indicator.className).toContain('rounded-t-2xl')
+    expect(screen.queryByTestId('context-usage-indicator')).toBeNull()
   })
 
   it('replaces the unavailable Composer with one compact recoverable Service state', () => {
@@ -438,6 +441,7 @@ describe('Composer', () => {
     if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
     else window.localStorage.setItem('ak-composer-mode', previousMode)
 
+    fireEvent.click(screen.getByTestId('composer-tools-trigger'))
     fireEvent.click(screen.getByTestId('composer-mode-toggle'))
     expect(screen.getByTestId('composer-input')).toBeTruthy()
   })
@@ -452,6 +456,7 @@ describe('Composer', () => {
     const simpleInput = screen.getByTestId('composer-input-simple')
     simpleInput.textContent = 'draft survives the density switch'
     fireEvent.input(simpleInput)
+    fireEvent.click(screen.getByTestId('composer-tools-trigger'))
     fireEvent.click(screen.getByTestId('composer-mode-toggle'))
 
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'draft survives the density switch')
@@ -482,25 +487,33 @@ describe('Composer', () => {
     expect(actions.contains(screen.getByTestId('composer-send'))).toBe(true)
   })
 
-  it('renders only the simple Task Graph accessory beside Attach', () => {
+  it('places simple composer tools behind one plus menu', () => {
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
     renderComposer({
+      approvalMode: 'allow_all',
       footerExtras: <button data-testid="shell-trigger">Shell</button>,
       simpleFooterExtras: <button data-testid="task-graph-trigger">Graph</button>,
     })
     if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
     else window.localStorage.setItem('ak-composer-mode', previousMode)
 
-    const extras = screen.getByTestId('composer-simple-footer-extras')
-    const attachment = screen.getByTestId('composer-attach-file')
-    const graph = screen.getByTestId('task-graph-trigger')
-    expect(extras.contains(attachment)).toBe(true)
-    expect(extras.contains(graph)).toBe(true)
-    expect(attachment.compareDocumentPosition(graph) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const shell = screen.getByTestId('composer-simple-shell')
+    expect(screen.queryByTestId('composer-attach-file')).toBeNull()
+    expect(screen.queryByTestId('task-graph-trigger')).toBeNull()
+    expect(screen.queryByTestId('composer-config-trigger')).toBeNull()
+    expect(screen.queryByTestId('composer-mode-toggle')).toBeNull()
+    expect(shell.contains(screen.getByTestId('composer-tools-trigger'))).toBe(true)
+    fireEvent.click(screen.getByTestId('composer-tools-trigger'))
+    const menu = screen.getByTestId('composer-tools-menu')
+    expect(menu.contains(screen.getByTestId('composer-attach-file'))).toBe(true)
+    expect(menu.contains(screen.getByTestId('task-graph-trigger'))).toBe(true)
+    expect(menu.contains(screen.getByTestId('composer-config-trigger'))).toBe(true)
+    expect(menu.contains(screen.getByTestId('composer-mode-toggle'))).toBe(true)
+    expect(screen.getByTestId('composer-config-trigger').className).toContain('text-muted-foreground')
+    expect(screen.getByTestId('composer-config-trigger').className).not.toContain('text-rose-600')
     expect(screen.queryByTestId('shell-trigger')).toBeNull()
     expect(screen.queryByTestId('human-attention-indicator')).toBeNull()
-    expect(screen.getByTestId('composer-simple-shell').contains(extras)).toBe(true)
   })
 
   it('supports slash commands in simple mode', () => {
@@ -547,14 +560,14 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('pasted text', 'steer', undefined, undefined)
   })
 
-  it('uses the midpoint between the iOS safe area and compact bottom padding', () => {
+  it('keeps the iOS safe area while removing extra fixed bottom padding', () => {
     renderComposer()
     const composer = screen.getByTestId('composer')
-    expect(composer.className).toContain('pb-[calc(env(safe-area-inset-bottom)/2+0.125rem)]')
+    expect(composer.className).toContain('pb-[calc(env(safe-area-inset-bottom)/2)]')
     expect(composer.className).not.toContain('max(env(safe-area-inset-bottom)')
   })
 
-  it('places one usage bar above the simple input instead of an inline indicator', () => {
+  it('keeps context usage around the simple shell and layout controls inside the tools menu', () => {
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
     renderComposer()
@@ -562,35 +575,76 @@ describe('Composer', () => {
     else window.localStorage.setItem('ak-composer-mode', previousMode)
 
     const shell = screen.getByTestId('composer-simple-shell')
-    const frame = screen.getByTestId('composer-simple-frame')
-    const indicator = screen.getByTestId('context-usage-bar')
     const send = screen.getByTestId('composer-send')
 
-    expect(shell.contains(indicator)).toBe(true)
-    expect(frame.contains(indicator)).toBe(true)
     expect(shell.contains(send)).toBe(true)
-    expect(shell.contains(screen.getByTestId('composer-config-trigger'))).toBe(true)
-    expect(indicator.className).toContain('absolute')
-    expect(screen.queryByTestId('context-usage-indicator')).toBeNull()
-    expect(indicator.className).toContain('-inset-x-px')
-    expect(indicator.className).toContain('h-5')
+    expect(shell.contains(screen.getByTestId('composer-tools-trigger'))).toBe(true)
+    const indicator = screen.getByTestId('context-usage-bar')
+    expect(shell.contains(indicator)).toBe(true)
     expect(indicator.className).toContain('rounded-t-[22px]')
-    expect(send.className).toContain('h-11')
+    expect(screen.queryByTestId('context-usage-indicator')).toBeNull()
+    expect(send.className).toContain('h-10')
     expect(screen.getByTestId('send-mode-toggle')).toBeTruthy()
 
-    // The mode switch is a quiet control inside the shared Composer surface,
-    // not a bordered segment that makes the capsule visually heavier.
+    fireEvent.click(screen.getByTestId('composer-tools-trigger'))
+    const menu = screen.getByTestId('composer-tools-menu')
     const modeToggle = screen.getByTestId('composer-mode-toggle')
+    expect(menu.contains(indicator)).toBe(false)
+    expect(screen.queryByTestId('composer-tools-metrics')).toBeNull()
     expect(modeToggle).toBeTruthy()
     expect(modeToggle.className).not.toContain('absolute')
-    expect(modeToggle.className).toContain('h-11')
-    expect(modeToggle.className).toContain('w-10')
+    expect(modeToggle.className).toContain('h-10')
+    expect(modeToggle.className).toContain('w-full')
     expect(modeToggle.className).toContain('bg-transparent')
     expect(modeToggle.className).toContain('border-0')
     expect(modeToggle.querySelector('svg')).toBeTruthy()
-    expect(shell.contains(modeToggle)).toBe(true)
-    expect(modeToggle.compareDocumentPosition(shell.querySelector('textarea, [contenteditable="true"]') ?? indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(menu.contains(modeToggle)).toBe(true)
     expect(screen.queryByTestId('composer-mode-toggle-menuitem')).toBeNull()
+  })
+
+  it('keeps the usage frame mounted when switching between full and simple modes', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'full')
+    try {
+      renderComposer()
+      expect(screen.getByTestId('composer-full-shell').contains(screen.getByTestId('context-usage-bar'))).toBe(true)
+      fireEvent.click(screen.getByTestId('composer-mode-toggle'))
+      expect(screen.getByTestId('composer-simple-shell').contains(screen.getByTestId('context-usage-bar'))).toBe(true)
+    } finally {
+      if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+      else window.localStorage.setItem('ak-composer-mode', previousMode)
+    }
+  })
+
+  it('keeps the usage frame mounted when switching Sessions', () => {
+    function SessionHarness(): JSX.Element {
+      const [sessionId, setSessionId] = useState('session-a')
+      return (
+        <>
+          <button type="button" onClick={() => setSessionId('session-b')}>Switch Session</button>
+          <Composer
+            model=""
+            models={[]}
+            onModelChange={() => {}}
+            approvalMode="auto"
+            onApprovalModeChange={() => {}}
+            state={createInitialState({ sessionId })}
+            config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
+            contextSnapshot={null}
+            humanAttention={EMPTY_HUMAN_ATTENTION}
+            queuedMessages={[]}
+            onSubmit={() => {}}
+            onCompact={() => {}}
+          />
+        </>
+      )
+    }
+
+    render(<SessionHarness />)
+    expect(screen.getByTestId('context-usage-track')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Switch Session' }))
+    expect(screen.getByTestId('context-usage-track')).toBeTruthy()
+    expect(screen.getByTestId('composer-full-shell').contains(screen.getByTestId('context-usage-bar'))).toBe(true)
   })
 
   it('gives the simple input its own mobile row and keeps tool actions together', () => {
@@ -600,28 +654,31 @@ describe('Composer', () => {
       renderComposer({
         footerExtras: <button type="button" data-testid="hidden-shell-tool">Shell tool</button>,
         simpleFooterExtras: <button type="button">Graph tool</button>,
+        leftAccessory: <div data-testid="user-message-navigation"><button type="button">Previous</button><button type="button">Next</button></div>,
       })
 
       const shell = screen.getByTestId('composer-simple-shell')
-      const tools = screen.getByTestId('composer-simple-footer-extras')
+      const row = screen.getByTestId('composer-simple-row')
+      const tools = screen.getByTestId('composer-simple-tools')
       const sendColumn = screen.getByTestId('composer-simple-send-column')
+      const leftAccessory = screen.getByTestId('composer-left-accessory')
       expect(shell.getAttribute('data-layout')).toBe('mobile-input-first')
-      expect(tools.getAttribute('data-layout')).toBe('horizontal')
-      expect(tools.className).toContain('flex-row')
+      expect(row.className).toContain('sm:-ml-8')
+      expect(leftAccessory.className).toContain('[&_[data-testid=user-message-navigation]]:flex-col')
+      expect(leftAccessory.className).toContain('[&_[data-testid=user-message-navigation]]:gap-0')
+      expect(leftAccessory.className).toContain('[&_[data-testid=user-message-navigation]_button]:h-6')
+      expect(screen.queryByTestId('composer-tools-menu')).toBeNull()
       expect(sendColumn.contains(screen.getByTestId('composer-send'))).toBe(true)
       expect(tools.contains(screen.getByTestId('composer-send'))).toBe(false)
 
       const input = screen.getByTestId('composer-input-simple')
-      expect(input.parentElement?.className).toContain('order-first')
-      expect(input.parentElement?.className).toContain('w-full')
-      expect(input.parentElement?.className).toContain('sm:order-none')
+      expect(input.parentElement?.className).toContain('flex-1')
+      expect(tools.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       input.textContent = 'first line\nsecond line'
       fireEvent.input(input)
 
       expect(shell.getAttribute('data-layout')).toBe('mobile-input-first')
-      expect(tools.getAttribute('data-layout')).toBe('horizontal')
-      expect(tools.className).toContain('flex-row')
-      expect(tools.className).not.toContain('flex-col')
+      expect(screen.queryByTestId('composer-tools-menu')).toBeNull()
       expect(screen.queryByTestId('hidden-shell-tool')).toBeNull()
       expect(sendColumn.contains(screen.getByTestId('composer-send'))).toBe(true)
     } finally {
@@ -786,22 +843,23 @@ describe('Composer', () => {
     expect(onQueuedDelete).toHaveBeenCalledWith('q2')
   })
 
-  it('uses commercial-size text, shell height, and touch targets in both composer modes', () => {
+  it('keeps commercial-size text while reducing excess composer shell height', () => {
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
     const { unmount } = renderComposer()
-    expect(screen.getByTestId('composer-simple-shell').className).toContain('min-h-14')
+    expect(screen.getByTestId('composer-simple-shell').className).toContain('min-h-12')
     expect(screen.getByTestId('composer-input-simple').className).toContain('text-[1.125rem]')
     expect(screen.getByTestId('composer-input-simple').className).not.toContain('sm:text-base')
-    expect(screen.getByTestId('composer-input-simple').className).toContain('min-h-12')
-    expect(screen.getByTestId('composer-mode-toggle').className).toContain('h-11')
-    expect(screen.getByTestId('composer-send').className).toContain('h-11')
+    expect(screen.getByTestId('composer-input-simple').className).toContain('min-h-11')
+    fireEvent.click(screen.getByTestId('composer-tools-trigger'))
+    expect(screen.getByTestId('composer-mode-toggle').className).toContain('h-10')
+    expect(screen.getByTestId('composer-send').className).toContain('h-10')
     expect(screen.getByTestId('send-mode-toggle')).toBeTruthy()
     unmount()
 
     window.localStorage.setItem('ak-composer-mode', 'full')
     renderComposer()
-    expect(screen.getByTestId('composer-input').className).toContain('min-h-14')
+    expect(screen.getByTestId('composer-input').className).toContain('min-h-12')
     expect(screen.getByTestId('composer-input').className).toContain('text-[1.125rem]')
     expect(screen.getByTestId('composer-input').className).not.toContain('sm:text-base')
     expect(screen.getByTestId('composer-input').className).not.toContain('sm:text-sm')
@@ -840,6 +898,7 @@ describe('Composer', () => {
     if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
     else window.localStorage.setItem('ak-composer-mode', previousMode)
 
+    fireEvent.click(screen.getByTestId('composer-tools-trigger'))
     fireEvent.click(screen.getByTestId('composer-config-trigger'))
     const nativeApproval = screen.getByTestId('composer-config-approval-native')
     expect(nativeApproval.className).toContain('sm:hidden')
@@ -854,6 +913,7 @@ describe('Composer', () => {
     if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
     else window.localStorage.setItem('ak-composer-mode', previousMode)
 
+    fireEvent.click(screen.getByTestId('composer-tools-trigger'))
     fireEvent.click(screen.getByTestId('composer-config-trigger'))
     const config = screen.getByTestId('composer-config-popover')
     const desktopApproval = within(config).getAllByRole('combobox', { name: /approval mode/i })[1]!

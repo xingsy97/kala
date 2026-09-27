@@ -53,9 +53,47 @@ describe('NestedTranscript', () => {
     expect(screen.getByText('Inspect the working directory.')).toBeTruthy()
     expect(screen.getByText(/\/repo\/a\.md/)).toBeTruthy()
     expect(screen.getByText(/\/repo\/b\.md/)).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('nested-tool-detail-c2').querySelector('button')!)
+    expect(screen.getByText((content) => content.includes('"path": "/repo/a.md"'))).toBeTruthy()
+    expect(screen.getByText('missing')).toBeTruthy()
   })
 
-  it('uses lightweight placeholders for complex preview content', () => {
+  it('shows complete tool inputs and multi-line results on demand', () => {
+    const fullResult = `first line\n${'complete output '.repeat(30)}`
+    render(
+      <NestedTranscript
+        messages={[
+          {
+            role: 'assistant',
+            content: [{
+              type: 'tool_call',
+              callId: 'complete-call',
+              name: 'bash',
+              input: { command: 'printf complete', timeout: 120 },
+            }],
+          },
+          {
+            role: 'tool',
+            content: [{
+              type: 'tool_result',
+              callId: 'complete-call',
+              ok: true,
+              content: fullResult,
+            }],
+          },
+        ] satisfies Message[]}
+      />,
+    )
+
+    expect(screen.queryByText(fullResult)).toBeNull()
+    const detail = screen.getByTestId('nested-tool-detail-complete-call')
+    fireEvent.click(detail.querySelector('button')!)
+    expect(screen.getByText((content) => content.includes('"command": "printf complete"'))).toBeTruthy()
+    expect(detail.querySelectorAll('pre')[1]?.textContent).toBe(fullResult)
+  })
+
+  it('renders Markdown, diagrams as code, and fenced source inside a child transcript', () => {
     render(
       <NestedTranscript
         messages={[{
@@ -66,11 +104,40 @@ describe('NestedTranscript', () => {
     )
 
     expect(screen.getByText('Architecture:')).toBeTruthy()
-    expect(screen.getByText('Diagram')).toBeTruthy()
-    expect(screen.getByText('typescript code')).toBeTruthy()
-    expect(screen.getAllByText('Complex content omitted from session preview')).toHaveLength(2)
-    expect(screen.queryByText('graph TD')).toBeNull()
-    expect(screen.queryByTestId('code-block-highlighted')).toBeNull()
+    expect(screen.getByText(/graph TD/)).toBeTruthy()
+    expect(screen.getByText(/const x = 1/)).toBeTruthy()
+    expect(screen.getAllByTestId('nested-markdown')).toHaveLength(1)
+  })
+
+  it('renders user and thinking Markdown inside a child transcript', () => {
+    render(
+      <NestedTranscript
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: '**User emphasis**' }] },
+          { role: 'assistant', content: [{ type: 'thinking', text: '## Reasoning\n\n- first\n- second' }] },
+        ] satisfies Message[]}
+      />,
+    )
+
+    expect(screen.getByText('User emphasis').tagName).toBe('STRONG')
+    expect(screen.getByRole('heading', { level: 2, name: 'Reasoning' })).toBeTruthy()
+    expect(screen.getByTestId('nested-thinking-markdown').querySelectorAll('li')).toHaveLength(2)
+  })
+
+  it('allows a long final response to be revealed in full', () => {
+    const tail = 'COMPLETE-TAIL-MARKER'
+    render(
+      <NestedTranscript
+        messages={[{
+          role: 'assistant',
+          content: [{ type: 'text', text: `${'a'.repeat(12_100)}${tail}` }],
+        }] satisfies Message[]}
+      />,
+    )
+
+    expect(screen.queryByText(new RegExp(tail))).toBeNull()
+    fireEvent.click(screen.getByTestId('nested-markdown-toggle'))
+    expect(screen.getByText(new RegExp(tail))).toBeTruthy()
   })
 
   it('does not collapse nested tool activity across assistant text', () => {

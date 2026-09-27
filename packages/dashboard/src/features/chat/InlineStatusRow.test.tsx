@@ -93,6 +93,11 @@ describe('agent activity card', () => {
 })
 
 describe('compact context display', () => {
+  it('explains that automatic compaction does not stop active work', () => {
+    render(<CompactFeedbackRow kind="running" trigger="auto" startedAt={Date.now()} tokensBefore={100_000} />)
+    expect(screen.getByTestId('inline-compact-running').textContent).toContain('current tools and subagents continue')
+  })
+
   it('labels the value as current context rather than cumulative token usage', () => {
     render(<CompactFeedbackRow kind="running" startedAt={Date.now()} tokensBefore={823_456} />)
     expect(screen.getByTestId('inline-compact-running').textContent).toContain('context 823.5k tokens')
