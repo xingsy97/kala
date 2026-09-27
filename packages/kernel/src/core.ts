@@ -58,12 +58,21 @@ type Handler<K extends AgentEvent['kind']> = (
 ) => HandlerResult
 
 type TransitionRow = {
-  [K in AgentEvent['kind']]?: Handler<K>
+  [K in AgentEvent['kind']]: Handler<K> | undefined
 }
 
-const transitions: Record<AgentStatus, TransitionRow> = {
+type TransitionTable = {
+  [S in AgentStatus]: TransitionRow
+}
+
+const transitions = {
   idle: {
     user_message: (s, e, c) => onUserMessage(s, e, c),
+    llm_response: undefined,
+    llm_error: undefined,
+    user_approve: undefined,
+    user_reject: undefined,
+    tool_result: undefined,
     cancel: (s) => noop(s),
     clear: (s) => onClear(s),
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
@@ -71,30 +80,52 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
   },
   thinking: {
+    user_message: undefined,
     llm_response: (s, e, c) => onLlmResponse(s, e.message, e.usage, c),
     llm_error: (s, e) => onLlmError(s, e.error),
+    user_approve: undefined,
+    user_reject: undefined,
+    tool_result: undefined,
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
+    cwd_changed: undefined,
   },
   awaiting_approval: {
+    user_message: undefined,
+    llm_response: undefined,
+    llm_error: undefined,
     user_approve: (s, e) => onUserApprove(s, e.callId),
     user_reject: (s, e, c) => onUserReject(s, e.callId, e.reason, c),
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c, e.failure),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
+    messages_replaced: undefined,
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
+    cwd_changed: undefined,
   },
   executing_tools: {
+    user_message: undefined,
+    llm_response: undefined,
+    llm_error: undefined,
+    user_approve: undefined,
+    user_reject: undefined,
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c, e.failure),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
+    cwd_changed: undefined,
   },
   done: {
     user_message: (s, e, c) => onUserMessage(s, e, c),
+    llm_response: undefined,
+    llm_error: undefined,
+    user_approve: undefined,
+    user_reject: undefined,
+    tool_result: undefined,
+    cancel: undefined,
     clear: (s) => onClear(s),
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
@@ -102,19 +133,47 @@ const transitions: Record<AgentStatus, TransitionRow> = {
   },
   error: {
     user_message: (s, e, c) => onUserMessage(s, e, c),
+    llm_response: undefined,
+    llm_error: undefined,
+    user_approve: undefined,
+    user_reject: undefined,
+    tool_result: undefined,
+    cancel: undefined,
     clear: (s) => onClear(s),
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
+    cwd_changed: undefined,
   },
-}
+} satisfies TransitionTable
+
+export type TransitionClassification = 'handled' | 'ignored'
+
+export const agentStatuses = Object.freeze(
+  Object.keys(transitions) as AgentStatus[],
+)
+
+export const agentEventKinds = Object.freeze(
+  Object.keys(transitions.idle) as AgentEvent['kind'][],
+)
+
+export const transitionContract: Readonly<
+  Record<AgentStatus, Readonly<Record<AgentEvent['kind'], TransitionClassification>>>
+> = Object.freeze(Object.fromEntries(
+  agentStatuses.map((status) => [
+    status,
+    Object.freeze(Object.fromEntries(
+      agentEventKinds.map((kind) => [kind, transitions[status][kind] ? 'handled' : 'ignored']),
+    )),
+  ]),
+) as Record<AgentStatus, Record<AgentEvent['kind'], TransitionClassification>>)
 
 export const legalTransitions: Readonly<Record<AgentStatus, readonly AgentEvent['kind'][]>> = {
-  idle: Object.keys(transitions.idle) as AgentEvent['kind'][],
-  thinking: Object.keys(transitions.thinking) as AgentEvent['kind'][],
-  awaiting_approval: Object.keys(transitions.awaiting_approval) as AgentEvent['kind'][],
-  executing_tools: Object.keys(transitions.executing_tools) as AgentEvent['kind'][],
-  done: Object.keys(transitions.done) as AgentEvent['kind'][],
-  error: Object.keys(transitions.error) as AgentEvent['kind'][],
+  idle: agentEventKinds.filter((kind) => transitionContract.idle[kind] === 'handled'),
+  thinking: agentEventKinds.filter((kind) => transitionContract.thinking[kind] === 'handled'),
+  awaiting_approval: agentEventKinds.filter((kind) => transitionContract.awaiting_approval[kind] === 'handled'),
+  executing_tools: agentEventKinds.filter((kind) => transitionContract.executing_tools[kind] === 'handled'),
+  done: agentEventKinds.filter((kind) => transitionContract.done[kind] === 'handled'),
+  error: agentEventKinds.filter((kind) => transitionContract.error[kind] === 'handled'),
 }
 
 export function step(
