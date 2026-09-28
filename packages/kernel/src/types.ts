@@ -196,9 +196,8 @@ export type AgentConfig = {
   readonly maxAgentDepth?: number
   /**
    * Maximum concurrent sibling sub-agents under a single parent. Host default
-   * is 4. The host loop dispatches effects serially per session, so this cap
-   * is a safety net for future schedulers or for cross-parent chained
-   * delegation.
+   * is 8. Tool effects from one model response may execute concurrently, so
+   * the Host atomically reserves fan-out capacity before creating each child.
    */
   readonly maxAgentFanOut?: number
   /**

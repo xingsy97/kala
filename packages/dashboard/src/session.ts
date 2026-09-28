@@ -753,11 +753,21 @@ export function useSession({
     }
   }, [host, sessionId, token, cache, sharedSocket])
 
+  const selectionCurrent = projection.sessionId === sessionId
+  const selectedProjection = selectionCurrent
+    ? projection
+    : {
+        ...EMPTY_SESSION_PROJECTION,
+        generation: projection.generation,
+        sessionId,
+        status: sessionId ? 'connecting' as const : 'idle' as const,
+      }
+
   const {
     status, agentRuntime, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
     queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, turnStartedAt,
     hydratedSessionId, historyLoadedSessionId,
-  } = projection
+  } = selectedProjection
 
   const pendingApprovals = useMemo<readonly ApprovalRequiredEvent[]>(() => {
     if (!state || !sessionId) return []
@@ -791,11 +801,15 @@ export function useSession({
   // it: recompute only after the timeline has been quiet for a moment. During
   // an active turn the timeline changes constantly, so this collapses dozens of
   // full recomputes into (at most) one per quiet window.
-  const [attentionTimeline, setAttentionTimeline] = useState<readonly TimelineEntry[]>(timeline)
+  const [attentionSnapshot, setAttentionSnapshot] = useState<{
+    sessionId: string | null
+    timeline: readonly TimelineEntry[]
+  }>({ sessionId, timeline })
   useEffect(() => {
-    const handle = window.setTimeout(() => setAttentionTimeline(timeline), 400)
+    const handle = window.setTimeout(() => setAttentionSnapshot({ sessionId, timeline }), 400)
     return () => window.clearTimeout(handle)
-  }, [timeline])
+  }, [sessionId, timeline])
+  const attentionTimeline = attentionSnapshot.sessionId === sessionId ? attentionSnapshot.timeline : []
   const humanAttention = useMemo(
     () => deriveHumanAttentionTimeline(sessionId, attentionTimeline),
     [sessionId, attentionTimeline],
@@ -812,10 +826,10 @@ export function useSession({
       compactStatus: remoteCompactStatus,
       timeline,
       humanAttention,
-      streamingText,
-      streamingActive,
-      streamingAnchor,
-      retainedDrafts,
+      streamingText: selectionCurrent ? streamingText : '',
+      streamingActive: selectionCurrent && streamingActive,
+      streamingAnchor: selectionCurrent ? streamingAnchor : null,
+      retainedDrafts: selectionCurrent ? retainedDrafts : [],
       pendingApprovals,
       pendingAskUserChoices,
       queuedMessages,
@@ -852,6 +866,7 @@ export function useSession({
       toolExecutionStartedAt,
       hydratedSessionId,
       historyLoadedSessionId,
+      selectionCurrent,
       boundSocket,
       sharedSocket,
       sessionId,

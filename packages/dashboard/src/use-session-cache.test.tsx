@@ -297,6 +297,60 @@ describe('useSession session view cache', () => {
     expect(socket.connected).toBe(true)
   })
 
+  it('never exposes the previous projection under a newly selected session', async () => {
+    const socket = new MockSocket()
+    const observations: Array<{
+      requested: string
+      stateSessionId: string | null
+      timelineText: string
+      approvalSessionId: string | null
+    }> = []
+    const Probe = ({ sessionId }: { sessionId: string }) => {
+      const current = useSession({ host: 'http://host', sessionId, socket: socket as never })
+      observations.push({
+        requested: sessionId,
+        stateSessionId: current.state?.sessionId ?? null,
+        timelineText: current.timeline.map((entry) => entry.event.kind === 'user_message' ? entry.event.text : '').join(''),
+        approvalSessionId: current.pendingApprovals[0]?.sessionId ?? null,
+      })
+      return null
+    }
+    const view = render(<Probe sessionId="a" />)
+    act(() => socket.serverEmit('session:ready', {
+      sessionId: 'a',
+      agentRuntime: 'kernel',
+      reason: 'load',
+      cursor: 41,
+      state: {
+        ...createInitialState({ sessionId: 'a' }),
+        status: 'awaiting_approval',
+        pendingCalls: [{
+          callId: 'approval-a',
+          name: 'shell',
+          input: { command: 'private-a' },
+          status: 'awaiting_approval',
+        }],
+      },
+      config: { tools: [] },
+      contextSnapshot: null,
+    }))
+    act(() => socket.serverEmit('server:history', {
+      sessionId: 'a',
+      entries: [{ ...timelineEntry(41), event: { kind: 'user_message', text: 'message-only-from-a' } }],
+    }))
+    await waitFor(() => expect(observations.at(-1)?.stateSessionId).toBe('a'))
+
+    observations.length = 0
+    view.rerender(<Probe sessionId="b" />)
+
+    expect(observations.filter((entry) => entry.requested === 'b')).not.toEqual([])
+    for (const observation of observations.filter((entry) => entry.requested === 'b')) {
+      expect(observation.stateSessionId).not.toBe('a')
+      expect(observation.timelineText).not.toContain('message-only-from-a')
+      expect(observation.approvalSessionId).not.toBe('b')
+    }
+  })
+
   it('removes session listeners when a shared socket is rebound', async () => {
     sockets.length = 0
     const wrapper = ({ sessionId }: { sessionId: string }) => {

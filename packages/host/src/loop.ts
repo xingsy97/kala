@@ -212,7 +212,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
         if (status === 'idle' || status === 'done' || status === 'error') {
           // Preserve the public cancellation contract without polluting the
           // event log/cursor with a reducer no-op.
-          deps.tools.cancelPending(sessionId)
+          await deps.tools.cancelPending(sessionId)
           return
         }
         const cancel = dispatchOne(deps, sessionId, event, inFlightAborts, undefined, undefined, undefined, notifyCheckpoint)
@@ -566,7 +566,7 @@ export async function dispatchOne(
   if (event.kind === 'cancel') {
     await interruptSubAgentsForParent(deps, aborts, sessionId)
     deps.askUserChoice?.cancelSession(sessionId)
-    deps.tools.cancelPending(sessionId)
+    await deps.tools.cancelPending(sessionId)
     const inFlight = aborts.get(sessionId)
     if (inFlight) inFlight.abort()
   }

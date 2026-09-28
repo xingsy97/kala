@@ -219,8 +219,6 @@ type SlashDeleteState = {
   sessionId: string
 }
 
-const COMPACT_WATCHDOG_MS = 75_000
-
 /**
  * Fetch the host's advertised models on mount. The host reads them from
  * `~/.claude/settings.json` and `~/.codex/config.toml`; hardcoding a list here
@@ -665,8 +663,12 @@ export function App(): JSX.Element {
     if (last.seq <= compactStartSeq.current) return
     compactStartSeq.current = null
     inferredCompactSeq.current = null
-    setCompactStatus(isCompactionSuccess(last.event) ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(last.event) })
-    scheduleCompactIdle(2500)
+    if (isCompactionSuccess(last.event)) {
+      setCompactStatus({ kind: 'idle' })
+    } else {
+      setCompactStatus({ kind: 'error', message: compactFailureMessage(last.event) })
+      scheduleCompactIdle(6000)
+    }
   }, [compactStatus, session.timeline])
 
   useEffect(() => {
@@ -677,8 +679,12 @@ export function App(): JSX.Element {
     if (terminal) {
       compactStartSeq.current = null
       inferredCompactSeq.current = null
-      setCompactStatus(isCompactionSuccess(terminal.event) ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(terminal.event) })
-      scheduleCompactIdle(2500)
+      if (isCompactionSuccess(terminal.event)) {
+        setCompactStatus({ kind: 'idle' })
+      } else {
+        setCompactStatus({ kind: 'error', message: compactFailureMessage(terminal.event) })
+        scheduleCompactIdle(6000)
+      }
       return
     }
     const llmResponse = session.timeline.some((entry) => entry.seq > startSeq && (entry.event.kind === 'llm_response' || entry.event.kind === 'llm_error'))
@@ -704,8 +710,18 @@ export function App(): JSX.Element {
       return
     }
     if (remoteCompact.kind === 'done') {
-      setCompactStatus({ kind: 'done' })
-      scheduleCompactIdle(2500)
+      if (session.agentRuntime === 'kernel') {
+        setCompactStatus({ kind: 'idle' })
+      } else {
+        setCompactStatus({
+          kind: 'done',
+          tokensBefore: remoteCompact.tokensBefore,
+          tokensAfter: remoteCompact.tokensAfter,
+          trigger: remoteCompact.trigger,
+          replacedCount: remoteCompact.replacedCount,
+          summary: remoteCompact.summary,
+        })
+      }
       return
     }
     if (remoteCompact.kind === 'skipped') {
@@ -720,7 +736,7 @@ export function App(): JSX.Element {
     // Intentionally not listing scheduleCompactIdle in deps: it's a stable
     // ref-based helper defined in the same component (see below).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remoteCompact])
+  }, [remoteCompact, session.agentRuntime])
 
   useEffect(() => {
     if (compactStatus.kind !== 'running') return
@@ -729,17 +745,6 @@ export function App(): JSX.Element {
     setCompactStatus({ kind: 'error', message: session.lastError.message })
     scheduleCompactIdle(6000)
   }, [compactStatus, session.lastError])
-
-  useEffect(() => {
-    if (compactStatus.kind !== 'running') return
-    const timer = window.setTimeout(() => {
-      setCompactStatus({
-        kind: 'error',
-        message: t('app.compactTimeout'),
-      })
-    }, COMPACT_WATCHDOG_MS)
-    return () => window.clearTimeout(timer)
-  }, [compactStatus])
 
   // Hard-tier context pressure means the host will auto-compact before the
   // next user turn runs. Surface that as a transcript row (queued state) so

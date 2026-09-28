@@ -91,6 +91,7 @@ export function evaluateSubAgentTimeout(input: {
 }
 
 const activeSubAgents = new Map<string, ActiveSubAgent>()
+const reservedSubAgentSlots = new Map<string, Set<string>>()
 
 function activeKey(parentSessionId: string, parentCallId: string): string {
   return `${parentSessionId}\u0000${parentCallId}`
@@ -105,6 +106,32 @@ export function activeSubAgentFor(
 
 export function activeSubAgentsForParent(parentSessionId: string): readonly ActiveSubAgent[] {
   return [...activeSubAgents.values()].filter((entry) => entry.parentSessionId === parentSessionId)
+}
+
+function reservedSubAgentCount(parentSessionId: string): number {
+  return reservedSubAgentSlots.get(parentSessionId)?.size ?? 0
+}
+
+function reserveSubAgentSlot(
+  parentSessionId: string,
+  parentCallId: string,
+  maxFanOut: number,
+): { admitted: boolean; concurrentSiblingCount: number } {
+  const concurrentSiblingCount =
+    activeSubAgentsForParent(parentSessionId).length + reservedSubAgentCount(parentSessionId)
+  if (concurrentSiblingCount >= maxFanOut) return { admitted: false, concurrentSiblingCount }
+
+  const reserved = reservedSubAgentSlots.get(parentSessionId) ?? new Set<string>()
+  reserved.add(parentCallId)
+  reservedSubAgentSlots.set(parentSessionId, reserved)
+  return { admitted: true, concurrentSiblingCount }
+}
+
+function releaseSubAgentSlot(parentSessionId: string, parentCallId: string): void {
+  const reserved = reservedSubAgentSlots.get(parentSessionId)
+  if (!reserved) return
+  reserved.delete(parentCallId)
+  if (reserved.size === 0) reservedSubAgentSlots.delete(parentSessionId)
 }
 
 export function isCancelledSubAgentChild(childSessionId: string): boolean {
@@ -123,8 +150,21 @@ export async function interruptSubAgent(
   if (!marked.ok) return marked
   const active = activeSubAgentFor(parentSessionId, parentCallId)
   if (active?.cancelRuntime) {
-    await interruptSubAgentsForParent(deps, aborts, marked.childSessionId, reason)
-    await active.cancelRuntime()
+    const cancellation = (async () => {
+      await interruptSubAgentsForParent(deps, aborts, marked.childSessionId, reason)
+      await active.cancelRuntime!()
+      return { ok: true as const, childSessionId: marked.childSessionId }
+    })()
+    active.runtimeCancellation = cancellation
+    try {
+      await cancellation
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      active.cancelReason = `${reason}; runtime cancellation failed: ${detail}`
+      throw error
+    } finally {
+      if (active.runtimeCancellation === cancellation) active.runtimeCancellation = undefined
+    }
   } else {
     await dispatchOne(deps, marked.childSessionId, { kind: 'cancel' }, aborts)
   }
@@ -209,7 +249,8 @@ export async function runAgentTool(
   const depth = depthOf(deps.store, parent)
   const maxDepth = Math.min(parent.config.maxAgentDepth ?? DEFAULT_MAX_AGENT_DEPTH, DEFAULT_MAX_AGENT_DEPTH)
   const maxFanOut = parent.config.maxAgentFanOut ?? DEFAULT_MAX_AGENT_FANOUT
-  const concurrentSiblingCount = activeSubAgentsForParent(parentSessionId).length
+  const admission = reserveSubAgentSlot(parentSessionId, effect.callId, maxFanOut)
+  const concurrentSiblingCount = admission.concurrentSiblingCount
 
   const policyInput = readPolicyInput(effect, parent.config)
   const agentType = agentTypeOf(effect) ?? policyInput?.role
@@ -225,6 +266,7 @@ export async function runAgentTool(
   const intention = policy.intention
 
   if (policy.reasons.includes('policy_max_depth_exceeded')) {
+    if (admission.admitted) releaseSubAgentSlot(parentSessionId, effect.callId)
     await persistSubAgentPolicyArtifact(deps, parent, undefined, effect.callId, policy)
     return failEnvelope(
       'depth-exceeded',
@@ -235,7 +277,7 @@ export async function runAgentTool(
       intention,
     )
   }
-  if (policy.reasons.includes('policy_max_fanout_exceeded')) {
+  if (!admission.admitted || policy.reasons.includes('policy_max_fanout_exceeded')) {
     await persistSubAgentPolicyArtifact(deps, parent, undefined, effect.callId, policy)
     return failEnvelope(
       'fanout-exceeded',
@@ -250,64 +292,70 @@ export async function runAgentTool(
   // Active tracking is process-local, while parentCallId is durable. Restart can
   // redispatch a pending `agent` call; reuse its completed child or explicitly
   // terminate an incomplete orphan instead of spawning a duplicate child.
-  const existingChild = (await deps.store.listChildren(parentSessionId))
-    .find((candidate) => candidate.parentCallId === effect.callId)
-  if (existingChild) {
-    const final = existingChild.state
-    const turns = final.cursor
-    if (final.status === 'done') {
-      return okEnvelope(existingChild.sessionId, agentType, finalAssistantText(final), turns, 0, intention)
-    }
-    if (final.status !== 'error') {
-      await dispatchOne(deps, existingChild.sessionId, { kind: 'cancel' }, aborts)
-    }
-    return failEnvelope(
-      existingChild.sessionId,
-      agentType,
-      `sub-agent recovery stopped incomplete child in status ${final.status}`,
-      turns,
-      0,
-      intention,
-    )
-  }
-
-  const effectiveTools = pickEffectiveTools(effect.input.tools, policy.allowedTools)
   const startedAt = new Date()
-  const childSessionId = ulid()
-  const child = await deps.store.create({
-    sessionId: childSessionId,
-    config: filteredAgentConfig(parent.config, effectiveTools),
-    agentRuntime: parent.agentRuntime,
-    ...(parent.agentRuntimeVersion ? { agentRuntimeVersion: parent.agentRuntimeVersion } : {}),
-    ...(parent.agentRuntime !== 'kernel' ? { externalSessionId: childSessionId } : {}),
-    parentSessionId,
-    parentCursor: parent.state.cursor,
-    parentCallId: effect.callId,
-    ...(agentType !== undefined ? { agentType } : {}),
-    subAgentStartedAt: startedAt.toISOString(),
-    ...(parent.workspaceId !== undefined ? { workspaceId: parent.workspaceId } : {}),
-    ...(parent.workspaceName !== undefined ? { workspaceName: parent.workspaceName } : {}),
-    ...(parent.state.cwd !== undefined ? { initialCwd: parent.state.cwd } : {}),
-    // Sub-agents run headless: no dashboard is attached to the child session,
-    // so any RequestApprovalEffect would deadlock. Force allow_all regardless
-    // of the parent's mode. See docs/meta/adr/0014-subagent-approval-mode.md.
-    initialApprovalMode: 'allow_all',
-  })
+  let child: SessionRecord
+  let active: ActiveSubAgent
+  try {
+    const existingChild = (await deps.store.listChildren(parentSessionId))
+      .find((candidate) => candidate.parentCallId === effect.callId)
+    if (existingChild) {
+      const final = existingChild.state
+      const turns = assistantTurnCount(final)
+      if (final.status === 'done') {
+        return okEnvelope(existingChild.sessionId, agentType, finalAssistantText(final), turns, 0, intention)
+      }
+      if (final.status !== 'error') {
+        await dispatchOne(deps, existingChild.sessionId, { kind: 'cancel' }, aborts)
+      }
+      return failEnvelope(
+        existingChild.sessionId,
+        agentType,
+        `sub-agent recovery stopped incomplete child in status ${final.status}`,
+        turns,
+        0,
+        intention,
+      )
+    }
 
-  await persistSubAgentPolicyArtifact(deps, parent, child.sessionId, effect.callId, policy)
+    const effectiveTools = pickEffectiveTools(effect.input.tools, policy.allowedTools)
+    const childSessionId = ulid()
+    child = await deps.store.create({
+      sessionId: childSessionId,
+      config: filteredAgentConfig(parent.config, effectiveTools),
+      agentRuntime: parent.agentRuntime,
+      ...(parent.agentRuntimeVersion ? { agentRuntimeVersion: parent.agentRuntimeVersion } : {}),
+      ...(parent.agentRuntime !== 'kernel' ? { externalSessionId: childSessionId } : {}),
+      parentSessionId,
+      parentCursor: parent.state.cursor,
+      parentCallId: effect.callId,
+      ...(agentType !== undefined ? { agentType } : {}),
+      subAgentStartedAt: startedAt.toISOString(),
+      ...(parent.workspaceId !== undefined ? { workspaceId: parent.workspaceId } : {}),
+      ...(parent.workspaceName !== undefined ? { workspaceName: parent.workspaceName } : {}),
+      ...(parent.state.cwd !== undefined ? { initialCwd: parent.state.cwd } : {}),
+      // Sub-agents run headless: no dashboard is attached to the child session,
+      // so any RequestApprovalEffect would deadlock. Force allow_all regardless
+      // of the parent's mode. See docs/meta/adr/0014-subagent-approval-mode.md.
+      initialApprovalMode: 'allow_all',
+    })
 
-  const active: ActiveSubAgent = {
-    parentSessionId,
-    parentCallId: effect.callId,
-    childSessionId: child.sessionId,
-    ...(agentType !== undefined ? { agentType } : {}),
-    startedAt,
-    cancelled: false,
-    ...(parent.agentRuntime !== 'kernel' && runtimeController
-      ? { cancelRuntime: async () => await runtimeController.cancel(child) }
-      : {}),
+    await persistSubAgentPolicyArtifact(deps, parent, child.sessionId, effect.callId, policy)
+
+    active = {
+      parentSessionId,
+      parentCallId: effect.callId,
+      childSessionId: child.sessionId,
+      ...(agentType !== undefined ? { agentType } : {}),
+      startedAt,
+      cancelled: false,
+      ...(parent.agentRuntime !== 'kernel' && runtimeController
+        ? { cancelRuntime: async () => await runtimeController.cancel(child) }
+        : {}),
+    }
+    activeSubAgents.set(activeKey(parentSessionId, effect.callId), active)
+  } finally {
+    if (admission.admitted) releaseSubAgentSlot(parentSessionId, effect.callId)
   }
-  activeSubAgents.set(activeKey(parentSessionId, effect.callId), active)
   deps.broadcast.onSubAgentStarted?.({
     parentSessionId,
     parentCallId: effect.callId,
@@ -408,7 +456,7 @@ export async function runAgentTool(
   const finishedAt = new Date()
   const durationMs = finishedAt.getTime() - startedAt.getTime()
   const final = deps.store.get(child.sessionId)?.state
-  const turns = final?.cursor ?? 0
+  const turns = final ? assistantTurnCount(final) : 0
 
   if (active.cancelled) {
     const error = active.cancelReason ?? 'sub-agent interrupted'
@@ -465,7 +513,11 @@ async function waitForExternalSubAgent(
   childSessionId: string,
   active: ActiveSubAgent,
 ): Promise<void> {
-  while (!active.cancelled) {
+  while (true) {
+    if (active.cancelled) {
+      await active.runtimeCancellation?.catch(() => undefined)
+      return
+    }
     const status = store.get(childSessionId)?.state.status
     if (status === 'done' || status === 'error') return
     await new Promise((resolve) => setTimeout(resolve, 25))

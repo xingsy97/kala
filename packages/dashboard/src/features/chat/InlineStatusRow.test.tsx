@@ -105,15 +105,21 @@ describe('agent activity card', () => {
 })
 
 describe('compact context display', () => {
-  it('explains that automatic compaction does not stop active work', () => {
+  it('keeps automatic compaction status concise', () => {
     render(<CompactFeedbackRow kind="running" trigger="auto" startedAt={Date.now()} tokensBefore={100_000} />)
-    expect(screen.getByTestId('inline-compact-running').textContent).toContain('current tools and subagents continue')
+    const row = screen.getByTestId('inline-compact-running')
+    expect(row.textContent).toContain('Compacting conversation')
+    expect(row.textContent).not.toContain('current tools and subagents continue')
+    expect(screen.getByTestId('inline-compact-progress-label').classList.contains('ak-thinking-text')).toBe(true)
+    expect(row.className).not.toContain('border')
+    expect(row.querySelector('.animate-spin')).toBeNull()
   })
 
   it('labels the value as current context rather than cumulative token usage', () => {
     render(<CompactFeedbackRow kind="running" startedAt={Date.now()} tokensBefore={823_456} />)
     expect(screen.getByTestId('inline-compact-running').textContent).toContain('context 823.5k tokens')
     expect(screen.getByTestId('inline-compact-running').textContent).not.toContain('↑')
+    expect(screen.getByTestId('inline-compact-running').textContent).not.toContain('↳')
   })
 
   it('formats only genuinely million-sized snapshots as millions', () => {

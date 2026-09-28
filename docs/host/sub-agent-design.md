@@ -162,8 +162,8 @@ If the child already finished, the host broadcasts a `session:error` to the pare
 
 Two dashboard RPCs to make the feature complete:
 
-- `agent_types:list` — returns the currently-loaded agent type registry: `{ types: Array<{ name, description, model?, tools?, systemPromptPreview? }> }`. Used by the Composer / future "@agent-name" affordance.
-- `sub_agent:list` — returns children of a given parent: `{ parentSessionId, children: Array<{ childSessionId, agentType?, status, startedAt, finishedAt? }> }`. Read from `SessionStore` by scanning records with `parentSessionId === X`. Used by the dashboard to reconstruct sub-agent cards when replaying an existing session log.
+- `agent_types:list` — returns the built-in role templates (`research`, `implementation`, `test`, and `review`) as `{ types: Array<{ name, description, model?, tools?, systemPromptPreview? }> }`. A future registry loader may add workspace and user-defined types. Used by the Composer / future "@agent-name" affordance.
+- `sub_agent:list` — returns children of a given parent: `{ parentSessionId, children: Array<{ childSessionId, agentType?, status, startedAt, finishedAt?, turns?, durationMs?, error? }> }`. It combines child records with the durable parent `<sub_agent>` result envelope, preserving failed/cancelled status and diagnostics across dashboard refreshes.
 
 Both are ack-response RPCs following the same pattern as `bg:list` / `fs:list_dirs`.
 
@@ -227,6 +227,8 @@ The group presents each child as a readable row inside one shared container. It 
 The default surface prioritizes the task, progress, and result. Resolved policy internals such as allowed tools, max turns, timeout budgets, depth/fan-out, and resolution reasons live under a closed **Execution details** disclosure. They are diagnostic settings, not primary transcript content.
 
 The inline child transcript uses a compact read-only renderer over the same normalized `Message` model. If the live child transcript is unavailable after completion, the parsed `<result>` envelope is the durable fallback.
+
+For Copilot-runtime children, a turn that produces no meaningful assistant, usage, tool, error, or idle event within five minutes is aborted as a failed child. Internal `user.message` and `assistant.turn_start` bookkeeping events do not count as progress. After meaningful activity begins, the existing 30-minute inactivity window applies. The resulting failure envelope is returned to the parent like any other failed child.
 
 ### Composer hint
 

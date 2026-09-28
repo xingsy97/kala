@@ -133,9 +133,9 @@ export function useSubAgentSession({
             return {
               status: child.status,
               childSessionId: child.childSessionId,
-              error: 'sub-agent ended before this dashboard connected',
-              turns: 0,
-              durationMs: 0,
+              error: child.error ?? 'sub-agent ended before this dashboard connected',
+              turns: child.turns ?? 0,
+              durationMs: child.durationMs ?? 0,
               finishedAt: child.finishedAt ?? '',
               ...(child.startedAt ? { startedAt: child.startedAt } : {}),
             }
@@ -144,8 +144,8 @@ export function useSubAgentSession({
             return {
               status: 'completed',
               childSessionId: child.childSessionId,
-              turns: 0,
-              durationMs: 0,
+              turns: child.turns ?? 0,
+              durationMs: child.durationMs ?? 0,
               finishedAt: child.finishedAt ?? '',
               ...(child.startedAt ? { startedAt: child.startedAt } : {}),
             }
@@ -185,11 +185,18 @@ export function useSubAgentSession({
       if (payload.parentCallId !== parentCallId) return
       setLifecycle((prev) => {
         const startedAt = prev.status === 'running' ? prev.startedAt : undefined
-        if (payload.status === 'failed' || payload.status === 'cancelled') {
+        if (
+          payload.status === 'failed'
+          || payload.status === 'cancelled'
+          || payload.status === 'timed_out_with_partial_result'
+        ) {
           return {
-            status: payload.status,
+            status: payload.status === 'timed_out_with_partial_result' ? 'failed' : payload.status,
             childSessionId: payload.childSessionId,
-            error: payload.error ?? 'unknown error',
+            error: payload.error ??
+              (payload.status === 'timed_out_with_partial_result'
+                ? 'sub-agent timed out with a partial result'
+                : 'unknown error'),
             turns: payload.turns,
             durationMs: payload.durationMs,
             finishedAt: payload.finishedAt,

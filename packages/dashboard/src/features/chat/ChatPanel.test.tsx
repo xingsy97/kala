@@ -1717,6 +1717,29 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-compact-running')).toBeTruthy()
   })
 
+  it('renders Copilot compact completion as a persistent neutral result with inspectable summary', () => {
+    render(
+      <ChatPanel
+        items={[{ kind: 'message', message: { role: 'user', content: [{ type: 'text', text: 'before compact' }] } }]}
+        compactStatus={{
+          kind: 'done',
+          trigger: 'manual',
+          tokensBefore: 12_400,
+          tokensAfter: 3_800,
+          replacedCount: 14,
+          summary: '# Compacted Context\n\nKeep the active implementation constraints.',
+        }}
+      />,
+    )
+
+    const result = screen.getByTestId('compact-completed-result')
+    expect(result.className).not.toContain('emerald')
+    expect(result.textContent).toContain('Context compacted')
+    expect(result.textContent).toContain('12.4k')
+    fireEvent.click(screen.getByTestId('compact-boundary-open'))
+    expect(screen.getByTestId('compact-summary-modal').textContent).toContain('Keep the active implementation constraints.')
+  })
+
   it('renders compact empty feedback as a transcript tail item', () => {
     render(
       <ChatPanel

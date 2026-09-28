@@ -81,6 +81,7 @@ const sdk = vi.hoisted(() => ({
     success: true,
     tokensRemoved: 80_000,
     messagesRemoved: 40,
+    summaryContent: '# Compacted Context\n\nKeep the active implementation constraints.',
     contextWindow: {
       currentTokens: 40_000,
       tokenLimit: 128_000,
@@ -708,6 +709,7 @@ describe('Copilot runtime custom tools', () => {
         toolDefinitionsTokens: 4_000,
         tokenLimit: 128_000,
         messagesRemoved: 30,
+        summaryContent: '# Compacted Context\n\nPreserve the current task.',
       },
     })
 
@@ -736,6 +738,9 @@ describe('Copilot runtime custom tools', () => {
       attemptId: 'compact-start-1',
       tokensBefore: 104_000,
       tokensAfter: 32_000,
+      trigger: 'auto',
+      replacedCount: 30,
+      summary: '# Compacted Context\n\nPreserve the current task.',
       endedAt: '2026-08-30T00:00:02.000Z',
     })
     expect(onState).toHaveBeenCalledWith(expect.objectContaining({ sessionId: record.sessionId }), expect.any(Object), expect.objectContaining({
@@ -1037,6 +1042,7 @@ describe('Copilot runtime custom tools', () => {
 
   it('runs manual compaction through the Copilot history RPC', async () => {
     const onState = vi.fn()
+    const onCompactStatus = vi.fn()
     const runtime = new CopilotAgentRuntime({
       store,
       tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
@@ -1045,6 +1051,7 @@ describe('Copilot runtime custom tools', () => {
         onTokenDelta() {},
         onApprovalRequired() {},
         onError() {},
+        onCompactStatus,
       },
     }, { enabled: true, sessionsDir: dir })
     const record = await store.create({
@@ -1061,6 +1068,20 @@ describe('Copilot runtime custom tools', () => {
       contextWindow: { tokens: 128_000, source: 'api_reported' },
       usage: { inputTokens: 40_000, totalTokens: 40_000 },
     }))
+    expect(onCompactStatus).toHaveBeenCalledTimes(2)
+    expect(onCompactStatus.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: record.sessionId,
+      kind: 'running',
+      trigger: 'manual',
+    })
+    expect(onCompactStatus.mock.calls[1]?.[0]).toMatchObject({
+      sessionId: record.sessionId,
+      kind: 'done',
+      tokensAfter: 40_000,
+      trigger: 'manual',
+      replacedCount: 40,
+      summary: '# Compacted Context\n\nKeep the active implementation constraints.',
+    })
     await runtime.close()
   })
 
@@ -1178,6 +1199,46 @@ describe('Copilot runtime custom tools', () => {
     expect(cancelPending).toHaveBeenCalledWith(record.sessionId)
   })
 
+  it('aborts a Copilot turn that never produces initial activity', async () => {
+    vi.useFakeTimers()
+    try {
+      const cancelPending = vi.fn()
+      const runtime = new CopilotAgentRuntime({
+        store,
+        tools: { async callTool() { return { ok: true, content: '' } }, cancelPending },
+        broadcast: {
+          onState() {},
+          onTokenDelta() {},
+          onApprovalRequired() {},
+          onError() {},
+        },
+      }, {
+        enabled: true,
+        sessionsDir: dir,
+      })
+      const record = await store.create({
+        sessionId: 'copilot-initial-activity-timeout',
+        agentRuntime: 'copilot',
+        config: createConfig({ tools: [] }),
+      })
+
+      await runtime.start()
+      await runtime.send(record, { text: 'Start the task.' })
+      await vi.advanceTimersByTimeAsync(4 * 60_000)
+      for (const listener of [...sdk.listeners]) {
+        listener({ type: 'assistant.turn_start', id: 'non-progress', timestamp: new Date().toISOString(), parentId: null, data: { turnId: '1' } })
+      }
+      await vi.advanceTimersByTimeAsync(1 * 60_000)
+      await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('error'))
+      expect(store.get(record.sessionId)?.state.error).toContain('without initial Copilot session activity')
+      expect(sdk.abort).toHaveBeenCalledOnce()
+      expect(cancelPending).toHaveBeenCalledWith(record.sessionId)
+      await runtime.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps an active Copilot turn alive and aborts only after prolonged inactivity', async () => {
     vi.useFakeTimers()
     try {
@@ -1203,15 +1264,15 @@ describe('Copilot runtime custom tools', () => {
 
       await runtime.start()
       await runtime.send(record, { text: 'Run a long task.' })
-      await vi.advanceTimersByTimeAsync(29 * 60_000)
+      await vi.advanceTimersByTimeAsync(4 * 60_000)
       for (const listener of [...sdk.listeners]) {
-        listener({ type: 'assistant.turn_start', id: 'activity', timestamp: new Date().toISOString(), parentId: null, data: { turnId: '1' } })
+        listener({ type: 'assistant.message_delta', id: 'activity', timestamp: new Date().toISOString(), parentId: null, data: { deltaContent: 'Working' } })
       }
-      await vi.advanceTimersByTimeAsync(2 * 60_000)
+      await vi.advanceTimersByTimeAsync(29 * 60_000)
       expect(store.get(record.sessionId)?.state.status).toBe('thinking')
       expect(sdk.abort).not.toHaveBeenCalled()
 
-      await vi.advanceTimersByTimeAsync(28 * 60_000)
+      await vi.advanceTimersByTimeAsync(1 * 60_000)
       await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('error'))
       expect(sdk.abort).toHaveBeenCalledOnce()
       expect(cancelPending).toHaveBeenCalledWith(record.sessionId)
@@ -1332,6 +1393,60 @@ describe('Copilot runtime custom tools', () => {
       content: 'approved result',
     }])
     expect(callTool).toHaveBeenCalledOnce()
+    await runtime.close()
+  })
+
+  it('remains executing while another concurrent Copilot tool call is pending', async () => {
+    const releases = new Map<string, (result: { ok: boolean; content: string }) => void>()
+    const callTool: ToolDispatcher['callTool'] = async (_sessionId, effect) =>
+      await new Promise<{ ok: boolean; content: string }>((resolve) => {
+        releases.set(effect.callId, resolve)
+      })
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { callTool, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-concurrent-tools',
+      agentRuntime: 'copilot',
+      config: createConfig({
+        tools: [{
+          name: 'inspect',
+          description: 'Inspect a resource',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'inspect',
+        }],
+      }),
+    })
+
+    await runtime.start()
+    await runtime.send(record, { text: 'Inspect both resources.' })
+    const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'inspect')
+    const first = tool!.handler({}, { toolCallId: 'call-a' })
+    const second = tool!.handler({}, { toolCallId: 'call-b' })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.pendingCalls).toHaveLength(2))
+
+    releases.get('call-a')!({ ok: true, content: 'first done' })
+    await first
+    expect(store.get(record.sessionId)?.state).toMatchObject({
+      status: 'executing_tools',
+      pendingCalls: [{ callId: 'call-b' }],
+    })
+
+    releases.get('call-b')!({ ok: true, content: 'second done' })
+    await second
+    expect(store.get(record.sessionId)?.state).toMatchObject({
+      status: 'thinking',
+      pendingCalls: [],
+    })
     await runtime.close()
   })
 

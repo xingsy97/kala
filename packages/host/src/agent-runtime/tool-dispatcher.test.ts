@@ -162,4 +162,87 @@ describe('runtime tool dispatcher', () => {
     })
     expect(result.content).toContain('copilot child result')
   })
+
+  it('returns Copilot sub-agent failures to the parent as a failed envelope', async () => {
+    await store.create({
+      sessionId: 'copilot-failure-parent',
+      agentRuntime: 'copilot',
+      externalSessionId: 'copilot-failure-parent',
+      config: createConfig({
+        tools: [{
+          name: 'agent',
+          description: 'Spawn a sub-agent',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'agent',
+        }],
+      }),
+    })
+    const send = vi.fn(async (record) => {
+      await store.recordRuntimeProjection(
+        record.sessionId,
+        {
+          ...record.state,
+          cursor: record.state.cursor + 1,
+          status: 'error',
+          error: 'Copilot child produced no initial activity',
+        },
+        'copilot.session_error',
+        {},
+      )
+    })
+    const dispatcher = createRuntimeToolDispatcher(deps, executors, {} as LoopHandle, {
+      send,
+      cancel: vi.fn(),
+    })
+
+    const result = await dispatcher.callTool(
+      'copilot-failure-parent',
+      effect('agent', { prompt: 'delegate through Copilot' }),
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toContain('status="failed"')
+    expect(result.content).toContain('Copilot child produced no initial activity')
+  })
+
+  it('cascades Copilot parent cancellation to its active child', async () => {
+    await store.create({
+      sessionId: 'copilot-cancel-parent',
+      agentRuntime: 'copilot',
+      externalSessionId: 'copilot-cancel-parent',
+      config: createConfig({
+        tools: [{
+          name: 'agent',
+          description: 'Spawn a sub-agent',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'agent',
+        }],
+      }),
+    })
+    const send = vi.fn(async () => {})
+    const cancel = vi.fn(async () => {})
+    const dispatcher = createRuntimeToolDispatcher(deps, executors, {} as LoopHandle, { send, cancel })
+
+    const resultPromise = dispatcher.callTool(
+      'copilot-cancel-parent',
+      effect('agent', { prompt: 'wait until the parent is stopped' }),
+    )
+    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce())
+
+    await dispatcher.cancelPending('copilot-cancel-parent')
+
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(cancel.mock.calls[0]?.[0]).toMatchObject({
+      parentSessionId: 'copilot-cancel-parent',
+      agentRuntime: 'copilot',
+    })
+    await expect(resultPromise).resolves.toMatchObject({
+      ok: false,
+      content: expect.stringContaining('status="cancelled"'),
+    })
+  })
 })

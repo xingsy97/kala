@@ -661,6 +661,9 @@ export const SubAgentSummarySchema = z.object({
   status: z.enum(['running', 'completed', 'failed', 'cancelled']),
   startedAt: z.string().optional(),
   finishedAt: z.string().optional(),
+  turns: z.number().int().nonnegative().optional(),
+  durationMs: z.number().nonnegative().optional(),
+  error: z.string().optional(),
 }) satisfies z.ZodType<SubAgentSummary>
 
 export const SubAgentListResultSchema = z.object({

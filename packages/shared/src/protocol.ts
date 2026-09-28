@@ -420,6 +420,10 @@ export type CompactStatusEvent =
       attemptId: string
       tokensBefore: number
       tokensAfter: number
+      trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'
+      replacedCount?: number
+      /** LLM-generated compacted context, when the Runtime exposes it. */
+      summary?: string
       endedAt: string
     }
   | {
@@ -1205,6 +1209,9 @@ export type SubAgentSummary = {
   /** ISO 8601. Optional because pre-lifecycle-events records don't carry it. */
   startedAt?: string
   finishedAt?: string
+  turns?: number
+  durationMs?: number
+  error?: string
 }
 
 export type SubAgentListResult = {
