@@ -100,6 +100,9 @@ test('release scripts enforce Linux and macOS assets and reject Windows offers',
   for (const section of ['Improvements', 'Fixes', 'Known issues', 'Installation', 'Supported platforms', 'Verification', 'Full changelog']) {
     assert.match(builder, new RegExp(section))
   }
+  assert.match(builder, /Kala is a complete, self-hosted, cloud-native agent system for running agents/)
+  assert.match(builder, /Its three layers form a single system: the Agent Kernel defines behavior/)
+  assert.doesNotMatch(builder, /Kala is a self-hosted command center for coding agents across workspaces/)
   assert.doesNotMatch(builder, /## Highlights/)
   assert.match(verifier, /supportedNativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
   assert.match(verifier, /linux-arm64\|win32\|windows/)
