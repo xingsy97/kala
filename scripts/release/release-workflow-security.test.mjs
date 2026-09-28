@@ -57,6 +57,13 @@ test('release workflow publishes archived metadata and verifies the signed 27-as
   assert.doesNotMatch(workflow, /release\/sbom\.cdx\.json/u)
 })
 
+test('RC promotion binds acceptance to the tag ref exposed by the Actions API', () => {
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/promote-rc.yml'), 'utf8')
+  assert.match(workflow, /--jq \.head_branch\)" = "\$TAG"/u)
+  assert.doesNotMatch(workflow, /--jq \.inputs\.tag/u)
+  assert.match(workflow, /verify-rc-evidence\.mjs[\s\S]*--tag "\$TAG" --revision/u)
+})
+
 test('release reconciliation deletes unrelated remote assets and proves exact local closure', () => {
   const temporary = mkdtempSync(join(tmpdir(), 'release-reconcile-'))
   try {

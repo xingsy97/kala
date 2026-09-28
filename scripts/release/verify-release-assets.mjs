@@ -235,8 +235,11 @@ if (manifest.assets.some((asset) => asset === 'copilot-cli' || asset.startsWith(
 if (manifest.assets.includes('run.sh') && (!notes.includes("set -o pipefail; curl --proto '=https' --tlsv1.2 -fsSL") || !notes.includes('| COMPONENT='))) {
   fail('release notes missing direct HTTPS curl-to-bash bootstrap with pipefail')
 }
-if (manifest.assets.includes('run.sh') && !notes.includes('## Advanced Usage')) {
-  fail('release notes missing advanced usage section')
+for (const section of ['## Improvements', '## Fixes', '## Known issues', '## Installation', '## Supported platforms', '## Verification', '## Full changelog']) {
+  if (!notes.includes(section)) fail(`release notes missing ${section.slice(3)} section`)
+}
+if (notes.includes('## Highlights')) {
+  fail('release notes must use objective Improvements and Fixes sections instead of Highlights')
 }
 if (notes.includes('## Assets')) {
   fail('release notes must not duplicate the GitHub release assets list')
@@ -253,8 +256,11 @@ if (/wget\s+-qO-.*\|.*bash/.test(notes)) {
 if (notes.includes('run-host.sh') || notes.includes('run-executor.sh')) {
   fail('release notes must use unified run.sh only')
 }
-if (!notes.includes('sha256sum -c SHA256SUMS --ignore-missing')) {
-  fail('release notes missing checksum verification command')
+if (!notes.includes('grep "  $ASSET$" SHA256SUMS | sha256sum -c -') || !notes.includes('cosign verify-blob')) {
+  fail('release notes missing focused checksum or Sigstore verification commands')
+}
+if ((notes.match(/\bwget\b/g) ?? []).length > 1) {
+  fail('release notes must not duplicate per-asset wget commands')
 }
 if (/kala-(?:dashboard-with-runtime|host|executor)\.cjs\s*\|\s*node/.test(notes)) {
   fail('release notes must not pipe Node.js assets directly to node')

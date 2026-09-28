@@ -79,9 +79,18 @@ async function startPortable() {
   child.stdout.on('data', (chunk) => logs.push(String(chunk)))
   child.stderr.on('data', (chunk) => logs.push(String(chunk)))
   const exit = new Promise((resolveExit) => child.once('exit', (code, signal) => resolveExit({ code, signal })))
+  child.once('error', (error) => logs.push(`Portable process error: ${String(error)}\n`))
   running = { child, exit, logs }
   const origin = 'http://127.0.0.1:' + port
-  try { await waitForHttp(origin + '/runtime/capabilities', 20_000) } catch (error) { throw new Error(String(error) + '\n' + logs.join('').slice(-2000)) }
+  try {
+    const ready = await Promise.race([
+      waitForHttp(origin + '/runtime/capabilities', 60_000).then(() => ({ ready: true })),
+      exit.then((result) => ({ ready: false, result })),
+    ])
+    if (!ready.ready) throw new Error(`Portable process exited before readiness: ${JSON.stringify(ready.result)}`)
+  } catch (error) {
+    throw new Error(String(error) + '\n' + logs.join('').slice(-2000))
+  }
   return { origin }
 }
 

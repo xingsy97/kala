@@ -32,7 +32,7 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .path)" = '.github/workflows/rc-acceptance.yml'
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .conclusion)" = success
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .head_sha)" = "$REVISION"
-          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .inputs.tag)" = "$TAG"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .head_branch)" = "$TAG"
           test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
           # Publish only after both source-free assets and GHCR images have
           # succeeded for this exact tag and revision, not merely been queued.

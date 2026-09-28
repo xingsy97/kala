@@ -57,6 +57,16 @@ test('both full and native-only SEA Executor builds resolve adjacent native addo
   assert.match(builder, /\$\{nativeRequire\}\$\{buildInfo\}/)
 })
 
+test('macOS SEA assets use the required Mach-O segment and restore an ad-hoc signature', () => {
+  const builder = read('scripts/release/build-release-assets.mjs')
+  const removeSignature = builder.indexOf("await run('codesign', ['--remove-signature', nativePath])")
+  const machoSegment = builder.indexOf("postjectArgs.push('--macho-segment-name', 'NODE_SEA')")
+  const inject = builder.indexOf("await run('pnpm', postjectArgs)")
+  const sign = builder.indexOf("await run('codesign', ['--sign', '-', nativePath])")
+  assert.ok(removeSignature >= 0 && removeSignature < machoSegment)
+  assert.ok(machoSegment < inject && inject < sign)
+})
+
 test('release docs include tracked files only and exclude the unfinished showcase', () => {
   const builder = read('scripts/release/build-release-assets.mjs')
   assert.match(builder, /spawnSync\('git', \['ls-files', '-z', '--', 'docs\/']/)
@@ -87,6 +97,10 @@ test('release scripts enforce Linux and macOS assets and reject Windows offers',
   assert.doesNotMatch(builder, /generateExecutorInstallerSh|COPILOT_CLI_PATH/)
   assert.match(builder, /Release downloads require HTTPS except for loopback URLs/)
   assert.match(builder, /cosign verify-blob/)
+  for (const section of ['Improvements', 'Fixes', 'Known issues', 'Installation', 'Supported platforms', 'Verification', 'Full changelog']) {
+    assert.match(builder, new RegExp(section))
+  }
+  assert.doesNotMatch(builder, /## Highlights/)
   assert.match(verifier, /supportedNativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
   assert.match(verifier, /linux-arm64\|win32\|windows/)
   assert.match(verifier, /assertSupportedReleaseAssetName\(asset\?\.path, 'embedded Host assets'\)/)

@@ -1,0 +1,20 @@
+{
+  "v0.2.0-rc.18": {
+    "previousTag": "v0.2.0-rc.17",
+    "improvements": [
+      "Running Sessions in the left sidebar now use the same ambient text treatment as Thinking activity.",
+      "The Desktop connection screen now separates first-time setup from endpoint changes.",
+      "Manual Desktop update checks now report when the installed version is current."
+    ],
+    "fixes": [
+      "Conversation history hidden with `/clear` now stays hidden for that Session after refresh, reconnect, or service restart.",
+      "The right sidebar now defaults to Files and restores the last selected tab independently for each Session.",
+      "Linux Desktop microphone requests now use an explicit, origin-scoped native permission flow.",
+      "Copilot CLI discovery now remains available after a local redeployment."
+    ],
+    "knownIssues": [
+      "Desktop microphone permission has been validated by automated native tests; installation still requires the normal operating-system permission prompt."
+    ],
+    "desktopViaDashboard": true
+  }
+}

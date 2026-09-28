@@ -125,6 +125,8 @@ test('bootstrap RC requires exactly three real hosted Portable installs and succ
   assert.match(acceptance, /verify-portable-native\.mjs/u)
   assert.doesNotMatch(acceptance, /runs-on: \[self-hosted/u)
   assert.doesNotMatch(acceptance, /--predecessor-asset/u)
+  assert.match(acceptance, /portable:[\s\S]*?permissions:\s*\n\s+contents: write\s*\n\s+attestations: read/u)
+  assert.doesNotMatch(acceptance, /gh release (?:edit|create|upload|delete)/u)
   assert.match(acceptance, /verify-checksum-index\.mjs/u)
   assert.doesNotMatch(acceptance, /sha256sum/u)
   assert.match(acceptance, /gh attestation verify/u)

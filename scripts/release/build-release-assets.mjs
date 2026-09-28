@@ -21,6 +21,7 @@ const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
 const dashboardDist = join(root, 'packages/dashboard/dist')
 const docsDir = join(root, 'docs')
+const releaseNotesCatalog = JSON.parse(readFileSync(join(root, 'scripts', 'release', 'release-notes.json'), 'utf8'))
 const modelCatalogSeed = join(root, 'resources', 'model-catalog', 'models-dev-seed.json')
 const socketAdminDist = resolveSocketAdminDist()
 const options = parseOptions(process.argv.slice(2))
@@ -650,7 +651,13 @@ async function buildNativeSea(name, cjsPath, target) {
   writeFileSync(seaConfigPath, `${JSON.stringify({ main: cjsPath, output: blobPath, disableExperimentalSEAWarning: true }, null, 2)}\n`)
   await run(process.execPath, ['--experimental-sea-config', seaConfigPath])
   copyFileSync(process.execPath, nativePath)
-  await run('pnpm', ['exec', 'postject', nativePath, 'NODE_SEA_BLOB', blobPath, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2'])
+  const postjectArgs = ['exec', 'postject', nativePath, 'NODE_SEA_BLOB', blobPath, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2']
+  if (target.startsWith('darwin-')) {
+    await run('codesign', ['--remove-signature', nativePath])
+    postjectArgs.push('--macho-segment-name', 'NODE_SEA')
+  }
+  await run('pnpm', postjectArgs)
+  if (target.startsWith('darwin-')) await run('codesign', ['--sign', '-', nativePath])
   chmodSync(nativePath, 0o755)
 }
 
@@ -991,44 +998,39 @@ function unifiedBootstrap({ repo, tag, component }) {
 
 
 function releaseNotes(manifest) {
+  const changes = releaseNotesCatalog[manifest.tag] ?? {}
   const tagPath = manifest.tag === 'latest' ? 'latest/download' : `download/${manifest.tag}`
   const base = `https://github.com/${manifest.repo}/releases/${tagPath}`
   const canRunHost = manifest.component === 'all' || manifest.component === 'host'
-  const canRunDashboard = manifest.component === 'all' || manifest.component === 'dashboard'
   const canRunExecutor = manifest.component === 'all' || manifest.component === 'executor'
   const run = (component, extraEnv = '') => {
     const env = [extraEnv.trim(), `COMPONENT=${component}`].filter(Boolean).join(' ')
     return `set -o pipefail; curl --proto '=https' --tlsv1.2 -fsSL "${base}/run.sh" | ${env} bash`
   }
-  const hasNativeAssets = Object.values(manifest.nativeAssets ?? {}).some((assets) => Array.isArray(assets) && assets.length > 0)
   const lines = [
     `# Kala ${manifest.tag}`,
     '',
-    'Kala is a self-hosted command center for coding agents across workspaces. Plan work as a DAG, follow live tool activity, and inspect sessions, files, Git changes, and runtime traces. This release packages the Host, Dashboard, Executor, checksums, and bootstrap scripts.',
+    'Kala is a self-hosted command center for coding agents across workspaces.',
     '',
-    '## What ships',
+    '## Improvements',
     '',
-    '- Host + Dashboard bundle for running Kala locally or on a VM.',
-    '- Separately deployable Executor for workspace tools.',
-    '- `SHA256SUMS` and its Sigstore bundle for release-asset verification.',
-    hasNativeAssets
-      ? '- Native fallback binaries when Node.js 22+ is unavailable.'
-      : '- Node.js `.cjs` assets for environments with Node.js 22+.',
-    '- GHCR Runtime, Ingress, and Dashboard images (preview); no npm packages are published.',
+    ...releaseNoteBullets(changes.improvements, 'No user-facing improvements are recorded for this build.'),
     '',
-    '## Release support scope',
+    '## Fixes',
     '',
-    'Publication requires native Portable installation and same-version reinstall evidence on Linux x64 and macOS x64/arm64. Linux arm64 and Windows release assets are not included in this release. This is not cross-version upgrade or rollback evidence.',
-    'Dedicated and Private Cloud assets are previews: production lifecycle, upgrade, rollback, and tenant isolation have not been certified for this release.',
-    `See the [release support policy](https://github.com/${manifest.repo}/blob/${manifest.tag}/docs/operations/release-support-policy.md) for the supported scope.`,
+    ...releaseNoteBullets(changes.fixes, 'No user-facing fixes are recorded for this build.'),
     '',
-    '## Quick Start',
+    '## Known issues',
+    '',
+    ...releaseNoteBullets(changes.knownIssues, 'No release-specific known issues are recorded.'),
+    '',
+    '## Installation',
     '',
   ]
   if (manifest.assets.includes('run.sh')) {
     if (canRunHost) {
       lines.push(
-        'Run the host and dashboard together:',
+        'Host and Dashboard:',
         '',
         '```bash',
         run('host-frontend'),
@@ -1038,65 +1040,73 @@ function releaseNotes(manifest) {
     }
     if (canRunExecutor) {
       lines.push(
-        'Run an executor that connects to the host:',
+        'Executor:',
         '',
         '```bash',
         run('executor', 'HOST_URL=https://agent.example.com'),
         '```',
         '',
-        'Public bootstrap downloads require HTTPS and verify the signed checksum index with Sigstore. Unsigned bootstrap is allowed only from a loopback URL for local development.',
-        '',
-        'Use `HOST_URL=https://agent.example.com` when the host is exposed through a public domain.',
-        '',
-      )
-    }
-    if (canRunHost || canRunDashboard) {
-      lines.push('## Advanced Usage', '')
-    }
-    if (canRunHost) {
-      lines.push('Run only the headless host:', '', '```bash', run('host'), '```', '')
-    }
-    if (canRunDashboard) {
-      lines.push(
-        'Download and extract only the dashboard frontend bundle:',
-        '',
-        '```bash',
-        run('frontend'),
-        '```',
-        '',
-      )
-    }
-    if (canRunHost) {
-      lines.push('Bind the host to all interfaces and use a custom port:', '', '```bash', run('host-frontend', 'HOST=0.0.0.0 PORT=3000'), '```', '')
-    }
-    if (canRunHost || canRunExecutor) {
-      lines.push(
-        '## Configuration',
-        '',
-        '- `COMPONENT=host-frontend|host|frontend|executor`',
-        '- `HOST_URL` - host URL used by executors.',
-        '- `HOST` - host bind interface, default `127.0.0.1`.',
-        '- `PORT` - host listen port, default `3000`.',
-        '- `AGENT_KERNEL_FRONTEND_DIR` - frontend extraction directory.',
-        '- `AGENT_KERNEL_ALLOWED_ORIGINS` - comma-separated dashboard origins.',
-        '- `AGENT_KERNEL_RUNTIME=auto|cjs|native` - runtime selection.',
-        '- `AGENT_KERNEL_RUN_DIR` - persistent runtime scratch directory.',
-        '',
       )
     }
   }
-  const verifyTargets = manifest.assets
+  if (changes.desktopDeb) {
+    lines.push(
+      'Linux Desktop (x64):',
+      '',
+      '```bash',
+      `curl --proto '=https' --tlsv1.2 -fLO "${base}/${changes.desktopDeb}"`,
+      `sudo apt install "./${changes.desktopDeb}"`,
+      '```',
+      '',
+    )
+  } else if (changes.desktopViaDashboard) {
+    lines.push(
+      'Linux Desktop (x64): install from the **Download desktop app** page in your Kala Dashboard.',
+      '',
+    )
+  }
   lines.push(
-    '## Verify Checksums',
+    '## Supported platforms',
+    '',
+    '- Native Host and Executor: Linux x64 and macOS x64/arm64.',
+    '- Node.js fallback: platforms with Node.js 22+.',
+    changes.desktopDeb || changes.desktopViaDashboard
+      ? '- Desktop application: Debian/Ubuntu x64.'
+      : '- No Desktop application package is included.',
+    '- Dashboard: current Chromium, Firefox, and Safari releases.',
+    '- Linux arm64 and Windows release assets are not included in this release.',
+    '',
+    `See the [release support policy](https://github.com/${manifest.repo}/blob/${manifest.tag}/docs/operations/release-support-policy.md) for the validated support scope.`,
+    '',
+    '## Verification',
+    '',
+    'Set `ASSET` to the downloaded filename, then verify it against the signed checksum index:',
     '',
     '```bash',
-    `wget -q ${base}/SHA256SUMS`,
-    ...verifyTargets.map((asset) => `wget -q ${base}/${asset}`),
-    'sha256sum -c SHA256SUMS --ignore-missing',
+    'ASSET=kala-dashboard-with-runtime.cjs',
+    `curl --proto '=https' --tlsv1.2 -fLO "${base}/SHA256SUMS"`,
+    `curl --proto '=https' --tlsv1.2 -fLO "${base}/SHA256SUMS.sigstore.json"`,
+    `curl --proto '=https' --tlsv1.2 -fLO "${base}/$ASSET"`,
+    'grep "  $ASSET$" SHA256SUMS | sha256sum -c -',
+    `cosign verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity-regexp "https://github.com/${manifest.repo}/.github/workflows/release.yml@.*" --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS`,
     '```',
+    '',
+    'The release metadata archive also contains the SBOM and third-party notices.',
+    '',
+    '## Full changelog',
+    '',
+    changes.previousTag
+      ? `[Compare ${changes.previousTag}...${manifest.tag}](https://github.com/${manifest.repo}/compare/${changes.previousTag}...${manifest.tag})`
+      : `See the [commit history](https://github.com/${manifest.repo}/commits/${manifest.tag}).`,
     '',
   )
   return `${lines.join('\n')}\n`
+}
+
+function releaseNoteBullets(items, fallback) {
+  return Array.isArray(items) && items.length > 0
+    ? items.map((item) => `- ${item}`)
+    : [`- ${fallback}`]
 }
 
 function bash(lines) {
