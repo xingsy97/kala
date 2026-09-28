@@ -143,7 +143,7 @@ function AskUserChoiceRequestCard({
           {t('chat.askUser.required')}
         </span>
         {total > 1 ? (
-          <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-[0.625rem] font-medium tabular-nums text-muted-foreground ring-1 ring-border/50">
+          <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-caption font-medium tabular-nums text-muted-foreground ring-1 ring-border/50">
             {t('chat.askUser.index', { current: current + 1, total })}
           </span>
         ) : null}

@@ -213,8 +213,8 @@ export function DocsPage(): JSX.Element {
       {content ? (
         <article className="mx-auto max-w-[88rem] px-4 py-4 sm:px-6 sm:py-5">
           <div className="mb-4 border-b border-border/60 pb-3">
-            <div className="break-all font-mono text-[0.6875rem] text-muted-foreground">{content.path}</div>
-            <div className="text-[0.6875rem] text-muted-foreground">{t('docs.page.updated', { value: new Date(content.updatedAt).toLocaleString() })}</div>
+            <div className="break-all font-mono text-caption text-muted-foreground">{content.path}</div>
+            <div className="text-caption text-muted-foreground">{t('docs.page.updated', { value: new Date(content.updatedAt).toLocaleString() })}</div>
           </div>
           <DocsMarkdown body={content.body} />
         </article>

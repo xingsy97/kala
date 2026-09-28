@@ -83,6 +83,7 @@ import { formatTokens } from '../../lib/format.js'
 import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, PREF_SMOOTH_STREAMING_TEXT, PREF_TOOL_ACTIVITY_ICON_SCALE, useBooleanPref, useNumberPref } from '../../lib/prefs.js'
 import { useInterfaceScale } from '../../lib/interface-scale.js'
 import { cn } from '../../lib/utils.js'
+import { writeTextToClipboard } from '../../lib/clipboard.js'
 import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview, hasDiffPreviewForTool } from './DiffPreview.js'
 import { CodeBlock } from './CodeBlock.js'
@@ -760,11 +761,11 @@ function TranscriptSearchBar({
       </div>
       <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
         {categories.map((value) => (
-          <button key={value} type="button" onClick={() => onCategoryChange(value)} aria-pressed={category === value} className={cn('rounded-full border px-2 py-0.5 text-[0.8125rem]', category === value ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground')}>
+          <button key={value} type="button" onClick={() => onCategoryChange(value)} aria-pressed={category === value} className={cn('rounded-full border px-2 py-0.5 text-meta', category === value ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground')}>
             {t(`chat.transcript.searchCategories.${value}`)}
           </button>
         ))}
-        {active ? <span className="ml-2 min-w-0 truncate text-[0.8125rem] text-muted-foreground" title={active.text}>{searchMatchSnippet(active)}</span> : null}
+        {active ? <span className="ml-2 min-w-0 truncate text-meta text-muted-foreground" title={active.text}>{searchMatchSnippet(active)}</span> : null}
       </div>
     </div>
   )
@@ -848,19 +849,19 @@ function StickyUserPrompt({
           {hasAttachments ? (
             <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
               {prompt.imageCount > 0 ? (
-                <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-[0.8125rem] text-muted-foreground">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-meta text-muted-foreground">
                   <Image className="h-3 w-3 flex-none" aria-hidden="true" />
                   {t('chat.transcript.imageAttachmentCount', { count: prompt.imageCount })}
                 </span>
               ) : null}
               {prompt.fileNames.map((name) => (
-                <span key={name} className="inline-flex max-w-[11rem] items-center gap-1 rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-[0.8125rem] text-muted-foreground">
+                <span key={name} className="inline-flex max-w-[11rem] items-center gap-1 rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-meta text-muted-foreground">
                   <FileText className="h-3 w-3 flex-none" aria-hidden="true" />
                   <span className="truncate">{name}</span>
                 </span>
               ))}
               {prompt.extraFileCount > 0 ? (
-                <span className="inline-flex items-center rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-[0.8125rem] text-muted-foreground">
+                <span className="inline-flex items-center rounded-full border border-border/60 bg-background/60 px-2 py-0.5 text-meta text-muted-foreground">
                   {t('chat.transcript.moreAttachments', { count: prompt.extraFileCount })}
                 </span>
               ) : null}
@@ -1289,7 +1290,7 @@ function ToolActivityTranscriptRow({
         <AssistantAvatarRail hidden={hideHeader} label={t('chat.transcript.searchCategories.assistant')} />
         <div className="relative min-w-0 flex-1">
           {hideHeader ? null : (
-            <div className="mb-1 text-[0.8125rem] font-medium uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1 text-meta font-medium uppercase tracking-wider text-muted-foreground">
               {t('chat.transcript.searchCategories.assistant')}
             </div>
           )}
@@ -1318,7 +1319,7 @@ function ToolActivityTranscriptRow({
         <AssistantAvatarRail hidden={hideHeader} label={t('chat.transcript.searchCategories.assistant')} />
         <div className="relative min-w-0 flex-1">
           {hideHeader ? null : (
-            <div className="mb-1 text-[0.8125rem] font-medium uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1 text-meta font-medium uppercase tracking-wider text-muted-foreground">
               {t('chat.transcript.searchCategories.assistant')}
             </div>
           )}
@@ -1351,7 +1352,7 @@ function ToolActivityTranscriptRow({
       <AssistantAvatarRail hidden={hideHeader} label={t('chat.transcript.searchCategories.assistant')} />
       <div className="relative min-w-0 flex-1">
         {hideHeader ? null : (
-          <div className="mb-1 text-[0.8125rem] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="mb-1 text-meta font-medium uppercase tracking-wider text-muted-foreground">
             {t('chat.transcript.searchCategories.assistant')}
           </div>
         )}
@@ -1587,7 +1588,7 @@ function CompactBoundaryRow({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex min-w-0 items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-[0.8125rem] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex min-w-0 items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-meta text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         data-testid="compact-boundary-open"
       >
         <Archive className="h-3 w-3 flex-none" aria-hidden="true" />
@@ -1853,7 +1854,7 @@ function MessageRow({
         {hideHeader ? null : (
           <div
             className={cn(
-              'mb-1 text-[0.8125rem] font-medium uppercase tracking-wider',
+              'mb-1 text-meta font-medium uppercase tracking-wider',
               roleTextColor,
             )}
           >
@@ -1941,14 +1942,14 @@ function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared')
   ].filter(([, value]) => Number(value) > 0)
   return (
     <div className="min-w-0 flex-1 basis-72" data-testid={`turn-timing-${summary.turnId}`}>
-      <button type="button" className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[0.8125rem] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+      <button type="button" className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-meta text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <span aria-hidden="true">{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
         <span>{statusLabel} · {formatTurnDuration(summary.wallDurationMs)}</span>
         <span className="ml-auto" />
         {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
       </button>
       {open ? (
-        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-[0.8125rem]" data-testid={`turn-timing-details-${summary.turnId}`}>
+        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-meta" data-testid={`turn-timing-details-${summary.turnId}`}>
           <section aria-labelledby={`turn-activity-${summary.turnId}`}>
             <h4 id={`turn-activity-${summary.turnId}`} className="mb-1.5 text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">{t('chatCommon.turnTiming.activity')}</h4>
             <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
@@ -2092,10 +2093,10 @@ function MessageActions({
           aria-label={copied ? t('common.copied') : t('common.copy')}
           data-testid="copy-message"
           onClick={() => {
-            void copyTextToClipboard(copyText).then(() => {
+            void writeTextToClipboard(copyText).then(() => {
               setCopied(true)
               window.setTimeout(() => setCopied(false), 1200)
-            })
+            }).catch(() => setCopied(false))
           }}
         >
           {copied ? (
@@ -2131,22 +2132,6 @@ function MessageActions({
       ) : null}
     </div>
   )
-}
-
-async function copyTextToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  document.body.removeChild(textarea)
 }
 
 function messagePlainText(content: readonly MessageContent[]): string {
@@ -2301,7 +2286,7 @@ function AttachmentFileChip({ name, mediaType }: { name: string; mediaType: stri
       <FileText className="h-5 w-5 flex-none text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium">{name}</span>
-        <span className="block truncate text-[0.8125rem] text-muted-foreground">{mediaType}</span>
+        <span className="block truncate text-meta text-muted-foreground">{mediaType}</span>
       </span>
     </div>
   )
@@ -2331,7 +2316,7 @@ function ThinkingBlock({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-[0.8125rem] text-muted-foreground transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-meta text-muted-foreground transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         aria-expanded={open}
       >
         <Sparkles className="h-3 w-3 flex-none" />
@@ -2767,11 +2752,11 @@ function ToolCallBlock({
         >
           {isPendingApproval ? t('chat.transcript.approvalNeeded') : t('chat.transcript.assistantRequestedTool')}
         </span>
-        <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-[0.8125rem]">
+        <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-meta">
           {call.name}
         </span>
         <span className="flex-1" />
-        <span className="hidden max-w-[35%] truncate font-mono text-[0.8125rem] text-muted-foreground sm:inline">
+        <span className="hidden max-w-[35%] truncate font-mono text-meta text-muted-foreground sm:inline">
           {call.callId}
         </span>
         {open ? (
@@ -2787,14 +2772,14 @@ function ToolCallBlock({
           ) : (
             <div className="overflow-hidden rounded-md bg-background/60">
               <ScrollArea>
-                <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-[0.8125rem] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-meta leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                   {JSON.stringify(call.input, null, 2)}
                 </pre>
               </ScrollArea>
             </div>
           )}
           {isPendingApproval ? (
-            <p className="pt-1 text-[0.8125rem] italic text-amber-700 dark:text-amber-300">
+            <p className="pt-1 text-meta italic text-amber-700 dark:text-amber-300">
               {t('chat.transcript.approveRejectBelow')}
             </p>
           ) : null}
@@ -2851,7 +2836,7 @@ function ToolResultBlock({
         <Icon className={cn('h-3.5 w-3.5 flex-none', statusTone)} />
         <span className="font-medium text-muted-foreground">{t('chat.transcript.toolResult')}</span>
         {toolName ? (
-          <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-[0.8125rem]">
+          <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-meta">
             {toolName}
           </span>
         ) : null}
@@ -2869,7 +2854,7 @@ function ToolResultBlock({
           </span>
         ) : null}
         <span className="flex-1" />
-        <span className="hidden max-w-[35%] truncate font-mono text-[0.8125rem] text-muted-foreground sm:inline">
+        <span className="hidden max-w-[35%] truncate font-mono text-meta text-muted-foreground sm:inline">
           {result.callId}
         </span>
         {open ? (
@@ -2881,7 +2866,7 @@ function ToolResultBlock({
       {open ? (
         <div className="ak-expand-in mt-2 overflow-hidden rounded-lg bg-muted/60">
           {isOverflowed && fullOutput.state !== 'loaded' && overflowReader ? (
-            <div className="flex items-center justify-between border-b border-border/40 px-3 py-1.5 text-[0.8125rem]">
+            <div className="flex items-center justify-between border-b border-border/40 px-3 py-1.5 text-meta">
               <span className="text-muted-foreground">
                 Output truncated inline; full text lives on the executor's disk.
               </span>
@@ -2898,7 +2883,7 @@ function ToolResultBlock({
             </div>
           ) : null}
           {fullOutput.state === 'error' ? (
-            <div className="border-b border-border/40 bg-rose-50/60 px-3 py-1.5 text-[0.8125rem] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+            <div className="border-b border-border/40 bg-rose-50/60 px-3 py-1.5 text-meta text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
               Failed to read full output: {fullOutput.error}
             </div>
           ) : null}
@@ -3040,7 +3025,7 @@ function ToolResultContentView({
   if (!structuredResult) {
     return (
       <ScrollArea>
-        <pre className={cn('min-w-0 whitespace-pre-wrap break-words font-mono text-[0.8125rem] leading-relaxed text-foreground [overflow-wrap:anywhere]', rawClassName ?? 'px-2.5 py-2')}>
+        <pre className={cn('min-w-0 whitespace-pre-wrap break-words font-mono text-meta leading-relaxed text-foreground [overflow-wrap:anywhere]', rawClassName ?? 'px-2.5 py-2')}>
           {fallback || content || t('chatCommon.noOutput')}
         </pre>
       </ScrollArea>
@@ -3048,7 +3033,7 @@ function ToolResultContentView({
   }
   return (
     <div className="min-w-0">
-      <div className="flex items-center justify-between gap-2 border-b border-border/30 px-2.5 py-1.5 text-[0.8125rem]">
+      <div className="flex items-center justify-between gap-2 border-b border-border/30 px-2.5 py-1.5 text-meta">
         <span className="text-muted-foreground">{t('chatCommon.result')}</span>
         <button
           type="button"
@@ -3060,7 +3045,7 @@ function ToolResultContentView({
       </div>
       {raw ? (
         <ScrollArea>
-          <pre className={cn('min-w-0 whitespace-pre-wrap break-words font-mono text-[0.8125rem] leading-relaxed text-foreground [overflow-wrap:anywhere]', rawClassName ?? 'px-2.5 py-2')}>
+          <pre className={cn('min-w-0 whitespace-pre-wrap break-words font-mono text-meta leading-relaxed text-foreground [overflow-wrap:anywhere]', rawClassName ?? 'px-2.5 py-2')}>
             {content || t('chatCommon.noOutput')}
           </pre>
         </ScrollArea>
@@ -3074,7 +3059,7 @@ function ToolResultContentView({
 function StructuredToolResultView({ result }: { result: StructuredToolResult }): JSX.Element {
   const files = result.files ?? []
   return (
-    <div className="space-y-2 px-2.5 py-2 text-[0.8125rem]">
+    <div className="space-y-2 px-2.5 py-2 text-meta">
       {result.summary ? <div className="leading-relaxed text-foreground">{result.summary}</div> : null}
       {files.length > 0 ? (
         <div className="space-y-2">
@@ -3120,7 +3105,7 @@ function ToolResultDiffView({ diff }: { diff: string }): JSX.Element {
   const lines = diff.split('\n')
   return (
     <ScrollArea className="max-h-96 max-w-full">
-      <pre className="min-w-max whitespace-pre py-1 pr-2 font-mono text-[0.8125rem] leading-snug">
+      <pre className="min-w-max whitespace-pre py-1 pr-2 font-mono text-meta leading-snug">
         {lines.map((line, index) => (
           <span key={index} className={cn('block px-2', resultDiffLineClass(line))}>{line || ' '}</span>
         ))}
@@ -3153,7 +3138,7 @@ function ToolResultMetadataFields({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-1.5 text-[0.8125rem] text-muted-foreground',
+        'flex flex-wrap items-center gap-1.5 text-meta text-muted-foreground',
         compact ? '' : 'border-t border-border/40 px-3 py-1.5',
       )}
     >
@@ -3181,7 +3166,7 @@ function ToolTextBadge({
   return (
     <span
       className={cn(
-        'inline-flex h-6 flex-none items-center rounded px-2 text-[0.8125rem] font-medium uppercase leading-none tracking-wider',
+        'inline-flex h-6 flex-none items-center rounded px-2 text-meta font-medium uppercase leading-none tracking-wider',
         tone === 'success' && 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
         tone === 'danger' && 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
         tone === 'warning' && 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
@@ -3198,7 +3183,7 @@ function ToolTextBadge({
 function ToolDeltaBadges({ metric }: { metric: SummaryDelta | null }): JSX.Element | null {
   if (!metric) return null
   return (
-    <span className="inline-flex h-5 flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[0.8125rem] leading-none shadow-sm" aria-label={`${metric.additions} additions, ${metric.deletions} deletions`}>
+    <span className="inline-flex h-5 flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-meta leading-none shadow-sm" aria-label={`${metric.additions} additions, ${metric.deletions} deletions`}>
       <span className="inline-flex h-5 items-center gap-1 border-r border-border/50 px-1.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300">
         <span className="text-[0.75rem] text-emerald-600/80 dark:text-emerald-300/80">+</span>
         {metric.additions}
@@ -3252,7 +3237,7 @@ function ToolCallInlineDetail({
     >
       <header className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/40 px-2 py-2 sm:px-2.5">
         <h4 id={headingId} className="flex min-w-0 items-center gap-2">
-          <span className="flex-none text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('chatCommon.tool')}</span>
+          <span className="flex-none text-caption font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('chatCommon.tool')}</span>
           <ToolNameChip name={call.name} />
         </h4>
         {isPendingApproval ? (
@@ -3261,15 +3246,15 @@ function ToolCallInlineDetail({
       </header>
       {call.intent ? (
         <div className="border-b border-border/40 bg-primary/[0.035] px-2 py-2.5 sm:px-2.5" aria-labelledby={intentId}>
-          <h5 id={intentId} className="mb-1 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-primary/80">
+          <h5 id={intentId} className="mb-1 text-caption font-semibold uppercase tracking-[0.12em] text-primary/80">
             {t('chatCommon.intention')}
           </h5>
-          <p className="whitespace-pre-wrap break-words text-[0.875rem] leading-relaxed text-foreground [overflow-wrap:anywhere]" data-testid={`tool-call-detail-intent-${call.callId}`}>
+          <p className="whitespace-pre-wrap break-words text-ui leading-relaxed text-foreground [overflow-wrap:anywhere]" data-testid={`tool-call-detail-intent-${call.callId}`}>
             {call.intent}
           </p>
         </div>
       ) : null}
-      <details open className="border-b border-border/40 text-[0.8125rem]" data-testid={`tool-call-technical-details-${call.callId}`}>
+      <details open className="border-b border-border/40 text-meta" data-testid={`tool-call-technical-details-${call.callId}`}>
         <summary className="cursor-pointer select-none px-2 py-2 font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground sm:px-2.5">{t('chatCommon.inputs')}</summary>
         <div className="min-w-0 border-t border-border/30 bg-muted/15">
           {summary ? <div className="flex min-w-0 flex-wrap gap-1.5 px-2 py-2 sm:px-2.5"><ToolCallInputFieldBadges fields={summary.fields} /></div> : null}
@@ -3281,7 +3266,7 @@ function ToolCallInlineDetail({
             <ToolCallInputSummaryRows rows={summary.rows} />
           ) : (
             <ScrollArea className="max-w-full">
-              <pre className="min-w-0 max-w-full whitespace-pre-wrap break-words px-2 py-2 font-mono text-[0.8125rem] leading-relaxed text-muted-foreground [overflow-wrap:anywhere] sm:px-2.5">
+              <pre className="min-w-0 max-w-full whitespace-pre-wrap break-words px-2 py-2 font-mono text-meta leading-relaxed text-muted-foreground [overflow-wrap:anywhere] sm:px-2.5">
                 {JSON.stringify(call.input, null, 2)}
               </pre>
             </ScrollArea>
@@ -3289,7 +3274,7 @@ function ToolCallInlineDetail({
         </div>
       </details>
       {isPendingApproval ? (
-        <p className="border-t border-border/30 px-2 py-1.5 text-[0.8125rem] italic text-amber-700 dark:text-amber-300 sm:px-2.5">
+        <p className="border-t border-border/30 px-2 py-1.5 text-meta italic text-amber-700 dark:text-amber-300 sm:px-2.5">
           Approve or reject below.
         </p>
       ) : null}
@@ -3357,8 +3342,8 @@ function ToolCallInputFieldBadges({ fields }: { fields: ToolCallInputSummary['fi
 
 function ToolCallInputSummaryRows({ rows }: { rows: string[] }): JSX.Element {
   return (
-    <div className="px-2.5 py-2 text-[0.8125rem]">
-      <div className="min-w-0 rounded bg-muted/40 px-2 py-1 font-mono text-[0.8125rem] leading-relaxed text-muted-foreground">
+    <div className="px-2.5 py-2 text-meta">
+      <div className="min-w-0 rounded bg-muted/40 px-2 py-1 font-mono text-meta leading-relaxed text-muted-foreground">
         {rows.map((row) => (
           <div key={row} className="truncate">{row}</div>
         ))}
@@ -3404,8 +3389,8 @@ function ToolResultInlineDetail({
   const headingId = `tool-result-heading-${result.callId}`
   return (
     <section className="min-w-0 overflow-hidden rounded-md border border-border/50 bg-background/55" aria-labelledby={headingId} data-testid={`tool-result-detail-${result.callId}`}>
-      <header className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/40 px-2 py-2 text-[0.8125rem] sm:px-2.5">
-        <h4 id={headingId} className="mr-0.5 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('chatCommon.result')}</h4>
+      <header className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/40 px-2 py-2 text-meta sm:px-2.5">
+        <h4 id={headingId} className="mr-0.5 text-caption font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('chatCommon.result')}</h4>
         {!compactNarrative ? <ToolTextBadge tone={result.ok ? 'success' : 'danger'}>{result.ok ? 'succeeded' : 'failed'}</ToolTextBadge> : null}
         {parsedError?.code ? <ToolTextBadge tone="danger">{parsedError.code}</ToolTextBadge> : null}
         {displayOutput.metadata ? <ToolResultMetadataFields metadata={displayOutput.metadata} compact /> : null}
@@ -3414,7 +3399,7 @@ function ToolResultInlineDetail({
         ) : null}
       </header>
       {isOverflowed && fullOutput.state !== 'loaded' && overflowReader ? (
-        <div className="flex items-center justify-between border-b border-border/30 px-2.5 py-1.5 text-[0.8125rem]">
+        <div className="flex items-center justify-between border-b border-border/30 px-2.5 py-1.5 text-meta">
           <span className="text-muted-foreground">Output truncated inline.</span>
           <button
             type="button"
@@ -3429,7 +3414,7 @@ function ToolResultInlineDetail({
         </div>
       ) : null}
       {fullOutput.state === 'error' ? (
-        <div className="border-b border-border/30 bg-rose-50/60 px-2.5 py-1.5 text-[0.8125rem] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+        <div className="border-b border-border/30 bg-rose-50/60 px-2.5 py-1.5 text-meta text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
           Failed to read full output: {fullOutput.error}
         </div>
       ) : null}
@@ -3497,14 +3482,14 @@ function ToolHeaderResultSummaryView({
     return (
       <span className="flex min-w-0 items-center gap-1.5">
         {summary.code ? <ToolTextBadge tone="danger">{summary.code}</ToolTextBadge> : null}
-        <span className="min-w-0 truncate text-[0.8125rem] leading-5 text-rose-700 dark:text-rose-300" title={summary.message}>
+        <span className="min-w-0 truncate text-meta leading-5 text-rose-700 dark:text-rose-300" title={summary.message}>
           {summary.message}
         </span>
       </span>
     )
   }
   return (
-    <span className="min-w-0 truncate text-[0.8125rem] leading-5 text-muted-foreground" title={summary.title ?? summary.text}>
+    <span className="min-w-0 truncate text-meta leading-5 text-muted-foreground" title={summary.title ?? summary.text}>
       {summary.text}
     </span>
   )
@@ -3628,8 +3613,8 @@ function ToolCallGroupBlock({
     return () => observer.disconnect()
   }, [dotBoundary])
   const railBudget = toolDotRailBudget(dotBoundaryWidth)
-  const gapWidth = 10 * interfaceScale
-  const omissionWidth = 48 * interfaceScale
+  const gapWidth = Math.round(10 * interfaceScale)
+  const omissionWidth = Math.round(48 * interfaceScale)
   const dotGroups = groupConsecutiveToolDots(dots)
   const widestDotGroup = Math.max(nodePixels, ...dotGroups.map((dotGroup) => toolDotNodeWidth(nodePixels, dotGroup.dots.length)))
   const limitWithoutOmission = railBudget > 0 ? Math.max(2, Math.floor((railBudget + gapWidth) / (widestDotGroup + gapWidth))) : 8
@@ -3792,7 +3777,7 @@ function ToolCallGroupBlock({
                   style={repeated ? { height: nodePixels, minWidth: nodePixels } : { width: nodePixels, height: nodePixels }}
                 >
                   <ToolActivityGlyph dot={dot} size={iconPixels} />
-                  {repeated ? <span className="font-mono text-[0.875rem] font-bold tabular-nums text-foreground" data-testid={`tool-card-dot-count-${dot.callId}`}>×{dotGroup.dots.length}</span> : null}
+                  {repeated ? <span className="font-mono text-ui font-bold tabular-nums text-foreground" data-testid={`tool-card-dot-count-${dot.callId}`}>×{dotGroup.dots.length}</span> : null}
                 </button>
                 {omittedDotCount > 0 && index === Math.ceil(visibleDotGroups.length / 2) - 1 ? (
                   <button type="button" onClick={toggleOpen} className="relative z-20 ml-2.5 flex h-8 min-w-12 flex-none items-center justify-center rounded-full bg-background px-2 font-mono text-[0.9375rem] font-bold tabular-nums text-foreground shadow-[0_0_0_4px_hsl(var(--background))] ring-1 ring-inset ring-foreground/30 hover:bg-muted" title={t('chatCommon.omittedTools', { count: omittedDotCount })} aria-label={t('chatCommon.omittedToolsExpand', { count: omittedDotCount })} data-testid="tool-activity-omission">+{omittedDotCount}</button>
@@ -3895,23 +3880,23 @@ function ToolCallGroupBlock({
         <span className="flex min-w-0 items-center gap-1.5">
           <ToolNameChip name={groupTitle} />
           {toolCardMode !== 'dots' && singleCall?.intent ? (
-            <span className="min-w-0 truncate text-[0.8125rem] text-muted-foreground" title={singleCall.intent} data-testid={`tool-call-intent-${singleCall.callId}`}>
+            <span className="min-w-0 truncate text-meta text-muted-foreground" title={singleCall.intent} data-testid={`tool-call-intent-${singleCall.callId}`}>
               {singleCall.intent}
             </span>
           ) : toolCardMode !== 'dots' && fallbackIntent ? (
-            <span className="min-w-0 whitespace-normal break-words text-[0.8125rem] text-muted-foreground" data-testid={`tool-call-intent-summary-${group.firstCallId}`}>
+            <span className="min-w-0 whitespace-normal break-words text-meta text-muted-foreground" data-testid={`tool-call-intent-summary-${group.firstCallId}`}>
               {fallbackIntent}
             </span>
           ) : toolCardMode !== 'dots' && singleRow?.primary ? (
-            <span className="min-w-0 truncate font-mono text-[0.8125rem] text-foreground [overflow-wrap:anywhere]" title={singleRow.primary}>
+            <span className="min-w-0 truncate font-mono text-meta text-foreground [overflow-wrap:anywhere]" title={singleRow.primary}>
               {singleRow.primary}
             </span>
           ) : group.mixed ? (
-            <span className="min-w-0 truncate text-[0.875rem] text-muted-foreground" title={toolMix}>
+            <span className="min-w-0 truncate text-ui text-muted-foreground" title={toolMix}>
               {toolMix}
             </span>
           ) : toolCardMode !== 'dots' && primaryTargets ? (
-            <span className="min-w-0 truncate font-mono text-[0.8125rem] text-foreground [overflow-wrap:anywhere]" title={primaryTargets}>
+            <span className="min-w-0 truncate font-mono text-meta text-foreground [overflow-wrap:anywhere]" title={primaryTargets}>
               {primaryTargets}
             </span>
           ) : null}
@@ -3924,14 +3909,14 @@ function ToolCallGroupBlock({
         <span className="flex min-w-0 flex-none flex-wrap items-center justify-end gap-1.5 max-sm:col-span-2 max-sm:justify-start max-sm:pl-5">
           {singleHeaderResult.kind === 'delta' ? <ToolDeltaBadges metric={singleHeaderResult.metric} /> : null}
           {singleHeaderResult.kind === 'text' && shouldShowCompactHeaderText(singleCall?.name ?? '', singleHeaderResult.text) ? (
-            <span className="hidden h-5 max-w-32 items-center truncate rounded bg-background/70 px-1.5 text-[0.8125rem] leading-none text-muted-foreground lg:inline-flex" title={singleHeaderResult.title ?? singleHeaderResult.text}>
+            <span className="hidden h-5 max-w-32 items-center truncate rounded bg-background/70 px-1.5 text-meta leading-none text-muted-foreground lg:inline-flex" title={singleHeaderResult.title ?? singleHeaderResult.text}>
               {singleHeaderResult.text}
             </span>
           ) : null}
           {group.calls.length > 1 ? (
             <span
               className={cn(
-                'inline-flex h-6 flex-none items-center rounded px-2 font-mono text-[0.875rem] leading-none',
+                'inline-flex h-6 flex-none items-center rounded px-2 font-mono text-ui leading-none',
                 group.mixed
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-background/80 text-muted-foreground',
@@ -3949,7 +3934,7 @@ function ToolCallGroupBlock({
           {singleStatus ? (
             <span
               className={cn(
-                'inline-flex h-6 flex-none items-center rounded px-2 text-[0.8125rem] font-medium uppercase leading-none tracking-wider',
+                'inline-flex h-6 flex-none items-center rounded px-2 text-meta font-medium uppercase leading-none tracking-wider',
                 singleStatus.className,
                 isRunning && 'motion-safe:animate-pulse',
               )}

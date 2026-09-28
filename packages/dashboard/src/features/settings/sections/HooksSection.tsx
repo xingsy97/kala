@@ -37,7 +37,7 @@ export function HooksSection({
       )}
       <details className="mt-4 rounded-md border border-border bg-muted/30 p-3 text-xs">
         <summary className="cursor-pointer text-muted-foreground">{t('settings.hooks.example')}</summary>
-        <pre className="mt-2 whitespace-pre-wrap font-mono text-[0.6875rem] text-foreground">
+        <pre className="mt-2 whitespace-pre-wrap font-mono text-caption text-foreground">
 {`[[hooks]]
 event = "pre_tool_use"
 match = "bash"

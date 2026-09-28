@@ -1,6 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import '@fontsource-variable/inter/wght.css'
+import '@fontsource-variable/jetbrains-mono/wght.css'
+import '@fontsource-variable/noto-sans-sc/wght.css'
 
 import { App } from './app.js'
 import { GroupedToolCallsDemo } from './demoGroupedToolCalls.js'

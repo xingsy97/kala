@@ -83,7 +83,7 @@ try {
   await clearStoredPanelLayouts(page)
   await page.goto(`${HOST_URL}/?sessionId=${SESSION_ID}`, { waitUntil: 'networkidle2', timeout: 15_000 })
   await ensureFixtureSessionSelected(page)
-  await page.waitForSelector('[data-testid="workbench-toolbar"]')
+  await page.waitForSelector('[data-testid="composer"]')
   await page.waitForSelector('[data-testid="model-picker"]')
   await page.waitForSelector('[data-testid="inspector-panel"]')
 

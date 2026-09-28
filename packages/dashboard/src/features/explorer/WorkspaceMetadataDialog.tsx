@@ -8,12 +8,15 @@ import type { AttachedExecutor, ExecutorIdentitySummary, ServerExecutorIdentitie
 
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  dialogMobileSheetClassName,
 } from '../../components/ui/dialog.js'
 import { Button } from '../../components/ui/button.js'
+import { cn } from '../../lib/utils.js'
 
 type Props = {
   open: boolean
@@ -124,14 +127,17 @@ export function WorkspaceMetadataDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[90dvh] max-w-2xl overflow-hidden p-0 gap-0"
+        className={cn(
+          dialogMobileSheetClassName,
+          'h-[min(calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem),48rem)] max-w-2xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0 gap-0',
+        )}
         data-testid="workspace-metadata-dialog"
       >
         <DialogHeader className="border-b border-border/50 px-5 py-4">
           <DialogTitle className="flex items-center gap-1">{displayName || t('workspaceMetadata.workspace')}<HelpHint label={t('workspaceMetadata.workspace')}>{t('workspaceMetadata.description')}</HelpHint></DialogTitle>
           <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 space-y-4 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
+        <DialogBody className="min-w-0 space-y-4 px-3 py-3 sm:px-5 sm:py-4" data-testid="workspace-metadata-body">
           <section className="grid gap-3 sm:grid-cols-3" data-testid="workspace-home-summary">
             <WorkspaceHomeMetric label={t('workspaceMetadata.home.status')} value={executor ? t('workspaceMetadata.home.online') : t('workspaceMetadata.home.offline')} tone={executor ? 'good' : 'neutral'} />
             <WorkspaceHomeMetric label={t('workspaceMetadata.home.sessions')} value={String(sessions.length)} tone={sessions.length ? 'info' : 'neutral'} />
@@ -141,7 +147,7 @@ export function WorkspaceMetadataDialog({
             <section className="rounded-2xl border border-border/50 bg-card/80 p-3" data-testid="workspace-home-recent-sessions">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h3 className="text-sm font-medium">{t('workspaceMetadata.home.recentSessions')}</h3>
-                <span className="text-[0.6875rem] text-muted-foreground">{t('workspaceMetadata.home.recentSessionsHint')}</span>
+                <span className="text-caption text-muted-foreground">{t('workspaceMetadata.home.recentSessionsHint')}</span>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 {recentSessions.map((session) => (
@@ -156,7 +162,7 @@ export function WorkspaceMetadataDialog({
                     data-testid="workspace-home-session"
                   >
                     <span className="block truncate text-xs font-medium">{session.label ?? session.firstUserMessage ?? session.sessionId}</span>
-                    <span className="mt-1 block truncate text-[0.6875rem] text-muted-foreground">{session.status} · {session.eventCount} events</span>
+                    <span className="mt-1 block truncate text-caption text-muted-foreground">{session.status} · {session.eventCount} events</span>
                   </button>
                 ))}
               </div>
@@ -207,32 +213,30 @@ export function WorkspaceMetadataDialog({
               </Button>
             </div>
           </section>
-          <div className="overflow-hidden rounded-md border border-border/50">
-            <dl className="divide-y divide-border/50 sm:hidden" data-testid="workspace-metadata-mobile-values">
-              {rows.map(([label, value]) => (
-                <div key={label} className="min-w-0 px-3 py-2">
-                  <dt className="text-[0.6875rem] font-medium text-muted-foreground">{label}</dt>
-                  <dd className="mt-0.5 break-all font-mono text-xs text-foreground">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <table className="hidden w-full text-sm sm:table">
-              <tbody>
-                {rows.map(([label, value], i) => (
-                  <tr
-                    key={label}
-                    className={i !== rows.length - 1 ? 'border-b border-border/50' : ''}
-                  >
-                    <th className="w-44 border-r border-border/50 bg-muted/50 px-3 py-2 text-left font-medium">
-                      {label}
-                    </th>
-                    <td className="px-3 py-2 font-mono text-xs break-all">{value}</td>
-                  </tr>
+          <details className="overflow-hidden rounded-md border border-border/50 bg-card" data-testid="workspace-technical-details">
+            <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/30">{t('workspaceMetadata.technicalDetails')}</summary>
+            <div className="border-t border-border/50">
+              <dl className="divide-y divide-border/50 sm:hidden" data-testid="workspace-metadata-mobile-values">
+                {rows.map(([label, value]) => (
+                  <div key={label} className="min-w-0 px-3 py-2">
+                    <dt className="text-caption font-medium text-muted-foreground">{label}</dt>
+                    <dd className="mt-0.5 break-all font-mono text-xs text-foreground">{value}</dd>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </dl>
+              <table className="hidden w-full text-sm sm:table">
+                <tbody>
+                  {rows.map(([label, value], i) => (
+                    <tr key={label} className={i !== rows.length - 1 ? 'border-b border-border/50' : ''}>
+                      <th className="w-44 border-r border-border/50 bg-muted/50 px-3 py-2 text-left font-medium">{label}</th>
+                      <td className="break-all px-3 py-2 font-mono text-xs">{value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   )
@@ -241,7 +245,7 @@ export function WorkspaceMetadataDialog({
 function WorkspaceHomeMetric({ label, value, tone }: { label: string; value: string; tone: 'neutral' | 'good' | 'info' }): JSX.Element {
   return (
     <div className="rounded-2xl border border-border/45 bg-card/80 p-3">
-      <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
+      <div className="text-caption font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
       <div className={tone === 'good' ? 'mt-2 truncate text-lg font-semibold text-emerald-600 dark:text-emerald-400' : tone === 'info' ? 'mt-2 truncate text-lg font-semibold text-sky-600 dark:text-sky-400' : 'mt-2 truncate text-lg font-semibold text-foreground'}>{value}</div>
     </div>
   )

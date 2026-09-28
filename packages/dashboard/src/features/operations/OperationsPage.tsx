@@ -24,10 +24,6 @@ export function OperationsPage({ deployment, executors = [], sessions = [], sess
   const running = sessions.filter((session) => isRunningSessionActivity(sessionStatuses?.get(session.sessionId) ?? session.status)).length
   const waiting = sessions.filter((session) => (sessionStatuses?.get(session.sessionId) ?? session.status) === 'awaiting_approval').length
   const queued = sessions.reduce((sum, session) => sum + (session.queuedCount ?? 0), 0)
-  const enabledCapabilities = deployment
-    ? Object.entries(deployment.capabilities).filter(([, enabled]) => enabled).map(([key]) => key)
-    : []
-
   return (
     <ProductPage testId="operations-page">
       <ProductPageHeader title={t('operations.pageTitle')} description={t('operations.pageSubtitle')} titleTestId="operations-page-title" actions={
@@ -40,7 +36,6 @@ export function OperationsPage({ deployment, executors = [], sessions = [], sess
         <RuntimeOperationsDashboard
           product={deployment?.product}
           deploymentMode={deployment?.deployment ? deployment.deployment.architecture === 'platform' ? deployment.deployment.tenancy : deployment.deployment.architecture : undefined}
-          capabilities={enabledCapabilities}
           executorCount={executors.length}
           sessionCount={sessions.length}
           running={running}
@@ -60,10 +55,9 @@ export function OperationsPage({ deployment, executors = [], sessions = [], sess
   )
 }
 
-function RuntimeOperationsDashboard({ product, deploymentMode, capabilities, executorCount, sessionCount, running, waiting, queued }: {
+function RuntimeOperationsDashboard({ product, deploymentMode, executorCount, sessionCount, running, waiting, queued }: {
   product?: string | null
   deploymentMode?: string
-  capabilities: string[]
   executorCount: number
   sessionCount: number
   running: number
@@ -73,12 +67,16 @@ function RuntimeOperationsDashboard({ product, deploymentMode, capabilities, exe
   const { t } = useTranslation()
   return (
     <section className="ak-workspace-surface mb-4 grid gap-px overflow-hidden bg-border/20 p-px md:grid-cols-2 xl:grid-cols-4" data-testid="runtime-operations-dashboard">
-      <OpsMetric icon={RadioTower} label={t('operations.dashboard.runtime')} value={product ?? 'local'} detail={deploymentMode ?? t('operations.dashboard.loaded')} tone="info" />
+      <OpsMetric icon={RadioTower} label={t('operations.dashboard.runtime')} value={product ?? 'Kala'} detail={deploymentMode ? humanizeValue(deploymentMode) : t('operations.dashboard.loaded')} tone="info" />
       <OpsMetric icon={Boxes} label={t('operations.dashboard.executors')} value={String(executorCount)} detail={t('operations.dashboard.sessions', { count: sessionCount })} tone={executorCount ? 'good' : 'neutral'} />
       <OpsMetric icon={Activity} label={t('operations.dashboard.activeWork')} value={String(running)} detail={t('operations.dashboard.queued', { count: queued })} tone={running || queued ? 'info' : 'neutral'} />
-      <OpsMetric icon={ShieldCheck} label={t('operations.dashboard.attention')} value={String(waiting)} detail={capabilities.join(' · ') || t('operations.dashboard.noCapabilities')} tone={waiting ? 'warn' : 'good'} />
+      <OpsMetric icon={ShieldCheck} label={t('operations.dashboard.attention')} value={String(waiting)} detail={waiting ? t('operations.dashboard.awaitingApproval', { count: waiting }) : t('operations.dashboard.noCapabilities')} tone={waiting ? 'warn' : 'good'} />
     </section>
   )
+}
+
+function humanizeValue(value: string): string {
+  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function OpsMetric({ icon: Icon, label, value, detail, tone }: { icon: typeof Route; label: string; value: string; detail: string; tone: 'neutral' | 'good' | 'warn' | 'info' }): JSX.Element {

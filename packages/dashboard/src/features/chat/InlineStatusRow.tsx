@@ -1,9 +1,9 @@
 /**
  * A single inline "what is the agent doing right now" row rendered at the tail
  * of the message flow. Reads `state.status` from the kernel — no invented
- * pseudo-statuses. During `thinking` a breathing activity dot accompanies the
- * live elapsed/progress label until the stream begins (at which point the
- * streaming assistant bubble takes over).
+ * pseudo-statuses. During `thinking` a continuous text sheen covers the live
+ * elapsed/progress label until the stream begins (at which point the streaming
+ * assistant bubble takes over).
  * During `executing_tools` the currently-running tool calls are summarised
  * with an expandable parameter view. `awaiting_approval` renders a static
  * amber hint pointing to the approval card below. All other statuses render
@@ -69,20 +69,22 @@ function ThinkingRow({ progress, startedAt }: { progress?: AgentProgress; starte
   const approval = progress?.outcome === 'approval'
   return (
     <div
-      className="ak-thinking-row mb-3 inline-grid overflow-hidden w-fit max-w-[calc(100%-2rem)] sm:max-w-[min(42rem,90%)] min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 rounded-xl border border-border/60 bg-card/90 px-3 py-2.5 text-xs text-foreground shadow-[0_4px_12px_hsl(var(--foreground)/0.06)] backdrop-blur-md dark:bg-zinc-950/80"
+      className="ak-thinking-row mb-3 inline-flex w-fit max-w-[calc(100%-2rem)] min-w-0 items-center gap-1.5 px-1 py-1 text-ui text-muted-foreground"
       data-testid="inline-status-thinking"
       role="status"
       aria-live="polite"
     >
-      <span className="relative z-[1] mt-0.5 flex h-4 w-4 flex-none items-center justify-center text-primary">
+      {completed || failed || approval ? <span className="flex h-4 w-4 flex-none items-center justify-center">
         {completed ? <Check className="h-3.5 w-3.5 text-emerald-500" aria-label={t('chatStatus.succeeded')} />
           : failed ? <X className="h-3.5 w-3.5 text-rose-500" aria-label={t('chatStatus.failed')} />
-            : approval ? <TriangleAlert className="h-3.5 w-3.5 text-amber-500" aria-label={t('chatStatus.approvalNeeded')} />
-              : <span aria-hidden="true"><span className="absolute h-2 w-2 rounded-full bg-current opacity-15 ak-thinking-dot" /><span className="relative block h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_5px_hsl(var(--primary)/0.35)]" /></span>}
-      </span>
-      <span className="relative z-[1] flex min-w-0 items-center gap-2 font-semibold leading-5" data-testid="inline-status-label">
+            : <TriangleAlert className="h-3.5 w-3.5 text-amber-500" aria-label={t('chatStatus.approvalNeeded')} />}
+      </span> : null}
+      <span
+        className={cn('flex min-w-0 items-center gap-1.5 font-semibold leading-5', running && 'ak-thinking-text')}
+        data-testid="inline-status-label"
+      >
         <span>{label}</span>
-        {elapsed !== undefined ? <span className="font-normal tabular-nums text-muted-foreground" data-testid="inline-status-elapsed">{Math.floor(elapsed)}s</span> : null}
+        {elapsed !== undefined ? <span className="tabular-nums" data-testid="inline-status-elapsed">{formatElapsedDuration(elapsed)}</span> : null}
       </span>
     </div>
   )
@@ -230,6 +232,16 @@ export function formatTokensShort(tokens: number): string {
   if (tokens < 1000) return `${tokens} tokens`
   if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}k tokens`
   return `${(tokens / 1_000_000).toFixed(1)}m tokens`
+}
+
+export function formatElapsedDuration(elapsedSeconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedSeconds))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
+  if (minutes > 0) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
 }
 
 export function useElapsedSeconds(active: boolean, startedAt?: number | null, fixedDurationMs?: number): number | undefined {

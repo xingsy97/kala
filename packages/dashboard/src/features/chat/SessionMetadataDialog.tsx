@@ -32,6 +32,7 @@ import {
 import { cn } from '../../lib/utils.js'
 import { saveFile } from '../../lib/save-file.js'
 import { getDesktopBridge, validDesktopSessionId } from '../../lib/desktop-bridge.js'
+import { writeTextToClipboard } from '../../lib/clipboard.js'
 import { notify } from '../../notify.js'
 import { evaluationReferenceUrl, explicitEvaluationReference, governedSessionTaskCandidate } from '../../evaluation-integration.js'
 import { Input } from '../../components/ui/input.js'
@@ -119,7 +120,7 @@ export function SessionMetadataDialog({
   const copyDesktopSessionLink = async (): Promise<void> => {
     if (!desktopSessionLink) return
     try {
-      await navigator.clipboard.writeText(desktopSessionLink)
+      await writeTextToClipboard(desktopSessionLink)
       notify.success(t('common.copied'), { id: 'desktop-session-link' })
     } catch (error) {
       notify.error(t('desktopNative.copyLinkFailed'), {

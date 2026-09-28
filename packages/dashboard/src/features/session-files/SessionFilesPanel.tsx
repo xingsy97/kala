@@ -39,6 +39,7 @@ import { FILE_VIEW_FONT_SIZE_PX, FONT_SIZE_MIN, FONT_SIZE_MAX } from '../../lib/
 import { useInterfaceScale } from '../../lib/interface-scale.js'
 import { workspaceReadBinary } from '../../lib/workspace-exec.js'
 import { notify } from '../../notify.js'
+import { writeTextToClipboard } from '../../lib/clipboard.js'
 import type { WorkspaceFileTarget } from '../chat/ChatPanel.js'
 import {
   Dialog,
@@ -132,10 +133,15 @@ export function WorkspaceFileViewDialog({
   const copyView = useCallback(async (target: 'path' | 'content'): Promise<void> => {
     const text = target === 'path' ? viewPath ?? viewerPath(viewer) : copyableViewerContent(viewer)
     if (!text) return
-    await navigator.clipboard?.writeText(text)
-    setCopied(target)
-    window.setTimeout(() => setCopied((current) => current === target ? null : current), 1200)
-  }, [viewPath, viewer])
+    try {
+      await writeTextToClipboard(text)
+      setCopied(target)
+      window.setTimeout(() => setCopied((current) => current === target ? null : current), 1200)
+    } catch {
+      setCopied(null)
+      notify.error(t('common.copyFailed'))
+    }
+  }, [t, viewPath, viewer])
 
   const downloadView = useCallback(async (): Promise<void> => {
     const targetPath = viewPath ?? viewerPath(viewer)
@@ -160,7 +166,7 @@ export function WorkspaceFileViewDialog({
                 </Button>
                 <DialogTitle className="min-w-0 truncate font-mono text-xs font-medium leading-5">{viewerTitle(viewer, viewPath)}</DialogTitle>
               </div>
-              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
+              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground">
                 {viewerMeta(viewer).map((item) => <span key={item}>{item}</span>)}
               </div>
             </div>
@@ -176,7 +182,7 @@ export function WorkspaceFileViewDialog({
                   <WrapText className="h-3.5 w-3.5" />
                 </Button>
                 {hasRichPreview(viewer) ? (
-                  <Button variant={markdownMode === 'preview' ? 'outline' : 'ghost'} size="sm" className="h-7 px-2 text-[0.6875rem]" onClick={() => setMarkdownMode((value) => value === 'preview' ? 'source' : 'preview')} title={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')} aria-label={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')}>
+                  <Button variant={markdownMode === 'preview' ? 'outline' : 'ghost'} size="sm" className="h-7 px-2 text-caption" onClick={() => setMarkdownMode((value) => value === 'preview' ? 'source' : 'preview')} title={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')} aria-label={t(markdownMode === 'preview' ? 'sessionFiles.showSource' : 'sessionFiles.showPreview')}>
                     {t(markdownMode === 'preview' ? 'sessionFiles.source' : 'sessionFiles.preview')}
                   </Button>
                 ) : null}
@@ -185,7 +191,7 @@ export function WorkspaceFileViewDialog({
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta <= -2} onClick={() => setFontSizeDelta((value) => Math.max(-2, value - 1))} title={t('sessionFiles.decreaseFont')} aria-label={t('sessionFiles.decreaseFont')}>
                   <Minus className="h-3.5 w-3.5" />
                 </Button>
-                <div className="flex h-7 min-w-9 items-center justify-center rounded border border-border px-1.5 font-mono text-[0.6875rem] text-muted-foreground" title={t('sessionFiles.currentFont', { size: effectiveFontSize })} aria-label={t('sessionFiles.currentFont', { size: effectiveFontSize })} data-testid="session-file-view-font-size">
+                <div className="flex h-7 min-w-9 items-center justify-center rounded border border-border px-1.5 font-mono text-caption text-muted-foreground" title={t('sessionFiles.currentFont', { size: effectiveFontSize })} aria-label={t('sessionFiles.currentFont', { size: effectiveFontSize })} data-testid="session-file-view-font-size">
                   {effectiveFontSize}px
                 </div>
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta >= 2} onClick={() => setFontSizeDelta((value) => Math.min(2, value + 1))} title={t('sessionFiles.increaseFont')} aria-label={t('sessionFiles.increaseFont')}>
@@ -303,7 +309,7 @@ function SessionFilesPanelImpl({
     return (
       <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="session-files-panel">
         <div className="flex h-10 flex-none items-center gap-2 border-b border-sidebar-border/40 bg-muted/15 px-3" data-testid="session-files-toolbar">
-          <span className="min-w-0 flex-1 truncate text-[0.6875rem] text-sidebar-foreground/60">{cwd || t('sessionFiles.workspaceFiles')}</span>
+          <span className="min-w-0 flex-1 truncate text-caption text-sidebar-foreground/60">{cwd || t('sessionFiles.workspaceFiles')}</span>
           <Button variant="ghost" size="icon" className="h-8 w-8 flex-none rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title={t('sessionFiles.refresh')} aria-label={t('sessionFiles.refresh')}>
             {loadingPath ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </Button>
@@ -431,7 +437,7 @@ function FileTreeRow({
           : <span className="h-3 w-3 flex-none" />}
         {item.type === 'directory' ? <Folder className="h-3.5 w-3.5 flex-none text-sky-500" /> : <File className={cn('h-3.5 w-3.5 flex-none', sidebar ? 'text-sidebar-foreground/55' : 'text-muted-foreground')} />}
         <span className="min-w-0 truncate">{item.name}</span>
-        {item.type === 'file' && item.size !== undefined ? <span className={cn('ml-auto hidden flex-none text-[0.625rem] sm:inline', sidebar ? 'text-sidebar-foreground/45' : 'text-muted-foreground')}>{formatBytes(item.size)}</span> : null}
+        {item.type === 'file' && item.size !== undefined ? <span className={cn('ml-auto hidden flex-none text-caption sm:inline', sidebar ? 'text-sidebar-foreground/45' : 'text-muted-foreground')}>{formatBytes(item.size)}</span> : null}
       </button>
       {item.type === 'file' ? (
         <button
@@ -812,7 +818,7 @@ function FallbackViewer({ kind, size, message }: { kind: string; size?: number; 
     <div className="space-y-2 p-4 text-sm">
       <div className="font-medium">{diagnostic.title}</div>
       <div className="text-xs text-muted-foreground">{diagnostic.description}{size !== undefined ? ` · ${formatBytes(size)}` : ''}</div>
-      {message && message !== diagnostic.description ? <div className="max-w-full break-words rounded bg-muted/50 p-2 font-mono text-[0.6875rem] text-muted-foreground">{message}</div> : null}
+      {message && message !== diagnostic.description ? <div className="max-w-full break-words rounded bg-muted/50 p-2 font-mono text-caption text-muted-foreground">{message}</div> : null}
     </div>
   )
 }
@@ -881,7 +887,7 @@ function SessionTerminal({ socket, workspaceId, sessionId, cwd }: { socket: Dash
   }, [])
 
   useEffect(() => {
-    if (terminalRef.current) terminalRef.current.options.fontSize = 12 * interfaceScale
+    if (terminalRef.current) terminalRef.current.options.fontSize = Math.round(12 * interfaceScale)
     fitRef.current?.fit()
   }, [interfaceScale])
 

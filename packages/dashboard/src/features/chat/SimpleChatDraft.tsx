@@ -150,7 +150,7 @@ export function SimpleChatDraft({
               <span className="flex min-w-0 flex-col items-start">
                 <span className="flex items-center gap-1">
                   <span>{label}</span>
-                  {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
+                  {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-caption font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
                   <HelpHint label={label} trigger={<span className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground" aria-label={description}><Info className="h-3.5 w-3.5" aria-hidden="true" /></span>}>{description}</HelpHint>
                 </span>
               </span>

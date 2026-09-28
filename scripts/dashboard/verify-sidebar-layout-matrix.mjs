@@ -10,9 +10,10 @@ const output = resolve(root, '.artifacts/sidebar-layout-matrix')
 const port = 5299
 const numberList = (name, fallback) => process.env[name]?.split(',').map(Number) ?? fallback
 const widths = numberList('SIDEBAR_MATRIX_WIDTHS', [240, 256, 280, 320, 400, 544])
-const scales = numberList('SIDEBAR_MATRIX_SCALES', [0.8, 1, 1.25, 1.5])
+const scales = numberList('SIDEBAR_MATRIX_SCALES', [0.9, 1, 1.125])
 const viewports = numberList('SIDEBAR_MATRIX_VIEWPORTS', [1280, 1440, 1920])
 const themes = process.env.SIDEBAR_MATRIX_THEMES?.split(',') ?? ['dark', 'light']
+const languages = process.env.SIDEBAR_MATRIX_LANGUAGES?.split(',') ?? ['en', 'zh-CN']
 
 await mkdir(output, { recursive: true })
 const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
@@ -44,10 +45,11 @@ try {
   for (const viewport of viewports) {
     await page.setViewport({ width: viewport, height: 900, deviceScaleFactor: 1 })
     for (const theme of themes) {
-      for (const scale of scales) {
-        for (const sidebar of widths) {
-          const id = `v${viewport}-s${sidebar}-z${String(scale).replace('.', '_')}-${theme}`
-          await page.goto(`http://127.0.0.1:${port}/sidebar-layout-fixture.html?sidebar=${sidebar}&scale=${scale}&theme=${theme}`, { waitUntil: 'networkidle0' })
+      for (const language of languages) {
+        for (const scale of scales) {
+          for (const sidebar of widths) {
+          const id = `v${viewport}-s${sidebar}-z${String(scale).replace('.', '_')}-${theme}-${language}`
+          await page.goto(`http://127.0.0.1:${port}/sidebar-layout-fixture.html?sidebar=${sidebar}&scale=${scale}&theme=${theme}&language=${language}`, { waitUntil: 'networkidle0' })
           await page.waitForSelector('body[data-fixture-ready="true"]')
           const result = await page.evaluate(() => {
             const byTestId = (id) => document.querySelector(`[data-testid="${id}"]`)
@@ -84,7 +86,10 @@ try {
             if (values.wordmark.width < 39 * interfaceScale || values.wordmark.width > 65 * interfaceScale) errors.push(`wordmark width out of bounds: ${values.wordmark.width} at ${interfaceScale}`)
             if (values.brand.right > values.collapse.left - 4) errors.push(`brand overlaps collapse control: ${values.brand.right}/${values.collapse.left}`)
             if (values.brand.left < values.sidebar.left || values.collapse.right > values.sidebar.right) errors.push('brand row escapes sidebar')
-            return { errors, values, labelVisible: visible(label), wordmarkVisible: visible(wordmark) }
+            const fontFamily = getComputedStyle(sidebar).fontFamily
+            const expectedFont = document.documentElement.lang === 'zh-CN' ? 'Noto Sans SC Variable' : 'Inter Variable'
+            if (!fontFamily.startsWith(`"${expectedFont}"`) && !fontFamily.startsWith(expectedFont)) errors.push(`unexpected font family: ${fontFamily}`)
+            return { errors, values, labelVisible: visible(label), wordmarkVisible: visible(wordmark), fontFamily }
           })
           await page.click('[data-testid="product-switcher-trigger"]')
           await page.waitForSelector('[data-testid="product-switcher-menu"]', { timeout: 2_000 })
@@ -101,6 +106,7 @@ try {
           }
           if (result.errors.length) failures.push({ id, ...result })
           await page.screenshot({ path: resolve(output, `${id}.png`) })
+          }
         }
       }
     }
@@ -111,7 +117,7 @@ try {
 }
 
 if (failures.length) {
-  console.error(JSON.stringify({ cases: widths.length * scales.length * viewports.length * themes.length, failures }, null, 2))
+  console.error(JSON.stringify({ cases: widths.length * scales.length * viewports.length * themes.length * languages.length, failures }, null, 2))
   process.exit(1)
 }
-console.log(`Sidebar layout matrix passed: ${widths.length * scales.length * viewports.length * themes.length} cases; screenshots: ${output}`)
+console.log(`Sidebar layout matrix passed: ${widths.length * scales.length * viewports.length * themes.length * languages.length} cases; screenshots: ${output}`)

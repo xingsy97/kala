@@ -144,7 +144,7 @@ export function NewSessionDialog({
           </DialogClose>
         </DialogHeader>
         <section className="min-w-0 overflow-hidden border-b border-border/50 bg-muted/20 px-3 py-1.5" aria-labelledby="new-session-runtime-label">
-          <div id="new-session-runtime-label" className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div id="new-session-runtime-label" className="mb-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
             {t('dialogs.chooseAgentRuntime')}
             <HelpHint label={t('dialogs.chooseAgentRuntime')}>{agentRuntimes.map((runtime) => <span className="mb-2 block last:mb-0" key={runtime.id}><strong>{runtimeDisplayLabel(t, runtime)}</strong><br />{runtimeDisplayDescription(t, runtime)}</span>)}</HelpHint>
           </div>
@@ -180,11 +180,11 @@ export function NewSessionDialog({
                   <span className="min-w-0 flex-1">
                     <span className="flex min-w-0 flex-wrap items-center gap-1 text-sm font-semibold">
                       <span className="truncate">{label}</span>
-                      {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
+                      {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-caption font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
                       <HelpHint label={label} trigger={<span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded text-muted-foreground/70 hover:text-foreground" aria-label={description}><Info className="h-3.5 w-3.5" aria-hidden="true" /></span>}>{description}</HelpHint>
                       {selected ? <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" /> : null}
                     </span>
-                    {!runtime.available ? <span className="mt-0.5 block break-words text-[0.6875rem] text-muted-foreground">{runtime.reason ?? runtime.status}</span> : null}
+                    {!runtime.available ? <span className="mt-0.5 block break-words text-caption text-muted-foreground">{runtime.reason ?? runtime.status}</span> : null}
                   </span>
                 </button>
               )
@@ -243,7 +243,7 @@ export function NewSessionDialog({
                     <div className="truncate font-mono text-sm text-foreground">
                       {w.workspaceName}
                     </div>
-                    <div className="mt-0.5 truncate font-mono text-[0.6875rem] text-muted-foreground">
+                    <div className="mt-0.5 truncate font-mono text-caption text-muted-foreground">
                       {workspaceMeta(w)}
                     </div>
                   </button>
@@ -256,7 +256,7 @@ export function NewSessionDialog({
               <div className="flex items-center gap-2 border-b border-border/50 bg-muted/30 px-3 py-2" data-testid="new-session-scoped-workspace">
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-mono text-sm font-medium">{selectedWorkspace.workspaceName}</div>
-                  <div className="truncate font-mono text-[0.6875rem] text-muted-foreground">{workspaceMeta(selectedWorkspace)}</div>
+                  <div className="truncate font-mono text-caption text-muted-foreground">{workspaceMeta(selectedWorkspace)}</div>
                 </div>
                 <Button
                   variant="ghost"

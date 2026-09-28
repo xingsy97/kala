@@ -76,15 +76,12 @@ export function NestedTranscript({ messages, compact = false, virtualized = true
   const renderItem = useCallback(
     (item: NestedRenderItem): JSX.Element => {
       if (item.kind === 'tool_activity') {
-        return (
-          <RoleColumn label="Assistant" tone="assistant" compact={compact}>
-            <NestedToolGroup group={item.group} />
-          </RoleColumn>
-        )
+        return <NestedToolGroup group={item.group} />
       }
       return (
         <NestedMessage
           message={item.message}
+          messageIndex={item.messageIndex}
           resultsByCallId={resultsByCallId}
           groupedCallIds={groupedCallIds}
           compact={compact}
@@ -97,9 +94,9 @@ export function NestedTranscript({ messages, compact = false, virtualized = true
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col text-[0.875rem] leading-relaxed',
+        'flex min-w-0 flex-col text-ui leading-relaxed',
         virtualized && 'flex-1',
-        compact && 'text-[0.8125rem]',
+        compact && 'text-meta',
       )}
       data-testid="nested-transcript"
       data-virtualized={virtualized ? 'true' : 'false'}
@@ -230,15 +227,18 @@ function isToolResultMessageForKnownCalls(
 
 function NestedMessage({
   message,
+  messageIndex,
   resultsByCallId,
   groupedCallIds,
   compact,
 }: {
   message: Message
+  messageIndex: number
   resultsByCallId: ReadonlyMap<string, ToolResultContent>
   groupedCallIds: ReadonlySet<string>
   compact: boolean
 }): JSX.Element | null {
+  const { t } = useTranslation()
   const visibleContent: MessageContent[] =
     message.role === 'tool'
       ? message.content.filter(
@@ -249,7 +249,7 @@ function NestedMessage({
 
   if (message.role === 'user') {
     return (
-      <RoleColumn label="User" tone="user" compact={compact}>
+      <RoleColumn label={messageIndex === 0 ? t('chat.subAgent.prompt') : t('chat.subAgent.followUp')} tone="user" compact={compact}>
         {visibleContent.map((c, i) => (
           <NestedContent key={i} content={c} role="user" compact={compact} />
         ))}
@@ -269,11 +269,11 @@ function NestedMessage({
 
   const grouped = groupConsecutiveToolCalls(visibleContent, resultsByCallId)
   return (
-    <RoleColumn label="Assistant" tone="assistant" compact={compact}>
+    <div className="flex min-w-0 flex-col gap-1" data-testid="nested-assistant-content">
       {grouped.map((item, i) => (
         <NestedGroupItem key={i} item={item} compact={compact} />
       ))}
-    </RoleColumn>
+    </div>
   )
 }
 
@@ -284,16 +284,14 @@ function RoleColumn({
   children,
 }: {
   label: string
-  tone: 'user' | 'assistant' | 'tool'
+  tone: 'user' | 'tool'
   compact: boolean
   children: React.ReactNode
 }): JSX.Element {
   const labelTone =
     tone === 'user'
       ? 'text-sky-700 dark:text-sky-400'
-      : tone === 'tool'
-        ? 'text-emerald-700 dark:text-emerald-400'
-        : 'text-muted-foreground'
+      : 'text-emerald-700 dark:text-emerald-400'
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <div
@@ -322,7 +320,7 @@ function NestedContent({
   compact: boolean
 }): JSX.Element | null {
   if (content.type === 'text') {
-    return <NestedPreviewText text={content.text} compact={compact} />
+    return <NestedPreviewText text={content.text} compact={compact} preserveWhitespace={role === 'user'} />
   }
   if (content.type === 'tool_call') {
     return <NestedToolCall call={content} />
@@ -385,7 +383,7 @@ function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
       <div className="flex min-w-0 flex-col gap-0.5" data-testid={`nested-tool-group-${group.firstCallId}`}>
         <button
           type="button"
-          className="flex min-w-0 items-center gap-1.5 rounded bg-muted/60 px-1.5 py-1 text-left text-[0.8125rem] text-muted-foreground hover:bg-muted"
+          className="flex min-w-0 items-center gap-1.5 rounded bg-muted/60 px-1.5 py-1 text-left text-meta text-muted-foreground hover:bg-muted"
           onClick={() => setOpen((v) => !v)}
         >
           <span className="flex-none rounded bg-primary px-1 text-[0.75rem] font-medium uppercase tracking-wider text-primary-foreground">
@@ -443,7 +441,7 @@ function NestedToolDetail({
   return (
     <div
       className={cn(
-        'min-w-0 rounded font-mono text-[0.8125rem]',
+        'min-w-0 rounded font-mono text-meta',
         ok ? 'text-muted-foreground' : 'bg-muted/55 text-foreground',
       )}
       data-testid={`nested-tool-detail-${call.callId}`}
@@ -486,7 +484,7 @@ function NestedToolDetail({
 function NestedToolPayload({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div className="min-w-0">
-      <div className="mb-1 font-sans text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="mb-1 font-sans text-caption font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
       <pre className="max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/45 p-2 text-foreground [overflow-wrap:anywhere]">
@@ -596,13 +594,25 @@ function NestedToolResult({ result }: { result: ToolResultContent }): JSX.Elemen
 }
 
 const NESTED_MARKDOWN_TEXT_LIMIT = 12_000
+const NESTED_USER_PROMPT_LIMIT = 1_800
 
-function NestedPreviewText({ text, compact, muted = false }: { text: string; compact: boolean; muted?: boolean }): JSX.Element {
+function NestedPreviewText({
+  text,
+  compact,
+  muted = false,
+  preserveWhitespace = false,
+}: {
+  text: string
+  compact: boolean
+  muted?: boolean
+  preserveWhitespace?: boolean
+}): JSX.Element {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
-  const truncated = text.length > NESTED_MARKDOWN_TEXT_LIMIT
+  const limit = preserveWhitespace ? NESTED_USER_PROMPT_LIMIT : NESTED_MARKDOWN_TEXT_LIMIT
+  const truncated = text.length > limit
   const markdown = truncated && !expanded
-    ? `${text.slice(0, NESTED_MARKDOWN_TEXT_LIMIT)}…`
+    ? `${text.slice(0, limit)}…`
     : text
   return (
     <div
@@ -613,9 +623,11 @@ function NestedPreviewText({ text, compact, muted = false }: { text: string; com
         '[&_pre]:my-2 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border/70 [&_pre]:bg-muted/45 [&_pre]:p-3',
         '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
         '[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border/70 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border/70 [&_th]:bg-muted/50 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left',
-        compact ? 'text-[0.8125rem]' : 'text-[0.875rem]',
+        preserveWhitespace && '[&_p]:whitespace-pre-wrap',
+        compact ? 'text-meta' : 'text-ui',
       )}
       data-testid="nested-markdown"
+      data-preserve-whitespace={preserveWhitespace ? 'true' : undefined}
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}

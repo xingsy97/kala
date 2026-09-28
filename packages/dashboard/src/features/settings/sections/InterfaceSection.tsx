@@ -61,7 +61,7 @@ import { cn } from '../../../lib/utils.js'
 import { InterfaceToggle, SectionHeader, Toggle } from '../controls.js'
 import { formatBytes, responseError } from '../section-utils.js'
 import { SizePreference } from '../SizePreference.js'
-import { CHAT_FONT_SIZE_PX, SESSION_EXPLORER_FONT_SIZE_PX, FILE_EXPLORER_FONT_SIZE_PX, FILE_VIEW_FONT_SIZE_PX, DEFAULT_INTERFACE_SCALE, INTERFACE_SCALE_MIN, INTERFACE_SCALE_MAX, FONT_SIZE_MIN, FONT_SIZE_MAX } from '../../../lib/display-sizes.js'
+import { CHAT_FONT_SIZE_PX, SESSION_EXPLORER_FONT_SIZE_PX, FILE_EXPLORER_FONT_SIZE_PX, FILE_VIEW_FONT_SIZE_PX, DEFAULT_INTERFACE_SCALE, FONT_SIZE_MIN, FONT_SIZE_MAX, INTERFACE_DENSITY_OPTIONS, interfacePreferenceForPercent } from '../../../lib/display-sizes.js'
 import { DASHBOARD_PREFERENCES, PREF_INTERFACE_SCALE, numberPreferenceOptions } from '../../../lib/prefs.js'
 
 function LanguageSetting(): JSX.Element {
@@ -140,12 +140,16 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
       />
       <ul className="space-y-3 text-sm">
         <LanguageSetting />
-        <SizePreference
+        <SegmentedNumberPref
           label={t('settings.interface.interfaceScale')}
           description={t('settings.interface.interfaceScaleDesc')}
-          value={interfaceScale} onChange={setInterfaceScale}
-          min={INTERFACE_SCALE_MIN} max={INTERFACE_SCALE_MAX}
-          defaultValue={DEFAULT_INTERFACE_SCALE} unit="%" testId="settings-interface-scale"
+          value={interfacePreferenceForPercent(interfaceScale)}
+          onChange={setInterfaceScale}
+          testId="settings-interface-scale"
+          options={INTERFACE_DENSITY_OPTIONS.map((option, index) => ({
+            value: option.value,
+            label: t(`settings.interface.size3.${index}`),
+          }))}
         />
         <li className="flex items-center justify-between gap-2 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50">
           <div className="min-w-0">
@@ -554,7 +558,7 @@ function MarketplaceThemeBrowser({
       <div className="rounded-md border border-border bg-background/40 p-2">
         <div className="mb-2 flex items-center justify-between gap-2 text-xs">
           <div className="font-medium text-muted-foreground">{t('settings.interface.vscodeTheme.searchResults')}</div>
-          {selected ? <div className="min-w-0 truncate text-[0.6875rem] text-muted-foreground">{selected.displayName}</div> : null}
+          {selected ? <div className="min-w-0 truncate text-caption text-muted-foreground">{selected.displayName}</div> : null}
         </div>
         <div className="max-h-36 space-y-1 overflow-y-auto pr-1">
           {(searchQuery.data ?? []).map((result) => (
@@ -566,9 +570,9 @@ function MarketplaceThemeBrowser({
             >
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium text-foreground">{result.displayName}</div>
-                <div className="truncate text-[0.6875rem]">{result.namespace}.{result.name}</div>
+                <div className="truncate text-caption">{result.namespace}.{result.name}</div>
               </div>
-              {result.verified ? <span className="rounded border border-primary/40 px-1.5 py-0.5 text-[0.625rem] text-primary">{t('settings.interface.vscodeTheme.verified')}</span> : null}
+              {result.verified ? <span className="rounded border border-primary/40 px-1.5 py-0.5 text-caption text-primary">{t('settings.interface.vscodeTheme.verified')}</span> : null}
             </button>
           ))}
           {searchQuery.isLoading ? <div className="px-2 py-1 text-xs text-muted-foreground">{t('common.loading')}</div> : null}
@@ -629,8 +633,8 @@ function ThemeListRow({
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <div className="truncate text-sm font-medium">{label}</div>
-            {active ? <span className="flex-none rounded border border-primary/40 px-1.5 py-0.5 text-[0.625rem] text-primary">{t('settings.interface.vscodeTheme.active')}</span> : null}
-            {previewing ? <span className="flex-none rounded bg-accent px-1.5 py-0.5 text-[0.625rem] text-accent-foreground">{t('settings.interface.vscodeTheme.previewing')}</span> : null}
+            {active ? <span className="flex-none rounded border border-primary/40 px-1.5 py-0.5 text-caption text-primary">{t('settings.interface.vscodeTheme.active')}</span> : null}
+            {previewing ? <span className="flex-none rounded bg-accent px-1.5 py-0.5 text-caption text-accent-foreground">{t('settings.interface.vscodeTheme.previewing')}</span> : null}
           </div>
           <div className="truncate text-xs text-muted-foreground">{source}</div>
         </div>

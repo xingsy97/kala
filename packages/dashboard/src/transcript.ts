@@ -34,6 +34,14 @@ export type TranscriptItem =
     }
   | CompactBoundary
 
+export function lastUserTranscriptIndex(items: readonly TranscriptItem[]): number {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]
+    if (item?.kind === 'pending_user_message' || (item?.kind === 'message' && item.message.role === 'user')) return index
+  }
+  return 0
+}
+
 export type PendingUserTranscriptMessage = {
   id: string
   text: string

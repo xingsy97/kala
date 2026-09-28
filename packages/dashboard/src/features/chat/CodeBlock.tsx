@@ -19,6 +19,8 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/ui/button.js'
 import { cn } from '../../lib/utils.js'
 import { scheduleDeferredWork } from '../../lib/deferred-work.js'
+import { writeTextToClipboard } from '../../lib/clipboard.js'
+import { notify } from '../../notify.js'
 
 type Props = {
   code: string
@@ -72,13 +74,14 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
   }, [code, deferEnhancement, lang])
 
   const copyCode = useCallback(() => {
-    if (!navigator.clipboard?.writeText) return
-    void (async () => {
-      await navigator.clipboard.writeText(code)
+    void writeTextToClipboard(code).then(() => {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1200)
-    })()
-  }, [code])
+    }).catch(() => {
+      setCopied(false)
+      notify.error(t('common.copyFailed'))
+    })
+  }, [code, t])
 
   return (
     <figure
@@ -92,13 +95,13 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
     >
       <figcaption className="ak-code-snippet-header flex h-7 items-center justify-between gap-2 border-b border-border/25 px-2">
         <span className="inline-flex min-w-0 items-center gap-2">
-          <span className="truncate font-mono text-[0.6875rem] font-medium text-muted-foreground" data-testid="code-block-language">{language}</span>
+          <span className="truncate font-mono text-caption font-medium text-muted-foreground" data-testid="code-block-language">{language}</span>
         </span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-5 gap-1 rounded-md bg-transparent px-1.5 text-[0.625rem] text-muted-foreground shadow-none hover:bg-accent/45 hover:text-foreground"
+          className="h-5 gap-1 rounded-md bg-transparent px-1.5 text-caption text-muted-foreground shadow-none hover:bg-accent/45 hover:text-foreground"
           onClick={copyCode}
           aria-label={t('codeBlock.copy')}
           data-testid="code-block-copy"

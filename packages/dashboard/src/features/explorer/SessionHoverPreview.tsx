@@ -82,7 +82,7 @@ export function SessionHoverPreview({ anchor, previewRef, previewStore, getCache
     >
       <div className="flex h-11 flex-none items-center justify-between gap-3 border-b border-border/60 bg-muted/25 px-3.5">
         <div className="min-w-0 truncate text-xs font-semibold" title={anchor.label}>{anchor.label}</div>
-        <div className="flex min-w-0 items-center gap-2 text-[0.625rem] text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
           <span className={cn('h-1.5 w-1.5 flex-none rounded-full', snapshot?.freshness === 'live' ? 'bg-emerald-500' : snapshot?.freshness === 'stale' ? 'bg-amber-500' : 'bg-slate-400')} aria-hidden="true" />
           <span className="sr-only" data-testid="session-hover-preview-freshness">{snapshot?.freshness ?? 'cached'}</span>
           <span className="max-w-32 truncate" title={cached.selectedModel ?? undefined}>{shortModel(cached.selectedModel)}</span>
@@ -115,7 +115,7 @@ function ActivitySummary({ activity }: { activity: SessionPreviewSummary['activi
     )} data-testid="session-preview-activity">
       <Icon className={cn('mt-0.5 h-4 w-4 flex-none', activity.tone === 'active' && 'animate-spin')} aria-hidden="true" />
       <div className="min-w-0">
-        <div className="text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{activity.label}</div>
+        <div className="text-caption font-semibold uppercase tracking-[0.12em] text-muted-foreground">{activity.label}</div>
         <div className="mt-0.5 text-xs leading-5 text-foreground/90">{activity.text}</div>
       </div>
     </div>
@@ -125,7 +125,7 @@ function ActivitySummary({ activity }: { activity: SessionPreviewSummary['activi
 function SummarySection({ icon, label, text, testId }: { icon: JSX.Element; label: string; text: string; testId: string }): JSX.Element {
   return (
     <section className="min-w-0" data-testid={testId}>
-      <div className="mb-1 flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{icon}{label}</div>
+      <div className="mb-1 flex items-center gap-1.5 text-caption font-semibold uppercase tracking-[0.12em] text-muted-foreground">{icon}{label}</div>
       <p className="m-0 line-clamp-3 break-words text-xs leading-5 text-foreground/85 [overflow-wrap:anywhere]">{text}</p>
     </section>
   )
@@ -140,7 +140,7 @@ function ActivityStats({ stats }: { stats: SessionPreviewSummary['stats'] }): JS
   ].filter(Boolean) as Array<{ icon: JSX.Element; text: string; danger?: boolean }>
   if (values.length === 0) return null
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/50 pt-2.5 text-[0.625rem] text-muted-foreground" data-testid="session-preview-stats">
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/50 pt-2.5 text-caption text-muted-foreground" data-testid="session-preview-stats">
       {values.map((value) => <span key={value.text} className={cn('inline-flex items-center gap-1', value.danger && 'text-rose-600 dark:text-rose-300')}>{value.icon}{value.text}</span>)}
     </div>
   )

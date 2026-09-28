@@ -76,7 +76,7 @@ export function ProductSwitcher({
       style={adaptive && menuPosition ? menuPosition : undefined}
       data-testid="product-switcher-menu"
     >
-      <div className="px-2.5 pb-1.5 pt-1 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">Kala</div>
+      <div className="px-2.5 pb-1.5 pt-1 text-caption font-medium uppercase tracking-[0.12em] text-muted-foreground">Kala</div>
       {NAV_ITEMS.map(({ id, labelKey, Icon }) => (
         <button key={id} type="button" role="menuitem" aria-current={section === id ? 'page' : undefined} data-testid={`product-switcher-${id}`} onClick={() => select(id)} className={cn('flex min-h-10 w-full items-center gap-3 rounded-xl px-2.5 text-left text-sm hover:bg-accent', section === id && 'bg-accent/70 font-medium')}>
           <Icon className="h-4 w-4 flex-none text-muted-foreground" aria-hidden />
@@ -446,7 +446,7 @@ function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin, 
   return (
     <details ref={detailsRef} className="relative" data-testid="account-menu">
       <summary className="flex h-8 min-w-8 cursor-pointer list-none items-center justify-center gap-2 rounded-md px-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden" aria-label={account ? t('appShell.account.trigger', { name: account.displayName }) : t('appShell.account.loading')} data-testid="account-menu-trigger">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-3.5 w-3.5" aria-hidden />}</span>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-caption font-semibold text-primary">{loading ? '…' : account?.initials ?? <UserRound className="h-3.5 w-3.5" aria-hidden />}</span>
         {account ? <span className="hidden max-w-32 truncate lg:inline">{account.displayName}</span> : null}
       </summary>
       <div className={cn('absolute z-50 w-72 overflow-hidden rounded-xl border border-border/45 bg-popover text-popover-foreground shadow-lg', placement === 'rail' ? 'bottom-0 left-full ml-2' : placement === 'footer' ? 'bottom-full right-0 mb-2' : 'right-0 top-full mt-2')} role="menu">
@@ -455,7 +455,7 @@ function AccountMenu({ account, loading, onSignOut, onOpenAccount, onOpenAdmin, 
           <a href="#/docs" role="menuitem" onClick={close} className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-accent"><CircleHelp className="h-4 w-4" aria-hidden />{t('appShell.account.help')}</a>
           <button type="button" role="menuitem" onClick={() => { close(); onOpenAccount?.() }} data-testid="account-details" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><UserRound className="h-4 w-4" aria-hidden />{t('appShell.account.details')}</button>
           {onOpenAdmin ? <button type="button" role="menuitem" onClick={() => { close(); onOpenAdmin() }} data-testid="organization-admin" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-accent"><SettingsIcon className="h-4 w-4" aria-hidden />{t('appShell.account.administration')}</button> : null}
-          <div className="px-3 py-2 text-[0.6875rem] text-muted-foreground">Kala · {t('appShell.account.routing')}</div>
+          <div className="px-3 py-2 text-caption text-muted-foreground">Kala · {t('appShell.account.routing')}</div>
           <form method="post" action="/auth/logout" onSubmit={prepareNativeSignOut}>
             <button type="submit" role="menuitem" data-testid="account-sign-out" className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10"><LogOut className="h-4 w-4" aria-hidden />{t('appShell.account.signOut')}</button>
           </form>

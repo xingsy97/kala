@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { ProductState } from './components/ui/product-state.js'
 import { dashboardBootIdentity, isStaleDashboardAssetError, recoverStaleDashboard } from './lib/dashboard-version-recovery.js'
+import { writeTextToClipboard } from './lib/clipboard.js'
 
 type Props = {
   children: ReactNode
@@ -37,6 +38,7 @@ export function ErrorBoundaryFallback({ error }: { error: Error }): JSX.Element 
     return identity.generation !== undefined || identity.releaseId !== undefined
   }, [])
   const [recovery, setRecovery] = useState<'checking' | 'failed'>(stale || canCheckVersion ? 'checking' : 'failed')
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const diagnostics = useMemo(() => `Kala dashboard render failure\n${error.name}: ${error.message}`, [error])
   useEffect(() => {
     if (!stale && !canCheckVersion) return
@@ -62,7 +64,12 @@ export function ErrorBoundaryFallback({ error }: { error: Error }): JSX.Element 
         title={t('errorBoundary.title')}
         description={t('errorBoundary.body')}
         primary={{ label: t('common.reload'), onClick: () => window.location.reload() }}
-        secondary={{ label: t('errorBoundary.copyDiagnostics'), onClick: () => { void navigator.clipboard?.writeText(diagnostics) } }}
+        secondary={{
+          label: copyState === 'copied' ? t('common.copied') : copyState === 'failed' ? t('common.copyFailed') : t('errorBoundary.copyDiagnostics'),
+          onClick: () => {
+            void writeTextToClipboard(diagnostics).then(() => setCopyState('copied'), () => setCopyState('failed'))
+          },
+        }}
       />
     </main>
   )

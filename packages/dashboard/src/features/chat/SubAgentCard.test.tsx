@@ -74,8 +74,45 @@ describe('SubAgentCard', () => {
     const row = screen.getByTestId('sub-agent-row-c-intent')
     expect(row.textContent).toContain('Explain the user-visible session behavior.')
     expect(row.textContent).not.toContain('/workspace/private/file.ts')
+    expect(screen.queryByTestId('sub-agent-task-c-intent')).toBeNull()
     fireEvent.click(screen.getByTestId('sub-agent-toggle-c-intent'))
-    expect(row.textContent?.match(/Explain the user-visible session behavior\./g)).toHaveLength(1)
+    expect(screen.queryByTestId('sub-agent-task-c-intent')).toBeNull()
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c-intent'))
+    expect(screen.queryByTestId('sub-agent-task-c-intent')).toBeNull()
+  })
+
+  it('reveals the full intention only when the header is actually truncated', () => {
+    let resize: ResizeObserverCallback = () => {}
+    vi.stubGlobal('ResizeObserver', class ResizeObserverMock {
+      constructor(callback: ResizeObserverCallback) { resize = callback }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    })
+    try {
+      render(
+        <SubAgentCard
+          parentSessionId="parent-1"
+          socket={null}
+          group={makeGroup([makeCall('c-truncated', {
+            prompt: 'structured child prompt',
+            intention: 'Inspect every clipboard surface across browser and desktop layouts.',
+          })])}
+          approvalByCallId={new Map()}
+        />,
+      )
+      const header = screen.getByTestId('sub-agent-header-intention-c-truncated')
+      Object.defineProperties(header, {
+        clientWidth: { configurable: true, value: 120 },
+        scrollWidth: { configurable: true, value: 420 },
+      })
+      act(() => resize([], {} as ResizeObserver))
+      const task = screen.getByTestId('sub-agent-task-c-truncated')
+      expect(task.textContent).toContain('Inspect every clipboard surface across browser and desktop layouts.')
+      expect(task.textContent).not.toContain('Fresh context')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('uses a generic historical fallback instead of exposing a path or giant prompt', () => {

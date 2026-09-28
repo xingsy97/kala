@@ -607,7 +607,7 @@ function HiddenWorkspacesBar({
     <div className="flex-none border-t border-border/35 bg-card/35 px-1.5 py-1" data-testid="hidden-workspaces-bar">
       <button
         type="button"
-        className="flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-[0.6875rem] text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-caption text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => setOpen((value) => !value)}
         data-testid="hidden-workspaces-toggle"
         aria-expanded={open}
@@ -653,7 +653,7 @@ function HiddenWorkspaceItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-[0.6875rem] text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-workspace-item">
+    <div className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-caption text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-workspace-item">
       <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
       <button
         type="button"
@@ -682,7 +682,7 @@ function HiddenSessionsBar({
     <div className="flex-none border-t border-border/35 bg-card/35 px-1.5 py-1" data-testid="hidden-sessions-bar">
       <button
         type="button"
-        className="flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-[0.6875rem] text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-caption text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => setOpen((value) => !value)}
         data-testid="hidden-sessions-toggle"
         aria-expanded={open}
@@ -720,7 +720,7 @@ function HiddenSessionItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-[0.6875rem] text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-session-item">
+    <div className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-caption text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-session-item">
       <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
       <button
         type="button"
@@ -1454,7 +1454,7 @@ function SessionRow({
           </Button>
         </div>
       )}
-      <div className="ak-session-last-activity ak-touch-hide pointer-events-none col-start-3 row-start-1 flex min-w-0 items-center justify-end overflow-hidden whitespace-nowrap text-[0.6875rem] leading-4 text-muted-foreground/85 group-hover:opacity-0">
+      <div className="ak-session-last-activity ak-touch-hide pointer-events-none col-start-3 row-start-1 flex min-w-0 items-center justify-end overflow-hidden whitespace-nowrap text-caption leading-4 text-muted-foreground/85 group-hover:opacity-0">
         <span className="min-w-0 max-w-full truncate tabular-nums opacity-70" title={formatWhen(lastActivityIso, t, minuteNow * 60_000)} data-testid="session-last-activity">{formatWhen(lastActivityIso, t, minuteNow * 60_000)}</span>
       </div>
     </div>
@@ -1587,7 +1587,7 @@ function ToolbarSessionStatus({ status, label, compact }: { status: SessionActiv
           ? LoaderCircle
           : Circle
   return (
-    <span className={cn('inline-flex h-6 flex-none items-center gap-1.5 rounded-md border text-[0.625rem] font-medium', compact ? 'w-6 justify-center px-0 sm:w-auto sm:justify-start sm:px-2' : 'px-2', tone)} data-testid="session-status-indicator" data-status={status ?? 'unknown'} aria-label={label}>
+    <span className={cn('inline-flex h-6 flex-none items-center gap-1.5 rounded-md border text-caption font-medium', compact ? 'w-6 justify-center px-0 sm:w-auto sm:justify-start sm:px-2' : 'px-2', tone)} data-testid="session-status-indicator" data-status={status ?? 'unknown'} aria-label={label}>
       <span className={cn('inline-flex', running && 'ak-session-status-spinner')} data-testid={running ? 'session-status-spinner' : undefined} aria-hidden="true">
         <Icon className="h-3 w-3" strokeWidth={2.3} />
       </span>
@@ -1684,7 +1684,7 @@ function RenameInput({
       data-testid={testId}
       aria-label={ariaLabel ?? t('explorer.renameSession')}
       spellCheck={false}
-      className="min-w-0 flex-1 rounded-sm bg-background px-1.5 py-0.5 text-[0.8125rem] font-medium text-foreground shadow-inner outline-none ring-1 ring-primary/40 focus:ring-2"
+      className="min-w-0 flex-1 rounded-sm bg-background px-1.5 py-0.5 text-meta font-medium text-foreground shadow-inner outline-none ring-1 ring-primary/40 focus:ring-2"
     />
   )
 }

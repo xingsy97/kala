@@ -119,7 +119,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
       >
         <DialogHeader className="relative min-h-[4.5rem] min-w-0 justify-center border-b border-border/40 bg-card/75 px-4 py-2 pr-14 backdrop-blur md:min-h-0 md:px-6 md:py-4 md:pr-14">
           <div className={desktopLayout ? 'hidden' : undefined}>
-            <div className="text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('settings.title')}</div>
+            <div className="text-caption font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('settings.title')}</div>
             <div className="flex min-w-0 items-center gap-1">
             <label className="relative mt-0.5 inline-flex min-w-0 max-w-full flex-1 items-center gap-2 pr-6" data-testid="settings-mobile-section-picker">
               <span className="sr-only">{t('settings.sectionsLabel')}</span>
@@ -155,7 +155,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
             <nav className="h-full space-y-1 overflow-x-hidden overflow-y-auto px-3 py-4" aria-label={t('settings.sectionsLabel')}>
               {SECTION_GROUPS.map((group) => (
                 <div key={group} className="space-y-1" data-testid={`settings-group-${group}`}>
-                  <div className="px-3 pb-1.5 pt-4 text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/75 first:pt-0">
+                  <div className="px-3 pb-1.5 pt-4 text-caption font-semibold uppercase tracking-[0.16em] text-muted-foreground/75 first:pt-0">
                     {t(`settings.groups.${group}`)}
                   </div>
                   {SECTIONS.filter((item) => item.group === group).map((item) => (

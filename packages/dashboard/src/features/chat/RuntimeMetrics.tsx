@@ -160,13 +160,13 @@ export function RuntimeMetrics({
       {isSimple ? (
         <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${simpleGeometry.width} ${simpleGeometry.height}`} aria-hidden="true" data-testid="context-usage-track">
           <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" />
-          {usedPercent > 0 ? <path d={contextBorderPath} pathLength="100" fill="none" className={cn('drop-shadow-[0_0_8px_currentColor] opacity-95 transition-[filter,opacity] duration-[240ms] ease-out', contextStrokeTone)} strokeWidth="3.25" strokeLinecap="round" strokeDasharray={`${usedPercent} ${contextUsageGap}`} data-context-usage-tone={evaluation.tone} /> : null}
+          {usedPercent > 0 ? <path d={contextBorderPath} pathLength="100" fill="none" className={cn('drop-shadow-[0_0_8px_currentColor] opacity-95 transition-[filter,opacity,stroke-dasharray] duration-500 ease-out motion-reduce:transition-none', contextStrokeTone)} strokeWidth="3.25" strokeLinecap="round" strokeDasharray={`${usedPercent} ${contextUsageGap}`} data-context-usage-tone={evaluation.tone} /> : null}
         </svg>
       ) : null}
       <button
         type="button"
         className={cn(
-          'flex flex-none items-center gap-1.5 text-[0.6875rem] text-muted-foreground transition-colors hover:text-foreground',
+          'flex flex-none items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground',
           isSimple
             ? cn(
                 'pointer-events-auto absolute -inset-x-px -top-px h-5 overflow-visible p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400/30',
@@ -203,18 +203,18 @@ export function RuntimeMetrics({
             cx="10"
             cy="10"
             r={ringRadius}
-            className={tone}
             fill="none"
             stroke={`url(#${ringGradientId})`}
             strokeWidth={isSimple ? 2.25 : 3}
             strokeLinecap="round"
             strokeDasharray={ringCircumference}
             strokeDashoffset={ringOffset}
+            className={cn(tone, 'transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none')}
           />
         </svg> : null}
         {!isSimple ? (
           <span className={cn(
-            'flex-none whitespace-nowrap font-mono text-[0.625rem] leading-none text-foreground',
+            'flex-none whitespace-nowrap font-mono text-caption leading-none text-foreground',
             evaluation.tone === 'ok' && 'hidden sm:inline',
           )}>
             {percent !== null ? `${percent}%` : '?'}
@@ -252,7 +252,7 @@ export function RuntimeMetrics({
                 {breakdownSegments.map((seg) => (
                   <span
                     key={seg.key}
-                    className={cn('h-full', seg.className)}
+                    className={cn('h-full transition-[width] duration-500 ease-out motion-reduce:transition-none', seg.className)}
                     style={{ width: `${Math.max(0.5, Math.min(100, seg.percent))}%` }}
                     title={`${seg.label}: ${formatTokens(seg.tokens)} (${Math.round(seg.percent)}%)`}
                     aria-label={`${seg.label} ${Math.round(seg.percent)}%`}
@@ -260,7 +260,7 @@ export function RuntimeMetrics({
                 ))}
               </div>
             ) : (
-              <div className="absolute inset-y-0 left-0 rounded-full bg-sky-500" style={{ width: usedWidth }} />
+              <div className="absolute inset-y-0 left-0 rounded-full bg-sky-500 transition-[width] duration-500 ease-out motion-reduce:transition-none" style={{ width: usedWidth }} />
             )}
             <div
               className="absolute inset-y-0 text-muted-foreground opacity-60"
@@ -272,7 +272,7 @@ export function RuntimeMetrics({
             />
           </div>
           {breakdownSegments.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground" data-testid="context-breakdown-legend">
+            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-caption text-muted-foreground" data-testid="context-breakdown-legend">
               {breakdownSegments.map((seg) => (
                 <span key={seg.key} className="inline-flex items-center gap-1.5">
                   <span className={cn('h-2 w-2 flex-none rounded-sm', seg.className)} aria-hidden="true" />
@@ -384,7 +384,7 @@ function SectionTitle({ children }: { children: ReactNode }): JSX.Element {
 
 function MetricRow({ label, value, muted }: { label: string; value: string; muted?: boolean }): JSX.Element {
   return (
-    <div className={cn('flex items-center justify-between gap-3', muted ? 'mt-1 text-[0.6875rem]' : 'mt-2 text-xs')}>
+    <div className={cn('flex items-center justify-between gap-3', muted ? 'mt-1 text-caption' : 'mt-2 text-xs')}>
       <span className={cn('min-w-0 truncate', muted ? 'text-muted-foreground' : 'text-foreground/90')}>{label}</span>
       <span className="flex-none font-mono text-muted-foreground">{value}</span>
     </div>

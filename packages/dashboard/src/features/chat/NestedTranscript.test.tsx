@@ -120,8 +120,29 @@ describe('NestedTranscript', () => {
     )
 
     expect(screen.getByText('User emphasis').tagName).toBe('STRONG')
+    expect(screen.getByText('Prompt')).toBeTruthy()
+    expect(screen.queryByText('Assistant')).toBeNull()
     expect(screen.getByRole('heading', { level: 2, name: 'Reasoning' })).toBeTruthy()
     expect(screen.getByTestId('nested-thinking-markdown').querySelectorAll('li')).toHaveLength(2)
+  })
+
+  it('preserves delegated prompt line breaks and bounds long prompt height', () => {
+    const tail = 'PROMPT-TAIL'
+    render(
+      <NestedTranscript
+        messages={[{
+          role: 'user',
+          content: [{ type: 'text', text: `First instruction\nSecond instruction\n${'detail '.repeat(300)}${tail}` }],
+        }] satisfies Message[]}
+      />,
+    )
+
+    const prompt = screen.getByTestId('nested-markdown')
+    expect(prompt.getAttribute('data-preserve-whitespace')).toBe('true')
+    expect(prompt.className).toContain('[&_p]:whitespace-pre-wrap')
+    expect(screen.queryByText(new RegExp(tail))).toBeNull()
+    fireEvent.click(screen.getByTestId('nested-markdown-toggle'))
+    expect(screen.getByText(new RegExp(tail))).toBeTruthy()
   })
 
   it('allows a long final response to be revealed in full', () => {

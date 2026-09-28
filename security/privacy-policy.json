@@ -79,7 +79,8 @@
     { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "f1d11713de23ea8549c2aad51700da028aa58e428e7dcc37b5bdc1ce9a69ac29", "reason": "TipTap lockfile update retains the same third-party glob deprecation notice with a public maintainer contact; exact bytes only." },
     { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "e35354d90aef6d454ce70be679d910e99a9c9dad932b8872559c0aeb0719455e", "reason": "Historical runtime dependency lockfile retains the same public third-party glob deprecation notice; exact bytes only, not project or user data." },
     { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "241d82a7888b2b87195722b8755858cc5566a0d1e733749491b8171b39a82f80", "reason": "Historical dependency lockfile retains the same public third-party glob deprecation notice; exact bytes only, not project or user data." },
-    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "eac36c9bd3c375c4195f9966d768b711d1e55979957393d5eecba71dc038bf51", "reason": "Current lockfile retains the same public third-party glob deprecation notice; exact bytes only, not project or user data." }
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "eac36c9bd3c375c4195f9966d768b711d1e55979957393d5eecba71dc038bf51", "reason": "Current lockfile retains the same public third-party glob deprecation notice; exact bytes only, not project or user data." },
+    { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "8b7c283d64f2266395ef1101974a785726642caee2ad27a83cdb96268712f326", "reason": "Font dependency lockfile update retains the same public third-party glob deprecation notice; exact bytes only, not project or user data." }
   ],
   "allowedHistoricalAssetHashes": {
     "deploy/identity/favicon.svg": ["fe588e5f2ad0261bc0e9ae4fda5fd538d5bad1baec28141d2368a5ea30bd2631"],
