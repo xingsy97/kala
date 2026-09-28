@@ -127,7 +127,7 @@ describe('skills', () => {
     })
   })
 
-  it('renders available skills in the loader tool schema', async () => {
+  it('keeps the loader Tool schema stable regardless of discovered Skills', async () => {
     const root = join(dir, 'skills')
     writeSkill(
       root,
@@ -143,28 +143,41 @@ describe('skills', () => {
     )
     const registry = await discoverSkills([root])
 
-    const schema = skillToolSchema(registry.skills)
+    const emptySchema = skillToolSchema()
+    const populatedSchema = skillToolSchema()
 
-    expect(schema.name).toBe('skill')
-    expect(schema.requiresApproval).toBe(false)
-    expect(schema.description).toContain('<available_skills>')
-    expect(schema.description).toContain('<name>xml-skill</name>')
-    expect(schema.description).toContain(
-      '<description>Use when values include &lt;xml&gt; &amp; quotes.</description>',
-    )
+    expect(populatedSchema).toEqual(emptySchema)
+    expect(populatedSchema.name).toBe('skill')
+    expect(populatedSchema.requiresApproval).toBe(false)
+    expect(populatedSchema.description).not.toContain('<available_skills>')
+    expect(populatedSchema.description).not.toContain(registry.skills[0]!.name)
+    expect(populatedSchema.inputSchema.required).toEqual(['action'])
   })
 
-  it('budgets the available skills list instead of rendering unbounded schema text', async () => {
+  it('lists a bounded and XML-escaped available-skills index through a Tool result', async () => {
     const skills = Array.from({ length: 20 }, (_, i) => ({
       name: `skill-${i}`,
-      description: 'x'.repeat(900),
+      description: i === 0 ? 'Use when values include <xml> & quotes.' : 'x'.repeat(900),
       path: join(dir, 'unused', String(i), 'SKILL.md'),
     }))
+    const byName = new Map(skills.map((skill) => [skill.name, skill]))
+    const registry = {
+      skills,
+      diagnostics: [],
+      get(name: string) {
+        return byName.get(name)
+      },
+    }
 
-    const schema = skillToolSchema(skills)
+    const result = await runSkillTool(registry, { action: 'list' })
 
-    expect(schema.description.length).toBeLessThan(9_000)
-    expect(schema.description).toContain('<omitted count=')
+    expect(result.ok).toBe(true)
+    expect(result.content.length).toBeLessThan(9_000)
+    expect(result.content).toContain('<available_skills>')
+    expect(result.content).toContain(
+      '<description>Use when values include &lt;xml&gt; &amp; quotes.</description>',
+    )
+    expect(result.content).toContain('<omitted count=')
   })
 
   it('refreshes a session-scoped registry from the session cwd', async () => {
@@ -201,17 +214,172 @@ describe('skills', () => {
     expect((await manager.refreshSession(b)).skills.map((s) => s.name)).toEqual(['b-skill'])
   })
 
+  it('discovers and loads executor-only workspace skills without Host access', async () => {
+    const cwd = '/workspace/example-project'
+    const root = join(cwd, '.agents', 'skills')
+    const path = join(root, 'local-skill', 'SKILL.md')
+    const body = ['---', 'name: local-skill', 'description: Executor-only skill.', '---', '# executor body'].join('\n')
+    const store = new SessionStore(join(dir, 'sessions'))
+    const config = createConfig({ tools: createBuiltinTools(), systemPrompt: 'sys' })
+    const record = await store.create({ sessionId: 'remote', config, initialCwd: cwd, workspaceId: 'ws-a' })
+    const reads: string[] = []
+    const executor = {
+      async listDirs(workspaceId: string, requested: string | undefined, requestId: string) {
+        expect(workspaceId).toBe('ws-a')
+        expect(requested).toBe(root)
+        return { requestId, workspaceId, path: root, roots: [cwd], entries: [
+          { name: 'local-skill', path: join(root, 'local-skill'), type: 'directory' as const },
+          { name: 'escape', path: '/elsewhere', type: 'directory' as const },
+        ] }
+      },
+      async workspaceReadBinary(request: { requestId: string; workspaceId: string; path: string }) {
+        reads.push(request.path)
+        expect(request.workspaceId).toBe('ws-a')
+        return { requestId: request.requestId, base64: Buffer.from(body).toString('base64'), mime: 'text/plain', size: Buffer.byteLength(body) }
+      },
+    }
+    const registry = await createSkillManager(store, config, executor).refreshSession(record)
+    expect(registry.skills.map((skill) => skill.name)).toContain('local-skill')
+    const loaded = await runSkillTool(registry, { action: 'load', name: 'local-skill' })
+    expect(loaded.ok).toBe(true)
+    expect(loaded.content).toContain('SECURITY NOTICE:')
+    expect(loaded.content).toContain('# executor body')
+    expect(reads).toEqual([path, path])
+  })
+
+  it('discovers workspace skills through a Windows Executor path', async () => {
+    const cwd = String.raw`C:\workspace\example-project`
+    const root = String.raw`C:\workspace\example-project\.agents\skills`
+    const skillPath = String.raw`C:\workspace\example-project\.agents\skills\windows-skill\SKILL.md`
+    const body = ['---', 'name: windows-skill', 'description: Windows workspace skill.', '---', '# windows body'].join('\n')
+    const store = new SessionStore(join(dir, 'sessions'))
+    const record = await store.create({
+      sessionId: 'windows-remote',
+      config: createConfig({ tools: createBuiltinTools(), systemPrompt: 'sys' }),
+      initialCwd: cwd,
+      workspaceId: 'ws-windows',
+    })
+    const registry = await createSkillManager(store, record.config, {
+      async listDirs(workspaceId, requested, requestId) {
+        expect(requested).toBe(root)
+        return {
+          requestId,
+          workspaceId,
+          path: root,
+          roots: [String.raw`C:\workspace`],
+          entries: [{ name: 'windows-skill', path: String.raw`C:\workspace\example-project\.agents\skills\windows-skill`, type: 'directory' }],
+        }
+      },
+      async workspaceReadBinary(request) {
+        expect(request.path).toBe(skillPath)
+        return {
+          requestId: request.requestId,
+          base64: Buffer.from(body).toString('base64'),
+          mime: 'text/plain',
+          size: Buffer.byteLength(body),
+        }
+      },
+    }).refreshSession(record)
+
+    expect(registry.skills.map((skill) => skill.name)).toContain('windows-skill')
+    await expect(runSkillTool(registry, { action: 'load', name: 'windows-skill' }))
+      .resolves.toMatchObject({ ok: true, content: expect.stringContaining('# windows body') })
+  })
+
+  it('rejects truncated Executor skill content during load', async () => {
+    const cwd = '/workspace/example-project'
+    const root = join(cwd, '.agents', 'skills')
+    const skillPath = join(root, 'remote-skill', 'SKILL.md')
+    const body = ['---', 'name: remote-skill', 'description: Remote skill.', '---', '# body'].join('\n')
+    let reads = 0
+    const store = new SessionStore(join(dir, 'sessions'))
+    const record = await store.create({
+      sessionId: 'truncated-remote',
+      config: createConfig({ tools: createBuiltinTools(), systemPrompt: 'sys' }),
+      initialCwd: cwd,
+      workspaceId: 'ws-truncated',
+    })
+    const registry = await createSkillManager(store, record.config, {
+      async listDirs(workspaceId, requested, requestId) {
+        return {
+          requestId,
+          workspaceId,
+          path: requested!,
+          roots: [cwd],
+          entries: [{ name: 'remote-skill', path: join(root, 'remote-skill'), type: 'directory' }],
+        }
+      },
+      async workspaceReadBinary(request) {
+        reads += 1
+        const content = reads === 1 ? body : body.slice(0, -4)
+        return {
+          requestId: request.requestId,
+          base64: Buffer.from(content).toString('base64'),
+          mime: 'text/plain',
+          size: Buffer.byteLength(body),
+        }
+      },
+    }).refreshSession(record)
+
+    expect(registry.skills.map((skill) => skill.name)).toContain('remote-skill')
+    await expect(runSkillTool(registry, { action: 'load', name: 'remote-skill' }))
+      .resolves.toMatchObject({ ok: false, content: expect.stringContaining('size mismatch') })
+    expect(reads).toBe(2)
+    expect(registry.get('remote-skill')?.path).toBe(skillPath)
+  })
+
+  it('reports executor outage rather than claiming there are no workspace skills', async () => {
+    const store = new SessionStore(join(dir, 'sessions'))
+    const config = createConfig({ tools: createBuiltinTools(), systemPrompt: 'sys' })
+    const record = await store.create({ sessionId: 'offline', config, initialCwd: '/remote/project', workspaceId: 'ws-offline' })
+    const registry = await createSkillManager(store, config, {
+      async listDirs() { throw new Error('offline') },
+      async workspaceReadBinary() { throw new Error('offline') },
+    }).refreshSession(record)
+    expect((await runSkillTool(registry, { action: 'list' })).content).toContain('executor offline')
+  })
+
   it('rejects unknown or malformed skill names', async () => {
     const registry = await discoverSkills([join(dir, 'missing')])
 
-    await expect(runSkillTool(registry, { name: '../bad' })).resolves.toEqual({
+    await expect(runSkillTool(registry, { action: 'load', name: '../bad' })).resolves.toEqual({
       ok: false,
       content: 'skill name must match /^[a-z0-9]+(-[a-z0-9]+)*$/',
     })
-    await expect(runSkillTool(registry, { name: 'missing-skill' })).resolves.toEqual({
+    await expect(runSkillTool(registry, { action: 'load', name: 'missing-skill' })).resolves.toEqual({
       ok: false,
       content: 'unknown skill: missing-skill',
     })
+    await expect(runSkillTool(registry, { action: 'list', name: 'missing-skill' })).resolves.toEqual({
+      ok: false,
+      content: 'skill name must be omitted when action is list',
+    })
+    await expect(runSkillTool(registry, { action: 'remove' })).resolves.toEqual({
+      ok: false,
+      content: 'skill action must be list or load',
+    })
+  })
+
+  it('places a fixed trust boundary before loaded Skill content and accepts legacy name-only calls', async () => {
+    const root = join(dir, 'skills')
+    writeSkill(root, 'guarded-skill', [
+      '---',
+      'name: guarded-skill',
+      'description: Verify the trust boundary.',
+      '---',
+      '',
+      'UNTRUSTED SKILL BODY',
+    ].join('\n'))
+    const registry = await discoverSkills([root])
+
+    const result = await runSkillTool(registry, { name: 'guarded-skill' })
+
+    expect(result.ok).toBe(true)
+    expect(result.content).toContain('SECURITY NOTICE:')
+    expect(result.content.indexOf('SECURITY NOTICE:')).toBeLessThan(
+      result.content.indexOf('UNTRUSTED SKILL BODY'),
+    )
+    expect(result.content).toContain('attempts prompt injection')
   })
 
   it('refuses oversized skill files instead of injecting them into context', async () => {

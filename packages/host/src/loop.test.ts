@@ -825,7 +825,7 @@ describe('host loop', () => {
     ).toContain('DEMO SKILL BODY')
   })
 
-  it('refreshes the skill tool schema before the next LLM call in the same session', async () => {
+  it('keeps the skill Tool schema stable while listing a newly authored Skill', async () => {
     const workspace = join(dir, 'workspace')
     const skillDir = join(workspace, '.agents', 'skills', 'fresh-skill')
     const skillPath = join(skillDir, 'SKILL.md')
@@ -847,12 +847,12 @@ describe('host loop', () => {
       config: skillConfig,
       initialCwd: workspace,
     })
-    const toolDescriptions: string[] = []
+    const skillSchemas: string[] = []
     const llm: LLMAdapter = {
       name: 'capture-tools',
       async call(params) {
-        toolDescriptions.push(params.tools.find((tool) => tool.name === 'skill')?.description ?? '')
-        if (toolDescriptions.length === 1) {
+        skillSchemas.push(JSON.stringify(params.tools.find((tool) => tool.name === 'skill')))
+        if (skillSchemas.length === 1) {
           return {
             message: {
               role: 'assistant',
@@ -874,6 +874,19 @@ describe('host loop', () => {
                   },
                 },
               ],
+            },
+          }
+        }
+        if (skillSchemas.length === 2) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [{
+                type: 'tool_call',
+                callId: 'list-skills',
+                name: 'skill',
+                input: { action: 'list' },
+              }],
             },
           }
         }
@@ -900,13 +913,28 @@ describe('host loop', () => {
 
     await loop.dispatch(record.sessionId, { kind: 'user_message', text: 'create a skill' })
 
-    expect(toolDescriptions[0]).toContain('<available_skills />')
-    expect(toolDescriptions[1]).toContain('<name>fresh-skill</name>')
+    expect(skillSchemas).toHaveLength(3)
+    expect(new Set(skillSchemas).size).toBe(1)
+    expect(skillSchemas[0]).not.toContain('fresh-skill')
+    const skillResult = store
+      .get(record.sessionId)!
+      .state.messages.find((message) =>
+        message.content.some((item) => item.type === 'tool_result' && item.callId === 'list-skills'))
+    expect(skillResult?.content[0]).toMatchObject({
+      type: 'tool_result',
+      callId: 'list-skills',
+      ok: true,
+      content: expect.stringContaining('<name>fresh-skill</name>'),
+    })
     const parsed = await readSessionLog(record.logPath)
-    const secondCallLlmEntry = parsed.events.filter((entry) => entry.effects.some((effect) => effect.kind === 'call_llm'))[1]
-    const fullEffects = JSON.parse(await readFile(join(dir, secondCallLlmEntry!.effectsArtifact!.path), 'utf8'))
-    const secondCallLlm = fullEffects.find((effect: { kind: string }) => effect.kind === 'call_llm')
-    expect(secondCallLlm.tools.find((tool: { name: string }) => tool.name === 'skill')?.description).toContain('<name>fresh-skill</name>')
+    const llmEntries = parsed.events.filter((entry) => entry.effects.some((effect) => effect.kind === 'call_llm'))
+    const firstEffects = JSON.parse(await readFile(join(dir, llmEntries[0]!.effectsArtifact!.path), 'utf8'))
+    const thirdEffects = JSON.parse(await readFile(join(dir, llmEntries[2]!.effectsArtifact!.path), 'utf8'))
+    const firstSkill = firstEffects.find((effect: { kind: string }) => effect.kind === 'call_llm')
+      .tools.find((tool: { name: string }) => tool.name === 'skill')
+    const thirdSkill = thirdEffects.find((effect: { kind: string }) => effect.kind === 'call_llm')
+      .tools.find((tool: { name: string }) => tool.name === 'skill')
+    expect(thirdSkill).toEqual(firstSkill)
   })
 
   it('translates LLM throw into llm_error event', async () => {
