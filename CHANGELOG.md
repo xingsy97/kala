@@ -31,5 +31,5 @@ Versioning while pre-1.0 and uses one product version across release artifacts.
 
 ### Release target
 
-- `v0.2.0-rc.16` after every gate in the public release readiness runbook passes.
+- `v0.2.0-rc.17` after every gate in the public release readiness runbook passes.
 - Kala branding and safer installation documentation; no automatic npm publishing.
