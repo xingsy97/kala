@@ -22,9 +22,9 @@ fi
 umask 077
 tmp="$(mktemp -d /tmp/agent-runlab-install.XXXXXXXXXX)"
 cleanup() {
-  rm -f -- "$tmp/kala-desktop_0.2.0~rc.12_amd64.deb" \
-    "$tmp/0.2.0~rc.12-ac34d40e0cb6972ecceef3a4204a6753f181b16252f9e600707e689954902039.dependencies.json" \
-    "$tmp/0.2.0~rc.12-ac34d40e0cb6972ecceef3a4204a6753f181b16252f9e600707e689954902039.SHA256SUMS.txt"
+  rm -f -- "$tmp/kala-desktop_0.2.0~rc.17_amd64.deb" \
+    "$tmp/0.2.0~rc.17-0876582bb45108c0ccf8cf8ec1e1b9229302893351dd471d9203e3162692c1e8.dependencies.json" \
+    "$tmp/0.2.0~rc.17-0876582bb45108c0ccf8cf8ec1e1b9229302893351dd471d9203e3162692c1e8.SHA256SUMS.txt"
   rmdir -- "$tmp"
 }
 trap cleanup EXIT
@@ -32,26 +32,26 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 curl --proto '=http,https' --tlsv1.2 --fail --show-error --silent \
   --connect-timeout 15 --max-time 120 \
-  --output "$tmp/kala-desktop_0.2.0~rc.12_amd64.deb" \
+  --output "$tmp/kala-desktop_0.2.0~rc.17_amd64.deb" \
   "$origin/install/assets/desktop-package.deb"
 curl --proto '=http,https' --tlsv1.2 --fail --show-error --silent \
   --connect-timeout 15 --max-time 120 \
-  --output "$tmp/0.2.0~rc.12-ac34d40e0cb6972ecceef3a4204a6753f181b16252f9e600707e689954902039.dependencies.json" \
+  --output "$tmp/0.2.0~rc.17-0876582bb45108c0ccf8cf8ec1e1b9229302893351dd471d9203e3162692c1e8.dependencies.json" \
   "$origin/install/assets/desktop-dependencies.json"
 curl --proto '=http,https' --tlsv1.2 --fail --show-error --silent \
   --connect-timeout 15 --max-time 120 \
-  --output "$tmp/0.2.0~rc.12-ac34d40e0cb6972ecceef3a4204a6753f181b16252f9e600707e689954902039.SHA256SUMS.txt" \
+  --output "$tmp/0.2.0~rc.17-0876582bb45108c0ccf8cf8ec1e1b9229302893351dd471d9203e3162692c1e8.SHA256SUMS.txt" \
   "$origin/install/assets/desktop-SHA256SUMS.txt"
 cd -- "$tmp"
 # Verify every exact named file before reading the immutable checksum list.
 printf '%s\n' \
-  'ac34d40e0cb6972ecceef3a4204a6753f181b16252f9e600707e689954902039  kala-desktop_0.2.0~rc.12_amd64.deb' \
-  'da440c868ab34be5338900a6762f1617336de244db7a7d22cb7ce00c53323389  0.2.0~rc.12-ac34d40e0cb6972ecceef3a4204a6753f181b16252f9e600707e689954902039.dependencies.json' \
-  'f8b5e3943ec3946b5be8c78c9aa271a83a8bffb9e431d7ca59a5c683b86bf0ff  0.2.0~rc.12-ac34d40e0cb6972ecceef3a4204a6753f181b16252f9e600707e689954902039.SHA256SUMS.txt' \
+  '0876582bb45108c0ccf8cf8ec1e1b9229302893351dd471d9203e3162692c1e8  kala-desktop_0.2.0~rc.17_amd64.deb' \
+  '89cf235243efa1b46a8a065661ba08beaf871f9af70d5a00e2bd80c853266f28  0.2.0~rc.17-0876582bb45108c0ccf8cf8ec1e1b9229302893351dd471d9203e3162692c1e8.dependencies.json' \
+  'e8ab0a9ba229c21403e318cb3a0ae0d2538e7b94d83d467ba066868cb5de6219  0.2.0~rc.17-0876582bb45108c0ccf8cf8ec1e1b9229302893351dd471d9203e3162692c1e8.SHA256SUMS.txt' \
   | sha256sum --strict --check -
-sha256sum --strict --check '0.2.0~rc.12-ac34d40e0cb6972ecceef3a4204a6753f181b16252f9e600707e689954902039.SHA256SUMS.txt'
+sha256sum --strict --check '0.2.0~rc.17-0876582bb45108c0ccf8cf8ec1e1b9229302893351dd471d9203e3162692c1e8.SHA256SUMS.txt'
 # The original downloaded file and home-directory permissions remain unchanged.
 # Let APT's unprivileged _apt user read only the verified public package.
-chmod 644 -- "$tmp/kala-desktop_0.2.0~rc.12_amd64.deb"
+chmod 644 -- "$tmp/kala-desktop_0.2.0~rc.17_amd64.deb"
 chmod 755 -- "$tmp"
-sudo apt install -y -- "$tmp/kala-desktop_0.2.0~rc.12_amd64.deb"
+sudo apt install -y -- "$tmp/kala-desktop_0.2.0~rc.17_amd64.deb"
