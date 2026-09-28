@@ -5,7 +5,8 @@ import type { TimelineEntry } from './session.js'
 
 export type CompactBoundary = {
   kind: 'compact_boundary'
-  seq: number
+  seq?: number
+  attemptId?: string
   trigger: 'manual' | 'auto' | 'preflight' | 'tool_result' | 'unknown'
   replacedCount: number
   /**
@@ -20,6 +21,16 @@ export type CompactBoundary = {
   summary: string
 }
 
+export type CompactProgress = {
+  kind: 'compact_progress'
+  attemptId: string
+  phase: 'running' | 'error'
+  trigger: 'manual' | 'auto' | 'preflight' | 'tool_result'
+  tokensBefore: number
+  startedAt: string
+  error?: string
+}
+
 export type TranscriptItem =
   | { kind: 'message'; message: Message; seq?: number; ts?: string; streaming?: boolean; turnTiming?: import('@agent-kernel/shared').TurnTimingSummary }
   | { kind: 'model_changed'; from?: string; to: string }
@@ -32,6 +43,7 @@ export type TranscriptItem =
       content?: readonly MessageContent[]
       createdAt: string
     }
+  | CompactProgress
   | CompactBoundary
 
 export function lastUserTranscriptIndex(items: readonly TranscriptItem[]): number {
@@ -335,6 +347,28 @@ function stateTranscriptItems(stateMessages: readonly Message[]): TranscriptItem
   return stateMessages.flatMap((message): TranscriptItem[] => {
     if (message.metadata?.kind === 'model_changed') {
       return [{ kind: 'model_changed', ...(message.metadata.from ? { from: message.metadata.from } : {}), to: message.metadata.to }]
+    }
+    if (message.metadata?.kind === 'context_compaction') {
+      if (message.metadata.phase === 'done') {
+        return [{
+          kind: 'compact_boundary',
+          attemptId: message.metadata.attemptId,
+          trigger: message.metadata.trigger,
+          replacedCount: message.metadata.replacedCount ?? 0,
+          tokensBefore: message.metadata.tokensBefore,
+          tokensAfter: message.metadata.tokensAfter ?? null,
+          summary: message.metadata.summary ?? '',
+        }]
+      }
+      return [{
+        kind: 'compact_progress',
+        attemptId: message.metadata.attemptId,
+        phase: message.metadata.phase,
+        trigger: message.metadata.trigger,
+        tokensBefore: message.metadata.tokensBefore,
+        startedAt: message.metadata.startedAt,
+        ...(message.metadata.error ? { error: message.metadata.error } : {}),
+      }]
     }
     return message.role === 'system' ? [] : [{ kind: 'message', message }]
   })

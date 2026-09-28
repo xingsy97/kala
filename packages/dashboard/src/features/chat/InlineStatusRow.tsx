@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Check, Loader2, TriangleAlert, X } from 'lucide-react'
+import { Check, TriangleAlert, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AgentState } from '@agent-kernel/kernel'
@@ -27,7 +27,14 @@ export type CompactStatus =
   | { kind: 'idle' }
   | { kind: 'queued' }
   | { kind: 'running'; startedAt: number; tokensBefore: number; trigger?: 'auto' | 'manual' | 'preflight' | 'tool_result' }
-  | { kind: 'done' }
+  | {
+      kind: 'done'
+      tokensBefore: number
+      tokensAfter: number
+      trigger?: 'auto' | 'manual' | 'preflight' | 'tool_result'
+      replacedCount?: number
+      summary?: string
+    }
   | { kind: 'empty'; message: string }
   | { kind: 'error'; message: string }
 
@@ -95,7 +102,6 @@ export function CompactFeedbackRow({
   message,
   startedAt,
   tokensBefore,
-  trigger,
   onDismiss,
 }: {
   kind: 'queued' | 'running' | 'done' | 'empty' | 'error'
@@ -129,19 +135,15 @@ export function CompactFeedbackRow({
   if (kind === 'running') {
     return (
       <div
-        className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+        className="mb-2 inline-flex w-fit max-w-full min-w-0 items-center gap-2 px-1 py-1 text-ui text-muted-foreground"
         data-testid="inline-compact-running"
         role="status"
       >
-        <Loader2 className="h-3.5 w-3.5 flex-none animate-spin" />
-        <span className="font-medium">{t('chatStatus.compacting')}</span>
-        {trigger === 'auto' ? (
-          <span className="truncate text-amber-700/70 dark:text-amber-300/70">
-            {t('chatStatus.compactBackgroundHint')}
-          </span>
-        ) : null}
-        <span className="ml-auto tabular-nums text-amber-700/70 dark:text-amber-300/70">
-          ↳ {(elapsedMs / 1000).toFixed(1)}s
+        <span className="ak-thinking-text min-w-0 truncate font-semibold leading-5" data-testid="inline-compact-progress-label">
+          {t('chatStatus.compacting')}
+        </span>
+        <span className="flex-none tabular-nums text-muted-foreground/75">
+          {(elapsedMs / 1000).toFixed(1)}s
           {typeof tokensBefore === 'number' ? ` · context ${formatTokensShort(tokensBefore)}` : ''}
         </span>
       </div>

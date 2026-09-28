@@ -542,7 +542,7 @@ describe('Explorer', () => {
     expect(localStorage.getItem(HIDDEN_WORKSPACES_STORAGE_KEY)).toBeNull()
   })
 
-  it('keeps the same status-indicator DOM node when a running session flips thinking↔executing_tools', () => {
+  it('keeps the same ambient label DOM node when a running session changes phase', () => {
     const runningSummary = { ...sessionSummary, status: 'thinking' as const }
     // Stable callbacks so areExplorerPropsEqual isn't tripped by callback
     // identity (in the real app these are useCallback-stable); this isolates
@@ -558,19 +558,18 @@ describe('Explorer', () => {
       onRename: noop,
     }
     const { rerender } = render(<Explorer {...props} sessions={[runningSummary]} />)
-    const before = screen.getByTestId('session-status-indicator')
-    const beforeSpinner = screen.getByTestId('session-status-spinner')
+    const before = screen.getByTestId('running-session-label')
 
-    // A tool-step flip: same session moves to executing_tools. The sidebar
-    // renders an identical spinner for both, so the indicator node must NOT be
-    // torn down and rebuilt (which would restart the spin animation).
     rerender(<Explorer {...props} sessions={[{ ...runningSummary, status: 'executing_tools' as const }]} />)
-    const after = screen.getByTestId('session-status-indicator')
+    const after = screen.getByTestId('running-session-label')
     expect(after).toBe(before)
-    expect(screen.getByTestId('session-status-spinner')).toBe(beforeSpinner)
+    expect(after.className).toContain('ak-thinking-text')
+    expect(after.className).toContain('font-extrabold')
+    expect(after.className).toContain('ak-session-running-label')
+    expect(screen.queryByTestId('session-status-spinner')).toBeNull()
   })
 
-  it('keeps each row spinner mounted when live running phases change', () => {
+  it('keeps each running session row ambient without rendering spinners', () => {
     const second = {
       ...sessionSummary,
       sessionId: '02JXXXXXXXXXXXXXXXXXXXXX',
@@ -587,7 +586,7 @@ describe('Explorer', () => {
       onDelete: noop,
       onRename: noop,
     }
-    const { rerender } = render(
+    render(
       <Explorer
         {...props}
         sessionStatuses={new Map([
@@ -596,25 +595,8 @@ describe('Explorer', () => {
         ])}
       />,
     )
-    const spinnerBySession = (sessionId: string): Element | null =>
-      screen.getAllByTestId('session-row')
-        .find((row) => row.getAttribute('data-session-id') === sessionId)
-        ?.querySelector('[data-testid="session-status-spinner"]') ?? null
-    const firstSpinner = spinnerBySession(sessionSummary.sessionId)
-    const secondSpinner = spinnerBySession(second.sessionId)
-
-    rerender(
-      <Explorer
-        {...props}
-        sessionStatuses={new Map([
-          [sessionSummary.sessionId, 'executing_tools'],
-          [second.sessionId, 'thinking'],
-        ])}
-      />,
-    )
-
-    expect(spinnerBySession(sessionSummary.sessionId)).toBe(firstSpinner)
-    expect(spinnerBySession(second.sessionId)).toBe(secondSpinner)
+    expect(screen.getAllByTestId('running-session-label')).toHaveLength(2)
+    expect(screen.queryByTestId('session-status-spinner')).toBeNull()
   })
 
   it('does not offer hide for the unassigned workspace bucket', () => {
@@ -751,9 +733,9 @@ describe('Explorer', () => {
       />,
     )
 
-    const indicator = screen.getByTestId('session-status-indicator')
-    expect(indicator.getAttribute('data-status')).toBe('loading')
-    expect(indicator.getAttribute('title')).toBe('Working')
+    expect(screen.getByTestId('running-session-label').className).toContain('ak-thinking-text')
+    expect(screen.getByText('Working').className).toContain('sr-only')
+    expect(screen.queryByTestId('session-status-indicator')).toBeNull()
   })
 
   it('shows per-session working status independently of selection', () => {
@@ -771,12 +753,12 @@ describe('Explorer', () => {
       />,
     )
 
-    const indicator = screen.getByTestId('session-status-indicator')
-    expect(indicator.getAttribute('data-status')).toBe('loading')
-    expect(indicator.getAttribute('title')).toBe('Working')
+    expect(screen.getByTestId('running-session-label').className).toContain('ak-thinking-text')
+    expect(screen.getByText('Working').className).toContain('sr-only')
+    expect(screen.queryByTestId('session-status-indicator')).toBeNull()
   })
 
-  it('keeps running indicators scoped to each session row in the same workspace', () => {
+  it('keeps ambient running labels scoped to each session row in the same workspace', () => {
     const second: SessionSummary = {
       ...sessionSummary,
       sessionId: '02JXXXXXXXXXXXXXXXXXXXXX',
@@ -803,32 +785,10 @@ describe('Explorer', () => {
     const rows = screen.getAllByTestId('session-row')
     const firstRow = rows.find((row) => row.getAttribute('data-session-id') === sessionSummary.sessionId)
     const secondRow = rows.find((row) => row.getAttribute('data-session-id') === second.sessionId)
-    const firstIndicator = firstRow?.querySelector('[data-testid="session-status-indicator"]')
-    const secondIndicator = secondRow?.querySelector('[data-testid="session-status-indicator"]')
-    expect(firstIndicator?.getAttribute('data-status')).toBe('loading')
-    expect(secondIndicator?.getAttribute('data-status')).toBe('executing_tools')
-    expect(firstIndicator?.getAttribute('data-animation-phase-ms')).not.toBe(secondIndicator?.getAttribute('data-animation-phase-ms'))
-  })
-
-  it('resumes a virtualized session spinner at its previous rotation instead of restarting it', () => {
-    const clock = vi.spyOn(performance, 'now').mockReturnValue(1_000)
-    const props = {
-      executors: [executor], sessions: [sessionSummary], selectedSessionId: sessionSummary.sessionId,
-      sessionStatuses: new Map([[sessionSummary.sessionId, 'loading' as const]]),
-      onSelect: () => {}, onNewSession: () => {}, onConnectWorkspace: () => {},
-      onDelete: () => {}, onRename: () => {},
-    }
-    try {
-      const first = render(<Explorer {...props} />)
-      const initial = Number(screen.getByTestId('session-status-indicator').getAttribute('data-animation-phase-ms'))
-      first.unmount()
-      clock.mockReturnValue(1_300)
-      render(<Explorer {...props} />)
-      const resumed = Number(screen.getByTestId('session-status-indicator').getAttribute('data-animation-phase-ms'))
-      expect((initial - resumed + 900) % 900).toBe(300)
-    } finally {
-      clock.mockRestore()
-    }
+    expect(firstRow?.querySelector('[data-testid="running-session-label"]')).not.toBeNull()
+    expect(secondRow?.querySelector('[data-testid="running-session-label"]')).not.toBeNull()
+    expect(firstRow?.querySelector('[data-testid="session-status-indicator"]')).toBeNull()
+    expect(secondRow?.querySelector('[data-testid="session-status-indicator"]')).toBeNull()
   })
 
   it('presents sessions with no workspaceId as ordinary Chats', () => {
@@ -1301,7 +1261,7 @@ describe('Explorer', () => {
     expect(dateLayer.className).toContain('pointer-events-none')
   })
 
-  it('renders active running statuses with the same row-local spinner', () => {
+  it('renders active running statuses as bold ambient session names', () => {
     const second: SessionSummary = {
       ...sessionSummary,
       sessionId: '02JXXXXXXXXXXXXXXXXXXXXX',
@@ -1324,16 +1284,14 @@ describe('Explorer', () => {
       />,
     )
 
-    const indicators = screen.getAllByTestId('session-status-indicator')
-    expect(indicators.map((indicator) => indicator.getAttribute('data-status'))).toEqual(['thinking', 'executing_tools'])
-    for (const indicator of indicators) {
-      const spinner = indicator.querySelector('[data-testid="session-status-spinner"]')
-      const icon = indicator.querySelector('svg')
-      expect(spinner?.className).toContain('ak-session-status-spinner')
-      expect(icon?.className.baseVal).not.toContain('animate-spin')
-      expect(icon?.className.baseVal).not.toContain('translateZ')
-      expect(indicator.querySelector('.animate-pulse')).toBeNull()
+    const labels = screen.getAllByTestId('running-session-label')
+    expect(labels).toHaveLength(2)
+    for (const label of labels) {
+      expect(label.className).toContain('ak-thinking-text')
+      expect(label.className).toContain('font-extrabold')
+      expect(label.className).toContain('ak-session-running-label')
     }
+    expect(screen.queryByTestId('session-status-spinner')).toBeNull()
   })
 
   it('marks the selected session without shifting the row grid', () => {

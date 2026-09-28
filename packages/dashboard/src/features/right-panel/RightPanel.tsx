@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Bug, Files, GitBranch, PanelRightClose, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { RightPanelTab } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import { cn } from '../../lib/utils.js'
 
-export type RightPanelTab = 'files' | 'git' | 'terminal' | 'inspector'
+export type { RightPanelTab } from '@agent-kernel/shared'
 
 export function RightPanel({
   activeTab,

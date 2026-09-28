@@ -22,6 +22,7 @@ import type {
   ContextUsageSnapshot,
   EventEntry,
   LLMTrace,
+  MetadataEntry,
   SessionMemoryPolicy,
   SessionPreferences,
   SnapshotEntry,
@@ -525,6 +526,12 @@ export class SessionStore {
     if (record.preferences.toolCardMode) {
       await appendMetadataEntry(record.logPath, { toolCardMode: record.preferences.toolCardMode })
     }
+    if (record.preferences.transcriptViewStart !== undefined) {
+      await appendMetadataEntry(record.logPath, { transcriptViewStart: record.preferences.transcriptViewStart })
+    }
+    if (record.preferences.rightPanelTab) {
+      await appendMetadataEntry(record.logPath, { rightPanelTab: record.preferences.rightPanelTab })
+    }
     this.records.set(sessionId, record)
     this.summaryCache.delete(logPath)
     return record
@@ -559,11 +566,23 @@ export class SessionStore {
       else next.toolCardMode = patch.toolCardMode
       changed = true
     }
+    if ('transcriptViewStart' in patch) {
+      if (patch.transcriptViewStart === undefined) delete next.transcriptViewStart
+      else next.transcriptViewStart = patch.transcriptViewStart
+      changed = true
+    }
+    if ('rightPanelTab' in patch) {
+      if (patch.rightPanelTab === undefined) delete next.rightPanelTab
+      else next.rightPanelTab = patch.rightPanelTab
+      changed = true
+    }
     if (changed) {
       rec.preferences = next
       await appendMetadataEntry(rec.logPath, {
         ...('selectedModel' in patch ? { selectedModel: next.selectedModel ?? '' } : {}),
         ...('toolCardMode' in patch && next.toolCardMode ? { toolCardMode: next.toolCardMode } : {}),
+        ...('transcriptViewStart' in patch && next.transcriptViewStart !== undefined ? { transcriptViewStart: next.transcriptViewStart } : {}),
+        ...('rightPanelTab' in patch && next.rightPanelTab ? { rightPanelTab: next.rightPanelTab } : {}),
       })
       this.summaryCache.delete(rec.logPath)
     }
@@ -1449,11 +1468,17 @@ export class SessionStore {
       persistedSummary?.summary.preferences?.selectedModel
     const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata) ??
       persistedSummary?.summary.preferences?.toolCardMode
+    const transcriptViewStart = latestTranscriptViewStartFromMetadata(parsed.metadata) ??
+      persistedSummary?.summary.preferences?.transcriptViewStart
+    const rightPanelTab = latestRightPanelTabFromMetadata(parsed.metadata) ??
+      persistedSummary?.summary.preferences?.rightPanelTab
     const preferences: SessionPreferences = {
       ...(selectedModel
         ? { selectedModel }
         : {}),
       ...(toolCardMode ? { toolCardMode } : {}),
+      ...(transcriptViewStart !== undefined ? { transcriptViewStart } : {}),
+      ...(rightPanelTab ? { rightPanelTab } : {}),
     }
 
     const record: SessionRecord = {
@@ -1758,6 +1783,8 @@ function summarizeLog(
   const label = latestStringFromMetadata(parsed.metadata, 'label')
   const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel')
   const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)
+  const transcriptViewStart = latestTranscriptViewStartFromMetadata(parsed.metadata)
+  const rightPanelTab = latestRightPanelTabFromMetadata(parsed.metadata)
   const workspaceId =
     latestStringFromMetadata(parsed.metadata, 'workspaceId') ?? header.workspaceId
   const workspaceName =
@@ -1793,8 +1820,13 @@ function summarizeLog(
       ? { firstUserMessage: firstUserText.slice(0, 120) }
       : {}),
     ...(label ? { label } : {}),
-    ...(selectedModel || toolCardMode
-      ? { preferences: { ...(selectedModel ? { selectedModel } : {}), ...(toolCardMode ? { toolCardMode } : {}) } }
+    ...(selectedModel || toolCardMode || transcriptViewStart !== undefined || rightPanelTab
+      ? { preferences: {
+          ...(selectedModel ? { selectedModel } : {}),
+          ...(toolCardMode ? { toolCardMode } : {}),
+          ...(transcriptViewStart !== undefined ? { transcriptViewStart } : {}),
+          ...(rightPanelTab ? { rightPanelTab } : {}),
+        } }
       : {}),
   }
 
@@ -1811,7 +1843,7 @@ function firstUserMessageFromState(state: AgentState): string | undefined {
 
 /** Walk metadata entries in reverse to find the most recent string value. */
 function latestStringMetadataPatch(
-  metadata: readonly Record<string, string | undefined>[],
+  metadata: readonly MetadataEntry[],
   key: 'label' | 'workspaceId' | 'workspaceName' | 'selectedModel' | 'organizationId' | 'principal',
 ): { found: false } | { found: true; value: string | undefined } {
   for (let i = metadata.length - 1; i >= 0; i--) {
@@ -1825,7 +1857,7 @@ function latestStringMetadataPatch(
 }
 
 function latestStringFromMetadata(
-  metadata: readonly Record<string, string | undefined>[],
+  metadata: readonly MetadataEntry[],
   key: 'label' | 'workspaceId' | 'workspaceName' | 'selectedModel' | 'organizationId' | 'principal',
 ): string | undefined {
   const patch = latestStringMetadataPatch(metadata, key)
@@ -1833,7 +1865,7 @@ function latestStringFromMetadata(
 }
 
 function latestOrganizationRoleFromMetadata(
-  metadata: readonly Record<string, string | undefined>[],
+  metadata: readonly MetadataEntry[],
 ): 'owner' | 'admin' | 'member' | 'viewer' | undefined {
   for (let i = metadata.length - 1; i >= 0; i--) {
     const value = metadata[i]!.organizationRole
@@ -1843,7 +1875,7 @@ function latestOrganizationRoleFromMetadata(
 }
 
 function latestToolCardModeFromMetadata(
-  metadata: readonly Record<string, string | undefined>[],
+  metadata: readonly MetadataEntry[],
 ): 'dots' | 'standard' | undefined {
   for (let i = metadata.length - 1; i >= 0; i--) {
     const value = metadata[i]!.toolCardMode
@@ -1852,11 +1884,36 @@ function latestToolCardModeFromMetadata(
   return undefined
 }
 
+function latestTranscriptViewStartFromMetadata(
+  metadata: readonly MetadataEntry[],
+): number | undefined {
+  for (let i = metadata.length - 1; i >= 0; i -= 1) {
+    const value = metadata[i]!.transcriptViewStart
+    if (Number.isSafeInteger(value) && value !== undefined && value >= 0) return value
+  }
+  return undefined
+}
+
+function latestRightPanelTabFromMetadata(
+  metadata: readonly MetadataEntry[],
+): SessionPreferences['rightPanelTab'] {
+  for (let i = metadata.length - 1; i >= 0; i -= 1) {
+    const value = metadata[i]!.rightPanelTab
+    if (value === 'files' || value === 'git' || value === 'terminal' || value === 'inspector') return value
+  }
+  return undefined
+}
+
 function normalizedPreferences(preferences: SessionPreferences | undefined): SessionPreferences {
   const selectedModel = normalizePreferenceString(preferences?.selectedModel)
+  const transcriptViewStart = preferences?.transcriptViewStart
   return {
     ...(selectedModel ? { selectedModel } : {}),
     ...(preferences?.toolCardMode ? { toolCardMode: preferences.toolCardMode } : {}),
+    ...(transcriptViewStart !== undefined && Number.isSafeInteger(transcriptViewStart) && transcriptViewStart >= 0
+      ? { transcriptViewStart }
+      : {}),
+    ...(preferences?.rightPanelTab ? { rightPanelTab: preferences.rightPanelTab } : {}),
   }
 }
 

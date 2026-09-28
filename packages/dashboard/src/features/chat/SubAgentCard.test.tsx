@@ -160,6 +160,9 @@ describe('SubAgentCard', () => {
     expect(runningRow.className).not.toContain('border-l-2')
     expect(runningRow.className).not.toContain('border-l-sky')
     expect(screen.getByTestId('sub-agent-status-badge').textContent).toContain('Running')
+    expect(screen.getByTestId('sub-agent-role-c1').classList.contains('ak-thinking-text')).toBe(true)
+    expect(runningRow.querySelector('.animate-spin')).toBeNull()
+    expect(runningRow.textContent).not.toContain('Child session is starting')
 
     act(() => {
       socket.emitFinished({
@@ -446,6 +449,68 @@ describe('SubAgentCard', () => {
     await waitFor(() => expect(screen.getByText(/child is still working/)).toBeTruthy())
     expect(screen.getByTestId('sub-agent-transcript-frame-c-live').getAttribute('data-layout')).toBe('content')
     expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('false')
+  })
+
+  it('recovers a cancelled child with its durable reason and metrics', async () => {
+    const socket = makeRecoveringSocket({
+      parentSessionId: 'parent-1',
+      parentCallId: 'c-cancelled-refresh',
+      childSessionId: 'child-cancelled-refresh',
+      status: 'cancelled',
+      turns: 3,
+      durationMs: 4200,
+      error: 'stopped by operator',
+      messages: [],
+    })
+
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={socket}
+        group={makeGroup([makeCall('c-cancelled-refresh', { intention: 'Inspect cancellation recovery.' })])}
+        approvalByCallId={new Map()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-cancelled-refresh').getAttribute('data-sub-agent-status')).toBe('cancelled'))
+    expect(screen.getByTestId('sub-agent-status-badge').textContent).toContain('Cancelled')
+    expect(screen.getByText(/3 turns/)).toBeTruthy()
+    expect(screen.getByText(/stopped by operator/)).toBeTruthy()
+  })
+
+  it('renders a live partial timeout as failed instead of completed', async () => {
+    const socket = makeControlledSocket()
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={socket.socket}
+        group={makeGroup([makeCall('c-partial-timeout', { intention: 'Inspect timeout handling.' })])}
+        approvalByCallId={new Map()}
+      />,
+    )
+    act(() => {
+      socket.emitStarted({
+        parentSessionId: 'parent-1',
+        parentCallId: 'c-partial-timeout',
+        childSessionId: 'child-partial-timeout',
+        prompt: 'inspect',
+        startedAt: new Date().toISOString(),
+      })
+      socket.emitFinished({
+        parentSessionId: 'parent-1',
+        parentCallId: 'c-partial-timeout',
+        childSessionId: 'child-partial-timeout',
+        status: 'timed_out_with_partial_result',
+        error: 'ordinary-idle timeout',
+        turns: 2,
+        durationMs: 5000,
+        finishedAt: new Date().toISOString(),
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-partial-timeout').getAttribute('data-sub-agent-status')).toBe('failed'))
+    expect(screen.getByTestId('sub-agent-status-badge').textContent).toContain('Failed')
+    expect(screen.getByText(/ordinary-idle timeout/)).toBeTruthy()
   })
 
   it('keeps a long running transcript virtualized in a compact content-sized viewport', async () => {
@@ -876,6 +941,10 @@ function makeRecoveringSocket(input: {
   parentCallId: string
   childSessionId: string
   messages: Message[]
+  status?: 'running' | 'completed' | 'failed' | 'cancelled'
+  turns?: number
+  durationMs?: number
+  error?: string
 }): DashboardSocket {
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   return {
@@ -900,8 +969,12 @@ function makeRecoveringSocket(input: {
               childSessionId: input.childSessionId,
               parentCallId: input.parentCallId,
               agentType: 'Explore',
-              status: 'running',
+              status: input.status ?? 'running',
               startedAt: new Date().toISOString(),
+              ...(input.status && input.status !== 'running' ? { finishedAt: new Date().toISOString() } : {}),
+              ...(input.turns !== undefined ? { turns: input.turns } : {}),
+              ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+              ...(input.error !== undefined ? { error: input.error } : {}),
             },
           ],
         })

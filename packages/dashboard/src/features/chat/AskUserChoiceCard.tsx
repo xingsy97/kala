@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import type { AskUserChoiceRequest } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
-import { Textarea } from '../../components/ui/textarea.js'
+import { Input } from '../../components/ui/input.js'
 import { cn } from '../../lib/utils.js'
 
 export type AskUserChoiceDraft =
@@ -214,31 +214,29 @@ function AskUserChoiceRequestCard({
             <span className="block text-sm font-medium">{t('chat.askUser.customLabel')}</span>
           </label>
         </fieldset>
-        <div
-          className={cn(
-            'rounded-xl border bg-background/55 p-2.5 transition',
-            draft.kind === 'custom'
-              ? 'border-primary/45 bg-primary/10 shadow-sm ring-1 ring-primary/20'
-              : 'border-border/55',
-          )}
-          data-testid="ask-user-choice-custom"
-          data-selected={draft.kind === 'custom' ? 'true' : 'false'}
-        >
-          <Textarea
-            id={`ask-user-choice-custom-${request.callId}`}
-            aria-label={t('chat.askUser.customLabel')}
-            value={draft.kind === 'custom' ? draft.text : ''}
-            onChange={(event) => {
-              setDraft({ kind: 'custom', text: event.target.value })
-              if (phase.kind === 'error') setPhase({ kind: 'idle' })
-            }}
-            disabled={disabled || draft.kind !== 'custom'}
-            maxLength={4000}
-            placeholder={t('chat.askUser.customPlaceholder')}
-            data-testid="ask-user-choice-custom-input"
-            className="min-h-[84px] border-border/60 bg-card/80 text-foreground placeholder:text-muted-foreground/60 focus-visible:ring-primary/35"
-          />
-        </div>
+        {draft.kind === 'custom' ? (
+          <div
+            className="ak-expand-in rounded-xl border border-primary/45 bg-primary/10 p-2 shadow-sm ring-1 ring-primary/20"
+            data-testid="ask-user-choice-custom"
+            data-selected="true"
+          >
+            <Input
+              id={`ask-user-choice-custom-${request.callId}`}
+              aria-label={t('chat.askUser.customLabel')}
+              value={draft.text}
+              onChange={(event) => {
+                setDraft({ kind: 'custom', text: event.target.value })
+                if (phase.kind === 'error') setPhase({ kind: 'idle' })
+              }}
+              autoFocus
+              disabled={disabled}
+              maxLength={4000}
+              placeholder={t('chat.askUser.customPlaceholder')}
+              data-testid="ask-user-choice-custom-input"
+              className="h-9 border-border/60 bg-card/80 text-foreground placeholder:text-muted-foreground/60 focus-visible:ring-primary/35"
+            />
+          </div>
+        ) : null}
         {phase.kind === 'error' ? (
           <p className="text-sm text-destructive" role="alert" data-testid="ask-user-choice-error">
             {t('chat.askUser.submitError', { error: phase.message })}

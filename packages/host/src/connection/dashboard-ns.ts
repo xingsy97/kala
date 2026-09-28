@@ -80,6 +80,7 @@ import {
   validateInlineMessageFiles,
   validateInlineMessageImages,
 } from '@agent-kernel/shared'
+import { SUB_AGENT_ROLE_TEMPLATES } from '@agent-kernel/shared/enhancement'
 import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
 import type { SessionSummary } from '@agent-kernel/shared'
 import type {
@@ -261,6 +262,54 @@ const READ_ONLY_DASHBOARD_EVENTS = new Set([
   'client:unsubscribe_channels', 'subscribe', 'unsubscribe', 'client:list_dirs', 'client:list_files',
   'workspace:read_binary', 'client:read_overflow', 'bg:list', 'bg:output', 'sub_agent:list', 'agent_types:list',
 ])
+
+export function recoverSubAgentOutcome(
+  parentState: AgentState,
+  parentCallId: string,
+): { status: SubAgentSummary['status']; turns: number; durationMs: number; error?: string } | undefined {
+  for (let messageIndex = parentState.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = parentState.messages[messageIndex]
+    if (!message) continue
+    for (let contentIndex = message.content.length - 1; contentIndex >= 0; contentIndex -= 1) {
+      const content = message.content[contentIndex]
+      if (content?.type !== 'tool_result' || content.callId !== parentCallId) continue
+      const header = /^<sub_agent\b([\s\S]*?)>/.exec(content.content.trimStart())
+      if (!header) return undefined
+      const attrs = Object.fromEntries(
+        [...(header[1] ?? '').matchAll(/(\w+)="([^"]*)"/g)]
+          .map((match) => [match[1]!, match[2]!]),
+      )
+      const rawStatus = attrs.status
+      if (
+        rawStatus !== 'completed'
+        && rawStatus !== 'failed'
+        && rawStatus !== 'cancelled'
+        && rawStatus !== 'timed_out_with_partial_result'
+      ) return undefined
+      const status: SubAgentSummary['status'] =
+        rawStatus === 'timed_out_with_partial_result' ? 'failed' : rawStatus
+      const errorMatch = /<(?:error|warning)>([\s\S]*?)<\/(?:error|warning)>/.exec(content.content)
+      const error = errorMatch?.[1]
+        ?.replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .trim()
+      return {
+        status,
+        turns: nonNegativeNumber(attrs.turns),
+        durationMs: nonNegativeNumber(attrs.duration_ms),
+        ...(error ? { error } : {}),
+      }
+    }
+  }
+  return undefined
+}
+
+function nonNegativeNumber(value: string | undefined): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+}
 
 export function configureDashboardNamespace(
   ns: DashboardNs,
@@ -831,7 +880,7 @@ export function configureDashboardNamespace(
       if (!p) return
       if (!await requireRuntimeCapability(deps, p.sessionId, 'clear', 'clear')) return
       deps.audit?.log({ action: 'dashboard.session_clear', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok' })
-      deps.loopDeps.tools.cancelPending(p.sessionId)
+      await deps.loopDeps.tools.cancelPending(p.sessionId)
       deps.loopDeps.askUserChoice?.cancelSession(p.sessionId, 'ask_user_choice request was cleared')
       deps.loop.cancelStream(p.sessionId)
       const evt: AgentEvent = { kind: 'clear' }
@@ -1222,20 +1271,45 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientListSubAgentsSchema, raw, 'sub_agent:list')
       if (!p) return
       const children: SubAgentSummary[] = []
+      const parent = deps.store.get(p.parentSessionId)
       for (const rec of await deps.store.listChildren(p.parentSessionId)) {
+        const outcome = rec.parentCallId && parent
+          ? recoverSubAgentOutcome(parent.state, rec.parentCallId)
+          : undefined
+        const active = rec.parentCallId
+          ? activeSubAgentFor(p.parentSessionId, rec.parentCallId)
+          : null
         const status: SubAgentSummary['status'] =
-          rec.state.status === 'done'
+          outcome?.status ??
+          (active?.cancelled
+            ? 'cancelled'
+            : rec.state.status === 'done'
             ? 'completed'
             : rec.state.status === 'error'
               ? 'failed'
-              : 'running'
+              : 'running')
+        const startedAt = rec.subAgentStartedAt
+        const finishedAt = status !== 'running' ? rec.lastEventAt : undefined
+        const durationMs = outcome?.durationMs ??
+          (startedAt && finishedAt
+            ? Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt))
+            : undefined)
         children.push({
           childSessionId: rec.sessionId,
           ...(rec.parentCallId !== undefined ? { parentCallId: rec.parentCallId } : {}),
           ...(rec.agentType !== undefined ? { agentType: rec.agentType } : {}),
           status,
-          ...(rec.subAgentStartedAt !== undefined ? { startedAt: rec.subAgentStartedAt } : {}),
-          ...(status !== 'running' && rec.lastEventAt !== undefined ? { finishedAt: rec.lastEventAt } : {}),
+          ...(startedAt !== undefined ? { startedAt } : {}),
+          ...(finishedAt !== undefined ? { finishedAt } : {}),
+          ...(outcome?.turns !== undefined ? { turns: outcome.turns } : {}),
+          ...(durationMs !== undefined && Number.isFinite(durationMs) ? { durationMs } : {}),
+          ...(outcome?.error
+            ? { error: outcome.error }
+            : status === 'failed' && rec.state.error
+              ? { error: rec.state.error }
+              : active?.cancelled && active.cancelReason
+                ? { error: active.cancelReason }
+                : {}),
         })
       }
       ack({ requestId: p.requestId, parentSessionId: p.parentSessionId, children })
@@ -1243,10 +1317,14 @@ export function configureDashboardNamespace(
     socket.on('agent_types:list', (raw: ClientListAgentTypes, ack) => {
       const p = vparse(schema.ClientListAgentTypesSchema, raw, 'agent_types:list')
       if (!p) return
-      // Registry loader lives behind a follow-up (docs/host/sub-agent-design.md §6).
-      // Return an empty list so dashboards that call this on mount don't crash;
-      // the Composer '@agent-name' menu shows an empty state until the loader ships.
-      ack({ requestId: p.requestId, types: [] })
+      ack({
+        requestId: p.requestId,
+        types: Object.values(SUB_AGENT_ROLE_TEMPLATES).map((template) => ({
+          name: template.role,
+          description: template.purpose,
+          tools: [...template.defaultAllowedTools],
+        })),
+      })
     })
     socket.on('client:consolidate_memory', async (raw: ClientConsolidateMemory) => {
       const p = vparse(schema.ClientConsolidateMemorySchema, raw, 'client:consolidate_memory', (raw as ClientConsolidateMemory | undefined)?.sessionId)
@@ -1261,6 +1339,7 @@ export function configureDashboardNamespace(
         })
         return
       }
+
       const outcome = await consolidateMemory(deps.loopDeps, p.sessionId).catch(
         (err: unknown): ConsolidationOutcome => ({
           saved: [],

@@ -151,11 +151,26 @@ export const MessageContentSchema = z.union([
 export const MessageSchema: z.ZodType<Message> = z.object({
   role: RoleSchema,
   content: z.array(MessageContentSchema),
-  metadata: z.object({
-    kind: z.literal('model_changed'),
-    from: z.string().optional(),
-    to: z.string(),
-  }).optional(),
+  metadata: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('model_changed'),
+      from: z.string().optional(),
+      to: z.string(),
+    }),
+    z.object({
+      kind: z.literal('context_compaction'),
+      attemptId: z.string().min(1),
+      phase: z.enum(['running', 'done', 'error']),
+      trigger: z.enum(['manual', 'auto', 'preflight', 'tool_result']),
+      tokensBefore: z.number().int().nonnegative(),
+      tokensAfter: z.number().int().nonnegative().optional(),
+      replacedCount: z.number().int().nonnegative().optional(),
+      summary: z.string().optional(),
+      startedAt: z.string(),
+      endedAt: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  ]).optional(),
 })
 
 // ============================================================================

@@ -245,6 +245,8 @@ export type MetadataEntry = {
   organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   selectedModel?: string
   toolCardMode?: import('./protocol.js').ToolCardMode
+  transcriptViewStart?: number
+  rightPanelTab?: import('./protocol.js').RightPanelTab
 }
 
 export type RuntimeMetadataEntry = {

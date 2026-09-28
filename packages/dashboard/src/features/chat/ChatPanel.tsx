@@ -426,6 +426,7 @@ export function ChatPanel({
     const raw = displayItems[match.rawItemIndex]
     if (raw?.kind === 'pending_user_message') return transcriptItems.findIndex((item) => item.kind === 'pending_user_message' && item.id === raw.id)
     if (raw?.kind === 'compact_boundary') return transcriptItems.findIndex((item) => item.kind === 'compact_boundary' && item.seq === raw.seq)
+    if (raw?.kind === 'compact_progress') return transcriptItems.findIndex((item) => item.kind === 'compact_progress' && item.attemptId === raw.attemptId)
     return null
   }, [activeSearchMatch, messageIndexByItem, displayItems, transcriptItems])
 
@@ -436,6 +437,11 @@ export function ChatPanel({
 
   const renderItem = useCallback(
     (item: RenderTranscriptItem, itemIndex: number): JSX.Element => {
+      if (item.kind === 'compact_progress') {
+        return item.phase === 'running'
+          ? <CompactProgressRow startedAt={Date.parse(item.startedAt)} tokensBefore={item.tokensBefore} />
+          : <CompactFeedbackTranscriptRow status={{ kind: 'error', message: item.error ?? t('chatStatus.compactFailed') }} />
+      }
       if (item.kind === 'compact_boundary') {
         return <CompactBoundaryRow boundary={item} />
       }
@@ -535,7 +541,9 @@ export function ChatPanel({
   const keyFor = useCallback(
     (item: RenderTranscriptItem, itemIndex: number): string =>
       item.kind === 'compact_boundary'
-        ? `compact-${item.seq}`
+        ? `compact-${item.seq ?? item.attemptId ?? itemIndex}`
+        : item.kind === 'compact_progress'
+          ? `compact-progress-${item.attemptId}`
         : item.kind === 'compact_feedback'
           ? `compact-feedback-${item.status.kind}`
         : item.kind === 'tool_activity'
@@ -893,16 +901,62 @@ function CompactFeedbackTranscriptRow({
   status: Exclude<CompactStatus, { kind: 'idle' }>
   onDismiss?: () => void
 }): JSX.Element {
+  if (status.kind === 'running') {
+    return <CompactProgressRow startedAt={status.startedAt} tokensBefore={status.tokensBefore} />
+  }
+  if (status.kind === 'done') {
+    return (
+      <div className="pl-0 sm:pl-10" data-testid="compact-feedback-transcript-row">
+        <CompactResultRow
+          trigger={status.trigger ?? 'unknown'}
+          tokensBefore={status.tokensBefore}
+          tokensAfter={status.tokensAfter}
+          replacedCount={status.replacedCount}
+          summary={status.summary}
+          testId="compact-completed-result"
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="pl-0 sm:pl-10" data-testid="compact-feedback-transcript-row">
       <CompactFeedbackRow
         kind={status.kind}
         message={status.kind === 'empty' || status.kind === 'error' ? status.message : undefined}
-        startedAt={status.kind === 'running' ? status.startedAt : undefined}
-        tokensBefore={status.kind === 'running' ? status.tokensBefore : undefined}
-        trigger={status.kind === 'running' ? status.trigger : undefined}
-        onDismiss={status.kind === 'running' || status.kind === 'queued' ? undefined : onDismiss}
+        onDismiss={status.kind === 'queued' ? undefined : onDismiss}
       />
+    </div>
+  )
+}
+
+function CompactProgressRow({
+  startedAt,
+  tokensBefore,
+}: {
+  startedAt: number
+  tokensBefore: number
+}): JSX.Element {
+  const { t } = useTranslation()
+  const elapsed = useElapsedSeconds(true, startedAt)
+  return (
+    <div className="flex items-center gap-3 py-2" data-testid="compact-feedback-transcript-row">
+      <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
+      <div
+        className="flex min-w-0 items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-meta text-muted-foreground"
+        data-testid="inline-compact-running"
+        role="status"
+      >
+        <Archive className="h-3 w-3 flex-none" aria-hidden="true" />
+        <span className="ak-thinking-text truncate font-bold" data-testid="inline-compact-progress-label">
+          {t('chatStatus.compacting')}
+        </span>
+        <span className="flex-none tabular-nums text-muted-foreground/75">
+          {elapsed === undefined ? null : `${elapsed.toFixed(1)}s · `}
+          context {formatCompactTokens(tokensBefore)} tokens
+        </span>
+      </div>
+      <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
     </div>
   )
 }
@@ -1572,14 +1626,50 @@ function CompactBoundaryRow({
 }: {
   boundary: Extract<TranscriptItem, { kind: 'compact_boundary' }>
 }): JSX.Element {
+  return (
+    <CompactResultRow
+      trigger={boundary.trigger}
+      tokensBefore={boundary.tokensBefore}
+      tokensAfter={boundary.tokensAfter}
+      replacedCount={boundary.replacedCount}
+      seq={boundary.seq}
+      summary={boundary.summary}
+      testId="compact-boundary"
+    />
+  )
+}
+
+function CompactResultRow({
+  trigger: triggerKind,
+  tokensBefore,
+  tokensAfter,
+  replacedCount,
+  seq,
+  summary,
+  testId,
+}: {
+  trigger: Extract<TranscriptItem, { kind: 'compact_boundary' }>['trigger']
+  tokensBefore: number | null
+  tokensAfter: number | null
+  replacedCount?: number
+  seq?: number
+  summary?: string
+  testId: string
+}): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const trigger = compactTriggerLabel(boundary.trigger, t)
-  const shortTrigger = compactTriggerLabelShort(boundary.trigger, t)
-  const before = formatCompactTokens(boundary.tokensBefore)
-  const after = formatCompactTokens(boundary.tokensAfter)
+  const trigger = compactTriggerLabel(triggerKind, t)
+  const shortTrigger = compactTriggerLabelShort(triggerKind, t)
+  const before = formatCompactTokens(tokensBefore)
+  const after = formatCompactTokens(tokensAfter)
+  const description = seq !== undefined && replacedCount !== undefined
+    ? t('chat.transcript.compactSummary', { trigger, seq, before, after, count: replacedCount })
+    : [
+        t('chat.transcript.compactSummaryShort', { trigger: shortTrigger, before, after }),
+        replacedCount === undefined ? null : t('chat.transcript.compactReplacedCount', { count: replacedCount }),
+      ].filter(Boolean).join(' · ')
   return (
-    <div className="flex items-center gap-3 py-2" data-testid="compact-boundary">
+    <div className="flex items-center gap-3 py-2" data-testid={testId}>
       <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
       <button
         type="button"
@@ -1590,7 +1680,7 @@ function CompactBoundaryRow({
         <Archive className="h-3 w-3 flex-none" aria-hidden="true" />
         <span className="font-medium text-foreground">{t('chat.transcript.contextCompacted')}</span>
         <span className="hidden truncate sm:inline">
-          · {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before, after, count: boundary.replacedCount })}
+          · {description}
         </span>
         <span className="truncate sm:hidden">
           {t('chat.transcript.compactSummaryShort', { trigger: shortTrigger, before, after })}
@@ -1604,12 +1694,14 @@ function CompactBoundaryRow({
               {t('chat.transcript.contextCompacted')}
             </DialogTitle>
             <DialogDescription>
-              {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before, after, count: boundary.replacedCount })}
+              {description}
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="min-h-0 bg-background">
             <div className="px-5 py-4" data-testid="compact-summary-modal">
-              <AssistantMarkdown text={boundary.summary} />
+              {summary?.trim()
+                ? <AssistantMarkdown text={summary} />
+                : <p className="text-sm text-muted-foreground">{t('chat.transcript.compactSummaryUnavailable')}</p>}
             </div>
           </ScrollArea>
           <DialogFooter className="bg-card px-4 py-3">

@@ -2626,6 +2626,62 @@ describe('host loop', () => {
     expect(refused.event.content).toContain('fan-out exceeded')
   })
 
+  it('atomically enforces the fan-out cap for sibling calls from one response', async () => {
+    const parent = await store.create({
+      config: createConfig({
+        tools: [AGENT],
+        systemPrompt: 'sys',
+        maxAgentFanOut: 1,
+      }),
+      sessionId: 'sess-fanout-race-parent',
+      workspaceId: 'ws-fanout-race',
+    })
+    const llm: LLMAdapter = {
+      name: 'parallel-fanout',
+      async call(params) {
+        const userText = params.messages
+          .filter((message) => message.role === 'user')
+          .flatMap((message) => message.content)
+          .map((content) => content.type === 'text' ? content.text : '')
+          .join('\n')
+        const hasToolResult = params.messages.some(
+          (message) => message.content.some((content) => content.type === 'tool_result'),
+        )
+        if (userText.includes('child task')) {
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'child done' }] } }
+        }
+        if (!hasToolResult) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'tool_call', callId: 'agent-race-a', name: 'agent', input: { prompt: 'child task A' } },
+                { type: 'tool_call', callId: 'agent-race-b', name: 'agent', input: { prompt: 'child task B' } },
+              ],
+            },
+          }
+        }
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'parent done' }] } }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    const children = store.list().filter((record) => record.parentSessionId === parent.sessionId)
+    expect(children).toHaveLength(1)
+    const toolResults = store.get(parent.sessionId)!.state.messages
+      .flatMap((message) => message.content)
+      .filter((content) => content.type === 'tool_result')
+    expect(toolResults).toHaveLength(2)
+    expect(toolResults.some((result) => result.type === 'tool_result' && result.content.includes('fan-out exceeded'))).toBe(true)
+  })
+
   it('spawned sub-agents run with allow_all regardless of parent approval mode (ADR 0014)', async () => {
     // Regression: parents in `auto`/`ask` used to hand their mode down to the
     // child. But sub-agents are headless — no dashboard is subscribed to the

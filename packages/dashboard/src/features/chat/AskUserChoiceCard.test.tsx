@@ -45,7 +45,7 @@ describe('AskUserChoiceCard', () => {
     expect(screen.getByText('Choose the implementation scope.')).toBeTruthy()
     expect(screen.getByText('Minimal surface area.')).toBeTruthy()
     expect(screen.getAllByText('Or type a different response')).toHaveLength(1)
-    expect(screen.getByRole('textbox', { name: 'Or type a different response' })).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: 'Or type a different response' })).toBeNull()
     expect(screen.getAllByText('Confirm')).toHaveLength(1)
     expect(screen.queryByTestId('ask-user-choice-custom-submit')).toBeNull()
   })
@@ -77,10 +77,11 @@ describe('AskUserChoiceCard', () => {
       <AskUserChoiceCard sessionScope="s" requests={[firstRequest]} onSubmit={onSubmit} onReject={vi.fn()} />,
     )
 
-    const input = screen.getByTestId('ask-user-choice-custom-input')
-    expect((input as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.queryByTestId('ask-user-choice-custom-input')).toBeNull()
     fireEvent.click(screen.getByTestId('ask-user-choice-custom-option'))
+    const input = screen.getByTestId('ask-user-choice-custom-input')
     expect(screen.getByTestId('ask-user-choice-custom').getAttribute('data-selected')).toBe('true')
+    expect(input.tagName).toBe('INPUT')
     expect(screen.getByTestId('ask-user-choice-option-small').getAttribute('aria-checked')).toBe('false')
     expect(screen.getByTestId('ask-user-choice-option-complete').getAttribute('aria-checked')).toBe('false')
     expect((screen.getByTestId('ask-user-choice-submit') as HTMLButtonElement).disabled).toBe(true)
@@ -115,7 +116,6 @@ describe('AskUserChoiceCard', () => {
     for (const control of [
       screen.getByTestId('ask-user-choice-option-small'),
       screen.getByTestId('ask-user-choice-option-complete'),
-      screen.getByTestId('ask-user-choice-custom-input'),
       screen.getByTestId('ask-user-choice-reject-all'),
       screen.getByTestId('ask-user-choice-submit'),
     ]) {
@@ -141,7 +141,7 @@ describe('AskUserChoiceCard', () => {
     expect(screen.getByRole('alert').textContent).toContain('Try again')
     expect((screen.getByTestId('ask-user-choice-submit') as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByTestId('ask-user-choice-option-complete') as HTMLInputElement).disabled).toBe(false)
-    expect((screen.getByTestId('ask-user-choice-custom-input') as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.queryByTestId('ask-user-choice-custom-input')).toBeNull()
 
     fireEvent.click(screen.getByTestId('ask-user-choice-submit'))
     await screen.findByText('Answer submitted — agent continuing…')
@@ -238,6 +238,6 @@ describe('AskUserChoiceCard', () => {
     await waitFor(() => expect(screen.getByTestId('ask-user-choice-message').textContent).toBe('Pick the follow-up?'))
     expect(screen.queryByText('1 of 2')).toBeNull()
     expect(screen.getByTestId('ask-user-choice-option-b').getAttribute('aria-checked')).toBe('true')
-    expect((screen.getByTestId('ask-user-choice-custom-input') as HTMLTextAreaElement).value).toBe('')
+    expect(screen.queryByTestId('ask-user-choice-custom-input')).toBeNull()
   })
 })

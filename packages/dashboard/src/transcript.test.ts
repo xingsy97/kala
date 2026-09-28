@@ -55,6 +55,43 @@ describe('transcriptTimelineForRuntime', () => {
       { kind: 'model_changed', from: 'old', to: 'new' },
     ])
   })
+
+  it('keeps a persisted Copilot compaction boundary before output produced after its cutoff', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'Start the task.' }] },
+      {
+        role: 'system',
+        content: [],
+        metadata: {
+          kind: 'context_compaction',
+          attemptId: 'compact-1',
+          phase: 'done',
+          trigger: 'auto',
+          tokensBefore: 104_000,
+          tokensAfter: 32_000,
+          replacedCount: 30,
+          summary: 'Context before the live tail.',
+          startedAt: '2026-08-30T00:00:01.000Z',
+          endedAt: '2026-08-30T00:00:02.000Z',
+        },
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'Final output after the compact cutoff.' }] },
+    ]
+
+    expect(visibleTranscript(messages, [], '')).toEqual([
+      { kind: 'message', message: messages[0] },
+      {
+        kind: 'compact_boundary',
+        attemptId: 'compact-1',
+        trigger: 'auto',
+        replacedCount: 30,
+        tokensBefore: 104_000,
+        tokensAfter: 32_000,
+        summary: 'Context before the live tail.',
+      },
+      { kind: 'message', message: messages[2] },
+    ])
+  })
 })
 
 describe('Turn timing transcript projection', () => {

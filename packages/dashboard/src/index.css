@@ -544,6 +544,18 @@
     animation: ak-thinking-text 950ms linear infinite;
   }
 
+  .ak-session-running-label {
+    display: inline-block;
+    font-size: calc(1em + 1px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    animation-duration: 1.3s;
+    animation-timing-function: linear;
+    will-change: background-position;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
   .ak-empty-state-mark {
     border: 1px solid hsl(var(--border) / 0.55);
     background:

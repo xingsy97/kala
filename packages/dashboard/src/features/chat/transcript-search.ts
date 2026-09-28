@@ -33,7 +33,9 @@ export function searchTranscript(
         ? `pending:${item.id}`
         : item.kind === 'model_changed'
           ? `model-changed:${rawItemIndex}`
-          : `compact:${item.seq}`
+          : item.kind === 'compact_progress'
+            ? `compact-progress:${item.attemptId}`
+            : `compact:${item.seq ?? item.attemptId ?? rawItemIndex}`
     for (const part of searchableParts(item)) {
       if (category !== 'all' && part.category !== category) continue
       const haystack = part.text.toLocaleLowerCase()
@@ -63,6 +65,7 @@ export function searchMatchSnippet(match: TranscriptSearchMatch, radius = 42): s
 
 function searchableParts(item: TranscriptItem): SearchPart[] {
   if (item.kind === 'compact_boundary') return item.summary ? [{ category: 'assistant', text: item.summary }] : []
+  if (item.kind === 'compact_progress') return []
   if (item.kind === 'pending_user_message') return [{ category: 'user', text: item.text }]
   if (item.kind === 'model_changed') {
     return [{ category: 'assistant', text: `Model changed${item.from ? `: ${item.from} → ${item.to}` : ` to ${item.to}`}` }]

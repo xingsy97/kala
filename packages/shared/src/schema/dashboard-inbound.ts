@@ -89,6 +89,8 @@ const RelativePathSchema = z.string().trim().min(1).refine(
 export const SessionPreferencesSchema = z.object({
   selectedModel: z.string().trim().optional(),
   toolCardMode: z.enum(['dots', 'standard']).optional(),
+  transcriptViewStart: z.number().int().nonnegative().max(10_000_000).optional(),
+  rightPanelTab: z.enum(['files', 'git', 'terminal', 'inspector']).optional(),
 }) satisfies z.ZodType<SessionPreferences>
 
 const OperationIdSchema = z.string().min(1).max(128).optional()

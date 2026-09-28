@@ -163,10 +163,13 @@ export type SessionReadyEvent = {
  * threshold overrides, editor language, UI density, etc.
  */
 export type ToolCardMode = 'dots' | 'standard'
+export type RightPanelTab = 'files' | 'git' | 'terminal' | 'inspector'
 
 export type SessionPreferences = {
   selectedModel?: string
   toolCardMode?: ToolCardMode
+  transcriptViewStart?: number
+  rightPanelTab?: RightPanelTab
 }
 
 export type ClientUpdatePreferences = {
@@ -420,6 +423,10 @@ export type CompactStatusEvent =
       attemptId: string
       tokensBefore: number
       tokensAfter: number
+      trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'
+      replacedCount?: number
+      /** LLM-generated compacted context, when the Runtime exposes it. */
+      summary?: string
       endedAt: string
     }
   | {
@@ -1205,6 +1212,9 @@ export type SubAgentSummary = {
   /** ISO 8601. Optional because pre-lifecycle-events records don't carry it. */
   startedAt?: string
   finishedAt?: string
+  turns?: number
+  durationMs?: number
+  error?: string
 }
 
 export type SubAgentListResult = {

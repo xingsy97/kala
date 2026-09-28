@@ -215,7 +215,7 @@ export function WorkspaceMetadataDialog({
           </section>
           <details className="overflow-hidden rounded-md border border-border/50 bg-card" data-testid="workspace-technical-details">
             <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/30">{t('workspaceMetadata.technicalDetails')}</summary>
-            <div className="border-t border-border/50">
+            <div className="bg-muted/10">
               <dl className="divide-y divide-border/50 sm:hidden" data-testid="workspace-metadata-mobile-values">
                 {rows.map(([label, value]) => (
                   <div key={label} className="min-w-0 px-3 py-2">

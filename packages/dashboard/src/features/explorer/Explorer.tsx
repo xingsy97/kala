@@ -1337,8 +1337,21 @@ function SessionRow({
           style={{ fontSize: fontSizePx, lineHeight: 1.35 }}
           title={currentCwd || t('explorer.doubleClickRename')}
         >
-          {showsInlineSessionStatus(status) ? <SessionStatusIndicator status={status} phaseKey={s.sessionId} /> : null}
-          <span className="min-w-0 truncate"><HighlightText text={s.label} query={query} /></span>
+          {showsInlineSessionStatus(status) && !isRunningSessionStatus(status)
+            ? <SessionStatusIndicator status={status} phaseKey={s.sessionId} />
+            : null}
+          <span
+            className={cn(
+              'min-w-0 truncate',
+              isRunningSessionStatus(status) && 'ak-thinking-text ak-session-running-label font-extrabold',
+            )}
+            data-testid={isRunningSessionStatus(status) ? 'running-session-label' : undefined}
+          >
+            <HighlightText text={s.label} query={query} />
+          </span>
+          {isRunningSessionStatus(status)
+            ? <span className="sr-only">{statusIndicatorLabel(status, t)}</span>
+            : null}
         </div>
       )}
       {editing ? null : (
@@ -1463,6 +1476,10 @@ function SessionRow({
 
 function showsInlineSessionStatus(status: SessionActivityStatus | undefined): boolean {
   return status === 'loading' || status === 'thinking' || status === 'executing_tools' || status === 'awaiting_approval' || status === 'error'
+}
+
+function isRunningSessionStatus(status: SessionActivityStatus | undefined): boolean {
+  return status === 'loading' || status === 'thinking' || status === 'executing_tools'
 }
 
 export const SessionStatusIndicator = memo(function SessionStatusIndicator({

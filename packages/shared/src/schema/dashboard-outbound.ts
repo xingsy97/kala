@@ -661,6 +661,9 @@ export const SubAgentSummarySchema = z.object({
   status: z.enum(['running', 'completed', 'failed', 'cancelled']),
   startedAt: z.string().optional(),
   finishedAt: z.string().optional(),
+  turns: z.number().int().nonnegative().optional(),
+  durationMs: z.number().nonnegative().optional(),
+  error: z.string().optional(),
 }) satisfies z.ZodType<SubAgentSummary>
 
 export const SubAgentListResultSchema = z.object({
@@ -969,6 +972,8 @@ export const MetadataEntrySchema = z.object({
   workspaceName: z.string().optional(),
   selectedModel: z.string().optional(),
   toolCardMode: z.enum(['dots', 'standard']).optional(),
+  transcriptViewStart: z.number().int().nonnegative().max(10_000_000).optional(),
+  rightPanelTab: z.enum(['files', 'git', 'terminal', 'inspector']).optional(),
 }) satisfies z.ZodType<MetadataEntry>
 
 export const RuntimeMetadataEntrySchema = z.object({

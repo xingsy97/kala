@@ -333,7 +333,7 @@ async function writeSnapshotSidecar(logPath: string, entry: SnapshotEntry): Prom
 
 export async function appendMetadataEntry(
   path: string,
-  patch: { label?: string; workspaceId?: string; workspaceName?: string; selectedModel?: string; toolCardMode?: 'dots' | 'standard' },
+  patch: Pick<MetadataEntry, 'label' | 'workspaceId' | 'workspaceName' | 'selectedModel' | 'toolCardMode' | 'transcriptViewStart' | 'rightPanelTab'>,
 ): Promise<MetadataEntry> {
   const entry: MetadataEntry = {
     kind: 'metadata',
@@ -343,6 +343,8 @@ export async function appendMetadataEntry(
     ...(patch.workspaceName !== undefined ? { workspaceName: patch.workspaceName } : {}),
     ...(patch.selectedModel !== undefined ? { selectedModel: patch.selectedModel } : {}),
     ...(patch.toolCardMode !== undefined ? { toolCardMode: patch.toolCardMode } : {}),
+    ...(patch.transcriptViewStart !== undefined ? { transcriptViewStart: patch.transcriptViewStart } : {}),
+    ...(patch.rightPanelTab !== undefined ? { rightPanelTab: patch.rightPanelTab } : {}),
   }
   await appendFile(path, JSON.stringify(entry) + '\n', 'utf8')
   return entry

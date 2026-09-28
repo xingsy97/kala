@@ -219,8 +219,6 @@ type SlashDeleteState = {
   sessionId: string
 }
 
-const COMPACT_WATCHDOG_MS = 75_000
-
 /**
  * Fetch the host's advertised models on mount. The host reads them from
  * `~/.claude/settings.json` and `~/.codex/config.toml`; hardcoding a list here
@@ -275,7 +273,8 @@ export function App(): JSX.Element {
   const [connectWorkspaceOpen, setConnectWorkspaceOpen] = useState(false)
   const [explorerDrawerOpen, setExplorerDrawerOpen] = useState(false)
   const [inspectorDrawerOpen, setInspectorDrawerOpen] = useState(false)
-  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('inspector')
+  const [rightPanelTabOverrides, setRightPanelTabOverrides] = useState<Record<string, RightPanelTab>>({})
+  const [transcriptViewStartOverrides, setTranscriptViewStartOverrides] = useState<Record<string, number>>({})
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialSection, setSettingsInitialSection] = useState<'connection' | 'speech'>('connection')
@@ -516,6 +515,46 @@ export function App(): JSX.Element {
     }
   }, [controlSocket, workspaceTerminal])
   const activeSessionId = currentSession?.sessionId ?? null
+  const rightPanelTab: RightPanelTab = activeSessionId
+    ? rightPanelTabOverrides[activeSessionId] ?? currentSession?.preferences?.rightPanelTab ?? 'files'
+    : 'files'
+  const setRightPanelTab = useCallback((next: RightPanelTab): void => {
+    if (!activeSessionId || !controlSocket) {
+      notify.error('Unable to save the right panel', { description: 'No active Session connection.' })
+      return
+    }
+    const sessionId = activeSessionId
+    setRightPanelTabOverrides((current) => ({ ...current, [sessionId]: next }))
+    void updateSessionPreferences(controlSocket, sessionId, { rightPanelTab: next }).catch((error) => {
+      setRightPanelTabOverrides((current) => {
+        if (current[sessionId] !== next) return current
+        const copy = { ...current }
+        delete copy[sessionId]
+        return copy
+      })
+      notify.error('Unable to save the right panel', { description: error instanceof Error ? error.message : String(error) })
+    })
+  }, [activeSessionId, controlSocket])
+  useEffect(() => {
+    if (!activeSessionId) return
+    const persisted = currentSession?.preferences?.rightPanelTab
+    setRightPanelTabOverrides((current) => {
+      if (current[activeSessionId] === undefined || current[activeSessionId] !== persisted) return current
+      const copy = { ...current }
+      delete copy[activeSessionId]
+      return copy
+    })
+  }, [activeSessionId, currentSession?.preferences?.rightPanelTab])
+  useEffect(() => {
+    if (!activeSessionId) return
+    const persisted = currentSession?.preferences?.transcriptViewStart
+    setTranscriptViewStartOverrides((current) => {
+      if (current[activeSessionId] === undefined || current[activeSessionId] !== persisted) return current
+      const copy = { ...current }
+      delete copy[activeSessionId]
+      return copy
+    })
+  }, [activeSessionId, currentSession?.preferences?.transcriptViewStart])
   const explorerSelectedSessionId = optimisticSelectedSessionId ?? activeSessionId
   useEffect(() => {
     if (optimisticSelectedSessionId === null || activeSessionId !== optimisticSelectedSessionId) return
@@ -665,8 +704,12 @@ export function App(): JSX.Element {
     if (last.seq <= compactStartSeq.current) return
     compactStartSeq.current = null
     inferredCompactSeq.current = null
-    setCompactStatus(isCompactionSuccess(last.event) ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(last.event) })
-    scheduleCompactIdle(2500)
+    if (isCompactionSuccess(last.event)) {
+      setCompactStatus({ kind: 'idle' })
+    } else {
+      setCompactStatus({ kind: 'error', message: compactFailureMessage(last.event) })
+      scheduleCompactIdle(6000)
+    }
   }, [compactStatus, session.timeline])
 
   useEffect(() => {
@@ -677,8 +720,12 @@ export function App(): JSX.Element {
     if (terminal) {
       compactStartSeq.current = null
       inferredCompactSeq.current = null
-      setCompactStatus(isCompactionSuccess(terminal.event) ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(terminal.event) })
-      scheduleCompactIdle(2500)
+      if (isCompactionSuccess(terminal.event)) {
+        setCompactStatus({ kind: 'idle' })
+      } else {
+        setCompactStatus({ kind: 'error', message: compactFailureMessage(terminal.event) })
+        scheduleCompactIdle(6000)
+      }
       return
     }
     const llmResponse = session.timeline.some((entry) => entry.seq > startSeq && (entry.event.kind === 'llm_response' || entry.event.kind === 'llm_error'))
@@ -704,8 +751,7 @@ export function App(): JSX.Element {
       return
     }
     if (remoteCompact.kind === 'done') {
-      setCompactStatus({ kind: 'done' })
-      scheduleCompactIdle(2500)
+      setCompactStatus({ kind: 'idle' })
       return
     }
     if (remoteCompact.kind === 'skipped') {
@@ -720,7 +766,7 @@ export function App(): JSX.Element {
     // Intentionally not listing scheduleCompactIdle in deps: it's a stable
     // ref-based helper defined in the same component (see below).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remoteCompact])
+  }, [remoteCompact, session.agentRuntime])
 
   useEffect(() => {
     if (compactStatus.kind !== 'running') return
@@ -729,17 +775,6 @@ export function App(): JSX.Element {
     setCompactStatus({ kind: 'error', message: session.lastError.message })
     scheduleCompactIdle(6000)
   }, [compactStatus, session.lastError])
-
-  useEffect(() => {
-    if (compactStatus.kind !== 'running') return
-    const timer = window.setTimeout(() => {
-      setCompactStatus({
-        kind: 'error',
-        message: t('app.compactTimeout'),
-      })
-    }, COMPACT_WATCHDOG_MS)
-    return () => window.clearTimeout(timer)
-  }, [compactStatus])
 
   // Hard-tier context pressure means the host will auto-compact before the
   // next user turn runs. Surface that as a transcript row (queued state) so
@@ -1223,17 +1258,31 @@ export function App(): JSX.Element {
       ),
     [transcriptBase, stateMessages, transcriptTimeline, session.streamingText, session.streamingActive, session.streamingAnchor, session.retainedDrafts, visiblePendingUserMessages, visibleQueuedMessages],
   )
-  const [transcriptViewStarts, setTranscriptViewStarts] = useState<Record<string, number>>({})
-  const transcriptViewStart = activeSessionId ? transcriptViewStarts[activeSessionId] ?? 0 : 0
+  const transcriptViewStart = activeSessionId
+    ? transcriptViewStartOverrides[activeSessionId] ?? currentSession?.preferences?.transcriptViewStart ?? 0
+    : 0
   const visibleChatItems = useMemo(
     () => chatItems.slice(Math.min(transcriptViewStart, Math.max(0, chatItems.length - 1))),
     [chatItems, transcriptViewStart],
   )
   const clearTranscriptView = useCallback((): void => {
-    if (!activeSessionId) return
+    if (!activeSessionId || !controlSocket) {
+      notify.error('Unable to clear the conversation view', { description: 'No active Session connection.' })
+      return
+    }
+    const sessionId = activeSessionId
     const start = lastUserTranscriptIndex(chatItems)
-    setTranscriptViewStarts((current) => ({ ...current, [activeSessionId]: start }))
-  }, [activeSessionId, chatItems])
+    setTranscriptViewStartOverrides((current) => ({ ...current, [sessionId]: start }))
+    void updateSessionPreferences(controlSocket, sessionId, { transcriptViewStart: start }).catch((error) => {
+      setTranscriptViewStartOverrides((current) => {
+        if (current[sessionId] !== start) return current
+        const copy = { ...current }
+        delete copy[sessionId]
+        return copy
+      })
+      notify.error('Unable to clear the conversation view', { description: error instanceof Error ? error.message : String(error) })
+    })
+  }, [activeSessionId, chatItems, controlSocket])
   const createNewSessionFromCurrent = useCallback(async (): Promise<void> => {
     if (!controlSocket || !currentSession) {
       notify.error(t('app.socketNotConnected'))
@@ -2005,7 +2054,7 @@ export function App(): JSX.Element {
                             {isDesktopClient() ? <DesktopWindowControlsSlot /> : null}
                           </div>
                         ) : null}
-                        compactStatus={compactStatus}
+                        compactStatus={session.agentRuntime === 'copilot' ? { kind: 'idle' } : compactStatus}
                         liveToolActivityTailCount={liveToolActivityTailCount}
                         toolExecutionStartedAt={session.toolExecutionStartedAt}
                         toolCardMode={currentSession?.preferences?.toolCardMode ?? 'dots'}

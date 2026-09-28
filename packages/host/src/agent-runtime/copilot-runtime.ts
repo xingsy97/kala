@@ -49,6 +49,14 @@ type TurnCapture = {
   projectionError?: unknown
 }
 
+type ActiveCompaction = {
+  attemptId: string
+  tokensBefore: number
+  trigger: 'manual' | 'auto'
+  startedAt: string
+}
+
+const COPILOT_FIRST_ACTIVITY_TIMEOUT_MS = 5 * 60_000
 const COPILOT_INACTIVITY_TIMEOUT_MS = 30 * 60_000
 const COPILOT_SDK_TURN_TIMEOUT_MS = 24 * 60 * 60_000
 
@@ -72,7 +80,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
   private readonly sdkTurnGenerations = new Map<string, number>()
   private readonly eventGenerations = new Map<string, number>()
   private readonly toolCallGenerations = new Map<string, number>()
-  private readonly compactions = new Map<string, { attemptId: string; tokensBefore: number }>()
+  private readonly compactions = new Map<string, ActiveCompaction>()
   private readonly tails = new Map<string, Promise<void>>()
   private readonly accountedUsageCallIds = new Set<string>()
   private readonly turnCaptures = new Map<string, TurnCapture>()
@@ -167,7 +175,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
     for (const call of record.state.pendingCalls) {
       this.cancelledCalls.add(approvalKey(record.sessionId, call.callId))
     }
-    this.context.tools.cancelPending(record.sessionId)
+    await this.context.tools.cancelPending(record.sessionId)
     for (const [key, approval] of this.approvals) {
       if (!key.startsWith(`${record.sessionId}:`)) continue
       approval.resolve({ approved: false, reason: 'cancelled' })
@@ -215,15 +223,69 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   async compact(record: SessionRecord): Promise<void> {
     const session = await this.ensureSession(record, record.preferences?.selectedModel)
-    const result = await session.rpc.history.compact({ trigger: 'manual' })
-    if (!result.success) throw new Error('Copilot compaction did not complete successfully')
-    if (result.contextWindow) {
-      const snapshot = this.freshContextSnapshot(
-        record,
-        copilotContextSnapshot(record, result.contextWindow),
-        new Date().toISOString(),
-      )
-      if (snapshot) this.context.broadcast.onState(record, record.state, snapshot)
+    const active: ActiveCompaction = {
+      attemptId: randomUUID(),
+      tokensBefore: record.runtimeContextSnapshot?.usage.inputTokens ?? 0,
+      trigger: 'manual',
+      startedAt: new Date().toISOString(),
+    }
+    this.compactions.set(record.sessionId, active)
+    try {
+      await this.projectCompactionStart(record, active)
+      this.context.broadcast.onCompactStatus?.({
+        sessionId: record.sessionId,
+        kind: 'running',
+        trigger: 'manual',
+        tokensBefore: active.tokensBefore,
+        attemptId: active.attemptId,
+        startedAt: active.startedAt,
+      })
+      const result = await session.rpc.history.compact({ trigger: 'manual' })
+      if (!result.success) throw new Error('Copilot compaction did not complete successfully')
+      const completedAt = new Date().toISOString()
+      if (result.contextWindow) {
+        const snapshot = this.freshContextSnapshot(
+          record,
+          copilotContextSnapshot(record, result.contextWindow),
+          completedAt,
+        )
+        if (snapshot) this.context.broadcast.onState(record, record.state, snapshot)
+      }
+      const current = this.compactions.get(record.sessionId)
+      if (current) {
+        this.compactions.delete(record.sessionId)
+        const completion = {
+          tokensAfter: result.contextWindow?.currentTokens ?? Math.max(0, current.tokensBefore - result.tokensRemoved),
+          replacedCount: result.messagesRemoved,
+          ...(result.summaryContent ? { summary: result.summaryContent } : {}),
+          endedAt: completedAt,
+        }
+        await this.projectCompactionDone(record, current, completion)
+        this.context.broadcast.onCompactStatus?.({
+          sessionId: record.sessionId,
+          kind: 'done',
+          attemptId: current.attemptId,
+          tokensBefore: current.tokensBefore,
+          trigger: current.trigger,
+          ...completion,
+        })
+      }
+    } catch (error) {
+      const active = this.compactions.get(record.sessionId)
+      if (active) {
+        this.compactions.delete(record.sessionId)
+        const message = error instanceof Error ? error.message : String(error)
+        const endedAt = new Date().toISOString()
+        await this.projectCompactionError(record, active, message, endedAt)
+        this.context.broadcast.onCompactStatus?.({
+          sessionId: record.sessionId,
+          kind: 'error',
+          attemptId: active.attemptId,
+          message,
+          endedAt,
+        })
+      }
+      throw error
     }
   }
 
@@ -475,9 +537,16 @@ export class CopilotAgentRuntime implements AgentRuntime {
       return
     }
     if (event.type === 'session.compaction_start') {
-      const attemptId = event.id
       const tokensBefore = event.data.currentTokens ?? event.data.conversationTokens ?? 0
-      this.compactions.set(record.sessionId, { attemptId, tokensBefore })
+      const trigger = event.data.trigger === 'manual' ? 'manual' : 'auto'
+      const existing = this.compactions.get(record.sessionId)
+      const active: ActiveCompaction = existing ?? {
+        attemptId: event.id,
+        tokensBefore,
+        trigger,
+        startedAt: event.timestamp,
+      }
+      this.compactions.set(record.sessionId, active)
       if (event.data.tokenLimit && event.data.currentTokens !== undefined) {
         const snapshot = this.freshContextSnapshot(record, copilotContextSnapshot(record, {
           currentTokens: event.data.currentTokens,
@@ -488,29 +557,51 @@ export class CopilotAgentRuntime implements AgentRuntime {
         }), event.timestamp)
         if (snapshot) this.context.broadcast.onState(record, record.state, snapshot)
       }
-      this.context.broadcast.onCompactStatus?.({
-        sessionId: record.sessionId,
-        kind: 'running',
-        trigger: event.data.trigger === 'manual' ? 'manual' : 'auto',
-        tokensBefore,
-        attemptId,
-        startedAt: event.timestamp,
-      })
+      if (!existing) {
+        void this.projectCompactionStart(record, active).then(() => {
+          this.context.broadcast.onCompactStatus?.({
+            sessionId: record.sessionId,
+            kind: 'running',
+            trigger,
+            tokensBefore,
+            attemptId: active.attemptId,
+            startedAt: active.startedAt,
+          })
+        }).catch((error) => {
+          this.compactions.delete(record.sessionId)
+          this.context.broadcast.onError(record.sessionId, error instanceof Error ? error.message : String(error))
+        })
+      }
       return
     }
     if (event.type === 'session.compaction_complete') {
       const active = this.compactions.get(record.sessionId)
-      const attemptId = active?.attemptId ?? event.id
+      const current: ActiveCompaction = active ?? {
+        attemptId: event.parentId ?? event.id,
+        tokensBefore: event.data.preCompactionTokens ?? 0,
+        trigger: event.data.trigger === 'manual' ? 'manual' : 'auto',
+        startedAt: event.timestamp,
+      }
       this.compactions.delete(record.sessionId)
       if (event.data.success) {
         const tokensAfter = event.data.postCompactionTokens ?? event.data.conversationTokens ?? 0
-        this.context.broadcast.onCompactStatus?.({
-          sessionId: record.sessionId,
-          kind: 'done',
-          attemptId,
-          tokensBefore: event.data.preCompactionTokens ?? active?.tokensBefore ?? 0,
+        const completion = {
           tokensAfter,
+          ...(event.data.messagesRemoved !== undefined ? { replacedCount: event.data.messagesRemoved } : {}),
+          ...(event.data.summaryContent ? { summary: event.data.summaryContent } : {}),
           endedAt: event.timestamp,
+        }
+        void this.projectCompactionDone(record, current, completion).then(() => {
+          this.context.broadcast.onCompactStatus?.({
+            sessionId: record.sessionId,
+            kind: 'done',
+            attemptId: current.attemptId,
+            tokensBefore: event.data.preCompactionTokens ?? current.tokensBefore,
+            trigger: current.trigger,
+            ...completion,
+          })
+        }).catch((error) => {
+          this.context.broadcast.onError(record.sessionId, error instanceof Error ? error.message : String(error))
         })
         const currentTokens = completeCompactionContextTokens(event.data)
         if (event.data.tokenLimit && currentTokens !== undefined) {
@@ -524,12 +615,17 @@ export class CopilotAgentRuntime implements AgentRuntime {
           if (snapshot) this.context.broadcast.onState(record, record.state, snapshot)
         }
       } else {
-        this.context.broadcast.onCompactStatus?.({
-          sessionId: record.sessionId,
-          kind: 'error',
-          attemptId,
-          message: event.data.error ?? 'Copilot compaction failed',
-          endedAt: event.timestamp,
+        const message = event.data.error ?? 'Copilot compaction failed'
+        void this.projectCompactionError(record, current, message, event.timestamp).then(() => {
+          this.context.broadcast.onCompactStatus?.({
+            sessionId: record.sessionId,
+            kind: 'error',
+            attemptId: current.attemptId,
+            message,
+            endedAt: event.timestamp,
+          })
+        }).catch((error) => {
+          this.context.broadcast.onError(record.sessionId, error instanceof Error ? error.message : String(error))
         })
       }
       return
@@ -698,12 +794,12 @@ export class CopilotAgentRuntime implements AgentRuntime {
     } catch (error) {
       if (!this.isCurrentTurn(record.sessionId, generation)) return
       const message = error instanceof Error ? error.message : String(error)
-      if (message.includes('waiting for session.idle') || message.includes('without Copilot session activity')) {
+      if (message.includes('waiting for session.idle') || message.includes('Copilot session activity')) {
         await session.abort().catch(() => undefined)
         for (const call of record.state.pendingCalls) {
           this.cancelledCalls.add(approvalKey(record.sessionId, call.callId))
         }
-        this.context.tools.cancelPending(record.sessionId)
+        await this.context.tools.cancelPending(record.sessionId)
       }
       await this.project(record, 'copilot.session_error', { message }, (state) => ({
         ...state,
@@ -752,16 +848,24 @@ export class CopilotAgentRuntime implements AgentRuntime {
     ok: boolean,
     content: string,
   ): Promise<void> {
-    await this.project(record, 'copilot.tool_result', { callId: pending.callId, ok }, (state) => ({
-      ...state,
-      messages: [...state.messages, {
-        role: 'tool',
-        content: [{ type: 'tool_result', callId: pending.callId, ok, content }],
-      }],
-      status: 'thinking',
-      pendingCalls: state.pendingCalls.filter((call) => call.callId !== pending.callId),
-      error: undefined,
-    }))
+    await this.project(record, 'copilot.tool_result', { callId: pending.callId, ok }, (state) => {
+      const pendingCalls = state.pendingCalls.filter((call) => call.callId !== pending.callId)
+      const status = pendingCalls.some((call) => call.status === 'awaiting_approval')
+        ? 'awaiting_approval'
+        : pendingCalls.length > 0
+          ? 'executing_tools'
+          : 'thinking'
+      return {
+        ...state,
+        messages: [...state.messages, {
+          role: 'tool',
+          content: [{ type: 'tool_result', callId: pending.callId, ok, content }],
+        }],
+        status,
+        pendingCalls,
+        error: undefined,
+      }
+    })
   }
 
   private async expireUnresumableApproval(
@@ -881,6 +985,72 @@ export class CopilotAgentRuntime implements AgentRuntime {
     }
   }
 
+  private async projectCompactionStart(record: SessionRecord, active: ActiveCompaction): Promise<void> {
+    await this.project(record, 'copilot.compaction_start', {
+      attemptId: active.attemptId,
+      trigger: active.trigger,
+      tokensBefore: active.tokensBefore,
+    }, (state) => ({
+      ...state,
+      messages: [...state.messages, {
+        role: 'system',
+        content: [],
+        metadata: {
+          kind: 'context_compaction',
+          attemptId: active.attemptId,
+          phase: 'running',
+          trigger: active.trigger,
+          tokensBefore: active.tokensBefore,
+          startedAt: active.startedAt,
+        },
+      }],
+    }))
+  }
+
+  private async projectCompactionDone(
+    record: SessionRecord,
+    active: ActiveCompaction,
+    completion: {
+      tokensAfter: number
+      replacedCount?: number
+      summary?: string
+      endedAt: string
+    },
+  ): Promise<void> {
+    await this.project(record, 'copilot.compaction_complete', {
+      attemptId: active.attemptId,
+      trigger: active.trigger,
+      tokensBefore: active.tokensBefore,
+      ...completion,
+    }, (state) => ({
+      ...state,
+      messages: updateCompactionMarker(state.messages, active, {
+        phase: 'done',
+        ...completion,
+      }),
+    }))
+  }
+
+  private async projectCompactionError(
+    record: SessionRecord,
+    active: ActiveCompaction,
+    error: string,
+    endedAt: string,
+  ): Promise<void> {
+    await this.project(record, 'copilot.compaction_error', {
+      attemptId: active.attemptId,
+      error,
+      endedAt,
+    }, (state) => ({
+      ...state,
+      messages: updateCompactionMarker(state.messages, active, {
+        phase: 'error',
+        error,
+        endedAt,
+      }),
+    }))
+  }
+
   private freshContextSnapshot(
     record: SessionRecord,
     snapshot: ContextUsageSnapshot,
@@ -897,20 +1067,68 @@ export class CopilotAgentRuntime implements AgentRuntime {
   }
 }
 
+function updateCompactionMarker(
+  messages: readonly Message[],
+  active: ActiveCompaction,
+  update: {
+    phase: 'done' | 'error'
+    tokensAfter?: number
+    replacedCount?: number
+    summary?: string
+    endedAt: string
+    error?: string
+  },
+): Message[] {
+  let found = false
+  const next = messages.map((message) => {
+    if (message.metadata?.kind !== 'context_compaction' || message.metadata.attemptId !== active.attemptId) return message
+    found = true
+    return {
+      ...message,
+      metadata: {
+        ...message.metadata,
+        ...update,
+      },
+    }
+  })
+  if (found) return next
+  return [...next, {
+    role: 'system',
+    content: [],
+    metadata: {
+      kind: 'context_compaction',
+      attemptId: active.attemptId,
+      trigger: active.trigger,
+      tokensBefore: active.tokensBefore,
+      startedAt: active.startedAt,
+      ...update,
+    },
+  }]
+}
+
 async function sendAndWaitWithActivityTimeout(session: CopilotSession, message: MessageOptions) {
   let timeout: NodeJS.Timeout | undefined
+  let receivedActivity = false
   let rejectInactivity!: (error: Error) => void
   const inactivity = new Promise<never>((_, reject) => {
     rejectInactivity = reject
   })
   const armTimeout = () => {
     if (timeout) clearTimeout(timeout)
+    const timeoutMs = receivedActivity
+      ? COPILOT_INACTIVITY_TIMEOUT_MS
+      : COPILOT_FIRST_ACTIVITY_TIMEOUT_MS
     timeout = setTimeout(() => {
-      rejectInactivity(new Error(`Timeout after ${COPILOT_INACTIVITY_TIMEOUT_MS}ms without Copilot session activity`))
-    }, COPILOT_INACTIVITY_TIMEOUT_MS)
+      const phase = receivedActivity ? '' : 'initial '
+      rejectInactivity(new Error(`Timeout after ${timeoutMs}ms without ${phase}Copilot session activity`))
+    }, timeoutMs)
     timeout.unref?.()
   }
-  const unsubscribe = session.on(() => armTimeout())
+  const unsubscribe = session.on((event) => {
+    if (!isCopilotTurnActivity(event)) return
+    receivedActivity = true
+    armTimeout()
+  })
   armTimeout()
   try {
     return await Promise.race([
@@ -921,6 +1139,11 @@ async function sendAndWaitWithActivityTimeout(session: CopilotSession, message: 
     if (timeout) clearTimeout(timeout)
     unsubscribe()
   }
+}
+
+function isCopilotTurnActivity(event: SessionEvent): boolean {
+  return event.type !== 'user.message'
+    && event.type !== 'assistant.turn_start'
 }
 
 function modelInfo(model: CopilotModelInfo): ModelInfo {

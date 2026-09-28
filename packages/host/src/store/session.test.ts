@@ -813,6 +813,34 @@ describe('SessionStore.updatePreferences', () => {
     const reloaded = await new SessionStore(dir).load(record.sessionId)
     expect(reloaded.preferences.toolCardMode).toBe('standard')
   })
+
+  it('restores the transcript boundary and right panel tab for each session', async () => {
+    const store = new SessionStore(dir)
+    const { record } = await store.ensure({ sessionId: 'sess-view-preferences', defaultConfig: config })
+
+    const applied = await store.updatePreferences(record.sessionId, {
+      transcriptViewStart: 14,
+      rightPanelTab: 'terminal',
+    })
+
+    expect(applied).toMatchObject({ transcriptViewStart: 14, rightPanelTab: 'terminal' })
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.metadata.at(-1)).toMatchObject({
+      transcriptViewStart: 14,
+      rightPanelTab: 'terminal',
+    })
+
+    const reloadedStore = new SessionStore(dir)
+    const reloaded = await reloadedStore.load(record.sessionId)
+    expect(reloaded.preferences).toMatchObject({
+      transcriptViewStart: 14,
+      rightPanelTab: 'terminal',
+    })
+    expect((await reloadedStore.listSummaries()).find((summary) => summary.sessionId === record.sessionId)?.preferences).toMatchObject({
+      transcriptViewStart: 14,
+      rightPanelTab: 'terminal',
+    })
+  })
 })
 
 describe('SessionStore runtime context snapshots', () => {

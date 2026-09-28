@@ -21,7 +21,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Loader2,
   MoreHorizontal,
   Shield,
   Square,
@@ -195,9 +194,13 @@ const SubAgentRow = memo(function SubAgentRow({
   const startedAtMs = startedAtOf(view.lifecycle)
   const elapsedMs = useElapsedMs(status === 'running' ? startedAtMs : null)
   const totalMs =
-    status === 'completed' || status === 'failed' ? view.lifecycle.durationMs : elapsedMs
+    status === 'completed' || status === 'failed' || status === 'cancelled'
+      ? view.lifecycle.durationMs
+      : elapsedMs
   const turns =
-    status === 'completed' || status === 'failed' ? view.lifecycle.turns : view.messages.length
+    status === 'completed' || status === 'failed' || status === 'cancelled'
+      ? view.lifecycle.turns
+      : view.messages.length
 
   const failureText =
     status === 'failed' || status === 'cancelled'
@@ -304,10 +307,17 @@ const SubAgentRow = memo(function SubAgentRow({
           )}
           data-testid={`sub-agent-toggle-${call.callId}`}
         >
-          <span className="flex h-5 w-5 flex-none items-center justify-center">
-            <StatusIcon status={status} />
-          </span>
-          <span className={cn('flex-none font-semibold text-foreground', compact ? 'text-meta' : 'text-sm')}>
+          {status === 'running' || status === 'idle' ? null : (
+            <span className="flex h-5 w-5 flex-none items-center justify-center">
+              <StatusIcon status={status} />
+            </span>
+          )}
+          <span className={cn(
+            'flex-none font-semibold',
+            compact ? 'text-meta' : 'text-sm',
+            status === 'running' ? 'ak-thinking-text' : 'text-foreground',
+            status === 'idle' && 'text-muted-foreground',
+          )} data-testid={`sub-agent-role-${call.callId}`}>
             {agentType ?? t('chat.subAgent.label')}
           </span>
           <span ref={intentionRef} className="min-w-0 flex-1 truncate text-meta text-muted-foreground" title={intention} data-testid={`sub-agent-header-intention-${call.callId}`}>
@@ -397,14 +407,13 @@ const SubAgentRow = memo(function SubAgentRow({
   )
 })
 
-function EmptyChild({ status }: { status: SubAgentLifecycle['status'] }): JSX.Element {
+function EmptyChild({ status }: { status: SubAgentLifecycle['status'] }): JSX.Element | null {
   const { t } = useTranslation()
+  if (status === 'running') return null
   const label =
     status === 'idle'
       ? t('chat.subAgent.waiting')
-      : status === 'running'
-        ? t('chat.subAgent.starting')
-        : t('chat.subAgent.noMessages')
+      : t('chat.subAgent.noMessages')
   return (
     <div className="px-3 py-4 text-center text-sm italic text-muted-foreground">
       {label}
@@ -413,18 +422,6 @@ function EmptyChild({ status }: { status: SubAgentLifecycle['status'] }): JSX.El
 }
 
 function StatusIcon({ status }: { status: SubAgentLifecycle['status'] }): JSX.Element {
-  if (status === 'running' || status === 'idle')
-    return (
-      <Loader2
-        className={cn(
-          'h-3.5 w-3.5 flex-none',
-          status === 'running'
-            ? 'animate-spin text-sky-600 dark:text-sky-400'
-            : 'text-muted-foreground',
-        )}
-        aria-hidden="true"
-      />
-    )
   if (status === 'completed')
     return (
       <CheckCircle2

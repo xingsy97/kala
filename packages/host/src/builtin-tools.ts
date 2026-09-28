@@ -330,7 +330,7 @@ const agentToolset: ToolsetPlugin = {
         objective: { type: 'string', description: 'Backward-compatible user-facing delegation objective. Prefer intention for new calls.' },
         max_turns: { type: 'integer', minimum: 1, maximum: 480, description: 'Optional per-call turn budget. Use higher values for complex tasks. Role caps: review 240, research 360, test 400, implementation 480.' },
         timeout_ms: { type: 'integer', minimum: 1, maximum: 43_200_000, description: 'Optional per-call absolute deadline in milliseconds. Use higher values for long-running work. Role caps: review 21600000, research 28800000, test 36000000, implementation 43200000.' },
-        expected_output: { type: 'string', description: 'A concise description of what the child must return, such as findings, changed files, test results, or a final recommendation.' },
+        expected_output: { type: 'string', description: 'Observability metadata describing what the child must return. It does not alter the child instructions; include any requirement the child must follow directly in prompt.' },
       },
       required: ['prompt'],
     })]

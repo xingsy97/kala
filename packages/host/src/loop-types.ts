@@ -144,7 +144,7 @@ export type ToolDispatcher = {
     failure?: import('@agent-kernel/kernel').ToolFailure
     durationMs?: number
   }>
-  cancelPending(sessionId: string): void
+  cancelPending(sessionId: string): void | Promise<void>
 }
 
 export type LlmQuotaUsage = {

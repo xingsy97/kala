@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { COPILOT_AGENT_RUNTIME_CAPABILITIES, KERNEL_AGENT_RUNTIME_CAPABILITIES, type ClientUserMessage, type RuntimeMetadataEntry } from '@agent-kernel/shared'
+import { createInitialState } from '@agent-kernel/kernel'
 
-import { buildCompactionMetadataIndex, consumeCompactionMetadata, handleUserMessage, loadDashboardSession, type DashboardDeps } from './dashboard-ns.js'
+import { buildCompactionMetadataIndex, consumeCompactionMetadata, handleUserMessage, loadDashboardSession, recoverSubAgentOutcome, type DashboardDeps } from './dashboard-ns.js'
 import { terminalOwnerSessionId, terminalSessionRoom } from './rooms.js'
 import type { SessionStore } from '../store/session.js'
 
@@ -165,6 +166,61 @@ describe('temporary workspace terminal identity', () => {
     expect(terminalSessionRoom('workspace-terminal:session-1:request-1')).toBe('session:session-1')
     expect(terminalOwnerSessionId('workspace-terminal:')).toBeUndefined()
     expect(terminalOwnerSessionId('workspace-terminal::request-1')).toBeUndefined()
+  })
+
+  describe('sub-agent lifecycle recovery', () => {
+    it('recovers cancellation details from the durable parent tool result', () => {
+      const state = {
+        ...createInitialState({ sessionId: 'parent' }),
+        messages: [{
+          role: 'tool' as const,
+          content: [{
+            type: 'tool_result' as const,
+            callId: 'agent-call',
+            ok: false,
+            content: [
+              '<sub_agent session_id="child" status="cancelled" turns="3" duration_ms="4200">',
+              '<error>stopped &amp; reported</error>',
+              '</sub_agent>',
+            ].join('\n'),
+          }],
+        }],
+      }
+
+      expect(recoverSubAgentOutcome(state, 'agent-call')).toEqual({
+        status: 'cancelled',
+        turns: 3,
+        durationMs: 4200,
+        error: 'stopped & reported',
+      })
+    })
+
+    it('recovers a partial timeout as a failed lifecycle', () => {
+      const state = {
+        ...createInitialState({ sessionId: 'parent' }),
+        messages: [{
+          role: 'tool' as const,
+          content: [{
+            type: 'tool_result' as const,
+            callId: 'agent-timeout',
+            ok: true,
+            content: [
+              '<sub_agent session_id="child" status="timed_out_with_partial_result" turns="2" duration_ms="5000">',
+              '<warning>Sub-agent reached ordinary-idle; returning verified partial work.</warning>',
+              '<result>partial</result>',
+              '</sub_agent>',
+            ].join('\n'),
+          }],
+        }],
+      }
+
+      expect(recoverSubAgentOutcome(state, 'agent-timeout')).toEqual({
+        status: 'failed',
+        turns: 2,
+        durationMs: 5000,
+        error: 'Sub-agent reached ordinary-idle; returning verified partial work.',
+      })
+    })
   })
 })
 
