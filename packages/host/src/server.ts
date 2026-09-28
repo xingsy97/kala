@@ -1117,7 +1117,7 @@ export async function startHostServer(
     },
   }
 
-  const skills = options.skills ?? createSkillManager(store, getDefaultConfig())
+  const skills = options.skills ?? createSkillManager(store, getDefaultConfig(), executors)
   const askUserChoice = new AskUserChoiceBroker()
   const publishLocalImages = createLocalImagePublisher({
     artifacts: sessionArtifacts,

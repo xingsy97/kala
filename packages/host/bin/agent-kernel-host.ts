@@ -404,7 +404,6 @@ async function main(): Promise<void> {
     ...(release.source === 'local' ? { releaseAssetsDir: releaseDir() } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
-    skills,
     artifactRootDir,
     ...(process.env.AGENT_KERNEL_DOCS_DIR ? { docsRootDir: process.env.AGENT_KERNEL_DOCS_DIR } : {}),
     routerHealth: () => ({

@@ -24,10 +24,34 @@ describe('built-in tool intent schema',()=>{
     expect(planningTools[0]).toMatchObject({executionKind:'host',executionHandler:'todo_graph'})
   })
 
+  it('keeps the Skill Tool schema independent from the discovered Skill registry',()=>{
+    const empty=createBuiltinTools()
+    const populated=createBuiltinTools([{
+      name:'workspace-skill',
+      description:'A workspace-specific Skill that must not enter the Tool schema.',
+      path:'/placeholder/.agents/skills/workspace-skill/SKILL.md',
+    }])
+    const emptySkill=empty.find((tool)=>tool.name==='skill')!
+    const populatedSkill=populated.find((tool)=>tool.name==='skill')!
+    expect(populatedSkill).toEqual(emptySkill)
+    expect(populatedSkill.description).not.toContain('workspace-skill')
+    expect(populatedSkill.inputSchema.required).toContain('action')
+  })
+
   it('exposes an explicit bounded subagent intention while retaining objective compatibility',()=>{
     const agent=createBuiltinTools().find((tool)=>tool.name==='agent')!
     const properties=agent.inputSchema.properties as Record<string,any>
     expect(properties.intention).toMatchObject({type:'string',minLength:12,maxLength:240})
+    expect(properties.intention.description).toContain('single-line')
+    expect(properties.intention.description).toContain('Do not copy the full prompt')
+    expect(properties.prompt).toMatchObject({type:'string',minLength:1})
+    expect(properties.prompt.description).toContain('sent verbatim')
+    expect(properties.prompt.description).toContain('self-contained')
+    expect(properties.prompt.description).toContain('readable Markdown')
+    expect(properties.prompt.description).toContain('blank lines')
+    expect(properties.prompt.description).toContain('bullet points')
+    expect(properties.prompt.description).toContain('dense paragraph')
+    expect(properties.expected_output.description).toContain('what the child must return')
     expect(properties.objective.description).toContain('Backward-compatible')
   })
 

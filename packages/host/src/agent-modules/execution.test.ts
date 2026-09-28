@@ -268,10 +268,11 @@ describe('configured tool execution', () => {
         cancelPending() {},
       }),
       skills,
-    }, record.sessionId, effect('skill', { name: 'demo-skill' }), new Map())
+    }, record.sessionId, effect('skill', { action: 'load', name: 'demo-skill' }), new Map())
 
     expect(executorCalls).toBe(0)
     expect(result.ok).toBe(true)
+    expect(result.content.indexOf('SECURITY NOTICE:')).toBeLessThan(result.content.indexOf('BODY'))
     expect(result.content).toContain('BODY')
   })
 

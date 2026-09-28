@@ -14,6 +14,13 @@ describe('built-in assistant identity', () => {
     expect(prompt).not.toContain('You are Codex')
   })
 
+  it('asks both default prompts to avoid trivial delegation and hand off verified context', () => {
+    for (const prompt of [createBuiltinAgentModule().systemPrompt.render(context), DEFAULT_CUSTOM_SYSTEM_PROMPT]) {
+      expect(prompt).toContain('Do small lookups, single-file edits, and narrow tests yourself')
+      expect(prompt).toContain('verified facts and relevant files, remaining questions, edit scope, verification, and expected output')
+    }
+  })
+
   it('uses the Kala identity in the editable custom prompt default', () => {
     expect(DEFAULT_CUSTOM_SYSTEM_PROMPT).toContain('You are Kala, an AI coding agent')
     expect(DEFAULT_CUSTOM_SYSTEM_PROMPT).not.toContain('You are Codex')
