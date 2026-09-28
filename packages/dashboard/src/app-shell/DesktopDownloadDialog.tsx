@@ -54,14 +54,14 @@ function DownloadContent({ update }: { update: boolean }): JSX.Element {
   return (
     <DialogBody className="min-w-0 space-y-4 px-4 py-4 sm:px-6" data-testid="desktop-download-body">
       {release ? (
-        <details role="note" data-testid="desktop-release-security" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-5">
+        <details role="note" data-testid="desktop-release-security" className="rounded-lg bg-amber-500/10 p-3 text-xs leading-5 ring-1 ring-inset ring-amber-500/40">
           <summary className="cursor-pointer font-semibold">{t('desktopDownload.unsigned')}</summary>
           <p className="mt-2 text-muted-foreground">{t('desktopDownload.security')} <code className="break-all">docs/operations/linux-desktop-supply-chain.md</code></p>
         </details>
       ) : null}
       {release && update ? <p role="note" data-testid="desktop-update-restart" className="rounded-lg border border-border bg-muted/50 p-3 text-xs leading-5">{t('desktopUpdate.restartAfterInstall')}</p> : null}
       {error !== null ? (
-        <div role="status" className="rounded-xl border border-border/60 bg-muted/25 p-4 text-sm">
+        <div role="status" className="rounded-xl bg-muted/25 p-4 text-sm ring-1 ring-inset ring-border/60">
           <strong className="font-medium">{t('desktopDownload.releaseError')}</strong>
           {error ? <details className="mt-2 text-xs text-muted-foreground"><summary className="cursor-pointer">{t('desktopDownload.errorDetails')}</summary><p className="mt-1 break-words">{error}</p></details> : null}
         </div>

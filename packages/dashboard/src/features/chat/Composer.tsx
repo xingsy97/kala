@@ -1473,7 +1473,7 @@ export function VoiceStopControl({
         aria-hidden="true"
       />
       <span className={cn(
-        'pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1 text-[10px] font-medium text-primary/65 transition-opacity',
+        'pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1 text-caption font-medium text-primary/65 transition-opacity',
         dragging && 'text-primary',
       )}>
         <span className="hidden md:inline">{armed ? t('composer.voice.releaseToSend') : t('composer.voice.send')}</span>
