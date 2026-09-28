@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ServerTerminalOutput } from '@agent-kernel/shared'
 import { SessionTerminalPanel } from './SessionTerminalPanel.js'
@@ -47,6 +47,9 @@ function makeSocket() {
 }
 
 describe('SessionTerminalPanel', () => {
+  let width: ReturnType<typeof vi.spyOn>
+  let height: ReturnType<typeof vi.spyOn>
+
   beforeEach(() => {
     writeMock.mockClear(); clearMock.mockClear(); focusMock.mockClear(); inputListeners.length = 0
     vi.stubGlobal('ResizeObserver', class ResizeObserverMock {
@@ -55,6 +58,13 @@ describe('SessionTerminalPanel', () => {
       unobserve(): void {}
       disconnect(): void {}
     })
+    width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(900)
+    height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+  })
+  afterEach(() => {
+    width.mockRestore()
+    height.mockRestore()
+    vi.unstubAllGlobals()
   })
 
   it('starts, filters output, sends xterm and touch input, resizes, clears, and does not kill on unmount', async () => {

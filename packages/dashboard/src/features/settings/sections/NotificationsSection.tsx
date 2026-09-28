@@ -158,7 +158,7 @@ function SystemNotificationsSettings(): JSX.Element {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-1 font-medium">{t('settings.notifications.system')}<HelpHint label={t('settings.notifications.system')}>{t('settings.notifications.systemDescription')}</HelpHint></div>
-          <p className="mt-1 text-[0.6875rem] text-muted-foreground" data-testid="desktop-notification-permission">
+          <p className="mt-1 text-caption text-muted-foreground" data-testid="desktop-notification-permission">
             {active
               ? endpoint ? t('settings.notifications.enabledDevice') : t('settings.notifications.enabledBrowser')
               : t('settings.notifications.permission', { value: permissionLabel(permission, t) })}
@@ -274,13 +274,13 @@ function NotificationDeviceRow({ device, busy, onRefresh, onTestResult }: {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-medium text-foreground">{device.name}{device.current ? ` · ${t('settings.notifications.currentDevice')}` : ''}</div>
-          <div className="mt-0.5 text-[0.6875rem] text-muted-foreground">{t('settings.notifications.lastRegistered', { value: new Date(device.lastSeenAt).toLocaleString() })}</div>
+          <div className="mt-0.5 text-caption text-muted-foreground">{t('settings.notifications.lastRegistered', { value: new Date(device.lastSeenAt).toLocaleString() })}</div>
         </div>
         <Toggle checked={device.enabled} onChange={(next) => { void update(next) }} ariaLabel={t('settings.notifications.deviceAria', { name: device.name })} disabled={busy} />
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
-        <button type="button" onClick={() => { void test() }} disabled={busy || !device.enabled} className="rounded border border-border px-2 py-1 text-[0.6875rem] hover:bg-muted disabled:opacity-50">{t('settings.notifications.sendTestShort')}</button>
-        {!device.current ? <button type="button" onClick={() => { void remove() }} disabled={busy} className="rounded border border-border px-2 py-1 text-[0.6875rem] text-muted-foreground hover:bg-muted disabled:opacity-50">{t('settings.notifications.remove')}</button> : null}
+        <button type="button" onClick={() => { void test() }} disabled={busy || !device.enabled} className="rounded border border-border px-2 py-1 text-caption hover:bg-muted disabled:opacity-50">{t('settings.notifications.sendTestShort')}</button>
+        {!device.current ? <button type="button" onClick={() => { void remove() }} disabled={busy} className="rounded border border-border px-2 py-1 text-caption text-muted-foreground hover:bg-muted disabled:opacity-50">{t('settings.notifications.remove')}</button> : null}
       </div>
     </div>
   )

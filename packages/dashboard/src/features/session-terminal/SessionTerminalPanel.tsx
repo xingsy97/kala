@@ -45,12 +45,35 @@ export function SessionTerminalPanel({
   const inputContextRef = useRef({ socket, workspaceId, sessionId, status })
   const autoStartedRef = useRef(false)
   const disposedRef = useRef(false)
+  const fitFrameRef = useRef<number | null>(null)
+  const lastSizeRef = useRef<{ terminalId: string; cols: number; rows: number } | null>(null)
   inputContextRef.current = { socket, workspaceId, sessionId, status }
 
   const setTerminalId = useCallback((value: string | null): void => {
     terminalIdRef.current = value
+    lastSizeRef.current = null
     setTerminalIdState(value)
   }, [])
+
+  const scheduleFitAndResize = useCallback((terminalIdOverride?: string): void => {
+    if (fitFrameRef.current !== null) cancelAnimationFrame(fitFrameRef.current)
+    fitFrameRef.current = requestAnimationFrame(() => {
+      fitFrameRef.current = requestAnimationFrame(() => {
+        fitFrameRef.current = null
+        const host = hostRef.current
+        const term = terminalRef.current
+        const fit = fitRef.current
+        if (!host || !term || !fit || host.clientWidth <= 0 || host.clientHeight <= 0) return
+        fit.fit()
+        const id = terminalIdOverride ?? terminalIdRef.current
+        if (!socket || !workspaceId || !id || term.cols <= 0 || term.rows <= 0) return
+        const previous = lastSizeRef.current
+        if (previous?.terminalId === id && previous.cols === term.cols && previous.rows === term.rows) return
+        lastSizeRef.current = { terminalId: id, cols: term.cols, rows: term.rows }
+        socket.emit('terminal:resize', { workspaceId, sessionId, terminalId: id, cols: term.cols, rows: term.rows })
+      })
+    })
+  }, [sessionId, socket, workspaceId])
 
   useEffect(() => {
     const term = new XTerm({ cursorBlink: true, fontSize: 12, convertEol: true, rows: 12, theme: { background: '#0b0f14' } })
@@ -82,13 +105,14 @@ export function SessionTerminalPanel({
       term.dispose()
       terminalRef.current = null
       fitRef.current = null
+      if (fitFrameRef.current !== null) cancelAnimationFrame(fitFrameRef.current)
     }
   }, [])
 
   useEffect(() => {
-    if (terminalRef.current) terminalRef.current.options.fontSize = 12 * interfaceScale
-    fitRef.current?.fit()
-  }, [interfaceScale])
+    if (terminalRef.current) terminalRef.current.options.fontSize = Math.round(12 * interfaceScale)
+    scheduleFitAndResize()
+  }, [interfaceScale, scheduleFitAndResize])
 
   useEffect(() => {
     const identity = `${workspaceId ?? ''}:${sessionId}`
@@ -127,18 +151,24 @@ export function SessionTerminalPanel({
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const fitAndResize = (): void => {
-      fitRef.current?.fit()
-      const term = terminalRef.current
-      const id = terminalIdRef.current
-      if (!term || !socket || !workspaceId || !id || status !== 'running') return
-      socket.emit('terminal:resize', { workspaceId, sessionId, terminalId: id, cols: term.cols, rows: term.rows })
-    }
-    const observer = new ResizeObserver(fitAndResize)
+    const observer = new ResizeObserver(() => scheduleFitAndResize())
     observer.observe(host)
-    fitAndResize()
-    return () => observer.disconnect()
-  }, [interfaceScale, sessionId, socket, status, workspaceId])
+    if (host.parentElement) observer.observe(host.parentElement)
+    const onLayoutChange = (): void => scheduleFitAndResize()
+    let active = true
+    window.addEventListener('resize', onLayoutChange)
+    document.addEventListener('visibilitychange', onLayoutChange)
+    void document.fonts?.ready.then(() => {
+      if (active) onLayoutChange()
+    })
+    scheduleFitAndResize()
+    return () => {
+      observer.disconnect()
+      active = false
+      window.removeEventListener('resize', onLayoutChange)
+      document.removeEventListener('visibilitychange', onLayoutChange)
+    }
+  }, [scheduleFitAndResize])
 
   const start = useCallback(async (): Promise<void> => {
     if (!socket || !workspaceId || !online) return
@@ -162,9 +192,9 @@ export function SessionTerminalPanel({
     setStatus('running')
     if (result.replay) term?.write(result.replay)
     if (!result.reused && result.cwd) term?.writeln(t('terminal.connected', { cwd: result.cwd }))
-    fitRef.current?.fit()
+    scheduleFitAndResize(result.terminalId)
     term?.focus()
-  }, [cwd, destroyOnUnmount, online, sessionId, setTerminalId, socket, t, workspaceId])
+  }, [cwd, destroyOnUnmount, online, scheduleFitAndResize, sessionId, setTerminalId, socket, t, workspaceId])
 
   useEffect(() => {
     if (!autoStart || autoStartedRef.current || !socket || !workspaceId || !online) return
@@ -221,7 +251,7 @@ export function SessionTerminalPanel({
       {!online ? <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200" role="status">{t('terminal.offlineHelp')}</div> : null}
       <div
         ref={hostRef}
-        className="min-h-0 min-w-0 flex-1 cursor-text overflow-hidden p-1.5 outline-none ring-inset focus-within:ring-1 focus-within:ring-primary/50"
+        className="min-h-0 min-w-0 flex-1 cursor-text overflow-hidden p-1.5 outline-none ring-inset focus-within:ring-1 focus-within:ring-primary/50 [&_.xterm]:h-full"
         data-testid="terminal-viewport"
         onPointerDown={() => terminalRef.current?.focus()}
         onTouchStart={() => terminalRef.current?.focus()}

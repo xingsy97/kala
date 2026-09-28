@@ -65,6 +65,9 @@ describe('WorkspaceMetadataDialog', () => {
 
     expect(screen.queryByText('Working dir')).toBeNull()
     expect(screen.queryByText('/tmp/not-a-workspace-property')).toBeNull()
+    expect(screen.getByTestId('workspace-metadata-dialog').className).toContain('grid-rows-[auto_minmax(0,1fr)]')
+    expect(screen.getByTestId('workspace-metadata-body').className).toContain('overflow-y-auto')
+    expect(screen.getByTestId('workspace-technical-details').hasAttribute('open')).toBe(false)
   })
 
   it('shows and revokes a saved executor identity', async () => {

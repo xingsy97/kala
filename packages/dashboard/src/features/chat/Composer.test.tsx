@@ -21,7 +21,8 @@ function renderComposer(props?: {
   onReleaseFiles?: (files: readonly ReferencedFileContent[]) => Promise<void>
   onCompact?: () => void
   onCancel?: () => void
-  onClearSession?: () => void
+  onClearTranscript?: () => void
+  onNewSession?: () => void
   onRenameSession?: (label: string | null) => void
   onDeleteSession?: () => void
   onListFiles?: (query: string) => Promise<readonly FileListEntry[]>
@@ -66,7 +67,8 @@ function renderComposer(props?: {
       {...(props?.onReleaseFiles ? { onReleaseFiles: props.onReleaseFiles } : {})}
       onCompact={props?.onCompact ?? (() => {})}
       {...(props?.onCancel ? { onCancel: props.onCancel } : {})}
-      {...(props?.onClearSession ? { onClearSession: props.onClearSession } : {})}
+      {...(props?.onClearTranscript ? { onClearTranscript: props.onClearTranscript } : {})}
+      {...(props?.onNewSession ? { onNewSession: props.onNewSession } : {})}
       {...(props?.onRenameSession ? { onRenameSession: props.onRenameSession } : {})}
       {...(props?.onDeleteSession ? { onDeleteSession: props.onDeleteSession } : {})}
       {...(props?.onListFiles ? { onListFiles: props.onListFiles } : {})}
@@ -309,10 +311,10 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('new instruction', 'steer', undefined, undefined)
   })
 
-  it('runs /clear as a command when fresh-session creation is available', () => {
+  it('runs /clear as a visual-only transcript command', () => {
     const onSubmit = vi.fn()
-    const onClearSession = vi.fn()
-    renderComposer({ onSubmit, onClearSession })
+    const onClearTranscript = vi.fn()
+    renderComposer({ onSubmit, onClearTranscript })
 
     fireEvent.change(screen.getByTestId('composer-input'), {
       target: { value: '/cle' },
@@ -322,8 +324,21 @@ describe('Composer', () => {
     expect(screen.getByText('/clear')).toBeTruthy()
     fireEvent.click(screen.getByText('/clear'))
 
-    expect(onClearSession).toHaveBeenCalledTimes(1)
+    expect(onClearTranscript).toHaveBeenCalledTimes(1)
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('runs /new through the new-session callback without submitting a message', () => {
+    const onSubmit = vi.fn()
+    const onNewSession = vi.fn()
+    renderComposer({ onSubmit, onNewSession })
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '/new' } })
+    fireEvent.click(screen.getByTestId('composer-send'))
+
+    expect(onNewSession).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
   })
 

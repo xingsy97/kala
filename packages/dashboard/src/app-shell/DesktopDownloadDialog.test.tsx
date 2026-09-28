@@ -59,8 +59,8 @@ describe('DesktopDownloadDialog', () => {
     expect(deb.hasAttribute('download')).toBe(true)
     expect(screen.getByRole('link', { name: 'Dependency manifest' }).getAttribute('href')).toBe('/downloads/desktop/immutable.dependencies.json')
     expect(screen.getByText(/Version 0.2.0~rc.1/)).toBeTruthy()
-    expect(screen.getByRole('note').textContent).toContain('Unsigned release candidate')
-    expect(screen.getByRole('note').textContent).toContain('RUSTSEC-2024-0429')
+    expect(screen.getByRole('note').textContent).toContain('Preview build')
+    expect(screen.getByRole('note').textContent).toContain('known advisories')
     expect(screen.getByText(/Checksums detect corruption/).textContent).toContain('does not enable automatic updates')
     expect(await screen.findByText(/Unavailable — a production signed APT/)).toBeTruthy()
     expect(screen.queryByText('One-paste APT install')).toBeNull()
@@ -70,17 +70,17 @@ describe('DesktopDownloadDialog', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
-  it('disables downloads while loading and reports failures without artifact links', async () => {
+  it('shows a focused unavailable state without unrelated release warnings or artifact controls', async () => {
     let reject: (reason: Error) => void = () => {}
     vi.mocked(loadDesktopDownload).mockReturnValue(new Promise((_resolve, rejectPromise) => { reject = rejectPromise }))
     render(<DesktopDownloadDialog />)
     open()
-    expect((screen.getByRole('button', { name: 'Download Linux amd64 .deb' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText(/Checking this deployment/)).toBeTruthy()
     reject(new Error('Desktop release files are incomplete. Downloads are disabled.'))
-    await screen.findByRole('alert')
+    await screen.findByText('No Linux desktop package is included in this deployment.')
     expect(screen.queryAllByRole('link')).toHaveLength(0)
-    expect((screen.getByRole('button', { name: 'Download Linux amd64 .deb' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByTestId('desktop-release-security')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Download Linux amd64 .deb' })).toBeNull()
   })
 
   it('copies the full approved APT block and exposes clipboard failures without losing commands', async () => {
@@ -124,7 +124,7 @@ describe('DesktopDownloadDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '下载 Linux 桌面客户端' }))
     expect(screen.getByRole('dialog').textContent).toContain('Linux 桌面版')
     expect(await screen.findByRole('link', { name: '下载 Linux amd64 .deb' })).toBeTruthy()
-    expect(screen.getByRole('note').textContent).toContain('未签名的候选版本')
+    expect(screen.getByRole('note').textContent).toContain('预览版本')
     expect(screen.getByText(/尚未配置生产环境签名 APT/)).toBeTruthy()
     expect(screen.queryByText(/浏览器不能安装软件包/)).toBeNull()
     const copy = screen.getByRole('button', { name: '复制下载并安装 .deb' })
@@ -158,14 +158,14 @@ describe('DesktopDownloadDialog', () => {
     vi.mocked(loadDesktopDownload).mockRejectedValue(new Error('Desktop release files are incomplete.'))
     render(<DesktopDownloadDialog />)
     fireEvent.click(screen.getByTestId('app-shell-download-desktop'))
-    expect((await screen.findByRole('alert')).textContent).toContain('桌面客户端下载暂不可用。')
+    expect((await screen.findByRole('status')).textContent).toContain('当前部署未包含 Linux 桌面安装包。')
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
   it('shows the localized restart requirement only for an update dialog', async () => {
     await i18n.changeLanguage('zh')
     render(<DesktopDownloadDialog update />)
     fireEvent.click(screen.getByTestId('app-shell-download-desktop'))
-    const notice = screen.getByTestId('desktop-update-restart')
+    const notice = await screen.findByTestId('desktop-update-restart')
     expect(notice.textContent).toContain('从托盘菜单选择“退出”')
     expect(notice.textContent).toContain('不会替换正在运行的进程')
   })

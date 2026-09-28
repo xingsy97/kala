@@ -36,6 +36,11 @@ const RULES = [
     pattern: 'overflow-(auto|scroll|x-auto|y-auto|x-scroll|y-scroll)',
     hint: 'Wrap in <ScrollArea/> unless it is content-level fallback (STYLE.md §9).',
   },
+  {
+    id: 'micro-typography',
+    pattern: 'text-\\[(0\\.(5|5625|625|6875)rem|([0-9]|1[01])px)\\]',
+    hint: 'Use a semantic typography token; product UI must not render below the caption role.',
+  },
 ]
 
 function countHits(pattern) {

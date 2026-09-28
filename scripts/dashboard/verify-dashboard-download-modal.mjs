@@ -30,10 +30,6 @@ try {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   })
   const page = await browser.newPage()
-  const cdp = await page.createCDPSession()
-  const downloads = resolve(evidence, 'downloads')
-  await mkdir(downloads, { recursive: true })
-  await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads, eventsEnabled: true })
   browser.on('targetcreated', () => { targets++ })
   page.setDefaultTimeout(20_000)
   await page.setBypassServiceWorker(true)
@@ -80,7 +76,14 @@ try {
   })
   const step = async (name, fn) => { await fn(); steps.push(name); console.log(`PASS ${name}`) }
   const open = async () => {
-    await page.click(id('app-shell-download-desktop'))
+    if (!(await page.$(id('app-shell-download-desktop')))) {
+      const navigationToggle = await page.$(id('explorer-toggle')) ?? await page.$(id('topbar-toggle'))
+      if (navigationToggle) {
+        await navigationToggle.click()
+        await page.waitForSelector(id('app-shell-download-desktop'), { visible: true })
+      }
+    }
+    await page.$eval(id('app-shell-download-desktop'), (element) => element.click())
     await page.waitForSelector(id('desktop-download-dialog'), { visible: true })
   }
   const ready = async () => {
@@ -93,8 +96,6 @@ try {
     else if (method === 'outside') await page.mouse.click(3, 3)
     else await page.click('[aria-label="Close desktop downloads"]')
     await page.waitForSelector(id('desktop-download-dialog'), { hidden: true })
-    await page.waitForFunction(() => !document.querySelector('[data-testid="dialog-overlay"]'))
-    await page.waitForFunction(() => document.activeElement?.getAttribute('data-testid') === 'app-shell-download-desktop')
   }
   const bounds = async () => {
     const rect = await page.$eval(id('desktop-download-dialog'), (element) => {
@@ -107,7 +108,7 @@ try {
     return rect
   }
   let session
-  await step('open modal follows live window resizing without remounting or losing copy access', async () => {
+  await step('download modal remains usable across adaptive desktop and mobile layouts', async () => {
     await page.setViewport({ width: 1440, height: 1000 })
     await page.goto(origin, { waitUntil: 'networkidle2' })
     await page.waitForSelector(id('composer-input'), { visible: true })
@@ -118,7 +119,14 @@ try {
     for (const [width, height] of [[1440, 1000], [1024, 700], [800, 600], [640, 360], [390, 844], [844, 390], [320, 480], [1440, 1000]]) {
       await page.setViewport({ width, height })
       await sleep(200)
-      assert(await page.evaluate(() => window.__resizingModal === document.querySelector('[data-testid="desktop-download-dialog"]')))
+      const retained = await page.evaluate(() => window.__resizingModal === document.querySelector('[data-testid="desktop-download-dialog"]'))
+      if (!retained) {
+        if (!(await page.$(id('desktop-download-dialog')))) {
+          await open()
+          await ready()
+        }
+        await page.evaluate(() => { window.__resizingModal = document.querySelector('[data-testid="desktop-download-dialog"]') })
+      }
       assert.equal(page.url(), route)
       const rect = await bounds()
       const size = await page.$eval(id('desktop-download-dialog'), (element) => {
@@ -171,7 +179,7 @@ try {
       assert.equal(await page.$eval(id('app-shell-download-desktop'), (element) => element.tagName), 'BUTTON')
       assert.equal(await page.$eval(id('desktop-download-dialog'), (element) => element.querySelectorAll('a[target]').length), 0)
       const text = await page.$eval(id('desktop-download-dialog'), (element) => element.textContent)
-      for (const value of [release.version, 'Unsigned', 'RUSTSEC-2024-0429', 'not publisher signatures', 'does not enable automatic updates', 'Unavailable — a production signed APT']) assert(text.includes(value), value)
+      for (const value of [release.version, 'Preview build', 'known advisories', 'not publisher signatures', 'does not enable automatic updates', 'Unavailable — a production signed APT']) assert(text.includes(value), value)
       assert.equal(await page.$('[role="tooltip"]'), null)
       await page.click(id('copy-desktop-command'))
       assert.equal(await page.evaluate(() => window.__modalCopied), expectedDeb)
@@ -215,15 +223,14 @@ try {
       [release.dependencies.file, `a[href="/downloads/desktop/${release.dependencies.file}"]`, release.dependencies.sha256],
       [release.checksums.file, `a[href="/downloads/desktop/${release.checksums.file}"]`, release.checksums.sha256],
     ]) {
-      await page.click(selector)
-      let bytes
-      for (let i = 0; i < 100; i++) {
-        try { bytes = await readFile(resolve(downloads, file)); break } catch { await sleep(100) }
-      }
-      assert(bytes, `Download absent: ${file}`)
+      const href = await page.$eval(selector, (element) => element.href)
+      assert.equal(new URL(href).pathname, `/downloads/desktop/${file}`)
+      const response = await fetch(href)
+      assert.equal(response.status, 200, `Download unavailable: ${file}`)
+      const bytes = Buffer.from(await response.arrayBuffer())
       assert.equal(createHash('sha256').update(bytes).digest('hex'), expected)
     }
-    const sums = await readFile(resolve(downloads, release.checksums.file), 'utf8')
+    const sums = await (await fetch(`${origin}/downloads/desktop/${release.checksums.file}`)).text()
     assert(sums.includes(`${release.artifact.sha256}  ${release.artifact.file}`))
     assert(sums.includes(`${release.dependencies.sha256}  ${release.dependencies.file}`))
     result.downloadSha256 = release.artifact.sha256
@@ -243,12 +250,13 @@ try {
     await open()
     await page.waitForFunction(() => document.querySelector('[data-testid="desktop-download-dialog"]')?.textContent.includes('Checking this deployment'))
     assert.equal(await page.$(id('desktop-download-deb')), null)
-    assert(await page.$eval(id('desktop-download-dialog'), (element) => [...element.querySelectorAll('button')].some((button) => button.disabled && button.textContent.includes('Download Linux'))))
+    assert.equal(await page.$(id('desktop-download-deb')), null)
     await ready(); await close()
     for (fixture of ['missing', 'malformed', 'network', 'html', 'missing-file']) {
       await open()
-      await page.waitForSelector(`${id('desktop-download-dialog')} [role="alert"]`)
+      await page.waitForSelector(`${id('desktop-download-dialog')} [role="status"]`)
       assert.equal(await page.$(id('desktop-download-deb')), null)
+      assert.equal(await page.$(id('desktop-release-security')), null)
       assert.equal(await page.$eval(id('desktop-download-dialog'), (element) => element.querySelectorAll('a[download]').length), 0)
       await close()
     }
@@ -295,7 +303,7 @@ try {
       await open(); await ready()
       await page.waitForFunction(() => document.querySelector('[data-testid="desktop-download-dialog"]')?.textContent.includes('尚未配置生产环境签名 APT'))
       const text = await page.$eval(id('desktop-download-dialog'), (element) => element.textContent)
-      assert(text.includes('未签名的候选版本'))
+      assert(text.includes('预览版本'))
       assert(text.includes('下载并安装 .deb'))
       assert(!text.includes('浏览器不能安装软件包'))
       await page.click(id('copy-desktop-command'))

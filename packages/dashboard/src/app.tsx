@@ -7,6 +7,7 @@ import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
 import { notify } from './notify.js'
+import { writeTextToClipboard } from './lib/clipboard.js'
 
 import type { Message, MessageContent, ReferencedFileContent } from '@agent-kernel/kernel'
 
@@ -118,7 +119,6 @@ export function workspaceTerminalDialogSizeClass(expanded: boolean): string {
 
 import {
   cancelSession,
-  clearSession,
   createSessionWithAck,
   deleteQueuedMessage,
   deleteSession,
@@ -141,7 +141,7 @@ import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js
 import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { emitRpc } from './socket-rpc.js'
 import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage, releaseMessageAttachments, uploadMessageAttachment } from './admission-client.js'
-import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, type TranscriptItem } from './transcript.js'
+import { appendLiveTranscriptItems, appendTranscriptBaseItems, lastUserTranscriptIndex, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, type TranscriptItem } from './transcript.js'
 import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent, shouldShowQueuedAutoCompact } from './app-logic/compaction.js'
 import { addQueuedMessageTombstone, mergeOptimisticQueuedMessages, nextSessionSelection, reconcileOptimisticQueuedMessages, removeQueuedMessageTombstone, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity, isRunningSessionActivity } from './app-logic/session-activity.js'
@@ -345,8 +345,8 @@ export function App(): JSX.Element {
   const [appBadgeEnabled] = useBooleanPref(PREF_APP_BADGE_ENABLED, true)
   const [keepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
   const [showPinnedMessage] = useBooleanPref(PREF_SHOW_PINNED_MESSAGE, true)
-  const sessionExplorerFontSizePx = (SESSION_EXPLORER_FONT_SIZE_PX[sessionExplorerFontSize] ?? 13) * interfaceScale
-  const fileExplorerFontSizePx = (FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? 11) * interfaceScale
+  const sessionExplorerFontSizePx = Math.round((SESSION_EXPLORER_FONT_SIZE_PX[sessionExplorerFontSize] ?? 13) * interfaceScale)
+  const fileExplorerFontSizePx = Math.round((FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? 11) * interfaceScale)
   const cachedSessionIdsRef = useRef<ReadonlySet<string>>(new Set())
   const [hostEndpoint, setHostEndpoint] = useState<ResolvedHostEndpoint>(() => resolveHostEndpoint())
   const identityCacheNamespace = privateCloudMode
@@ -928,11 +928,6 @@ export function App(): JSX.Element {
     }
     window.addEventListener('keydown',handler);return()=>window.removeEventListener('keydown',handler)
   },[config.sessionId,newSession,selectSession,sessionTabs])
-  const clearCurrentSession = (): void => {
-    if (!session.socket || config.sessionId === null || !currentAgentRuntimeCapabilities.clear) return
-    sessionViewCache.delete(config.sessionId)
-    clearSession(session.socket, config.sessionId)
-  }
   const pickWorkspaceForNew = async (
     agentRuntime: import('@agent-kernel/shared').AgentRuntimeId,
     workspaceId: string,
@@ -1226,11 +1221,43 @@ export function App(): JSX.Element {
       ),
     [transcriptBase, stateMessages, transcriptTimeline, session.streamingText, session.streamingActive, session.streamingAnchor, session.retainedDrafts, visiblePendingUserMessages, visibleQueuedMessages],
   )
+  const [transcriptViewStarts, setTranscriptViewStarts] = useState<Record<string, number>>({})
+  const transcriptViewStart = activeSessionId ? transcriptViewStarts[activeSessionId] ?? 0 : 0
+  const visibleChatItems = useMemo(
+    () => chatItems.slice(Math.min(transcriptViewStart, Math.max(0, chatItems.length - 1))),
+    [chatItems, transcriptViewStart],
+  )
+  const clearTranscriptView = useCallback((): void => {
+    if (!activeSessionId) return
+    const start = lastUserTranscriptIndex(chatItems)
+    setTranscriptViewStarts((current) => ({ ...current, [activeSessionId]: start }))
+  }, [activeSessionId, chatItems])
+  const createNewSessionFromCurrent = useCallback(async (): Promise<void> => {
+    if (!controlSocket || !currentSession) {
+      notify.error(t('app.socketNotConnected'))
+      return
+    }
+    const sessionId = randomId()
+    const agentRuntime = currentSession.agentRuntime ?? session.agentRuntime ?? 'kernel'
+    try {
+      await createSessionWithAck(controlSocket, {
+        sessionId,
+        agentRuntime,
+        ...(currentSession.workspaceId ? { workspaceId: currentSession.workspaceId } : {}),
+        ...(currentSession.workspaceName ? { workspaceName: currentSession.workspaceName } : {}),
+        ...(currentCwd ? { cwd: currentCwd } : {}),
+        ...(agentRuntime === 'kernel' ? { selectedModel: session.selectedModel || preferredModel } : {}),
+      })
+      selectCreatedSession(sessionId)
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : String(error))
+    }
+  }, [controlSocket, currentCwd, currentSession, notify, preferredModel, selectCreatedSession, session.agentRuntime, session.selectedModel, t])
   // The header only needs the *count* of visible messages; derive it from the
   // already-built transcript instead of building a second full transcript.
   const chatMessagesCount = useMemo(
-    () => chatItems.filter((item) => item.kind === 'message').length,
-    [chatItems],
+    () => visibleChatItems.filter((item) => item.kind === 'message').length,
+    [visibleChatItems],
   )
   const backgroundTasks = useMemo(
     () => backgroundTerminalTasks(session.timeline),
@@ -1408,7 +1435,7 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.newSessionHint'),
         icon: Plus,
         keywords: ['create', 'start'],
-        run: () => newSession(),
+        run: () => activeSessionId === null ? newSession() : void createNewSessionFromCurrent(),
       },
       {
         id: 'session.info',
@@ -1481,11 +1508,9 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.clearSessionHint'),
         icon: Eraser,
         keywords: ['reset'],
-        disabled: !canRun || !currentAgentRuntimeCapabilities.clear,
+        disabled: !canRun,
         disabledReason: t('commandPalette.disabled.noActiveSession'),
-        run: () => {
-          if (socket && activeSessionId !== null) clearSession(socket, activeSessionId)
-        },
+        run: clearTranscriptView,
       },
     )
 
@@ -1603,6 +1628,8 @@ export function App(): JSX.Element {
     return cmds
   }, [
     activeSessionId,
+    clearTranscriptView,
+    createNewSessionFromCurrent,
     currentAgentRuntimeCapabilities,
     control.executors.length,
     hasSelectedSession,
@@ -1955,7 +1982,7 @@ export function App(): JSX.Element {
                         sessionId={activeSessionId}
                         attachmentHost={hostEndpoint.url}
                         attachmentToken={config.token}
-                        items={chatItems}
+                        items={visibleChatItems}
                         highlightIndex={highlightIndex}
                         pinnedToBottom={chatPinnedToBottom}
                         onPinnedChange={setChatPinnedToBottom}
@@ -2066,7 +2093,7 @@ export function App(): JSX.Element {
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium">{t('composer.delivery.failedTitle')}</div>
                                 <div className="mt-0.5 break-words">{messageDeliveryError.message}</div>
-                                {messageDeliveryError.operationId ? <div className="mt-1 font-mono text-[0.625rem] opacity-75">{messageDeliveryError.operationId}</div> : null}
+                                {messageDeliveryError.operationId ? <div className="mt-1 font-mono text-caption opacity-75">{messageDeliveryError.operationId}</div> : null}
                               </div>
                               <Button type="button" size="sm" variant="outline" className="h-7 shrink-0" onClick={() => { setMessageDeliveryError(null); controlSocket?.connect() }}>
                                 {t('composer.delivery.reconnect')}
@@ -2154,7 +2181,8 @@ export function App(): JSX.Element {
                               }
                             : undefined}
                           onCompact={currentAgentRuntimeCapabilities.compact ? runCompactNow : undefined}
-                          onClearSession={currentAgentRuntimeCapabilities.clear ? clearCurrentSession : undefined}
+                          onClearTranscript={clearTranscriptView}
+                          onNewSession={createNewSessionFromCurrent}
                           onCancel={() => {
                             if (!session.socket || activeSessionId === null) return
                             if (cancelPendingSessionId === activeSessionId) return
@@ -2505,9 +2533,9 @@ export function App(): JSX.Element {
               <div className="space-y-3">
                 <p>{t('app.slashDelete.description')}</p>
                 <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground">
-                  <div className="text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">{t('app.slashDelete.target')}</div>
+                  <div className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t('app.slashDelete.target')}</div>
                   <div className="mt-1 truncate font-medium" title={sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}>{sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}</div>
-                  <div className="mt-1 break-all font-mono text-[0.6875rem] text-muted-foreground">{slashDelete?.sessionId}</div>
+                  <div className="mt-1 break-all font-mono text-caption text-muted-foreground">{slashDelete?.sessionId}</div>
                 </div>
                 {slashDeleteDescendantCount > 0 ? <p className="text-amber-700 dark:text-amber-300">{t('app.slashDelete.children', { count: slashDeleteDescendantCount })}</p> : null}
                 <p>{t('app.slashDelete.confirmDescription', { phrase: slashDeleteRequiredPhrase, label: sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '') })}</p>
@@ -2703,8 +2731,8 @@ export function App(): JSX.Element {
             toast:
               'group toast pointer-events-none border border-border/70 bg-popover text-popover-foreground shadow-md rounded-md text-xs pl-3 pr-3 py-2 border-l-2',
             title: 'text-xs font-medium',
-            description: 'text-[0.6875rem] text-muted-foreground mt-0.5',
-            actionButton: 'pointer-events-auto text-[0.6875rem] px-2 py-0.5 rounded bg-accent text-accent-foreground hover:bg-accent/80',
+            description: 'text-caption text-muted-foreground mt-0.5',
+            actionButton: 'pointer-events-auto text-caption px-2 py-0.5 rounded bg-accent text-accent-foreground hover:bg-accent/80',
             success: 'border-l-emerald-500/70',
             info: 'border-l-sky-500/70',
             warning: 'border-l-amber-500/70',
@@ -2883,7 +2911,7 @@ export function NoSessionArea({
         <section className="ak-hero-surface overflow-hidden rounded-3xl border border-border/35 bg-card/60 p-5 sm:p-7" data-testid="session-cockpit-hero">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-primary">
+              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-caption font-semibold uppercase tracking-[0.16em] text-primary">
                 <Sparkles className="h-3.5 w-3.5" aria-hidden />
                 {t('app.cockpit.eyebrow')}
               </div>
@@ -2932,7 +2960,7 @@ export function NoSessionArea({
                     <div className="flex min-w-0 items-center gap-2">
                       <SessionStatusIndicator status={status} />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">{sessionDisplayLabel(item, item.sessionId)}</span>
-                      <span className="flex-none text-[0.6875rem] text-muted-foreground">{formatRelativeTime(item.lastEventAt ?? item.createdAt)}</span>
+                      <span className="flex-none text-caption text-muted-foreground">{formatRelativeTime(item.lastEventAt ?? item.createdAt)}</span>
                     </div>
                     <div className="truncate pl-5 text-xs text-muted-foreground">{item.workspaceName ?? item.workspaceId ?? t('app.cockpit.simpleChat')} · {item.eventCount} events</div>
                   </button>
@@ -2958,7 +2986,7 @@ export function NoSessionArea({
                     <span className="block truncate text-sm font-medium">{executor.workspaceName ?? executor.workspaceId}</span>
                     <span className="block truncate text-xs text-muted-foreground">{[executor.hostname, executor.os, executor.executorVersion].filter(Boolean).join(' · ')}</span>
                   </span>
-                  <span className="text-[0.6875rem] text-muted-foreground">{sessions.filter((item) => item.workspaceId === executor.workspaceId).length}</span>
+                  <span className="text-caption text-muted-foreground">{sessions.filter((item) => item.workspaceId === executor.workspaceId).length}</span>
                 </button>
               )) : (
                 <div className="px-4 py-8 text-sm text-muted-foreground">{t('app.cockpit.noWorkspaces')}</div>
@@ -3178,7 +3206,7 @@ export function WorkbenchToolbar({
         <span className="min-w-0 truncate font-semibold tracking-[-0.01em] text-inherit" data-testid="session-label">
           {displayLabel}
         </span>
-        {simpleChat ? <span className={cn('flex-none rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary', isTopbarPlacement && 'hidden sm:inline-flex')} data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
+        {simpleChat ? <span className={cn('flex-none rounded-full bg-primary/10 px-2 py-0.5 text-caption font-medium text-primary', isTopbarPlacement && 'hidden sm:inline-flex')} data-testid="simple-chat-badge">{t('explorer.chat')}</span> : null}
       </span>
       {sessionSelected && onChangeCwd ? (
         <Button
@@ -3415,7 +3443,7 @@ export function ConnectionStatusProvider({ socket, status, transport, cursor, wo
   }, [enabled, measure])
 
   const diagnostics = { status, transport: transport ?? 'unknown', hostRttMs: hostRtt, hostError, ...(executorRequired ? { executorRttMs: executorRtt, executorError, executorPresence: executorConnected ? 'online' : 'offline' } : {}), sessionCursor: cursor }
-  const copy = (): void => { void navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => setCopied(false)) }
+  const copy = (): void => { void writeTextToClipboard(JSON.stringify(diagnostics, null, 2)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => { setCopied(false); notify.error(t('common.copyFailed')) }) }
   const transientProbeFailed = hostError !== null || executorRequired && executorConnected && executorError !== null
   const probeFailed = status === 'ready' && transientProbeFailed && probeFailureStreak >= CONNECTION_HEALTH_FAILURES_BEFORE_ISSUE
   const executorOffline = status === 'ready' && executorRequired && !executorConnected
@@ -3445,7 +3473,7 @@ export function ConnectionStatusProvider({ socket, status, transport, cursor, wo
             </span>
           ) : <span className={cn('h-2 w-2 rounded-full', statusDot(displayStatus))} />}
           {brand || compact ? null : <span className="hidden sm:inline">{label}</span>}
-          {brand || compact ? null : <span className="hidden font-mono text-[0.625rem] tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineText}</span>}
+          {brand || compact ? null : <span className="hidden font-mono text-caption tabular-nums text-muted-foreground md:inline" data-testid="connection-headline-latency">{headlineText}</span>}
         </button>
         {open && typeof document !== 'undefined' ? createPortal(
           <div className={cn('fixed left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] top-[max(3.5rem,calc(env(safe-area-inset-top)+3rem))] z-[100] mx-auto max-h-[calc(var(--ak-viewport-h,100dvh)-max(4rem,calc(env(safe-area-inset-top)+3.5rem))-max(0.5rem,env(safe-area-inset-bottom)))] max-w-md overflow-y-auto rounded-2xl bg-popover p-4 text-xs shadow-2xl ring-1 ring-border/30 sm:mt-2 sm:max-h-[min(42rem,calc(100vh-5rem))] sm:w-[28rem]', brand ? cn('sm:left-3 sm:right-auto sm:top-12 sm:mx-0', triggerId === 'mobile-drawer' && 'sm:w-[22.5rem]') : 'sm:left-auto sm:right-3 sm:top-12 sm:mx-0')} data-testid="connection-status-popover">
@@ -3454,7 +3482,7 @@ export function ConnectionStatusProvider({ socket, status, transport, cursor, wo
               <h3 className="text-sm font-semibold">{t('connectionHealth.title')}</h3>
               <HelpHint label={t('connectionHealth.title')} testId="connection-health-help">{t('connectionHealth.subtitle')}</HelpHint>
             </div>
-            <span className={cn('inline-flex items-center gap-1.5 text-[0.6875rem] font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : failed ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : failed ? 'connectionHealth.issue' : 'connectionHealth.check')}</span>
+            <span className={cn('inline-flex items-center gap-1.5 text-caption font-medium', healthy ? 'text-emerald-600 dark:text-emerald-400' : failed ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300')}><span className={cn('h-1.5 w-1.5 rounded-full', healthy ? 'bg-emerald-500' : failed ? 'bg-rose-500' : 'bg-amber-500')} />{t(healthy ? 'connectionHealth.healthy' : failed ? 'connectionHealth.issue' : 'connectionHealth.check')}</span>
           </div>
           <div className="divide-y divide-border/30 rounded-2xl bg-muted/20 px-3">
             <ConnectionPath
@@ -3469,7 +3497,7 @@ export function ConnectionStatusProvider({ socket, status, transport, cursor, wo
           </div>
           <ConnectionHealthCurve key={workspaceId ?? 'chat'} samples={history} executorRequired={executorRequired} now={history[history.length - 1]?.at ?? Date.now()} t={t} />
           <div className="mt-3 flex items-center gap-2"><Button size="sm" variant="outline" className="h-8" disabled={checking || !socket?.connected} onClick={measure}>{t(checking ? 'connectionHealth.measuring' : 'connectionHealth.measureAgain')}</Button><Button size="sm" variant="ghost" className="h-8" onClick={onResync}>{t('connectionHealth.resync')}</Button></div>
-          <div className="mt-2 flex min-w-0 items-center justify-between gap-3 text-[0.6875rem] text-muted-foreground" data-testid="connection-transport-row">
+          <div className="mt-2 flex min-w-0 items-center justify-between gap-3 text-caption text-muted-foreground" data-testid="connection-transport-row">
             <span className="min-w-0 truncate">{t('connectionHealth.transport')} · {transport ?? t('connectionHealth.unknown')}</span>
             <Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy} title={t('connectionHealth.diagnostics')}>{t(copied ? 'common.copied' : 'common.copy')}</Button>
           </div>
@@ -3500,7 +3528,7 @@ function ConnectionPath({ deviceLabel, serviceLabel, executorLabel, hostSegment,
 }
 
 function ConnectionEndpoint({ label }: { label: string }): JSX.Element {
-  return <span className="rounded-full bg-background/80 px-2 py-1 text-[0.625rem] font-medium text-foreground ring-1 ring-border/40">{label}</span>
+  return <span className="rounded-full bg-background/80 px-2 py-1 text-caption font-medium text-foreground ring-1 ring-border/40">{label}</span>
 }
 
 function ConnectionSegment({ segment, measuringLabel, testId }: { segment: ConnectionSegmentInfo; measuringLabel: string; testId: string }): JSX.Element {
@@ -3509,7 +3537,7 @@ function ConnectionSegment({ segment, measuringLabel, testId }: { segment: Conne
   return (
     <div className="flex min-w-0 items-center gap-1" title={`${segment.label}: ${state}${segment.latency !== null && segment.latency !== undefined ? ` · ${segment.latency} ms` : ''}`} data-testid={testId}>
       <span className={cn('h-px min-w-2 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/60' : segment.tone === 'failed' ? 'bg-rose-500/60' : 'bg-amber-500/60')} />
-      <span className={cn('whitespace-nowrap rounded-full px-1.5 py-0.5 font-mono text-[0.625rem] tabular-nums', segment.tone === 'healthy' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : segment.tone === 'failed' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300')}>{label}</span>
+      <span className={cn('whitespace-nowrap rounded-full px-1.5 py-0.5 font-mono text-caption tabular-nums', segment.tone === 'healthy' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : segment.tone === 'failed' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300')}>{label}</span>
       <span className={cn('h-px min-w-2 flex-1', segment.tone === 'healthy' ? 'bg-emerald-500/60' : segment.tone === 'failed' ? 'bg-rose-500/60' : 'bg-amber-500/60')} />
     </div>
   )
@@ -3539,7 +3567,7 @@ function ConnectionHealthCurve({ samples, executorRequired, now, t }: { samples:
         <div>
           <p className="text-xs font-medium text-foreground">{t('connectionHealth.historyTitle')}</p>
         </div>
-        <div className="flex flex-none items-center gap-2 text-[0.625rem] text-muted-foreground">
+        <div className="flex flex-none items-center gap-2 text-caption text-muted-foreground">
           <span className="inline-flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-primary" />{t('connectionHealth.hostLegend')}</span>
           {executorRequired ? <span className="inline-flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-sky-400" />{t('connectionHealth.executorLegend')}</span> : null}
         </div>
@@ -3573,7 +3601,7 @@ function ConnectionHealthCurve({ samples, executorRequired, now, t }: { samples:
         })}
       </svg>
       {hovered ? (
-        <div className="pointer-events-none absolute top-12 z-10 min-w-32 -translate-x-1/2 rounded-lg bg-popover px-2.5 py-2 text-[0.6875rem] shadow-lg ring-1 ring-border/40" style={{ left: `calc(0.75rem + ${hovered.x / width * 100}%)` }} data-testid="connection-health-tooltip">
+        <div className="pointer-events-none absolute top-12 z-10 min-w-32 -translate-x-1/2 rounded-lg bg-popover px-2.5 py-2 text-caption shadow-lg ring-1 ring-border/40" style={{ left: `calc(0.75rem + ${hovered.x / width * 100}%)` }} data-testid="connection-health-tooltip">
           {formatHealthSampleTitle(hovered.sample, t).split('\n').map((line) => <div key={line}>{line}</div>)}
         </div>
       ) : null}
@@ -3621,7 +3649,7 @@ function HealthRow({ label, state, tone, latency, measuring = false, measuringLa
     <div className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2 py-1.5">
       <span className={cn('h-2 w-2 rounded-full', tone === 'healthy' ? 'bg-emerald-500' : tone === 'failed' ? 'bg-rose-500' : 'bg-amber-500')} />
       <span className="min-w-0 truncate font-medium text-foreground">{label}</span>
-      <span className="min-w-0 truncate text-[0.6875rem] text-muted-foreground">{measuring ? measuringLabel : state}</span>
+      <span className="min-w-0 truncate text-caption text-muted-foreground">{measuring ? measuringLabel : state}</span>
       {latency !== null && latency !== undefined ? <span className="font-mono text-xs tabular-nums text-foreground">{latency} ms</span> : null}
     </div>
   )

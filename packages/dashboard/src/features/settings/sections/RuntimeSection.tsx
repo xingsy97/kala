@@ -105,7 +105,7 @@ export function RuntimeSection({
                 {!platform && currentAttempt ? ` - ${currentAttempt.sessions.length} ${t('settings.runtime.restartSessions')}` : ''}
               </div>
               {operation?.blockers?.length ? <div className="text-xs text-amber-600">{t('settings.runtime.restartBlockers')}: {operation.blockers.join(', ')}</div> : null}
-              {operation?.operationId ? <div className="break-all font-mono text-[0.625rem] text-muted-foreground">{operation.operationId}</div> : null}
+              {operation?.operationId ? <div className="break-all font-mono text-caption text-muted-foreground">{operation.operationId}</div> : null}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button type="button" size="sm" className="h-9" disabled={restart.isPending || restartActive} onClick={() => restart.mutate()}>

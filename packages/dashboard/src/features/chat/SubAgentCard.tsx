@@ -15,7 +15,7 @@
  * `tool_result.content` on replay.
  */
 
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
@@ -69,7 +69,7 @@ export function SubAgentCard(props: Props): JSX.Element {
         <div className="mb-1.5 flex min-h-7 items-center gap-2 px-1 text-muted-foreground">
           <Workflow className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
           <span className="text-[0.75rem] font-medium">{t('chat.subAgent.groupLabel')}</span>
-          <span className="font-mono text-[0.6875rem] text-muted-foreground/80">{calls.length}</span>
+          <span className="font-mono text-caption text-muted-foreground/80">{calls.length}</span>
         </div>
         <div
           className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card/35 divide-y divide-border/40"
@@ -233,6 +233,21 @@ const SubAgentRow = memo(function SubAgentRow({
         ? status === 'running'
         : status === 'running' || status === 'idle' || status === 'failed' || status === 'cancelled',
   )
+  const intentionRef = useRef<HTMLSpanElement>(null)
+  const [intentionTruncated, setIntentionTruncated] = useState(false)
+  useLayoutEffect(() => {
+    const element = intentionRef.current
+    if (!element) return
+    const measure = (): void => setIntentionTruncated(element.scrollWidth > element.clientWidth + 1)
+    measure()
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure)
+      observer.observe(element)
+      return () => observer.disconnect()
+    }
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [intention])
   useEffect(() => {
     if (grouped) return
     if (!compact && (status === 'running' || status === 'failed' || status === 'cancelled')) setOpen(true)
@@ -292,10 +307,10 @@ const SubAgentRow = memo(function SubAgentRow({
           <span className="flex h-5 w-5 flex-none items-center justify-center">
             <StatusIcon status={status} />
           </span>
-          <span className={cn('flex-none font-semibold text-foreground', compact ? 'text-[0.8125rem]' : 'text-sm')}>
+          <span className={cn('flex-none font-semibold text-foreground', compact ? 'text-meta' : 'text-sm')}>
             {agentType ?? t('chat.subAgent.label')}
           </span>
-          <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-muted-foreground" title={intention}>
+          <span ref={intentionRef} className="min-w-0 flex-1 truncate text-meta text-muted-foreground" title={intention} data-testid={`sub-agent-header-intention-${call.callId}`}>
             {intention}
           </span>
           {open ? (
@@ -341,6 +356,15 @@ const SubAgentRow = memo(function SubAgentRow({
 
       {open ? (
         <div className="border-t border-border/50 bg-background/45 px-2 pb-2 pt-1.5">
+          {intentionTruncated ? <div
+            className="mb-1.5 min-w-0 rounded-lg border border-border/45 bg-muted/25 px-3 py-2"
+            data-testid={`sub-agent-task-${call.callId}`}
+          >
+            <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">{t('chat.subAgent.task')}</div>
+            <p className="mt-1 whitespace-pre-wrap break-words text-meta leading-5 text-foreground [overflow-wrap:anywhere]">
+              {intention}
+            </p>
+          </div> : null}
           {failureText ? (
             <div className="my-1 rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground">
               <strong className="font-semibold">{status === 'cancelled' ? t('chat.subAgent.cancelled') : t('chat.subAgent.failed')}</strong> {failureText}
@@ -431,7 +455,7 @@ function StatusBadge({
   return (
     <span
       className={cn(
-        'flex-none whitespace-nowrap px-1.5 py-0.5 text-[0.6875rem] font-medium',
+        'flex-none whitespace-nowrap px-1.5 py-0.5 text-caption font-medium',
         badgeClassFor(status),
       )}
       data-testid="sub-agent-status-badge"
@@ -606,6 +630,7 @@ function SubAgentDetails({
           {model ? <DetailRow label={t('chat.subAgent.model')} value={model} mono /> : null}
           {role || policy?.role ? <DetailRow label={t('chat.subAgent.role')} value={policy?.role ?? role!} /> : null}
           <DetailRow label={t('chat.subAgent.status')} value={statusLabel(status, t)} />
+          <DetailRow label={t('chat.subAgent.context')} value={t('chat.subAgent.freshContext')} />
           {turns > 0 ? <DetailRow label={t('chat.subAgent.turns')} value={String(turns)} /> : null}
           {durationMs > 0 ? <DetailRow label={t('chat.subAgent.duration')} value={formatDuration(durationMs)} /> : null}
           {childSessionId ? <DetailRow label={t('chat.subAgent.childSession')} value={childSessionId} mono /> : null}
@@ -648,7 +673,7 @@ function SubAgentDetails({
           {policy.reasons.map((reason) => (
             <span
               key={reason}
-              className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground"
+              className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-caption text-muted-foreground"
             >
               {reason}
             </span>
@@ -670,7 +695,7 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn('min-w-0 break-all text-foreground', mono && 'font-mono text-[0.6875rem]')}>{value}</dd>
+      <dd className={cn('min-w-0 break-all text-foreground', mono && 'font-mono text-caption')}>{value}</dd>
     </>
   )
 }

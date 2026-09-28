@@ -10,9 +10,10 @@ import { Explorer } from '../features/explorer/Explorer.js'
 const params = new URLSearchParams(location.search)
 const sidebarWidth = Number(params.get('sidebar') ?? 280)
 const scale = Number(params.get('scale') ?? 1)
+const language = params.get('language') === 'zh-CN' ? 'zh-CN' : 'en'
 document.documentElement.style.setProperty('--ak-interface-scale', String(scale))
+document.documentElement.dataset.akInterfaceDensity = scale < 1 ? 'compact' : scale > 1 ? 'comfortable' : 'default'
 document.documentElement.classList.toggle('dark', params.get('theme') !== 'light')
-void i18n.changeLanguage('en')
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
@@ -52,5 +53,11 @@ function Fixture(): JSX.Element {
   )
 }
 
-createRoot(document.getElementById('root')!).render(<Fixture />)
-requestAnimationFrame(() => requestAnimationFrame(() => { document.body.dataset.fixtureReady = 'true' }))
+async function renderFixture(): Promise<void> {
+  await i18n.changeLanguage(language)
+  createRoot(document.getElementById('root')!).render(<Fixture />)
+  await document.fonts.ready
+  requestAnimationFrame(() => requestAnimationFrame(() => { document.body.dataset.fixtureReady = 'true' }))
+}
+
+void renderFixture()

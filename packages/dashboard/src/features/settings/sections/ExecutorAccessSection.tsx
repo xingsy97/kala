@@ -212,7 +212,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
                         {invite.revoked ? t('settings.executorAccess.revoked') : expired ? t('settings.executorAccess.expired') : t('settings.executorAccess.inviteActive')}
                       </span>
                     </div>
-                    <label className="block max-w-md text-[0.6875rem] font-medium text-muted-foreground">
+                    <label className="block max-w-md text-caption font-medium text-muted-foreground">
                       {t('settings.executorAccess.label')}
                       <input
                         className="mt-1 h-8 w-full rounded-md border-0 bg-background px-2 text-sm text-foreground outline-none ring-1 ring-border/50 focus:ring-ring/50 disabled:opacity-70"
@@ -255,7 +255,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
 function InviteMeta({ label, value, mono = false }: { label: string; value: string; mono?: boolean }): JSX.Element {
   return (
     <div className="min-w-0">
-      <div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground/80">{label}</div>
+      <div className="text-caption uppercase tracking-wide text-muted-foreground/80">{label}</div>
       <div className={cn('mt-0.5 break-words text-foreground [overflow-wrap:anywhere]', mono && 'break-all font-mono')} title={value}>{value}</div>
     </div>
   )

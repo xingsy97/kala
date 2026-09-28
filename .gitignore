@@ -6,6 +6,10 @@ node_modules/
 dist/
 build/
 /release/
+*.woff
+*.woff2
+*.ttf
+*.otf
 .tmp/
 *.tsbuildinfo
 .next/

@@ -45,8 +45,10 @@ describe('bounded busy-indicator rendering', () => {
     expect(dashboardStyles).toContain('animation: ak-session-status-spin 900ms linear infinite;')
     const reducedMotion = dashboardStyles.slice(dashboardStyles.indexOf('@media (prefers-reduced-motion: reduce)', dashboardStyles.indexOf('.ak-session-status-spinner {')))
     expect(reducedMotion).toMatch(/\.ak-session-status-spinner,[\s\S]*?animation: none !important;/)
-    expect(dashboardStyles).toContain('@keyframes ak-thinking-dot')
-    expect(dashboardStyles).toContain('@keyframes ak-thinking-sheen')
+    expect(dashboardStyles).toContain('@keyframes ak-thinking-text')
+    expect(dashboardStyles).toContain('animation: ak-thinking-text 1.9s linear infinite;')
+    expect(dashboardStyles).toMatch(/@keyframes ak-thinking-text\s*\{\s*from \{ background-position: 200% 0; \}\s*to \{ background-position: 0 0; \}\s*\}/)
+    expect(dashboardStyles).not.toContain('55%, 100% { background-position: -120% 0; }')
   })
 })
 

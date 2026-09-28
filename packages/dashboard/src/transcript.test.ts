@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from './session.js'
-import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, visibleMessages, visibleTranscript } from './transcript.js'
+import { appendLiveTranscriptItems, appendTranscriptBaseItems, lastUserTranscriptIndex, reconcilePendingUserMessages, transcriptBaseItems, transcriptTimelineForRuntime, visibleMessages, visibleTranscript } from './transcript.js'
 
 const system: Message = {
   role: 'system',
@@ -18,6 +18,27 @@ describe('transcriptTimelineForRuntime', () => {
 
     expect(transcriptTimelineForRuntime('kernel', timeline)).toBe(timeline)
     expect(transcriptTimelineForRuntime('copilot', timeline)).toEqual([])
+  })
+
+  describe('lastUserTranscriptIndex', () => {
+    it('keeps the latest user turn and everything after it', () => {
+      const items = [
+        { kind: 'message' as const, message: { role: 'user' as const, content: [{ type: 'text' as const, text: 'old' }] } },
+        { kind: 'message' as const, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'old answer' }] } },
+        { kind: 'message' as const, message: { role: 'user' as const, content: [{ type: 'text' as const, text: 'latest' }] } },
+        { kind: 'message' as const, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'latest answer' }] } },
+      ]
+
+      expect(lastUserTranscriptIndex(items)).toBe(2)
+      expect(lastUserTranscriptIndex(items.slice(1, 2))).toBe(0)
+    })
+
+    it('treats an optimistic pending message as the latest user turn', () => {
+      expect(lastUserTranscriptIndex([
+        { kind: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'ready' }] } },
+        { kind: 'pending_user_message', id: 'pending-1', text: 'go', mode: 'steer', status: 'sending', createdAt: '2026-01-01T00:00:00Z' },
+      ])).toBe(1)
+    })
   })
 
   it('renders persisted external Runtime model changes without exposing system prompts', () => {

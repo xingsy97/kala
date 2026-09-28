@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/ui/button.js'
 import { HelpHint } from '../../components/ui/help-hint.js'
 import { cn } from '../../lib/utils.js'
+import { writeTextToClipboard } from '../../lib/clipboard.js'
+import { notify } from '../../notify.js'
 
 /**
  * Shared, presentational Settings controls. Extracted from SettingsDialog so the
@@ -209,7 +211,7 @@ export function SettingsRecord({
     <div className="min-w-0 rounded-xl bg-card/65 p-4 ring-1 ring-border/40">
       <div className="min-w-0 border-b border-border/40 pb-2">
         <div className="break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]">{title}</div>
-        {detail ? <div className="mt-0.5 break-all font-mono text-[0.6875rem] text-muted-foreground">{detail}</div> : null}
+        {detail ? <div className="mt-0.5 break-all font-mono text-caption text-muted-foreground">{detail}</div> : null}
       </div>
       <dl className="mt-2 grid min-w-0 gap-x-4 gap-y-2 sm:grid-cols-2">{children}</dl>
     </div>
@@ -238,11 +240,12 @@ export function CopyButton({ value }: { value: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
   const copy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(value)
+      await writeTextToClipboard(value)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1200)
     } catch {
-      // Non-fatal — clipboard permission denied.
+      setCopied(false)
+      notify.error(t('common.copyFailed'))
     }
   }
   return (

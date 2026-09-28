@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { CompactFeedbackRow, InlineStatusRow, formatTokensShort } from './InlineStatusRow.js'
+import { CompactFeedbackRow, InlineStatusRow, formatElapsedDuration, formatTokensShort } from './InlineStatusRow.js'
 
 describe('agent activity card', () => {
   const state = { sessionId: 's', status: 'thinking' as const, messages: [], pendingCalls: [], usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }, cursor: 0, approvalMode: 'auto' as const }
@@ -31,7 +31,12 @@ describe('agent activity card', () => {
       const row = screen.getByTestId('inline-status-thinking')
       expect(row.getAttribute('role')).toBe('status')
       expect(row.getAttribute('aria-live')).toBe('polite')
-      expect(row.querySelector('.ak-thinking-dot')).toBeTruthy()
+      expect(screen.getByTestId('inline-status-label').classList.contains('ak-thinking-text')).toBe(true)
+      expect(screen.getByTestId('inline-status-label').className).toContain('font-semibold')
+      expect(screen.getByTestId('inline-status-elapsed').closest('.ak-thinking-text')).toBe(screen.getByTestId('inline-status-label'))
+      expect(row.className).not.toContain('rounded-xl')
+      expect(row.className).not.toContain('border')
+      expect(row.className).toContain('text-ui')
       expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('0s')
       act(() => vi.advanceTimersByTime(2_100))
       expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('2s')
@@ -89,6 +94,13 @@ describe('agent activity card', () => {
     expect(screen.getByTestId('inline-status-elapsed').textContent).toBe('2s')
     rerender(<InlineStatusRow state={{ ...state, status: 'awaiting_approval' }} streamingActive={false} progress={{ phase: 'approval', label: 'Approve the write.', intention: 'Approve the write.', outcome: 'approval' }} />)
     expect(screen.queryByTestId('inline-status-elapsed')).toBeNull()
+  })
+
+  it('formats elapsed activity time as seconds, minutes, and hours', () => {
+    expect(formatElapsedDuration(59.9)).toBe('59s')
+    expect(formatElapsedDuration(60)).toBe('1m 0s')
+    expect(formatElapsedDuration(125)).toBe('2m 5s')
+    expect(formatElapsedDuration(3_661)).toBe('1h 1m 1s')
   })
 })
 

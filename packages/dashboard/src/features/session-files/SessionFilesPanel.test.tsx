@@ -119,7 +119,7 @@ describe('SessionFilesPanel', () => {
 
     expect((await screen.findByTestId('monaco-editor')).textContent).toContain('hello')
     expect(screen.getByTestId('monaco-editor').getAttribute('data-readonly')).toBe('true')
-    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('17.5')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('14')
     expect(socket.emitMock).toHaveBeenCalledWith('client:list_dirs', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo' }))
     expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ workspaceId: 'ws-1', path: '/repo/notes.txt', maxBytes: 1024 * 1024 }), expect.any(Function))
   })
@@ -135,7 +135,7 @@ describe('SessionFilesPanel', () => {
 
     fireEvent.click(await screen.findByText('notes.txt'))
 
-    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('22.5')
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('18')
   })
 
   it('renders the maximum file font and rescales an open view without fetching the file again', async () => {
@@ -146,10 +146,10 @@ describe('SessionFilesPanel', () => {
     })
     render(<SessionFilesPanel socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
     fireEvent.click(await screen.findByText('notes.txt'))
-    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('60')
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('48')
     const reads = socket.emitMock.mock.calls.filter(([event]) => event === 'workspace:read_binary').length
     fireEvent(window, new StorageEvent('storage', { key: 'ak-interface-scale', newValue: '200' }))
-    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('96')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('54')
     expect(socket.emitMock.mock.calls.filter(([event]) => event === 'workspace:read_binary')).toHaveLength(reads)
   })
 
@@ -637,13 +637,13 @@ describe('SessionFilesPanel', () => {
     render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
 
     fireEvent.click(await screen.findByText('notes.txt'))
-    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('17.5')
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('14')
 
     fireEvent.click(screen.getByRole('button', { name: /increase file view font size/i }))
-    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('20')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('16')
     fireEvent.click(screen.getByRole('button', { name: /decrease file view font size/i }))
     fireEvent.click(screen.getByRole('button', { name: /decrease file view font size/i }))
-    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('15')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('12')
     expect(localStorage.getItem('ak-file-view-font-size')).toBe('2')
   })
 

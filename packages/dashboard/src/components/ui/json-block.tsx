@@ -6,6 +6,8 @@ import { githubLightTheme } from '@uiw/react-json-view/githubLight'
 import { useTranslation } from 'react-i18next'
 
 import { cn } from '../../lib/utils.js'
+import { writeTextToClipboard } from '../../lib/clipboard.js'
+import { notify } from '../../notify.js'
 import { ScrollArea } from './scroll-area.js'
 
 type Props = {
@@ -46,10 +48,13 @@ export function JsonBlock({
 
   const onCopy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(value, null, 2))
+      await writeTextToClipboard(JSON.stringify(value, null, 2))
       setCopied(true)
       setTimeout(() => setCopied(false), 1200)
-    } catch {}
+    } catch {
+      setCopied(false)
+      notify.error(t('common.copyFailed'))
+    }
   }
 
   return (
@@ -61,7 +66,7 @@ export function JsonBlock({
     >
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/50 text-xs text-muted-foreground">
         <span className="flex-1 truncate font-medium">{label ?? 'json'}</span>
-        <span className="hidden flex-none rounded bg-background/70 px-1.5 py-0.5 font-mono text-[0.6875rem] text-muted-foreground sm:inline" data-testid="json-block-summary">
+        <span className="hidden flex-none rounded bg-background/70 px-1.5 py-0.5 font-mono text-caption text-muted-foreground sm:inline" data-testid="json-block-summary">
           {summary}
         </span>
         <label className="flex min-w-0 flex-none items-center gap-1 rounded bg-background/70 px-1.5 py-0.5 ring-1 ring-border/40 focus-within:ring-primary/40">

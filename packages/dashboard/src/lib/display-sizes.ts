@@ -1,8 +1,30 @@
 export const INTERFACE_SCALE_MIN = 75
 export const INTERFACE_SCALE_MAX = 200
-export const DEFAULT_INTERFACE_SCALE = 125
+export const DEFAULT_INTERFACE_SCALE = 100
+export const INTERFACE_DENSITY_OPTIONS = [
+  { value: 90, density: 'compact', scale: 0.9 },
+  { value: 100, density: 'default', scale: 1 },
+  { value: 112, density: 'comfortable', scale: 1.125 },
+] as const
+export type InterfaceDensity = typeof INTERFACE_DENSITY_OPTIONS[number]['density']
 export const FONT_SIZE_MIN = 10
 export const FONT_SIZE_MAX = 48
+
+export function interfaceDensityForPercent(percent: number): InterfaceDensity {
+  if (percent <= 95) return 'compact'
+  if (percent <= 106) return 'default'
+  return 'comfortable'
+}
+
+export function interfaceScaleForPercent(percent: number): number {
+  const density = interfaceDensityForPercent(percent)
+  return INTERFACE_DENSITY_OPTIONS.find((option) => option.density === density)?.scale ?? 1
+}
+
+export function interfacePreferenceForPercent(percent: number): number {
+  const density = interfaceDensityForPercent(percent)
+  return INTERFACE_DENSITY_OPTIONS.find((option) => option.density === density)?.value ?? DEFAULT_INTERFACE_SCALE
+}
 
 // Keep existing persisted indices stable; new controls display/edit pixels.
 function extendFontSizes(previous: readonly number[]): readonly number[] {

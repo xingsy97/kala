@@ -212,6 +212,8 @@ describe('RuntimeMetrics', () => {
     expect(usage?.getAttribute('data-context-usage-tone')).toBe('ok')
     expect(usage?.getAttribute('class')).toContain('stroke-sky-500/85')
     expect(usage?.getAttribute('class')).toContain('drop-shadow')
+    expect(usage?.getAttribute('class')).toContain('stroke-dasharray')
+    expect(usage?.getAttribute('class')).toContain('motion-reduce:transition-none')
     expect(usage?.getAttribute('class')).not.toContain('border-')
     expect(usage?.getAttribute('stroke-linecap')).toBe('round')
     expect(usage?.getAttribute('stroke-dasharray')).toBe('30 71')

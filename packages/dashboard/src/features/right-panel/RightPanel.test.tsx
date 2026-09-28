@@ -1,9 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { RightPanel } from './RightPanel.js'
 
 describe('RightPanel', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
   it('defaults through the selected inspector tab, switches without unmounting content, and collapses', () => {
     const onTabChange = vi.fn()
     const onCollapse = vi.fn()
@@ -37,5 +41,27 @@ describe('RightPanel', () => {
     expect(onTabChange).toHaveBeenCalledWith('git')
     fireEvent.click(screen.getByTestId('right-panel-collapse'))
     expect(onCollapse).toHaveBeenCalledOnce()
+  })
+
+  it('switches all tab labels to icons when their natural width does not fit', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === 'right-panel-tabs' ? 180 : 0
+    })
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.className.includes('invisible') ? 420 : 0
+    })
+    vi.stubGlobal('ResizeObserver', class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(): void { this.callback([], this as unknown as ResizeObserver) }
+      disconnect(): void {}
+      unobserve(): void {}
+    })
+
+    render(<RightPanel activeTab="files" onTabChange={() => {}} onCollapse={() => {}} files={null} git={null} terminal={null} inspector={null} />)
+
+    await waitFor(() => expect(screen.getByTestId('right-panel-tabs').getAttribute('data-labels-visible')).toBe('false'))
+    expect(screen.getByTestId('right-panel-terminal-tab').textContent).toBe('')
+    expect(screen.getByTestId('right-panel-terminal-tab').getAttribute('aria-label')).toBe('Terminal')
+    expect(screen.getByTestId('right-panel-terminal-tab').getAttribute('title')).toBe('Terminal')
   })
 })

@@ -9,23 +9,28 @@ afterEach(() => {
   cleanup()
   localStorage.clear()
   document.documentElement.style.removeProperty('--ak-interface-scale')
+  delete document.documentElement.dataset.akInterfaceDensity
 })
 
 describe('whole interface scale', () => {
-  it('starts enlarged and honors a stored explicit preference before mount', () => {
-    initializeInterfaceScale()
-    expect(document.documentElement.style.getPropertyValue('--ak-interface-scale')).toBe('1.25')
-    localStorage.setItem(PREF_INTERFACE_SCALE, '100')
+  it('uses a fixed default density and maps legacy preferences to discrete presets', () => {
     initializeInterfaceScale()
     expect(document.documentElement.style.getPropertyValue('--ak-interface-scale')).toBe('1')
+    expect(document.documentElement.dataset.akInterfaceDensity).toBe('default')
+    localStorage.setItem(PREF_INTERFACE_SCALE, '125')
+    initializeInterfaceScale()
+    expect(document.documentElement.style.getPropertyValue('--ak-interface-scale')).toBe('1.125')
+    expect(document.documentElement.dataset.akInterfaceDensity).toBe('comfortable')
   })
 
-  it('updates cross-tab and restores the enlarged default when reset', () => {
+  it('updates cross-tab and restores the default preset when reset', () => {
     render(<InterfaceScale />)
     act(() => window.dispatchEvent(new StorageEvent('storage', { key: PREF_INTERFACE_SCALE, newValue: '200' })))
-    expect(document.documentElement.style.getPropertyValue('--ak-interface-scale')).toBe('2')
+    expect(document.documentElement.style.getPropertyValue('--ak-interface-scale')).toBe('1.125')
+    expect(document.documentElement.dataset.akInterfaceDensity).toBe('comfortable')
     act(() => window.dispatchEvent(new StorageEvent('storage', { key: PREF_INTERFACE_SCALE, newValue: null })))
-    expect(document.documentElement.style.getPropertyValue('--ak-interface-scale')).toBe('1.25')
+    expect(document.documentElement.style.getPropertyValue('--ak-interface-scale')).toBe('1')
+    expect(document.documentElement.dataset.akInterfaceDensity).toBe('default')
   })
 
   it('allows clearing and typing a full number rather than clamping the first digit', () => {

@@ -46,7 +46,7 @@ describe('native desktop update surfaces', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(entry)
     await screen.findByTestId('copy-desktop-command')
-    expect(screen.getByTestId('desktop-release-security').textContent).toContain('Unsigned')
+    expect(screen.getByTestId('desktop-release-security').textContent).toContain('Preview build')
     expect(screen.getByTestId('desktop-update-restart').textContent).toContain('choose Quit from the tray menu')
     expect(screen.getByTestId('desktop-update-restart').textContent).toContain('does not replace the running process')
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
