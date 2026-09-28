@@ -81,6 +81,10 @@ import { compareToolVersions } from '../tool-version.js'
 import { exportSubAgentGraph } from '../subagent-graph.js'
 import { runWebSearch, type WebSearchCredentialStore } from '../web-search/index.js'
 import type { WebSearchCredentialStatus } from '../web-search/credential-store.js'
+import type { AzureSpeechCredentialStore } from '../speech/credential-store.js'
+import { normalizeAzureSpeechEndpoint } from '../speech/credential-store.js'
+import { transcribeAzureSpeechAudio } from '../speech/fast-transcription.js'
+import { issueAzureSpeechToken } from '../speech/token-service.js'
 import { ContentInputError, resolveContentToPath } from './content-inputs.js'
 import {
   HttpThemeError,
@@ -113,6 +117,7 @@ const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
 
 const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024
 const MAX_DOC_CONTENT_BYTES = 1024 * 1024
+const MAX_SPEECH_RECORDING_BYTES = 25 * 1024 * 1024
 const DEFAULT_ARTIFACT_MANIFEST_PAGE_SIZE = 100
 const MAX_ARTIFACT_MANIFEST_PAGE_SIZE = 500
 const ARTIFACT_MANIFEST_SNAPSHOT_FRESH_MS = 10 * 60_000
@@ -263,6 +268,7 @@ export function attachJsonRoutes(
       set(provider: 'serper', key: string): Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
       delete(provider: 'serper'): Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
     }
+    speechCredentials?: AzureSpeechCredentialStore
   },
 ): void {
   type ManifestSnapshot = { id: string; createdAt: number; manifest: ArtifactManifest }
@@ -658,6 +664,105 @@ export function attachJsonRoutes(
           sendJson(req, res, { ok: true })
         })
         .catch((error: unknown) => sendError(res, 502, error instanceof Error ? error.message : String(error)))
+      return
+    }
+    if (path === '/settings/speech' && payloads.speechCredentials) {
+      claimRoute(req)
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        void Promise.resolve(payloads.speechCredentials.status())
+          .then((body) => sendJson(req, res, body))
+          .catch((error: unknown) => sendError(res, 500, error instanceof Error ? error.message : String(error)))
+        return
+      }
+      if (req.method === 'PUT') {
+        const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+        if (!auth.ok) { sendError(res, auth.status, auth.error); return }
+        void readJson(req).then((raw) => {
+          const body = typeof raw === 'object' && raw !== null
+            ? raw as { endpoint?: unknown; apiKey?: unknown; enabled?: unknown; mode?: unknown }
+            : {}
+          if (typeof body.endpoint !== 'string') throw new HttpRouteError(400, 'endpoint is required')
+          let endpoint: string
+          try {
+            endpoint = normalizeAzureSpeechEndpoint(body.endpoint).endpoint
+          } catch (error) {
+            throw new HttpRouteError(400, error instanceof Error ? error.message : String(error))
+          }
+          if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw new HttpRouteError(400, 'enabled must be a boolean')
+          const enabled = typeof body.enabled === 'boolean' ? body.enabled : true
+          if (body.mode !== undefined && body.mode !== 'realtime' && body.mode !== 'after_recording') {
+            throw new HttpRouteError(400, 'mode must be realtime or after_recording')
+          }
+          const mode = body.mode === 'after_recording' ? 'after_recording' : 'realtime'
+          const apiKey = body.apiKey
+          if (apiKey !== undefined && (typeof apiKey !== 'string' || apiKey !== apiKey.trim() || apiKey.length < 16 || apiKey.length > 512)) {
+            throw new HttpRouteError(400, 'apiKey must be a trimmed string between 16 and 512 characters')
+          }
+          return Promise.resolve(payloads.speechCredentials!.status()).then((status) => {
+            if (typeof apiKey !== 'string' && !status.configured) throw new HttpRouteError(400, 'an Azure Speech key is required')
+            return payloads.speechCredentials!.set({
+              endpoint,
+              enabled,
+              mode,
+              ...(typeof apiKey === 'string' ? { apiKey } : {}),
+            })
+          })
+        }).then((body) => sendJson(req, res, body))
+          .catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 500, error instanceof Error ? error.message : String(error)))
+        return
+      }
+      if (req.method === 'DELETE') {
+        const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+        if (!auth.ok) { sendError(res, auth.status, auth.error); return }
+        void Promise.resolve(payloads.speechCredentials.delete())
+          .then((body) => sendJson(req, res, body))
+          .catch((error: unknown) => sendError(res, 500, error instanceof Error ? error.message : String(error)))
+        return
+      }
+      sendError(res, 405, 'method not allowed')
+      return
+    }
+    if (path === '/settings/speech/test' && req.method === 'POST' && payloads.speechCredentials) {
+      claimRoute(req)
+      const auth = authorizeSensitiveManagement(req, effectiveTenancy(payloads.deployment ?? PORTABLE_DEPLOYMENT), payloads.auth)
+      if (!auth.ok) { sendError(res, auth.status, auth.error); return }
+      void issueAzureSpeechToken(payloads.speechCredentials, { allowDisabled: true })
+        .then(() => sendJson(req, res, { ok: true }))
+        .catch((error: unknown) => sendError(res, 502, error instanceof Error ? error.message : String(error)))
+      return
+    }
+    if (path === '/runtime/speech/token' && req.method === 'POST' && payloads.speechCredentials) {
+      claimRoute(req)
+      const auth = authorizeDashboardHttp(req, payloads.auth)
+      if (!auth.ok) { sendError(res, 401, auth.reason); return }
+      if (!dashboardActorCanWrite(auth.actor)) { sendError(res, 403, 'forbidden'); return }
+      void issueAzureSpeechToken(payloads.speechCredentials)
+        .then((body) => sendJson(req, res, body))
+        .catch((error: unknown) => sendError(res, 502, error instanceof Error ? error.message : String(error)))
+      return
+    }
+    if (path === '/runtime/speech/transcribe' && req.method === 'POST' && payloads.speechCredentials) {
+      claimRoute(req)
+      const auth = authorizeDashboardHttp(req, payloads.auth)
+      if (!auth.ok) { sendError(res, 401, auth.reason); return }
+      if (!dashboardActorCanWrite(auth.actor)) { sendError(res, 403, 'forbidden'); return }
+      void (async () => {
+        const declaredLength = Number(req.headers['content-length'])
+        if (Number.isFinite(declaredLength) && declaredLength > MAX_SPEECH_RECORDING_BYTES) {
+          throw new HttpRouteError(413, `Recording exceeds ${MAX_SPEECH_RECORDING_BYTES} bytes`)
+        }
+        const mediaType = typeof req.headers['content-type'] === 'string'
+          ? req.headers['content-type'].split(';', 1)[0]!.trim().toLowerCase()
+          : ''
+        if (!['audio/webm', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/mpeg', 'audio/mp4'].includes(mediaType)) {
+          throw new HttpRouteError(415, 'unsupported recording media type')
+        }
+        const audio = await readBytes(req, MAX_SPEECH_RECORDING_BYTES, 'Recording')
+        if (audio.byteLength === 0) throw new HttpRouteError(400, 'recording is empty')
+        return transcribeAzureSpeechAudio(payloads.speechCredentials!, { audio, mediaType })
+      })()
+        .then((body) => sendJson(req, res, body))
+        .catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 502, error instanceof Error ? error.message : String(error)))
       return
     }
     const toolBarrier = /^\/runtime\/sessions\/([^/]+)\/tool-result\/([^/]+)$/u.exec(path)
@@ -1272,6 +1377,10 @@ function isProtectedJsonRoute(path: string): boolean {
     path === '/settings/models' ||
     path === '/settings/web-search' ||
     path === '/settings/web-search/test' ||
+    path === '/settings/speech' ||
+    path === '/settings/speech/test' ||
+    path === '/runtime/speech/token' ||
+    path === '/runtime/speech/transcribe' ||
     path === '/settings/agent-prompt' ||
     path === '/settings/socket-admin/init' ||
     path === '/settings/socket-admin/mode' ||
@@ -1927,13 +2036,13 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(raw) as unknown
 }
 
-async function readBytes(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+async function readBytes(req: IncomingMessage, maxBytes: number, label = 'Attachment'): Promise<Buffer> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of req) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     total += bytes.length
-    if (total > maxBytes) throw new HttpRouteError(413, `Attachment exceeds ${maxBytes} bytes`)
+    if (total > maxBytes) throw new HttpRouteError(413, `${label} exceeds ${maxBytes} bytes`)
     chunks.push(bytes)
   }
   return Buffer.concat(chunks)

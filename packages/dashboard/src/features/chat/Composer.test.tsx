@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createInitialState, type FileContent, type ImageContent, type ReferencedFileContent, type TextContent } from '@agent-kernel/kernel'
 import type { FileListEntry, HumanAttentionTimeline } from '@agent-kernel/shared'
 
-import { Composer } from './Composer.js'
+import { commitVoiceAndSend, Composer, VoiceStopControl } from './Composer.js'
 import type { ChatDisplayPrefs } from './chatDisplayPrefs.js'
 
 const EMPTY_HUMAN_ATTENTION = { sessionId: '', points: [], latest: null } as const
@@ -43,6 +43,7 @@ function renderComposer(props?: {
   footerExtras?: React.ReactNode
   simpleFooterExtras?: React.ReactNode
   leftAccessory?: React.ReactNode
+  onOpenVoiceSettings?: () => void
 }) {
   return render(
     <Composer
@@ -77,11 +78,118 @@ function renderComposer(props?: {
       footerExtras={props?.footerExtras}
       simpleFooterExtras={props?.simpleFooterExtras}
       leftAccessory={props?.leftAccessory}
+      onOpenVoiceSettings={props?.onOpenVoiceSettings}
     />,
   )
 }
 
+function firePointer(
+  target: Element,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  { pointerId, clientX, button = 0 }: { pointerId: number; clientX: number; button?: number },
+): void {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button, clientX })
+  Object.defineProperty(event, 'pointerId', { value: pointerId })
+  fireEvent(target, event)
+}
+
 describe('Composer', () => {
+  it('keeps tap-to-stop and requires a deliberate right drag to stop and send', () => {
+    const stop = vi.fn()
+    const stopAndSend = vi.fn()
+    const view = render(<VoiceStopControl compact={false} onStop={stop} onStopAndSend={stopAndSend} />)
+    const button = view.getByTestId('composer-voice-stop')
+    const track = view.getByTestId('composer-voice-send-track')
+
+    fireEvent.click(button)
+    expect(stop).toHaveBeenCalledOnce()
+    expect(stopAndSend).not.toHaveBeenCalled()
+
+    stop.mockClear()
+    firePointer(button, 'pointerdown', { pointerId: 1, clientX: 100 })
+    firePointer(button, 'pointermove', { pointerId: 1, clientX: 124 })
+    firePointer(button, 'pointerup', { pointerId: 1, clientX: 124 })
+    fireEvent.click(button)
+    expect(stop).not.toHaveBeenCalled()
+    expect(stopAndSend).not.toHaveBeenCalled()
+
+    firePointer(button, 'pointerdown', { pointerId: 2, clientX: 100 })
+    firePointer(button, 'pointermove', { pointerId: 2, clientX: 164 })
+    expect(track.getAttribute('data-armed')).toBe('true')
+    firePointer(button, 'pointerup', { pointerId: 2, clientX: 164 })
+    fireEvent.click(button)
+    expect(stop).not.toHaveBeenCalled()
+    expect(stopAndSend).toHaveBeenCalledOnce()
+  })
+
+  it('waits for final transcription, merges the original draft, and sends the merged text', async () => {
+    const setText = vi.fn()
+    const submit = vi.fn(async () => {})
+
+    await expect(commitVoiceAndSend({
+      stop: async () => 'new words',
+      draft: { text: 'before after', caret: 7 },
+      setText,
+      submit,
+    })).resolves.toBe(true)
+
+    expect(setText).toHaveBeenCalledWith('before new words after')
+    expect(submit).toHaveBeenCalledWith('before new words after')
+  })
+
+  it('does not send when recording produces no transcript', async () => {
+    const setText = vi.fn()
+    const submit = vi.fn(async () => {})
+
+    await expect(commitVoiceAndSend({
+      stop: async () => undefined,
+      draft: { text: 'existing draft', caret: 14 },
+      setText,
+      submit,
+    })).resolves.toBe(false)
+
+    expect(setText).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('explains the HTTPS requirement at the microphone control on insecure origins', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'isSecureContext')
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false })
+    try {
+      renderComposer()
+      const microphone = screen.getByTestId('composer-voice-start')
+      expect(microphone.getAttribute('data-secure-context')).toBe('false')
+      fireEvent.click(microphone)
+      expect(screen.getByTestId('composer-voice-https-help').textContent).toContain('Voice input requires HTTPS')
+      expect(screen.queryByTestId('composer-voice-recorder')).toBeNull()
+    } finally {
+      if (descriptor) Object.defineProperty(window, 'isSecureContext', descriptor)
+      else Reflect.deleteProperty(window, 'isSecureContext')
+    }
+  })
+
+  it('opens Voice Input settings when Azure Speech is not configured', async () => {
+    const previousFetch = globalThis.fetch
+    const openSettings = vi.fn()
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      configured: false,
+      provider: 'azure',
+      endpoint: 'https://japaneast.api.cognitive.microsoft.com/',
+      region: 'japaneast',
+      enabled: false,
+      mode: 'realtime',
+    })))
+    try {
+      renderComposer({ onOpenVoiceSettings: openSettings })
+      await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/settings/speech', { cache: 'no-store' }))
+      fireEvent.click(screen.getByTestId('composer-voice-start'))
+      await waitFor(() => expect(openSettings).toHaveBeenCalledOnce())
+      expect(screen.queryByTestId('composer-voice-recorder')).toBeNull()
+    } finally {
+      vi.stubGlobal('fetch', previousFetch)
+    }
+  })
+
   it('keeps runtime state out of the footer while preserving the full Composer usage frame', () => {
     render(
       <Composer

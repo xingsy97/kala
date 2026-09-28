@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { activatePwaUpdate, initPwa, isStandalone } from './pwa.js'
+import { activatePwaUpdate, forcePwaRefresh, initPwa, isStandalone } from './pwa.js'
 
 function serviceWorkerHarness(): {
   serviceWorker: Pick<ServiceWorkerContainer, 'addEventListener' | 'removeEventListener'>
@@ -31,10 +31,39 @@ describe('PWA standalone detection', () => {
       const controller = initPwa(handlers)
       await controller.checkForUpdate()
       await controller.applyUpdate()
+      await controller.forceRefresh()
       expect(handlers.onRegistered).not.toHaveBeenCalled()
     } finally {
       delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
     }
+  })
+
+  describe('forcePwaRefresh', () => {
+    it('unregisters the worker, clears only dashboard caches, and cache-busts the current URL', async () => {
+      const unregister = vi.fn(async () => true)
+      const deleteCache = vi.fn(async () => true)
+      const replace = vi.fn()
+      const serviceWorker = {
+        getRegistration: vi.fn(async () => ({ unregister })),
+      } as unknown as ServiceWorkerContainer
+      const cacheStorage = {
+        keys: vi.fn(async () => ['workbox-precache-v2-origin', 'ak-icons-v1', 'unrelated-cache']),
+        delete: deleteCache,
+      }
+
+      await forcePwaRefresh({
+        serviceWorker,
+        cacheStorage,
+        location: { href: 'https://kala.example/session/one?tab=chat#latest', replace } as Pick<Location, 'href' | 'replace'>,
+        nonce: 'test',
+      })
+
+      expect(unregister).toHaveBeenCalledOnce()
+      expect(deleteCache).toHaveBeenCalledTimes(2)
+      expect(deleteCache).toHaveBeenCalledWith('workbox-precache-v2-origin')
+      expect(deleteCache).toHaveBeenCalledWith('ak-icons-v1')
+      expect(replace).toHaveBeenCalledWith('https://kala.example/session/one?tab=chat&__kala_refresh=test#latest')
+    })
   })
   it('enables PWA-only behavior for standard and legacy iOS standalone modes', () => {
     expect(isStandalone({ matches: true })).toBe(true)

@@ -89,8 +89,8 @@ export function PwaLifecycleHost({ children }: { children: ReactNode }): JSX.Ele
 /**
  * Top-anchored PWA update banner. Displayed sticky under AppShellNav so a
  * new SW install can never be missed regardless of scroll position or chat
- * pane state. A waiting generation activates automatically; the button is a
- * manual retry if browser lifecycle events delay that controlled reload.
+ * pane state. Activation remains explicit so an abnormal waiting worker can
+ * never trap the Dashboard in an automatic reload loop.
  */
 export function PwaUpdateGlobalBanner(): JSX.Element | null {
   const { t } = useTranslation()
@@ -107,11 +107,15 @@ export function PwaUpdateGlobalBanner(): JSX.Element | null {
     }
   }, [controller])
 
-  useEffect(() => {
-    if (!state.needRefresh || !controller || reloading) return
+  const onForceRefresh = useCallback(async () => {
+    if (!controller) return
     setReloading(true)
-    void controller.applyUpdate().catch(() => setReloading(false))
-  }, [controller, reloading, state.needRefresh])
+    try {
+      await controller.forceRefresh()
+    } catch {
+      setReloading(false)
+    }
+  }, [controller])
 
   if (!state.needRefresh) return null
 
@@ -126,6 +130,15 @@ export function PwaUpdateGlobalBanner(): JSX.Element | null {
         <span className="min-w-0 truncate font-medium">{t('pwa.updateAvailable')}</span>
       </div>
       <div className="flex flex-none items-center gap-1">
+        <button
+          type="button"
+          onClick={onForceRefresh}
+          disabled={reloading}
+          className="rounded-md px-2 py-1 font-medium text-sky-800 hover:bg-sky-100 disabled:cursor-progress disabled:opacity-60 dark:text-sky-200 dark:hover:bg-sky-900"
+          data-testid="pwa-update-force-refresh"
+        >
+          {t('pwa.forceRefresh')}
+        </button>
         <button
           type="button"
           onClick={onReload}

@@ -85,6 +85,7 @@ import { readSessionLog } from './store/log.js'
 import { modelIdFromRef, resolveModelContextWindow } from './model-capabilities.js'
 import type { WebSearchCredentialStore } from './web-search/index.js'
 import type { WebSearchCredentialStatus } from './web-search/credential-store.js'
+import type { AzureSpeechCredentialStore } from './speech/credential-store.js'
 import { ExecutorInstallationStore } from './store/executor-installation.js'
 import { attachExecutorInstallationRoutes } from './http/executor-installation-routes.js'
 import { AgentRuntimeRegistry } from './agent-runtime/types.js'
@@ -151,6 +152,7 @@ export type HostServerOptions = {
   webSearchCredentialStatus?: () => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
   setWebSearchCredential?: (provider: 'serper', key: string) => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
   deleteWebSearchCredential?: (provider: 'serper') => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
+  speechCredentials?: AzureSpeechCredentialStore
   artifactRootDir?: string | false
   docsRootDir?: string
   /**
@@ -404,6 +406,7 @@ export async function startHostServer(
         delete: options.deleteWebSearchCredential,
       },
     } : {}),
+    ...(options.speechCredentials ? { speechCredentials: options.speechCredentials } : {}),
     sessions: store,
     executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     toolRegistry: () => (typeof options.defaultConfig === 'function' ? options.defaultConfig() : options.defaultConfig).tools,

@@ -134,8 +134,8 @@ function GraphView({ graph }: { graph: TaskGraphSnapshot }): JSX.Element {
       const dimmed = related !== null && !related.has(node.id)
       const blocked = graph.blocked.some((item) => item.id === node.id)
       return <button key={node.id} type="button" onClick={() => setSelected((current) => current === node.id ? null : node.id)}
-        className={cn('absolute flex flex-col rounded-lg border bg-background px-3 py-2 text-left shadow-sm transition-all hover:shadow-md',
-          node.status === 'completed' && 'border-emerald-500/60', node.status === 'in_progress' && 'border-sky-500 ring-1 ring-sky-500/20',
+        className={cn('absolute flex flex-col overflow-hidden rounded-lg border bg-background px-3 py-2 text-left shadow-sm transition-all hover:shadow-md',
+          node.status === 'completed' && 'border-emerald-500/60', node.status === 'in_progress' && 'ak-task-node-running border-sky-500/75 ring-1 ring-sky-500/20',
           blocked && 'border-amber-500/60', node.status === 'cancelled' && 'border-dashed opacity-60', selected === node.id && 'ring-2 ring-sky-500', dimmed && 'opacity-25')}
         style={{ left: x, top: y, width: GRAPH_NODE_WIDTH, height: GRAPH_NODE_HEIGHT }} data-node-id={node.id}>
         <span className="line-clamp-2 text-xs font-medium leading-snug">{node.content}</span>

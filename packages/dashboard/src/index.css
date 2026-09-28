@@ -544,6 +544,94 @@
     animation: ak-thinking-text 1.9s linear infinite;
   }
 
+  .ak-empty-state-mark {
+    border: 1px solid hsl(var(--border) / 0.55);
+    background:
+      linear-gradient(145deg, hsl(var(--background) / 0.92), hsl(var(--primary) / 0.08)),
+      hsl(var(--card));
+    box-shadow:
+      inset 0 1px 0 hsl(var(--background) / 0.95),
+      0 12px 32px hsl(var(--primary) / 0.1);
+  }
+
+  .ak-empty-suggestion {
+    border: 1px solid hsl(var(--border) / 0.42);
+    background:
+      linear-gradient(145deg, hsl(var(--card) / 0.76), hsl(var(--muted) / 0.34));
+    box-shadow: inset 0 1px 0 hsl(var(--background) / 0.65);
+  }
+
+  .ak-empty-suggestion:hover {
+    border-color: hsl(var(--primary) / 0.25);
+    background:
+      linear-gradient(145deg, hsl(var(--card) / 0.92), hsl(var(--primary) / 0.065));
+    box-shadow:
+      inset 0 1px 0 hsl(var(--background) / 0.78),
+      0 10px 28px hsl(var(--foreground) / 0.055);
+  }
+
+  .ak-command-palette {
+    background:
+      radial-gradient(circle at 18% 0%, hsl(var(--primary) / 0.09), transparent 18rem),
+      linear-gradient(155deg, hsl(var(--popover) / 0.99), hsl(var(--card) / 0.96));
+    box-shadow:
+      inset 0 1px 0 hsl(var(--background) / 0.9),
+      0 28px 90px hsl(var(--foreground) / 0.18);
+  }
+
+  .ak-tool-activity-running {
+    background: conic-gradient(
+      from var(--ak-tool-activity-angle, 0deg),
+      transparent 0deg,
+      hsl(263 82% 70% / 0.08) 220deg,
+      hsl(263 88% 72% / 0.9) 285deg,
+      hsl(210 95% 72% / 0.42) 320deg,
+      transparent 360deg
+    );
+    box-shadow: 0 0 12px hsl(263 82% 66% / 0.2);
+    animation: ak-tool-activity-orbit 2.8s linear infinite;
+    -webkit-mask: radial-gradient(circle, transparent 58%, #000 61%);
+            mask: radial-gradient(circle, transparent 58%, #000 61%);
+  }
+
+  .ak-task-node-running::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(108deg, transparent 24%, hsl(199 92% 72% / 0.16) 46%, hsl(217 92% 72% / 0.24) 51%, transparent 72%);
+    background-size: 220% 100%;
+    animation: ak-task-node-sheen 2.8s ease-in-out infinite;
+  }
+
+  .ak-terminal-connecting {
+    background: linear-gradient(90deg, transparent, hsl(199 92% 65% / 0.9), hsl(263 82% 72% / 0.8), transparent);
+    background-size: 38% 100%;
+    background-repeat: no-repeat;
+    animation: ak-terminal-connecting 1.8s ease-in-out infinite;
+  }
+
+  .ak-voice-recorder {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 170% at 0% 100%, hsl(205 92% 58% / 0.06), transparent 58%),
+      linear-gradient(110deg, hsl(var(--card) / 0.94), hsl(var(--background) / 0.88));
+  }
+
+  .ak-voice-recorder-listening::after {
+    position: absolute;
+    inset: auto 0 0;
+    z-index: -1;
+    height: 1px;
+    content: "";
+    background: linear-gradient(90deg, transparent, hsl(199 92% 62% / 0.42), hsl(229 88% 68% / 0.34), transparent);
+    background-size: 42% 100%;
+    background-repeat: no-repeat;
+    animation: ak-voice-listening-line 2.2s ease-in-out infinite;
+  }
+
   .ak-explorer-loading-row {
     position: relative;
     animation: ak-loading-pulse 1.8s ease-in-out infinite;
@@ -577,6 +665,12 @@
 }
 
 @property --ak-beam-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --ak-tool-activity-angle {
   syntax: '<angle>';
   inherits: false;
   initial-value: 0deg;
@@ -620,6 +714,26 @@
 @keyframes ak-thinking-text {
   from { background-position: 200% 0; }
   to { background-position: 0 0; }
+}
+
+@keyframes ak-tool-activity-orbit {
+  to { --ak-tool-activity-angle: 360deg; }
+}
+
+@keyframes ak-task-node-sheen {
+  0%, 18% { background-position: 180% 0; opacity: 0; }
+  36% { opacity: 1; }
+  68%, 100% { background-position: -120% 0; opacity: 0; }
+}
+
+@keyframes ak-terminal-connecting {
+  from { background-position: -60% 0; }
+  to { background-position: 160% 0; }
+}
+
+@keyframes ak-voice-listening-line {
+  from { background-position: -72% 0; }
+  to { background-position: 172% 0; }
 }
 
 @keyframes ak-loading-pulse {
@@ -747,6 +861,10 @@
   .ak-expand-in,
   .ak-status-pulse,
   .ak-thinking-text,
+  .ak-tool-activity-running,
+  .ak-task-node-running::before,
+  .ak-terminal-connecting,
+  .ak-voice-recorder-listening::after,
   .ak-session-status-spinner,
   .ak-explorer-loading-row,
   .ak-loading-spinner {

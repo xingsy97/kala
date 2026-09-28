@@ -1484,17 +1484,13 @@ function TranscriptLoadingState(): JSX.Element {
   )
 }
 
-function EmptyState({
-  onSuggest,
-}: {
-  onSuggest?: (text: string) => void
-}): JSX.Element {
+function EmptyState({ onSuggest }: { onSuggest?: (text: string) => void }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex flex-col items-center gap-6 py-10 text-center sm:gap-8 sm:py-16">
+    <div className="flex flex-col items-center gap-6 py-10 text-center sm:gap-8 sm:py-16" data-testid="chat-empty-state">
       <div className="flex flex-col items-center gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted/60">
-          <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        <div className="ak-empty-state-mark flex h-12 w-12 items-center justify-center rounded-2xl">
+          <Sparkles className="h-6 w-6 text-primary/80" aria-hidden="true" />
         </div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
           <Typewriter text={t('chat.transcript.emptyTitle')} charMs={38} startDelayMs={120} />
@@ -1514,7 +1510,7 @@ function EmptyState({
               onClick={() => onSuggest?.(s.prompt)}
               disabled={!clickable}
               className={cn(
-                'group flex min-w-0 items-start gap-3 rounded-xl bg-muted/40 p-3 text-left transition-colors sm:p-4',
+                'ak-empty-suggestion group flex min-w-0 items-start gap-3 rounded-xl p-3 text-left transition-[background-color,box-shadow,border-color] sm:p-4',
                 clickable
                   ? 'hover:bg-muted cursor-pointer'
                   : 'cursor-default opacity-70',
@@ -1786,7 +1782,7 @@ function MessageRow({
         )}
       >
         <div className="flex min-w-0 max-w-[92%] flex-col items-end gap-1.5 sm:max-w-[85%]">
-          <div className="relative max-w-full overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+          <div className="relative max-w-full overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm" data-testid="user-message-surface">
             <InlineTimestamp
               ts={ts}
               className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
@@ -4107,9 +4103,8 @@ function ToolActivityGlyph({ dot, size }: { dot: ToolActivityDot; size: number }
   const Icon = dot.kind === 'read' ? Eye : dot.kind === 'search' ? FileSearch : dot.kind === 'write' ? PenLine : dot.kind === 'shell' ? Terminal : dot.kind === 'web' ? Globe : dot.kind === 'todo' ? ListChecks : dot.kind === 'memory' ? Brain : dot.kind === 'agent' ? Bot : Wrench
   return (
     <span data-shape={dot.kind} className={cn('relative flex items-center justify-center rounded-full transition-transform group-hover/dot:scale-110', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'partial' && 'text-amber-600 dark:text-amber-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300', dot.status === 'orphaned' && 'text-muted-foreground/70')} style={{ width: size, height: size }}>
-      {dot.status === 'running' ? <span className="absolute inset-[-3px] animate-ping rounded-full bg-violet-500/25" aria-hidden="true" /> : null}
-      {dot.status === 'running' ? <span className="absolute inset-[-2px] animate-pulse rounded-full ring-2 ring-violet-500/70 shadow-[0_0_8px_hsl(263_70%_60%/0.65)]" aria-hidden="true" /> : null}
-      <Icon className={cn('relative stroke-[2.2]', dot.status === 'running' && 'animate-pulse')} style={{ width: size, height: size }} aria-hidden="true" />
+      {dot.status === 'running' ? <span className="ak-tool-activity-running absolute inset-[-4px] rounded-full" aria-hidden="true" /> : null}
+      <Icon className="relative stroke-[2.2]" style={{ width: size, height: size }} aria-hidden="true" />
       {dot.status === 'failed' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-rose-500 ring-1 ring-background" aria-hidden="true" /> : null}
       {dot.status === 'partial' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-amber-500 ring-1 ring-background" aria-hidden="true" /> : null}
       {dot.status === 'approval' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 ring-1 ring-background" aria-hidden="true" /> : null}

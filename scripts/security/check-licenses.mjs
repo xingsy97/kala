@@ -13,7 +13,9 @@ const allowed = new Set([
   'MIT',
   'MIT-0',
   'MPL-2.0',
+  'OFL-1.1',
   'Unlicense',
+  '(Apache-2.0 AND MIT)',
   '(MIT OR CC0-1.0)',
   '(MPL-2.0 OR Apache-2.0)',
 ])

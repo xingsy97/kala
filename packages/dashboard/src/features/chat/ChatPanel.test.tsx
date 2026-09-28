@@ -164,8 +164,10 @@ describe('ChatPanel', () => {
   })
 
   it('renders empty state', () => {
-    render(<ChatPanel messages={[]} />)
+    const { container } = render(<ChatPanel messages={[]} />)
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()
+    expect(screen.getByTestId('chat-empty-state')).toBeTruthy()
+    expect(container.querySelector('.ak-empty-state-mark')).toBeTruthy()
   })
 
   it('renders thinking Markdown expanded by default and allows collapsing it', () => {
@@ -707,7 +709,7 @@ describe('ChatPanel', () => {
     )
 
     const runningDot = screen.getByTestId('tool-card-dot-running')
-    expect(runningDot.querySelector('.animate-ping')).toBeTruthy()
+    expect(runningDot.querySelector('.ak-tool-activity-running')).toBeTruthy()
     expect(screen.queryByTestId('tool-card-preview-layer-running')).toBeNull()
     expect(screen.queryByTestId('tool-call-group-details-done')).toBeNull()
 

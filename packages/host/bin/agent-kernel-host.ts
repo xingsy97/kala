@@ -79,6 +79,7 @@ import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 import { LocalWebSearchCredentialStore } from '../src/web-search/credential-store.js'
+import { LocalAzureSpeechCredentialStore } from '../src/speech/credential-store.js'
 import { createDedicatedRuntimeReadiness, writeDedicatedProcessReadiness, writeDedicatedRuntimeReadiness } from '../src/tenant-runtime/dedicated-runtime-readiness.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
@@ -179,6 +180,7 @@ async function main(): Promise<void> {
     process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
   const expectedDeployment = parseExpectedDeployment(process.env.AGENT_RUNLAB_EXPECTED_DEPLOYMENT)
   const webSearchCredentialStore = new LocalWebSearchCredentialStore(join(dirname(sessionsDir), 'credentials'))
+  const speechCredentialStore = new LocalAzureSpeechCredentialStore(join(dirname(sessionsDir), 'credentials'))
   const artifactRootDir = process.env.AGENT_KERNEL_ARTIFACTS_DIR === '0'
     ? false
     : process.env.AGENT_KERNEL_ARTIFACTS_DIR ?? join(dirname(sessionsDir), 'artifacts')
@@ -315,6 +317,7 @@ async function main(): Promise<void> {
     webSearchCredentialStatus: () => webSearchCredentialStore.status(),
     setWebSearchCredential: (provider, key) => webSearchCredentialStore.set(provider, key),
     deleteWebSearchCredential: (provider) => webSearchCredentialStore.delete(provider),
+    speechCredentials: speechCredentialStore,
     defaultConfig: () => resolvedAgentModule.config,
     models: () => registry.models,
     defaultModel: () => registry.defaultModel,

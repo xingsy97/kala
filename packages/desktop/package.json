@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/desktop",
-  "version": "0.2.0-rc.16",
+  "version": "0.2.0-rc.17",
   "private": true,
   "type": "module",
   "description": "Linux-only Tauri client for an existing Kala Dashboard",

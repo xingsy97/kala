@@ -31,7 +31,7 @@ Five-column Finder-style shell (see [ADR 0013](../../docs/meta/adr/0013-dashboar
   - **Usage** — running token totals
   - **Approvals** — cards with unified diff for `edit` / `write` tool calls
 - **History** (`src/features/history/`) — timeline scrubber + Fork button on every event; lineage bar links back to the parent session.
-- **Settings** (`src/features/settings/`) — provider list (auto-imported + user-added), model picker per provider, approval mode default, host / port config.
+- **Settings** (`src/features/settings/`) — provider list (auto-imported + user-added), model picker per provider, Azure Speech voice input, approval mode default, host / port config.
 - **Create Session** (`src/features/create-session/`) — workspace picker + Finder-style cwd picker + provider/model picker.
 - **Background terminal** (`src/features/background/`) — panel derived from `bash` / `bash_output` / `kill_shell` events.
 - **Activity bar** (`src/features/activity/`) — bottom bar: runtime status, permission banners.

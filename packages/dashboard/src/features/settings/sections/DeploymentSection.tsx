@@ -7,6 +7,7 @@ import { CheckCircle2, ChevronRight, CircleAlert, CloudCog, MonitorUp, Server, W
 import { EmptyRow, SectionHeader, SettingsRecord, SettingsRecordField, SettingsRecordList } from '../controls.js'
 import packageJson from '../../../../package.json'
 import { HelpHint } from '../../../components/ui/help-hint.js'
+import { forcePwaRefresh } from '../../../lib/pwa.js'
 
 const DASHBOARD_VERSION = packageJson.version
 
@@ -49,6 +50,20 @@ export function DeploymentSection({ payload, executors, host, token }: { payload
             <SettingsRecord title={t('settings.deployment.dashboardComponent')} detail={status?.dashboard ? t('settings.deployment.independentStaticRelease') : dashboardDeliveryLabel(build)}><SettingsRecordField label={t('settings.deployment.version')} mono>{status?.dashboard?.version ?? DASHBOARD_VERSION}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.releaseDigest')} mono>{shortDigest(status?.dashboard?.releaseDigest)}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.assetDigest')} mono>{shortDigest(status?.dashboard?.assetDigest)}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.protocolRange')} mono>{status?.dashboard ? `${status.dashboard.protocol.min} – ${status.dashboard.protocol.max}` : PROTOCOL_VERSION}</SettingsRecordField></SettingsRecord>
             <SettingsRecord title={t('settings.deployment.protocolComponent')} detail={t('settings.deployment.wireContract')}><SettingsRecordField label={t('settings.deployment.version')} mono>{payload.versions?.protocol ?? PROTOCOL_VERSION}</SettingsRecordField><SettingsRecordField label={t('settings.deployment.health')}>{dashboardCompatible ? t('settings.deployment.compatible') : t('settings.deployment.incompatible')}</SettingsRecordField></SettingsRecord>
           </SettingsRecordList>
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-border bg-background/70 p-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-foreground">{t('settings.deployment.forceDashboardRefresh')}</div>
+              <div className="mt-1 text-xs leading-5 text-muted-foreground">{t('settings.deployment.forceDashboardRefreshDetail')}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => { void forcePwaRefresh() }}
+              className="flex-none rounded-md border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground hover:bg-accent"
+              data-testid="settings-force-dashboard-refresh"
+            >
+              {t('pwa.forceRefresh')}
+            </button>
+          </div>
           {payload.socketConnections ? <DiagnosticBlock title={t('settings.deployment.socketConnections')} testId="settings-socket-connections"><p>{t('settings.deployment.socketConnectionsDesc', payload.socketConnections)}</p><div className="mt-2 flex flex-wrap gap-1.5">{payload.socketConnections.namespaces.map((entry) => <code key={entry.namespace} className="rounded border border-border bg-background px-2 py-1">{t('settings.deployment.namespaceConnections', { namespace: entry.namespace, sockets: entry.sockets })}</code>)}</div></DiagnosticBlock> : null}
           {payload.agentModule ? <DiagnosticBlock title={t('settings.deployment.agentModule')}><p className="font-mono">{payload.agentModule.label} · {payload.agentModule.id}@{payload.agentModule.version}</p><p className="mt-1 font-mono">prompt {payload.agentModule.systemPromptHash.slice(0, 12)} · tools {payload.agentModule.toolRegistryHash.slice(0, 12)}</p></DiagnosticBlock> : null}
         </div>

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import type { SessionSummary } from '@agent-kernel/shared'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -393,6 +394,35 @@ describe('NoSessionArea', () => {
 
     expect(onNewSession).toHaveBeenCalledTimes(1)
     expect(onNewSession).toHaveBeenCalledWith()
+  })
+
+  it('shows only the three sessions updated most recently within 48 hours on the startup page', () => {
+    const now = Date.now()
+    const makeSession = (sessionId: string, hoursAgo: number): SessionSummary => ({
+      sessionId,
+      agentRuntime: 'kernel',
+      createdAt: new Date(now - hoursAgo * 60 * 60 * 1000).toISOString(),
+      lastEventAt: new Date(now - hoursAgo * 60 * 60 * 1000).toISOString(),
+      eventCount: 1,
+    })
+    render(
+      <NoSessionArea
+        onNewSession={() => {}}
+        hasSessions
+        sessions={[
+          makeSession('old', 49),
+          makeSession('third', 24),
+          makeSession('newest', 1),
+          makeSession('fourth', 36),
+          makeSession('second', 12),
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'What can I help with?' })).toBeTruthy()
+    expect(screen.getAllByTestId('session-cockpit-session')).toHaveLength(3)
+    expect(screen.queryByText('old')).toBeNull()
+    expect(screen.queryByText('fourth')).toBeNull()
   })
 
   describe('initial session selection', () => {
