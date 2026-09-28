@@ -29,7 +29,7 @@ export function DesktopUpdateSettings(): JSX.Element {
         {update.newer && update.release ? <DesktopDownloadDialog update trigger={<Button size="sm" data-testid="desktop-open-update">{t('desktopUpdate.available', { version: update.release.version })}</Button>} /> : null}
       </div>
       {error ? <p role="alert" className="text-xs text-destructive">{t('desktopUpdate.unavailable', { detail: error })}</p>
-        : update.release && !update.newer ? <p role="status" className="text-xs text-muted-foreground">{t('desktopUpdate.current')}</p> : null}
+        : update.release && !update.newer ? <p role="status" aria-live="polite" className="text-xs text-muted-foreground" data-testid="desktop-update-status">{t(update.manualCheckCompleted ? 'desktopUpdate.currentAfterCheck' : 'desktopUpdate.current')}</p> : null}
     </section>
   )
 }

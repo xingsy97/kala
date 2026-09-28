@@ -28,7 +28,7 @@ describe('CommandPalette', () => {
       />,
     )
 
-    expect(screen.getByTestId('command-palette')).toBeTruthy()
+    expect(screen.getByTestId('command-palette').className).toContain('ak-command-palette')
     expect(screen.getByText('No workspace online')).toBeTruthy()
 
     fireEvent.change(screen.getByTestId('command-palette-search'), { target: { value: 'settings' } })

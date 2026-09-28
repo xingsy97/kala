@@ -8,6 +8,7 @@ import {
   ChevronDown,
   KeyRound,
   Search,
+  Mic,
   Palette,
   PlugZap,
   Rocket,
@@ -53,6 +54,7 @@ import { RuntimeSection } from './sections/RuntimeSection.js'
 import { SecuritySection } from './sections/SecuritySection.js'
 import { SocketAdminSection } from './sections/SocketAdminSection.js'
 import { WebSearchSection } from './sections/WebSearchSection.js'
+import { SpeechSection } from './sections/SpeechSection.js'
 
 
 type Props = {
@@ -63,9 +65,10 @@ type Props = {
   sessionCache?: DurableSessionViewCache
   host?: string
   token?: string
+  initialSection?: SectionKey
 }
 
-type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
+type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'speech' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
 
 type SectionGroup = 'personal' | 'workspace' | 'agent' | 'administration'
 const SECTION_GROUPS: readonly SectionGroup[] = ['personal', 'workspace', 'agent', 'administration']
@@ -76,6 +79,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'agent', label: 'settings.sections.agent.label', hint: 'settings.sections.agent.hint', icon: Bot, group: 'agent' },
   { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint', icon: Cpu, group: 'agent' },
   { key: 'webSearch', label: 'settings.sections.webSearch.label', hint: 'settings.sections.webSearch.hint', icon: Search, group: 'agent' },
+  { key: 'speech', label: 'settings.sections.speech.label', hint: 'settings.sections.speech.hint', icon: Mic, group: 'agent' },
   { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint', icon: KeyRound, group: 'agent' },
   { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint', icon: Cable, group: 'administration' },
   { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint', icon: Shield, group: 'administration' },
@@ -86,11 +90,11 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint', icon: Blocks, group: 'administration' },
 ]
 
-export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token }: Props): JSX.Element {
+export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token, initialSection = 'connection' }: Props): JSX.Element {
   const { t } = useTranslation()
   const desktopLayout = useMinWidth(768)
   const queryClient = useQueryClient()
-  const [section, setSection] = useState<SectionKey>('connection')
+  const [section, setSection] = useState<SectionKey>(initialSection)
   const [sectionHelp, setSectionHelp] = useState<string>()
   const activeSection = SECTIONS.find((item) => item.key === section) ?? SECTIONS[0]!
 
@@ -185,6 +189,8 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
                 <ModelsSection payload={payload} onPayloadChange={applyPayload} onModelsChanged={onModelsChanged} />
               ) : section === 'webSearch' ? (
                 <WebSearchSection />
+              ) : section === 'speech' ? (
+                <SpeechSection />
               ) : section === 'security' ? (
                 <SecuritySection payload={payload} />
               ) : section === 'socketAdmin' ? (

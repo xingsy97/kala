@@ -84,7 +84,7 @@ export function CommandPalette({ open, onOpenChange, commands }: Props): JSX.Ele
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden p-0"
+        className="ak-command-palette top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden border-border/55 p-0 shadow-2xl"
         data-testid="command-palette"
       >
         <DialogHeader className="sr-only">
@@ -155,8 +155,8 @@ function PaletteRow({
       disabled={command.disabled}
       onSelect={onRun}
       className={cn(
-        'flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors',
-        'data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground',
+        'flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-xs transition-[background-color,border-color,box-shadow]',
+        'data-[selected=true]:border-border/45 data-[selected=true]:bg-background/75 data-[selected=true]:text-accent-foreground data-[selected=true]:shadow-[inset_0_1px_0_hsl(var(--background)/0.9),0_5px_18px_hsl(var(--foreground)/0.05)]',
         command.disabled && 'cursor-not-allowed opacity-45',
       )}
       data-testid={`command-palette-item-${command.id}`}

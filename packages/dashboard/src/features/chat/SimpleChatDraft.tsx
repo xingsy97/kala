@@ -23,7 +23,7 @@ type Submission = {
 }
 
 export function SimpleChatDraft({
-  socket, host, token, agentRuntimes, models, preferredModel, displayPrefs, onCreated,
+  socket, host, token, agentRuntimes, models, preferredModel, displayPrefs, onCreated, onOpenVoiceSettings,
 }: {
   socket: DashboardSocket | null
   host: string
@@ -33,6 +33,7 @@ export function SimpleChatDraft({
   preferredModel: string
   displayPrefs: ChatDisplayPrefs
   onCreated(sessionId: string): void
+  onOpenVoiceSettings?(): void
 }): JSX.Element {
   const { t } = useTranslation()
   const [runtime, setRuntime] = useState(() => initialSimpleChatRuntime(agentRuntimes))
@@ -172,6 +173,7 @@ export function SimpleChatDraft({
         disabled={!socket?.connected || !descriptor || busy || pending !== null}
         serviceUnavailable={!socket?.connected}
         onReconnectService={() => socket?.connect()}
+        onOpenVoiceSettings={onOpenVoiceSettings}
         lockWhileSubmitting
         model={selectedModel}
         models={availableModels}

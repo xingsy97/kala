@@ -62,6 +62,7 @@ import { ApprovalCard } from './features/chat/ApprovalCard.js'
 import { AskUserChoiceCard } from './features/chat/AskUserChoiceCard.js'
 import { BackgroundShellsButton } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel, type WorkspaceFileTarget } from './features/chat/ChatPanel.js'
+import { recentEmptyStateSessions } from './features/chat/recent-empty-sessions.js'
 import { APPROVAL_MODES, Composer } from './features/chat/Composer.js'
 import { SimpleChatDraft } from './features/chat/SimpleChatDraft.js'
 import { ComposerFlipContainer } from './features/chat/ComposerFlipContainer.js'
@@ -277,6 +278,7 @@ export function App(): JSX.Element {
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('inspector')
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsInitialSection, setSettingsInitialSection] = useState<'connection' | 'speech'>('connection')
   const [accountCenterOpen, setAccountCenterOpen] = useState(false)
   const [adminCenterOpen, setAdminCenterOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
@@ -1927,6 +1929,10 @@ export function App(): JSX.Element {
                 socket={controlSocket}
                 host={hostEndpoint.url}
                 token={config.token}
+                onOpenVoiceSettings={() => {
+                  setSettingsInitialSection('speech')
+                  setSettingsOpen(true)
+                }}
                 agentRuntimes={control.agentRuntimes}
                 models={models}
                 preferredModel={preferredModel}
@@ -2146,6 +2152,10 @@ export function App(): JSX.Element {
                           serviceUnavailable={!controlSocket?.connected}
                           workspaceUnavailable={sessionWorkspaceKnownOffline}
                           onReconnectService={() => controlSocket?.connect()}
+                          onOpenVoiceSettings={() => {
+                            setSettingsInitialSection('speech')
+                            setSettingsOpen(true)
+                          }}
                           model={composerModel}
                           models={availableModels}
                           onModelChange={onModelChange}
@@ -2574,7 +2584,11 @@ export function App(): JSX.Element {
         <Suspense fallback={<PageLoadingFallback compact />}>
           <SettingsDialog
             open={settingsOpen}
-            onOpenChange={setSettingsOpen}
+            onOpenChange={(open) => {
+              setSettingsOpen(open)
+              if (!open) setSettingsInitialSection('connection')
+            }}
+            initialSection={settingsInitialSection}
             onModelsChanged={reloadModels}
             executors={control.executors}
             sessionCache={sessionViewCache}
@@ -2891,9 +2905,7 @@ export function NoSessionArea({
   hasWorkspace?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
-  const recentSessions = [...sessions]
-    .sort((a, b) => Date.parse(b.lastEventAt ?? b.createdAt) - Date.parse(a.lastEventAt ?? a.createdAt))
-    .slice(0, 5)
+  const recentSessions = recentEmptyStateSessions(sessions, null)
   const waiting = sessions.filter((item) => (sessionStatuses?.get(item.sessionId) ?? item.status) === 'awaiting_approval').length
   const running = sessions.filter((item) => isRunningSessionActivity(sessionStatuses?.get(item.sessionId) ?? item.status)).length
   const queued = sessions.reduce((sum, item) => sum + (item.queuedCount ?? 0), 0)

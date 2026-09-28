@@ -48,7 +48,7 @@ describe('TaskGraphButton responsive graph view', () => {
       expect(scrollContent.className).toContain('min-w-full')
       expect(scrollContent.className).toContain('justify-center')
       expect(screen.getByText('Audit')).toBeTruthy()
-      expect(screen.getByText('Build')).toBeTruthy()
+      expect(screen.getByText('Build').closest('button')?.className).toContain('ak-task-node-running')
       expect(screen.getByText('Verify')).toBeTruthy()
     } finally {
       window.matchMedia = original

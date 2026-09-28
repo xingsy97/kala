@@ -3,6 +3,10 @@ const status = document.getElementById('status')
 const submit = document.getElementById('submit')
 const warning = document.getElementById('http-warning')
 const security = document.getElementById('endpoint-security')
+const launcher = document.getElementById('launcher')
+const currentConnection = document.getElementById('current-connection')
+const currentEndpoint = document.getElementById('current-endpoint')
+const submitLabel = document.getElementById('submit-label')
 const invoke = (command, args) => window.__TAURI__.core.invoke(command, args)
 
 function inspectEndpoint(value) {
@@ -92,7 +96,13 @@ async function initialize() {
   submit.disabled = true
   try {
     const saved = await invoke('launcher_bootstrap')
-    if (saved.origin) endpoint.value = saved.origin
+    if (saved.origin) {
+      endpoint.value = saved.origin
+      currentEndpoint.textContent = saved.origin
+      currentConnection.hidden = false
+      launcher.dataset.mode = 'change'
+      submitLabel.textContent = 'Connect to this Dashboard'
+    }
     else {
       try { endpoint.value = localStorage.getItem('runlab-desktop-origin') || endpoint.value }
       catch (error) { console.warn('Legacy server preference is unavailable:', error) }

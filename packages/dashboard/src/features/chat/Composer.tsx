@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react'
-import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, FileText, GripVertical, ListChecks, Navigation, PanelTopClose, PanelTopOpen, Paperclip, Pencil, Plus, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Archive, ArrowRight, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, FileText, GripVertical, ListChecks, LoaderCircle, LockKeyhole, Mic, Navigation, PanelTopClose, PanelTopOpen, Paperclip, Pencil, Plus, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -48,6 +49,7 @@ import { SimpleComposerInput } from './composer/SimpleComposerInput.js'
 import { useComposerMode } from './composer/useComposerMode.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 import { prepareComposerImage } from './image-compression.js'
+import { joinTranscriptChunks, mergeTranscriptAtCaret, useVoiceRecorder, type VoiceRecorderError } from '../voice/useVoiceRecorder.js'
 
 type Props = {
   disabled?: boolean
@@ -97,6 +99,7 @@ type Props = {
   simpleFooterExtras?: ReactNode
   /** Controls rendered in the side space immediately left of the Composer surface. */
   leftAccessory?: ReactNode
+  onOpenVoiceSettings?(): void
 }
 
 export type SendMode = 'steer' | 'queue'
@@ -244,6 +247,7 @@ export function Composer({
   footerExtras,
   simpleFooterExtras,
   leftAccessory,
+  onOpenVoiceSettings,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const isNarrow = useIsNarrow()
@@ -318,9 +322,55 @@ export function Composer({
   const [mentionLoading, setMentionLoading] = useState(false)
   const [pendingToast, setPendingToast] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const simpleCaretRef = useRef(0)
+  const voiceDraftRef = useRef({ text: '', caret: 0 })
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const mentionRequestId = useRef(0)
   const approvalModeLabel = approvalModeDisplay(approvalMode, t).label
+  const voice = useVoiceRecorder({
+    onTranscript: (transcript) => {
+      const draft = voiceDraftRef.current
+      const next = mergeTranscriptAtCaret(draft.text, draft.caret, transcript)
+      setText(next)
+      window.requestAnimationFrame(() => {
+        const input = textareaRef.current
+        if (!input) return
+        const position = draft.text.trim()
+          ? next.length - (draft.text.length - draft.caret)
+          : next.length
+        input.focus()
+        input.setSelectionRange(position, position)
+      })
+    },
+    onConfigure: onOpenVoiceSettings,
+  })
+  const beginVoiceInput = useCallback((): void => {
+    const caret = mode === 'full'
+      ? textareaRef.current?.selectionStart ?? text.length
+      : simpleCaretRef.current || text.length
+    voiceDraftRef.current = { text, caret }
+    void voice.start()
+  }, [mode, text, voice])
+  const voiceActive = voice.phase !== 'idle'
+
+  useEffect(() => {
+    if (!voiceActive) return
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      if (voice.phase === 'error') voice.dismissError()
+      else void voice.cancel()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [voice, voiceActive])
+
+  useEffect(() => {
+    if (voice.phase === 'idle') return
+    void voice.cancel()
+  // A recording belongs to the session where it began.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
   const slashCommands = useMemo(
     () => {
@@ -477,9 +527,10 @@ export function Composer({
     })
   }
 
-  const submit = async (): Promise<void> => {
+  const submit = async (textOverride?: string): Promise<void> => {
     if (disabled || workspaceOnline === false || submitting || submitInFlight.current) return
-    const trimmed = text.trim()
+    const sourceText = textOverride ?? text
+    const trimmed = sourceText.trim()
     if (trimmed.length === 0 && pastedImages.length === 0 && attachedFiles.length === 0) return
     const parsedCommand = parseSlashCommand(trimmed)
     const command = parsedCommand
@@ -527,7 +578,7 @@ export function Composer({
         }
       }
     }
-    const submittedText = text
+    const submittedText = sourceText
     const submittedImages = pastedImages
     const submittedFiles = attachedFiles
     // Clear optimistically while raw File objects remain only in this
@@ -596,6 +647,14 @@ export function Composer({
         setSubmitting(false)
       }
     }
+  }
+  const stopVoiceAndSend = async (): Promise<void> => {
+    await commitVoiceAndSend({
+      stop: voice.stop,
+      draft: voiceDraftRef.current,
+      setText,
+      submit,
+    })
   }
 
   async function extractImagesFromClipboardData(data: DataTransfer | null): Promise<PastedImage[]> {
@@ -858,9 +917,13 @@ export function Composer({
                 data-testid="composer-simple-shell"
                 data-layout="mobile-input-first"
               >
-                {contextUsageBar('compact')}
-                <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
-                <div className="flex min-w-0 flex-wrap items-center justify-between gap-1 px-1 py-0.5 sm:min-h-12 sm:flex-nowrap sm:justify-start">
+                {voiceActive ? (
+                  <VoiceRecorderSurface voice={voice} onStopAndSend={stopVoiceAndSend} compact />
+                ) : (
+                <>
+                  {contextUsageBar('compact')}
+                  <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-1 px-1 py-0.5 sm:min-h-12 sm:flex-nowrap sm:justify-start">
                   <SlashCommandMenu
                     commands={matchingCommands}
                     disabled={disabled}
@@ -879,13 +942,15 @@ export function Composer({
                       placeholder={placeholderText}
                       ariaLabel={t('composer.placeholder')}
                       onTextChange={(next) => setText(next)}
+                      onSelectionChange={(caret) => { simpleCaretRef.current = caret }}
                       onRemoveImage={(id) => removeImage(id)}
                       onPaste={handleSimplePaste}
                       onEnterSubmit={() => { void submit() }}
                       className="border-0 bg-transparent shadow-none focus-within:border-0 focus-within:bg-transparent focus-within:ring-0"
                     />
                   </div>
-                  <div className="flex flex-none items-center justify-center" data-testid="composer-simple-send-column">
+                  <div className="flex flex-none items-center justify-center gap-0.5" data-testid="composer-simple-send-column">
+                    <VoiceInputButton disabled={Boolean(disabled || submitting)} secureContext={voice.secureContext} onPrepare={voice.prepare} onClick={beginVoiceInput} />
                     <SendButton
                       disabled={!canSubmit}
                       sendMode={sendMode}
@@ -896,6 +961,8 @@ export function Composer({
                     />
                   </div>
                 </div>
+                </>
+                )}
               </div>
             </div>
           </div>
@@ -907,6 +974,10 @@ export function Composer({
             'ak-composer-surface relative min-w-0 flex-1 rounded-2xl transition-[border-color,background-color,box-shadow]',
           )}
         >
+          {voiceActive ? (
+            <VoiceRecorderSurface voice={voice} onStopAndSend={stopVoiceAndSend} />
+          ) : (
+          <>
           {contextUsageBar('full')}
           <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
           <div className="relative">
@@ -1110,6 +1181,7 @@ export function Composer({
             </div>
             <div className="flex flex-none items-center justify-end gap-0.5" data-testid="composer-footer-actions">
               <HumanAttentionIndicator timeline={humanAttention} />
+              <VoiceInputButton disabled={Boolean(disabled || submitting)} secureContext={voice.secureContext} onPrepare={voice.prepare} onClick={beginVoiceInput} />
               <SendButton
                 disabled={!canSubmit}
                 sendMode={sendMode}
@@ -1119,6 +1191,8 @@ export function Composer({
               />
             </div>
           </div>
+          </>
+          )}
         </div>
         </div>
         )}
@@ -1150,6 +1224,367 @@ function ComposerLeftAccessory({ mode, children }: { mode: 'simple' | 'full'; ch
       {children}
     </div>
   )
+}
+
+type VoiceRecorderControls = ReturnType<typeof useVoiceRecorder>
+
+function VoiceInputButton({
+  disabled,
+  secureContext,
+  onPrepare,
+  onClick,
+}: {
+  disabled: boolean
+  secureContext: boolean
+  onPrepare?(): Promise<void>
+  onClick(): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [secureContextHelp, setSecureContextHelp] = useState<{ left: number; top: number } | null>(null)
+  return (
+    <>
+      <button
+        type="button"
+        disabled={disabled}
+        onPointerEnter={() => { if (!disabled && secureContext) void onPrepare?.().catch(() => undefined) }}
+        onFocus={() => { if (!disabled && secureContext) void onPrepare?.().catch(() => undefined) }}
+        onPointerDown={() => { if (!disabled && secureContext) void onPrepare?.().catch(() => undefined) }}
+        onClick={(event) => {
+          if (!secureContext) {
+            const rect = event.currentTarget.getBoundingClientRect()
+            setSecureContextHelp((current) => current
+              ? null
+              : {
+                  left: Math.max(12, Math.min(rect.right - 256, window.innerWidth - 268)),
+                  top: Math.max(12, rect.top - 78),
+                })
+            return
+          }
+          onClick()
+        }}
+        aria-label={secureContext ? t('composer.voice.start') : t('composer.voice.httpsRequired')}
+        title={secureContext ? t('composer.voice.start') : t('composer.voice.httpsRequired')}
+        aria-expanded={!secureContext ? Boolean(secureContextHelp) : undefined}
+        data-testid="composer-voice-start"
+        data-secure-context={secureContext ? 'true' : 'false'}
+        className="relative z-[1] flex h-11 w-10 flex-none items-center justify-center rounded-xl border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground active:text-foreground disabled:cursor-not-allowed disabled:opacity-40 sm:h-10 sm:w-10"
+      >
+        <Mic className="h-[18px] w-[18px]" aria-hidden="true" />
+        {!secureContext ? <LockKeyhole className="absolute bottom-1 right-1 h-2.5 w-2.5" aria-hidden="true" /> : null}
+      </button>
+      {secureContextHelp && !secureContext && typeof document !== 'undefined' ? createPortal((
+        <div
+          className="fixed z-[100] w-64 rounded-lg border border-border bg-popover p-3 text-left shadow-lg"
+          style={secureContextHelp}
+          role="alert"
+          data-testid="composer-voice-https-help"
+        >
+          <div className="text-xs font-medium text-popover-foreground">{t('composer.voice.httpsRequired')}</div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">{t('composer.voice.httpsRequiredDetail')}</div>
+        </div>
+      ), document.body) : null}
+    </>
+  )
+}
+
+function VoiceRecorderSurface({
+  voice,
+  onStopAndSend,
+  compact = false,
+}: {
+  voice: VoiceRecorderControls
+  onStopAndSend(): Promise<void>
+  compact?: boolean
+}): JSX.Element {
+  const { t } = useTranslation()
+  const transcriptRef = useRef<HTMLDivElement | null>(null)
+  const followTranscriptRef = useRef(true)
+  const listening = voice.phase === 'listening'
+  const error = voice.phase === 'error' ? voiceErrorLabel(voice.error, t) : null
+  const liveMode = voice.configuration?.mode !== 'after_recording'
+  const transcript = joinTranscriptChunks(voice.finalTranscript, voice.interimTranscript)
+  const interimDisplay = transcript.slice(voice.finalTranscript.length)
+  useEffect(() => {
+    const element = transcriptRef.current
+    if (element && followTranscriptRef.current) element.scrollTop = element.scrollHeight
+  }, [transcript])
+  const status = voice.phase === 'requesting'
+    ? t('composer.voice.requesting')
+    : voice.phase === 'processing'
+      ? t('composer.voice.processing')
+      : error ?? (voice.elapsedSeconds >= 270
+        ? t('composer.voice.finishingSoon')
+        : liveMode ? t('composer.voice.listening') : t('composer.voice.recording'))
+  return (
+    <div
+      className={cn(
+        'ak-voice-recorder flex min-w-0 items-center gap-2 rounded-[inherit] px-2.5 py-2',
+        compact ? 'min-h-12' : 'min-h-[5.625rem] px-3.5',
+        listening && 'ak-voice-recorder-listening',
+      )}
+      data-testid="composer-voice-recorder"
+      data-voice-phase={voice.phase}
+      role="status"
+      aria-live="polite"
+    >
+      {voice.phase === 'error' ? (
+        <button
+          type="button"
+          onClick={voice.dismissError}
+          className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label={t('composer.voice.dismiss')}
+          data-testid="composer-voice-dismiss"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      ) : voice.phase !== 'processing' ? (
+        <button
+          type="button"
+          onClick={() => { void voice.cancel() }}
+          className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label={t('composer.voice.cancel')}
+          data-testid="composer-voice-cancel"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      ) : <span className="h-9 w-9 flex-none" aria-hidden="true" />}
+
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="relative flex h-7 w-7 flex-none items-center justify-center" aria-hidden="true">
+          {listening ? <span className="absolute inset-0 rounded-full bg-sky-500/15 motion-safe:animate-ping" /> : null}
+          <span className={cn('relative h-2.5 w-2.5 rounded-full', voice.phase === 'error' ? 'bg-destructive' : listening ? 'bg-rose-500' : 'bg-primary')} />
+        </span>
+        <div className="min-w-0 flex-1">
+          {listening && liveMode && transcript ? (
+            <div
+              ref={transcriptRef}
+              className={cn('whitespace-pre-wrap break-words overflow-y-auto overscroll-contain text-sm leading-5 [scrollbar-width:thin]', compact ? 'max-h-10' : 'max-h-20')}
+              onScroll={(event) => {
+                const element = event.currentTarget
+                followTranscriptRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 12
+              }}
+              data-testid="composer-voice-transcript"
+            >
+              <span className="text-foreground">{voice.finalTranscript}</span>
+              <span className="text-muted-foreground">{interimDisplay}</span>
+            </div>
+          ) : (
+            <div className={cn('text-sm font-medium', voice.phase === 'error' ? 'text-destructive' : 'text-foreground')} data-testid="composer-voice-status">
+              {status}
+            </div>
+          )}
+        </div>
+        {voice.phase !== 'error' ? (
+          <VoiceLevelTrace
+            levels={voice.levels}
+            compact={compact}
+            hideOnNarrow={listening && liveMode && Boolean(transcript)}
+          />
+        ) : null}
+        {voice.phase !== 'error' ? (
+          <span className="hidden w-10 flex-none text-right font-mono text-xs tabular-nums text-muted-foreground sm:block" data-testid="composer-voice-timer">
+            {formatVoiceDuration(voice.elapsedSeconds)}
+          </span>
+        ) : null}
+      </div>
+
+      {listening ? (
+        <VoiceStopControl
+          compact={compact}
+          onStop={() => voice.stop()}
+          onStopAndSend={onStopAndSend}
+        />
+      ) : voice.phase === 'error' ? (
+        <button
+          type="button"
+          onClick={() => { void voice.retry() }}
+          className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm"
+          aria-label={t('composer.voice.retry')}
+          data-testid="composer-voice-retry"
+        >
+          <Mic className="h-4 w-4" aria-hidden="true" />
+        </button>
+      ) : (
+        <span className="flex h-9 w-9 flex-none items-center justify-center text-muted-foreground" aria-hidden="true">
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        </span>
+      )}
+    </div>
+  )
+}
+
+const VOICE_SEND_DRAG_PX = 58
+const VOICE_SEND_MAX_PX = 66
+const VOICE_TAP_SLOP_PX = 5
+
+export async function commitVoiceAndSend({
+  stop,
+  draft,
+  setText,
+  submit,
+}: {
+  stop(): Promise<string | undefined>
+  draft: { text: string; caret: number }
+  setText(text: string): void
+  submit(text: string): Promise<void>
+}): Promise<boolean> {
+  const transcript = await stop()
+  if (!transcript) return false
+  const next = mergeTranscriptAtCaret(draft.text, draft.caret, transcript)
+  if (!next.trim()) return false
+  setText(next)
+  await submit(next)
+  return true
+}
+
+export function VoiceStopControl({
+  compact,
+  onStop,
+  onStopAndSend,
+}: {
+  compact: boolean
+  onStop(): void | Promise<unknown>
+  onStopAndSend(): void | Promise<unknown>
+}): JSX.Element {
+  const { t } = useTranslation()
+  const dragRef = useRef<{ pointerId: number; startX: number } | null>(null)
+  const suppressClickRef = useRef(false)
+  const [offset, setOffset] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const armed = offset >= VOICE_SEND_DRAG_PX
+  const reset = (): void => {
+    dragRef.current = null
+    setDragging(false)
+    setOffset(0)
+  }
+  return (
+    <div
+      className={cn(
+        'relative h-10 flex-none overflow-hidden rounded-full border border-primary/15 bg-primary/[0.055] select-none touch-none',
+        compact ? 'w-[6.5rem]' : 'w-[7.25rem]',
+      )}
+      data-testid="composer-voice-send-track"
+      data-armed={armed ? 'true' : 'false'}
+      title={t('composer.voice.slideToSend')}
+    >
+      <span
+        className="pointer-events-none absolute inset-y-0 left-0 bg-primary/10"
+        style={{ width: `${36 + offset}px` }}
+        aria-hidden="true"
+      />
+      <span className={cn(
+        'pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1 text-[10px] font-medium text-primary/65 transition-opacity',
+        dragging && 'text-primary',
+      )}>
+        <span className="hidden md:inline">{armed ? t('composer.voice.releaseToSend') : t('composer.voice.send')}</span>
+        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+      </span>
+      <button
+        type="button"
+        className={cn(
+          'absolute left-0.5 top-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm',
+          !dragging && 'transition-transform hover:scale-[1.03] active:scale-95',
+          armed && 'bg-emerald-600',
+        )}
+        style={{ transform: `translateX(${offset}px)` }}
+        aria-label={t('composer.voice.stop')}
+        aria-description={t('composer.voice.slideToSend')}
+        data-testid="composer-voice-stop"
+        onPointerDown={(event) => {
+          if (event.button !== 0 || dragRef.current) return
+          dragRef.current = { pointerId: event.pointerId, startX: event.clientX }
+          event.currentTarget.setPointerCapture?.(event.pointerId)
+          setDragging(true)
+        }}
+        onPointerMove={(event) => {
+          const drag = dragRef.current
+          if (!drag || drag.pointerId !== event.pointerId) return
+          setOffset(Math.max(0, Math.min(VOICE_SEND_MAX_PX, event.clientX - drag.startX)))
+        }}
+        onPointerUp={(event) => {
+          const drag = dragRef.current
+          if (!drag || drag.pointerId !== event.pointerId) return
+          const distance = Math.max(0, Math.min(VOICE_SEND_MAX_PX, event.clientX - drag.startX))
+          suppressClickRef.current = true
+          reset()
+          if (distance >= VOICE_SEND_DRAG_PX) void onStopAndSend()
+          else if (distance <= VOICE_TAP_SLOP_PX) void onStop()
+        }}
+        onPointerCancel={reset}
+        onClick={(event) => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false
+            event.preventDefault()
+            return
+          }
+          void onStop()
+        }}
+      >
+        {armed
+          ? <Navigation className="h-4 w-4 fill-current" aria-hidden="true" />
+          : <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />}
+      </button>
+    </div>
+  )
+}
+
+function VoiceLevelTrace({
+  levels,
+  compact,
+  hideOnNarrow,
+}: {
+  levels: readonly number[]
+  compact: boolean
+  hideOnNarrow: boolean
+}): JSX.Element {
+  const width = 160
+  const height = 24
+  const floor = height - 2
+  const points = levels.map((level, index) => {
+    const x = levels.length <= 1 ? 0 : (index / (levels.length - 1)) * width
+    const y = floor - Math.max(0, Math.min(1, level)) * (height - 5)
+    return `${x.toFixed(2)},${y.toFixed(2)}`
+  }).join(' ')
+  const area = `M 0 ${floor} L ${points.replaceAll(' ', ' L ')} L ${width} ${floor} Z`
+  return (
+    <div
+      className={cn(
+        'h-6 w-20 flex-none text-primary sm:w-28 md:w-36',
+        !compact && 'sm:w-36 md:w-44',
+        hideOnNarrow && 'hidden sm:block',
+      )}
+      data-testid="composer-voice-waveform"
+      aria-hidden="true"
+    >
+      <svg className="h-full w-full overflow-visible" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        <path d={area} fill="currentColor" opacity="0.09" />
+        <polyline
+          points={points}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+          opacity="0.82"
+        />
+      </svg>
+    </div>
+  )
+}
+
+function voiceErrorLabel(error: VoiceRecorderError | undefined, t: TFunction): string {
+  if (error === 'not_configured') return t('composer.voice.errors.notConfigured')
+  if (error === 'permission_denied') return t('composer.voice.errors.permissionDenied')
+  if (error === 'microphone_unavailable') return t('composer.voice.errors.unavailable')
+  if (error === 'secure_context_required') return t('composer.voice.errors.secureContext')
+  if (error === 'no_speech') return t('composer.voice.errors.noSpeech')
+  return t('composer.voice.errors.service')
+}
+
+function formatVoiceDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60)
+  return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 function AttachmentButton({ disabled, onClick, appearance = 'icon' }: { disabled?: boolean; onClick(): void; appearance?: 'icon' | 'menu' }): JSX.Element {

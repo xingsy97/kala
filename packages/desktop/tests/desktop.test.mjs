@@ -21,8 +21,8 @@ test('native window stays menu-free with local keyboard shortcuts and safe close
   assert.doesNotMatch(native, /set_title\(&format!|let title = format!\("Kala/)
   assert.equal(config.productName, 'kala-desktop')
   assert.equal(config.app.windows[0].title, 'Kala — Connect')
-  assert.equal(config.app.windows[0].width, 560)
-  assert.equal(config.app.windows[0].height, 520)
+  assert.equal(config.app.windows[0].width, 820)
+  assert.equal(config.app.windows[0].height, 590)
   assert.equal(config.app.windows[0].decorations, false)
   assert.match(config.app.security.csp, /media-src blob:; frame-src blob:; object-src 'none'/)
   assert.doesNotMatch(config.app.security.csp, /media-src[^;]*(?:https?:|'self')/)
@@ -30,6 +30,8 @@ test('native window stays menu-free with local keyboard shortcuts and safe close
   assert.match(native, /\.decorations\(false\)/)
   assert.match(html, /class="launcher-heading"[\s\S]*data-window-action="minimize"[\s\S]*data-window-action="toggle-maximize"[\s\S]*data-window-action="close"/)
   assert.match(html, /Connect to your Dashboard[\s\S]*id="http-warning"[\s\S]*Unencrypted remote connection/)
+  assert.match(html, /Your workspace,[\s\S]*Move this app to[\s\S]*Change Dashboard connection/)
+  assert.match(html, /Current Dashboard[\s\S]*id="current-endpoint"/)
   assert.doesNotMatch(html, /class="titlebar"|<header/)
   const init = read('../src-tauri/src/desktop-init.js')
   assert.match(init, /data-kala-desktop-window-controls-slot[\s\S]*appendChild\(host\)/)
@@ -73,7 +75,7 @@ test('official tray is minimal and cannot hide an app without registered host su
 })
 
 async function launcherPage({ saved = null, legacy = null, autoConnect = false, failure = '' } = {}) {
-  const nodes = Object.fromEntries(['endpoint', 'status', 'submit', 'connect', 'http-warning', 'endpoint-security'].map(id => [id, {
+  const nodes = Object.fromEntries(['launcher', 'endpoint', 'status', 'submit', 'submit-label', 'connect', 'http-warning', 'endpoint-security', 'current-connection', 'current-endpoint'].map(id => [id, {
     value: id === 'endpoint' ? 'http://remote.example' : '', textContent: '', dataset: {}, hidden: id === 'http-warning',
     setCustomValidity(value) { this.validationMessage = value },
     setAttribute(name, value) { this[name] = value },
@@ -166,6 +168,10 @@ test('normal startup automatically reuses native saved origin rather than stale 
 test('explicit Change server/reloaded launcher stays editable without reconnecting automatically', async () => {
   const { nodes, calls } = await launcherPage({ saved: 'https://saved.example', autoConnect: false })
   assert.equal(nodes.endpoint.value, 'https://saved.example')
+  assert.equal(nodes.launcher.dataset.mode, 'change')
+  assert.equal(nodes['current-connection'].hidden, false)
+  assert.equal(nodes['current-endpoint'].textContent, 'https://saved.example')
+  assert.equal(nodes['submit-label'].textContent, 'Connect to this Dashboard')
   assert.equal(calls.length, 1)
   assert.equal(nodes.submit.disabled, false)
   assert.match(read('../src-tauri/src/connection.rs'), /bootstrapped\.swap\(true/)
@@ -175,10 +181,10 @@ test('explicit Change server/reloaded launcher stays editable without reconnecti
 
 test('desktop release versions stay in sync without changing dependencies', () => {
   const version = JSON.parse(read('../package.json')).version
-  assert.equal(version, '0.2.0-rc.16')
+  assert.equal(version, '0.2.0-rc.18')
   assert.equal(JSON.parse(read('../src-tauri/tauri.conf.json')).version, version)
-  assert.match(read('../src-tauri/Cargo.toml'), /name = "kala-desktop"[\s\S]*version = "0\.2\.0-rc\.16"/)
-  assert.match(read('../src-tauri/Cargo.lock'), /name = "kala-desktop"\nversion = "0\.2\.0-rc\.16"/)
+  assert.match(read('../src-tauri/Cargo.toml'), /name = "kala-desktop"[\s\S]*version = "0\.2\.0-rc\.18"/)
+  assert.match(read('../src-tauri/Cargo.lock'), /name = "kala-desktop"\nversion = "0\.2\.0-rc\.18"/)
 })
 
 test('connect remains local; selected-origin v1 UI hints get no general native privileges', () => {
@@ -205,6 +211,14 @@ test('connect remains local; selected-origin v1 UI hints get no general native p
   assert.match(read('../src-tauri/src/main.rs'), /NewWindowResponse::Deny/)
   assert.match(read('../src-tauri/src/main.rs'), /set_do_overwrite_confirmation\(true\)/)
   assert.match(read('../src-tauri/src/main.rs'), /\.data_directory\(profile\)/)
+  const mediaPermissions = read('../src-tauri/src/media_permissions.rs')
+  assert.match(read('../src-tauri/src/main.rs'), /media_permissions::install\(&dashboard\)/)
+  assert.match(mediaPermissions, /UserMediaPermissionRequest/)
+  assert.match(mediaPermissions, /is_for_audio_device\(\) && !media\.is_for_video_device\(\)/)
+  assert.match(mediaPermissions, /origin != expected \|\| !crate::connection::confirmed/)
+  assert.match(mediaPermissions, /Allow microphone access\?/)
+  assert.match(mediaPermissions, /request\.allow\(\)/)
+  assert.match(mediaPermissions, /request\.deny\(\)/)
   const desktop = read('../src-tauri/src/desktop.rs')
   assert.match(desktop, /native_integration_allowed[\s\S]*permission\("allow-desktop-ui"\)[\s\S]*permission\("allow-window-control"\)\.permission\("allow-connection-ready"\)/)
   assert.match(desktop, /window\.label\(\) != "dashboard"/)

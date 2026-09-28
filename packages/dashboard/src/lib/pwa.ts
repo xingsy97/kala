@@ -33,12 +33,15 @@ export type PwaLifecycleHandlers = {
 export type PwaController = {
   /** Send SKIP_WAITING to the waiting worker and reload once it activates. */
   applyUpdate: () => Promise<void>
+  /** Remove stale worker/cache state and load the current network shell. */
+  forceRefresh: () => Promise<void>
   /** Manually trigger an update check. */
   checkForUpdate: () => Promise<void>
 }
 
 const NOOP_CONTROLLER: PwaController = {
   applyUpdate: async () => {},
+  forceRefresh: async () => {},
   checkForUpdate: async () => {},
 }
 
@@ -90,6 +93,11 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
   // the import still resolves. Guard on PROD anyway so we never register a
   // worker against a Vite dev server (which would break HMR).
   if (!import.meta.env.PROD) return NOOP_CONTROLLER
+  const bootUrl = new URL(window.location.href)
+  if (bootUrl.searchParams.has(FORCE_REFRESH_PARAMETER)) {
+    bootUrl.searchParams.delete(FORCE_REFRESH_PARAMETER)
+    window.history.replaceState(window.history.state, '', bootUrl.toString())
+  }
 
   let updateSW: ((reloadPage?: boolean) => Promise<void>) | undefined
   let pollTimer: ReturnType<typeof setTimeout> | undefined
@@ -111,6 +119,10 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
       const mod = await import(/* @vite-ignore */ 'virtual:pwa-register')
       updateSW = mod.registerSW({
         immediate: true,
+        // Workbox otherwise reloads from its `controlling` callback while
+        // activatePwaUpdate reloads from `controllerchange`, causing duplicate
+        // navigations and, in some browsers, a waiting-worker reload loop.
+        onNeedReload: () => {},
         onNeedRefresh: () => handlers.onNeedRefresh(),
         onOfflineReady: () => handlers.onOfflineReady(),
         onRegisteredSW: (_url: string, registration: ServiceWorkerRegistration | undefined) => {
@@ -186,11 +198,36 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
         reload: () => window.location.reload(),
       })
     },
+    forceRefresh: async () => {
+      await forcePwaRefresh()
+    },
     checkForUpdate: async () => {
       const registration = await navigator.serviceWorker.getRegistration()
       if (registration) await checkRegistration(registration, true)
     },
   }
+}
+
+const FORCE_REFRESH_PARAMETER = '__kala_refresh'
+
+export async function forcePwaRefresh(options: {
+  serviceWorker?: ServiceWorkerContainer
+  cacheStorage?: Pick<CacheStorage, 'keys' | 'delete'>
+  location?: Pick<Location, 'href' | 'replace'>
+  nonce?: string
+} = {}): Promise<void> {
+  const serviceWorker = options.serviceWorker ?? navigator.serviceWorker
+  const cacheStorage = options.cacheStorage ?? caches
+  const locationValue = options.location ?? window.location
+  const registration = await serviceWorker.getRegistration().catch(() => undefined)
+  await registration?.unregister()
+  const cacheNames = await cacheStorage.keys().catch(() => [])
+  await Promise.all(cacheNames
+    .filter((name) => name.startsWith('workbox-precache') || name.startsWith('ak-'))
+    .map((name) => cacheStorage.delete(name)))
+  const url = new URL(locationValue.href)
+  url.searchParams.set(FORCE_REFRESH_PARAMETER, options.nonce ?? String(Date.now()))
+  locationValue.replace(url.toString())
 }
 
 /**

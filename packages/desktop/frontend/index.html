@@ -7,9 +7,19 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <main>
+  <main id="launcher" data-mode="welcome">
     <div class="launcher-heading">
-      <div class="product-name">Kala</div>
+      <div class="product-name">
+        <svg class="title-mark" viewBox="0 0 64 64" aria-hidden="true">
+          <rect width="64" height="64" rx="14" fill="#172538"/>
+          <path d="M22 34C14 34 13 41 10 38M24 38C18 44 16 49 13 44M28 40C26 47 22 52 20 46M31 40C31 50 27 53 26 47M42 34C50 34 51 41 54 38M40 38C46 44 48 49 51 44M36 40C38 47 42 52 44 46M33 40C33 50 37 53 38 47" fill="none" stroke="#8be0d5" stroke-width="4.5" stroke-linecap="round"/>
+          <path d="M18 33C18 21 23 14 32 14S46 21 46 33V35C46 40 40 43 32 43S18 40 18 35Z" fill="#8be0d5"/>
+          <g fill="#172538"><circle cx="26" cy="30" r="2.4"/><circle cx="38" cy="30" r="2.4"/></g>
+          <path d="M29 35Q32 38 35 35" fill="none" stroke="#172538" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>Kala</span>
+        <span class="desktop-label">Desktop</span>
+      </div>
       <nav class="window-controls" aria-label="Window controls">
         <button type="button" data-window-action="minimize" aria-label="Minimize">−</button>
         <button type="button" data-window-action="toggle-maximize" aria-label="Maximize or restore">□</button>
@@ -17,40 +27,70 @@
       </nav>
     </div>
 
-    <section class="connection-card" aria-labelledby="connection-title">
-      <div class="card-heading">
-        <p class="eyebrow">Desktop connection</p>
-        <h1 id="connection-title">Connect to your Dashboard</h1>
-        <p class="intro">Enter the origin where your Kala Dashboard is available.</p>
-      </div>
-
-      <form id="connect" novalidate>
-        <label for="endpoint">Dashboard origin</label>
-        <div class="endpoint-field">
-          <span class="endpoint-icon" aria-hidden="true"></span>
-          <input id="endpoint" type="url" inputmode="url" required placeholder="https://kala.example.com" value="http://127.0.0.1:13000" autocomplete="url" autocapitalize="none" spellcheck="false" autofocus aria-describedby="endpoint-help endpoint-security status" />
+    <div class="onboarding-shell">
+      <section class="welcome-panel" aria-labelledby="welcome-title">
+        <div class="welcome-content">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64">
+              <path d="M22 34C14 34 13 41 10 38M24 38C18 44 16 49 13 44M28 40C26 47 22 52 20 46M31 40C31 50 27 53 26 47M42 34C50 34 51 41 54 38M40 38C46 44 48 49 51 44M36 40C38 47 42 52 44 46M33 40C33 50 37 53 38 47" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/>
+              <path d="M18 33C18 21 23 14 32 14S46 21 46 33V35C46 40 40 43 32 43S18 40 18 35Z" fill="currentColor"/>
+              <g fill="#11243a"><circle cx="26" cy="30" r="2.4"/><circle cx="38" cy="30" r="2.4"/></g>
+              <path d="M29 35Q32 38 35 35" fill="none" stroke="#11243a" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <p class="eyebrow">Kala Desktop</p>
+          <h1 id="welcome-title"><span class="welcome-copy">Your workspace,<br />closer at hand.</span><span class="change-copy">Move this app to<br />another Dashboard.</span></h1>
+          <p class="welcome-description welcome-copy">A focused desktop home for conversations, tasks, and the agents working alongside you.</p>
+          <p class="welcome-description change-copy">Choose a different Kala deployment without moving data or changing the server itself.</p>
         </div>
-        <p id="endpoint-help" class="field-help">Use only an HTTP or HTTPS origin. Paths, credentials, query parameters, and fragments are not allowed.</p>
-
-        <div id="http-warning" class="notice notice-warning" role="note" hidden>
-          <span class="notice-icon" aria-hidden="true">!</span>
-          <div><strong>Unencrypted remote connection</strong><p>Sign-in and session traffic can be observed or changed in transit. Native notifications, clipboard image access, and other secure-context features will be unavailable.</p></div>
+        <div class="trust-list" aria-label="Desktop connection details">
+          <div><span class="trust-icon" aria-hidden="true">01</span><span><strong>One connected workspace</strong><small>Your Dashboard remains the source of truth.</small></span></div>
+          <div><span class="trust-icon" aria-hidden="true">02</span><span><strong>Secure by default</strong><small>Native features require a trusted origin.</small></span></div>
         </div>
-        <div id="endpoint-security" class="security-state" aria-live="polite"></div>
+      </section>
 
-        <button id="submit" type="submit"><span>Connect</span><span aria-hidden="true">→</span></button>
-        <p id="status" class="status" role="status" aria-live="polite"></p>
-      </form>
-    </section>
+      <section class="connection-panel" aria-labelledby="connection-title">
+        <div class="card-heading">
+          <p class="step-label"><span class="welcome-copy">Set up your connection</span><span class="change-copy">Connection settings</span></p>
+          <h2 id="connection-title"><span class="welcome-copy">Connect to your Dashboard</span><span class="change-copy">Change Dashboard connection</span></h2>
+          <p class="intro"><span class="welcome-copy">Enter the web address for your Kala deployment.</span><span class="change-copy">Enter the origin this desktop app should open.</span></p>
+        </div>
 
-    <details>
-      <summary>Connection help</summary>
-      <div class="help-content">
-        <p>HTTPS is recommended for remote servers. HTTP remains available, but remote HTTP cannot use security-sensitive desktop integration. HTTP loopback origins such as localhost remain trusted for local development.</p>
-        <p>The app connects to your existing Dashboard and does not start a backend or open a port. A server is remembered only after the Dashboard connects successfully.</p>
-        <p>Press <kbd>Ctrl+Shift+O</kbd> to change server, <kbd>Ctrl+R</kbd> to reload, or <kbd>Ctrl+Q</kbd> to quit. External identity-provider redirects require HTTPS.</p>
-      </div>
-    </details>
+        <form id="connect" novalidate>
+          <div id="current-connection" class="current-connection change-copy" hidden>
+            <span class="current-indicator" aria-hidden="true"></span>
+            <span><small>Current Dashboard</small><strong id="current-endpoint"></strong></span>
+          </div>
+
+          <label for="endpoint">Dashboard origin</label>
+          <div class="endpoint-field">
+            <span class="endpoint-icon" aria-hidden="true"></span>
+            <input id="endpoint" type="url" inputmode="url" required placeholder="https://kala.example.com" value="http://127.0.0.1:13000" autocomplete="url" autocapitalize="none" spellcheck="false" autofocus aria-describedby="endpoint-help endpoint-security status" />
+          </div>
+          <p id="endpoint-help" class="field-help">The address only — without a path, credentials, or query.</p>
+
+          <div id="http-warning" class="notice notice-warning" role="note" hidden>
+            <span class="notice-icon" aria-hidden="true">!</span>
+            <div><strong>Unencrypted remote connection</strong><p>Sign-in and session traffic can be observed or changed in transit. Native notifications, clipboard image access, and other secure-context features will be unavailable.</p></div>
+          </div>
+          <div id="endpoint-security" class="security-state" aria-live="polite"></div>
+
+          <button id="submit" type="submit"><span id="submit-label">Connect Dashboard</span><span aria-hidden="true">→</span></button>
+          <p id="status" class="status" role="status" aria-live="polite"></p>
+        </form>
+
+        <details>
+          <summary>Connection help</summary>
+          <div class="help-content">
+            <p>HTTPS is recommended for remote servers. HTTP remains available, but remote HTTP cannot use security-sensitive desktop integration. HTTP loopback origins such as localhost remain trusted for local development.</p>
+            <p>The app connects to your existing Dashboard and does not start a backend or open a port. A server is remembered only after the Dashboard connects successfully.</p>
+            <p>Press <kbd>Ctrl+Shift+O</kbd> to change server, <kbd>Ctrl+R</kbd> to reload, or <kbd>Ctrl+Q</kbd> to quit. External identity-provider redirects require HTTPS.</p>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <footer><span>Desktop client</span><span>Connection preferences stay on this device</span></footer>
   </main>
   <script src="launcher.js"></script>
 </body>

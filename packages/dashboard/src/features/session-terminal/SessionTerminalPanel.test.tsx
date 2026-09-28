@@ -106,6 +106,18 @@ describe('SessionTerminalPanel', () => {
     expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('shows the ambient connection line while terminal creation is pending', () => {
+    const socket = {
+      emit: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+    } as unknown as DashboardSocket
+    render(<SessionTerminalPanel socket={socket} workspaceId="ws-1" sessionId="sess-1" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    expect(screen.getByTestId('session-terminal-panel').getAttribute('data-terminal-status')).toBe('starting')
+    expect(screen.getByTestId('terminal-toolbar').querySelector('.ak-terminal-connecting')).toBeTruthy()
+  })
+
   it('auto-starts a temporary terminal and kills it when the modal unmounts', async () => {
     const mock = makeSocket()
     const { unmount } = render(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" autoStart destroyOnUnmount />)

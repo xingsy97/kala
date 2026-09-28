@@ -58,6 +58,14 @@ describe('native desktop update surfaces', () => {
     await screen.findByText('No newer desktop package is published on this deployment.')
     expect(screen.queryByTestId('desktop-open-update')).toBeNull()
   })
+  it('acknowledges a successful manual check when no update is available', async () => {
+    native('0.2.0-rc.4')
+    render(<DesktopUpdateSettings />)
+    await screen.findByText('No newer desktop package is published on this deployment.')
+    fireEvent.click(screen.getByTestId('desktop-check-update'))
+    await screen.findByText('Update check complete. You already have the newest desktop package published here.')
+    expect(loadDesktopUpdateMetadata).toHaveBeenCalledTimes(2)
+  })
   it('shows failed/malformed metadata honestly and allows a manual retry', async () => {
     native()
     vi.mocked(loadDesktopUpdateMetadata).mockRejectedValueOnce(new Error('Invalid release metadata'))

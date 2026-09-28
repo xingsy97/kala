@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/dashboard",
-  "version": "0.2.0-rc.16",
+  "version": "0.2.0-rc.18",
   "description": "Kala Dashboard: React app that subscribes to the Kala Host over Socket.IO.",
   "private": true,
   "type": "module",
@@ -52,6 +52,7 @@
     "katex": "^0.17.0",
     "lucide-react": "^1.23.0",
     "mermaid": "11.16.1",
+    "microsoft-cognitiveservices-speech-sdk": "1.51.0",
     "monaco-editor": "^0.55.1",
     "motion": "^12.42.2",
     "react": "^18.3.1",

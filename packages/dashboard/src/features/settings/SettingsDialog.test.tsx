@@ -217,6 +217,70 @@ describe('SettingsDialog', () => {
     expect(await screen.findByText('Web search configuration removed.')).toBeTruthy()
   })
 
+  it('configures, tests, disables, and removes Azure Speech without displaying the key', async () => {
+    const endpoint = 'https://japaneast.api.cognitive.microsoft.com/'
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ configured: false, provider: 'azure', endpoint, region: 'japaneast', enabled: false, mode: 'realtime' }))
+      .mockResolvedValueOnce(Response.json({ configured: true, provider: 'azure', endpoint, region: 'japaneast', enabled: true, mode: 'after_recording' }))
+      .mockResolvedValueOnce(Response.json({ configured: true, provider: 'azure', endpoint, region: 'japaneast', enabled: false, mode: 'after_recording' }))
+      .mockResolvedValueOnce(Response.json({ ok: true }))
+      .mockResolvedValueOnce(Response.json({ configured: false, provider: 'azure', endpoint, region: 'japaneast', enabled: false, mode: 'realtime' }))
+    render(<SettingsDialog open onOpenChange={() => {}} initialSection="speech" />)
+
+    expect(await screen.findByText('Not configured')).toBeTruthy()
+    expect((screen.getByTestId('settings-speech-endpoint') as HTMLInputElement).value).toBe(endpoint)
+    expect(screen.queryByText(/Keys remain encrypted on the Host/)).toBeNull()
+    expect(screen.queryByText('Recognition languages')).toBeNull()
+    expect(screen.queryByText(/Audio streams directly from this browser/)).toBeNull()
+    fireEvent.click(screen.getAllByLabelText('About Voice Input')[0]!)
+    expect(await screen.findByText(/Keys remain encrypted on the Host/)).toBeTruthy()
+    fireEvent.change(screen.getByTestId('settings-speech-mode'), { target: { value: 'after_recording' } })
+    fireEvent.change(screen.getByTestId('settings-speech-api-key'), { target: { value: 'temporary-azure-key-value' } })
+    fireEvent.click(screen.getByTestId('settings-speech-save'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/settings/speech', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ endpoint, enabled: true, mode: 'after_recording', apiKey: 'temporary-azure-key-value' }),
+    })))
+    expect(screen.queryByText('temporary-azure-key-value')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('settings-speech-enabled'))
+    fireEvent.click(screen.getByTestId('settings-speech-save'))
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith('/settings/speech', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ endpoint, enabled: false, mode: 'after_recording' }),
+    })))
+
+    fireEvent.click(await screen.findByTestId('settings-speech-test'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/settings/speech/test', { method: 'POST' }))
+    fireEvent.click(screen.getByTestId('settings-speech-delete'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/settings/speech', { method: 'DELETE' }))
+    expect(await screen.findByText('Voice input configuration removed.')).toBeTruthy()
+  })
+
+  it('shows the HTTPS requirement in Voice Input status on an insecure origin', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'isSecureContext')
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false })
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+      .mockResolvedValueOnce(Response.json({
+        configured: true,
+        provider: 'azure',
+        endpoint: 'https://japaneast.api.cognitive.microsoft.com/',
+        region: 'japaneast',
+        enabled: true,
+        mode: 'realtime',
+      }))
+    try {
+      render(<SettingsDialog open onOpenChange={() => {}} initialSection="speech" />)
+      expect(await screen.findByText('Unavailable on this connection')).toBeTruthy()
+      expect(screen.getByTestId('settings-speech-https-required').textContent).toBe('Microphone access requires HTTPS.')
+    } finally {
+      if (descriptor) Object.defineProperty(window, 'isSecureContext', descriptor)
+      else Reflect.deleteProperty(window, 'isSecureContext')
+    }
+  })
+
   it('executes connection test, save, failure, and reset states', async () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
@@ -970,7 +1034,11 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('example-executor')).toBeTruthy()
     expect(screen.getByText('example-executor-host · Node.js v22.22.2')).toBeTruthy()
     expect(screen.getByText('background shell, file picker, overflow files')).toBeTruthy()
-    expect(screen.getByTestId('settings-deployment-diagnostics')).toBeTruthy()
+    const diagnostics = screen.getByTestId('settings-deployment-diagnostics')
+    expect(diagnostics).toBeTruthy()
+    fireEvent.click(diagnostics.querySelector('summary')!)
+    expect(screen.getByTestId('settings-force-dashboard-refresh')).toBeTruthy()
+    expect(screen.getByText('Use only when an update is stuck. Removes this origin’s Dashboard service worker and caches, then loads a fresh network copy.')).toBeTruthy()
     expect(screen.queryByText('Executor: example-executor')).toBeNull()
   })
 })

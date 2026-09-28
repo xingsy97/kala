@@ -8,6 +8,7 @@ mod tray;
 mod desktop;
 mod placement;
 mod connection;
+mod media_permissions;
 
 const DESKTOP_INIT: &str = include_str!("desktop-init.js");
 struct ConnectionOrigin(std::sync::Mutex<String>);
@@ -255,6 +256,7 @@ fn connect_dashboard(app: tauri::AppHandle, window: tauri::WebviewWindow, endpoi
         .map_err(|e| e.to_string())?;
     install_shortcuts(&dashboard).map_err(|e| e.to_string())?;
     connection::watch_load_failures(&dashboard)?;
+    media_permissions::install(&dashboard)?;
     placement::restore(&dashboard);
     window.hide().map_err(|e| e.to_string())?;
     desktop::connected(&app, &origin)?;
@@ -272,6 +274,7 @@ fn main() {
         .manage(tray::State::default())
         .manage(desktop::State::default())
         .manage(connection::State::default())
+        .manage(media_permissions::State::default())
         .invoke_handler(tauri::generate_handler![connect, desktop_window, desktop_clipboard_image, connection::launcher_bootstrap, desktop::desktop_ui, desktop::desktop_status, desktop::desktop_notify, desktop::desktop_connection_ready])
         .setup(|app| {
             if let Some(launcher) = app.get_webview_window("launcher") {

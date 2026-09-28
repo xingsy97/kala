@@ -30,18 +30,18 @@ export function compareDesktopVersions(left: string, right: string): number | nu
   return 0
 }
 
-type UpdateState = { checking: boolean; release: DesktopRelease | null; error: string | null }
+type UpdateState = { checking: boolean; release: DesktopRelease | null; error: string | null; manualCheckCompleted: boolean }
 const metadataCache = new Map<string, { expires: number; promise: Promise<DesktopRelease> }>()
 
 export function useDesktopUpdate() {
   const native = useDesktopBridge()
-  const [state, setState] = useState<UpdateState>({ checking: false, release: null, error: null })
+  const [state, setState] = useState<UpdateState>({ checking: false, release: null, error: null, manualCheckCompleted: false })
   const generation = useRef(0)
   const version = native.info?.version
   const check = useCallback(async (force = false) => {
     if (!version) return
     const operation = ++generation.current
-    setState((current) => ({ ...current, checking: true, error: null }))
+    setState((current) => ({ ...current, checking: true, error: null, manualCheckCompleted: false }))
     try {
       if (compareDesktopVersions(version, version) === null) throw new Error('Invalid installed desktop version')
       const key = window.location.origin
@@ -52,9 +52,9 @@ export function useDesktopUpdate() {
       }
       const release = await cached.promise
       if (compareDesktopVersions(release.version, version) === null) throw new Error('Invalid published desktop version')
-      if (operation === generation.current) setState({ checking: false, release, error: null })
+      if (operation === generation.current) setState({ checking: false, release, error: null, manualCheckCompleted: force })
     } catch (reason) {
-      if (operation === generation.current) setState({ checking: false, release: null, error: reason instanceof Error ? reason.message : 'Desktop update check failed' })
+      if (operation === generation.current) setState({ checking: false, release: null, error: reason instanceof Error ? reason.message : 'Desktop update check failed', manualCheckCompleted: force })
     }
   }, [version])
   useEffect(() => { void check(); return () => { generation.current++ } }, [check])

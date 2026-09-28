@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "kala-desktop"
-version = "0.2.0-rc.16"
+version = "0.2.0-rc.18"
 dependencies = [
  "base64 0.22.1",
  "gtk",
@@ -1679,6 +1679,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "webkit2gtk",
 ]
 
 [[package]]
