@@ -18,6 +18,7 @@ import type {
 } from './loop.js'
 import type { LLMAdapter, LLMResponse } from './llm/adapter.js'
 import { createSkillManager, discoverSkills } from './extensions/skills.js'
+import { createBuiltinExtensionRegistry } from './extensions/builtin-registry.js'
 import { contextSnapshot } from './context/manager.js'
 import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
 import { estimateStringTokens } from '@agent-kernel/shared/token-estimation'
@@ -182,6 +183,59 @@ describe('host loop', () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('preserves core state timing around extension lifecycle callbacks', async () => {
+    const calls: string[] = []
+    const extensions = createBuiltinExtensionRegistry([{
+      id: 'test.lifecycle-order',
+      version: '1',
+      lifecycle: {
+        beforeTurn({ event }) {
+          calls.push(`before-turn:${event.kind}:${store.get(sessionId)?.state.status}`)
+        },
+        beforeStateTransition({ event, record }) {
+          calls.push(`before-transition:${event.kind}:${record.state.status}`)
+        },
+        beforeModelCall() {
+          calls.push(`before-model:${store.get(sessionId)?.state.status}`)
+        },
+        afterModelCall() {
+          calls.push(`after-model:${store.get(sessionId)?.state.status}`)
+        },
+        afterTurn({ event }) {
+          calls.push(`after-turn:${event.kind}:${store.get(sessionId)?.state.status}`)
+        },
+      },
+    }])
+    const loop = runHostLoop({
+      store,
+      extensions,
+      llm: {
+        name: 'lifecycle-order',
+        async call() {
+          calls.push(`model-call:${store.get(sessionId)?.state.status}`)
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+            finishReason: 'stop',
+          }
+        },
+      },
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'run lifecycle' })
+
+    expect(calls).toEqual([
+      'before-turn:user_message:idle',
+      'before-transition:user_message:idle',
+      'before-model:thinking',
+      'model-call:thinking',
+      'after-model:thinking',
+      'before-transition:llm_response:thinking',
+      'after-turn:user_message:done',
+    ])
   })
 
   it('resumes once when an LLM stops while durable todo_graph work remains', async () => {
