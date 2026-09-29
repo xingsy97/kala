@@ -53,6 +53,16 @@ jobs:
         run: node scripts/private-cloud-local/acceptance/verify-tenant-isolation.mjs | tee ${{ runner.temp }}/evidence/tenant-isolation.json
       - name: Verify complete Workspace task chain
         run: node scripts/private-cloud-local/acceptance/verify-full-workspace.mjs | tee ${{ runner.temp }}/evidence/full-workspace.json
+      - name: Verify backup and disposable restore
+        run: |
+          backup_dir="${{ runner.temp }}/private-cloud-backup-${{ github.run_id }}"
+          KALA_BACKUP_DIR="${{ runner.temp }}" pnpm private-cloud:backup -- "$backup_dir"
+          node scripts/private-cloud-local/verify-backup.mjs "$backup_dir" | tee "${{ runner.temp }}/evidence/backup-restore.json"
+      - name: Verify Runtime fault recovery
+        run: |
+          KALA_PROFILE=local node scripts/private-cloud-local/compose-with-nfs.mjs restart runtime-host
+          KALA_PROFILE=local node scripts/private-cloud-local/compose-with-nfs.mjs up -d --wait runtime-host
+          node scripts/private-cloud-local/acceptance/verify-tenant-isolation.mjs | tee "${{ runner.temp }}/evidence/runtime-restart-isolation.json"
       - name: Verify raw tenant isolation contracts
         run: pnpm run verify:evaluation-product-dashboard-integration && pnpm run verify:evaluation-control-plane-authority
       - name: Upload Private Cloud evidence

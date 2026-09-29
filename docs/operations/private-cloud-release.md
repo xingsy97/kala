@@ -52,6 +52,34 @@ Uninstall removes containers and operator-owned installation metadata only after
 installation-specific confirmation. Volumes, configuration, secrets, releases,
 receipts, and backups are retained by default.
 
+An individual Runtime Unit may also be exported for operator-controlled transfer.
+The export contains only that Unit's directory and a manifest binding its Unit ID,
+source revision, size, and SHA-256. Restore requires `runtime-host` to be stopped,
+validates every archive path, and refuses to merge into or overwrite an existing
+Unit. Export material must be encrypted before it leaves the trusted host.
+
+## Runtime isolation gates
+
+The public Gateway reaches Runtime only over TLS 1.3 with mutual certificate
+authentication. Server, Gateway-client, and health-probe certificates are signed by
+an installation-local CA and mounted only into the services that require them. The
+application ingress secret remains mandatory as defense in depth.
+
+Every Runtime Unit is admitted through a process-local resource governor. Concurrent
+turns, durable queued messages, and artifact bytes have independent per-Unit limits;
+usage is reconciled from durable queue and artifact state after loading a Unit.
+Exhaustion fails closed without partially accepting a message or artifact.
+
+Release acceptance must prove all of the following before promotion:
+
+- a client without the internal CA-signed certificate cannot reach Runtime;
+- Unit limits reject excess work without affecting a second Unit;
+- Runtime restart preserves accepted queues, DAG leases, and Session cursors;
+- a full backup restores in disposable volumes and a Unit export restores without
+  path traversal or overwrite;
+- authenticated browser and Executor journeys remain functional under the supported
+  concurrency load.
+
 ## Independent Dashboard lifecycle
 
 Dashboard has its own image digest and service. `upgrade-dashboard` may change only

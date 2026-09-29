@@ -54,6 +54,24 @@ Do not put Cloudflare credentials, OIDC secrets, API keys, passwords, `.env` fil
 or generated release manifests into Git. Public hostnames in profile files are not secrets.
 The default production storage remains the NFS server in the same Docker Compose project.
 
+Gateway-to-Runtime traffic uses TLS 1.3 with mutually authenticated certificates generated
+by `private-cloud:secrets`. The Runtime listener rejects clients without a certificate signed
+by the installation-local internal CA; the existing ingress secret remains a second,
+application-layer authorization boundary.
+
+Per-Unit concurrency, durable queue length, and artifact storage limits are configurable with
+`KALA_RUNTIME_UNIT_MAX_CONCURRENT_TURNS`, `KALA_RUNTIME_UNIT_MAX_QUEUED_MESSAGES`, and
+`KALA_RUNTIME_UNIT_MAX_ARTIFACT_BYTES`.
+
+For an operator-controlled Unit transfer, stop `runtime-host`, export or restore the named
+Unit, then restart it. Restore verifies the manifest and archive digest and refuses to
+overwrite an existing Unit:
+
+```bash
+pnpm private-cloud:export-unit -- <unit-id> <persistent-backup-directory>
+pnpm private-cloud:restore-unit -- <persistent-export-directory>
+```
+
 ## Operational hardening
 
 All long-running services use bounded `json-file` logs and drop Linux capabilities.

@@ -116,7 +116,9 @@
     "private-cloud:up": "node scripts/private-cloud-local/compose-with-nfs.mjs up -d --build --wait",
     "private-cloud:down": "node scripts/private-cloud-local/compose-with-nfs.mjs down",
     "private-cloud:verify-isolation": "node scripts/private-cloud-local/acceptance/verify-tenant-isolation.mjs",
-    "private-cloud:backup": "node scripts/private-cloud-local/backup-compose-stack.mjs"
+    "private-cloud:backup": "node scripts/private-cloud-local/backup-compose-stack.mjs",
+    "private-cloud:export-unit": "node scripts/private-cloud-local/export-runtime-unit.mjs",
+    "private-cloud:restore-unit": "node scripts/private-cloud-local/restore-runtime-unit.mjs"
   },
   "devDependencies": {
     "@types/node": "22.9.0",
