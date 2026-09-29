@@ -355,12 +355,12 @@ export function DirectoryPicker({
         ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ScrollArea
-          className="h-full"
+        <div
+          ref={finderScrollRef}
+          className="h-full overflow-x-auto overflow-y-hidden"
           data-testid="directory-picker-finder"
-          viewportRef={finderScrollRef}
         >
-          <div className="flex min-h-full min-w-full md:w-max">
+          <div className="flex h-full min-h-0 min-w-full md:w-max">
             {columns.length === 0 ? (
               <div className="flex h-48 w-full items-center justify-center text-sm text-muted-foreground">
                 {loadingPath !== null ? t('directory.loading') : t('directory.selectWorkspace')}
@@ -377,7 +377,7 @@ export function DirectoryPicker({
               />
             ))}
           </div>
-        </ScrollArea>
+        </div>
       </div>
     </div>
   )
@@ -398,19 +398,20 @@ function DirectoryColumn({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className={cn('w-full min-w-0 shrink-0 border-border/50 md:w-64 md:border-r', mobileHidden && 'hidden md:block')} data-testid="finder-column">
+    <div className={cn('flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col overflow-hidden border-border/50 md:w-64 md:border-r', mobileHidden && 'hidden md:flex')} data-testid="finder-column">
       <div
-        className="truncate border-b border-border/50 px-3 py-2 font-mono text-caption text-muted-foreground"
+        className="flex-none truncate border-b border-border/50 px-3 py-2 font-mono text-caption text-muted-foreground"
         title={column.path}
+        data-testid="finder-column-header"
       >
-        {column.path}
+        {directoryName(column.path)}
       </div>
       {column.error ? (
-        <div className="px-3 py-2 text-xs text-rose-600 dark:text-rose-300">{column.error}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-xs text-rose-600 dark:text-rose-300">{column.error}</div>
       ) : column.entries.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-muted-foreground">{t('directory.noSubdirectories')}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-xs text-muted-foreground">{t('directory.noSubdirectories')}</div>
       ) : (
-        <div className="py-1">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1" data-testid="finder-column-scroll">
           {column.entries.map((entry) => {
             // Older executors omitted `type` because the picker originally
             // returned directories only. Preserve that behavior for them.
@@ -532,3 +533,12 @@ function buildBreadcrumbs(path: string, root: string | null): Breadcrumb[] {
 
 function isWindowsPath(path: string): boolean { return /^[a-z]:[\\/]/iu.test(path) }
 function isAbsoluteWorkspacePath(path: string): boolean { return path.startsWith('/') || isWindowsPath(path) }
+
+function directoryName(path: string): string {
+  if (isWindowsPath(path)) {
+    const normalized = path.replaceAll('/', '\\').replace(/\\+$/u, '')
+    return normalized.slice(normalized.lastIndexOf('\\') + 1) || normalized
+  }
+  const normalized = path.replace(/\/+$/u, '') || '/'
+  return normalized === '/' ? '/' : normalized.slice(normalized.lastIndexOf('/') + 1)
+}

@@ -2693,7 +2693,7 @@ export function App(): JSX.Element {
         workspaces={control.executors}
         agentRuntimes={control.agentRuntimes}
         initialWorkspaceId={pendingWorkspacePick?.workspaceId}
-        socket={session.socket}
+        socket={controlSocket}
         error={workspacePickError}
         submitting={workspacePickSubmitting}
         onCreate={({ agentRuntime, executionMode, workspaceId, workspaceName, cwd }) =>

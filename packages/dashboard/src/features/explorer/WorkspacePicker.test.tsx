@@ -91,9 +91,49 @@ describe('NewSessionDialog', () => {
     act(() => harness.emitDirList({ requestId: harness.lastDirRequest().requestId, workspaceId: 'ws-a', path: '/tmp/root/project', roots: ['/tmp/root'], entries: [] }))
     const columns = screen.getAllByTestId('finder-column')
     expect(columns).toHaveLength(2)
-    expect(columns[0]!.className).toContain('hidden md:block')
-    expect(columns[1]!.className).not.toContain('hidden md:block')
+    expect(columns[0]!.className).toContain('hidden md:flex')
+    expect(columns[1]!.className).not.toContain('hidden md:flex')
     expect(screen.getByTestId('directory-picker-finder').querySelector('.w-64')).toBeNull()
+  })
+
+  it('keeps session options compact and gives each Finder column independent vertical scrolling', async () => {
+    const harness = makeSocket()
+    render(<NewSessionDialog open workspaces={[wsA]} socket={harness.socket as never} onCreate={() => {}} onCreateSimpleChat={() => {}} onCancel={() => {}} />)
+
+    const options = screen.getByTestId('new-session-options')
+    expect(options.className).toContain('items-center')
+    expect(screen.getByTestId('new-session-runtime-kernel').className).toContain('h-7')
+    expect(screen.getByTestId('new-session-mode-chat').className).toContain('h-7')
+
+    await waitFor(() => expect(harness.lastDirRequest()).toBeTruthy())
+    act(() => harness.emitDirList({
+      requestId: harness.lastDirRequest().requestId,
+      workspaceId: 'ws-a',
+      path: '/tmp/root',
+      roots: ['/tmp/root'],
+      entries: [{ name: 'project', path: '/tmp/root/project', type: 'directory' }],
+    }))
+    fireEvent.click(screen.getByText('project'))
+    act(() => harness.emitDirList({
+      requestId: harness.lastDirRequest().requestId,
+      workspaceId: 'ws-a',
+      path: '/tmp/root/project',
+      roots: ['/tmp/root'],
+      entries: [{ name: 'README.md', path: '/tmp/root/project/README.md', type: 'file' }],
+    }))
+
+    const columns = screen.getAllByTestId('finder-column')
+    const scrollers = screen.getAllByTestId('finder-column-scroll')
+    const finder = screen.getByTestId('directory-picker-finder')
+    expect(columns).toHaveLength(2)
+    expect(scrollers).toHaveLength(2)
+    expect(screen.getAllByTestId('finder-column-header').map((header) => header.textContent)).toEqual(['root', 'project'])
+    expect(screen.getAllByTestId('finder-column-header')[1]?.getAttribute('title')).toBe('/tmp/root/project')
+    expect(finder.className).toContain('overflow-x-auto')
+    expect(finder.className).toContain('overflow-y-hidden')
+    expect(columns.every((column) => column.className.includes('h-full') && column.className.includes('overflow-hidden'))).toBe(true)
+    expect(scrollers.every((scroller) => scroller.className.includes('overflow-y-auto'))).toBe(true)
+    expect(screen.getByText('README.md')).toBeTruthy()
   })
 
   it('uses the shared mobile Sheet contract with a touch-sized close control', () => {
@@ -265,7 +305,7 @@ describe('NewSessionDialog', () => {
     })
   })
 
-  it('shows prominent runtime choices and creates with the selected runtime', () => {
+  it('shows compact runtime choices and creates with the selected runtime', () => {
     const onCreate = vi.fn()
     const harness = makeSocket()
     render(
@@ -299,14 +339,13 @@ describe('NewSessionDialog', () => {
 
     const copilot = screen.getByTestId('new-session-runtime-copilot')
     expect(copilot.getAttribute('role')).toBe('radio')
-    expect(copilot.className).toContain('min-h-12')
-    expect(copilot.className).not.toContain('min-h-14')
+    expect(copilot.className).toContain('h-7')
     expect(screen.getByText('Kala Kernel')).toBeTruthy()
     expect(screen.getByText('Recommended')).toBeTruthy()
     expect(screen.queryByText(/Requires your own LLM endpoint/u)).toBeNull()
     expect(screen.queryByText(/Uses your Copilot subscription/u)).toBeNull()
-    expect(screen.getByLabelText(/Requires your own LLM endpoint/u)).toBeTruthy()
-    expect(screen.getByLabelText(/Uses your Copilot subscription/u)).toBeTruthy()
+    expect(copilot.getAttribute('title')).toMatch(/Uses your Copilot subscription/u)
+    expect(screen.getAllByLabelText('Choose agent runtime').length).toBeGreaterThanOrEqual(1)
     fireEvent.click(copilot)
     expect(copilot.getAttribute('aria-checked')).toBe('true')
     expect(localStorage.getItem('ak-agent-runtime')).toBe('copilot')
@@ -428,14 +467,13 @@ describe('NewSessionDialog', () => {
     expect(screen.getByTestId('new-session-scoped-workspace').textContent).toContain('linux-box')
   })
 
-  it.each([undefined, 'ws-b'])('creates workspace-free chat with the chosen runtime from scope %s', (initialWorkspaceId) => {
+  it('creates workspace-free chat with the chosen runtime from the global dialog', () => {
     const onCreate = vi.fn()
     const onCreateSimpleChat = vi.fn()
     render(
       <NewSessionDialog
         open
         workspaces={[wsA, wsB]}
-        initialWorkspaceId={initialWorkspaceId}
         agentRuntimes={['kernel', 'copilot'].map((id) => ({
           id: id as 'kernel' | 'copilot',
           label: id,
@@ -458,15 +496,25 @@ describe('NewSessionDialog', () => {
     expect(onCreate).not.toHaveBeenCalled()
   })
 
-  it.each([undefined, 'ws-b'])('blocks duplicate simple chat creation while submitting from scope %s', (initialWorkspaceId) => {
+  it('does not offer workspace-free chat from a workspace-scoped dialog', () => {
+    render(
+      <NewSessionDialog open workspaces={[wsA, wsB]} initialWorkspaceId="ws-b"
+        socket={makeSocket().socket as never} onCreate={() => {}}
+        onCreateSimpleChat={() => {}} onCancel={() => {}} />,
+    )
+    expect(screen.queryByTestId('new-session-simple-chat')).toBeNull()
+    expect(screen.queryByTestId('new-session-simple-chat-mobile')).toBeNull()
+  })
+
+  it('blocks duplicate simple chat creation while submitting', () => {
     const onCreateSimpleChat = vi.fn()
     render(
-      <NewSessionDialog open workspaces={[wsA, wsB]} initialWorkspaceId={initialWorkspaceId}
+      <NewSessionDialog open workspaces={[wsA, wsB]}
         socket={makeSocket().socket as never} submitting onCreate={() => {}}
         onCreateSimpleChat={onCreateSimpleChat} onCancel={() => {}} />,
     )
     fireEvent.click(screen.getByTestId('new-session-simple-chat'))
-    if (!initialWorkspaceId) fireEvent.click(screen.getByTestId('new-session-simple-chat-mobile'))
+    fireEvent.click(screen.getByTestId('new-session-simple-chat-mobile'))
     expect(onCreateSimpleChat).not.toHaveBeenCalled()
   })
 

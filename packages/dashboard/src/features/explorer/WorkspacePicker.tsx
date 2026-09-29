@@ -4,7 +4,7 @@ import { HelpHint } from '../../components/ui/help-hint.js'
 import type { AgentRuntimeDescriptor, AgentRuntimeId, AttachedExecutor, SessionExecutionMode } from '@agent-kernel/shared'
 import { KERNEL_AGENT_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 
-import { Bot, Check, Info, X } from 'lucide-react'
+import { Bot, Info, X } from 'lucide-react'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -147,58 +147,47 @@ export function NewSessionDialog({
             <X className="h-4 w-4" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
-        <section className="min-w-0 overflow-hidden border-b border-border/50 bg-muted/20 px-3 py-1.5" aria-labelledby="new-session-runtime-label">
-          <div id="new-session-runtime-label" className="mb-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
-            {t('dialogs.chooseAgentRuntime')}
-            <HelpHint label={t('dialogs.chooseAgentRuntime')}>{agentRuntimes.map((runtime) => <span className="mb-2 block last:mb-0" key={runtime.id}><strong>{runtimeDisplayLabel(t, runtime)}</strong><br />{runtimeDisplayDescription(t, runtime)}</span>)}</HelpHint>
-          </div>
-          <div className="grid min-w-0 grid-cols-2 gap-1.5" role="radiogroup" aria-labelledby="new-session-runtime-label">
-            {agentRuntimes.map((runtime) => {
-              const selected = agentRuntime === runtime.id
-              const label = runtimeDisplayLabel(t, runtime)
-              const description = runtimeDisplayDescription(t, runtime)
-              const recommended = isRecommendedRuntime(runtime)
-              return (
-                <button
-                  key={runtime.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={submitting || !runtime.available}
-                  onClick={() => selectAgentRuntime(runtime.id)}
-                  data-testid={`new-session-runtime-${runtime.id}`}
-                  title={runtime.available ? description : runtime.reason}
-                  className={cn(
-                    'relative flex min-h-12 min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors',
-                    selected
-                      ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
-                      : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50',
-                    !runtime.available && 'cursor-not-allowed opacity-55',
-                  )}
-                >
-                  <span className={cn('flex-none rounded p-1', selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
-                    {runtime.id === 'copilot'
-                      ? <GitHubMark className="h-3.5 w-3.5" />
-                      : <Bot className="h-3.5 w-3.5" aria-hidden="true" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex min-w-0 flex-wrap items-center gap-1 text-sm font-semibold">
-                      <span className="truncate">{label}</span>
-                      {recommended ? <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-caption font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}
-                      <HelpHint label={label} trigger={<span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded text-muted-foreground/70 hover:text-foreground" aria-label={description}><Info className="h-3.5 w-3.5" aria-hidden="true" /></span>}>{description}</HelpHint>
-                      {selected ? <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" /> : null}
-                    </span>
-                    {!runtime.available ? <span className="mt-0.5 block break-words text-caption text-muted-foreground">{runtime.reason ?? runtime.status}</span> : null}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          <div className="mt-2 border-t border-border/40 pt-2">
-            <div id="new-session-mode-label" className="mb-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
-              {t('dialogs.chooseExecutionMode')}
+        <section className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 overflow-hidden border-b border-border/50 bg-muted/20 px-3 py-1.5" data-testid="new-session-options">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span id="new-session-runtime-label" className="flex-none text-caption font-semibold text-muted-foreground">
+              {t('dialogs.chooseAgentRuntime')}
+            </span>
+            <HelpHint label={t('dialogs.chooseAgentRuntime')} trigger={<span className="inline-flex h-6 w-6 flex-none items-center justify-center rounded text-muted-foreground/70 hover:text-foreground" aria-label={t('dialogs.chooseAgentRuntime')}><Info className="h-3.5 w-3.5" aria-hidden="true" /></span>}>{agentRuntimes.map((runtime) => <span className="mb-2 block last:mb-0" key={runtime.id}><strong>{runtimeDisplayLabel(t, runtime)}</strong><br />{runtimeDisplayDescription(t, runtime)}</span>)}</HelpHint>
+            <div className="flex min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-card p-0.5" role="radiogroup" aria-labelledby="new-session-runtime-label">
+              {agentRuntimes.map((runtime) => {
+                const selected = agentRuntime === runtime.id
+                const label = runtimeDisplayLabel(t, runtime)
+                const description = runtimeDisplayDescription(t, runtime)
+                return (
+                  <button
+                    key={runtime.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={submitting || !runtime.available}
+                    onClick={() => selectAgentRuntime(runtime.id)}
+                    data-testid={`new-session-runtime-${runtime.id}`}
+                    title={runtime.available ? description : runtime.reason}
+                    className={cn(
+                      'flex h-7 min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 text-xs font-medium transition-colors',
+                      selected ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                      !runtime.available && 'cursor-not-allowed opacity-55',
+                    )}
+                  >
+                    {runtime.id === 'copilot' ? <GitHubMark className="h-3 w-3 flex-none" /> : <Bot className="h-3 w-3 flex-none" aria-hidden="true" />}
+                    <span className="truncate">{label}</span>
+                    {isRecommendedRuntime(runtime) ? <span className="sr-only">{t('dialogs.runtime.recommended')}</span> : null}
+                  </button>
+                )
+              })}
             </div>
-            <div className="grid min-w-0 grid-cols-2 gap-1.5" role="radiogroup" aria-labelledby="new-session-mode-label">
+          </div>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span id="new-session-mode-label" className="flex-none text-caption font-semibold text-muted-foreground">
+              {t('dialogs.chooseExecutionMode')}
+            </span>
+            <HelpHint label={t('dialogs.chooseExecutionMode')}>{(['chat', 'dag'] as const).map((mode) => <span className="mb-2 block last:mb-0" key={mode}><strong>{t(`dialogs.executionMode.${mode}.label`)}</strong><br />{t(`dialogs.executionMode.${mode}.description`)}</span>)}</HelpHint>
+            <div className="flex min-w-0 flex-1 rounded-md border border-border bg-card p-0.5" role="radiogroup" aria-labelledby="new-session-mode-label">
               {(['chat', 'dag'] as const).map((mode) => {
                 const selected = executionMode === mode
                 return (
@@ -210,15 +199,13 @@ export function NewSessionDialog({
                     disabled={submitting}
                     onClick={() => setExecutionMode(mode)}
                     data-testid={`new-session-mode-${mode}`}
+                    title={t(`dialogs.executionMode.${mode}.description`)}
                     className={cn(
-                      'min-w-0 rounded-md border px-2 py-1.5 text-left transition-colors',
-                      selected
-                        ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
-                        : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50',
+                      'h-7 min-w-0 flex-1 truncate rounded px-2 text-xs font-medium transition-colors',
+                      selected ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                     )}
                   >
-                    <span className="block text-sm font-semibold">{t(`dialogs.executionMode.${mode}.label`)}</span>
-                    <span className="mt-0.5 block text-caption text-muted-foreground">{t(`dialogs.executionMode.${mode}.description`)}</span>
+                    {t(`dialogs.executionMode.${mode}.label`)}
                   </button>
                 )
               })}
@@ -274,11 +261,9 @@ export function NewSessionDialog({
                         : 'border-border/60 bg-card hover:bg-secondary',
                     )}
                   >
-                    <div className="truncate font-mono text-sm text-foreground">
-                      {w.workspaceName}
-                    </div>
-                    <div className="mt-0.5 truncate font-mono text-caption text-muted-foreground">
-                      {workspaceMeta(w)}
+                    <div className="flex min-w-0 items-baseline gap-2 font-mono">
+                      <span className="min-w-0 truncate text-sm text-foreground">{w.workspaceName}</span>
+                      <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">{workspaceMeta(w)}</span>
                     </div>
                   </button>
                 ))}
@@ -288,21 +273,10 @@ export function NewSessionDialog({
           <main className="flex min-h-0 min-w-0 overflow-hidden flex-col">
             {scopedWorkspace && selectedWorkspace ? (
               <div className="flex items-center gap-2 border-b border-border/50 bg-muted/30 px-3 py-2" data-testid="new-session-scoped-workspace">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-mono text-sm font-medium">{selectedWorkspace.workspaceName}</div>
-                  <div className="truncate font-mono text-caption text-muted-foreground">{workspaceMeta(selectedWorkspace)}</div>
+                <div className="flex min-w-0 flex-1 items-baseline gap-2 font-mono">
+                  <span className="min-w-0 truncate text-sm font-medium">{selectedWorkspace.workspaceName}</span>
+                  <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">{workspaceMeta(selectedWorkspace)}</span>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  data-testid="new-session-simple-chat"
-                  disabled={submitting}
-                  onClick={() => onCreateSimpleChat(agentRuntime)}
-                  title={t('dialogs.simpleChatDescription')}
-                  className="flex-none text-primary"
-                >
-                  {t('dialogs.simpleChat')}
-                </Button>
               </div>
             ) : null}
             <label

@@ -30,6 +30,9 @@ let thrown
 mkdirSync(home, { recursive: true })
 mkdirSync(sessionsDir, { recursive: true })
 mkdirSync(workspace, { recursive: true })
+for (let index = 0; index < 12; index += 1) mkdirSync(join(workspace, `e2e-dir-${String(index).padStart(2, '0')}`))
+mkdirSync(join(workspace, 'zz-e2e-column'))
+for (let index = 0; index < 12; index += 1) writeFileSync(join(workspace, 'zz-e2e-column', `item-${String(index).padStart(2, '0')}.txt`), `${index}\n`, 'utf8')
 writeFileSync(join(workspace, 'e2e-visible.txt'), 'FILES_E2E_VISIBLE\n', 'utf8')
 writeFileSync(join(workspace, 'e2e-binary.bin'), Buffer.from([0, 255, 1, 254, 2, 253]))
 writeFileSync(join(workspace, 'e2e-data.csv'), `name,note,value\nAda,"hello, world",=1+1\n${Array.from({ length: 1_050 }, (_, index) => `row-${index},note-${index},${index}`).join('\n')}\n`, 'utf8')
@@ -96,6 +99,40 @@ try {
     await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]')
     await hoverAncestorAndClickFirst(actor.page, '[data-testid^="workspace-new-session-"]', '[data-testid="workspace-row"]', { description: 'New Session for online Workspace' })
     await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
+    await harness.screenshot(actor, 'new-session-picker')
+    await actor.page.waitForSelector('[data-testid="finder-column"]', { timeout: 15_000 })
+    const finderText = await actor.page.$eval('[data-testid="directory-picker-finder"]', (finder) => finder.textContent ?? '')
+    if (!finderText.includes('e2e-visible.txt')) {
+      await harness.screenshot(actor, 'new-session-picker-missing-files')
+      throw new Error(`Create Session picker omitted workspace files: ${finderText.slice(0, 1_000)}`)
+    }
+    const pickerLayout = await actor.page.$eval('[data-testid="new-session-dialog"]', (dialog) => {
+      const options = dialog.querySelector('[data-testid="new-session-options"]')?.getBoundingClientRect()
+      const finder = dialog.querySelector('[data-testid="directory-picker-finder"]')?.getBoundingClientRect()
+      return { optionsHeight: options?.height ?? 0, finderHeight: finder?.height ?? 0 }
+    })
+    if (pickerLayout.optionsHeight > 56 || pickerLayout.finderHeight < 160) {
+      throw new Error(`Create Session picker is vertically cramped: ${JSON.stringify(pickerLayout)}`)
+    }
+    const firstColumnScroll = await actor.page.$('[data-testid="finder-column-scroll"]')
+    if (!firstColumnScroll) throw new Error('first Finder column has no independent scroll container')
+    await firstColumnScroll.hover()
+    await actor.page.mouse.wheel({ deltaY: 4_000 })
+    await actor.page.waitForFunction(() => (document.querySelector('[data-testid="finder-column-scroll"]')?.scrollTop ?? 0) > 0)
+    await clickFirstVisible(actor.page, '[data-testid="finder-dir"]', { text: 'zz-e2e-column', description: 'last directory in first Finder column' })
+    await actor.page.waitForFunction(() => document.querySelectorAll('[data-testid="finder-column-scroll"]').length === 2)
+    const columnScrollTops = await actor.page.$$eval('[data-testid="finder-column-scroll"]', (columns) => columns.map((column) => column.scrollTop))
+    if (!(columnScrollTops[0] > 0) || columnScrollTops[1] !== 0) {
+      throw new Error(`Finder columns do not preserve independent scroll positions: ${JSON.stringify(columnScrollTops)}`)
+    }
+    await clickByTestId(actor.page, 'new-session-close')
+    await actor.page.waitForSelector('[data-testid="new-session-dialog"]', { hidden: true })
+    await hoverAncestorAndClickFirst(actor.page, '[data-testid^="workspace-new-session-"]', '[data-testid="workspace-row"]', { description: 'Reopen new Session for online Workspace' })
+    await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
+    await actor.page.waitForFunction((expectedRoot) =>
+      document.querySelector('[data-testid="new-session-cwd-input"]')?.value === expectedRoot
+      && document.querySelectorAll('[data-testid="finder-column"]').length === 1
+      && [...document.querySelectorAll('[data-testid="finder-file"]')].some((entry) => entry.textContent?.includes('e2e-visible.txt')), {}, workspace)
     await clickByTestId(actor.page, 'new-session-mode-dag')
     await clickByTestId(actor.page, 'new-session-create')
     await actor.page.waitForFunction(() => new URL(location.href).searchParams.has('sessionId'))
@@ -114,7 +151,7 @@ try {
     }
     const selected = await actor.page.$eval(rowSelector, (element) => element.getAttribute('data-selected') === 'true')
     if (!selected) throw new Error(`created Session ${sessionId} row is not selected`)
-    return { sessionId, url: actor.page.url(), selected, dagSurface }
+    return { sessionId, url: actor.page.url(), selected, pickerLayout, columnScrollTops, dagSurface }
   })
 
   await harness.step('reload and restore the same Session', async () => {
@@ -184,6 +221,9 @@ try {
   await harness.step('read and download real Workspace files through Files UI', async () => {
     await clickByTestId(actor.page, 'right-panel-files-tab')
     await actor.page.waitForSelector('[data-testid="session-files-panel"]')
+    await actor.page.waitForSelector('[data-testid="session-files-panel"] [role="tree"] [role="treeitem"]')
+    await actor.page.focus('[data-testid="session-files-panel"] [role="tree"]')
+    await actor.page.keyboard.press('End')
     await actor.page.waitForFunction(() => [...document.querySelectorAll('[data-testid="session-file-file"]')].some((item) => item.textContent?.includes('e2e-visible.txt')), { timeout: 30_000 })
     await clickFirstVisible(actor.page, '[data-testid="session-file-file"]', { textIncludes: 'e2e-visible.txt', description: 'e2e-visible.txt file' })
     await actor.page.waitForFunction(() => document.body.innerText.includes('FILES_E2E_VISIBLE'), { timeout: 30_000 })
@@ -385,7 +425,21 @@ if (thrown) {
 console.log(`PASS core-workspace-journeys system E2E\nEvidence: ${result.evidenceRoot}`)
 
 async function findFileRow(page, name, scope = '') {
-  const rows = await page.$$(`${scope} [data-testid="session-file-file"]`.trim())
+  const rowSelector = `${scope} [data-testid="session-file-file"]`.trim()
+  let rows = await page.$$(rowSelector)
+  for (const rowButton of rows) {
+    if (await rowButton.evaluate((element, expected) => element.textContent?.includes(expected), name)) return rowButton
+  }
+  const treeSelector = `${scope} [role="tree"]`.trim()
+  await page.focus(treeSelector)
+  await page.keyboard.press('End')
+  await page.waitForFunction(
+    (selector, expected) => [...document.querySelectorAll(selector)].some((element) => element.textContent?.includes(expected)),
+    { timeout: 30_000 },
+    rowSelector,
+    name,
+  )
+  rows = await page.$$(rowSelector)
   for (const rowButton of rows) {
     if (await rowButton.evaluate((element, expected) => element.textContent?.includes(expected), name)) return rowButton
   }
