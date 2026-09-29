@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server as HttpServer } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
 
 import { createRuntimeUnitIngress, type RuntimeUnitIngress } from './runtime-unit-ingress.js'
 import { TenantRuntimeUnitRegistry, parseTenantRuntimeUnitId, type TenantRuntimeUnit, type TenantRuntimeUnitFactory } from './unit.js'
@@ -24,10 +25,24 @@ export async function startTenantRuntimeService(options: {
   listenHost?: string
   requireProvisioning?: boolean
   maxLoadedUnits?: number
+  tls?: {
+    key: string | Buffer
+    cert: string | Buffer
+    ca: string | Buffer
+  }
 }): Promise<TenantRuntimeService> {
   const units = new TenantRuntimeUnitRegistry(options.factory, options.maxLoadedUnits)
   const allowedUnits = new Set<string>()
-  const http = createServer()
+  const http = options.tls
+    ? createHttpsServer({
+        key: options.tls.key,
+        cert: options.tls.cert,
+        ca: options.tls.ca,
+        requestCert: true,
+        rejectUnauthorized: true,
+        minVersion: 'TLSv1.3',
+      })
+    : createServer()
   const router: RuntimeUnitIngress = createRuntimeUnitIngress({
     isRoutableRequest: (request) => !(request.url ?? '/').startsWith('/internal/'),
     resolve: async (request) => {

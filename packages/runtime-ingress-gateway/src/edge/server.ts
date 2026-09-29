@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
+import { Agent as HttpsAgent, request as httpsRequest } from 'node:https'
 
 import httpProxy from 'http-proxy'
 import { parsePublicUrls, validatePublicRequest, type PublicUrlPattern } from '@agent-kernel/shared'
@@ -96,10 +97,30 @@ export async function startRuntimeIngressGateway(options: {
   publicUrls?: readonly PublicUrlPattern[]
   listenHost?: string
   ingressSecret: string
+  runtimeTls?: {
+    ca: string | Buffer
+    cert: string | Buffer
+    key: string | Buffer
+    servername?: string
+  }
   rateLimiter?: RateLimiter
   provision?(unitId: string): Promise<void>
 }): Promise<RuntimeIngressGateway> {
-  const proxy = httpProxy.createProxyServer({ ws: true, target: options.hostOrigin })
+  const runtimeAgent = options.runtimeTls
+    ? new HttpsAgent({
+        ca: options.runtimeTls.ca,
+        cert: options.runtimeTls.cert,
+        key: options.runtimeTls.key,
+        servername: options.runtimeTls.servername,
+        minVersion: 'TLSv1.3',
+        rejectUnauthorized: true,
+      })
+    : undefined
+  const proxy = httpProxy.createProxyServer({
+    ws: true,
+    target: options.hostOrigin,
+    ...(runtimeAgent ? { agent: runtimeAgent, secure: true } : {}),
+  })
   const dashboardProxy = options.dashboardOrigin ? httpProxy.createProxyServer({ target: options.dashboardOrigin }) : undefined
   proxy.on('error', () => {})
   dashboardProxy?.on('error', () => {})
@@ -272,8 +293,8 @@ export async function startRuntimeIngressGateway(options: {
     const organizationAccess = identity && options.organizations ? await options.organizations.findAccess(identity) : undefined
     if (url.pathname.startsWith('/auth/executor-pairings') && (/\/claim$/u.test(url.pathname) || (url.pathname === '/auth/executor-pairings' && request.method === 'POST'))) {
       const body = request.method === 'POST' ? await readRequestBody(request) : undefined
-      const upstream = await fetch(`${options.hostOrigin}${url.pathname}`, { method: request.method, headers: { 'content-type': request.headers['content-type'] ?? 'application/json' }, ...(body ? { body: new Uint8Array(body) } : {}) })
-      response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });response.end(Buffer.from(await upstream.arrayBuffer()));return
+      const upstream = await requestRuntime(options.hostOrigin, url.pathname, request.method, { 'content-type': request.headers['content-type'] ?? 'application/json' }, body, options.runtimeTls)
+      response.writeHead(upstream.status, { 'content-type': upstream.contentType, 'cache-control': 'no-store' });response.end(upstream.body);return
     }
     if (url.pathname === '/organization' && request.method === 'GET' && organizationAccess && options.organizations) {
       const members = await options.organizations.listMembers(organizationAccess.organization.id)
@@ -371,30 +392,27 @@ export async function startRuntimeIngressGateway(options: {
       const decision = /^\/auth\/executor-pairings\/[^/]+\/(approve|reject)$/u.test(url.pathname)
       if (decision && (!organizationAccess || !permits(organizationAccess.membership.role, 'workspace:manage'))) { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'forbidden', requiredPermission: 'workspace:manage' })); return }
       const body = request.method === 'POST' ? await readRequestBody(request) : undefined
-      const upstream = await fetch(`${options.hostOrigin}${url.pathname}`, { method: request.method, headers: { 'content-type': request.headers['content-type'] ?? 'application/json', ...(organizationAccess ? { 'x-agent-runlab-runtime-unit': assignment.unitId, 'x-agent-runlab-ingress-secret': options.ingressSecret } : {}) }, ...(body ? { body: new Uint8Array(body) } : {}) })
-      response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });response.end(Buffer.from(await upstream.arrayBuffer()));return
+      const upstream = await requestRuntime(options.hostOrigin, url.pathname, request.method, { 'content-type': request.headers['content-type'] ?? 'application/json', ...(organizationAccess ? { 'x-agent-runlab-runtime-unit': assignment.unitId, 'x-agent-runlab-ingress-secret': options.ingressSecret } : {}) }, body, options.runtimeTls)
+      response.writeHead(upstream.status, { 'content-type': upstream.contentType, 'cache-control': 'no-store' });response.end(upstream.body);return
     }
     if (url.pathname === '/auth/executor-invites' && request.method === 'POST') {
       if (organizationAccess && !permits(organizationAccess.membership.role, 'workspace:manage')) { response.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'forbidden', requiredPermission: 'workspace:manage' })); return }
       const body = await readRequestBody(request)
-      const upstream = await fetch(`${options.hostOrigin}${url.pathname}`, {
-        method: 'POST',
-        headers: {
+      const upstream = await requestRuntime(options.hostOrigin, url.pathname, 'POST', {
           'content-type': request.headers['content-type'] ?? 'application/json',
           'x-agent-runlab-runtime-unit': assignment.unitId,
           'x-agent-runlab-ingress-secret': options.ingressSecret,
-        },
-        body: new Uint8Array(body),
-      })
-      const text = await upstream.text()
-      if (upstream.ok) {
+        }, body, options.runtimeTls)
+      const text = upstream.body.toString('utf8')
+      if (upstream.status >= 200 && upstream.status < 300) {
         const invite = JSON.parse(text) as { inviteToken?: string }
         if (invite.inviteToken) await options.directory.bindExecutorInvite(invite.inviteToken, assignment.unitId)
       }
-      response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' })
+      response.writeHead(upstream.status, { 'content-type': upstream.contentType, 'cache-control': 'no-store' })
       response.end(text)
       return
     }
+
     proxy.web(request, response, { target: options.hostOrigin }, () => { if (!response.headersSent) response.writeHead(502); response.end() })
   }
   const http = createServer((request, response) => {
@@ -445,4 +463,51 @@ export async function startRuntimeIngressGateway(options: {
   const address = http.address(); const port = typeof address === 'object' && address ? address.port : options.port
   publicUrls ??= parsePublicUrls(publicUrl.port === '0' ? `http://127.0.0.1:${port}` : options.publicOrigin)
   return { http, port, async close() { proxy.close(); dashboardProxy?.close(); await new Promise<void>((resolve) => http.close(() => resolve())) } }
+}
+
+export async function requestRuntime(
+  origin: string,
+  path: string,
+  method: string | undefined,
+  headers: Record<string, string>,
+  body: Buffer | undefined,
+  tls: { ca: string | Buffer; cert: string | Buffer; key: string | Buffer; servername?: string } | undefined,
+): Promise<{ status: number; contentType: string; body: Buffer }> {
+  if (!tls) {
+    const response = await fetch(`${origin}${path}`, {
+      method,
+      headers,
+      ...(body ? { body: new Uint8Array(body) } : {}),
+    })
+    return {
+      status: response.status,
+      contentType: response.headers.get('content-type') ?? 'application/json',
+      body: Buffer.from(await response.arrayBuffer()),
+    }
+  }
+  const url = new URL(path, origin)
+  return await new Promise((resolve, reject) => {
+    const request = httpsRequest(url, {
+      method,
+      headers,
+      ca: tls.ca,
+      cert: tls.cert,
+      key: tls.key,
+      servername: tls.servername ?? url.hostname,
+      minVersion: 'TLSv1.3',
+      rejectUnauthorized: true,
+    }, (response) => {
+      const chunks: Buffer[] = []
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+      response.once('error', reject)
+      response.once('end', () => resolve({
+        status: response.statusCode ?? 502,
+        contentType: typeof response.headers['content-type'] === 'string' ? response.headers['content-type'] : 'application/json',
+        body: Buffer.concat(chunks),
+      }))
+    })
+    request.once('error', reject)
+    if (body) request.write(body)
+    request.end()
+  })
 }

@@ -28,11 +28,19 @@ services:
         cp /run/secrets/session_secret /gateway/session_secret
         cp /run/secrets/oidc_client_id /gateway/oidc_client_id
         cp /run/secrets/oidc_client_secret /gateway/oidc_client_secret
+        cp /run/secrets/internal_ca /host/internal_ca.pem
+        cp /run/secrets/runtime_host_key /host/runtime_host_key.pem
+        cp /run/secrets/runtime_host_cert /host/runtime_host.pem
+        cp /run/secrets/runtime_health_key /host/runtime_health_key.pem
+        cp /run/secrets/runtime_health_cert /host/runtime_health.pem
+        cp /run/secrets/internal_ca /gateway/internal_ca.pem
+        cp /run/secrets/ingress_client_key /gateway/ingress_client_key.pem
+        cp /run/secrets/ingress_client_cert /gateway/ingress_client.pem
         printf 'postgresql://runlab:%s@control-postgres:5432/runlab_control?sslmode=disable' "$$(cat /run/secrets/control_postgres_password)" > /gateway/control_database_url
         chown -R 10001:10001 /host /gateway
         chmod 700 /host /gateway
         chmod 400 /host/* /gateway/*
-    secrets: [ingress_secret, llm_api_key, session_secret, oidc_client_id, oidc_client_secret, control_postgres_password]
+    secrets: [ingress_secret, llm_api_key, session_secret, oidc_client_id, oidc_client_secret, control_postgres_password, internal_ca, runtime_host_key, runtime_host_cert, ingress_client_key, ingress_client_cert, runtime_health_key, runtime_health_cert]
     volumes:
       - host-secrets:/host
       - gateway-secrets:/gateway
@@ -122,6 +130,12 @@ services:
       KALA_DEPLOYMENT_CONFIG: /etc/kala/deployment.json
       KALA_ALLOW_ALL_OK: ${KALA_ALLOW_ALL_OK:-1}
       KALA_INGRESS_SHARED_SECRET_FILE: /run/kala-secrets/ingress_secret
+      KALA_RUNTIME_TLS_CA_FILE: /run/kala-secrets/internal_ca.pem
+      KALA_RUNTIME_TLS_KEY_FILE: /run/kala-secrets/runtime_host_key.pem
+      KALA_RUNTIME_TLS_CERT_FILE: /run/kala-secrets/runtime_host.pem
+      KALA_RUNTIME_UNIT_MAX_CONCURRENT_TURNS: ${KALA_RUNTIME_UNIT_MAX_CONCURRENT_TURNS:-4}
+      KALA_RUNTIME_UNIT_MAX_QUEUED_MESSAGES: ${KALA_RUNTIME_UNIT_MAX_QUEUED_MESSAGES:-100}
+      KALA_RUNTIME_UNIT_MAX_ARTIFACT_BYTES: ${KALA_RUNTIME_UNIT_MAX_ARTIFACT_BYTES:-10737418240}
     volumes:
       - tenant-data:/var/lib/kala
       - host-secrets:/run/kala-secrets:ro
@@ -132,7 +146,7 @@ services:
       init-volumes: { condition: service_completed_successfully }
       init-app-secrets: { condition: service_completed_successfully }
     healthcheck:
-      test: [CMD, node, -e, "fetch('http://127.0.0.1:13002/internal/health',{headers:{'x-agent-runlab-ingress-secret':require('fs').readFileSync('/run/kala-secrets/ingress_secret','utf8').trim()}}).then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
+      test: [CMD, node, -e, "require('https').get({host:'127.0.0.1',port:13002,path:'/internal/health',servername:'runtime-host',ca:require('fs').readFileSync('/run/kala-secrets/internal_ca.pem'),cert:require('fs').readFileSync('/run/kala-secrets/runtime_health.pem'),key:require('fs').readFileSync('/run/kala-secrets/runtime_health_key.pem'),headers:{'x-agent-runlab-ingress-secret':require('fs').readFileSync('/run/kala-secrets/ingress_secret','utf8').trim()}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -178,7 +192,11 @@ services:
       KALA_INGRESS_PORT: 13001
       KALA_INGRESS_LISTEN_HOST: 0.0.0.0
       KALA_PUBLIC_URLS: ${KALA_PUBLIC_URLS:-http://localhost:13001}
-      KALA_RUNTIME_HOST_ORIGIN: http://runtime-host:13002
+      KALA_RUNTIME_HOST_ORIGIN: https://runtime-host:13002
+      KALA_INGRESS_RUNTIME_TLS_CA_FILE: /run/kala-secrets/internal_ca.pem
+      KALA_INGRESS_RUNTIME_TLS_KEY_FILE: /run/kala-secrets/ingress_client_key.pem
+      KALA_INGRESS_RUNTIME_TLS_CERT_FILE: /run/kala-secrets/ingress_client.pem
+      KALA_INGRESS_RUNTIME_TLS_SERVERNAME: runtime-host
       KALA_INGRESS_DASHBOARD_ORIGIN: http://dashboard:8080
       KALA_INGRESS_IDENTITY_ORIGIN: ${OIDC_DISCOVERY_ORIGIN:?set OIDC_DISCOVERY_ORIGIN in the ignored deployment environment}
       KALA_INGRESS_DATABASE_URL_FILE: /run/kala-secrets/control_database_url
@@ -235,3 +253,10 @@ secrets:
   oidc_client_id: { file: "${KALA_SECRETS_DIR:-./.secrets}/oidc_client_id" }
   oidc_client_secret: { file: "${KALA_SECRETS_DIR:-./.secrets}/oidc_client_secret" }
   llm_api_key: { file: "${KALA_SECRETS_DIR:-./.secrets}/llm_api_key" }
+  internal_ca: { file: "${KALA_SECRETS_DIR:-./.secrets}/internal_ca.pem" }
+  runtime_host_key: { file: "${KALA_SECRETS_DIR:-./.secrets}/runtime_host_key.pem" }
+  runtime_host_cert: { file: "${KALA_SECRETS_DIR:-./.secrets}/runtime_host.pem" }
+  ingress_client_key: { file: "${KALA_SECRETS_DIR:-./.secrets}/ingress_client_key.pem" }
+  ingress_client_cert: { file: "${KALA_SECRETS_DIR:-./.secrets}/ingress_client.pem" }
+  runtime_health_key: { file: "${KALA_SECRETS_DIR:-./.secrets}/runtime_health_key.pem" }
+  runtime_health_cert: { file: "${KALA_SECRETS_DIR:-./.secrets}/runtime_health.pem" }

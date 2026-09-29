@@ -101,6 +101,7 @@ import { KalaStateStore } from './store/state-store.js'
 import { DagOrchestrator } from './dag/orchestrator.js'
 import { DAG_WORKER_TOOLS } from './dag/worker-tool.js'
 import type { SubAgentRuntimeController } from './extensions/agent-tool.js'
+import type { UnitResourceGovernor } from './tenant-runtime/resource-governor.js'
 
 export type HostServerOptions = {
   port: number
@@ -113,6 +114,9 @@ export type HostServerOptions = {
   sessionQuota?: TenantSessionQuotaEnforcer
   queueQuota?: TenantQueueQuotaEnforcer
   storageQuota?: TenantStorageQuotaEnforcer
+  resourceGovernor?: UnitResourceGovernor
+  resourceUnitId?: string
+  resourceArtifactUsage?: () => Promise<number>
   executorQuota?: TenantExecutorQuotaEnforcer
   copilot?: {
     enabled?: boolean
@@ -311,6 +315,30 @@ export async function startHostServer(
   await sessionArtifacts.load()
   const messageAttachments = new MessageAttachmentStore(join(options.sessionsDir, '..', 'message-attachments'))
   await messageAttachments.load()
+  const effectiveStorageQuota: TenantStorageQuotaEnforcer | undefined =
+    options.storageQuota || (options.resourceGovernor && options.resourceUnitId)
+      ? {
+          async assertCanStoreArtifact(params) {
+            if (options.resourceGovernor && options.resourceUnitId) {
+              if (options.resourceArtifactUsage) {
+                options.resourceGovernor.reconcile(options.resourceUnitId, {
+                  artifactBytes: await options.resourceArtifactUsage(),
+                })
+              }
+              const decision = options.resourceGovernor.reserveArtifact(options.resourceUnitId, params.bytes)
+              if (!decision.ok) throw new Error(`Runtime Unit artifact quota exceeded (${decision.code})`)
+            }
+            try {
+              await options.storageQuota?.assertCanStoreArtifact(params)
+            } catch (error) {
+              if (options.resourceGovernor && options.resourceUnitId) {
+                options.resourceGovernor.releaseArtifact(options.resourceUnitId, params.bytes)
+              }
+              throw error
+            }
+          },
+        }
+      : undefined
   const store = new SessionStore(options.sessionsDir, {
     runtimeConfig: ({ executionMode }) => deriveSessionConfig(getDefaultConfig(), undefined, executionMode),
     artifactRootDir: options.artifactRootDir,
@@ -418,7 +446,7 @@ export async function startHostServer(
     ...(options.embeddedDocs ? { embeddedDocs: options.embeddedDocs } : {}),
     sessionArtifacts,
     messageAttachments,
-    ...(options.storageQuota ? { storageQuota: options.storageQuota } : {}),
+    ...(effectiveStorageQuota ? { storageQuota: effectiveStorageQuota } : {}),
     ...(options.routerHealth ? { routerHealth: options.routerHealth } : {}),
     ...(auth ? { auth } : {}),
     audit,
@@ -654,6 +682,7 @@ export async function startHostServer(
     }
     if (restored.items.length > 0) queuedMessages.set(sessionId, restored.items)
     cancelledQueueOperations.set(sessionId, new Set(restored.cancelledOperationIds))
+    syncGovernedQueueUsage()
     return queuedMessages.get(sessionId) ?? []
   }
 
@@ -662,6 +691,16 @@ export async function startHostServer(
     if (queue.length === 0) queuedMessages.delete(sessionId)
     else queuedMessages.set(sessionId, [...queue])
     cancelledQueueOperations.set(sessionId, new Set(cancelled))
+    syncGovernedQueueUsage()
+  }
+
+  const resourceUnitId = options.resourceUnitId
+  const resourceGovernor = options.resourceGovernor
+  const syncGovernedQueueUsage = (): void => {
+    if (!resourceGovernor || !resourceUnitId) return
+    resourceGovernor.reconcile(resourceUnitId, {
+      queuedMessages: [...queuedMessages.values()].reduce((total, queue) => total + queue.length, 0),
+    })
   }
 
   const withQueueMutation = async <T>(sessionId: string, fn: () => Promise<T>): Promise<T> => {
@@ -752,9 +791,18 @@ export async function startHostServer(
         if (queue.some((item) => item.operationId === msg.operationId)) return
         if (cancelledQueueOperations.get(sessionId)?.has(msg.operationId)) return
         if (await sessionUserOperationCursor(store, sessionId, msg.operationId) !== undefined) return
+        const admission = resourceGovernor && resourceUnitId
+          ? resourceGovernor.tryEnqueue(resourceUnitId)
+          : { ok: true as const }
+        if (!admission.ok) throw new Error(`Runtime Unit queue limit exceeded (${admission.code})`)
         if (priority === 'front') queue.unshift(msg)
         else queue.push(msg)
-        await persistQueue(sessionId, queue)
+        try {
+          await persistQueue(sessionId, queue)
+        } catch (error) {
+          if (resourceGovernor && resourceUnitId) resourceGovernor.dequeue(resourceUnitId)
+          throw error
+        }
         changed = true
       })
       if (changed) emitQueueUpdate(sessionId)
@@ -857,6 +905,13 @@ export async function startHostServer(
             if (!isRestingStatus(record.state.status)) return
             const next = await claimQueueHead(sessionId)
             if (!next || closed) return
+            const turnAdmission = resourceGovernor && resourceUnitId
+              ? resourceGovernor.tryStartTurn(resourceUnitId)
+              : { ok: true as const }
+            if (!turnAdmission.ok) {
+              releaseQueueClaim(sessionId, next.id)
+              return
+            }
             try {
               await options.queueDispatchBarrier?.({ sessionId, operationId: next.operationId, runtime: record.agentRuntime })
               if (!await isClaimedQueueHeadDispatchable(sessionId, next)) continue
@@ -876,7 +931,9 @@ export async function startHostServer(
               }
               await dequeueClaimedQueueHead(sessionId, next)
             } finally {
+              if (resourceGovernor && resourceUnitId) resourceGovernor.finishTurn(resourceUnitId)
               releaseQueueClaim(sessionId, next.id)
+              for (const queuedSessionId of queuedMessages.keys()) void messageQueues.drain(queuedSessionId)
             }
             continue
           }
@@ -898,6 +955,13 @@ export async function startHostServer(
           if (!record || !isRestingStatus(record.state.status)) return
           const next = await claimQueueHead(sessionId)
           if (!next || closed) return
+          const turnAdmission = resourceGovernor && resourceUnitId
+            ? resourceGovernor.tryStartTurn(resourceUnitId)
+            : { ok: true as const }
+          if (!turnAdmission.ok) {
+            releaseQueueClaim(sessionId, next.id)
+            return
+          }
           // Dispatch first and persist the dequeue only after the durable
           // user_message commit. A crash before commit leaves the item queued;
           // a crash after commit is recognized by operationId and only removes
@@ -921,7 +985,9 @@ export async function startHostServer(
               await dequeueCommitted()
             }
           } finally {
+            if (resourceGovernor && resourceUnitId) resourceGovernor.finishTurn(resourceUnitId)
             releaseQueueClaim(sessionId, next.id)
+            for (const queuedSessionId of queuedMessages.keys()) void messageQueues.drain(queuedSessionId)
           }
         }
       } finally {
@@ -1154,10 +1220,10 @@ export async function startHostServer(
   const publishLocalImages = createLocalImagePublisher({
     artifacts: sessionArtifacts,
     reader: async (input) => await executors.publishLocalImage(input),
-    ...(options.storageQuota ? {
+    ...(effectiveStorageQuota ? {
       assertCanStore: async (record, bytes) => {
         if (!record.organizationId) throw new Error('tenant_attribution_missing')
-        await options.storageQuota!.assertCanStoreArtifact({
+        await effectiveStorageQuota.assertCanStoreArtifact({
           organizationId: record.organizationId,
           sessionId: record.sessionId,
           kind: 'session_artifact',

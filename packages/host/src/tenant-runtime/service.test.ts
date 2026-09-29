@@ -1,6 +1,9 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { request as httpsRequest } from 'node:https'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createConfig } from '@agent-kernel/kernel'
 import { AGENT_RUNTIME_CAPABILITIES, PROTOCOL_VERSION, type ServerSessionsPayload } from '@agent-kernel/shared'
@@ -29,6 +32,20 @@ describe('multi-tenant Host composition', () => {
     expect(host.units.list()).toHaveLength(0)
   })
 
+  it('requires a trusted client certificate on the Gateway-to-Runtime listener', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'runtime-mtls-')); roots.push(root)
+    const tls = await createTestMtls(root)
+    host = await startTenantRuntimeService({
+      port: 0,
+      ingressSecret: 'secret',
+      tls: { key: tls.serverKey, cert: tls.serverCert, ca: tls.ca },
+      resolveUnitId: () => undefined,
+      factory: async () => { throw new Error('must not load') },
+    })
+    await expect(httpsGet(host.port, tls.ca)).rejects.toThrow()
+    expect((await httpsGet(host.port, tls.ca, tls.clientCert, tls.clientKey)).status).toBe(404)
+  })
+
   it('routes two complete Socket.IO runtimes with identical session ids without leakage', async () => {
     const root = await mkdtemp(join(tmpdir(), 'multi-tenant-host-')); roots.push(root)
     host = await startTenantRuntimeService({
@@ -41,6 +58,7 @@ describe('multi-tenant Host composition', () => {
         capabilities: AGENT_RUNTIME_CAPABILITIES,
       }),
     })
+
     const origin = `http://127.0.0.1:${host.port}`
     const a = connect(`${origin}/dashboard`, { transports: ['websocket'], extraHeaders: { 'x-runtime-unit': 'a' }, auth: { sessionId: 'same-session', role: 'dashboard', clientVersion: PROTOCOL_VERSION } })
     const b = connect(`${origin}/dashboard`, { transports: ['websocket'], extraHeaders: { 'x-runtime-unit': 'b' }, auth: { sessionId: 'same-session', role: 'dashboard', clientVersion: PROTOCOL_VERSION } })
@@ -124,3 +142,49 @@ describe('multi-tenant Host composition', () => {
     }
   })
 })
+
+async function createTestMtls(root: string): Promise<{
+  ca: Buffer
+  serverKey: Buffer
+  serverCert: Buffer
+  clientKey: Buffer
+  clientCert: Buffer
+}> {
+  const run = (...args: string[]): void => {
+    execFileSync('openssl', args, { cwd: root, stdio: 'ignore' })
+  }
+  await writeFile(join(root, 'server.ext'), 'subjectAltName=DNS:runtime-host\nextendedKeyUsage=serverAuth\n')
+  await writeFile(join(root, 'client.ext'), 'extendedKeyUsage=clientAuth\n')
+  run('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=test-ca', '-keyout', 'ca.key', '-out', 'ca.pem')
+  run('req', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=runtime-host', '-keyout', 'server.key', '-out', 'server.csr')
+  run('x509', '-req', '-days', '1', '-in', 'server.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key', '-CAcreateserial', '-extfile', 'server.ext', '-out', 'server.pem')
+  run('req', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=gateway', '-keyout', 'client.key', '-out', 'client.csr')
+  run('x509', '-req', '-days', '1', '-in', 'client.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key', '-CAcreateserial', '-extfile', 'client.ext', '-out', 'client.pem')
+  return {
+    ca: await readFile(join(root, 'ca.pem')),
+    serverKey: await readFile(join(root, 'server.key')),
+    serverCert: await readFile(join(root, 'server.pem')),
+    clientKey: await readFile(join(root, 'client.key')),
+    clientCert: await readFile(join(root, 'client.pem')),
+  }
+}
+
+function httpsGet(port: number, ca: Buffer, cert?: Buffer, key?: Buffer): Promise<{ status: number }> {
+  return new Promise((resolveRequest, reject) => {
+    const request = httpsRequest({
+      host: '127.0.0.1',
+      port,
+      path: '/runtime/capabilities',
+      servername: 'runtime-host',
+      ca,
+      ...(cert && key ? { cert, key } : {}),
+      minVersion: 'TLSv1.3',
+      headers: { 'x-agent-runlab-ingress-secret': 'secret' },
+    }, (response) => {
+      response.resume()
+      response.once('end', () => resolveRequest({ status: response.statusCode ?? 0 }))
+    })
+    request.once('error', reject)
+    request.end()
+  })
+}

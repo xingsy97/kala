@@ -22,4 +22,16 @@ describe('UnitResourceGovernor', () => {
     governor.releaseArtifact('a', 20)
     expect(governor.snapshot('a').artifactBytes).toBe(0)
   })
+
+  it('reconciles durable usage after a Unit is loaded', () => {
+    const governor = new UnitResourceGovernor({ maxConcurrentTurns: 2, maxQueuedMessages: 3, maxArtifactBytes: 20 })
+    expect(governor.reconcile('a', { queuedMessages: 2, artifactBytes: 12 })).toEqual({
+      concurrentTurns: 0,
+      queuedMessages: 2,
+      artifactBytes: 12,
+    })
+    expect(governor.tryEnqueue('a')).toEqual({ ok: true })
+    expect(governor.tryEnqueue('a')).toMatchObject({ ok: false, code: 'queue_limit' })
+    expect(() => governor.reconcile('a', { artifactBytes: -1 })).toThrow('non-negative safe integer')
+  })
 })

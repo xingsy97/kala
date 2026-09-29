@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path'
 import process from 'node:process'
+import { readFile } from 'node:fs/promises'
 
 import { parsePublicUrls } from '@agent-kernel/shared'
 
 import { JsonOrganizationStore } from '../organizations/json-store.js'
 import { PostgresOrganizationStore } from '../organizations/postgres-store.js'
-import { startRuntimeIngressGateway } from '../edge/server.js'
+import { requestRuntime, startRuntimeIngressGateway } from '../edge/server.js'
 import { createOidcClient } from '../auth/oidc-client.js'
 import { readRequiredSecretEnv } from '../config/secret-env.js'
 import { FileLoginStateStore } from '../auth/login-state-store.js'
@@ -52,6 +53,23 @@ async function main(): Promise<void> {
   const enterpriseSso = process.env.KALA_INGRESS_ENTERPRISE_SSO_CONFIG
     ? await loadEnterpriseSsoResolver(resolve(process.env.KALA_INGRESS_ENTERPRISE_SSO_CONFIG))
     : undefined
+  const hostOrigin = await readRequiredSecretEnv('KALA_RUNTIME_HOST_ORIGIN')
+  const runtimeTlsPaths = [
+    process.env.KALA_INGRESS_RUNTIME_TLS_KEY_FILE,
+    process.env.KALA_INGRESS_RUNTIME_TLS_CERT_FILE,
+    process.env.KALA_INGRESS_RUNTIME_TLS_CA_FILE,
+  ]
+  if (runtimeTlsPaths.some(Boolean) && !runtimeTlsPaths.every(Boolean)) {
+    throw new Error('KALA_INGRESS_RUNTIME_TLS_KEY_FILE, KALA_INGRESS_RUNTIME_TLS_CERT_FILE, and KALA_INGRESS_RUNTIME_TLS_CA_FILE must be configured together')
+  }
+  const runtimeTls = runtimeTlsPaths.every(Boolean)
+    ? {
+        key: await readFile(runtimeTlsPaths[0]!),
+        cert: await readFile(runtimeTlsPaths[1]!),
+        ca: await readFile(runtimeTlsPaths[2]!),
+        servername: process.env.KALA_INGRESS_RUNTIME_TLS_SERVERNAME ?? 'runtime-host',
+      }
+    : undefined
   const rateLimiter = process.env.KALA_INGRESS_RATE_LIMIT_MAX_REQUESTS
     ? new SlidingWindowRateLimiter({
       maxRequests: numberEnv('KALA_INGRESS_RATE_LIMIT_MAX_REQUESTS'),
@@ -72,7 +90,8 @@ async function main(): Promise<void> {
     },
     loginStates,
     sessions,
-    hostOrigin: await readRequiredSecretEnv('KALA_RUNTIME_HOST_ORIGIN'),
+    hostOrigin,
+    ...(runtimeTls ? { runtimeTls } : {}),
     ...(process.env.KALA_INGRESS_DASHBOARD_ORIGIN ? { dashboardOrigin: await readRequiredSecretEnv('KALA_INGRESS_DASHBOARD_ORIGIN') } : {}),
     publicOrigin,
     publicUrls,
@@ -81,12 +100,17 @@ async function main(): Promise<void> {
     ingressSecret,
     ...(rateLimiter ? { rateLimiter } : {}),
     provision: async (unitId) => {
-      const response = await fetch(`${await readRequiredSecretEnv('KALA_RUNTIME_HOST_ORIGIN')}/internal/runtime-units`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-secret': ingressSecret },
-        body: JSON.stringify({ unitId, operationId: `provision:${unitId}`, generation: 1 }),
-      })
-      if (!response.ok) throw new Error(`Tenant provisioning failed: ${response.status} ${await response.text()}`)
+      const response = await requestRuntime(
+        hostOrigin,
+        '/internal/runtime-units',
+        'POST',
+        { 'content-type': 'application/json', 'x-agent-runlab-ingress-secret': ingressSecret },
+        Buffer.from(JSON.stringify({ unitId, operationId: `provision:${unitId}`, generation: 1 })),
+        runtimeTls,
+      )
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Tenant provisioning failed: ${response.status} ${response.body.toString('utf8')}`)
+      }
     },
   })
   process.stdout.write(`${JSON.stringify({ event: 'private_cloud_gateway_ready', port: gateway.port })}\n`)

@@ -8,6 +8,14 @@ export class UnitResourceGovernor {
 
   snapshot(unitId: string): UnitResourceUsage { return { ...(this.usage.get(unitId) ?? emptyUsage()) } }
 
+  reconcile(unitId: string, usage: Partial<UnitResourceUsage>): UnitResourceUsage {
+    const current = this.mutable(unitId)
+    if (usage.concurrentTurns !== undefined) current.concurrentTurns = nonNegativeInteger(usage.concurrentTurns, 'concurrentTurns')
+    if (usage.queuedMessages !== undefined) current.queuedMessages = nonNegativeInteger(usage.queuedMessages, 'queuedMessages')
+    if (usage.artifactBytes !== undefined) current.artifactBytes = nonNegativeInteger(usage.artifactBytes, 'artifactBytes')
+    return { ...current }
+  }
+
   tryStartTurn(unitId: string): ResourceDecision {
     const usage = this.mutable(unitId)
     if (usage.concurrentTurns >= this.limits.maxConcurrentTurns) return { ok: false, code: 'concurrency_limit', retryable: true }
@@ -33,3 +41,7 @@ export class UnitResourceGovernor {
   private mutable(unitId: string): UnitResourceUsage { let value = this.usage.get(unitId); if (!value) { value = emptyUsage(); this.usage.set(unitId, value) } return value }
 }
 function emptyUsage(): UnitResourceUsage { return { concurrentTurns: 0, queuedMessages: 0, artifactBytes: 0 } }
+function nonNegativeInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be a non-negative safe integer`)
+  return value
+}

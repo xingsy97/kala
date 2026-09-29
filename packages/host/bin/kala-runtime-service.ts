@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
 
@@ -17,6 +17,7 @@ import { LocalWebSearchCredentialStore } from '../src/web-search/credential-stor
 import { KalaStateStore } from '../src/store/state-store.js'
 import { LocalAzureSpeechCredentialStore } from '../src/speech/credential-store.js'
 import { loadProductDeploymentConfig } from '../src/deployment-config.js'
+import { UnitResourceGovernor } from '../src/tenant-runtime/resource-governor.js'
 
 function required(name: string): string {
   const value = process.env[name]?.trim()
@@ -47,15 +48,35 @@ async function main(): Promise<void> {
       )
     : await createEnvironmentRuntimeProvider()
   const agentModule = resolveBuiltinAgentModule()
+  const resourceGovernor = new UnitResourceGovernor({
+    maxConcurrentTurns: positiveIntegerEnv('KALA_RUNTIME_UNIT_MAX_CONCURRENT_TURNS', 4),
+    maxQueuedMessages: positiveIntegerEnv('KALA_RUNTIME_UNIT_MAX_QUEUED_MESSAGES', 100),
+    maxArtifactBytes: positiveIntegerEnv('KALA_RUNTIME_UNIT_MAX_ARTIFACT_BYTES', 10 * 1024 * 1024 * 1024),
+  })
   const dashboardDir = process.env.KALA_RUNTIME_HOST_DASHBOARD_DIR
   const docsDir = process.env.KALA_RUNTIME_HOST_DOCS_DIR
   const releaseAssetsDir = process.env.KALA_RUNTIME_HOST_RELEASE_ASSETS_DIR
+  const tlsPaths = [
+    process.env.KALA_RUNTIME_TLS_KEY_FILE,
+    process.env.KALA_RUNTIME_TLS_CERT_FILE,
+    process.env.KALA_RUNTIME_TLS_CA_FILE,
+  ]
+  if (tlsPaths.some(Boolean) && !tlsPaths.every(Boolean)) {
+    throw new Error('KALA_RUNTIME_TLS_KEY_FILE, KALA_RUNTIME_TLS_CERT_FILE, and KALA_RUNTIME_TLS_CA_FILE must be configured together')
+  }
   const host = await startTenantRuntimeService({
     port,
     listenHost: process.env.KALA_RUNTIME_KALA_BIND_HOST ?? '127.0.0.1',
     ingressSecret,
     requireProvisioning: true,
     maxLoadedUnits: Number(process.env.KALA_RUNTIME_HOST_MAX_LOADED_UNITS ?? 100),
+    ...(tlsPaths.every(Boolean) ? {
+      tls: {
+        key: await readFile(tlsPaths[0]!),
+        cert: await readFile(tlsPaths[1]!),
+        ca: await readFile(tlsPaths[2]!),
+      },
+    } : {}),
     resolveUnitId: (request) => {
       const value = request.headers['x-agent-runlab-runtime-unit']
       return typeof value === 'string' ? value : undefined
@@ -71,6 +92,13 @@ async function main(): Promise<void> {
       const webSearchCredentialStore = new LocalWebSearchCredentialStore(stateStore)
       const speechCredentialStore = new LocalAzureSpeechCredentialStore(stateStore)
       await mkdir(workspaceDir, { recursive: true, mode: 0o700 })
+      resourceGovernor.reconcile(id, {
+        artifactBytes: await directoryBytes([
+          join(unitRoot, 'artifacts'),
+          join(unitRoot, 'session-artifacts'),
+          join(unitRoot, 'message-attachments'),
+        ]),
+      })
       return startLoopbackHostRuntimeUnit(id, {
         sessionsDir: join(unitRoot, 'sessions'),
         artifactRootDir: join(unitRoot, 'artifacts'),
@@ -88,6 +116,13 @@ async function main(): Promise<void> {
         deleteWebSearchCredential: (provider) => webSearchCredentialStore.delete(provider),
         speechCredentials: speechCredentialStore,
         stateStore,
+        resourceGovernor,
+        resourceUnitId: id,
+        resourceArtifactUsage: async () => await directoryBytes([
+          join(unitRoot, 'artifacts'),
+          join(unitRoot, 'session-artifacts'),
+          join(unitRoot, 'message-attachments'),
+        ]),
         ...(dashboardDir ? { staticDir: resolve(dashboardDir) } : {}),
         ...(docsDir ? { docsRootDir: resolve(docsDir) } : {}),
         ...(releaseAssetsDir ? { releaseAssetsDir: resolve(releaseAssetsDir) } : {}),
@@ -105,6 +140,33 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify({ event: 'tenant_runtime_service_ready', port: host.port, dataRoot })}\n`)
   const shutdown = async (): Promise<void> => { await host.drain(); await host.close(); process.exit(0) }
   process.on('SIGTERM', () => { void shutdown() }); process.on('SIGINT', () => { void shutdown() })
+}
+
+function positiveIntegerEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name] ?? fallback)
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive safe integer`)
+  return value
+}
+
+async function directoryBytes(paths: readonly string[]): Promise<number> {
+  let total = 0
+  const pending = [...paths]
+  while (pending.length > 0) {
+    const path = pending.pop()!
+    let entries
+    try {
+      entries = await readdir(path, { withFileTypes: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+    for (const entry of entries) {
+      const child = join(path, entry.name)
+      if (entry.isDirectory()) pending.push(child)
+      else if (entry.isFile()) total += (await stat(child)).size
+    }
+  }
+  return total
 }
 
 async function createEnvironmentRuntimeProvider() {
