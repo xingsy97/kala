@@ -14,6 +14,7 @@ import { createRuntimeProviderRuntime, FileSecretResolver, loadRuntimeProviderCa
 import { RuntimeUnitMaterializationStore } from '../src/tenant-runtime/materialization-store.js'
 import { attachTenantRuntimeControlApi } from '../src/tenant-runtime/control-api.js'
 import { LocalWebSearchCredentialStore } from '../src/web-search/credential-store.js'
+import { KalaStateStore } from '../src/store/state-store.js'
 import { LocalAzureSpeechCredentialStore } from '../src/speech/credential-store.js'
 import { loadProductDeploymentConfig } from '../src/deployment-config.js'
 
@@ -62,8 +63,13 @@ async function main(): Promise<void> {
     factory: async (id) => {
       const unitRoot = join(dataRoot, 'tenant-runtime-units', id)
       const workspaceDir = join(unitRoot, 'workspace')
-      const webSearchCredentialStore = new LocalWebSearchCredentialStore(join(unitRoot, 'credentials'))
-      const speechCredentialStore = new LocalAzureSpeechCredentialStore(join(unitRoot, 'credentials'))
+      const stateStore = new KalaStateStore(unitRoot, {
+        ...(process.env.KALA_STATE_MASTER_KEY_PATH ? { keyPath: process.env.KALA_STATE_MASTER_KEY_PATH } : {}),
+        legacyMemoDirectory: join(unitRoot, 'memos'),
+        legacyCredentialDirectory: join(unitRoot, 'credentials'),
+      })
+      const webSearchCredentialStore = new LocalWebSearchCredentialStore(stateStore)
+      const speechCredentialStore = new LocalAzureSpeechCredentialStore(stateStore)
       await mkdir(workspaceDir, { recursive: true, mode: 0o700 })
       return startLoopbackHostRuntimeUnit(id, {
         sessionsDir: join(unitRoot, 'sessions'),
@@ -81,6 +87,7 @@ async function main(): Promise<void> {
         setWebSearchCredential: (provider, key) => webSearchCredentialStore.set(provider, key),
         deleteWebSearchCredential: (provider) => webSearchCredentialStore.delete(provider),
         speechCredentials: speechCredentialStore,
+        stateStore,
         ...(dashboardDir ? { staticDir: resolve(dashboardDir) } : {}),
         ...(docsDir ? { docsRootDir: resolve(docsDir) } : {}),
         ...(releaseAssetsDir ? { releaseAssetsDir: resolve(releaseAssetsDir) } : {}),

@@ -86,6 +86,8 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 - Serve two Socket.IO namespaces: `/dashboard` and `/executor`, rooms `session:<id>`, and serve the pre-built Dashboard bundle from `packages/dashboard/dist/`
 - Drive context compaction (both auto via host `ContextSnapshot.pressureLevel === 'hard'` and manual via `client:compact` / the `/compact` slash command). The summarizer is invoked with the LLM adapter; successful replacement is recorded as `messages_replaced(reason='compaction')`, while attempt metadata is written as runtime metadata/artifacts.
 - Provide the host-side `agent` builtin tool: spawn a child JSONL session in the same workspace, inheriting the parent's `approvalMode`, and return the child's final assistant text.
+- Compose optional Host capabilities through a startup-time `ExtensionRegistry`. Host tool handlers and pre/post tool lifecycle contributors register once and the registry is sealed before serving sessions; the kernel and core loop do not branch on individual extension names.
+- Persist Runtime Unit state in one SQLite store: Memo records use revisioned transactions, while Search and Speech credentials are encrypted records protected by one external Unit master key. The master key is never stored in SQLite; Dedicated installations provision it at `/etc/kala/state-store.key`.
 - Auto-import LLM providers/models from `~/.claude/settings.json` and `~/.codex/config.toml`, merge user-managed model ids from `~/.config/kala/models.json`, and expose sanitized snapshots to the dashboard via HTTP `GET /models` and `GET /settings`.
 
 **Non-goals**:

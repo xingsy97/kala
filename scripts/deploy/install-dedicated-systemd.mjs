@@ -70,6 +70,7 @@ async function main() {
   await installInitialDashboardRelease(source, dataRoot, releaseId)
   await mkdir('/etc/kala/slots', { recursive: true, mode: 0o755 })
   await ensureHandoffSecret()
+  await ensureStateMasterKey()
   await copyFile(join(source, 'deployment.json'), '/etc/kala/deployment.json')
   await writeFile('/etc/kala/slots/blue.env', 'KALA_PORT=13001\n', { mode: 0o644 })
   await writeFile('/etc/kala/slots/green.env', 'KALA_PORT=13002\n', { mode: 0o644 })
@@ -307,10 +308,26 @@ async function ensureHandoffSecret() {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
   }
+
   const secret = randomBytes(32).toString('base64url')
   const file = await open(path, 'wx', 0o600)
   try {
-    await file.writeFile(`KALA_INGRESS_HANDOFF_SECRET=${secret}\n`)
+    await file.writeFile(`KALA_INGRESS_HANDOFF_SECRET=${secret    }
+
+    async function ensureStateMasterKey() {
+      const path = '/etc/kala/state-store.key'
+      if (!await exists(path)) {
+        const file = await open(path, 'wx', 0o640)
+        try {
+          await file.writeFile(randomBytes(32))
+          await file.sync()
+        } finally { await file.close() }
+      }
+      const value = await readFile(path)
+      if (value.length !== 32) throw new Error('existing Dedicated state master key is invalid')
+      await chmod(path, 0o640)
+      await run('chown', ['root:kala', path])
+    }\n`)
     await file.sync()
   } finally { await file.close() }
   const directory = await open(dirname(path), 'r')

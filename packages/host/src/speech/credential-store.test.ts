@@ -40,9 +40,9 @@ describe('LocalAzureSpeechCredentialStore', () => {
       enabled: true,
       mode: 'after_recording',
     })
-    expect(await readFile(join(root, 'azure-speech.json'), 'utf8')).not.toContain(TEST_KEY)
-    expect((await stat(join(root, 'speech-master.key'))).mode & 0o777).toBe(0o600)
-    expect((await stat(join(root, 'azure-speech.json'))).mode & 0o777).toBe(0o600)
+    expect(await readFile(join(root, 'state.sqlite'))).not.toContain(TEST_KEY)
+    expect((await stat(join(root, 'state-store.key'))).mode & 0o777).toBe(0o600)
+    expect((await stat(join(root, 'state.sqlite'))).mode & 0o777).toBe(0o600)
 
     await store.set({ endpoint: DEFAULT_AZURE_SPEECH_ENDPOINT, enabled: false, mode: 'realtime' })
     expect((await store.get())?.apiKey).toBe(TEST_KEY)

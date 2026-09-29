@@ -1,11 +1,8 @@
 import type { CallToolEffect } from '@agent-kernel/kernel'
 
-import { runAgentTool, type SubAgentRuntimeController } from '../extensions/agent-tool.js'
-import { isSkillManager, runSkillTool } from '../extensions/skills.js'
-import { runTodoGraphTool } from '../extensions/todo-graph.js'
-import { runToolCatalogTool } from '../extensions/tool-catalog.js'
+import type { SubAgentRuntimeController } from '../extensions/agent-tool.js'
+import { createBuiltinExtensionRegistry } from '../extensions/builtin-registry.js'
 import type { HostLoopDeps, LoopHandle } from '../loop-types.js'
-import { runWebSearch } from '../web-search/index.js'
 
 export type ToolExecutionResult = {
   ok: boolean
@@ -38,35 +35,15 @@ export async function dispatchConfiguredTool(
   }
 
   const handler = effect.name === 'websearch' ? 'websearch' : (schema?.executionHandler ?? effect.name)
-  switch (handler) {
-    case 'ask_user_choice':
-      if (!deps.askUserChoice) return { ok: false, content: 'ask_user_choice is not configured on this host' }
-      return await deps.askUserChoice.ask(sessionId, effect)
-    case 'websearch':
-      if (!deps.webSearchCredentials) {
-        return { ok: false, content: 'web search credential store is not configured' }
-      }
-      return await runWebSearch(effect.input, { credentials: deps.webSearchCredentials, sessionId, callId: effect.callId, audit: deps.audit })
-    case 'agent':
-      return await runAgentTool(deps, sessionId, effect, aborts, loop, runtimeController)
-    case 'todo_graph':
-      return await runTodoGraphTool(deps, sessionId, effect)
-    case 'tool_search':
-    case 'tool_describe':
-      if (!record) return { ok: false, content: 'Session is unavailable' }
-      return await runToolCatalogTool(record, handler, effect.input)
-    case 'skill':
-      if (!deps.skills) return { ok: false, content: 'skills are not configured on this host' }
-      return await runSkillTool(
-        isSkillManager(deps.skills)
-          ? await deps.skills.refreshSession(deps.store.get(sessionId)!)
-          : deps.skills,
-        effect.input,
-      )
-    default:
-      return {
-        ok: false,
-        content: `host tool handler is not registered: ${handler}`,
-      }
-  }
+  const extensions = deps.extensions ?? createBuiltinExtensionRegistry()
+  return await extensions.dispatchHostTool(handler, {
+    deps,
+    sessionId,
+    effect,
+    aborts,
+    ...(turnId !== undefined ? { turnId } : {}),
+    ...(loop !== undefined ? { loop } : {}),
+    plannedContinuation,
+    ...(runtimeController !== undefined ? { runtimeController } : {}),
+  })
 }

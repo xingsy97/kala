@@ -33,4 +33,7 @@ export type {
 } from './agent-modules/types.js'
 export { discoverSkills, skillToolSchema, SKILL_TOOL_NAME } from './extensions/skills.js'
 export type { SkillInfo, SkillRegistry } from './extensions/skills.js'
+export { createBuiltinExtensionRegistry, BUILTIN_HOST_TOOL_HANDLERS } from './extensions/builtin-registry.js'
+export { createExtensionRegistry } from './extensions/registry.js'
+export type { ExtensionLifecycle, ExtensionRegistry, HostExtension, HostToolContext, HostToolHandler } from './extensions/registry.js'
 export type { WebSearchCredentialStore } from './web-search/index.js'

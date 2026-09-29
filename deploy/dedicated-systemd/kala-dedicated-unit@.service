@@ -17,6 +17,7 @@ Environment=KALA_BIND_HOST=127.0.0.1
 Environment=KALA_SESSIONS_DIR=/var/lib/kala/.kala/sessions
 Environment=KALA_ARTIFACTS_DIR=/var/lib/kala/.kala/artifacts
 Environment=KALA_EXECUTOR_IDENTITIES=/var/lib/kala/.kala/executor-identities.json
+Environment=KALA_STATE_MASTER_KEY_PATH=/etc/kala/state-store.key
 Environment=KALA_WRITE_LEASE=/var/lib/kala/units/local/write.lock
 Environment=KALA_RUNTIME_READINESS=/run/kala/unit-%i-readiness.json
 Environment=KALA_PROCESS_READINESS=/run/kala/unit-%i-process-ready.json

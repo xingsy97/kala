@@ -34,6 +34,7 @@ import type { LLMAdapter } from './llm/adapter.js'
 import type { LlmQuotaEnforcer, LoopBroadcast, LoopHandle, TenantModelPolicyEnforcer } from './loop.js'
 import { runHostLoop } from './loop.js'
 import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
+import { createBuiltinExtensionRegistry } from './extensions/builtin-registry.js'
 import { selectHooks } from './extensions/hooks.js'
 import { createSkillManager, defaultSkillRoots, discoverSkills, type SkillManager, type SkillRegistry } from './extensions/skills.js'
 import { SessionNotFoundError, SessionStore, type SessionRecord } from './store/session.js'
@@ -96,6 +97,7 @@ import { CopilotAgentRuntime } from './agent-runtime/copilot-runtime.js'
 import { createRuntimeToolDispatcher } from './agent-runtime/tool-dispatcher.js'
 import { AskUserChoiceBroker } from './ask-user-choice.js'
 import { attachPublicAccessGate } from './http/public-access-gate.js'
+import { KalaStateStore } from './store/state-store.js'
 
 export type HostServerOptions = {
   port: number
@@ -157,6 +159,7 @@ export type HostServerOptions = {
   setWebSearchCredential?: (provider: 'serper', key: string) => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
   deleteWebSearchCredential?: (provider: 'serper') => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
   speechCredentials?: AzureSpeechCredentialStore
+  stateStore?: KalaStateStore
   artifactRootDir?: string | false
   docsRootDir?: string
   /**
@@ -310,7 +313,7 @@ export async function startHostServer(
       ])
     },
   })
-  const memoStore = new MemoStore(join(options.sessionsDir, '..', 'memos'))
+  const memoStore = new MemoStore(options.stateStore ?? join(options.sessionsDir, '..', 'memos'))
   const defaultSkillRootsList = defaultSkillRoots()
   const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
   const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
@@ -1151,6 +1154,7 @@ export async function startHostServer(
     } : {}),
   })
 
+  const extensions = createBuiltinExtensionRegistry()
   const loopDeps = {
     store,
     llm: options.llm,
@@ -1171,6 +1175,7 @@ export async function startHostServer(
     messageAttachments,
     askUserChoice,
     publishLocalImages,
+    extensions,
   }
   loop = runHostLoop(loopDeps)
   agentRuntimes = new AgentRuntimeRegistry()

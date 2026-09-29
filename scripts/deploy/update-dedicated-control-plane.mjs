@@ -16,6 +16,7 @@ const receiptsDir = join(updateRoot, 'receipts')
 let receiptPath = ''
 const unitDir = resolve(process.env.KALA_SYSTEMD_DIR ?? '/etc/systemd/system')
 const deploymentConfig = resolve(process.env.KALA_DEPLOYMENT_CONFIG ?? '/etc/kala/deployment.json')
+const stateMasterKeyPath = resolve(process.env.KALA_STATE_MASTER_KEY_PATH ?? join(dirname(deploymentConfig), 'state-store.key'))
 const operatorStatusPath = resolve(process.env.KALA_OPERATOR_STATUS ?? join(deployRoot, 'operator-status.json'))
 const ingressReadinessPath = resolve(process.env.KALA_INGRESS_READINESS ?? '/run/kala/ingress-readiness.json')
 const systemctlBinary = resolve(process.env.KALA_SYSTEMCTL ?? '/usr/bin/systemctl')
@@ -128,9 +129,27 @@ async function rollback(receipt, cause) {
 
 async function installControlRelease(release) {
   await ensureIndependentDashboard(release)
+  await ensureStateMasterKey()
   for (const unit of units) {
     const source = await pathExists(join(release, unit.asset)) ? unit.asset : unit.legacyAsset
     await copyAtomic(join(release, source), join(unitDir, unit.service), 0o644)
+  }
+
+  async function ensureStateMasterKey() {
+    await mkdir(dirname(stateMasterKeyPath), { recursive: true, mode: 0o755 })
+    try {
+      const existing = await readFile(stateMasterKeyPath)
+      if (existing.length !== 32) throw new Error('existing Dedicated state master key is invalid')
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+      const file = await open(stateMasterKeyPath, 'wx', 0o640)
+      try {
+        await file.writeFile(randomBytes(32))
+        await file.sync()
+      } finally { await file.close() }
+    }
+    await chmod(stateMasterKeyPath, 0o640)
+    await command(chownBinary, ['root:kala', stateMasterKeyPath])
   }
   await copyAtomic(join(release, 'deployment.json'), deploymentConfig, 0o644)
   await activate(controlLink, release)

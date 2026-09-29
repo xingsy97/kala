@@ -46,7 +46,7 @@ import {
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
 import { interruptSubAgentsForParent, isCancelledSubAgentChild, type SubAgentRuntimeController } from './extensions/agent-tool.js'
-import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
+import { createBuiltinExtensionRegistry } from './extensions/builtin-registry.js'
 import { isSkillManager } from './extensions/skills.js'
 import { todoGraphContinuationState } from './extensions/todo-graph.js'
 import { dispatchConfiguredTool, type ToolExecutionResult } from './agent-modules/execution.js'
@@ -90,11 +90,22 @@ export async function dispatchRuntimeTool(
   plannedContinuation = false,
   runtimeController?: SubAgentRuntimeController,
 ): Promise<ToolExecutionResult> {
+  const extensions = deps.extensions ?? createBuiltinExtensionRegistry()
+  const context = {
+    deps,
+    sessionId,
+    effect,
+    aborts,
+    ...(turnId !== undefined ? { turnId } : {}),
+    ...(loop !== undefined ? { loop } : {}),
+    plannedContinuation,
+    ...(runtimeController !== undefined ? { runtimeController } : {}),
+  }
   const memoryPolicyBlock = guardMemoryPolicy(deps, sessionId, effect)
   if (memoryPolicyBlock) return { ok: false, content: memoryPolicyBlock }
 
-  const blocked = await runPreToolHooks(deps, sessionId, effect)
-  if (blocked) return { ok: false, content: blocked }
+  const blocked = await extensions.beforeToolDispatch(context)
+  if (blocked) return blocked
 
   const result = await dispatchConfiguredTool(
     deps,
@@ -106,7 +117,7 @@ export async function dispatchRuntimeTool(
     plannedContinuation,
     runtimeController,
   )
-  await runPostToolHooks(deps, sessionId, effect, result)
+  await extensions.afterToolDispatch(context, result)
   return result
 }
 

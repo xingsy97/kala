@@ -31,6 +31,7 @@ import type { SessionStore } from './store/session.js'
 import type { WebSearchCredentialStore } from './web-search/index.js'
 import type { MessageAttachmentStore } from './message-attachment-store.js'
 import type { AskUserChoiceBroker } from './ask-user-choice.js'
+import type { ExtensionRegistry } from './extensions/registry.js'
 
 export type LoopBroadcast = {
   onEvent(
@@ -199,6 +200,7 @@ export type HostLoopDeps = {
   messageAttachments?: MessageAttachmentStore
   publishLocalImages?: (sessionId: string, record: import('./store/session.js').SessionRecord, message: import('@agent-kernel/kernel').Message) => Promise<import('@agent-kernel/kernel').Message>
   askUserChoice?: AskUserChoiceBroker
+  extensions?: ExtensionRegistry
 }
 
 export type LoopHandle = {

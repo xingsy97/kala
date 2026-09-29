@@ -1,10 +1,10 @@
 # Host extensions
 
 Optional capabilities layered on top of the host loop. **Each file here is
-something the kernel does not need to run.** Delete any one of them (and its
-single call site in `../loop.ts` / `../connection/dashboard-ns.ts` / `../../bin/`)
-and the agent still drives a session to completion — it just loses that one
-feature. This is the concrete expression of [ADR 0005](../../../../docs/meta/adr/0005-kernel-boundary.md):
+something the kernel does not need to run.** The runtime composes them at
+startup through `ExtensionRegistry`; removing a registration removes that
+capability without adding a tool-name branch to the loop. This is the concrete
+expression of [ADR 0005](../../../../docs/meta/adr/0005-kernel-boundary.md):
 planning, memory, and subagents live *outside* the kernel, and — by the same
 logic — outside the core host driver too.
 
@@ -18,9 +18,10 @@ from "bolt-on" at a glance.
 Extensions depend on the loop's **contract**, never on the loop's guts:
 
 ```
-extensions/*.ts ──imports──▶ ../loop-types.ts   (pure types: HostLoopDeps, LoopHandle, …)
-extensions/*.ts ──imports──▶ ../loop.ts          (one value only: dispatchOne, the re-entry point)
-../loop.ts      ──imports──▶ extensions/*.ts     (the entry functions below)
+extensions/*.ts ──imports──▶ ../loop-types.ts    (pure host-loop contracts)
+extensions/*.ts ──imports──▶ ../loop.ts          (only where re-entry is required)
+../loop.ts      ──imports──▶ registry.ts         (generic lifecycle contract)
+builtin-registry.ts ───────▶ concrete extensions (startup composition)
 ```
 
 `loop-types.ts` is a leaf module (no runtime logic, imports nothing that imports
@@ -40,9 +41,9 @@ The loop exposes a fixed set of seams. Each extension plugs into one or more:
 | Phase | When | Extension | Entry point → call site |
 |---|---|---|---|
 | **beforeCallLlm** | before each LLM call | compaction (preflight) | `maybeAutoCompact`-adjacent `compact()` ← `loop.ts` `messagesForLlmCall` |
-| **beforeCallTool** | before a tool dispatches | hooks (pre) + loop-guard | `runPreToolHooks` ← `loop.ts:295` |
-| **provideTool** | tool dispatch itself | agent builtin, skills | `dispatchConfiguredTool` reads `ToolSchema.executionKind` / `executionHandler` from the session config |
-| **afterCallTool** | after a tool settles | hooks (post) | `runPostToolHooks` ← `loop.ts:320` |
+| **beforeCallTool** | before a tool dispatches | registered lifecycle contributors, including command hooks | `ExtensionRegistry.beforeToolDispatch` |
+| **provideTool** | tool dispatch itself | registered Host handlers, including agent, skills, web search, todo graph, and catalog tools | `dispatchConfiguredTool` resolves `ToolSchema.executionHandler` through `ExtensionRegistry` |
+| **afterCallTool** | after a tool settles | registered lifecycle contributors, including command hooks | `ExtensionRegistry.afterToolDispatch` |
 | **onTurnDone** | after a turn completes | compaction (auto) | `maybeAutoCompact` ← `loop.ts:88` |
 | **manualTrigger** | operator command | compaction (`/compact`), memory | `runCompact` ← `loop.ts:97`, `consolidateMemory` ← `connection/dashboard-ns.ts:457` |
 | **discovery** | host startup | skills, hooks | `discoverSkills` / `createHookRunner` ← `bin/kala-host.ts` |
@@ -57,6 +58,8 @@ The loop exposes a fixed set of seams. Each extension plugs into one or more:
 | `hooks.ts` | discovery (runner) | no — pure, `node:child_process` |
 | `skills.ts` | provideTool, discovery | no — pure, kernel `ToolSchema` only |
 | `memory-consolidation.ts` | manualTrigger | types only |
+| `registry.ts` | provideTool, beforeCallTool, afterCallTool | host-loop contract types |
+| `builtin-registry.ts` | startup composition | concrete extension entry points |
 
 ## Agent modules and toolsets
 
@@ -74,9 +77,11 @@ prompt, `ToolSchema[]`, and compact `agentModule` metadata.
 
 Tool execution uses the same rendered metadata. `loop.ts` delegates tool calls
 to `dispatchConfiguredTool()`, which routes `executionKind: 'executor'` tools to
-the executor registry and `executionKind: 'host'` tools to registered host
-handlers such as `agent` and `skill`. The loop therefore no longer needs to know
-which tool names are built in; that belongs to the module/toolset layer.
+the executor and resolves `executionKind: 'host'` handlers through the sealed
+registry. Registration rejects duplicate extension IDs and duplicate handler
+ownership. Startup seals the registry before sessions run, so runtime behavior
+cannot mutate midway through a session. The historical `websearch` routing
+compatibility rule remains in the dispatcher for persisted sessions.
 
 The session header stores the rendered module metadata. On session creation, the
 host also writes `agent-module/system-prompt.txt` and

@@ -79,6 +79,7 @@ import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 import { LocalWebSearchCredentialStore } from '../src/web-search/credential-store.js'
+import { KalaStateStore } from '../src/store/state-store.js'
 import { LocalAzureSpeechCredentialStore } from '../src/speech/credential-store.js'
 import { createDedicatedRuntimeReadiness, writeDedicatedProcessReadiness, writeDedicatedRuntimeReadiness } from '../src/tenant-runtime/dedicated-runtime-readiness.js'
 
@@ -179,8 +180,14 @@ async function main(): Promise<void> {
   const sessionsDir =
     process.env.KALA_SESSIONS_DIR ?? join(homedir(), '.kala', 'sessions')
   const expectedDeployment = parseExpectedDeployment(process.env.KALA_EXPECTED_DEPLOYMENT)
-  const webSearchCredentialStore = new LocalWebSearchCredentialStore(join(dirname(sessionsDir), 'credentials'))
-  const speechCredentialStore = new LocalAzureSpeechCredentialStore(join(dirname(sessionsDir), 'credentials'))
+  const stateRoot = dirname(sessionsDir)
+  const stateStore = new KalaStateStore(stateRoot, {
+    ...(process.env.KALA_STATE_MASTER_KEY_PATH ? { keyPath: process.env.KALA_STATE_MASTER_KEY_PATH } : {}),
+    legacyMemoDirectory: join(stateRoot, 'memos'),
+    legacyCredentialDirectory: join(stateRoot, 'credentials'),
+  })
+  const webSearchCredentialStore = new LocalWebSearchCredentialStore(stateStore)
+  const speechCredentialStore = new LocalAzureSpeechCredentialStore(stateStore)
   const artifactRootDir = process.env.KALA_ARTIFACTS_DIR === '0'
     ? false
     : process.env.KALA_ARTIFACTS_DIR ?? join(dirname(sessionsDir), 'artifacts')
@@ -321,6 +328,7 @@ async function main(): Promise<void> {
     setWebSearchCredential: (provider, key) => webSearchCredentialStore.set(provider, key),
     deleteWebSearchCredential: (provider) => webSearchCredentialStore.delete(provider),
     speechCredentials: speechCredentialStore,
+    stateStore,
     defaultConfig: () => resolvedAgentModule.config,
     models: () => registry.models,
     defaultModel: () => registry.defaultModel,

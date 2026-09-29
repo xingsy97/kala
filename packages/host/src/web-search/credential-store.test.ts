@@ -17,13 +17,13 @@ describe('LocalWebSearchCredentialStore', () => {
     const status = await store.set('serper', TEST_KEY)
     expect(status).toMatchObject({ configured: true, provider: 'serper' })
 
-    const encrypted = await readFile(join(directory, 'web-search.json'), 'utf8')
+    const encrypted = await readFile(join(directory, 'state.sqlite'))
     expect(encrypted).not.toContain(TEST_KEY)
-    expect((await readFile(join(directory, 'master.key'))).length).toBe(32)
+    expect((await readFile(join(directory, 'state-store.key'))).length).toBe(32)
     if (process.platform !== 'win32') {
       expect((await stat(directory)).mode & 0o777).toBe(0o700)
-      expect((await stat(join(directory, 'master.key'))).mode & 0o777).toBe(0o600)
-      expect((await stat(join(directory, 'web-search.json'))).mode & 0o777).toBe(0o600)
+      expect((await stat(join(directory, 'state-store.key'))).mode & 0o777).toBe(0o600)
+      expect((await stat(join(directory, 'state.sqlite'))).mode & 0o777).toBe(0o600)
     }
 
     const restarted = new LocalWebSearchCredentialStore(directory)
