@@ -7,8 +7,8 @@ Apply these rules whenever adding or updating packages, actions, build tools, re
 - Pin direct dependencies and build tools to exact versions. Do not use `latest`, floating tags, broad ranges, or unbounded URLs.
 - Commit the package-manager lockfile and require frozen/immutable lockfile installs in CI and release builds.
 - Prefer packages with an established maintenance history, clear ownership, signed or verifiable releases, and active vulnerability reporting.
-- Do not adopt a package version published within the last 30 days. The cooling period allows time for malicious releases, compromised maintainers, regressions, and provenance problems to be discovered.
-- The only exception to the 30-day cooling period is a documented, concrete vulnerability alert that requires the newer version. Record the advisory identifier, affected versions, chosen fixed version, and why no older safe release is sufficient.
+- Do not adopt a package version published within the last 24 hours. The cooling period allows time for malicious releases, compromised maintainers, regressions, and provenance problems to be discovered.
+- The only exception to the 24-hour cooling period is a documented, concrete vulnerability alert that requires the newer version. Record the advisory identifier, affected versions, chosen fixed version, and why no older safe release is sufficient.
 - Minimize new dependencies. Prefer existing audited libraries, platform APIs, or small local implementations when they reduce third-party execution risk without sacrificing correctness.
 
 ## Verification
@@ -34,6 +34,6 @@ Every exception must be narrow, temporary, and reviewable. Record:
 
 1. The dependency and exact version.
 2. The vulnerability advisory or operational requirement.
-3. Why the normal 30-day cooling period or pinning rule cannot be followed.
+3. Why the normal 24-hour cooling period or pinning rule cannot be followed.
 4. The verification performed.
 5. The owner and planned follow-up or expiry date.

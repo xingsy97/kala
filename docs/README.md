@@ -126,6 +126,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 
 | File | Purpose |
 |---|---|
+| [ui-principles.md](ui-principles.md) | Shared product-interface hierarchy, density, typography, interaction, and responsive principles |
 | [design/human-attention-score.md](design/human-attention-score.md) | Session-scoped human attention indicator and draft risk-matched LLM evaluator |
 | [design/session-slash-commands.md](design/session-slash-commands.md) | Session slash command semantics for `/clear`, `/rename`, `/stop`, and `/delete` |
 | [design/authenticated-product-shell.md](design/authenticated-product-shell.md) | Private Cloud account identity, logout, cache partitioning, and authenticated product-shell behavior |
@@ -140,6 +141,13 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [testing/feature-review-ledger.md](testing/feature-review-ledger.md) | Historical feature-by-feature review snapshot, gaps, and remaining release proof |
 | [testing/current-program-baseline.md](testing/current-program-baseline.md) | Historical frozen LXD boundary and service snapshot, isolated validation environments, and evidence policy |
 | [testing/product-e2e-harness.md](testing/product-e2e-harness.md) | Normative real-action, side-effect, persistence, failure/recovery, evidence, and cleanup contract |
+
+### Development and supply chain
+
+| File | Purpose |
+|---|---|
+| [dev/build-test-deploy.md](dev/build-test-deploy.md) | Local build, test, and deployment workflow |
+| [supply-chain-security.md](supply-chain-security.md) | Exact-version, minimum-release-age, provenance, and release verification policy |
 
 ### Capabilities
 
