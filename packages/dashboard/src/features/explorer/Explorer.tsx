@@ -1342,8 +1342,8 @@ function SessionRow({
             : null}
           <span
             className={cn(
-              'min-w-0 truncate',
-              isRunningSessionStatus(status) && 'ak-thinking-text ak-session-running-label font-extrabold',
+              'ak-session-label min-w-0 truncate font-extrabold',
+              isRunningSessionStatus(status) && 'ak-thinking-text ak-session-running-label',
             )}
             data-testid={isRunningSessionStatus(status) ? 'running-session-label' : undefined}
           >

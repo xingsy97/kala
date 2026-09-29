@@ -569,6 +569,26 @@ describe('Explorer', () => {
     expect(screen.queryByTestId('session-status-spinner')).toBeNull()
   })
 
+  it('uses emphasized session typography when the session is not running', () => {
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={sessionSummary.sessionId}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const label = screen.getByTestId('session-row').querySelector('.ak-session-label')
+    expect(label?.classList.contains('font-extrabold')).toBe(true)
+    expect(label?.classList.contains('ak-thinking-text')).toBe(false)
+    expect(label?.classList.contains('ak-session-running-label')).toBe(false)
+  })
+
   it('keeps each running session row ambient without rendering spinners', () => {
     const second = {
       ...sessionSummary,
