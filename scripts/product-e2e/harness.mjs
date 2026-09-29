@@ -149,6 +149,7 @@ export async function clickElement(element, description = 'element') {
     throw new Error(`cannot pointer-click hidden ${description}`)
   }
   const hit = await element.evaluate((candidate) => {
+    if (!candidate.isConnected) return { reachable: false, target: 'detached' }
     const rect = candidate.getBoundingClientRect()
     const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
     return {
@@ -166,24 +167,42 @@ export async function clickElement(element, description = 'element') {
 
 export async function clickFirstVisible(page, selector, options = {}) {
   await page.waitForSelector(selector)
-  const elements = await page.$$(selector)
-  for (const element of elements) {
-    if (!await element.isVisible()) continue
-    const matches = await element.evaluate((candidate, expected) => {
-      if (expected.enabled !== false && (
-        candidate.hasAttribute('disabled')
-        || candidate.getAttribute('aria-disabled') === 'true'
-      )) return false
-      const text = candidate.textContent?.trim() ?? ''
-      if (expected.text !== undefined && text !== expected.text) return false
-      if (expected.textIncludes !== undefined && !text.includes(expected.textIncludes)) return false
-      return true
-    }, options)
-    if (!matches) continue
-    await clickElement(element, options.description ?? selector)
-    return
-  }
-  throw new Error(`no visible matching element found for ${options.description ?? selector}`)
+  await waitFor(async () => {
+    const elements = await page.$$(selector)
+    for (const element of elements) {
+      if (!await element.isVisible()) continue
+      const matches = await element.evaluate((candidate, expected) => {
+        if (expected.enabled !== false && (
+          candidate.hasAttribute('disabled')
+          || candidate.getAttribute('aria-disabled') === 'true'
+        )) return false
+        const text = candidate.textContent?.trim() ?? ''
+        if (expected.text !== undefined && text !== expected.text) return false
+        if (expected.textIncludes !== undefined && !text.includes(expected.textIncludes)) return false
+        return true
+      }, options)
+      if (!matches) continue
+      try {
+        await clickElement(element, options.description ?? selector)
+        return true
+      } catch (error) {
+        if (String(error).includes('detached') || String(error).includes('Node is detached')) continue
+        throw error
+      }
+    }
+    if (elements.length > 0) {
+      const diagnostics = await page.$$eval(selector, (candidates) => candidates.map((candidate) => {
+        const rect = candidate.getBoundingClientRect()
+        return {
+          text: candidate.textContent?.trim() ?? '',
+          disabled: candidate.hasAttribute('disabled') || candidate.getAttribute('aria-disabled') === 'true',
+          rect: { width: rect.width, height: rect.height, x: rect.x, y: rect.y },
+        }
+      }))
+      throw new Error(`matching elements are not actionable: ${JSON.stringify(diagnostics)}`)
+    }
+    return false
+  }, { timeoutMs: options.timeoutMs ?? 5_000, name: options.description ?? selector })
 }
 
 export async function hoverAncestorAndClickFirst(page, selector, ancestorSelector, options = {}) {

@@ -112,7 +112,7 @@ try {
     if (dagSurface.height < 190 || !dagSurface.text.includes('Waiting for DAG plan')) {
       throw new Error(`DAG-First surface is not prominent: ${JSON.stringify(dagSurface)}`)
     }
-    const selected = await actor.page.$eval(rowSelector, (element) => element.classList.contains('bg-accent'))
+    const selected = await actor.page.$eval(rowSelector, (element) => element.getAttribute('data-selected') === 'true')
     if (!selected) throw new Error(`created Session ${sessionId} row is not selected`)
     return { sessionId, url: actor.page.url(), selected, dagSurface }
   })
@@ -124,15 +124,40 @@ try {
     await actor.page.waitForSelector('[data-testid="dag-run-canvas"]')
     await sleep(1_000)
     const selectedRow = await actor.page.$(`[data-testid="session-row"][data-session-id="${sessionId}"]`)
-    if (!selectedRow || !(await selectedRow.evaluate((element) => element.classList.contains('bg-accent')))) throw new Error('selected Session row missing after reload')
+    if (!selectedRow || !(await selectedRow.evaluate((element) => element.getAttribute('data-selected') === 'true'))) throw new Error('selected Session row missing after reload')
     return { sessionId, restored: true }
   })
 
   await harness.step('send real Chromium keyboard input through Host and Executor PTY', async () => {
-    await clickByTestId(actor.page, 'right-panel-terminal-tab')
-    await actor.page.waitForSelector('[data-testid="session-terminal-panel"]')
-    await clickFirstVisible(actor.page, '[data-testid="session-terminal-panel"] button', { textIncludes: 'Start', description: 'Start terminal' })
-    await actor.page.waitForFunction(() => /running|运行/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
+    const inspectorPanel = await actor.page.$('[data-testid="inspector-panel"]')
+    if (!inspectorPanel || !await inspectorPanel.isVisible()) {
+      await clickFirstVisible(actor.page, '[data-testid="sidebar-toggle"]', { description: 'Open inspector', timeoutMs: 30_000 })
+    }
+    await actor.page.waitForSelector('[data-testid="inspector-panel"]', { visible: true })
+    await clickFirstVisible(actor.page, '[data-testid="inspector-panel"] [data-testid="right-panel-terminal-tab"]', { description: 'Terminal tab', timeoutMs: 30_000 })
+    await sleep(1_000)
+    await harness.screenshot(actor, 'terminal-tab-selected')
+    await actor.page.waitForFunction(() => document.querySelector('[data-testid="inspector-panel"] [data-testid="right-panel-terminal-tab"]')?.getAttribute('aria-selected') === 'true')
+    const terminalPanelSelector = '[data-testid="inspector-panel"] [data-testid="right-panel-terminal-content"][aria-hidden="false"]'
+    await actor.page.waitForFunction((panelSelector) => {
+      const button = document.querySelector(`${panelSelector} [data-testid="terminal-start"]`)
+      return button instanceof HTMLButtonElement && !button.disabled
+    }, { timeout: 30_000 }, terminalPanelSelector)
+    await clickFirstVisible(actor.page, `${terminalPanelSelector} [data-testid="terminal-start"]`, { description: 'Start terminal', timeoutMs: 30_000 })
+    try {
+      await waitFor(async () => {
+        const states = await actor.page.$$eval(`${terminalPanelSelector} [data-testid="session-terminal-panel"]`, (panels) => panels.map((panel) => ({
+          status: panel.getAttribute('data-terminal-status'),
+          text: panel.querySelector('[data-testid="terminal-status"]')?.textContent ?? '',
+          visible: panel.getBoundingClientRect().width > 0 && panel.getBoundingClientRect().height > 0,
+        })))
+        if (states.some((state) => state.visible && /running|运行/iu.test(state.text))) return true
+        throw new Error(`terminal did not enter running state: ${JSON.stringify(states)}`)
+      }, { timeoutMs: 30_000, name: 'terminal running state' })
+    } catch (error) {
+      await harness.screenshot(actor, 'terminal-start-failure')
+      throw error
+    }
     await actor.page.waitForSelector('.xterm-helper-textarea')
     await actor.page.click('.xterm-helper-textarea')
     await actor.page.keyboard.type("printf 'TERMINAL_E2E_OK\\n'")
@@ -145,9 +170,9 @@ try {
   await harness.step('resize, kill, restart, and reuse the real PTY', async () => {
     await actor.page.setViewport({ width: 1180, height: 760 })
     await sleep(300)
-    await clickFirstVisible(actor.page, '[data-testid="session-terminal-panel"] button[title*="Kill"], [data-testid="session-terminal-panel"] button[aria-label*="Kill"]', { description: 'Kill terminal' })
+    await clickFirstVisible(actor.page, '[data-testid="terminal-kill"]', { description: 'Kill terminal' })
     await actor.page.waitForFunction(() => /exited|已退出/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
-    await clickFirstVisible(actor.page, '[data-testid="session-terminal-panel"] button[title*="Restart"], [data-testid="session-terminal-panel"] button[aria-label*="Restart"]', { description: 'Restart terminal' })
+    await clickFirstVisible(actor.page, '[data-testid="terminal-restart"]', { description: 'Restart terminal' })
     await actor.page.waitForFunction(() => /running|运行/iu.test(document.querySelector('[data-testid="terminal-status"]')?.textContent ?? ''), { timeout: 30_000 })
     await actor.page.click('.xterm-helper-textarea')
     await actor.page.keyboard.type("printf 'TERMINAL_RESTART_OK\\n'")
@@ -216,8 +241,8 @@ try {
       if (name === 'e2e-preview.md') {
         const unsafeLink = await actor.page.$('[data-testid="session-file-markdown-preview"] a[href^="javascript:"]')
         const externalImage = await actor.page.$('[data-testid="session-file-markdown-preview"] img')
-        const mermaidSvg = await actor.page.$('[data-testid="session-file-markdown-preview"] svg')
-        if (unsafeLink || externalImage || mermaidSvg) throw new Error('Markdown file preview exposed active content')
+        const activeEmbed = await actor.page.$('[data-testid="session-file-markdown-preview"] script, [data-testid="session-file-markdown-preview"] iframe, [data-testid="session-file-markdown-preview"] object, [data-testid="session-file-markdown-preview"] embed')
+        if (unsafeLink || externalImage || activeEmbed) throw new Error('Markdown file preview exposed active content')
       }
       if (name === 'e2e-report.pdf') {
         const download = await actor.page.$('button[aria-label="Download file"]')
@@ -243,9 +268,9 @@ try {
     const tabHeights = await actor.page.$$eval('[role="tablist"][aria-label="Workspace tools"] [role="tab"]', (tabs) => tabs.map((tab) => tab.getBoundingClientRect().height))
     if (tabHeights.length !== 4 || tabHeights.some((height) => height < 44)) throw new Error(`mobile Tool tabs are not touch-sized: ${JSON.stringify(tabHeights)}`)
 
-    await actor.page.click('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-terminal-tab"]')
-    await actor.page.waitForSelector('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-terminal-content"]', { visible: true })
+    await clickFirstVisible(actor.page, '[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-terminal-tab"]', { description: 'Mobile terminal tab' })
     await actor.page.waitForFunction(() => document.querySelector('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-terminal-tab"]')?.getAttribute('aria-selected') === 'true')
+    await actor.page.waitForSelector('[data-testid="inspector-drawer-mobile"] [data-testid="right-panel-terminal-content"][aria-hidden="false"]')
     const terminalControls = await actor.page.$$eval('[data-testid="inspector-drawer-mobile"] [data-testid="terminal-toolbar"] button, [data-testid="inspector-drawer-mobile"] [data-testid="terminal-touch-keys"] button', (buttons) => buttons.map((button) => ({ label: button.getAttribute('aria-label') ?? button.textContent ?? '', height: button.getBoundingClientRect().height, width: button.getBoundingClientRect().width })))
     if (terminalControls.length < 7 || terminalControls.some((control) => control.height < 44 || control.width < 44)) throw new Error(`mobile Terminal controls are not touch-sized: ${JSON.stringify(terminalControls)}`)
 

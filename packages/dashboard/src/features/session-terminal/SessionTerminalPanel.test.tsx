@@ -106,6 +106,20 @@ describe('SessionTerminalPanel', () => {
     expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('accepts terminal creation after the socket hydrates', async () => {
+    const mock = makeSocket()
+    const { rerender } = render(<SessionTerminalPanel socket={null} workspaceId="ws-1" sessionId="sess-1" />)
+    rerender(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+
+    await screen.findByText('Running')
+    expect(mock.emit).toHaveBeenCalledWith('terminal:create', expect.objectContaining({
+      workspaceId: 'ws-1',
+      sessionId: 'sess-1',
+    }), expect.any(Function))
+  })
+
   it('shows the ambient connection line while terminal creation is pending', () => {
     const socket = {
       emit: vi.fn(),

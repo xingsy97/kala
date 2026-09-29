@@ -1266,15 +1266,19 @@ export function useControlPlane(
     const onControlUpdate = (payload: ControlUpdate): void => {
       if (!isActive()) return
       if (payload.kind === 'session_meta_changed') {
-        setSessions(summaryStore.update(payload.sessionId, (s) => ({
-          ...s,
-          ...(payload.label !== undefined && payload.label.trim().length > 0
-            ? { label: payload.label }
-            : payload.label !== undefined
-              ? { label: undefined }
-              : {}),
-          ...(payload.preferences !== undefined ? { preferences: payload.preferences } : {}),
-        })))
+        setSessions((current) => summaryStore.replace(current.map((summary) =>
+          summary.sessionId === payload.sessionId
+            ? {
+                ...summary,
+                ...(payload.label !== undefined && payload.label.trim().length > 0
+                  ? { label: payload.label }
+                  : payload.label !== undefined
+                    ? { label: undefined }
+                    : {}),
+                ...(payload.preferences !== undefined ? { preferences: payload.preferences } : {}),
+              }
+            : summary,
+        )))
       }
       if (payload.kind === 'executor_changed') {
         onExecutorChanged(payload)
@@ -1311,7 +1315,7 @@ export function useControlPlane(
       payload,
     ) => {
       if (!isActive()) return
-      setSessions(summaryStore.delete(payload.sessionId))
+      setSessions((current) => summaryStore.replace(current.filter((summary) => summary.sessionId !== payload.sessionId)))
     }
     socket.on('server:session_deleted', onSessionDeleted)
 
