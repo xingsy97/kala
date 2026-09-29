@@ -38,6 +38,21 @@ describe('deploy:dashboard client', () => {
     expect(execFileSync('tar', ['-tzf', stagedArchive], { encoding: 'utf8' }).trim().split('\n').sort()).toEqual(['assets/app.12345678.js', 'index.html'])
     expect(JSON.parse(readFileSync(join(request.stagedReleaseDir, 'manifest.json'), 'utf8')).product).toBe('kala-dashboard')
   })
+  it('no-ops an already-current immutable release and rejects digest conflicts', () => {
+    const value = fixture()
+    const args = [script, 'stage', '--local', '--skip-build', '--release-dir', value.release, '--deploy-root', value.deploy, '--release-id', 'dashboard-r2', '--operation-id', 'operation-dashboard-r2', '--deployment-id', 'deployment-dashboard-r2']
+    const first = JSON.parse(execFileSync(process.execPath, args, { encoding: 'utf8' }))
+    const request = JSON.parse(readFileSync(join(value.deploy, 'requests', 'operation-dashboard-r2.json'), 'utf8'))
+    writeFileSync(join(value.deploy, 'route-state.json'), JSON.stringify({ schemaVersion: 1, generation: 8, releaseId: 'dashboard-r2', releaseDigest: request.releaseDigest, assetDigest: 'd'.repeat(64), version: '1.0.0', protocol: { min: '1.0.0', max: '1.0.0' }, activatedAt: new Date().toISOString() }))
+    const retryArgs = args.map((value) => value === 'operation-dashboard-r2' ? 'operation-dashboard-r2-noop' : value === 'deployment-dashboard-r2' ? 'deployment-dashboard-r2-noop' : value)
+    const noop = JSON.parse(execFileSync(process.execPath, retryArgs, { encoding: 'utf8' }))
+    expect(first.accepted).toBe(true)
+    expect(noop).toMatchObject({ accepted: false, noop: true, reason: 'already-current', expectedGeneration: 8 })
+    const state = JSON.parse(readFileSync(join(value.deploy, 'route-state.json'), 'utf8'))
+    writeFileSync(join(value.deploy, 'route-state.json'), JSON.stringify({ ...state, releaseDigest: 'e'.repeat(64) }))
+    const conflictArgs = retryArgs.map((value) => value === 'operation-dashboard-r2-noop' ? 'operation-dashboard-r2-conflict' : value === 'deployment-dashboard-r2-noop' ? 'deployment-dashboard-r2-conflict' : value)
+    expect(() => execFileSync(process.execPath, conflictArgs, { encoding: 'utf8', stdio: 'pipe' })).toThrow()
+  })
   it('rejects a tampered consolidated Dashboard archive before staging', () => {
     const value = fixture(); const archive = join(value.release, 'kala-dashboard.tar.gz'); const bytes = readFileSync(archive); bytes[Math.floor(bytes.length / 2)] ^= 0xff; writeFileSync(archive, bytes)
     expect(() => execFileSync(process.execPath, [script, 'stage', '--local', '--skip-build', '--release-dir', value.release, '--deploy-root', value.deploy], { encoding: 'utf8', stdio: 'pipe' })).toThrow()

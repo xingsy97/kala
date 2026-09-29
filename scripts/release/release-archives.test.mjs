@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -52,6 +52,16 @@ test('merges exact Dashboard bytes and its manifest into one independently verif
   const verified = verifyDashboardArchive(value.archive)
   assert.equal(verified.manifest.version, '1.2.3')
   assert.deepEqual([...readExactTarGz(value.archive).keys()].sort(), ['assets/app.js', 'dashboard-release.json', 'index.html'])
+})
+
+test('produces byte-identical Dashboard archives across output paths and source mtimes', () => {
+  const value = dashboardFixture()
+  const first = join(value.release, 'first.tar.gz')
+  const second = join(value.release, 'second.tar.gz')
+  createDashboardArchive({ dashboardDist: value.dist, manifestPath: value.manifestPath, outputPath: first })
+  utimesSync(join(value.dist, 'index.html'), new Date(), new Date())
+  createDashboardArchive({ dashboardDist: value.dist, manifestPath: value.manifestPath, outputPath: second })
+  assert.deepEqual(readFileSync(second), readFileSync(first))
 })
 
 test('refuses Dashboard drift and archive links before any extraction', () => {

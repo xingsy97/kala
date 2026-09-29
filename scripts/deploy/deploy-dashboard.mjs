@@ -34,6 +34,18 @@ function stage() {
   const releaseId = identity(option('--release-id') ?? `dashboard-${release.manifest.assetDigest.slice(0, 20)}`)
   const deploymentId = identity(option('--deployment-id') ?? `deployment-dashboard-${randomUUID()}`)
   const state = readJson(join(deployRoot, 'route-state.json'))
+  if (state.releaseId === releaseId) {
+    if (state.releaseDigest !== release.manifestSha256) throw new Error('immutable Dashboard release conflicts with the active release digest')
+    process.stdout.write(JSON.stringify({
+      accepted: false,
+      noop: true,
+      reason: 'already-current',
+      releaseId,
+      releaseDigest: release.manifestSha256,
+      expectedGeneration: state.generation,
+    }, null, 2) + '\n')
+    return
+  }
   const staged = join(deployRoot, 'submissions', operationId)
   transport.stage(releaseDir, staged, [
     { bytes: release.payloadArchiveBytes, target: 'dashboard.tar.gz' },
@@ -127,7 +139,7 @@ function tarText(bytes) { const end = bytes.indexOf(0); return new TextDecoder('
 function tarNumber(bytes) { if (bytes[0] & 0x80) throw new Error('Dashboard archive uses an unsupported tar number'); const value = tarText(bytes).trim(); if (!/^[0-7]*$/u.test(value)) throw new Error('Dashboard archive has an invalid tar number'); const number = Number.parseInt(value || '0', 8); if (!Number.isSafeInteger(number) || number < 0) throw new Error('Dashboard archive has an invalid tar number'); return number }
 function writeTarGz(entries) {
   const blocks = []
-  for (const [path, bytes] of entries) {
+  for (const [path, bytes] of [...entries].sort((left, right) => Buffer.compare(Buffer.from(left[0]), Buffer.from(right[0])))) {
     const header = Buffer.alloc(512)
     const parts = path.split('/'); const name = parts.pop(); const prefix = parts.join('/')
     if (Buffer.byteLength(name) > 100 || Buffer.byteLength(prefix) > 155) throw new Error('Dashboard archive path exceeds portable tar limits')
@@ -138,7 +150,7 @@ function writeTarGz(entries) {
     blocks.push(header, bytes, Buffer.alloc((512 - bytes.length % 512) % 512))
   }
   blocks.push(Buffer.alloc(1024))
-  return gzipSync(Buffer.concat(blocks), { level: 9 })
+  return gzipSync(Buffer.concat(blocks), { level: 9, mtime: 0 })
 }
 function writeTarText(header, offset, length, value) { const bytes = Buffer.from(value); if (bytes.length > length) throw new Error('Dashboard archive path exceeds portable tar limits'); bytes.copy(header, offset) }
 function writeTarOctal(header, offset, length, value) { const text = value.toString(8).padStart(length - 1, '0') + '\0'; if (text.length !== length) throw new Error('Dashboard archive entry is too large'); header.write(text, offset, length, 'ascii') }

@@ -1,9 +1,7 @@
-import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
-import { gunzipSync } from 'node:zlib'
+import { gunzipSync, gzipSync } from 'node:zlib'
 
 export const dashboardArchiveName = 'kala-dashboard.tar.gz'
 export const dashboardManifestName = 'dashboard-release.json'
@@ -96,31 +94,68 @@ export function readExactTarGz(archivePath, { maxUncompressedBytes = 512 * 1024 
 }
 
 function createArchive(outputPath, entries) {
-  const names = entries.map((entry) => entry.name)
+  const normalized = entries.map((entry) => ({
+    name: entry.name,
+    bytes: entry.source
+      ? (() => {
+          if (!lstatSync(entry.source).isFile()) throw new Error(`Archive source is not a regular file: ${entry.name}`)
+          return readFileSync(entry.source)
+        })()
+      : Buffer.from(entry.bytes),
+  })).sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)))
+  const names = normalized.map((entry) => entry.name)
   for (const name of names) assertSafeArchivePath(name)
   if (new Set(names).size !== names.length) throw new Error('Cannot create an archive with duplicate entries')
-  const staging = mkdtempSync(join(tmpdir(), 'kala-release-archive-'))
   const temporary = `${outputPath}.tmp-${process.pid}-${Date.now()}`
   try {
-    for (const entry of entries) {
-      const target = join(staging, ...entry.name.split('/'))
-      mkdirSync(dirname(target), { recursive: true })
-      if (entry.source) {
-        if (!lstatSync(entry.source).isFile()) throw new Error(`Archive source is not a regular file: ${entry.name}`)
-        copyFileSync(entry.source, target)
-      } else writeFileSync(target, entry.bytes)
-    }
     mkdirSync(dirname(outputPath), { recursive: true })
-    const result = spawnSync('tar', ['--format=ustar', '--owner=0', '--group=0', '--numeric-owner', '--mtime=@0', '-czf', temporary, '-C', staging, '--null', '-T', '-'], {
-      input: Buffer.from(`${names.join('\0')}\0`), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-    })
-    if (result.status !== 0) throw new Error(`Cannot create release archive: ${result.stderr || result.error?.message || result.status}`)
+    writeFileSync(temporary, canonicalTarGz(normalized), { flag: 'wx', mode: 0o600 })
     renameSync(temporary, outputPath)
     return outputPath
   } finally {
     rmSync(temporary, { force: true })
-    rmSync(staging, { recursive: true, force: true })
   }
+}
+
+function canonicalTarGz(entries) {
+  const blocks = []
+  for (const { name: path, bytes } of entries) {
+    const header = Buffer.alloc(512)
+    const parts = path.split('/')
+    const name = parts.pop()
+    const prefix = parts.join('/')
+    writeTarText(header, 0, 100, name)
+    writeTarOctal(header, 100, 8, 0o644)
+    writeTarOctal(header, 108, 8, 0)
+    writeTarOctal(header, 116, 8, 0)
+    writeTarOctal(header, 124, 12, bytes.length)
+    writeTarOctal(header, 136, 12, 0)
+    header.fill(32, 148, 156)
+    header[156] = 48
+    writeTarText(header, 257, 6, 'ustar')
+    writeTarText(header, 263, 2, '00')
+    writeTarText(header, 345, 155, prefix)
+    let checksum = 0
+    for (const byte of header) checksum += byte
+    header.write(checksum.toString(8).padStart(6, '0'), 148, 6, 'ascii')
+    header[154] = 0
+    header[155] = 32
+    blocks.push(header, bytes, Buffer.alloc((512 - bytes.length % 512) % 512))
+  }
+  blocks.push(Buffer.alloc(1024))
+  return gzipSync(Buffer.concat(blocks), { level: 9, mtime: 0 })
+}
+
+function writeTarText(header, offset, length, value) {
+  const bytes = Buffer.from(value)
+  if (bytes.length > length) throw new Error('Release archive path exceeds portable ustar limits')
+  bytes.copy(header, offset)
+}
+
+function writeTarOctal(header, offset, length, value) {
+  const text = value.toString(8).padStart(length - 1, '0') + '\0'
+  if (text.length !== length) throw new Error('Release archive entry is too large')
+  header.write(text, offset, length, 'ascii')
 }
 
 function parseDashboardManifest(bytes) {

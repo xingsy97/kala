@@ -27,6 +27,7 @@ const socketAdminDist = resolveSocketAdminDist()
 const options = parseOptions(process.argv.slice(2))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const sourceIdentity = readSourceIdentity()
+const releaseBuiltAt = deterministicBuildTime()
 const { component, tag, nativeOnly, finalizeOnly, noNative, skipDashboardBuild, skipPackageBuild } = options
 const repo = options.repo ?? repoFromPackageJson(packageJson)
 if (!repo && component !== 'dashboard') {
@@ -438,7 +439,7 @@ function writeDashboardReleaseManifest(dir) {
     schemaVersion: 1,
     product: 'kala-dashboard',
     version: packageJson.version,
-    builtAt: new Date().toISOString(),
+    builtAt: releaseBuiltAt,
     source: sourceIdentity,
     protocol: { min: '1.0.0', max: '1.0.0' },
     assetDigest,
@@ -540,7 +541,7 @@ function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
     productVersion: packageJson.version,
     gitCommit: sourceIdentity.revision.slice(0, 12),
     sourceSnapshotSha256: sourceIdentity.snapshotSha256,
-    builtAt: new Date().toISOString(),
+    builtAt: releaseBuiltAt,
     artifactKind,
     dashboardMode,
     socketAdminMode,
@@ -557,6 +558,7 @@ function readSourceIdentity() {
     if (!options.sourceRevision) throw new Error('gitless release build requires --source-revision')
     return { revision, snapshotSha256: gitlessSourceSnapshotSha256(), dirty: true }
   }
+
   if (options.sourceRevision && revision !== gitText(['rev-parse', 'HEAD']).trim()) {
     throw new Error('release source revision does not match Git HEAD')
   }
@@ -565,6 +567,17 @@ function readSourceIdentity() {
     snapshotSha256: sourceSnapshotSha256(),
     dirty: gitText(['status', '--porcelain=v1', '--untracked-files=all']).trim().length > 0,
   }
+}
+
+function deterministicBuildTime() {
+  const explicit = process.env.SOURCE_DATE_EPOCH
+  const seconds = explicit === undefined
+    ? existsSync(join(root, '.git'))
+      ? Number(gitText(['show', '-s', '--format=%ct', 'HEAD']).trim())
+      : 0
+    : Number(explicit)
+  if (!Number.isSafeInteger(seconds) || seconds < 0) throw new Error('SOURCE_DATE_EPOCH must be a non-negative integer')
+  return new Date(seconds * 1000).toISOString()
 }
 
 function assertSourceIdentityUnchanged() {
