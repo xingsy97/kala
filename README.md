@@ -63,7 +63,9 @@ Kala's service layer operates Agent Runtimes as a durable system across
 processes, workspaces, machines, and tenants. It provides persistent sessions,
 remote workspace connectivity, concurrent task and subagent coordination,
 recovery, deployment control, and a consistent surface through the Dashboard,
-Desktop client, APIs, and automation.
+Desktop client, APIs, and automation. The versioned
+[Product API](docs/api/v1.md) exposes the same durable Session and DAG
+authorities with OpenAPI and a typed client.
 
 For Private Cloud, isolated Tenant Runtime Units share the surrounding
 platform instead of requiring a complete service stack for every tenant. This

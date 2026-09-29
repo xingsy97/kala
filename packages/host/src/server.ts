@@ -51,12 +51,15 @@ import {
   DEFAULT_TOOL_ACK_TIMEOUT_MS,
 } from './connection/executor.js'
 import {
+  collectSessionDescendants,
   configureDashboardNamespace,
+  deriveSessionConfig,
   type DashboardNs,
   type MessageQueueManager,
   type QueuedUserMessage,
   type TenantQueueQuotaEnforcer,
   type TenantSessionQuotaEnforcer,
+  validateWorkspaceCwd,
   isRestingStatus,
 } from './connection/dashboard-ns.js'
 import {
@@ -72,6 +75,7 @@ import { validateMessageAttachmentReferences } from './message-attachment-resolv
 import { createLocalImagePublisher } from './local-image-publisher.js'
 import { MemoStore } from './memo-store.js'
 import type { AuthConfig } from './auth-control.js'
+import { authenticateDashboardHandshake } from './auth-control.js'
 import type { AuditLogger } from './audit-log.js'
 import { noopAuditLogger } from './audit-log.js'
 import { snapshotFromConfig, type ContextWindowOverride } from './context/manager.js'
@@ -102,6 +106,8 @@ import { DagOrchestrator } from './dag/orchestrator.js'
 import { DAG_WORKER_TOOLS } from './dag/worker-tool.js'
 import type { SubAgentRuntimeController } from './extensions/agent-tool.js'
 import type { UnitResourceGovernor } from './tenant-runtime/resource-governor.js'
+import { createPublicApiHandler, type PublicApiActor } from './http/public-api.js'
+import { resetCompactRuntime } from './extensions/compaction.js'
 
 export type HostServerOptions = {
   port: number
@@ -429,6 +435,87 @@ export async function startHostServer(
     }
   }
 
+  const enqueueUserMessage = async ({
+    sessionId,
+    text,
+    operationId: requestedOperationId,
+    mode = 'queue',
+    content,
+  }: {
+    sessionId: string
+    text: string
+    operationId?: string
+    mode?: 'queue' | 'steer'
+    content?: readonly import('@agent-kernel/kernel').MessageContent[]
+  }): Promise<{ accepted?: boolean; committed: boolean; cursor?: number }> => {
+    const operationId = requestedOperationId ?? ulid()
+    let record = store.get(sessionId)
+    if (!record) record = await store.load(sessionId, { recoverDangling: false })
+    validateMessageAttachmentReferences(messageAttachments, sessionId, content)
+    const existingOperation = await findSessionOperation(
+      record.logPath,
+      operationId,
+      record.agentRuntime === 'kernel' ? {} : { maxScanBytes: 64 * 1024 * 1024 },
+    )
+    if (existingOperation?.kind === 'event') {
+      assertMessageOperationCompatible(existingOperation.event, text, content)
+      return { accepted: true, committed: true, cursor: existingOperation.cursor }
+    }
+    if (existingOperation?.kind === 'runtime_metadata') return { accepted: true, committed: true, cursor: record.state.cursor }
+    if (record.agentRuntime !== 'kernel') {
+      const resting = isRestingStatus(record.state.status)
+      await messageQueues.enqueue(sessionId, {
+        id: operationId,
+        operationId,
+        text,
+        mode,
+        createdAt: new Date().toISOString(),
+        ...(content ? { content } : {}),
+        ...(effectiveModelForSession(sessionId) ? { model: effectiveModelForSession(sessionId) } : {}),
+      }, mode === 'steer' ? 'front' : undefined)
+      if (mode === 'steer' && !resting) {
+        await agentRuntimes!.require(record.agentRuntime).cancel(record)
+        await messageQueues.drain(sessionId)
+      } else if (resting) {
+        await messageQueues.drain(sessionId)
+      } else {
+        void messageQueues.drain(sessionId)
+      }
+      const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
+      return committedCursor === undefined
+        ? { accepted: true, committed: false }
+        : { accepted: true, committed: true, cursor: committedCursor }
+    }
+    if (record.state.status === 'thinking' && !loop.hasActiveLlmCall(sessionId)) {
+      await loop.recoverInterruptedLlm(sessionId)
+      record = store.get(sessionId) ?? record
+    }
+    const effectiveMode = mode === 'queue' && isRestingStatus(record.state.status) ? 'steer' : mode
+    await messageQueues.enqueue(sessionId, {
+      id: operationId,
+      operationId,
+      text,
+      mode: effectiveMode,
+      createdAt: new Date().toISOString(),
+      ...(content ? { content } : {}),
+    }, effectiveMode === 'steer' ? 'front' : undefined)
+    if (effectiveMode === 'steer' && !isRestingStatus(record.state.status)) loop.requestStopAtBoundary(sessionId)
+    void messageQueues.drain(sessionId)
+    const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
+    return committedCursor === undefined
+      ? { accepted: true, committed: false }
+      : { accepted: true, committed: true, cursor: committedCursor }
+  }
+  let publicApiHandler: ReturnType<typeof createPublicApiHandler> = async (_request, response) => {
+    response.writeHead(503, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-kala-api-version': 'v1',
+      'x-kala-api-compatibility': '1',
+    })
+    response.end(JSON.stringify({ error: { code: 'internal_error', message: 'Runtime API is starting', requestId: 'startup' } }))
+    return true
+  }
   attachJsonRoutes(http, {
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
@@ -464,6 +551,7 @@ export async function startHostServer(
       },
     } : {}),
     ...(options.speechCredentials ? { speechCredentials: options.speechCredentials } : {}),
+    publicApiHandler: async (request, response) => await publicApiHandler(request, response),
     sessions: store,
     executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     toolRegistry: () => (typeof options.defaultConfig === 'function' ? options.defaultConfig() : options.defaultConfig).tools,
@@ -497,59 +585,7 @@ export async function startHostServer(
       return snapshot
     },
     releaseCutover: () => loop.endDrain(),
-    enqueueUserMessage: async ({ sessionId, text, operationId: requestedOperationId, mode = 'queue', content }) => {
-      // Persist as a queued follow-up and drain immediately. Delivered as soon
-      // as any in-flight turn finishes; no live socket required.
-      const operationId = requestedOperationId ?? ulid()
-      let record = store.get(sessionId)
-      if (!record) record = await store.load(sessionId, { recoverDangling: false })
-      validateMessageAttachmentReferences(messageAttachments, sessionId, content)
-      const existingCursor = await sessionUserOperationCursor(store, sessionId, operationId)
-      if (existingCursor !== undefined) return { accepted: true, committed: true, cursor: existingCursor }
-      if (record.agentRuntime !== 'kernel') {
-        const resting = isRestingStatus(record.state.status)
-        await messageQueues.enqueue(sessionId, {
-          id: operationId,
-          operationId,
-          text,
-          mode,
-          createdAt: new Date().toISOString(),
-          ...(content ? { content } : {}),
-          ...(effectiveModelForSession(sessionId) ? { model: effectiveModelForSession(sessionId) } : {}),
-        }, mode === 'steer' ? 'front' : undefined)
-        if (mode === 'steer' && !resting) {
-          await agentRuntimes!.require(record.agentRuntime).cancel(record)
-          await messageQueues.drain(sessionId)
-        } else if (resting) {
-          await messageQueues.drain(sessionId)
-        } else {
-          void messageQueues.drain(sessionId)
-        }
-        const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
-        return committedCursor === undefined
-          ? { accepted: true, committed: false }
-          : { accepted: true, committed: true, cursor: committedCursor }
-      }
-      if (record.state.status === 'thinking' && !loop.hasActiveLlmCall(sessionId)) {
-        await loop.recoverInterruptedLlm(sessionId)
-        record = store.get(sessionId) ?? record
-      }
-      const effectiveMode = mode === 'queue' && isRestingStatus(record.state.status) ? 'steer' : mode
-      await messageQueues.enqueue(sessionId, {
-        id: operationId,
-        operationId,
-        text,
-        mode: effectiveMode,
-        createdAt: new Date().toISOString(),
-        ...(content ? { content } : {}),
-      }, effectiveMode === 'steer' ? 'front' : undefined)
-      if (effectiveMode === 'steer' && !isRestingStatus(record.state.status)) loop.requestStopAtBoundary(sessionId)
-      void messageQueues.drain(sessionId)
-      const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
-      return committedCursor === undefined
-        ? { accepted: true, committed: false }
-        : { accepted: true, committed: true, cursor: committedCursor }
-    },
+    enqueueUserMessage,
   })
 
   const advertisedModels = (): readonly ModelInfo[] => typeof options.models === 'function'
@@ -788,7 +824,11 @@ export async function startHostServer(
         const queue = [...await loadQueue(sessionId)]
         // operationId survives ACK loss, reconnect and Host restart. A retry is
         // already accepted when it is still queued or has a durable user event.
-        if (queue.some((item) => item.operationId === msg.operationId)) return
+        const existing = queue.find((item) => item.operationId === msg.operationId)
+        if (existing) {
+          assertMessageOperationCompatible(existing, msg.text, msg.content)
+          return
+        }
         if (cancelledQueueOperations.get(sessionId)?.has(msg.operationId)) return
         if (await sessionUserOperationCursor(store, sessionId, msg.operationId) !== undefined) return
         const admission = resourceGovernor && resourceUnitId
@@ -1010,6 +1050,16 @@ export async function startHostServer(
     )
     if (operation?.kind === 'event') return operation.cursor
     return operation?.kind === 'runtime_metadata' ? record.state.cursor : undefined
+  }
+
+  function assertMessageOperationCompatible(
+    existing: { text?: string; content?: readonly import('@agent-kernel/kernel').MessageContent[] },
+    text: string,
+    content: readonly import('@agent-kernel/kernel').MessageContent[] | undefined,
+  ): void {
+    if ((existing.text ?? '') !== text || JSON.stringify(existing.content ?? []) !== JSON.stringify(content ?? [])) {
+      throw new Error('message operation ID conflict')
+    }
   }
 
   // Coalesce `server:sessions` broadcasts. The loop's onEvent fires once per
@@ -1351,6 +1401,205 @@ export async function startHostServer(
   agentRuntimes.register(copilotRuntime)
   dagOrchestrator = new DagOrchestrator(dagStore, loopDeps, loop, runtimeController)
   for (const sessionId of dagStore.activeParentSessionIds()) dagOrchestrator.schedule(sessionId)
+  const loadApiRecord = async (sessionId: string): Promise<SessionRecord | undefined> => {
+    const loaded = store.get(sessionId)
+    if (loaded) return loaded
+    try {
+      return await store.load(sessionId, { recoverDangling: false })
+    } catch (error) {
+      if (error instanceof SessionNotFoundError) return undefined
+      throw error
+    }
+  }
+  const apiRecord = async (actor: PublicApiActor, sessionId: string): Promise<SessionRecord | undefined> => {
+    const record = await loadApiRecord(sessionId)
+    if (!record) return undefined
+    if (actor.organizationId && record.organizationId !== actor.organizationId) return undefined
+    return record
+  }
+  const apiSession = async (actor: PublicApiActor, sessionId: string) => {
+    const record = await apiRecord(actor, sessionId)
+    if (!record) return undefined
+    const summary = (await store.listSummaries()).find((candidate) => candidate.sessionId === sessionId)
+    return summary ? { summary, state: record.state } : undefined
+  }
+  const apiAuditActor = (actor: PublicApiActor): import('./audit-log.js').AuditActor =>
+    actor.organizationId && actor.role
+      ? { kind: 'ingress', principal: actor.principal, organizationId: actor.organizationId, role: actor.role }
+      : { kind: 'token', label: actor.principal }
+  publicApiHandler = createPublicApiHandler({
+    authorize(request) {
+      const authorization = request.headers.authorization
+      const token = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined
+      const result = authenticateDashboardHandshake(
+        { role: 'dashboard', clientVersion: 'http-api-v1', ...(token ? { token } : {}) },
+        request,
+        auth,
+      )
+      if (!result.ok) return { ok: false, status: 401, code: 'authentication_required' }
+      if (result.actor.kind === 'ingress') {
+        if (effectiveTenancy(deployment) !== 'multi-tenant') {
+          return { ok: false, status: 401, code: 'authentication_required' }
+        }
+        return {
+          ok: true,
+          actor: {
+            principal: result.actor.principal,
+            organizationId: result.actor.organizationId,
+            role: result.actor.role,
+            canWrite: result.actor.role !== 'viewer',
+          },
+        }
+      }
+      if (result.actor.kind === 'github_user') {
+        return { ok: true, actor: { principal: result.actor.login, canWrite: true } }
+      }
+      return { ok: true, actor: { principal: result.actor.kind, canWrite: true } }
+    },
+    async listSessions(actor) {
+      const summaries = await store.listSummaries()
+      if (!actor.organizationId) return summaries.map((summary) => ({ summary }))
+      const visible = []
+      for (const summary of summaries) {
+        const record = await apiRecord(actor, summary.sessionId)
+        if (record) visible.push({ summary })
+      }
+      return visible
+    },
+    getSession: apiSession,
+    async createSession(actor, input) {
+      const executionMode = input.executionMode ?? 'chat'
+      if (!extensions.getSessionMode(executionMode)) throw new Error(`unsupported session execution mode: ${executionMode}`)
+      const selectedModel = input.selectedModel?.trim()
+      const normalizedSelectedModel = selectedModel ? normalizeModelRef(selectedModel) : undefined
+      if (selectedModel && !normalizedSelectedModel) throw new Error(`unknown or ambiguous model: ${selectedModel}`)
+      const persisted = await loadApiRecord(input.sessionId)
+      if (persisted) {
+        if (actor.organizationId && persisted.organizationId !== actor.organizationId) {
+          throw new Error('session id conflict')
+        }
+        if (persisted.executionMode !== executionMode
+          || (input.workspaceId !== undefined && persisted.workspaceId !== input.workspaceId)
+          || (input.workspaceName !== undefined && persisted.workspaceName !== input.workspaceName)
+          || (input.cwd !== undefined && persisted.state.cwd !== input.cwd)
+          || (normalizedSelectedModel !== undefined && persisted.preferences.selectedModel !== normalizedSelectedModel)) {
+          throw new Error('session create idempotency conflict')
+        }
+        return { session: (await apiSession(actor, input.sessionId))!, created: false }
+      }
+      if (normalizedSelectedModel && options.modelPolicy) {
+        if (!actor.organizationId) throw new Error('missing organization attribution for model policy enforcement')
+        await options.modelPolicy.assertCanUseModel({
+          organizationId: actor.organizationId,
+          sessionId: input.sessionId,
+          model: normalizedSelectedModel,
+          principal: actor.principal,
+        })
+      }
+      let cwd = input.cwd?.trim()
+      if (cwd && input.workspaceId) {
+        const validation = await validateWorkspaceCwd({ executors }, input.workspaceId, cwd)
+        if (!validation.ok) throw new Error(validation.reason)
+        cwd = validation.cwd
+      }
+      if (options.sessionQuota) {
+        if (!actor.organizationId || !actor.role) throw new Error('missing organization attribution for session quota enforcement')
+        await options.sessionQuota.assertCanCreateSession({
+          organizationId: actor.organizationId,
+          principal: actor.principal,
+          role: actor.role,
+          sessionId: input.sessionId,
+        })
+      }
+      const config = deriveSessionConfig(getDefaultConfig(), undefined, executionMode)
+      const { record, created } = await store.ensure({
+        sessionId: input.sessionId,
+        agentRuntime: 'kernel',
+        executionMode,
+        defaultConfig: config,
+        runtimeConfig: config,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        ...(input.workspaceName ? { workspaceName: input.workspaceName } : {}),
+        ...(actor.organizationId && actor.role ? {
+          organizationId: actor.organizationId,
+          principal: actor.principal,
+          organizationRole: actor.role,
+        } : {}),
+        ...(cwd ? { initialCwd: cwd } : {}),
+        ...(normalizedSelectedModel ? { preferences: { selectedModel: normalizedSelectedModel } } : {}),
+      })
+      if (created) {
+        await extensions.sessionCreated({ deps: loopDeps, record }).catch(() => undefined)
+        scheduleSessionsBroadcast()
+      }
+      audit.log({
+        action: 'public_api.session_create',
+        actor: apiAuditActor(actor),
+        target: { sessionId: record.sessionId, workspaceId: record.workspaceId },
+        outcome: 'ok',
+        refs: { operationId: input.operationId },
+      })
+      return { session: (await apiSession(actor, record.sessionId))!, created }
+    },
+    async deleteSession(actor, sessionId, operationId) {
+      const root = await apiRecord(actor, sessionId)
+      if (!root) return
+      const targetIds = collectSessionDescendants(await store.listSummaries(), sessionId)
+      for (const targetSessionId of targetIds) {
+        if (loop.hasActiveTurn(targetSessionId)) throw new Error('session tree has an active turn; stop it before deleting')
+      }
+      for (const targetSessionId of targetIds.reverse()) {
+        const record = await apiRecord(actor, targetSessionId)
+        if (!record) continue
+        await agentRuntimes!.get(record.agentRuntime)?.delete?.(record)
+        await extensions.sessionDeleted({ deps: loopDeps, record }).catch(() => undefined)
+        if (record.workspaceId) {
+          executors.closeSessionTerminals({ workspaceId: record.workspaceId, sessionId: targetSessionId })
+          await executors.deleteOverflowSession(record.workspaceId, targetSessionId).catch(() => undefined)
+        }
+        await store.delete(targetSessionId)
+        resetCompactRuntime(targetSessionId)
+        dashboardNs.emit('server:session_deleted', { sessionId: targetSessionId })
+      }
+      audit.log({
+        action: 'public_api.session_delete',
+        actor: apiAuditActor(actor),
+        target: { sessionId },
+        outcome: 'ok',
+        refs: { operationId },
+      })
+      scheduleSessionsBroadcast()
+    },
+    async sendMessage(actor, sessionId, input) {
+      if (!await apiRecord(actor, sessionId)) throw new Error('session not found')
+      return await enqueueUserMessage({
+        sessionId,
+        text: input.text,
+        operationId: input.operationId,
+        mode: input.mode ?? 'queue',
+        ...(input.content ? { content: input.content } : {}),
+      })
+    },
+    async getDagRun(actor, sessionId) {
+      if (!await apiRecord(actor, sessionId)) throw new Error('session not found')
+      return dagStore.runForSession(sessionId) ?? null
+    },
+    async answerDagDecision(actor, sessionId, decisionId, input) {
+      if (!await apiRecord(actor, sessionId)) throw new Error('session not found')
+      const run = dagStore.runForSession(sessionId)
+      if (!run) throw new Error('DAG run does not exist')
+      const updated = dagStore.answerDecision(run.id, decisionId, input.answer, input.operationId)
+      dagOrchestrator?.schedule(sessionId)
+      dashboardNs.to(sessionRoom(sessionId)).emit('server:dag_run', { sessionId, run: updated })
+      return updated
+    },
+    onInternalError(error, requestId) {
+      options.logger?.warn({
+        requestId,
+        error: error instanceof Error ? error.message : String(error),
+      }, 'public API request failed')
+    },
+  })
   restart = new RestartCoordinator({
     store,
     loop,

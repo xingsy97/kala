@@ -259,6 +259,7 @@ export function attachJsonRoutes(
       delete(provider: 'serper'): Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
     }
     speechCredentials?: AzureSpeechCredentialStore
+    publicApiHandler?: (request: IncomingMessage, response: ServerResponse) => Promise<boolean>
   },
 ): void {
   type ManifestSnapshot = { id: string; createdAt: number; manifest: ArtifactManifest }
@@ -302,6 +303,16 @@ export function attachJsonRoutes(
     // Strip query string / fragment before matching, so `/models?ts=…`
     // (cache-buster) still hits.
     const path = url.split('?')[0]?.split('#')[0] ?? ''
+    if ((path === '/api/v1' || path.startsWith('/api/v1/')) && payloads.publicApiHandler) {
+      claimRoute(req)
+      void payloads.publicApiHandler(req, res).catch((error) => {
+        if (res.writableEnded) return
+        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ error: { code: 'internal_error', message: 'internal API error', requestId: req.headers['x-request-id'] ?? 'unknown' } }))
+        payloads.audit?.log({ action: 'public_api.unhandled_error', actor: httpActor(req, payloads.auth), outcome: 'error', error: error instanceof Error ? error.message : String(error) })
+      })
+      return
+    }
     if ((path === '/memo' || path === '/user/session-tabs') && ['GET', 'HEAD', 'PUT'].includes(req.method ?? '') && payloads.memoStore) {
       claimRoute(req)
       const principalOwner = memoOwner(req)

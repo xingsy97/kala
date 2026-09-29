@@ -1688,7 +1688,7 @@ function executorSnapshotFor(deps: DashboardDeps): readonly AttachedExecutor[] {
   return deps.executorSnapshot ? deps.executorSnapshot() : deps.executors.snapshot()
 }
 
-function deriveSessionConfig(
+export function deriveSessionConfig(
   base: AgentConfig,
   toolAllowlist: readonly string[] | undefined,
   executionMode: import('@agent-kernel/shared').SessionExecutionMode = 'chat',
@@ -2080,8 +2080,8 @@ async function validateSessionCwd(
   }
 }
 
-async function validateWorkspaceCwd(
-  deps: DashboardDeps,
+export async function validateWorkspaceCwd(
+  deps: Pick<DashboardDeps, 'executors'>,
   workspaceId: string,
   cwd: string,
 ): Promise<{ ok: true; cwd: string } | { ok: false; reason: string }> {
@@ -2112,7 +2112,7 @@ async function validateWorkspaceCwd(
 }
 
 async function validateDirectoryExists(
-  deps: DashboardDeps,
+  deps: Pick<DashboardDeps, 'executors'>,
   workspaceId: string,
   cwd: string,
 ): Promise<{ ok: true; cwd: string } | { ok: false; reason: string }> {
@@ -2140,7 +2140,7 @@ function withQueuedCounts(deps: DashboardDeps, sessions: readonly SessionSummary
   })
 }
 
-function collectSessionDescendants(
+export function collectSessionDescendants(
   sessions: readonly { sessionId: string; parentSessionId?: string }[],
   rootSessionId: string,
 ): string[] {

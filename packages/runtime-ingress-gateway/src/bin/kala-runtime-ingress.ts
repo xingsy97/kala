@@ -18,6 +18,7 @@ import { createSessionSecretBox } from '../auth/session-secret-box.js'
 import { loadEnterpriseSsoResolver } from '../auth/enterprise-sso-config.js'
 import { SlidingWindowRateLimiter } from '../governance/rate-limit.js'
 import { resolveRuntimeIngressControlPlaneMode } from '../config/control-plane.js'
+import { ServiceAccountService } from '../api/service-accounts.js'
 
 async function main(): Promise<void> {
   const port = Number(process.env.KALA_INGRESS_PORT ?? 13001)
@@ -98,6 +99,11 @@ async function main(): Promise<void> {
     cacheNamespaceSecret,
     secretBox,
     ingressSecret,
+    ...(database ? {
+      serviceAccounts: new ServiceAccountService(database, {
+        maxActiveServiceAccounts: numberEnv('KALA_INGRESS_MAX_SERVICE_ACCOUNTS', 100),
+      }),
+    } : {}),
     ...(rateLimiter ? { rateLimiter } : {}),
     provision: async (unitId) => {
       const response = await requestRuntime(

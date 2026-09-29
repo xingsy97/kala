@@ -401,7 +401,11 @@ describe('readSessionLog', () => {
     })
 
     await expect(findSessionOperation(path, 'runtime-operation')).resolves.toEqual({ kind: 'runtime_metadata' })
-    await expect(findSessionOperation(path, 'event-operation')).resolves.toEqual({ kind: 'event', cursor: 7 })
+    await expect(findSessionOperation(path, 'event-operation')).resolves.toEqual({
+      kind: 'event',
+      cursor: 7,
+      event: { kind: 'user_message', operationId: 'event-operation', text: 'hello' },
+    })
     await expect(findSessionOperation(path, 'missing-operation')).resolves.toBeUndefined()
   })
 

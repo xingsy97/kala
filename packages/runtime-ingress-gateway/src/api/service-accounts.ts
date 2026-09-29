@@ -21,9 +21,23 @@ export class ServiceAccountService {
     await this.database.query(`INSERT INTO service_account_tokens(id,organization_id,principal_id,token_hash,scopes) VALUES($1,$2,$3,$4,$5)`, [`sat_${randomBytes(16).toString('base64url')}`, input.organizationId, id, hash(token), scopes])
     return { id, token }
   }
-  async authenticate(token: string): Promise<{ principalId: string; organizationId: string; scopes: readonly ServiceAccountScope[] } | undefined> {
-    const result = await this.database.query<{ principal_id: string; organization_id: string; scopes: ServiceAccountScope[] }>('SELECT principal_id,organization_id,scopes FROM service_account_tokens WHERE token_hash=$1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())', [hash(token)])
-    const row = result.rows[0]; return row ? { principalId: row.principal_id, organizationId: row.organization_id, scopes: row.scopes } : undefined
+  async authenticate(token: string): Promise<{ principalId: string; organizationId: string; unitId: string; organizationStatus: string; scopes: readonly ServiceAccountScope[] } | undefined> {
+    const result = await this.database.query<{ principal_id: string; organization_id: string; runtime_unit_id: string; organization_status: string; scopes: ServiceAccountScope[] }>(`
+      SELECT tokens.principal_id, tokens.organization_id, tokens.scopes,
+             organizations.runtime_unit_id, organizations.status AS organization_status
+      FROM service_account_tokens AS tokens
+      JOIN organizations ON organizations.id = tokens.organization_id
+      WHERE tokens.token_hash=$1 AND tokens.revoked_at IS NULL
+        AND (tokens.expires_at IS NULL OR tokens.expires_at>now())
+    `, [hash(token)])
+    const row = result.rows[0]
+    return row ? {
+      principalId: row.principal_id,
+      organizationId: row.organization_id,
+      unitId: row.runtime_unit_id,
+      organizationStatus: row.organization_status,
+      scopes: row.scopes,
+    } : undefined
   }
   async revoke(principalId: string): Promise<void> { await this.database.query('UPDATE service_account_tokens SET revoked_at=now() WHERE principal_id=$1 AND revoked_at IS NULL', [principalId]) }
 }

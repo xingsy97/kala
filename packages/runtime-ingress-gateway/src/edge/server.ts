@@ -12,6 +12,8 @@ import { permits, type OrganizationStore } from '../organizations/store.js'
 import { browserDeviceFromUserAgent, browserSessionTokenHash, isLive, type BrowserSession, type BrowserSessionStore } from '../auth/browser-session-store.js'
 import type { SessionSecretBox } from '../auth/session-secret-box.js'
 import type { EnterpriseSsoResolver } from '../auth/enterprise-sso.js'
+import type { ServiceAccountService, ServiceAccountScope } from '../api/service-accounts.js'
+import { enterpriseManagementOpenApi } from '../api/openapi.js'
 import type { RateLimiter } from '../governance/rate-limit.js'
 
 export type RuntimeIngressGateway = { readonly http: HttpServer; readonly port: number; close(): Promise<void> }
@@ -52,16 +54,24 @@ function denyInactiveOrganization(response: ServerResponse, status: string): voi
   response.end(JSON.stringify({ error: 'organization_not_active', status }))
 }
 
-function enforceRateLimit(response: ServerResponse, limiter: RateLimiter | undefined, key: string): boolean {
+function enforceRateLimit(response: ServerResponse, limiter: RateLimiter | undefined, key: string, api = false): boolean {
   if (!limiter) return true
   const decision = limiter.check(key)
   if (decision.ok) return true
+  const requestId = api ? randomBytes(16).toString('hex') : undefined
   response.writeHead(429, {
     'content-type': 'application/json',
     'cache-control': 'no-store',
     'retry-after': String(Math.ceil(decision.retryAfterMs / 1_000)),
+    ...(api ? {
+      'x-request-id': requestId!,
+      'x-kala-api-version': 'v1',
+      'x-kala-api-compatibility': '1',
+    } : {}),
   })
-  response.end(JSON.stringify({ error: 'rate_limited', retryAfterMs: decision.retryAfterMs }))
+  response.end(JSON.stringify(api
+    ? { error: { code: 'rate_limited', message: 'request rate limit exceeded', requestId, details: { retryAfterMs: decision.retryAfterMs } } }
+    : { error: 'rate_limited', retryAfterMs: decision.retryAfterMs }))
   return false
 }
 
@@ -103,6 +113,7 @@ export async function startRuntimeIngressGateway(options: {
     key: string | Buffer
     servername?: string
   }
+  serviceAccounts?: ServiceAccountService
   rateLimiter?: RateLimiter
   provision?(unitId: string): Promise<void>
 }): Promise<RuntimeIngressGateway> {
@@ -291,6 +302,113 @@ export async function startRuntimeIngressGateway(options: {
     const session = await authenticate(request)
     const identity = session?.identity
     const organizationAccess = identity && options.organizations ? await options.organizations.findAccess(identity) : undefined
+    if (url.pathname === '/api/v1/openapi.json') {
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        response.setHeader('allow', 'GET, HEAD')
+        apiGatewayError(response, 405, 'invalid_request', 'method not allowed')
+        return
+      }
+      const requestId = randomBytes(16).toString('hex')
+      response.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-request-id': requestId,
+        'x-kala-api-version': 'v1',
+        'x-kala-api-compatibility': '1',
+      })
+      response.end(request.method === 'HEAD' ? undefined : JSON.stringify(enterpriseManagementOpenApi))
+      return
+    }
+    if (url.pathname === '/api/v1/service-accounts' && request.method === 'POST') {
+      if (!session || !organizationAccess || !options.serviceAccounts) {
+        apiGatewayError(response, 401, 'authentication_required', 'browser administrator authentication is required')
+        return
+      }
+      if (request.headers.origin !== requestPublicOrigin(request)) {
+        apiGatewayError(response, 403, 'forbidden', 'same-origin browser request is required')
+        return
+      }
+      if (!permits(organizationAccess.membership.role, 'organization:manage')) {
+        apiGatewayError(response, 403, 'forbidden', 'organization:manage permission is required')
+        return
+      }
+      try {
+        const raw = JSON.parse((await readRequestBody(request)).toString('utf8')) as { name?: unknown; scopes?: unknown }
+        if (typeof raw.name !== 'string' || !Array.isArray(raw.scopes)) {
+          apiGatewayError(response, 400, 'invalid_request', 'name and scopes are required')
+          return
+        }
+        const created = await options.serviceAccounts.create({
+          organizationId: organizationAccess.organization.id,
+          name: raw.name,
+          scopes: raw.scopes as ServiceAccountScope[],
+        })
+        response.writeHead(201, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-request-id': randomBytes(16).toString('hex'), 'x-kala-api-version': 'v1', 'x-kala-api-compatibility': '1' })
+        response.end(JSON.stringify(created))
+      } catch (error) {
+        apiGatewayError(response, 400, 'invalid_request', error instanceof Error ? error.message : 'invalid service account')
+      }
+      return
+    }
+    if (url.pathname === '/api/v1' || url.pathname.startsWith('/api/v1/')) {
+      const authorization = request.headers.authorization
+      const bearer = typeof authorization === 'string' && authorization.startsWith('Bearer ')
+        ? authorization.slice(7)
+        : undefined
+      const serviceAccount = bearer && options.serviceAccounts
+        ? await options.serviceAccounts.authenticate(bearer)
+        : undefined
+      if (bearer && !serviceAccount) {
+        apiGatewayError(response, 401, 'authentication_required', 'service account token is invalid or expired')
+        return
+      }
+      if (!serviceAccount && (!session || !organizationAccess)) {
+        apiGatewayError(response, 401, 'authentication_required', 'valid browser or service account authentication is required')
+        return
+      }
+      const write = !['GET', 'HEAD'].includes(request.method ?? '')
+      if (serviceAccount) {
+        const requiredScope: ServiceAccountScope = write ? 'workspace:write' : 'workspace:read'
+        if (!serviceAccount.scopes.includes(requiredScope)) {
+          apiGatewayError(response, 403, 'forbidden', `${requiredScope} scope is required`)
+          return
+        }
+        if (serviceAccount.organizationStatus !== 'active') {
+          apiGatewayError(response, 403, 'forbidden', 'organization is not active')
+          return
+        }
+      } else if (write && organizationAccess?.membership.role === 'viewer') {
+        apiGatewayError(response, 403, 'forbidden', 'runtime:write permission is required')
+        return
+      }
+      if (!serviceAccount && write && request.headers.origin !== requestPublicOrigin(request)) {
+        apiGatewayError(response, 403, 'forbidden', 'same-origin browser request is required')
+        return
+      }
+      const unitId = serviceAccount?.unitId ?? organizationAccess!.organization.unitId
+      const organizationId = serviceAccount?.organizationId ?? organizationAccess!.organization.id
+      const principal = serviceAccount?.principalId
+        ?? Buffer.from(`${identity!.issuer}\0${identity!.subject}`, 'utf8').toString('base64url')
+      if (!enforceRateLimit(response, options.rateLimiter, `${organizationId}:${principal}:api`, true)) return
+      delete request.headers.cookie
+      delete request.headers.authorization
+      delete request.headers['x-agent-runlab-runtime-unit']
+      delete request.headers['x-agent-runlab-ingress-secret']
+      delete request.headers['x-agent-runlab-organization-id']
+      delete request.headers['x-agent-runlab-organization-role']
+      delete request.headers['x-agent-runlab-principal']
+      request.headers['x-agent-runlab-runtime-unit'] = unitId
+      request.headers['x-agent-runlab-ingress-secret'] = options.ingressSecret
+      request.headers['x-agent-runlab-organization-id'] = organizationId
+      request.headers['x-agent-runlab-organization-role'] = serviceAccount
+        ? (write ? 'member' : 'viewer')
+        : organizationAccess!.membership.role
+      request.headers['x-agent-runlab-principal'] = principal
+      proxy.web(request, response, { target: options.hostOrigin }, () => {
+        if (!response.headersSent) apiGatewayError(response, 502, 'internal_error', 'Runtime API is unavailable')
+      })
+      return
+    }
     if (url.pathname.startsWith('/auth/executor-pairings') && (/\/claim$/u.test(url.pathname) || (url.pathname === '/auth/executor-pairings' && request.method === 'POST'))) {
       const body = request.method === 'POST' ? await readRequestBody(request) : undefined
       const upstream = await requestRuntime(options.hostOrigin, url.pathname, request.method, { 'content-type': request.headers['content-type'] ?? 'application/json' }, body, options.runtimeTls)
@@ -510,4 +628,16 @@ export async function requestRuntime(
     if (body) request.write(body)
     request.end()
   })
+}
+
+function apiGatewayError(response: ServerResponse, status: number, code: string, message: string): void {
+  const requestId = randomBytes(16).toString('hex')
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-request-id': requestId,
+    'x-kala-api-version': 'v1',
+    'x-kala-api-compatibility': '1',
+  })
+  response.end(JSON.stringify({ error: { code, message, requestId } }))
 }

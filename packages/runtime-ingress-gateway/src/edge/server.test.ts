@@ -9,6 +9,8 @@ import { createSessionSecretBox } from '../auth/session-secret-box.js'
 import { MemoryEnterpriseSsoResolver } from '../auth/enterprise-sso.js'
 import { MemoryOrganizationStore, type OrganizationStore, type OrganizationStatus } from '../organizations/store.js'
 import { SlidingWindowRateLimiter } from '../governance/rate-limit.js'
+import { ServiceAccountService } from '../api/service-accounts.js'
+import type { SqlExecutor, SqlQueryResult } from '../persistence/postgres.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,6 +33,94 @@ const running: Array<{ close(): Promise<void> }> = []
 afterEach(async () => { await Promise.all(running.splice(0).map((server) => server.close())) })
 
 describe('Private Cloud edge request path', () => {
+  it('serves the versioned OpenAPI contract and envelopes method errors', async () => {
+    const gateway = await createGateway('http://127.0.0.1:9')
+    const openApi = await fetch(`http://127.0.0.1:${gateway.port}/api/v1/openapi.json`)
+    expect(openApi.status).toBe(200)
+    expect(openApi.headers.get('x-request-id')).toEqual(expect.any(String))
+    await expect(openApi.json()).resolves.toMatchObject({
+      openapi: '3.1.0',
+      paths: { '/api/v1/service-accounts': expect.any(Object) },
+    })
+
+    const invalid = await fetch(`http://127.0.0.1:${gateway.port}/api/v1/openapi.json`, { method: 'POST' })
+    expect(invalid.status).toBe(405)
+    expect(invalid.headers.get('allow')).toBe('GET, HEAD')
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: 'invalid_request', requestId: expect.any(String) },
+    })
+  })
+
+  it('authenticates scoped service accounts and injects one Runtime Unit authority', async () => {
+    const upstreamRequests: Array<{ authorization?: string; unit?: string; organization?: string; principal?: string }> = []
+    const upstream = createServer((request, response) => {
+      upstreamRequests.push({
+        authorization: request.headers.authorization,
+        unit: request.headers['x-agent-runlab-runtime-unit'] as string | undefined,
+        organization: request.headers['x-agent-runlab-organization-id'] as string | undefined,
+        principal: request.headers['x-agent-runlab-principal'] as string | undefined,
+      })
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ items: [] }))
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+    running.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) })
+    const serviceAccounts = new ServiceAccountService(new ServiceAccountAuthDatabase())
+    const gateway = await createGateway(`http://127.0.0.1:${port}`, undefined, { serviceAccounts })
+
+    const listed = await fetch(`http://127.0.0.1:${gateway.port}/api/v1/sessions`, {
+      headers: { authorization: 'Bearer ak_sa_test' },
+    })
+    expect(listed.status).toBe(200)
+    expect(upstreamRequests).toEqual([{
+      authorization: undefined,
+      unit: 'tenant_api',
+      organization: 'org_api',
+      principal: 'prn_api',
+    }])
+
+    const denied = await fetch(`http://127.0.0.1:${gateway.port}/api/v1/sessions`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer ak_sa_test', 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(denied.status).toBe(403)
+    await expect(denied.json()).resolves.toMatchObject({ error: { code: 'forbidden', requestId: expect.any(String) } })
+    expect(upstreamRequests).toHaveLength(1)
+  })
+
+  it('returns the versioned error envelope for Product API rate limits', async () => {
+    const upstream = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ items: [] }))
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    const port = typeof address === 'object' && address ? address.port : 0
+    running.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) })
+    const gateway = await createGateway(`http://127.0.0.1:${port}`, undefined, {
+      serviceAccounts: new ServiceAccountService(new ServiceAccountAuthDatabase()),
+      rateLimiter: new SlidingWindowRateLimiter({ windowMs: 60_000, maxRequests: 1 }),
+    })
+    const headers = { authorization: `Bearer ${['ak', 'sa', 'test-token'].join('_')}` }
+
+    expect(await fetch(`http://127.0.0.1:${gateway.port}/api/v1/sessions`, { headers }).then((response) => response.status)).toBe(200)
+    const limited = await fetch(`http://127.0.0.1:${gateway.port}/api/v1/sessions`, { headers })
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('x-kala-api-version')).toBe('v1')
+    expect(limited.headers.get('x-kala-api-compatibility')).toBe('1')
+    expect(limited.headers.get('x-request-id')).toEqual(expect.any(String))
+    await expect(limited.json()).resolves.toMatchObject({
+      error: {
+        code: 'rate_limited',
+        requestId: expect.any(String),
+        details: { retryAfterMs: expect.any(Number) },
+      },
+    })
+  })
+
   it('proxies installer and release assets without browser authentication', async () => {
     const seen: string[] = []
     const upstream = createServer((request, response) => {
@@ -264,6 +354,7 @@ async function createGateway(
     dashboardOrigin?: string
     organizations?: OrganizationStore
     rateLimiter?: SlidingWindowRateLimiter
+    serviceAccounts?: ServiceAccountService
   },
 ): Promise<RuntimeIngressGateway> {
   const dir = mkdtempSync(join(tmpdir(), 'gateway-sessions-'))
@@ -281,6 +372,7 @@ async function createGateway(
     ingressSecret: 'gateway-secret',
     ...(auth?.organizations ? { organizations: auth.organizations } : {}),
     ...(auth?.rateLimiter ? { rateLimiter: auth.rateLimiter } : {}),
+    ...(auth?.serviceAccounts ? { serviceAccounts: auth.serviceAccounts } : {}),
     directory: new MemoryRuntimeAssignmentStore(),
     loginStates: new MemoryLoginStates(),
     ...(auth?.enterpriseSso ? { enterpriseSso: auth.enterpriseSso } : {}),
@@ -301,6 +393,24 @@ async function createGateway(
   running.push(gateway)
   running.push({ close: async () => { rmSync(dir, { recursive: true, force: true }) } })
   return gateway
+}
+
+class ServiceAccountAuthDatabase implements SqlExecutor {
+  async query<Row extends Record<string, unknown> = Record<string, unknown>>(): Promise<SqlQueryResult<Row>> {
+    return {
+      rows: [{
+        principal_id: 'prn_api',
+        organization_id: 'org_api',
+        runtime_unit_id: 'tenant_api',
+        organization_status: 'active',
+        scopes: ['workspace:read'],
+      } as unknown as Row],
+      rowCount: 1,
+      command: '',
+      oid: 0,
+      fields: [],
+    }
+  }
 }
 
 function cookieValue(headers: readonly string[], name: string): string {

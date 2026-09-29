@@ -32,17 +32,46 @@ describe('ServiceAccountService', () => {
     const service = new ServiceAccountService(new FakeServiceAccountDatabase())
     await expect(service.create({ organizationId: 'org_acme', name: 'automation', scopes: ['root:all' as ServiceAccountScope] })).rejects.toThrow('invalid service account')
   })
+
+  it('binds authenticated tokens to their organization Runtime Unit', async () => {
+    const service = new ServiceAccountService(new FakeServiceAccountDatabase({
+      authenticated: {
+        principal_id: 'prn_automation',
+        organization_id: 'org_acme',
+        runtime_unit_id: 'tenant_acme',
+        organization_status: 'active',
+        scopes: ['workspace:read'],
+      },
+    }))
+    await expect(service.authenticate('ak_sa_token')).resolves.toEqual({
+      principalId: 'prn_automation',
+      organizationId: 'org_acme',
+      unitId: 'tenant_acme',
+      organizationStatus: 'active',
+      scopes: ['workspace:read'],
+    })
+  })
 })
 
 class FakeServiceAccountDatabase implements SqlExecutor {
   readonly executed: Array<{ sql: string; values: readonly unknown[] }> = []
 
-  constructor(private readonly options: { activeCount?: number } = {}) {}
+  constructor(private readonly options: {
+    activeCount?: number
+    authenticated?: {
+      principal_id: string
+      organization_id: string
+      runtime_unit_id: string
+      organization_status: string
+      scopes: ServiceAccountScope[]
+    }
+  } = {}) {}
 
   async query<Row extends Record<string, unknown> = Record<string, unknown>>(text: string, values: readonly unknown[] = []): Promise<SqlQueryResult<Row>> {
     const sql = text.trim().replace(/\s+/gu, ' ')
     this.executed.push({ sql, values })
     if (sql.startsWith('SELECT COUNT(*)')) return result([{ count: String(this.options.activeCount ?? 0) } as unknown as Row])
+    if (sql.startsWith('SELECT tokens.principal_id') && this.options.authenticated) return result([this.options.authenticated as unknown as Row])
     return result([])
   }
 }

@@ -63,6 +63,11 @@ Per-Unit concurrency, durable queue length, and artifact storage limits are conf
 `KALA_RUNTIME_UNIT_MAX_CONCURRENT_TURNS`, `KALA_RUNTIME_UNIT_MAX_QUEUED_MESSAGES`, and
 `KALA_RUNTIME_UNIT_MAX_ARTIFACT_BYTES`.
 
+The versioned Product API is served at `/api/v1`; its OpenAPI document is
+`/api/v1/openapi.json`. Browser Sessions and organization-scoped Service Accounts are
+supported. Service Account tokens are shown once, stored only as hashes, and bounded by
+`KALA_INGRESS_MAX_SERVICE_ACCOUNTS`. See `docs/api/v1.md`.
+
 For an operator-controlled Unit transfer, stop `runtime-host`, export or restore the named
 Unit, then restart it. Restore verifies the manifest and archive digest and refuses to
 overwrite an existing Unit:

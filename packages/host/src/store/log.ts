@@ -414,7 +414,7 @@ async function assertFullSessionReadAllowed(
 }
 
 export type SessionOperationMatch =
-  | { kind: 'event'; cursor: number }
+  | { kind: 'event'; cursor: number; event: Extract<AgentEvent, { kind: 'user_message' }> }
   | { kind: 'runtime_metadata' }
 
 export async function findLatestEventEntry(
@@ -486,7 +486,7 @@ export async function findSessionOperation(
             && entry.event.kind === 'user_message'
             && entry.event.operationId === operationId
           ) {
-            return { kind: 'event', cursor: entry.seq }
+            return { kind: 'event', cursor: entry.seq, event: entry.event }
           }
           if (entry.kind === 'runtime_metadata' && entry.payload.operationId === operationId) {
             return { kind: 'runtime_metadata' }
