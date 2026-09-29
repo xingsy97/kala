@@ -49,13 +49,13 @@ See the
 ### Agent Runtime
 
 A pure core does not call a model or edit a file. The Agent Runtime turns its
-effects into real work: it connects model and agent providers, streams their
-output, coordinates tools and subagents, manages context, and sends workspace
+effects into real work: it connects model providers, streams their output,
+coordinates tools and subagents, manages context, and sends workspace
 operations to remote Executors.
 
-That separation lets Kala support Copilot, Claude Code, Codex, compatible model
-providers, and different workspace environments without moving
-provider-specific behavior into the Kernel.
+That separation keeps model integration and workspace-specific behavior out of
+the Kernel while preserving one deterministic execution contract throughout
+Kala.
 
 ### Cloud-native Agent Service
 
@@ -77,7 +77,7 @@ flowchart TB
     Service["Cloud-native Agent Service<br/>Durability, tenancy, routing, deployment"]
     Runtime["Agent Runtime<br/>Models, tools, context, subagents, workspaces"]
     Kernel["Agent Kernel<br/>Pure-function FSM"]
-    Providers["Model and agent providers"]
+    Providers["Model providers"]
     Executors["Workspace Executors"]
 
     Service -->|"operates"| Runtime
@@ -105,16 +105,16 @@ for the normative boundaries.
 
 - **Work across machines** — connect workspace executors, see their online
   status, and switch between sessions from one dashboard.
-- **DAG-first task planning & tracking** — map dependencies, see what is done
-  or blocked, and follow delegated subagents alongside their messages and tool
+- **Plan and track dependent work** — map dependencies, see what is done or
+  blocked, and follow delegated subagents alongside their messages and tool
   activity.
 - **Keep context in view** — check context usage, inspect attachments and
   conversation history, thinking, and runtime state.
 - **Inspect without leaving the session** — use the right panel for files, Git
   changes, a workspace terminal, and runtime status and trace events.
-- **Stay in control** — review approvals and choose a supported agent runtime
-  and model. Workspace tools run through outbound executors rather than exposing
-  your workstation directly.
+- **Stay in control** — review approvals and choose a model. Workspace tools
+  run through outbound executors rather than exposing your workstation
+  directly.
 
 ## Quick start from source
 
