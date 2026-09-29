@@ -151,10 +151,22 @@ export async function clickElement(element, description = 'element') {
   const hit = await element.evaluate((candidate) => {
     if (!candidate.isConnected) return { reachable: false, target: 'detached' }
     const rect = candidate.getBoundingClientRect()
-    const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    const points = [
+      [0.5, 0.5],
+      [0.25, 0.25],
+      [0.75, 0.25],
+      [0.25, 0.75],
+      [0.75, 0.75],
+    ]
+    const match = points.map(([x, y]) => ({
+      x: rect.width * x,
+      y: rect.height * y,
+      target: document.elementFromPoint(rect.left + rect.width * x, rect.top + rect.height * y),
+    })).find(({ target }) => target === candidate || candidate.contains(target))
     return {
-      reachable: target === candidate || candidate.contains(target),
-      target: target?.getAttribute('data-testid') ?? target?.tagName ?? null,
+      reachable: match !== undefined,
+      target: match?.target?.getAttribute('data-testid') ?? match?.target?.tagName ?? null,
+      offset: match ? { x: match.x, y: match.y } : undefined,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
       viewport: { width: window.innerWidth, height: window.innerHeight },
     }
@@ -162,7 +174,7 @@ export async function clickElement(element, description = 'element') {
   if (!hit.reachable) {
     throw new Error(`cannot pointer-click covered ${description}; ${JSON.stringify(hit)}`)
   }
-  await element.click()
+  await element.click({ offset: hit.offset })
 }
 
 export async function clickFirstVisible(page, selector, options = {}) {
@@ -186,7 +198,7 @@ export async function clickFirstVisible(page, selector, options = {}) {
         await clickElement(element, options.description ?? selector)
         return true
       } catch (error) {
-        if (String(error).includes('detached') || String(error).includes('Node is detached')) continue
+        if (String(error).includes('detached') || String(error).includes('Node is detached') || String(error).includes('cannot pointer-click covered')) continue
         throw error
       }
     }
