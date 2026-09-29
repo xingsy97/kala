@@ -43,15 +43,15 @@ const RESTART_MODES = new Set(['checkpoint', 'when_idle', 'force'])
 export function buildDeployPlan({ args, env, root, now = new Date(), exists = existsSync, readDir = readdirSync }) {
   const releaseDir = join(root, 'release')
   const options = parseOptions(args)
-  const sshTarget = requiredOption(options.ssh ?? env.AK_DEPLOY_SSH, '--ssh or AK_DEPLOY_SSH')
-  const hostUrl = requiredOption(options.hostUrl ?? env.AK_DEPLOY_HOST_URL, '--host-url or AK_DEPLOY_HOST_URL')
-  const remoteBin = requiredOption(options.remoteBin ?? env.AK_DEPLOY_REMOTE_BIN, '--remote-bin or AK_DEPLOY_REMOTE_BIN')
-  const restartMode = options.restartMode ?? env.AK_DEPLOY_RESTART_MODE ?? 'checkpoint'
-  const restartTimeoutMs = positiveNumber(options.restartTimeoutMs ?? env.AK_DEPLOY_RESTART_TIMEOUT_MS ?? 600000, '--restart-timeout-ms')
-  const statusTimeoutMs = positiveNumber(options.statusTimeoutMs ?? env.AK_DEPLOY_STATUS_TIMEOUT_MS ?? restartTimeoutMs + 60000, '--status-timeout-ms')
-  const pollMs = positiveNumber(options.pollMs ?? env.AK_DEPLOY_POLL_MS ?? 2000, '--poll-ms')
-  const service = options.service ?? env.AK_DEPLOY_SERVICE
-  const sudo = options.sudo === true || /^(?:1|true|yes|on)$/iu.test(env.AK_DEPLOY_SUDO ?? '')
+  const sshTarget = requiredOption(options.ssh ?? env.KALA_DEPLOY_SSH, '--ssh or KALA_DEPLOY_SSH')
+  const hostUrl = requiredOption(options.hostUrl ?? env.KALA_DEPLOY_HOST_URL, '--host-url or KALA_DEPLOY_HOST_URL')
+  const remoteBin = requiredOption(options.remoteBin ?? env.KALA_DEPLOY_REMOTE_BIN, '--remote-bin or KALA_DEPLOY_REMOTE_BIN')
+  const restartMode = options.restartMode ?? env.KALA_DEPLOY_RESTART_MODE ?? 'checkpoint'
+  const restartTimeoutMs = positiveNumber(options.restartTimeoutMs ?? env.KALA_DEPLOY_RESTART_TIMEOUT_MS ?? 600000, '--restart-timeout-ms')
+  const statusTimeoutMs = positiveNumber(options.statusTimeoutMs ?? env.KALA_DEPLOY_STATUS_TIMEOUT_MS ?? restartTimeoutMs + 60000, '--status-timeout-ms')
+  const pollMs = positiveNumber(options.pollMs ?? env.KALA_DEPLOY_POLL_MS ?? 2000, '--poll-ms')
+  const service = options.service ?? env.KALA_DEPLOY_SERVICE
+  const sudo = options.sudo === true || /^(?:1|true|yes|on)$/iu.test(env.KALA_DEPLOY_SUDO ?? '')
 
   if (!RESTART_MODES.has(restartMode)) throw new Error('--restart-mode must be checkpoint, when_idle, or force')
 
@@ -66,7 +66,7 @@ export function buildDeployPlan({ args, env, root, now = new Date(), exists = ex
   }
 
   const stamp = deployStamp(now)
-  const uploadDir = `${remoteBin.replace(/\/$/, '')}/.agent-kernel-upload-${stamp}`
+  const uploadDir = `${remoteBin.replace(/\/$/, '')}/.kala-upload-${stamp}`
   return {
     root,
     releaseDir,
@@ -104,11 +104,11 @@ export function installScript(remoteBinDir, remoteUploadDir, names, retiredNames
     'set -euo pipefail',
     `REMOTE_BIN=${remotePathForShell(remoteBinDir)}`,
     `UPLOAD_DIR=${remotePathForShell(remoteUploadDir)}`,
-    'BACKUP_DIR="$REMOTE_BIN/.agent-kernel-backup-$(date +%Y%m%d%H%M%S)"',
+    'BACKUP_DIR="$REMOTE_BIN/.kala-backup-$(date +%Y%m%d%H%M%S)"',
     'mkdir -p "$REMOTE_BIN" "$BACKUP_DIR"',
     'cd "$UPLOAD_DIR"',
     'sha256sum -c SHA256SUMS --ignore-missing',
-    'MODEL_CATALOG_DIR="$HOME/.local/share/agent-runlab/model-catalog"',
+    'MODEL_CATALOG_DIR="$HOME/.local/share/kala/model-catalog"',
   ]
   for (const name of names) {
     lines.push(`printf '%s\\n' ${sh(name)} >> "$BACKUP_DIR/.deployed-files"`)
@@ -119,7 +119,7 @@ export function installScript(remoteBinDir, remoteUploadDir, names, retiredNames
     lines.push(`if [ -e "$REMOTE_BIN/${name}" ]; then cp -p "$REMOTE_BIN/${name}" "$BACKUP_DIR/${name}"; fi`)
     lines.push(`rm -f "$REMOTE_BIN/${name}"`)
   }
-  lines.push('printf "%s\\n" "$BACKUP_DIR" > "$REMOTE_BIN/.agent-kernel-backup-current"')
+  lines.push('printf "%s\\n" "$BACKUP_DIR" > "$REMOTE_BIN/.kala-backup-current"')
   for (const name of names) {
     lines.push(`mv "$UPLOAD_DIR/${name}" "$REMOTE_BIN/${name}"`)
   }
@@ -130,8 +130,8 @@ export function installScript(remoteBinDir, remoteUploadDir, names, retiredNames
   for (const name of names.filter((name) => name.endsWith('.cjs') || name === 'run.sh')) {
     lines.push(`chmod +x "$REMOTE_BIN/${name}"`)
   }
-  lines.push('rm -f "$REMOTE_BIN/.agent-kernel-upload-current"')
-  lines.push('printf "%s\n" "$UPLOAD_DIR" > "$REMOTE_BIN/.agent-kernel-upload-current"')
+  lines.push('rm -f "$REMOTE_BIN/.kala-upload-current"')
+  lines.push('printf "%s\n" "$UPLOAD_DIR" > "$REMOTE_BIN/.kala-upload-current"')
   lines.push('rmdir "$UPLOAD_DIR" 2>/dev/null || true')
   return lines.join('\n')
 }
@@ -140,7 +140,7 @@ export function rollbackScript(remoteBinDir, service, sudo = false) {
   return [
     'set -euo pipefail',
     `REMOTE_BIN=${remotePathForShell(remoteBinDir)}`,
-    'BACKUP_DIR=$(cat "$REMOTE_BIN/.agent-kernel-backup-current")',
+    'BACKUP_DIR=$(cat "$REMOTE_BIN/.kala-backup-current")',
     '[ -d "$BACKUP_DIR" ]',
     '[ -f "$BACKUP_DIR/.deployed-files" ]',
     'while IFS= read -r name; do rm -f "$REMOTE_BIN/$name"; [ ! -e "$BACKUP_DIR/$name" ] || cp -p "$BACKUP_DIR/$name" "$REMOTE_BIN/$name"; done < "$BACKUP_DIR/.deployed-files"',

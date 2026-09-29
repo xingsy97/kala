@@ -1,14 +1,14 @@
 [Unit]
 Description=Kala Dedicated one-shot migration finalizer
-After=network-online.target agent-runlab-host.service
+After=network-online.target kala-host.service
 Wants=network-online.target
 StartLimitIntervalSec=5min
 StartLimitBurst=3
 
 [Service]
 Type=oneshot
-EnvironmentFile=-/etc/agent-runlab/migration.env
-ExecStart=/usr/bin/node /opt/agent-runlab/control/cutover-dedicated-systemd.mjs
+EnvironmentFile=-/etc/kala/migration.env
+ExecStart=/usr/bin/node /opt/kala/control/cutover-dedicated-systemd.mjs
 Restart=on-failure
 RestartSec=10s
 TimeoutStartSec=0
@@ -20,6 +20,6 @@ ProtectHome=false
 # Source and target must remain on one mount object for atomic rename. Do not
 # add separate ReadWritePaths for the two state roots: bind mounts turn rename
 # into EXDEV even when both paths report the same st_dev.
-ReadWritePaths=/etc/systemd/system /etc/agent-runlab
+ReadWritePaths=/etc/systemd/system /etc/kala
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
 UMask=0077

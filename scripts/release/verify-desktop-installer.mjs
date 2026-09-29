@@ -77,7 +77,7 @@ try {
   const execution = spawnSync('lxc', [
     'exec', values.lxd, '--user', uid, '--group', gid,
     '--env', 'HOME=/home/ubuntu', '--env', 'LC_ALL=C',
-    ...(localPackage ? ['--env', `RUNLAB_DESKTOP_PACKAGE=${localPackage}`] : []),
+    ...(localPackage ? ['--env', `KALA_DESKTOP_PACKAGE=${localPackage}`] : []),
     '--', 'bash',
   ], { input: command, encoding: 'utf8', timeout: 180_000, maxBuffer: 8 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] })
   const output = `${execution.stdout ?? ''}\n${execution.stderr ?? ''}`

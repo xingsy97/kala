@@ -15,7 +15,7 @@ describe('retrieveMemory', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'ak-mem-'))
     workspace = mkdtempSync(join(tmpdir(), 'ak-mem-ws-'))
-    memoryDir = join(workspace, '.agent-kernel', 'memory')
+    memoryDir = join(workspace, '.kala', 'memory')
     mkdirSync(memoryDir, { recursive: true })
   })
 

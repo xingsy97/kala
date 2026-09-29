@@ -26,7 +26,7 @@ let succeeded = false
 try {
   run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab'], {
     ...process.env,
-    RUNLAB_PROFILE_SOURCEMAP: '1',
+    KALA_PROFILE_SOURCEMAP: '1',
   })
   if (!streamingOnly) {
     run('node', ['scripts/performance/profile-dashboard-production.mjs'], {
@@ -42,7 +42,7 @@ try {
     run('node', ['scripts/performance/profile-dashboard-streaming.mjs'], {
       ...process.env,
       PERF_EVIDENCE_ROOT: join(outputRoot, 'streaming'),
-      PERF_STREAM_HOST_PORT: process.env.PERF_STREAM_HOST_PORT ?? '3216',
+      PERF_STREAM_KALA_PORT: process.env.PERF_STREAM_KALA_PORT ?? '3216',
       PERF_STREAM_PROVIDER_PORT: process.env.PERF_STREAM_PROVIDER_PORT ?? '3217',
     })
     run('node', ['scripts/performance/analyze-cpu-profile.mjs', join(outputRoot, 'streaming/streaming.cpuprofile.json'), '--output', join(outputRoot, 'streaming-hotspots.md')], process.env)

@@ -83,5 +83,5 @@ export function writeInstallerSession(path: string, session: InstallerSession): 
 }
 
 export function defaultManagedRoot(home: string, system: boolean): string {
-  return system ? '/var/lib/runlab-executor' : join(home, '.local', 'state', 'runlab-executor')
+  return system ? '/var/lib/kala/executor' : join(home, '.local', 'state', 'kala', 'executor')
 }

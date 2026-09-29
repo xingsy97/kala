@@ -110,7 +110,7 @@ export function createRuntimeUnitIngress(options: {
   }
 
   const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    if (!isRoutable(request)) return
+    if (socket.destroyed || !socket.writable || socket.writableEnded || !isRoutable(request)) return
     trackUpgrade(upgradedClients, socket)
     void Promise.resolve((options.resolveUpgrade ?? options.resolve)(request)).then((target) => {
       if (!target) {

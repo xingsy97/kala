@@ -322,12 +322,12 @@ export async function verifyImmutablePredecessorRelease(input: {
     runtimeAsset = 'agent-runlab-runtime.cjs'
     if (fallbackAssets['agent-runlab-runtime'] !== runtimeAsset
       || !assets.includes(runtimeAsset)
-      || !assets.includes('agent-runlab-dedicated-unit@.service')) {
+      || !assets.includes('kala-dedicated-unit@.service')) {
       throw new Error('installed predecessor does not contain a supported Runtime asset')
     }
   }
   const bundleSha256 = sha256(await readFile(join(input.releaseDir, runtimeAsset)))
-  await verifyImmutableReleaseRuntime({ ...input, bundleSha256 }, runtimeAsset)
+  await verifyImmutableReleaseRuntime({ ...input, bundleSha256, allowImplicitLocalDevelopment: true }, runtimeAsset)
   return bundleSha256
 }
 
@@ -338,6 +338,7 @@ async function verifyImmutableReleaseRuntime(input: {
   releaseDigest: string
   bundleSha256: string
   allowLocalDevelopment?: boolean
+  allowImplicitLocalDevelopment?: boolean
 }, runtimeAsset: string): Promise<void> {
   const releasesRoot = resolve(input.deployRoot, 'releases')
   const releaseDir = resolve(input.releaseDir)
@@ -352,7 +353,7 @@ async function verifyImmutableReleaseRuntime(input: {
   if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) throw new Error('release manifest assets are required')
   const assets = manifest.assets.map((asset) => safeFileName(asset, 'manifest asset'))
   if (new Set(assets).size !== assets.length) throw new Error('release manifest contains duplicate assets')
-  const layout = releaseLayout(manifest, assets, true, input.allowLocalDevelopment === true)
+  const layout = releaseLayout(manifest, assets, true, input.allowLocalDevelopment === true, input.allowImplicitLocalDevelopment === true)
   const expected = new Set(layout.files)
   const entries = await readdir(releaseDir, { withFileTypes: true })
   if (entries.some((entry) => !entry.isFile())) throw new Error('immutable release contains a non-file entry')
@@ -492,13 +493,15 @@ async function verifyReleaseContents(directory: string, releaseDigest: string, b
   return expected
 }
 
-function releaseLayout(manifest: Record<string, unknown>, assets: string[], allowLegacyPredecessor: boolean, allowLocalDevelopment: boolean): { files: string[]; checksummed: string[] } {
+function releaseLayout(manifest: Record<string, unknown>, assets: string[], allowLegacyPredecessor: boolean, allowLocalDevelopment: boolean, allowImplicitLocalDevelopment = false): { files: string[]; checksummed: string[] } {
   const reserved = new Set(['manifest.json', 'RELEASE_NOTES.md', 'SHA256SUMS', releaseChecksumSignature])
   if (assets.some((name) => reserved.has(name))) throw new Error('invalid release manifest asset set')
-  if (manifest.localDevelopment === true) {
+  const sortedAssets = JSON.stringify([...assets].sort())
+  const exactLocalDevelopmentAssets = [localDevelopmentAssets, legacyLocalDevelopmentAssets]
+    .some((expected) => sortedAssets === JSON.stringify([...expected].sort()))
+  if (manifest.localDevelopment === true || (allowLocalDevelopment && allowImplicitLocalDevelopment && exactLocalDevelopmentAssets)) {
     if (!allowLocalDevelopment) throw new Error('local development release is not enabled on this machine')
-    const sortedAssets = JSON.stringify([...assets].sort())
-    if (![localDevelopmentAssets, legacyLocalDevelopmentAssets].some((expected) => sortedAssets === JSON.stringify([...expected].sort()))) {
+    if (!exactLocalDevelopmentAssets) {
       throw new Error('local development release must contain the exact current or legacy CJS asset set')
     }
     return { files: [...assets, 'manifest.json', 'SHA256SUMS'].sort(), checksummed: [...assets, 'manifest.json'].sort() }
@@ -509,7 +512,7 @@ function releaseLayout(manifest: Record<string, unknown>, assets: string[], allo
     if (bridge.schemaVersion !== 1 || typeof bridge.legacyReleaseDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(bridge.legacyReleaseDigest)
       || typeof bridge.localReleaseDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(bridge.localReleaseDigest)
       || assets.includes(releaseMetadataArchive) || !assets.includes('kala-runtime.cjs')
-      || !assets.includes('agent-runlab-runtime.cjs') || !assets.includes('agent-runlab-dedicated-deploy-supervisor.cjs')
+      || !assets.includes('agent-runlab-runtime.cjs') || !assets.includes('kala-dedicated-deploy-supervisor.cjs')
       || !assets.includes('kala-dedicated-deploy-supervisor.cjs') || !assets.includes(dedicatedSupportArchive)
       || record(manifest.fallbackAssets, 'bridge fallbackAssets')['agent-runlab-runtime'] !== 'agent-runlab-runtime.cjs') throw new Error('invalid local development bridge')
     return {

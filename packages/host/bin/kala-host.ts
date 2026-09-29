@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `agent-kernel-host` CLI.
+ * `kala-host` CLI.
  *
  * The runtime config is read from two operator-owned files:
  *
@@ -15,20 +15,20 @@
  * HTTP (`GET /models`).
  *
  * Other env vars:
- *   HOST_PORT          — default 3000
- *   SESSIONS_DIR       — default ~/.agent-kernel/sessions
- *   HOST_AUTH_TOKEN    — optional; when set, clients must supply it in auth
- *   HOST_GITHUB_OAUTH_REQUIRED — set to 1 to require GitHub OAuth for dashboard/HTTP
+ *   KALA_PORT          — default 3000
+ *   KALA_SESSIONS_DIR       — default ~/.kala/sessions
+ *   KALA_AUTH_TOKEN    — optional; when set, clients must supply it in auth
+ *   KALA_GITHUB_OAUTH_REQUIRED — set to 1 to require GitHub OAuth for dashboard/HTTP
  *   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET / GITHUB_OAUTH_CALLBACK_URL
  *   GITHUB_USERNAME_WHITELIST — optional comma-separated GitHub login allowlist
- *   HOST_AUTH_SESSION_SECRET — HMAC secret for dashboard login cookies
- *   EXECUTOR_TOKENS    — optional JSON array of {token, workspaceId?, label?}
- *   HOST_EXECUTOR_IDENTITIES — default ~/.agent-kernel/executor-identities.json
- *   HOST_AUDIT_DIR     — default ~/.agent-kernel/audit
+ *   KALA_AUTH_SESSION_SECRET — HMAC secret for dashboard login cookies
+ *   KALA_EXECUTOR_TOKENS    — optional JSON array of {token, workspaceId?, label?}
+ *   KALA_EXECUTOR_IDENTITIES — default ~/.kala/executor-identities.json
+ *   KALA_AUDIT_DIR     — default ~/.kala/audit
  *   HOST_MODEL         — hard override for the default model
- *   AGENT_KERNEL_RELEASE_BASE_URL — optional executor bootstrap asset base URL
- *   AGENT_KERNEL_RELEASE_ASSETS_DIR — optional local release asset directory
- *   AGENT_KERNEL_UPDATE_REPO / AGENT_KERNEL_RELEASE_TAG — GitHub Release source
+ *   KALA_RELEASE_BASE_URL — optional executor bootstrap asset base URL
+ *   KALA_RELEASE_ASSETS_DIR — optional local release asset directory
+ *   KALA_UPDATE_REPO / KALA_RELEASE_TAG — GitHub Release source
  */
 
 import { homedir } from 'node:os'
@@ -38,7 +38,7 @@ import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
 import type { ManualModelInput, ManualProviderInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
-import { AGENT_RUNTIME_CAPABILITIES, FULL_RUNTIME_CAPABILITIES, PROTOCOL_VERSION, productVariant } from '@agent-kernel/shared'
+import { AGENT_RUNTIME_CAPABILITIES, FULL_RUNTIME_CAPABILITIES, PROTOCOL_VERSION, parsePublicUrls, productVariant } from '@agent-kernel/shared'
 import bcrypt from 'bcryptjs'
 
 import packageJson from '../package.json' with { type: 'json' }
@@ -82,7 +82,7 @@ import { LocalWebSearchCredentialStore } from '../src/web-search/credential-stor
 import { LocalAzureSpeechCredentialStore } from '../src/speech/credential-store.js'
 import { createDedicatedRuntimeReadiness, writeDedicatedProcessReadiness, writeDedicatedRuntimeReadiness } from '../src/tenant-runtime/dedicated-runtime-readiness.js'
 
-const logger = createRuntimeLogger('agent-kernel-host')
+const logger = createRuntimeLogger('kala-host')
 const VERSION = packageJson.version
 
 type BuildInfo = {
@@ -119,27 +119,27 @@ Usage:
 Options:
   -h, --help                 Show this help and exit.
   -v, --version              Print version and exit.
-  --port <port>              HTTP/WebSocket port. Defaults to HOST_PORT or 3000.
+  --port <port>              HTTP/WebSocket port. Defaults to KALA_PORT or 3000.
   --print-agent-module       Print resolved agent module metadata and exit.
   --print-system-prompt      Print resolved system prompt and exit.
   --print-tool-registry      Print resolved tool registry and exit.
 
 Common environment:
-  HOST_PORT                  Port used when --port is omitted.
-  SESSIONS_DIR               Session JSONL directory. Default: ~/.agent-kernel/sessions.
-  AGENT_KERNEL_ARTIFACTS_DIR Artifact root. Set to 0 to disable artifact writes.
-  DASHBOARD_DIR              Static dashboard directory override.
-  HOST_AUTH_TOKEN            Optional shared token required by clients.
-  EXECUTOR_TOKENS            Optional JSON array of executor tokens.
+  KALA_PORT                  Port used when --port is omitted.
+  KALA_SESSIONS_DIR               Session JSONL directory. Default: ~/.kala/sessions.
+  KALA_ARTIFACTS_DIR Artifact root. Set to 0 to disable artifact writes.
+  KALA_DASHBOARD_DIR              Static dashboard directory override.
+  KALA_AUTH_TOKEN            Optional shared token required by clients.
+  KALA_EXECUTOR_TOKENS            Optional JSON array of executor tokens.
   HOST_MODEL                 Override the default model.
-  AGENT_KERNEL_SOCKET_ADMIN_USER
+  KALA_SOCKET_ADMIN_USER
                              Socket.IO Admin UI username. Default: admin.
   LOG_LEVEL                  trace, debug, info, warn, error. Default: info.
   LOG_FORMAT                 pretty/human or json. Default: pretty.
 
 Examples:
   node kala-dashboard-with-runtime.cjs --port 3000
-  HOST_PORT=3001 node kala-dashboard-with-runtime.cjs
+  KALA_PORT=3001 node kala-dashboard-with-runtime.cjs
   LOG_FORMAT=json node kala-dashboard-with-runtime.cjs --port 3000
   node kala-dashboard-with-runtime.cjs enhancement --help
 `)
@@ -161,33 +161,33 @@ async function main(): Promise<void> {
   }
 
   const deployment = loadProductDeploymentConfig({
-    configPath: process.env.AGENT_RUNLAB_DEPLOYMENT_CONFIG,
+    configPath: process.env.KALA_DEPLOYMENT_CONFIG,
   })
   const product = productVariant(deployment)
   const capabilities = deployment.runtimeProfile === 'full' ? FULL_RUNTIME_CAPABILITIES : AGENT_RUNTIME_CAPABILITIES
   const enhancementCommand = parseEnhancementCli(argv)
   if (await runEnhancementCli(enhancementCommand)) return
 
-  // Default `AK_ALLOW_ALL_OK` to "1" so the dashboard can flip a session into
+  // Default `KALA_ALLOW_ALL_OK` to "1" so the dashboard can flip a session into
   // `allow_all` approval mode without extra env plumbing. Operators who want
-  // the original guard rail back can set `AK_ALLOW_ALL_OK=0` explicitly.
-  if (process.env.AK_ALLOW_ALL_OK === undefined) {
-    process.env.AK_ALLOW_ALL_OK = '1'
+  // the original guard rail back can set `KALA_ALLOW_ALL_OK=0` explicitly.
+  if (process.env.KALA_ALLOW_ALL_OK === undefined) {
+    process.env.KALA_ALLOW_ALL_OK = '1'
   }
   const runtime = loadRuntimeConfig()
-  const port = Number(argValue(process.argv.slice(2), '--port') ?? process.env.HOST_PORT ?? 3000)
+  const port = Number(argValue(process.argv.slice(2), '--port') ?? process.env.KALA_PORT ?? 3000)
   const sessionsDir =
-    process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
-  const expectedDeployment = parseExpectedDeployment(process.env.AGENT_RUNLAB_EXPECTED_DEPLOYMENT)
+    process.env.KALA_SESSIONS_DIR ?? join(homedir(), '.kala', 'sessions')
+  const expectedDeployment = parseExpectedDeployment(process.env.KALA_EXPECTED_DEPLOYMENT)
   const webSearchCredentialStore = new LocalWebSearchCredentialStore(join(dirname(sessionsDir), 'credentials'))
   const speechCredentialStore = new LocalAzureSpeechCredentialStore(join(dirname(sessionsDir), 'credentials'))
-  const artifactRootDir = process.env.AGENT_KERNEL_ARTIFACTS_DIR === '0'
+  const artifactRootDir = process.env.KALA_ARTIFACTS_DIR === '0'
     ? false
-    : process.env.AGENT_KERNEL_ARTIFACTS_DIR ?? join(dirname(sessionsDir), 'artifacts')
+    : process.env.KALA_ARTIFACTS_DIR ?? join(dirname(sessionsDir), 'artifacts')
   const auth = loadAuthConfig()
-  const auditDir = process.env.HOST_AUDIT_DIR ?? join(dirname(sessionsDir), 'audit')
+  const auditDir = process.env.KALA_AUDIT_DIR ?? join(dirname(sessionsDir), 'audit')
   const audit = createAuditLogger(auditDir)
-  const executorIdentityPath = process.env.HOST_EXECUTOR_IDENTITIES ?? join(dirname(sessionsDir), 'executor-identities.json')
+  const executorIdentityPath = process.env.KALA_EXECUTOR_IDENTITIES ?? join(dirname(sessionsDir), 'executor-identities.json')
   const executorIdentityStore = new ExecutorIdentityStore(executorIdentityPath)
   executorIdentityStore.load()
   const effectiveAuth: AuthConfig = { ...(auth ?? {}), executorIdentityStore }
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
   const embeddedSocketAdminAssets = embeddedSocketAdminAssetsFromGlobal()
   const embeddedReleaseAssets = embeddedReleaseAssetsFromGlobal()
   const embeddedDocs = embeddedDocsFromGlobal()
-  const socketAdminStorePath = process.env.AGENT_KERNEL_SOCKET_ADMIN_CONFIG ?? join(homedir(), '.config', 'agent-kernel', 'socket-admin.json')
+  const socketAdminStorePath = process.env.KALA_SOCKET_ADMIN_CONFIG ?? join(homedir(), '.config', 'kala', 'socket-admin.json')
   const socketAdminStore = createSocketAdminStore(socketAdminStorePath)
   let socketAdminState = loadSocketAdminConfig({ currentModulePath: currentModulePath(), configPath: socketAdminStore.path, record: socketAdminStore.load(), embeddedAssets: embeddedSocketAdminAssets })
   let activeSocketAdminMode = socketAdminState.runtime?.mode
@@ -244,9 +244,9 @@ async function main(): Promise<void> {
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
   let release = releaseSettings(port)
-  const processReadinessPath = process.env.AGENT_RUNLAB_PROCESS_READINESS?.trim()
+  const processReadinessPath = process.env.KALA_PROCESS_READINESS?.trim()
 
-  const manualModelsPath = join(homedir(), '.config', 'agent-kernel', 'models.json')
+  const manualModelsPath = join(homedir(), '.config', 'kala', 'models.json')
   const hookSummaries = hooks.map((h) => ({
       event: h.event,
       command: h.command,
@@ -281,7 +281,7 @@ async function main(): Promise<void> {
       claudeSettings: join(homedir(), '.claude', 'settings.json'),
       codexConfig: join(homedir(), '.codex', 'config.toml'),
       manualModels: manualModelsPath,
-      hooksConfig: join(homedir(), '.config', 'agent-kernel', 'config.toml'),
+      hooksConfig: join(homedir(), '.config', 'kala', 'config.toml'),
       sessionsDir,
     },
     mcp: {
@@ -291,19 +291,22 @@ async function main(): Promise<void> {
     release,
   })
 
-  const evaluationUrl = publicHttpUrl(process.env.AGENT_RUNLAB_EVALUATION_URL)
+  const evaluationUrl = publicHttpUrl(process.env.KALA_EVALUATION_URL)
   const server = await startHostServer({
     port,
-    ...(process.env.HOST_LISTEN_HOST?.trim() ? { listenHost: process.env.HOST_LISTEN_HOST.trim() } : {}),
+    ...(process.env.KALA_BIND_HOST?.trim() ? { listenHost: process.env.KALA_BIND_HOST.trim() } : {}),
+    ...(product === 'portable' ? {
+      publicUrls: parsePublicUrls(process.env.KALA_PUBLIC_URLS ?? `http://localhost:${port},http://127.0.0.1:${port}`),
+    } : {}),
     deployment,
     capabilities,
     ...(evaluationUrl ? { evaluationUrl } : {}),
     sessionsDir,
     ...(expectedDeployment ? { expectedDeployment } : {}),
-    ...((processReadinessPath || process.env.AGENT_RUNLAB_RUNTIME_READINESS?.trim()) ? {
+    ...((processReadinessPath || process.env.KALA_RUNTIME_READINESS?.trim()) ? {
       invalidateReadiness: () => {
         if (processReadinessPath) rmSync(processReadinessPath, { force: true })
-        const runtimeReadinessPath = process.env.AGENT_RUNLAB_RUNTIME_READINESS?.trim()
+        const runtimeReadinessPath = process.env.KALA_RUNTIME_READINESS?.trim()
         if (runtimeReadinessPath) rmSync(runtimeReadinessPath, { force: true })
       },
     } : {}),
@@ -370,7 +373,7 @@ async function main(): Promise<void> {
         err.status = 409
         throw err
       }
-      const username = process.env.AGENT_KERNEL_SOCKET_ADMIN_USER?.trim() || 'admin'
+      const username = process.env.KALA_SOCKET_ADMIN_USER?.trim() || 'admin'
       socketAdminStore.initialize({ username, passwordHash: hashSocketAdminPassword(password), mode: input.mode ?? socketAdminState.summary.configuredMode })
       socketAdminState = loadSocketAdminConfig({ currentModulePath: currentModulePath(), configPath: socketAdminStore.path, record: socketAdminStore.load(), embeddedAssets: embeddedSocketAdminAssets })
       if (socketAdminState.runtime) {
@@ -408,7 +411,7 @@ async function main(): Promise<void> {
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
     artifactRootDir,
-    ...(process.env.AGENT_KERNEL_DOCS_DIR ? { docsRootDir: process.env.AGENT_KERNEL_DOCS_DIR } : {}),
+    ...(process.env.KALA_DOCS_DIR ? { docsRootDir: process.env.KALA_DOCS_DIR } : {}),
     routerHealth: () => ({
       generatedAt: new Date().toISOString(),
       providers: healthRegistry.entries(),
@@ -416,10 +419,10 @@ async function main(): Promise<void> {
     }),
   })
   release = releaseSettings(server.port)
-  const runtimeReadinessPath = process.env.AGENT_RUNLAB_RUNTIME_READINESS?.trim()
+  const runtimeReadinessPath = process.env.KALA_RUNTIME_READINESS?.trim()
   if (runtimeReadinessPath) {
-    const writeLeasePath = process.env.AGENT_RUNLAB_WRITE_LEASE?.trim()
-    if (!writeLeasePath) throw new Error('AGENT_RUNLAB_WRITE_LEASE is required with AGENT_RUNLAB_RUNTIME_READINESS')
+    const writeLeasePath = process.env.KALA_WRITE_LEASE?.trim()
+    if (!writeLeasePath) throw new Error('KALA_WRITE_LEASE is required with KALA_RUNTIME_READINESS')
     const restartStatus = server.restartStatus()
     await writeDedicatedRuntimeReadiness(runtimeReadinessPath, await createDedicatedRuntimeReadiness({
       sessionsDir, writeLeasePath, capabilities, restart: restartStatus.last,
@@ -482,13 +485,13 @@ function publicHttpUrl(value: string | undefined): string | undefined {
 function parseExpectedDeployment(raw: string | undefined): NonNullable<import('@agent-kernel/shared').HostRestartAttempt['deployment']> | undefined {
   if (!raw?.trim()) return undefined
   const value = JSON.parse(raw) as Record<string, unknown>
-  if (typeof value.deploymentId !== 'string' || !value.deploymentId || typeof value.targetReleaseDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.targetReleaseDigest) || !Number.isSafeInteger(value.expectedRouteGeneration) || Number(value.expectedRouteGeneration) < 1 || typeof value.fencingToken !== 'string' || value.fencingToken.length < 16) throw new Error('invalid AGENT_RUNLAB_EXPECTED_DEPLOYMENT')
+  if (typeof value.deploymentId !== 'string' || !value.deploymentId || typeof value.targetReleaseDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.targetReleaseDigest) || !Number.isSafeInteger(value.expectedRouteGeneration) || Number(value.expectedRouteGeneration) < 1 || typeof value.fencingToken !== 'string' || value.fencingToken.length < 16) throw new Error('invalid KALA_EXPECTED_DEPLOYMENT')
   return { deploymentId: value.deploymentId, targetReleaseDigest: value.targetReleaseDigest, expectedRouteGeneration: Number(value.expectedRouteGeneration), fencingToken: value.fencingToken }
 }
 
 function plannedDeploymentPubliclyRouted(expected: NonNullable<import('@agent-kernel/shared').HostRestartAttempt['deployment']>): boolean {
-  const routePath = process.env.AGENT_RUNLAB_ROUTE_STATE?.trim()
-  const slot = process.env.AGENT_RUNLAB_SLOT?.trim()
+  const routePath = process.env.KALA_ROUTE_STATE?.trim()
+  const slot = process.env.KALA_SLOT?.trim()
   if (!routePath || (slot !== 'blue' && slot !== 'green')) return false
   try {
     const route = JSON.parse(readFileSync(routePath, 'utf8')) as { generation?: unknown; activeSlot?: unknown }
@@ -708,16 +711,16 @@ function buildSingleAdapter(provider: ProviderSpec, model: string): LLMAdapter {
 }
 
 function loadAuthConfig(): AuthConfig | undefined {
-  const githubRequired = process.env.HOST_GITHUB_OAUTH_REQUIRED === '1'
-  const executorTokens = parseExecutorTokens(process.env.EXECUTOR_TOKENS)
-  const sharedToken = process.env.HOST_AUTH_TOKEN
+  const githubRequired = process.env.KALA_GITHUB_OAUTH_REQUIRED === '1'
+  const executorTokens = parseExecutorTokens(process.env.KALA_EXECUTOR_TOKENS)
+  const sharedToken = process.env.KALA_AUTH_TOKEN
   const github = githubRequired
     ? {
         required: true,
         ...(process.env.GITHUB_CLIENT_ID ? { clientId: process.env.GITHUB_CLIENT_ID } : {}),
         ...(process.env.GITHUB_CLIENT_SECRET ? { clientSecret: process.env.GITHUB_CLIENT_SECRET } : {}),
         ...(process.env.GITHUB_OAUTH_CALLBACK_URL ? { callbackUrl: process.env.GITHUB_OAUTH_CALLBACK_URL } : {}),
-        ...(process.env.HOST_AUTH_SESSION_SECRET ? { sessionSecret: process.env.HOST_AUTH_SESSION_SECRET } : {}),
+        ...(process.env.KALA_AUTH_SESSION_SECRET ? { sessionSecret: process.env.KALA_AUTH_SESSION_SECRET } : {}),
         usernameWhitelist: (process.env.GITHUB_USERNAME_WHITELIST ?? '')
           .split(',')
           .map((s) => s.trim())
@@ -736,7 +739,7 @@ function parseExecutorTokens(raw: string | undefined): NonNullable<AuthConfig['e
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) throw new Error('EXECUTOR_TOKENS must be a JSON array')
+    if (!Array.isArray(parsed)) throw new Error('KALA_EXECUTOR_TOKENS must be a JSON array')
     return parsed.flatMap((item) => {
       if (!item || typeof item !== 'object') return []
       const rec = item as Record<string, unknown>
@@ -748,7 +751,7 @@ function parseExecutorTokens(raw: string | undefined): NonNullable<AuthConfig['e
       }]
     })
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'invalid EXECUTOR_TOKENS; ignoring scoped executor tokens')
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'invalid KALA_EXECUTOR_TOKENS; ignoring scoped executor tokens')
     return []
   }
 }
@@ -769,26 +772,26 @@ function joinPath(base: string, tail: string): string {
 /**
  * Environment-configured provider path used when no settings-file or catalog
  * provider is available. `KALA_PROVIDER` takes precedence; legacy
- * `AGENT_KERNEL_PROVIDER` remains accepted for existing deployments.
+ * `KALA_PROVIDER` remains accepted for existing deployments.
  * `policy-gateway` selects SGLang-backed live rollouts.
  */
 function environmentProviderAdapter(models: ModelInfo[]): LLMAdapter {
-  const provider = (process.env.KALA_PROVIDER ?? process.env.AGENT_KERNEL_PROVIDER ?? 'anthropic').toLowerCase()
+  const provider = (process.env.KALA_PROVIDER ?? process.env.KALA_PROVIDER ?? 'anthropic').toLowerCase()
   if (provider === 'policy-gateway') {
-    const baseUrl = process.env.AGENT_KERNEL_POLICY_BASE_URL
-    const model = process.env.AGENT_KERNEL_POLICY_MODEL ?? process.env.HOST_MODEL
+    const baseUrl = process.env.KALA_POLICY_BASE_URL
+    const model = process.env.KALA_POLICY_MODEL ?? process.env.HOST_MODEL
     if (!baseUrl || !model) {
-      fail('AGENT_KERNEL_PROVIDER=policy-gateway requires AGENT_KERNEL_POLICY_BASE_URL and AGENT_KERNEL_POLICY_MODEL')
+      fail('KALA_PROVIDER=policy-gateway requires KALA_POLICY_BASE_URL and KALA_POLICY_MODEL')
     }
     models.push(modelInfo(model, 'policy-gateway (SGLang)', { providerId: 'policy-gateway', source: 'env' }))
     return policyGatewayAdapter({
       baseUrl,
-      artifactRoot: process.env.AGENT_KERNEL_ARTIFACTS_DIR ?? join(homedir(), '.agent-kernel', 'artifacts'),
+      artifactRoot: process.env.KALA_ARTIFACTS_DIR ?? join(homedir(), '.kala', 'artifacts'),
       model,
-      ...(process.env.AGENT_KERNEL_POLICY_TOKENIZER ? { tokenizerPath: process.env.AGENT_KERNEL_POLICY_TOKENIZER } : {}),
-      ...(process.env.AGENT_KERNEL_POLICY_ROUTE_KEY ? { routeKey: process.env.AGENT_KERNEL_POLICY_ROUTE_KEY } : {}),
-      ...(process.env.AGENT_KERNEL_POLICY_WEIGHT_VERSION ? { weightVersion: process.env.AGENT_KERNEL_POLICY_WEIGHT_VERSION } : {}),
-      requireLogprobs: process.env.AGENT_KERNEL_POLICY_REQUIRE_LOGPROBS === '1',
+      ...(process.env.KALA_POLICY_TOKENIZER ? { tokenizerPath: process.env.KALA_POLICY_TOKENIZER } : {}),
+      ...(process.env.KALA_POLICY_ROUTE_KEY ? { routeKey: process.env.KALA_POLICY_ROUTE_KEY } : {}),
+      ...(process.env.KALA_POLICY_WEIGHT_VERSION ? { weightVersion: process.env.KALA_POLICY_WEIGHT_VERSION } : {}),
+      requireLogprobs: process.env.KALA_POLICY_REQUIRE_LOGPROBS === '1',
     })
   }
   const anthropicKey = process.env.ANTHROPIC_API_KEY
@@ -833,7 +836,7 @@ type DashboardServing =
   | { kind: 'none' }
 
 async function createDashboardServing(): Promise<DashboardServing> {
-  const override = process.env.DASHBOARD_DIR
+  const override = process.env.KALA_DASHBOARD_DIR
   if (override) {
     return existsSync(join(override, 'index.html'))
       ? { kind: 'static', staticDir: override }
@@ -860,8 +863,8 @@ async function createDashboardServing(): Promise<DashboardServing> {
 
 function embeddedDashboardAssets(): readonly EmbeddedStaticAsset[] {
   const globalValue = (globalThis as typeof globalThis & {
-    __AGENT_KERNEL_EMBEDDED_DASHBOARD__?: unknown
-  }).__AGENT_KERNEL_EMBEDDED_DASHBOARD__
+    __KALA_EMBEDDED_DASHBOARD__?: unknown
+  }).__KALA_EMBEDDED_DASHBOARD__
   if (!Array.isArray(globalValue)) return []
   const assets: EmbeddedStaticAsset[] = []
   for (const item of globalValue) {
@@ -876,8 +879,8 @@ function embeddedDashboardAssets(): readonly EmbeddedStaticAsset[] {
 
 function embeddedSocketAdminAssetsFromGlobal(): readonly EmbeddedSocketAdminAsset[] {
   const globalValue = (globalThis as typeof globalThis & {
-    __AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__?: unknown
-  }).__AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__
+    __KALA_EMBEDDED_SOCKET_ADMIN_UI__?: unknown
+  }).__KALA_EMBEDDED_SOCKET_ADMIN_UI__
   if (!Array.isArray(globalValue)) return []
   const assets: EmbeddedSocketAdminAsset[] = []
   for (const item of globalValue) {
@@ -892,8 +895,8 @@ function embeddedSocketAdminAssetsFromGlobal(): readonly EmbeddedSocketAdminAsse
 
 function embeddedReleaseAssetsFromGlobal(): readonly EmbeddedStaticAsset[] {
   const globalValue = (globalThis as typeof globalThis & {
-    __AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__?: unknown
-  }).__AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__
+    __KALA_EMBEDDED_RELEASE_ASSETS__?: unknown
+  }).__KALA_EMBEDDED_RELEASE_ASSETS__
   if (!Array.isArray(globalValue)) return []
   const assets: EmbeddedStaticAsset[] = []
   for (const item of globalValue) {
@@ -908,8 +911,8 @@ function embeddedReleaseAssetsFromGlobal(): readonly EmbeddedStaticAsset[] {
 
 function embeddedDocsFromGlobal(): readonly EmbeddedStaticAsset[] {
   const globalValue = (globalThis as typeof globalThis & {
-    __AGENT_KERNEL_EMBEDDED_DOCS__?: unknown
-  }).__AGENT_KERNEL_EMBEDDED_DOCS__
+    __KALA_EMBEDDED_DOCS__?: unknown
+  }).__KALA_EMBEDDED_DOCS__
   if (!Array.isArray(globalValue)) return []
   const assets: EmbeddedStaticAsset[] = []
   for (const item of globalValue) {
@@ -923,13 +926,13 @@ function embeddedDocsFromGlobal(): readonly EmbeddedStaticAsset[] {
 
 function runtimeBuildInfo(dashboard: DashboardServing, socketAdminAssets: readonly EmbeddedSocketAdminAsset[]): BuildInfo & { embeddedDashboardFiles?: number; embeddedSocketAdminFiles?: number } {
   const globalValue = (globalThis as typeof globalThis & {
-    __AGENT_KERNEL_BUILD_INFO__?: unknown
-  }).__AGENT_KERNEL_BUILD_INFO__
+    __KALA_BUILD_INFO__?: unknown
+  }).__KALA_BUILD_INFO__
   const base = parseBuildInfo(globalValue) ?? {
-    releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? 'local',
+    releaseTag: process.env.KALA_RELEASE_TAG ?? 'local',
     productVersion: VERSION,
-    gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown',
-    builtAt: process.env.AGENT_KERNEL_BUILT_AT ?? 'unknown',
+    gitCommit: process.env.KALA_GIT_COMMIT ?? 'unknown',
+    builtAt: process.env.KALA_BUILT_AT ?? 'unknown',
     artifactKind: 'source' as const,
     dashboardMode: dashboard.kind,
   }
@@ -994,8 +997,8 @@ async function createViteDashboardHandler(): Promise<
 }
 
 function isSourceDevRun(): boolean {
-  if (process.env.AGENT_KERNEL_DASHBOARD_DEV === '0') return false
-  if (process.env.AGENT_KERNEL_DASHBOARD_DEV === '1') return true
+  if (process.env.KALA_DASHBOARD_DEV === '0') return false
+  if (process.env.KALA_DASHBOARD_DEV === '1') return true
   return currentModulePath().endsWith('.ts')
 }
 
@@ -1018,12 +1021,12 @@ function currentModulePath(): string {
 }
 
 function releaseSettings(port: number): NonNullable<ServerSettingsPayload['release']> {
-  const explicit = process.env.AGENT_KERNEL_RELEASE_BASE_URL?.trim()
+  const explicit = process.env.KALA_RELEASE_BASE_URL?.trim()
   if (explicit) {
     return { bootstrapBaseUrl: trimTrailingSlash(explicit), source: explicit.includes('github.com/') ? 'github' : 'local' }
   }
-  const repo = process.env.AGENT_KERNEL_UPDATE_REPO?.trim()
-  const tag = process.env.AGENT_KERNEL_RELEASE_TAG?.trim()
+  const repo = process.env.KALA_UPDATE_REPO?.trim()
+  const tag = process.env.KALA_RELEASE_TAG?.trim()
   if (repo) {
     const suffix = tag && tag !== 'latest' ? `releases/download/${tag}` : 'releases/latest/download'
     return { bootstrapBaseUrl: `https://github.com/${repo}/${suffix}`, source: 'github' }
@@ -1032,7 +1035,7 @@ function releaseSettings(port: number): NonNullable<ServerSettingsPayload['relea
 }
 
 function releaseDir(): string {
-  const explicit = process.env.AGENT_KERNEL_RELEASE_ASSETS_DIR?.trim()
+  const explicit = process.env.KALA_RELEASE_ASSETS_DIR?.trim()
   if (explicit) return resolve(explicit)
   const found = findReleaseDir([process.cwd(), dirname(currentModulePath())])
   return found ?? resolve(process.cwd(), 'release')

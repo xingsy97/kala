@@ -12,7 +12,7 @@
  *
  * Requires a session that already has at least one llm_response event on disk.
  * Uses the tool-call verify session id (or the last non-verify session) — pick
- * the newest jsonl in SESSIONS_DIR that has an llm_response.
+ * the newest jsonl in KALA_SESSIONS_DIR that has an llm_response.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -23,7 +23,7 @@ import puppeteer from 'puppeteer-core'
 const HOST_URL = process.env.HOST_URL ?? 'http://localhost:3000'
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? HOST_URL
 const CHROME = process.env.CHROME_PATH ?? '/usr/bin/google-chrome'
-const SESSIONS_DIR = process.env.SESSIONS_DIR ?? '/tmp/agent-kernel-e2e-sessions'
+const KALA_SESSIONS_DIR = process.env.KALA_SESSIONS_DIR ?? '/tmp/agent-kernel-e2e-sessions'
 
 let exitCode = 0
 const check = (name, pass, detail) => {
@@ -32,13 +32,13 @@ const check = (name, pass, detail) => {
 }
 
 // Pick the newest session file that contains an llm_response event.
-const files = readdirSync(SESSIONS_DIR)
+const files = readdirSync(KALA_SESSIONS_DIR)
   .filter((f) => f.endsWith('.jsonl'))
   .sort()
   .reverse()
 let targetSessionId = null
 for (const file of files) {
-  const raw = readFileSync(join(SESSIONS_DIR, file), 'utf8')
+  const raw = readFileSync(join(KALA_SESSIONS_DIR, file), 'utf8')
   if (raw.includes('"kind":"llm_response"')) {
     const match = file.match(/_(.+)\.jsonl$/)
     if (match) {

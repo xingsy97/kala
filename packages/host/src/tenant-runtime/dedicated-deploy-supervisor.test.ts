@@ -30,14 +30,14 @@ const localDevelopmentAssets = [
   'kala-release-metadata.tar.gz', 'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
 ]
 const legacyPredecessorAssets = [
-  'bundle-dashboard-with-runtime.cjs', 'agent-runlab-runtime.cjs', 'agent-kernel-executor.cjs',
-  'agent-runlab-dedicated-ingress.cjs', 'agent-runlab-dedicated-deploy-supervisor.cjs',
+  'bundle-dashboard-with-runtime.cjs', 'agent-runlab-runtime.cjs', 'kala-executor.cjs',
+  'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
   'agent-kernel-dashboard-dist.tar.gz', 'dashboard-release.json', 'agent-runlab-docs.tar.gz',
   'agent-runlab-model-catalog-seed.json', 'run.sh', 'install-executor.sh',
-  'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@.service',
-  'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service', 'deployment.json', 'install-dedicated-systemd.mjs',
-  'runlab-dedicated.mjs', 'deploy-dedicated.mjs', 'deploy-dashboard.mjs', 'cutover-dedicated-systemd.mjs',
+  'kala-dedicated-ingress.service', 'kala-dedicated-unit@.service',
+  'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-control-updater.service',
+  'kala-dedicated-migration-finalizer.service', 'deployment.json', 'install-dedicated-systemd.mjs',
+  'kala-dedicated.mjs', 'deploy-dedicated.mjs', 'deploy-dashboard.mjs', 'cutover-dedicated-systemd.mjs',
   'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'update-dedicated-control-plane.mjs',
   'rollback-dedicated-systemd.mjs', 'sbom.cdx.json', 'THIRD_PARTY_NOTICES.txt',
 ]
@@ -95,11 +95,11 @@ async function legacyPredecessorRelease(dir: string, content: string, immutable 
   const manifest = JSON.stringify({
     name: 'kala', version: '0.2.0-rc.12', assets: legacyPredecessorAssets,
     fallbackAssets: {
-      'agent-kernel-host': 'bundle-dashboard-with-runtime.cjs',
+      'kala-host': 'bundle-dashboard-with-runtime.cjs',
       'agent-runlab-runtime': 'agent-runlab-runtime.cjs',
-      'agent-kernel-executor': 'agent-kernel-executor.cjs',
-      'agent-runlab-dedicated-ingress': 'agent-runlab-dedicated-ingress.cjs',
-      'agent-runlab-dedicated-deploy-supervisor': 'agent-runlab-dedicated-deploy-supervisor.cjs',
+      'kala-executor': 'kala-executor.cjs',
+      'kala-dedicated-ingress': 'kala-dedicated-ingress.cjs',
+      'kala-dedicated-deploy-supervisor': 'kala-dedicated-deploy-supervisor.cjs',
     },
   })
   const checksummed = new Map(legacyPredecessorAssets.map((name) => [name, name === 'agent-runlab-runtime.cjs' ? content : `${name}:${content}`]))

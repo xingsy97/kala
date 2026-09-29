@@ -23,7 +23,7 @@ const maps = new Map()
 for (const file of readdirSync(mapDir).filter((name) => name.endsWith('.js.map'))) {
   try { maps.set(file.slice(0, -4), await new SourceMapConsumer(JSON.parse(readFileSync(join(mapDir, file), 'utf8')))) } catch {}
 }
-if (maps.size === 0) throw new Error(`no source maps found in ${mapDir}; rebuild with RUNLAB_PROFILE_SOURCEMAP=1`)
+if (maps.size === 0) throw new Error(`no source maps found in ${mapDir}; rebuild with KALA_PROFILE_SOURCEMAP=1`)
 
 const reports = []
 for (const path of profiles) {

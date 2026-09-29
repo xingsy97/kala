@@ -6,8 +6,8 @@ import { join, normalize, posix } from 'node:path'
 import { unzipSync } from 'fflate'
 import { parse as parseJsonc } from 'jsonc-parser'
 
-const OPEN_VSX_BASE_URL = process.env.AGENT_KERNEL_OPEN_VSX_BASE_URL ?? 'https://open-vsx.org'
-const CACHE_DIR = process.env.AGENT_KERNEL_VSCODE_THEME_CACHE_DIR ?? join(homedir(), '.cache', 'agent-kernel', 'vscode-themes')
+const OPEN_VSX_BASE_URL = process.env.KALA_OPEN_VSX_BASE_URL ?? 'https://open-vsx.org'
+const CACHE_DIR = process.env.KALA_VSCODE_THEME_CACHE_DIR ?? join(homedir(), '.cache', 'agent-kernel', 'vscode-themes')
 const FETCH_TIMEOUT_MS = 15_000
 const MAX_JSON_BYTES = 2 * 1024 * 1024
 const MAX_VSIX_BYTES = 30 * 1024 * 1024

@@ -5,7 +5,7 @@
  * signed by the sender per request so browser push endpoints can trust the
  * origin. Keys come from three sources, in priority order:
  *
- * 1. AK_PUSH_VAPID_PUBLIC / AK_PUSH_VAPID_PRIVATE env vars.
+ * 1. KALA_PUSH_VAPID_PUBLIC / KALA_PUSH_VAPID_PRIVATE env vars.
  * 2. A JSON file at `<sessionsDir>/../push-vapid.json` — auto-generated the
  *    first time the host boots without env vars, so a fresh install starts
  *    working without a manual step. File is chmod 600.
@@ -14,7 +14,7 @@
  *
  * The subject (`mailto:` / `https://`) identifies the sender to push
  * services; browsers do not display it, but Firefox has been known to log
- * abuse reports against it. AK_PUSH_VAPID_SUBJECT overrides the default.
+ * abuse reports against it. KALA_PUSH_VAPID_SUBJECT overrides the default.
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -53,9 +53,9 @@ function normalizeSubject(subject: string | undefined | null): string {
 }
 
 export function loadOrCreateVapidKeys(sessionsDir: string): VapidKeys | null {
-  const envPublic = process.env.AK_PUSH_VAPID_PUBLIC?.trim()
-  const envPrivate = process.env.AK_PUSH_VAPID_PRIVATE?.trim()
-  const subject = normalizeSubject(process.env.AK_PUSH_VAPID_SUBJECT)
+  const envPublic = process.env.KALA_PUSH_VAPID_PUBLIC?.trim()
+  const envPrivate = process.env.KALA_PUSH_VAPID_PRIVATE?.trim()
+  const subject = normalizeSubject(process.env.KALA_PUSH_VAPID_SUBJECT)
 
   if (envPublic && envPrivate) {
     return { publicKey: envPublic, privateKey: envPrivate, subject }
@@ -65,7 +65,7 @@ export function loadOrCreateVapidKeys(sessionsDir: string): VapidKeys | null {
   // an unauditable configuration.
   if (envPublic || envPrivate) {
     // eslint-disable-next-line no-console -- surfaced once at boot for triage
-    console.warn('[push/vapid] both AK_PUSH_VAPID_PUBLIC and AK_PUSH_VAPID_PRIVATE must be set; ignoring partial env')
+    console.warn('[push/vapid] both KALA_PUSH_VAPID_PUBLIC and KALA_PUSH_VAPID_PRIVATE must be set; ignoring partial env')
   }
 
   const filePath = join(dirname(sessionsDir), 'push-vapid.json')

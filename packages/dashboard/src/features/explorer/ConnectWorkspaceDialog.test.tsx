@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ConnectWorkspaceDialog } from './ConnectWorkspaceDialog.js'
 
 const base = {
-  id: 'inst_1', platform: 'linux', mode: 'service', workspaceRoot: '__RUNLAB_CURRENT_DIRECTORY__',
+  id: 'inst_1', platform: 'linux', mode: 'service', workspaceRoot: '__KALA_CURRENT_DIRECTORY__',
   status: 'created', seq: 0, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:15:00Z',
-  command: "curl -fsSL 'http://localhost:3000/install' | RUNLAB_SETUP_CODE='A1B2C3D4E5' RUNLAB_INSTALL_MODE='service' sh", setupCode: 'A1B2C3D4E5',
+  command: "curl -fsSL 'http://localhost:3000/install' | KALA_SETUP_CODE='A1B2C3D4E5' KALA_INSTALL_MODE='service' sh", setupCode: 'A1B2C3D4E5',
 }
 
 function response(body: unknown, ok = true): Response {
@@ -33,7 +33,7 @@ describe('ConnectWorkspaceDialog', () => {
             ...base,
             id: 'inst_2',
             ...input,
-            command: "curl -fsSL 'http://localhost:3000/install' | RUNLAB_SETUP_CODE='F6E7D8C9B0' RUNLAB_INSTALL_MODE='temporary' sh",
+            command: "curl -fsSL 'http://localhost:3000/install' | KALA_SETUP_CODE='F6E7D8C9B0' KALA_INSTALL_MODE='temporary' sh",
             setupCode: 'F6E7D8C9B0',
           })
         }
@@ -79,7 +79,7 @@ describe('ConnectWorkspaceDialog', () => {
     expect(command).toContain('/install')
     expect(command).toContain('A1B2C3D4E5')
     expect(command).not.toContain('\n')
-    expect(command).not.toMatch(/sudo|systemctl|launchctl|sc\.exe|agent-kernel-executor|ak_install_/i)
+    expect(command).not.toMatch(/sudo|systemctl|launchctl|sc\.exe|kala-executor|ak_install_/i)
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('executor-invites'))).toBe(false)
   })
 
@@ -90,7 +90,7 @@ describe('ConnectWorkspaceDialog', () => {
     fireEvent.click(screen.getByTestId('connect-workspace-macos'))
     fireEvent.click(screen.getByTestId('connect-workspace-temporary'))
     await waitFor(() => expect(screen.getByText(/F6E7D8C9B0/)).toBeTruthy())
-    expect(screen.getByTestId('executor-terminal-command').textContent).toContain("RUNLAB_INSTALL_MODE='temporary'")
+    expect(screen.getByTestId('executor-terminal-command').textContent).toContain("KALA_INSTALL_MODE='temporary'")
     expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs' && init?.method === 'POST' && String(init.body).includes('temporary'))).toBe(true)
     expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs/inst_1' && init?.method === 'DELETE')).toBe(true)
     fireEvent.click(screen.getByTestId('copy-executor-command'))

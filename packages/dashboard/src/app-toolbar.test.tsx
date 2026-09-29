@@ -187,7 +187,7 @@ describe('desktop sidebar controls', () => {
 
 describe('WorkbenchToolbar', () => {
   it('provides one in-row mount slot for native Desktop window controls in both placements', () => {
-    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    Object.defineProperty(window, '__KALA_DESKTOP__', { value: true, configurable: true })
     try {
       renderToolbar({ sessionSelected: true })
       renderToolbar({ sessionSelected: true, placement: 'topbar' })
@@ -198,7 +198,7 @@ describe('WorkbenchToolbar', () => {
         expect(slot.className).toContain('w-[132px]')
       }
     } finally {
-      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+      delete (window as Window & { __KALA_DESKTOP__?: boolean }).__KALA_DESKTOP__
     }
   })
 

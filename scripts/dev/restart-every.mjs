@@ -6,7 +6,7 @@ const DEFAULT_INTERVAL_MS = 180_000
 const DEFAULT_KILL_GRACE_MS = 5_000
 
 const args = process.argv.slice(2)
-let intervalMs = Number(process.env.AK_DEV_RESTART_MS ?? DEFAULT_INTERVAL_MS)
+let intervalMs = Number(process.env.KALA_DEV_RESTART_MS ?? DEFAULT_INTERVAL_MS)
 let killGraceMs = DEFAULT_KILL_GRACE_MS
 const separator = args.indexOf('--')
 

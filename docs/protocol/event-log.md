@@ -1,7 +1,7 @@
 # Event Log Format
 
 **Format**: JSONL (one JSON object per line, UTF-8, LF-terminated)
-**Storage**: `~/.agent-kernel/sessions/<iso-timestamp>_<sessionId>.jsonl`
+**Storage**: `~/.kala/sessions/<iso-timestamp>_<sessionId>.jsonl`
 **Status**: Normative.
 
 For Kernel sessions, the event log is the **canonical source of truth** and can
@@ -25,13 +25,13 @@ paths that opt in at the call site.
 ### 1.1 Path
 
 ```
-~/.agent-kernel/sessions/<startedAt>_<sessionId>.jsonl
+~/.kala/sessions/<startedAt>_<sessionId>.jsonl
 ```
 
 - `startedAt`: ISO 8601 timestamp with `:` replaced by `-`, e.g. `2026-07-04T17-30-15Z`
 - `sessionId`: ULID (26 chars, sortable, URL-safe alphabet)
 
-Example: `~/.agent-kernel/sessions/2026-07-04T17-30-15Z_01J1XZ8T4W9F2A3B4C5D6E7F8G.jsonl`
+Example: `~/.kala/sessions/2026-07-04T17-30-15Z_01J1XZ8T4W9F2A3B4C5D6E7F8G.jsonl`
 
 The path itself is not read back — only the file contents are authoritative. The naming aids listing and human debugging.
 

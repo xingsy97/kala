@@ -9,8 +9,8 @@ import { packageIdentity, root, run, verifyBuild } from './desktop-provenance.mj
 
 // This installs/removes the app: refuse anything except the task-owned disposable builder.
 if (hostname() !== 'runlab-desktop-builder' || process.getuid() !== 0
-    || process.env.RUNLAB_TEST_ONLY_APT !== 'isolated-builder') {
-  throw new Error('TEST ONLY: run as root inside task-owned runlab-desktop-builder with RUNLAB_TEST_ONLY_APT=isolated-builder')
+    || process.env.KALA_TEST_ONLY_APT !== 'isolated-builder') {
+  throw new Error('TEST ONLY: run as root inside task-owned runlab-desktop-builder with KALA_TEST_ONLY_APT=isolated-builder')
 }
 const [artifactArg] = process.argv.slice(2)
 if (!artifactArg) throw new Error('Provide a controlled locally-built candidate .deb')

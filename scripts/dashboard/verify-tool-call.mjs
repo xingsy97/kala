@@ -27,7 +27,7 @@ import puppeteer from 'puppeteer-core'
 const HOST_URL = process.env.HOST_URL ?? 'http://localhost:3000'
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? HOST_URL
 const CHROME = process.env.CHROME_PATH ?? '/usr/bin/google-chrome'
-const SESSIONS_DIR = process.env.SESSIONS_DIR ?? '/tmp/agent-kernel-e2e-sessions'
+const KALA_SESSIONS_DIR = process.env.KALA_SESSIONS_DIR ?? '/tmp/agent-kernel-e2e-sessions'
 const MODEL = process.env.VERIFY_MODEL ?? 'gpt-5.5'
 const SESSION_ID = process.env.VERIFY_SESSION_ID ?? '01JVERIFYTOOLCALLREAD00'
 const WORKSPACE = process.env.VERIFY_WORKSPACE ?? join(tmpdir(), `verify-tool-${SESSION_ID}`)
@@ -85,7 +85,7 @@ try {
   const warmupDeadline = Date.now() + 20_000
   let warmupOk = false
   while (Date.now() < warmupDeadline) {
-    const entries = readSessionEntries(SESSIONS_DIR, SESSION_ID)
+    const entries = readSessionEntries(KALA_SESSIONS_DIR, SESSION_ID)
     if (entries.some((e) => e.event.kind === 'llm_response')) {
       warmupOk = true
       break
@@ -104,7 +104,7 @@ try {
       '@agent-kernel/executor',
       'exec',
       'tsx',
-      'bin/agent-kernel-executor.ts',
+      'bin/kala-executor.ts',
     ],
     {
       cwd: REPO_ROOT,
@@ -148,7 +148,7 @@ try {
   const cutoff = Date.now() + 30_000
   let entries = []
   while (Date.now() < cutoff) {
-    entries = readSessionEntries(SESSIONS_DIR, SESSION_ID)
+    entries = readSessionEntries(KALA_SESSIONS_DIR, SESSION_ID)
     if (entries.some((e) => e.event.kind === 'tool_result')) break
     await sleep(500)
   }

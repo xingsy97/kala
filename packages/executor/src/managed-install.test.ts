@@ -10,8 +10,8 @@ describe('installManagedGeneration', () => {
   it('uses the bundled script rather than the Node.js runtime for fallback installs', () => {
     expect(managedInstallSourceExecutable('/usr/bin/node', './release/kala-executor.cjs'))
       .toBe(join(process.cwd(), 'release', 'kala-executor.cjs'))
-    expect(managedInstallSourceExecutable('/tmp/runlab-executor', '/tmp/ignored.cjs'))
-      .toBe('/tmp/runlab-executor')
+    expect(managedInstallSourceExecutable('/tmp/kala-executor', '/tmp/ignored.cjs'))
+      .toBe('/tmp/kala-executor')
     expect(() => managedInstallSourceExecutable('/usr/bin/node', undefined))
       .toThrow('missing its script path')
   })
@@ -29,7 +29,7 @@ describe('installManagedGeneration', () => {
       const repeated = installManagedGeneration(source, join(root, 'managed'), '1.2.3')
       expect(repeated.installed).toBe(false)
       expect(readFileSync(repeated.executable, 'utf8')).toBe('first')
-      expect(readFileSync(join(root, 'managed', 'current', 'runlab-executor'), 'utf8')).toBe('first')
+      expect(readFileSync(join(root, 'managed', 'current', 'kala-executor'), 'utf8')).toBe('first')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

@@ -1,0 +1,29 @@
+[Unit]
+Description=Kala Dedicated Control Plane Updater
+After=network-online.target kala-dedicated-ingress.service kala-dedicated-deploy-supervisor.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+Group=kala
+EnvironmentFile=-/etc/kala/supervisor.env
+Environment=KALA_CONTROL_CURRENT=/var/lib/kala/deploy/control-current
+Environment=KALA_CONTROL_UPDATER_CURRENT=/var/lib/kala/deploy/control-updater-current
+Environment=KALA_CONTROL_UPDATE_ROOT=/var/lib/kala/deploy/control-updates
+Environment=KALA_OPERATOR_STATUS=/var/lib/kala/deploy/operator-status.json
+Environment=KALA_INGRESS_READINESS=/run/kala/ingress-readiness.json
+ExecStart=/usr/bin/node /var/lib/kala/deploy/control-updater-current/update-dedicated-control-plane.mjs
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=0
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=-/run/kala/ingress-readiness.json
+ReadWritePaths=/var/lib/kala/deploy /etc/systemd/system /etc/kala
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077

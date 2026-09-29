@@ -2,7 +2,7 @@
  * Hooks system.
  *
  * Users configure "when event X happens, run command Y" in
- * `~/.config/agent-kernel/config.toml`. Supported events:
+ * `~/.config/kala/config.toml`. Supported events:
  *   - `pre_tool_use`   fired before every tool dispatch. Non-zero exit blocks
  *                      the tool call: the loop synthesizes a `tool_result`
  *                      with `ok: false` instead of dispatching to the executor.

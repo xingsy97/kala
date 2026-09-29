@@ -11,7 +11,7 @@ import { browserMetadata, resolveChrome, startProfileWindow, stopProfileWindow }
 const root = new URL('../..', import.meta.url).pathname
 const bundle = join(root, 'release', 'kala-dashboard-with-runtime.cjs')
 const executor = join(root, 'release', 'kala-executor.cjs')
-const hostPort = Number(process.env.PERF_STREAM_HOST_PORT ?? 3216)
+const hostPort = Number(process.env.PERF_STREAM_KALA_PORT ?? 3216)
 const providerPort = Number(process.env.PERF_STREAM_PROVIDER_PORT ?? 3217)
 const origin = `http://127.0.0.1:${hostPort}`
 const stateRoot = mkdtempSync(join(tmpdir(), 'runlab-stream-profile-'))
@@ -55,7 +55,7 @@ const provider=createServer(async(req,res)=>{
 try{
  if(!existsSync(bundle)||!existsSync(executor)||!chrome)throw new Error('production artifacts or Chromium missing')
  await new Promise(r=>provider.listen(providerPort,'127.0.0.1',r))
- host=spawn(process.execPath,[bundle],{cwd:root,env:{...process.env,HOME:home,HOST_LISTEN_HOST:'127.0.0.1',HOST_PORT:String(hostPort),SESSIONS_DIR:sessionsDir,EXECUTOR_TOKENS:JSON.stringify([{token}]),ANTHROPIC_API_KEY:'perf',ANTHROPIC_MODEL:'perf-model',ANTHROPIC_BASE_URL:`http://127.0.0.1:${providerPort}/v1/messages`},stdio:['ignore','pipe','pipe']});captureLogs('host',host)
+ host=spawn(process.execPath,[bundle],{cwd:root,env:{...process.env,HOME:home,KALA_BIND_HOST:'127.0.0.1',KALA_PORT:String(hostPort),KALA_SESSIONS_DIR:sessionsDir,KALA_EXECUTOR_TOKENS:JSON.stringify([{token}]),ANTHROPIC_API_KEY:'perf',ANTHROPIC_MODEL:'perf-model',ANTHROPIC_BASE_URL:`http://127.0.0.1:${providerPort}/v1/messages`},stdio:['ignore','pipe','pipe']});captureLogs('host',host)
  await waitHttp(`${origin}/settings`)
  executorProcess=spawn(executor,['--host',origin,'--sandbox-root',workspace],{cwd:workspace,env:{...process.env,HOME:stateRoot,HOST_URL:origin,EXECUTOR_TOKEN:token,WORKSPACE_NAME:'perf-stream-workspace'},stdio:['ignore','pipe','pipe']});captureLogs('executor',executorProcess)
  await waitFor(()=>processLogs.some(line=>line.includes('executor announced')),30000)

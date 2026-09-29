@@ -27,7 +27,7 @@ const base = { workspaceId: 'ws', sessionId: 'session' }
 
 describe('TerminalManager', () => {
   afterEach(() => {
-    delete process.env.AGENT_KERNEL_TERMINAL_DISABLE_PTY
+    delete process.env.KALA_TERMINAL_DISABLE_PTY
     vi.clearAllMocks()
   })
 
@@ -49,7 +49,7 @@ describe('TerminalManager', () => {
   })
 
   it('keeps one terminal per Session, replays a 1 MiB ring, and closes only that Session', async () => {
-    process.env.AGENT_KERNEL_TERMINAL_DISABLE_PTY = '1'
+    process.env.KALA_TERMINAL_DISABLE_PTY = '1'
     const manager = createTerminalManager({
       sandbox: { roots: [], resolve: async (path) => path },
       emitOutput: vi.fn(),
@@ -93,7 +93,7 @@ describe('TerminalManager', () => {
   })
 
   it('caps live terminal output and terminates chatty sessions', async () => {
-    process.env.AGENT_KERNEL_TERMINAL_DISABLE_PTY = '1'
+    process.env.KALA_TERMINAL_DISABLE_PTY = '1'
     const emitOutput = vi.fn()
     const manager = createTerminalManager({
       sandbox: { roots: [], resolve: async (path) => path },

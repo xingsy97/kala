@@ -77,7 +77,7 @@ If the browser has already saved the `.deb`, use **Install an already downloaded
 .deb** in the same dialog (also available on the standalone page). This command
 finds the exact version in the configured Downloads directory or current
 directory, including the observed underscore filename variant. For another
-path, set `RUNLAB_DESKTOP_PACKAGE` explicitly. It verifies a private temporary
+path, set `KALA_DESKTOP_PACKAGE` explicitly. It verifies a private temporary
 copy before making that copy readable to `_apt`, installs it and removes the
 temporary directory. It does not re-download the package or change permissions
 on the original file or home directory. Direct `sudo apt install
@@ -174,8 +174,8 @@ Checksums alone are not authenticity signatures.
 2. Set its full fingerprint and create a fresh staging repository:
 
    ```sh
-   export RUNLAB_APT_SIGNING_FINGERPRINT='FULL_EXISTING_KEY_FINGERPRINT'
-   export RUNLAB_APT_PUBLIC_URL='https://YOUR_APPROVED_REPOSITORY_ORIGIN/path'
+   export KALA_APT_SIGNING_FINGERPRINT='FULL_EXISTING_KEY_FINGERPRINT'
+   export KALA_APT_PUBLIC_URL='https://YOUR_APPROVED_REPOSITORY_ORIGIN/path'
    node scripts/release/publish-desktop-apt.mjs path/to/package.deb release/apt-staging
    ```
 
@@ -238,7 +238,7 @@ standalone package already benefits from signed APT updates.
 
 `scripts/release/verify-desktop-apt-test-only.mjs` refuses to run outside the
 task-owned `runlab-desktop-builder` or without
-`RUNLAB_TEST_ONLY_APT=isolated-builder`. Run as root **only in that disposable
+`KALA_TEST_ONLY_APT=isolated-builder`. Run as root **only in that disposable
 builder**, passing its controlled candidate `.deb`. It installs/removes the app,
 so it must never target a live Host or a user's workstation.
 
@@ -267,7 +267,7 @@ Dashboard, not a bundled local backend.
 The selected Dashboard alone may call:
 
 ```js
-const bridge = window.__RUNLAB_DESKTOP_BRIDGE__
+const bridge = window.__KALA_DESKTOP_BRIDGE__
 // bridge.version === 1
 await bridge.getInfo() // { version, focused, visible, notificationsAvailable?, trayAvailable? }
 // Only after the authenticated control connection and server:sessions snapshot:
@@ -329,11 +329,11 @@ native updater or OS update notification. Unsigned candidates remain labelled
 review-required. Native code never invokes sudo, apt or an updater privilege
 helper; browser credentials are not extracted or bypassed.
 
-Set `RUNLAB_DESKTOP_TEST_FEATURES=1` for the genuine GNOME test below to additionally
+Set `KALA_DESKTOP_TEST_FEATURES=1` for the genuine GNOME test below to additionally
 exercise real native notifications and their physical click action, active-view
 suppression, repeat launch/session links, persisted geometry across restarts,
 off-screen recovery and absence of duplicate native update notices.
-Set `RUNLAB_DESKTOP_REAL_DASHBOARD=1` as well for release acceptance: the script
+Set `KALA_DESKTOP_REAL_DASHBOARD=1` as well for release acceptance: the script
 starts `tests/native-dashboard-host.mjs` using the existing Host/tsx runner,
 serves the actual production Dashboard from `packages/dashboard/dist`, and
 drives real Host/Socket.IO session transitions through the installed bridge.
@@ -351,9 +351,9 @@ Use only an isolated native builder with `gnome-shell`, `gjs`,
 It uses its own X11 display/session bus/settings, physically clicks the GNOME
 panel icon, checks Mutter's `_NET_CLIENT_LIST` for taskbar withdrawal, verifies
 the same document/draft survives restoration, and disables/re-enables the real
-extension to exercise recovery. `RUNLAB_DESKTOP_EXPECT_BUG=1` reproduces the
+extension to exercise recovery. `KALA_DESKTOP_EXPECT_BUG=1` reproduces the
 shipped rc.3 GNOME close-and-exit bug; normal mode verifies the installed fixed
-candidate. Set `RUNLAB_DESKTOP_EVIDENCE` to a project-local evidence directory.
+candidate. Set `KALA_DESKTOP_EVIDENCE` to a project-local evidence directory.
 Coverage is GNOME Shell 46 / Ubuntu AppIndicator 58 on X11, not a claim about
 every GNOME release, Wayland, or the user's exact desktop environment.
 The isolated Shell uses `--unsafe-mode` only for test-driver inspection of
@@ -366,15 +366,15 @@ These test-session settings are not packaged or applied to users' desktops.
 binary** using ordinary GTK/X11 keyboard/mouse input: isolated remote page IPC
 denial, desktop marker, native save/cancel, menu-free windows, native keyboard
 reconnect/reload/quit, and no-tray normal close. With
-`RUNLAB_DESKTOP_TEST_TRAY=1`, a test-only session-bus watcher additionally verifies
+`KALA_DESKTOP_TEST_TRAY=1`, a test-only session-bus watcher additionally verifies
 native registration, hide/restore without reload, minimal tray actions, actual
 Quit, and recovery when the host, registration or watcher disappears.
 The fixture uses the existing Python GObject introspection package (`python3-gi`).
 Its small loopback fixture is ephemeral
-and exists only inside the builder. Set `RUNLAB_DESKTOP_LIVE_ORIGIN` to additionally
+and exists only inside the builder. Set `KALA_DESKTOP_LIVE_ORIGIN` to additionally
 reconnect to an already accessible live Host; the probe does not create a tunnel.
 It requires the existing Ubuntu packages `xvfb xdotool imagemagick dbus-x11`.
-Set `RUNLAB_DESKTOP_EVIDENCE` to a project-local output directory.
+Set `KALA_DESKTOP_EVIDENCE` to a project-local output directory.
 
 `verify-native.py` records additional WebKitWebDriver checks (same-origin API,
 Socket.IO health, local file input, PWA suppression, reconnect, file navigation

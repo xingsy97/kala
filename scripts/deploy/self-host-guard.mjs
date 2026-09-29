@@ -1,9 +1,9 @@
 export function assertSafeDeploymentInvocation({ env, supervisorInstalled }) {
-  const targetHost = normalizeOrigin(env.AK_DEPLOY_HOST_URL)
-  const originHost = normalizeOrigin(env.AGENT_RUNLAB_ORIGIN_HOST_URL)
-  const hostedSession = nonEmpty(env.AGENT_RUNLAB_SESSION_ID)
-  const hostedCall = nonEmpty(env.AGENT_RUNLAB_CALL_ID)
-  const explicitFreeze = truthy(env.AGENT_RUNLAB_SELF_HOSTED_DEPLOY_FORBIDDEN)
+  const targetHost = normalizeOrigin(env.KALA_DEPLOY_HOST_URL)
+  const originHost = normalizeOrigin(env.KALA_ORIGIN_HOST_URL)
+  const hostedSession = nonEmpty(env.KALA_SESSION_ID)
+  const hostedCall = nonEmpty(env.KALA_CALL_ID)
+  const explicitFreeze = truthy(env.KALA_SELF_HOSTED_DEPLOY_FORBIDDEN)
   const sameHost = Boolean(targetHost && originHost && targetHost === originHost)
 
   if ((explicitFreeze || sameHost) && hostedSession && hostedCall && !supervisorInstalled) {

@@ -6,11 +6,15 @@ import process from 'node:process'
 import { executeDedicatedDataMigration, planDedicatedDataMigration, probeDedicatedAtomicRename, rollbackDedicatedData } from './dedicated-data-migration.mjs'
 import { dedicatedSettingsFingerprint } from './dedicated-settings-fingerprint.mjs'
 
-const dataRoot = resolve(process.env.AGENT_RUNLAB_DATA_ROOT ?? '/var/lib/agent-runlab')
-const legacyService = process.env.AGENT_RUNLAB_LEGACY_SERVICE ?? 'agent-runlab-host.service'
-const activeUnitService = 'agent-runlab-dedicated-unit@blue.service'
-const services = [activeUnitService, 'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-deploy-supervisor.service']
-const rollbackServices = [...services, 'agent-runlab-dedicated-control-updater.service']
+const dataRoot = resolve(process.env.KALA_DATA_ROOT ?? '/var/lib/kala')
+const legacyServices = (process.env.KALA_LEGACY_SERVICES ?? process.env.KALA_LEGACY_SERVICE ?? 'agent-runlab-host.service')
+  .split(',').map((value) => value.trim()).filter(Boolean)
+if (legacyServices.length === 0 || new Set(legacyServices).size !== legacyServices.length
+  || legacyServices.some((value) => !/^[A-Za-z0-9@_.-]+\.service$/u.test(value))) throw new Error('KALA_LEGACY_SERVICES is invalid')
+const legacyRuntimeOrigin = loopbackOrigin(process.env.KALA_LEGACY_RUNTIME_ORIGIN ?? 'http://127.0.0.1:13000')
+const activeUnitService = 'kala-dedicated-unit@blue.service'
+const services = [activeUnitService, 'kala-dedicated-ingress.service', 'kala-dedicated-deploy-supervisor.service']
+const rollbackServices = [...services, 'kala-dedicated-control-updater.service']
 const receiptPath = join(dataRoot, 'deploy', 'migration-receipt.json')
 const forwardPhases = [
   'installed_disabled', 'boundary_reserved', 'legacy_stopped', 'data_migration_planned', 'data_migrated',
@@ -71,14 +75,20 @@ async function resumeCutover(initial) {
       receipt = await transition(receipt, 'boundary_reserved', { cleanInstall: true, legacyWasEnabled: false, boundaryReservedAt: new Date().toISOString() })
     } else {
       const legacySettingsFingerprint = await settingsFingerprint('http://127.0.0.1:13000/settings')
-      const legacyWasEnabled = await systemctlEnabled(legacyService)
+      const legacyServiceEnablement = Object.fromEntries(await Promise.all(
+        legacyServices.map(async (service) => [service, await systemctlEnabled(service)]),
+      ))
       await waitForLegacyBoundary()
-      receipt = await transition(receipt, 'boundary_reserved', { legacySettingsFingerprint, legacyWasEnabled, boundaryReservedAt: new Date().toISOString() })
+      receipt = await transition(receipt, 'boundary_reserved', {
+        legacySettingsFingerprint, legacyServiceEnablement,
+        legacyWasEnabled: Object.values(legacyServiceEnablement).some(Boolean),
+        boundaryReservedAt: new Date().toISOString(),
+      })
     }
   }
   if (at(receipt, 'boundary_reserved')) {
     await run('systemctl', ['daemon-reload'])
-    if (!receipt.cleanInstall) await run('systemctl', ['stop', legacyService])
+    if (!receipt.cleanInstall) await run('systemctl', ['stop', ...[...legacyServices].reverse()])
     receipt = await transition(receipt, 'legacy_stopped', { legacyStoppedAt: new Date().toISOString() })
   }
   if (at(receipt, 'legacy_stopped')) {
@@ -97,14 +107,14 @@ async function resumeCutover(initial) {
     receipt = await transition(receipt, 'unit_started', { unitStartedAt: new Date().toISOString() })
   }
   if (at(receipt, 'unit_started')) {
-    await run('systemctl', ['start', 'agent-runlab-dedicated-ingress.service'])
+    await run('systemctl', ['start', 'kala-dedicated-ingress.service'])
     await waitFor('http://127.0.0.1:13000/runtime/capabilities', isDedicatedCapabilities)
     const migratedSettingsFingerprint = await settingsFingerprint('http://127.0.0.1:13000/settings')
     if (!receipt.cleanInstall && migratedSettingsFingerprint !== receipt.legacySettingsFingerprint) throw new Error('sanitised provider/model settings fingerprint changed during migration')
     receipt = await transition(receipt, 'ingress_started', { migratedSettingsFingerprint, ingressStartedAt: new Date().toISOString() })
   }
   if (at(receipt, 'ingress_started')) {
-    await run('systemctl', ['start', 'agent-runlab-dedicated-deploy-supervisor.service'])
+    await run('systemctl', ['start', 'kala-dedicated-deploy-supervisor.service'])
     receipt = await transition(receipt, 'supervisor_started', { supervisorStartedAt: new Date().toISOString() })
   }
   if (at(receipt, 'supervisor_started')) {
@@ -112,11 +122,13 @@ async function resumeCutover(initial) {
     receipt = await transition(receipt, 'services_enabled', { servicesEnabledAt: new Date().toISOString() })
   }
   if (at(receipt, 'services_enabled')) {
-    if (!receipt.cleanInstall) await run('systemctl', ['disable', legacyService])
+    if (!receipt.cleanInstall) await run('systemctl', ['disable', ...legacyServices])
     receipt = await transition(receipt, 'legacy_disabled', { legacyDisabledAt: new Date().toISOString() })
   }
   if (at(receipt, 'legacy_disabled')) {
-    receipt = await transition(receipt, 'cutover_completed', { completedAt: new Date().toISOString(), previousService: legacyService })
+    receipt = await transition(receipt, 'cutover_completed', {
+      completedAt: new Date().toISOString(), previousService: legacyServices[0], previousServices: legacyServices,
+    })
   }
   return receipt
 }
@@ -136,9 +148,12 @@ async function resumeRollback(initial) {
       receipt = await transition(receipt, 'rolled_back', { rolledBackAt: new Date().toISOString(), cleanInstallStopped: true })
       return receipt
     }
-    if (receipt.legacyWasEnabled === true) await run('systemctl', ['enable', legacyService])
-    else if (receipt.legacyWasEnabled === false) await run('systemctl', ['disable', legacyService])
-    await run('systemctl', ['start', legacyService])
+    for (const service of legacyServices) {
+      const wasEnabled = receipt.legacyServiceEnablement?.[service] ?? receipt.legacyWasEnabled
+      if (wasEnabled === true) await run('systemctl', ['enable', service])
+      else if (wasEnabled === false) await run('systemctl', ['disable', service])
+    }
+    await run('systemctl', ['start', ...legacyServices])
     await waitFor('http://127.0.0.1:13000/runtime/capabilities', (body) => body !== null && typeof body === 'object')
     receipt = await transition(receipt, 'rolled_back', { rolledBackAt: new Date().toISOString() })
   }
@@ -148,16 +163,25 @@ async function resumeRollback(initial) {
 async function waitForLegacyBoundary() {
   const deadline = Date.now() + 60 * 60_000
   while (Date.now() < deadline) {
-    const quiescence = await fetch('http://127.0.0.1:13000/internal/runtime/quiescence', { signal: AbortSignal.timeout(5000) }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`quiescence returned ${response.status}`)))
+    const quiescence = await fetch(`${legacyRuntimeOrigin}/internal/runtime/quiescence`, { signal: AbortSignal.timeout(5000) }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`quiescence returned ${response.status}`)))
     if (quiescence.safe) {
-      const reserved = await fetch('http://127.0.0.1:13000/internal/runtime/cutover/reserve', { method: 'POST', signal: AbortSignal.timeout(120_000) })
+      const reserved = await fetch(`${legacyRuntimeOrigin}/internal/runtime/cutover/reserve`, { method: 'POST', signal: AbortSignal.timeout(120_000) })
       if (!reserved.ok) throw new Error(`cutover reservation returned ${reserved.status}: ${await reserved.text()}`)
       const result = await reserved.json()
       if (result.safe) return
     }
+
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 1000))
   }
   throw new Error('legacy Host did not reach a safe cutover boundary within one hour')
+}
+
+function loopbackOrigin(value) {
+  const url = new URL(value)
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('KALA_LEGACY_RUNTIME_ORIGIN must be an HTTP loopback origin')
+  }
+  return url.origin
 }
 
 async function settingsFingerprint(url) {

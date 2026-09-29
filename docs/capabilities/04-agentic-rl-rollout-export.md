@@ -126,19 +126,19 @@ is not a trajectory format and must remain an adapter-side index.
 Implemented local sidecar export command:
 
 ```bash
-agent-kernel-host enhancement rollout export-session \
+kala-host enhancement rollout export-session \
   --root-dir runs/rollouts \
-  --session-log ~/.agent-kernel/sessions/<session>.jsonl \
+  --session-log ~/.kala/sessions/<session>.jsonl \
   --task-id swebench:sympy__sympy-20590 \
   --framework slime \
   --model local-policy \
   --reward rewards/<session>.json
 
-agent-kernel-host enhancement rollout export-segments \
+kala-host enhancement rollout export-segments \
   --root-dir runs/rollouts \
-  --session-log ~/.agent-kernel/sessions/<session>.jsonl
+  --session-log ~/.kala/sessions/<session>.jsonl
 
-agent-kernel-host enhancement rollout export-adapter \
+kala-host enhancement rollout export-adapter \
   --root-dir runs/rollouts \
   --sidecar runs/rollouts/rollouts/<rollout_id>.json \
   --framework slime
@@ -247,21 +247,21 @@ gateway.
 
 The current RL implementation is correctly adapter-first:
 
-- `agent-kernel-host enhancement rollout export-session` writes a rollout
+- `kala-host enhancement rollout export-session` writes a rollout
   sidecar linking session log, trace, token segment artifact, reward artifact,
   target framework, model, and weight version.
-- `agent-kernel-host enhancement rollout export-segments` writes a conservative
+- `kala-host enhancement rollout export-segments` writes a conservative
   `rl-token-segments/<session_id>.json` artifact derived from the JSONL ledger.
 - Segment artifacts preserve event sequence links, source roles, estimated
   token counts, loss-mask intent, compaction metadata, subagent topology, and
   `tokenIdsCaptured=false` when real ids were not captured.
-- `agent-kernel-host enhancement rollout export-adapter --framework slime`
+- `kala-host enhancement rollout export-adapter --framework slime`
   emits a ready handoff manifest for custom rollout generation.
 - `--framework verl` is guarded: it only emits AgentLoopOutput-shaped data when
   a referenced token artifact contains real `prompt_ids`, `response_ids`,
   `response_mask`, and `tokenIdsCaptured=true`; otherwise it writes a blocked
   artifact with missing requirements.
-- `agent-kernel-host enhancement rollout verify-reward` reads a graded eval
+- `kala-host enhancement rollout verify-reward` reads a graded eval
   trial (`--trial <path>`) or scored session summary (`--score <path>`) and
   writes a canonical `rl_reward` artifact under `rl-rewards/<taskId>.json`.
   Reward is `1.0` when resolved, `0.0` otherwise; shaped labels reuse the

@@ -6,29 +6,29 @@ import { spawn } from 'node:child_process'
 import process from 'node:process'
 import { gunzipSync } from 'node:zlib'
 
-const deployRoot = resolve(process.env.AGENT_RUNLAB_DEPLOY_ROOT ?? '/var/lib/agent-runlab/deploy')
-const controlLink = resolve(process.env.AGENT_RUNLAB_CONTROL_CURRENT ?? join(deployRoot, 'control-current'))
-const updaterLink = resolve(process.env.AGENT_RUNLAB_CONTROL_UPDATER_CURRENT ?? join(deployRoot, 'control-updater-current'))
-const controlReleasesRoot = resolve(process.env.AGENT_RUNLAB_CONTROL_RELEASES_ROOT ?? join(deployRoot, 'control-releases'))
-const updateRoot = resolve(process.env.AGENT_RUNLAB_CONTROL_UPDATE_ROOT ?? join(deployRoot, 'control-updates'))
+const deployRoot = resolve(process.env.KALA_DEPLOY_ROOT ?? '/var/lib/kala/deploy')
+const controlLink = resolve(process.env.KALA_CONTROL_CURRENT ?? join(deployRoot, 'control-current'))
+const updaterLink = resolve(process.env.KALA_CONTROL_UPDATER_CURRENT ?? join(deployRoot, 'control-updater-current'))
+const controlReleasesRoot = resolve(process.env.KALA_CONTROL_RELEASES_ROOT ?? join(deployRoot, 'control-releases'))
+const updateRoot = resolve(process.env.KALA_CONTROL_UPDATE_ROOT ?? join(deployRoot, 'control-updates'))
 const requestsDir = join(updateRoot, 'requests')
 const receiptsDir = join(updateRoot, 'receipts')
 let receiptPath = ''
-const unitDir = resolve(process.env.AGENT_RUNLAB_SYSTEMD_DIR ?? '/etc/systemd/system')
-const deploymentConfig = resolve(process.env.AGENT_RUNLAB_DEPLOYMENT_CONFIG ?? '/etc/agent-runlab/deployment.json')
-const operatorStatusPath = resolve(process.env.AGENT_RUNLAB_OPERATOR_STATUS ?? join(deployRoot, 'operator-status.json'))
-const ingressReadinessPath = resolve(process.env.AGENT_RUNLAB_INGRESS_READINESS ?? '/run/agent-runlab/ingress-readiness.json')
-const systemctlBinary = resolve(process.env.AGENT_RUNLAB_SYSTEMCTL ?? '/usr/bin/systemctl')
-const chownBinary = resolve(process.env.AGENT_RUNLAB_CHOWN ?? '/usr/bin/chown')
+const unitDir = resolve(process.env.KALA_SYSTEMD_DIR ?? '/etc/systemd/system')
+const deploymentConfig = resolve(process.env.KALA_DEPLOYMENT_CONFIG ?? '/etc/kala/deployment.json')
+const operatorStatusPath = resolve(process.env.KALA_OPERATOR_STATUS ?? join(deployRoot, 'operator-status.json'))
+const ingressReadinessPath = resolve(process.env.KALA_INGRESS_READINESS ?? '/run/kala/ingress-readiness.json')
+const systemctlBinary = resolve(process.env.KALA_SYSTEMCTL ?? '/usr/bin/systemctl')
+const chownBinary = resolve(process.env.KALA_CHOWN ?? '/usr/bin/chown')
 const supportArchive = 'kala-dedicated-support.tar.gz'
 const supportManifest = 'dedicated-support-manifest.json'
 const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const units = [
-  { asset: 'kala-dedicated-ingress.service', legacyAsset: 'agent-runlab-dedicated-ingress.service', service: 'agent-runlab-dedicated-ingress.service' },
-  { asset: 'kala-dedicated-unit@.service', legacyAsset: 'agent-runlab-dedicated-unit@.service', service: 'agent-runlab-dedicated-unit@.service' },
-  { asset: 'kala-dedicated-deploy-supervisor.service', legacyAsset: 'agent-runlab-dedicated-deploy-supervisor.service', service: 'agent-runlab-dedicated-deploy-supervisor.service' },
-  { asset: 'kala-dedicated-control-updater.service', legacyAsset: 'agent-runlab-dedicated-control-updater.service', service: 'agent-runlab-dedicated-control-updater.service' },
-  { asset: 'kala-dedicated-migration-finalizer.service', legacyAsset: 'agent-runlab-dedicated-migration-finalizer.service', service: 'agent-runlab-dedicated-migration-finalizer.service' },
+  { asset: 'kala-dedicated-ingress.service', legacyAsset: 'agent-runlab-dedicated-ingress.service', service: 'kala-dedicated-ingress.service' },
+  { asset: 'kala-dedicated-unit@.service', legacyAsset: 'agent-runlab-dedicated-unit@.service', service: 'kala-dedicated-unit@.service' },
+  { asset: 'kala-dedicated-deploy-supervisor.service', legacyAsset: 'agent-runlab-dedicated-deploy-supervisor.service', service: 'kala-dedicated-deploy-supervisor.service' },
+  { asset: 'kala-dedicated-control-updater.service', legacyAsset: 'agent-runlab-dedicated-control-updater.service', service: 'kala-dedicated-control-updater.service' },
+  { asset: 'kala-dedicated-migration-finalizer.service', legacyAsset: 'agent-runlab-dedicated-migration-finalizer.service', service: 'kala-dedicated-migration-finalizer.service' },
 ]
 
 const transitions = {
@@ -79,20 +79,20 @@ async function nextRequest() {
 async function reconcile(receipt) {
   const target = await materializeControlRelease(receipt.targetReleaseId, receipt.targetReleaseDigest)
   await materializeControlRelease(receipt.predecessorReleaseId, receipt.predecessorReleaseDigest)
-  if (receipt.phase === 'requested') receipt = await transition(receipt, 'activating', { previousSupervisorPid: await servicePid('agent-runlab-dedicated-deploy-supervisor.service'), previousIngressPid: await servicePid('agent-runlab-dedicated-ingress.service') })
+  if (receipt.phase === 'requested') receipt = await transition(receipt, 'activating', { previousSupervisorPid: await servicePid('kala-dedicated-deploy-supervisor.service'), previousIngressPid: await servicePid('kala-dedicated-ingress.service') })
   if (receipt.phase === 'activating') {
     await installControlRelease(target)
     receipt = await transition(receipt, 'ingress_restarting', { activatedAt: new Date().toISOString() })
   }
   if (receipt.phase === 'ingress_restarting') {
-    if (await servicePid('agent-runlab-dedicated-ingress.service').catch(() => 0) === receipt.previousIngressPid) await systemctl('restart', 'agent-runlab-dedicated-ingress.service')
-    const ingressPid = await waitForNewPid('agent-runlab-dedicated-ingress.service', receipt.previousIngressPid)
+    if (await servicePid('kala-dedicated-ingress.service').catch(() => 0) === receipt.previousIngressPid) await systemctl('restart', 'kala-dedicated-ingress.service')
+    const ingressPid = await waitForNewPid('kala-dedicated-ingress.service', receipt.previousIngressPid)
     await waitForIngressReady(ingressPid)
     receipt = await transition(receipt, 'ingress_ready', { ingressPid })
   }
   if (receipt.phase === 'ingress_ready') receipt = await transition(receipt, 'supervisor_restarting', { supervisorRestartRequestedAt: new Date().toISOString() })
   if (receipt.phase === 'supervisor_restarting') {
-    if (await servicePid('agent-runlab-dedicated-deploy-supervisor.service').catch(() => 0) === receipt.previousSupervisorPid) await systemctl('restart', 'agent-runlab-dedicated-deploy-supervisor.service')
+    if (await servicePid('kala-dedicated-deploy-supervisor.service').catch(() => 0) === receipt.previousSupervisorPid) await systemctl('restart', 'kala-dedicated-deploy-supervisor.service')
     const supervisorPid = await waitForSupervisorReady(receipt.previousSupervisorPid, receipt.supervisorRestartRequestedAt)
     await activate(updaterLink, target)
     receipt = await transition(receipt, 'completed', { supervisorPid, readyAt: new Date().toISOString() })
@@ -106,13 +106,13 @@ async function rollback(receipt, cause) {
     if (receipt.phase !== 'rolling_back') receipt = await transition(receipt, 'rolling_back', { error: message })
     const predecessor = await materializeControlRelease(receipt.predecessorReleaseId, receipt.predecessorReleaseDigest)
     await installControlRelease(predecessor)
-    const ingressBefore = await servicePid('agent-runlab-dedicated-ingress.service').catch(() => 0)
-    await systemctl('restart', 'agent-runlab-dedicated-ingress.service')
-    const ingressPid = await waitForNewPid('agent-runlab-dedicated-ingress.service', ingressBefore)
+    const ingressBefore = await servicePid('kala-dedicated-ingress.service').catch(() => 0)
+    await systemctl('restart', 'kala-dedicated-ingress.service')
+    const ingressPid = await waitForNewPid('kala-dedicated-ingress.service', ingressBefore)
     await waitForIngressReady(ingressPid)
-    const supervisorBefore = await servicePid('agent-runlab-dedicated-deploy-supervisor.service').catch(() => 0)
+    const supervisorBefore = await servicePid('kala-dedicated-deploy-supervisor.service').catch(() => 0)
     const supervisorRestartRequestedAt = new Date().toISOString()
-    await systemctl('restart', 'agent-runlab-dedicated-deploy-supervisor.service')
+    await systemctl('restart', 'kala-dedicated-deploy-supervisor.service')
     const supervisorPid = await waitForSupervisorReady(supervisorBefore, supervisorRestartRequestedAt)
     await activate(updaterLink, predecessor)
     receipt = await transition(receipt, 'rolled_back', {
@@ -146,13 +146,13 @@ async function ensureIndependentDashboard(release) {
   // private to the service group while guaranteeing that it can traverse the
   // release parents. This also repairs directories created by older updaters
   // whose root UMask produced root:root 0700 parents.
-  await command(chownBinary, ['root:agent-runlab', dashboardRoot, releasesRoot])
+  await command(chownBinary, ['root:kala', dashboardRoot, releasesRoot])
   await chmod(dashboardRoot, 0o750)
   await chmod(releasesRoot, 0o750)
   try {
     const state = JSON.parse(await readFile(statePath, 'utf8'))
     if (state?.schemaVersion !== 1 || !Number.isSafeInteger(state.generation) || state.generation < 1 || !releaseId(state.releaseId) || !digest(state.releaseDigest)) throw new Error('existing Dashboard route state is invalid')
-    await command(chownBinary, ['root:agent-runlab', statePath])
+    await command(chownBinary, ['root:kala', statePath])
     await chmod(statePath, 0o640)
     return
   } catch (error) { if (error?.code !== 'ENOENT') throw error }
@@ -178,7 +178,7 @@ async function ensureIndependentDashboard(release) {
     await rename(incoming, target); await syncDirectory(dirname(target))
   } finally { await rm(incoming, { recursive: true, force: true }) }
   await writeAtomic(statePath, `${JSON.stringify({ schemaVersion: 1, generation: 1, releaseId: initialReleaseId, releaseDigest: sha256(manifestBytes), assetDigest: manifest.assetDigest, version: manifest.version, protocol: manifest.protocol, activatedAt: new Date().toISOString() }, null, 2)}\n`, 0o640)
-  await command(chownBinary, ['root:agent-runlab', statePath])
+  await command(chownBinary, ['root:kala', statePath])
 }
 
 async function verifyDashboardFiles(root, expected) {
@@ -405,7 +405,7 @@ async function waitForSupervisorReady(previousPid, restartRequestedAt) {
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     try {
-      const pid = await waitForPid('agent-runlab-dedicated-deploy-supervisor.service')
+      const pid = await waitForPid('kala-dedicated-deploy-supervisor.service')
       const status = JSON.parse(await readFile(operatorStatusPath, 'utf8'))
       if (pid !== previousPid && status?.schemaVersion === 1 && status.services?.supervisor?.pid === pid
         && timestamp(status.generatedAt) && Date.parse(status.generatedAt) >= Date.parse(restartRequestedAt)) return pid

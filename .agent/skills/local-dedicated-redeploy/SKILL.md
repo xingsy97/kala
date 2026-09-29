@@ -3,7 +3,7 @@ name: local-dedicated-redeploy
 description: Build, verify, and deploy the current Kala checkout to a local Dedicated LXD environment with a safe blue-green cutover.
 ---
 
-# Local Dedicated redeploy
+# Local Dedicated redeployment
 
 Use this procedure when asked to rebuild and redeploy the current checkout to a
 local Kala Dedicated environment. Never copy real hostnames, tokens, paths,
@@ -18,6 +18,9 @@ discovered non-secret values.
 - `<REPOSITORY_SLUG>`: release repository identifier, such as
   `owner/repository`.
 - `<DEPLOY_TIMEOUT_MS>`: bounded wait timeout, normally `600000`.
+- `<PUBLIC_LISTENERS>`: comma-separated host IP literals and ports.
+- `<PUBLIC_URLS>`: comma-separated exact or wildcard public URLs accepted by
+  Kala.
 
 Do not print environment files, credentials, message contents, or complete
 session records. Redact secrets from diagnostics and restrict inspection to
@@ -31,8 +34,8 @@ service state, release metadata, receipt phases, counts, and bounded errors.
    cd <REPOSITORY_ROOT>
    git status --short
    lxc exec <LXD_CONTAINER> -- systemctl --no-pager --full status \
-     agent-runlab-dedicated-ingress.service \
-     agent-runlab-dedicated-deploy-supervisor.service
+     kala-dedicated-ingress.service \
+     kala-dedicated-deploy-supervisor.service
    ```
 
 2. Install the frozen dependency graph in the build environment:
@@ -101,16 +104,32 @@ service state, release metadata, receipt phases, counts, and bounded errors.
    Ingress. Always complete this step when the requested redeploy includes UI
    changes.
 
-7. Verify both active routes and bounded service logs:
+7. Configure the public URL policy inside the container and the host-side LXD
+   listeners. This manages only `kala-public-*` proxy devices and must not
+   modify an independently managed reverse proxy, VPN, or tunnel:
+
+   ```bash
+   printf '%s\n' 'KALA_PUBLIC_URLS=<PUBLIC_URLS>' |
+     lxc exec <LXD_CONTAINER> -- sh -lc \
+       'umask 077; cat > /etc/kala/ingress.env'
+   lxc exec <LXD_CONTAINER> -- systemctl restart \
+     kala-dedicated-ingress.service
+   KALA_PUBLIC_LISTEN='<PUBLIC_LISTENERS>' \
+     node scripts/deploy/configure-lxd-public-listeners.mjs \
+       --lxd <LXD_CONTAINER>
+   ```
+
+8. Verify every configured route and bounded service logs:
 
    ```bash
    lxc exec <LXD_CONTAINER> -- sh -lc \
      'cat <DEPLOY_ROOT>/route-state.json &&
       cat <DEPLOY_ROOT>/dashboard/route-state.json &&
       curl -fsS <LOCAL_INGRESS_ORIGIN>/runtime/capabilities &&
-      journalctl -u agent-runlab-dedicated-unit@<ACTIVE_SLOT>.service \
+      journalctl -u kala-dedicated-unit@<ACTIVE_SLOT>.service \
         --since "<DEPLOY_STARTED_AT>" --no-pager |
         grep -Ei "<KNOWN_FAILURE_PATTERN>" && exit 1 || true'
+   curl -fsS <PUBLIC_ORIGIN>/healthz
    ```
 
 ## Upgrade compatibility

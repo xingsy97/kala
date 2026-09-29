@@ -31,8 +31,8 @@ try {
   harness.registerResource('state-root', stateRoot, async () => rmSync(stateRoot, { recursive: true, force: true }))
   await harness.step('start production Host bundle', async () => {
     const child = startProcess(bundle, [], { cwd: root, env: {
-      ...process.env, HOST_LISTEN_HOST: '0.0.0.0', HOST_PORT: String(port), SESSIONS_DIR: sessionsDir,
-      AGENT_KERNEL_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), ANTHROPIC_API_KEY: 'unused',
+      ...process.env, KALA_BIND_HOST: '0.0.0.0', KALA_PORT: String(port), KALA_SESSIONS_DIR: sessionsDir,
+      KALA_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), ANTHROPIC_API_KEY: 'unused',
     } })
     harness.registerProcess('production-host', child, hostLogs)
     await waitForHttp(`${localProbe}/install`)
@@ -44,11 +44,11 @@ try {
     await actor.page.goto(hostOrigin, { waitUntil: 'networkidle2' })
     await clickByTestId(actor.page, 'connect-workspace-button').catch(async () => clickByTestId(actor.page, 'no-session-connect-workspace'))
     await actor.page.waitForSelector('[data-testid="connect-workspace-dialog"]')
-    await actor.page.waitForFunction(() => (document.querySelector('[data-testid="executor-terminal-command"]')?.textContent ?? '').includes("RUNLAB_INSTALL_MODE='service'"))
+    await actor.page.waitForFunction(() => (document.querySelector('[data-testid="executor-terminal-command"]')?.textContent ?? '').includes("KALA_INSTALL_MODE='service'"))
     await clickByTestId(actor.page, 'connect-workspace-temporary')
-    await actor.page.waitForFunction(() => (document.querySelector('[data-testid="executor-terminal-command"]')?.textContent ?? '').includes("RUNLAB_INSTALL_MODE='temporary'"))
+    await actor.page.waitForFunction(() => (document.querySelector('[data-testid="executor-terminal-command"]')?.textContent ?? '').includes("KALA_INSTALL_MODE='temporary'"))
     const command = await actor.page.$eval('[data-testid="executor-terminal-command"] pre', (element) => element.textContent ?? '')
-    redactedCommand = command.replace(/RUNLAB_SETUP_CODE='[^']+'/u, "RUNLAB_SETUP_CODE='[REDACTED]'")
+    redactedCommand = command.replace(/KALA_SETUP_CODE='[^']+'/u, "KALA_SETUP_CODE='[REDACTED]'")
     return { command, redactedCommand }
   }, () => ({ command: redactedCommand }))
 
@@ -75,7 +75,7 @@ try {
 
   await harness.step('verify temporary Workspace online without service installation', async () => {
     await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]', { timeout: 30_000 })
-    const service = await runCommand('lxc', ['exec', container, '--', 'systemctl', 'is-enabled', 'runlab-executor.service'], { allowFailure: true })
+    const service = await runCommand('lxc', ['exec', container, '--', 'systemctl', 'is-enabled', 'kala-executor.service'], { allowFailure: true })
     if (service.code === 0) throw new Error('temporary mode unexpectedly installed a service')
     const snapshot = await fetch(`${localProbe}/api/executor-installs/${encodeURIComponent(installationId)}`).then((response) => response.json())
     if (snapshot.status !== 'completed' || snapshot.mode !== 'temporary') throw new Error(`unexpected installation snapshot: ${JSON.stringify(snapshot)}`)

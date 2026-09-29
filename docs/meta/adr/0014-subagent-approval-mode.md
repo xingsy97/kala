@@ -40,7 +40,7 @@ Sub-agents run headless. Every effective operator of a sub-agent is the parent a
 
 **Bad — deliberate:**
 - A parent set to `auto` or `ask` cannot enforce that same posture on its sub-agents. The security boundary is the *parent chain*: whoever authorized the top-level session has implicitly authorized any tool call any descendant makes.
-- The `AK_ALLOW_ALL_OK=1` env-gate on `allow_all` at the *dashboard-facing* API is bypassed for child sessions. This is intentional (the child is not human-facing), but worth noting for future security review.
+- The `KALA_ALLOW_ALL_OK=1` env-gate on `allow_all` at the *dashboard-facing* API is bypassed for child sessions. This is intentional (the child is not human-facing), but worth noting for future security review.
 - A malicious or buggy sub-agent prompt can execute arbitrary bash without a second confirmation. The mitigation today is the `maxAgentDepth` recursion guard and the sandboxed workspace roots — not per-call approval.
 
 **Follow-up:**

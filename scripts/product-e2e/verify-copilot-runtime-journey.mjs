@@ -5,13 +5,13 @@ import { io } from 'socket.io-client'
 
 import { ProductE2EHarness, clickByTestId, clickElement, hoverAncestorAndClickFirst, waitFor } from './harness.mjs'
 
-const origin = process.env.RUNLAB_URL ?? process.env.DASHBOARD_URL
-const sourceRevision = process.env.RUNLAB_REVISION
-const artifactDigest = process.env.RUNLAB_ARTIFACT_DIGEST
-const requestedWorkspaceId = process.env.RUNLAB_WORKSPACE_ID
-if (!origin) throw new Error('set RUNLAB_URL or DASHBOARD_URL to the production Kala origin')
+const origin = process.env.KALA_URL ?? process.env.DASHBOARD_URL
+const sourceRevision = process.env.KALA_REVISION
+const artifactDigest = process.env.KALA_ARTIFACT_DIGEST
+const requestedWorkspaceId = process.env.KALA_WORKSPACE_ID
+if (!origin) throw new Error('set KALA_URL or DASHBOARD_URL to the production Kala origin')
 if (!sourceRevision || !artifactDigest) {
-  throw new Error('set RUNLAB_REVISION and RUNLAB_ARTIFACT_DIGEST to the exact deployed production artifact evidence')
+  throw new Error('set KALA_REVISION and KALA_ARTIFACT_DIGEST to the exact deployed production artifact evidence')
 }
 
 const normalizedOrigin = origin.replace(/\/$/u, '')

@@ -31,7 +31,7 @@ export function SecuritySection({ payload }: { payload: ServerSettingsPayload })
         value: <span className="break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">{value}</span>,
       }))} />
       <div className="mt-4 rounded-md bg-muted/40 px-4 py-3 text-xs text-muted-foreground ring-1 ring-border/50">
-        <div className="break-words font-mono">HOST_GITHUB_OAUTH_REQUIRED, GITHUB_USERNAME_WHITELIST, EXECUTOR_TOKENS, HOST_AUDIT_DIR</div>
+        <div className="break-words font-mono">KALA_GITHUB_OAUTH_REQUIRED, GITHUB_USERNAME_WHITELIST, KALA_EXECUTOR_TOKENS, KALA_AUDIT_DIR</div>
       </div>
     </div>
   )

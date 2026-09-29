@@ -130,8 +130,8 @@ export function createMacosLaunchdService(
 
   const executablePath = options.executablePath ?? (
     options.architecture === 'arm64'
-      ? '/opt/homebrew/bin/runlab-executor'
-      : '/usr/local/bin/runlab-executor'
+      ? '/opt/homebrew/bin/kala-executor'
+      : '/usr/local/bin/kala-executor'
   )
   assertAbsolutePath('executablePath', executablePath)
 
@@ -141,7 +141,7 @@ export function createMacosLaunchdService(
   if (options.scope === 'system') {
     domain = 'system'
     plistPath = `/Library/LaunchDaemons/${label}.plist`
-    logDirectory = '/Library/Logs/Agent RunLab'
+    logDirectory = '/Library/Logs/Kala'
   } else {
     if (!Number.isSafeInteger(options.uid) || (options.uid ?? -1) < 0) {
       throw new Error('uid must be a non-negative integer for a user LaunchAgent')
@@ -150,7 +150,7 @@ export function createMacosLaunchdService(
     assertAbsolutePath('homeDirectory', options.homeDirectory)
     domain = `gui/${options.uid}`
     plistPath = `${options.homeDirectory}/Library/LaunchAgents/${label}.plist`
-    logDirectory = `${options.homeDirectory}/Library/Logs/Agent RunLab`
+    logDirectory = `${options.homeDirectory}/Library/Logs/Kala`
   }
 
   const serviceTarget = `${domain}/${label}`

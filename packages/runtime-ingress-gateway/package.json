@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "agent-runlab-runtime-ingress": "./dist/src/bin/agent-runlab-runtime-ingress.js",
+    "kala-runtime-ingress": "./dist/src/bin/kala-runtime-ingress.js",
     "agent-runlab-control-plane-migrate": "./dist/src/bin/migrate-control-plane.js",
     "agent-runlab-control-plane-import-json": "./dist/src/bin/import-json-control.js"
   },

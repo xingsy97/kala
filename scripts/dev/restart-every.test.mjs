@@ -13,7 +13,7 @@ describe('restart-every', () => {
     expect(hostPkg.scripts.dev).toContain('tsx watch')
     expect(hostPkg.scripts.dev).toContain('--exclude "../dashboard/**"')
     expect(hostPkg.scripts.dev).not.toContain('restart-every.mjs')
-    expect(executorPkg.scripts.dev).toBe('tsx watch bin/agent-kernel-executor.ts')
+    expect(executorPkg.scripts.dev).toBe('tsx watch bin/kala-executor.ts')
     expect(executorPkg.scripts.dev).not.toContain('restart-every.mjs')
     expect(hostPkg.scripts['dev:restart']).toContain('restart-every.mjs')
     expect(executorPkg.scripts['dev:restart']).toContain('restart-every.mjs')

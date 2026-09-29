@@ -2,7 +2,7 @@
 // Install-time smoke for the pre-built release/ artifacts. Simulates a user who
 // downloads the embedded host asset into a clean directory, runs
 // `kala-dashboard-with-runtime.cjs` with only environment configuration (no repo source
-// tree and no DASHBOARD_DIR), and checks that the server boots and serves the
+// tree and no KALA_DASHBOARD_DIR), and checks that the server boots and serves the
 // embedded dashboard.
 //
 // Reads release/manifest.json to know which assets to install; fails if any
@@ -46,16 +46,16 @@ const hostCjs = join(installDir, 'kala-dashboard-with-runtime.cjs')
 
 const env = {
   ...process.env,
-  HOST_PORT: String(port),
-  SESSIONS_DIR: sessionsDir,
-  AGENT_KERNEL_ARTIFACTS_DIR: artifactsDir,
+  KALA_PORT: String(port),
+  KALA_SESSIONS_DIR: sessionsDir,
+  KALA_ARTIFACTS_DIR: artifactsDir,
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? 'smoke-key-not-used',
-  AK_ALLOW_ALL_OK: '0',
-  AGENT_RUNLAB_DEPLOYMENT_CONFIG: join(installDir, 'deployment.json'),
+  KALA_ALLOW_ALL_OK: '0',
+  KALA_DEPLOYMENT_CONFIG: join(installDir, 'deployment.json'),
 }
 delete env.HOME_INSTANCE
-delete env.HOST_AUTH_TOKEN
-delete env.DASHBOARD_DIR
+delete env.KALA_AUTH_TOKEN
+delete env.KALA_DASHBOARD_DIR
 
 const child = spawn('node', [hostCjs], { env, stdio: ['ignore', 'pipe', 'pipe'] })
 let stdout = ''

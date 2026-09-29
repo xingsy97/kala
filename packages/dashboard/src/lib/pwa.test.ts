@@ -25,7 +25,7 @@ function serviceWorkerHarness(): {
 
 describe('PWA standalone detection', () => {
   it('does not register or check service workers in the desktop webview', async () => {
-    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    Object.defineProperty(window, '__KALA_DESKTOP__', { value: true, configurable: true })
     try {
       const handlers = { onNeedRefresh: vi.fn(), onOfflineReady: vi.fn(), onRegistered: vi.fn() }
       const controller = initPwa(handlers)
@@ -34,7 +34,7 @@ describe('PWA standalone detection', () => {
       await controller.forceRefresh()
       expect(handlers.onRegistered).not.toHaveBeenCalled()
     } finally {
-      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+      delete (window as Window & { __KALA_DESKTOP__?: boolean }).__KALA_DESKTOP__
     }
   })
 

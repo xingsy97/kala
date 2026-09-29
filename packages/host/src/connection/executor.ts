@@ -447,7 +447,7 @@ export function createExecutorRegistry(
       // Case 2: different executorId but same workspaceId AND the previous
       // claimant is still actively attached (no detach in flight). A
       // *different* process is claiming the same workspace — duplicate
-      // `~/.agent-kernel/workspace-id` copied to another machine, or two
+      // `~/.kala/workspace-id` copied to another machine, or two
       // processes racing before the local lockfile takes effect.
       //
       // Arbitration: if the current claimant's socket is still connected,
@@ -464,7 +464,7 @@ export function createExecutorRegistry(
               `executor ${wsClaimant.announcement.executorId} ` +
               `(from ${wsClaimant.announcement.hostname ?? '?'}). ` +
               `Two executors cannot hold the same workspaceId simultaneously — ` +
-              `check for a duplicate ~/.agent-kernel/workspace-id file across machines.`,
+              `check for a duplicate ~/.kala/workspace-id file across machines.`,
           })
           // Server-initiated disconnect: the executor's socket.io client sees
           // this as `disconnect('io server disconnect')` and, with the retry

@@ -99,7 +99,7 @@ export async function seedGitWorkspace(
 
   let applied = false
   if (testPatch !== null) {
-    const patchPath = join(workspace, '.agent-kernel-test.patch')
+    const patchPath = join(workspace, '.kala-test.patch')
     await writeFile(patchPath, testPatch, 'utf8')
     const apply = await runner(['apply', '--index', patchPath], { cwd: workspace })
     if (apply.exitCode !== 0) {

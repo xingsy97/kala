@@ -48,7 +48,7 @@ describe('seedGitWorkspace', () => {
     expect(calls[3]?.[0]).toBe('apply')
     expect(calls[3]?.[1]).toBe('--index')
 
-    const patchOnDisk = await readFile(join(workspace, '.agent-kernel-test.patch'), 'utf8').catch((err) => err.code)
+    const patchOnDisk = await readFile(join(workspace, '.kala-test.patch'), 'utf8').catch((err) => err.code)
     expect(patchOnDisk).toBe('ENOENT')
   })
 

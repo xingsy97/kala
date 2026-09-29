@@ -172,8 +172,8 @@ Both are ack-response RPCs following the same pattern as `bg:list` / `fs:list_di
 Agent types are named `(systemPrompt, allowedTools?, model?, description)` bundles resolved at spawn time. Definition sources, in priority order (higher wins on name collision):
 
 1. **Inline in the `agent` tool call** — the parent passes `{ agent_type: 'researcher' }` and the type is looked up in the registry. If `agent_type` is omitted, we use a generic fallback ("general-purpose" — same system prompt as the parent, all tools).
-2. **Workspace-local** — `.agent-kernel/agents/<name>.md` (walked up from `cwd`). Frontmatter + body, like Claude Code.
-3. **User-global** — `~/.config/agent-kernel/agents/<name>.md`.
+2. **Workspace-local** — `.kala/agents/<name>.md` (walked up from `cwd`). Frontmatter + body, like Claude Code.
+3. **User-global** — `~/.config/kala/agents/<name>.md`.
 4. **Built-ins** — a small set shipped in `packages/host/src/agent-types/*.md`, initially just `general-purpose`, `Explore`, `Plan` for parity with the reference designs.
 
 Frontmatter schema:
@@ -200,7 +200,7 @@ Spawn a sub-agent to handle a focused sub-task. Available agent_type values:
   - general-purpose (default): general reasoning + all tools
   - Explore: fast read-only research (no write/edit/bash tools)
   - Plan: architectural planning; produces a plan, does not execute
-  - <workspace-local types loaded from .agent-kernel/agents/>
+  - <workspace-local types loaded from .kala/agents/>
 ```
 
 This keeps the LLM oriented without needing per-type separate tools (Claude Code's pattern of exposing each type as its own tool inflates the tool schema for the parent).

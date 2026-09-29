@@ -10,8 +10,8 @@ import { createConfig } from '../../kernel/src/index.ts'
 
 assert.equal(hostname(), 'runlab-desktop-builder')
 const root = resolve(import.meta.dirname, '../../..')
-const output = process.env.RUNLAB_DESKTOP_EVIDENCE
-assert(output && process.env.RUNLAB_DESKTOP_PROBE_ORIGIN)
+const output = process.env.KALA_DESKTOP_EVIDENCE
+assert(output && process.env.KALA_DESKTOP_PROBE_ORIGIN)
 const config = createConfig({ systemPrompt: 'Isolated native acceptance; no prompts.', tools: [] })
 const http = createServer()
 await new Promise(done => http.listen(0, '127.0.0.1', done))
@@ -44,7 +44,7 @@ const host = await startHostServer({
           || (req.method === 'HEAD' && path.startsWith('/downloads/desktop/kala-desktop_99.'))) {
         const chunks = []
         for await (const chunk of req) chunks.push(chunk)
-        const reply = await fetch(`${process.env.RUNLAB_DESKTOP_PROBE_ORIGIN}${path}`, {
+        const reply = await fetch(`${process.env.KALA_DESKTOP_PROBE_ORIGIN}${path}`, {
           method: req.method, ...(req.method === 'POST' ? { body: Buffer.concat(chunks) } : {}),
         })
         res.writeHead(reply.status, { 'Content-Type': reply.headers.get('content-type') ?? 'application/json' })

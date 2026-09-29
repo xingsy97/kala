@@ -16,7 +16,7 @@ if (!args.length || args.includes('--help') || args.includes('-h')) {
 }
 const command = args[0]
 const transport = createTransport(args)
-const deployRoot = targetPath(option('--deploy-root') ?? '/var/lib/agent-runlab/deploy/dashboard')
+const deployRoot = targetPath(option('--deploy-root') ?? '/var/lib/kala/deploy/dashboard')
 if (command === 'stage') stage()
 else if (command === 'status') status(identity(positional(0)))
 else if (command === 'wait') await wait(identity(positional(0)))

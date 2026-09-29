@@ -54,9 +54,9 @@ export class ModelsDevCatalog {
 
   constructor(options: ModelsDevCatalogOptions = {}) {
     const cacheDir = join(homedir(), '.cache', 'agent-runlab', 'model-catalog')
-    this.url = options.url ?? process.env.AGENT_RUNLAB_MODELS_DEV_URL ?? DEFAULT_URL
-    this.seedPath = options.seedPath ?? process.env.AGENT_RUNLAB_MODELS_DEV_SEED ?? defaultSeedPath()
-    this.cachePath = options.cachePath ?? process.env.AGENT_RUNLAB_MODELS_DEV_CACHE ?? join(cacheDir, 'models-dev.json')
+    this.url = options.url ?? process.env.KALA_MODELS_DEV_URL ?? DEFAULT_URL
+    this.seedPath = options.seedPath ?? process.env.KALA_MODELS_DEV_SEED ?? defaultSeedPath()
+    this.cachePath = options.cachePath ?? process.env.KALA_MODELS_DEV_CACHE ?? join(cacheDir, 'models-dev.json')
     this.cacheMetadataPath = options.cacheMetadataPath ?? `${this.cachePath}.metadata.json`
     this.maxAgeMs = options.maxAgeMs ?? DEFAULT_MAX_AGE_MS
     this.fetchImpl = options.fetch ?? globalThis.fetch
@@ -77,7 +77,7 @@ export class ModelsDevCatalog {
   }
 
   async refresh(): Promise<LoadedModelCatalog | undefined> {
-    if (/^(?:1|true|yes)$/i.test(process.env.AGENT_RUNLAB_DISABLE_MODEL_CATALOG_REFRESH ?? '')) return undefined
+    if (/^(?:1|true|yes)$/i.test(process.env.KALA_DISABLE_MODEL_CATALOG_REFRESH ?? '')) return undefined
     const metadata = await readCacheMetadata(this.cacheMetadataPath)
     const headers = new Headers()
     if (metadata?.etag) headers.set('If-None-Match', metadata.etag)

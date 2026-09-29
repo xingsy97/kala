@@ -121,7 +121,7 @@ export function readGithubSession(req: IncomingMessage, config: GithubOAuthConfi
 }
 
 export function setGithubSessionCookie(res: ServerResponse, config: GithubOAuthConfig, session: GithubSession): void {
-  if (!config.sessionSecret) throw new Error('HOST_AUTH_SESSION_SECRET is required')
+  if (!config.sessionSecret) throw new Error('KALA_AUTH_SESSION_SECRET is required')
   const body = Buffer.from(JSON.stringify({ ...session, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 }), 'utf8').toString('base64url')
   const value = `${body}.${sign(body, config.sessionSecret)}`
   appendSetCookie(res, `${COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`)
@@ -160,7 +160,7 @@ export async function finishGithubOAuth(
   const tokenBody = await tokenResponse.json() as { access_token?: string; error_description?: string }
   if (!tokenResponse.ok || !tokenBody.access_token) return { ok: false, reason: tokenBody.error_description ?? 'github token exchange failed' }
   const userResponse = await fetch('https://api.github.com/user', {
-    headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${tokenBody.access_token}`, 'user-agent': 'agent-kernel-host' },
+    headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${tokenBody.access_token}`, 'user-agent': 'kala-host' },
   })
   const user = await userResponse.json() as { login?: string; id?: number; message?: string }
   if (!userResponse.ok || !user.login) return { ok: false, reason: user.message ?? 'github user lookup failed' }

@@ -8,20 +8,20 @@ systemd distribution of Kala Dedicated
 ## 1. Command surface
 
 The release bundle contains `kala-dedicated.mjs`. Installation publishes the
-same program as `/usr/local/bin/runlab-dedicated`. Operators use this entry point for installation and Runtime/control-plane lifecycle:
+same program as `/usr/local/bin/kala-dedicated`. Operators use this entry point for installation and Runtime/control-plane lifecycle:
 
 ```text
-runlab-dedicated install --release-dir <verified-release>
-runlab-dedicated status
-runlab-dedicated upgrade --release-dir <verified-release>
-runlab-dedicated rollback <deployment-id>
-runlab-dedicated backup --output <persistent-empty-directory>
-runlab-dedicated restore --backup <backup-directory> --confirm RESTORE:<backup-id>
-runlab-dedicated uninstall --confirm UNINSTALL:<installation-id>
+kala-dedicated install --release-dir <verified-release>
+kala-dedicated status
+kala-dedicated upgrade --release-dir <verified-release>
+kala-dedicated rollback <deployment-id>
+kala-dedicated backup --output <persistent-empty-directory>
+kala-dedicated restore --backup <backup-directory> --confirm RESTORE:<backup-id>
+kala-dedicated uninstall --confirm UNINSTALL:<installation-id>
 ```
 
 Legacy migrations select a non-default predecessor service through the private
-`/etc/agent-runlab/migration.env` file described by the migration runbook. The
+`/etc/kala/migration.env` file described by the migration runbook. The
 public command never rewrites an existing private environment file.
 
 The command runs locally on the target through an independent operator shell. It
@@ -35,7 +35,7 @@ restart endpoint, or maintain a second deployment state machine.
 The independent Dashboard has a separate release lane. From a source checkout use
 `pnpm run deploy:dashboard -- stage`; from a release bundle use
 `node deploy-dashboard.mjs stage`. Both support `status`, `wait`, `inspect`, and
-Dashboard rollback. `runlab-dedicated upgrade` does not advance Dashboard generation,
+Dashboard rollback. `kala-dedicated upgrade` does not advance Dashboard generation,
 and a Dashboard-only activation does not restart Ingress, Runtime, Sessions, or
 Executors.
 
@@ -110,15 +110,15 @@ explicit operator cleanup.
 `status` publishes a stable installation ID. Uninstall requires the exact
 `UNINSTALL:<installation-id>` confirmation, then stops and disables only the six
 Kala Dedicated units, removes only their exact unit files, the installed
-operator link, and the bounded `/opt/agent-runlab` control root. It preserves
-`/var/lib/agent-runlab`, `/etc/agent-runlab`, immutable releases, receipts,
+operator link, and the bounded `/opt/kala` control root. It preserves
+`/var/lib/kala`, `/etc/kala`, immutable releases, receipts,
 backups, service identity, and user data. This command has no data-purge mode.
 
 ## 7. Receipts and recovery
 
 Lifecycle receipts use a versioned schema, monotonic revision, explicit transition
 table, operation ID, timestamps, bounded redacted error, and target identities.
-They are durably atomically replaced under `/var/lib/agent-runlab-operator`; this
+They are durably atomically replaced under `/var/lib/kala-operator`; this
 root is outside the data root so restore cannot replace its own recovery authority.
 An incomplete receipt blocks a new lifecycle operation until the operator has
 inspected it and completed bounded recovery; it is never silently discarded or

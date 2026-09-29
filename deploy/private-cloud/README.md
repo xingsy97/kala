@@ -24,8 +24,8 @@ Profiles:
 docker compose --env-file deploy/identity/.secrets/deployment.env \
   -f deploy/identity/compose.yaml up -d --wait
 pnpm private-cloud:secrets
-RUNLAB_PROFILE=cloudflare pnpm private-cloud:check
-RUNLAB_PROFILE=cloudflare pnpm private-cloud:deploy
+KALA_PROFILE=cloudflare pnpm private-cloud:check
+KALA_PROFILE=cloudflare pnpm private-cloud:deploy
 ```
 
 The Platform Dashboard is a separate immutable container image behind Runtime Ingress. A
@@ -36,7 +36,7 @@ release manifest. Portable remains the sole distribution that embeds Dashboard a
 the Runtime executable.
 
 ```bash
-RUNLAB_PROFILE=cloudflare pnpm private-cloud:deploy-dashboard
+KALA_PROFILE=cloudflare pnpm private-cloud:deploy-dashboard
 ```
 
 Cloudflare Tunnel routes:
@@ -57,7 +57,7 @@ The default production storage remains the NFS server in the same Docker Compose
 ## Operational hardening
 
 All long-running services use bounded `json-file` logs and drop Linux capabilities.
-Run `RUNLAB_PROFILE=cloudflare node scripts/private-cloud-local/health-report.mjs` from monitoring.
+Run `KALA_PROFILE=cloudflare node scripts/private-cloud-local/health-report.mjs` from monitoring.
 Alert on non-zero exit, less than 5 GiB free space, unhealthy containers, PostgreSQL backup
 failure, or NFS health failure. Runtime egress is intentionally isolated on the `egress`
 network; enforce destination-level policy at the host firewall or an egress proxy. Production

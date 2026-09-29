@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
@@ -13,7 +13,7 @@ import type { InstallerSession } from './installer-session.js'
 const session: InstallerSession = {
   version: 1,
   mode: 'system',
-  executable: '/opt/agent-runlab/executor/current/runlab-executor',
+  executable: '/opt/kala/executor/current/kala-executor',
   host: 'https://agent.example.test',
   name: 'Build Box',
   sandboxRoots: ['/srv/work space'],
@@ -27,7 +27,7 @@ describe('Linux service adapter', () => {
       const privateSession: InstallerSession = {
         ...session,
         mode: 'user',
-        executable: join(root, 'runlab-executor'),
+        executable: join(root, 'kala-executor'),
         credential: { token: 'real-pipe-secret' },
       }
       const plan = createLinuxServicePlan('install', 'user', root, privateSession)
@@ -40,7 +40,7 @@ describe('Linux service adapter', () => {
       }
       expect(readFileSync(plan.paths.credential, 'utf8')).toBe('real-pipe-secret\n')
       expect(statSync(plan.paths.credential).mode & 0o777).toBe(0o600)
-      expect(readFileSync(plan.paths.unit, 'utf8')).toContain('runlab-executor')
+      expect(readFileSync(plan.paths.unit, 'utf8')).toContain('kala-executor')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -50,6 +50,7 @@ describe('Linux service adapter', () => {
     const rendered = renderLinuxServiceFiles(session, '/home/example')
     expect(rendered.unit).not.toContain('secret-value')
     expect(rendered.unit).toContain('Restart=always')
+    expect(rendered.unit).toContain(`Environment="PATH=${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"`)
     expect(rendered.unit).toContain('CPUQuota=400%')
     expect(rendered.unit).toContain('MemoryMax=8G')
     expect(rendered.unit).toContain('TasksMax=512')
@@ -70,31 +71,31 @@ describe('Linux service adapter', () => {
   })
 
   it('exposes status, logs, start, stop, restart, and uninstall service controls', () => {
-    expect(createLinuxServicePlan('status', 'user', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['--user', 'status', 'runlab-executor.service'] })
-    expect(createLinuxServicePlan('logs', 'user', '/home/example').commands[0]).toMatchObject({ file: 'journalctl', args: ['--user', '--unit', 'runlab-executor.service', '--follow'] })
-    expect(createLinuxServicePlan('start', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['start', 'runlab-executor.service'] })
-    expect(createLinuxServicePlan('stop', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['stop', 'runlab-executor.service'] })
-    expect(createLinuxServicePlan('restart', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['restart', 'runlab-executor.service'] })
+    expect(createLinuxServicePlan('status', 'user', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['--user', 'status', 'kala-executor.service'] })
+    expect(createLinuxServicePlan('logs', 'user', '/home/example').commands[0]).toMatchObject({ file: 'journalctl', args: ['--user', '--unit', 'kala-executor.service', '--follow'] })
+    expect(createLinuxServicePlan('start', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['start', 'kala-executor.service'] })
+    expect(createLinuxServicePlan('stop', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['stop', 'kala-executor.service'] })
+    expect(createLinuxServicePlan('restart', 'system', '/home/example').commands[0]).toMatchObject({ file: 'systemctl', args: ['restart', 'kala-executor.service'] })
     expect(createLinuxServicePlan('uninstall', 'system', '/home/example').commands.some((command) => command.args.includes('disable'))).toBe(true)
   })
 
   it('installs a separate persistent updater timer for managed generations', () => {
     const managed: InstallerSession = {
       ...session,
-      managedRoot: '/var/lib/runlab-executor',
+      managedRoot: '/var/lib/kala/executor',
       update: {
         manifestUrl: 'https://agent.example.test/install/assets/executor-update-manifest.json',
-        publicKeyFile: '/var/lib/runlab-executor/update-public-key.pem',
+        publicKeyFile: '/var/lib/kala/executor/update-public-key.pem',
         channel: 'stable',
         intervalMinutes: 60,
       },
     }
     const rendered = renderLinuxServiceFiles(managed, '/home/example')
-    expect(rendered.unit).toContain('/current/runlab-executor')
+    expect(rendered.unit).toContain('/current/kala-executor')
     expect(rendered.updateUnit).toContain('update apply --config')
     expect(rendered.updateTimer).toContain('Persistent=true')
     const plan = createLinuxServicePlan('install', 'system', '/home/example', managed)
-    expect(plan.commands.some((command) => command.args.includes('runlab-executor-update.timer'))).toBe(true)
+    expect(plan.commands.some((command) => command.args.includes('kala-executor-update.timer'))).toBe(true)
   })
 
   it('restarts an existing managed service so a repeated install activates the new generation', () => {
@@ -102,10 +103,10 @@ describe('Linux service adapter', () => {
     const serviceCommands = plan.commands
       .filter((command) => command.file === 'systemctl')
       .map((command) => command.args.join(' '))
-    expect(serviceCommands).toContain('enable runlab-executor.service')
-    expect(serviceCommands).toContain('restart runlab-executor.service')
-    expect(serviceCommands).not.toContain('enable --now runlab-executor.service')
-    expect(serviceCommands.indexOf('enable runlab-executor.service')).toBeLessThan(serviceCommands.indexOf('restart runlab-executor.service'))
+    expect(serviceCommands).toContain('enable kala-executor.service')
+    expect(serviceCommands).toContain('restart kala-executor.service')
+    expect(serviceCommands).not.toContain('enable --now kala-executor.service')
+    expect(serviceCommands.indexOf('enable kala-executor.service')).toBeLessThan(serviceCommands.indexOf('restart kala-executor.service'))
   })
 })
 
@@ -124,12 +125,12 @@ function spawnCommand(command: { file: string; args: readonly string[]; stdin?: 
 
 describe('macOS service adapter', () => {
   it('renders safe system and user launchd definitions and rolls back writes', async () => {
-    const system = createMacosLaunchdService({ scope: 'system', architecture: 'arm64', configPath: '/Library/Application Support/Agent RunLab/配置.json', executablePath: '/opt/homebrew/bin/runlab-executor' })
-    expect(system.plist).toContain('/opt/homebrew/bin/runlab-executor')
+    const system = createMacosLaunchdService({ scope: 'system', architecture: 'arm64', configPath: '/Library/Application Support/Kala/配置.json', executablePath: '/opt/homebrew/bin/kala-executor' })
+    expect(system.plist).toContain('/opt/homebrew/bin/kala-executor')
     expect(system.plist).toContain('配置.json')
     expect(system.plist).not.toContain('token')
 
-    const user = createMacosLaunchdService({ scope: 'user', architecture: 'x64', uid: 501, homeDirectory: '/Users/Test User', configPath: '/Users/Test User/Library/Application Support/Agent RunLab/config.json' })
+    const user = createMacosLaunchdService({ scope: 'user', architecture: 'x64', uid: 501, homeDirectory: '/Users/Test User', configPath: '/Users/Test User/Library/Application Support/Kala/config.json' })
     expect(user.domain).toBe('gui/501')
     const operations: string[] = []
     await expect(executeLaunchdPlan(user.plans.install, async (operation) => {
@@ -143,7 +144,7 @@ describe('macOS service adapter', () => {
 
 describe('Windows service adapter', () => {
   it('quotes paths, excludes credentials, and executes only through the injected boundary', async () => {
-    const plan = createWindowsServicePlan({ serviceName: 'RunLabExecutor', programFiles: 'C:\\Program Files', programData: 'C:\\Program Data', executableName: 'runlab-executor.exe' })
+    const plan = createWindowsServicePlan({ serviceName: 'KalaExecutor', programFiles: 'C:\\Program Files', programData: 'C:\\Program Data', executableName: 'kala-executor.exe' })
     const create = plan.commands.find((command) => command.action === 'create')!
     expect(create.args.join(' ')).toContain('C:\\Program Files')
     expect(create.args.join(' ')).toContain('--config')

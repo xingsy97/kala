@@ -6,17 +6,17 @@ import { backupJsonControlFiles, importJsonControlPlan, planJsonControlImport } 
 import { createPostgresControlPlaneDatabase } from '../persistence/postgres.js'
 
 async function main(): Promise<void> {
-  const connectionString = process.env.RUNTIME_INGRESS_DATABASE_URL
-  const directoryPath = process.env.RUNTIME_INGRESS_JSON_DIRECTORY
-  if (!connectionString || !directoryPath) throw new Error('RUNTIME_INGRESS_DATABASE_URL and RUNTIME_INGRESS_JSON_DIRECTORY are required')
-  const sessionsPath = process.env.RUNTIME_INGRESS_JSON_SESSIONS
+  const connectionString = process.env.KALA_INGRESS_DATABASE_URL
+  const directoryPath = process.env.KALA_INGRESS_JSON_DIRECTORY
+  if (!connectionString || !directoryPath) throw new Error('KALA_INGRESS_DATABASE_URL and KALA_INGRESS_JSON_DIRECTORY are required')
+  const sessionsPath = process.env.KALA_INGRESS_JSON_SESSIONS
   const plan = await planJsonControlImport(resolve(directoryPath), sessionsPath ? resolve(sessionsPath) : undefined)
   if (plan.skippedExecutorInvites > 0) throw new Error('legacy Executor invites cannot be migrated safely; revoke them and issue new enrollment tokens')
   if (process.argv.includes('--dry-run')) {
     process.stdout.write(`${JSON.stringify({ event: 'json_control_import_plan', ...counts(plan), checksum: plan.checksum })}\n`)
     return
   }
-  const backupPrefix = resolve(process.env.RUNTIME_INGRESS_JSON_BACKUP_PREFIX ?? `${directoryPath}.pre-postgres-${Date.now()}`)
+  const backupPrefix = resolve(process.env.KALA_INGRESS_JSON_BACKUP_PREFIX ?? `${directoryPath}.pre-postgres-${Date.now()}`)
   const backupPath = await backupJsonControlFiles(resolve(directoryPath), backupPrefix, sessionsPath ? resolve(sessionsPath) : undefined)
   const database = createPostgresControlPlaneDatabase({ connectionString, applicationName: 'agent-runlab-json-control-import', maxConnections: 1 })
   try {

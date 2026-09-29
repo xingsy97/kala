@@ -172,7 +172,7 @@ describe('host loop', () => {
   let state: AgentState
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'agent-kernel-host-'))
+    dir = mkdtempSync(join(tmpdir(), 'kala-host-'))
     store = new SessionStore(dir)
     config = createConfig({ tools: [READ], systemPrompt: 'sys' })
     const record = await store.create({ config, sessionId: 'sess-1' })
@@ -748,7 +748,7 @@ describe('host loop', () => {
   })
 
   it('handles the skill builtin in host without dispatching to executor', async () => {
-    const skillsRoot = join(dir, '.agents', 'skills')
+    const skillsRoot = join(dir, '.agent', 'skills')
     const skillDir = join(skillsRoot, 'demo-skill')
     mkdirSync(skillDir, { recursive: true })
     writeFileSync(
@@ -827,7 +827,7 @@ describe('host loop', () => {
 
   it('keeps the skill Tool schema stable while listing a newly authored Skill', async () => {
     const workspace = join(dir, 'workspace')
-    const skillDir = join(workspace, '.agents', 'skills', 'fresh-skill')
+    const skillDir = join(workspace, '.agent', 'skills', 'fresh-skill')
     const skillPath = join(skillDir, 'SKILL.md')
     mkdirSync(workspace, { recursive: true })
     const skillConfig = createConfig({

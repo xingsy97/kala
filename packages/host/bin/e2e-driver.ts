@@ -24,9 +24,9 @@ import { startHostServer } from '../src/server.js'
 import { startExecutor } from '../../executor/src/client.js'
 
 const SESSION_ID = 'e2e-session'
-const HOST_PORT = 3111
+const KALA_PORT = 3111
 const WORKSPACE = mkdtempSync(join(tmpdir(), 'e2e-workspace-'))
-const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'e2e-sessions-'))
+const KALA_SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'e2e-sessions-'))
 
 function scriptedLlm(): LLMAdapter {
   const queue = [
@@ -67,8 +67,8 @@ function scriptedLlm(): LLMAdapter {
 
 async function main(): Promise<void> {
   const server = await startHostServer({
-    port: HOST_PORT,
-    sessionsDir: SESSIONS_DIR,
+    port: KALA_PORT,
+    sessionsDir: KALA_SESSIONS_DIR,
     llm: scriptedLlm(),
     defaultConfig: {
       tools: [
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
       port: server.port,
       sessionId: SESSION_ID,
       workspace: WORKSPACE,
-      sessionsDir: SESSIONS_DIR,
+      sessionsDir: KALA_SESSIONS_DIR,
       executorId: executor.executorId,
     }),
   )

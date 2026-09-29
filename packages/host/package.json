@@ -15,10 +15,10 @@
     }
   },
   "bin": {
-    "agent-kernel-host": "./dist/bin/agent-kernel-host.js",
-    "agent-runlab-runtime-service": "./dist/bin/agent-runlab-runtime-service.js",
-    "agent-runlab-dedicated-ingress": "./dist/bin/agent-runlab-dedicated-ingress.js",
-    "agent-runlab-dedicated-deploy-supervisor": "./dist/bin/agent-runlab-dedicated-deploy-supervisor.js"
+    "kala-host": "./dist/bin/kala-host.js",
+    "kala-runtime-service": "./dist/bin/kala-runtime-service.js",
+    "kala-dedicated-ingress": "./dist/bin/kala-dedicated-ingress.js",
+    "kala-dedicated-deploy-supervisor": "./dist/bin/kala-dedicated-deploy-supervisor.js"
   },
   "files": [
     "dist",
@@ -31,8 +31,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx watch --exclude \"../dashboard/**\" bin/agent-kernel-host.ts",
-    "dev:restart": "node ../../scripts/dev/restart-every.mjs --interval-ms 180000 -- tsx bin/agent-kernel-host.ts",
+    "dev": "tsx watch --exclude \"../dashboard/**\" bin/kala-host.ts",
+    "dev:restart": "node ../../scripts/dev/restart-every.mjs --interval-ms 180000 -- tsx bin/kala-host.ts",
     "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },
   "dependencies": {

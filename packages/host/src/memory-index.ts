@@ -68,10 +68,10 @@ export async function buildMemoryIndex(
   const warnings: string[] = []
   const entries: MemoryIndexEntry[] = []
   if (input.workspaceRoot) {
-    entries.push(...await readMemoryDir('workspace', join(input.workspaceRoot, '.agent-kernel', 'memory'), warnings))
+    entries.push(...await readMemoryDir('workspace', join(input.workspaceRoot, '.kala', 'memory'), warnings))
   }
   if (input.includeGlobal) {
-    entries.push(...await readMemoryDir('global', join(homedir(), '.agent-kernel', 'memory'), warnings))
+    entries.push(...await readMemoryDir('global', join(homedir(), '.kala', 'memory'), warnings))
   }
   entries.sort((a, b) => `${a.scope}:${a.key}`.localeCompare(`${b.scope}:${b.key}`))
   const now = input.now ? input.now() : new Date()

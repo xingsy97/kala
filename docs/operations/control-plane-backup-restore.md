@@ -14,8 +14,8 @@ Pilot objective: **RPO 15 minutes, RTO 4 hours**. Contracted production targets 
 ## Portable backup
 
 ```bash
-export RUNTIME_INGRESS_DATABASE_URL='postgresql://...'
-export RUNLAB_BACKUP_DIR=/secure/backup/control-plane
+export KALA_INGRESS_DATABASE_URL='postgresql://...'
+export KALA_BACKUP_DIR=/secure/backup/control-plane
 node scripts/private-cloud-local/backup-control-plane-postgres.mjs
 ```
 
@@ -23,7 +23,7 @@ The command requires PostgreSQL client tools matching or newer than the server m
 
 ## Disposable restore drill
 
-Create an empty disposable database, point `RUNTIME_INGRESS_DATABASE_URL` at it, then run:
+Create an empty disposable database, point `KALA_INGRESS_DATABASE_URL` at it, then run:
 
 ```bash
 node scripts/private-cloud-local/verify-control-plane-restore.mjs /secure/backup/control-plane/control-plane-TIMESTAMP.dump

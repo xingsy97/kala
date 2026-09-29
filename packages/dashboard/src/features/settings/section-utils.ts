@@ -9,7 +9,7 @@ import { resolveHostEndpoint } from '../../host-endpoint.js'
 /** The shell command an operator runs to attach a new executor with an invite. */
 export function executorSetupCommand(inviteToken: string): string {
   const hostUrl = resolveHostEndpoint().url
-  return `HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(inviteToken)} SANDBOX_ROOTS="$HOME" agent-kernel-executor`
+  return `HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(inviteToken)} SANDBOX_ROOTS="$HOME" kala-executor`
 }
 
 /** Extract a human error string from an unknown JSON error body, or null. */

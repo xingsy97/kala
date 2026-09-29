@@ -18,7 +18,7 @@ describe('memory index export', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
   it('indexes workspace memory metadata without reading it into kernel state', async () => {
-    const memoryDir = join(dir, '.agent-kernel', 'memory')
+    const memoryDir = join(dir, '.kala', 'memory')
     mkdirSync(memoryDir, { recursive: true })
     writeFileSync(join(memoryDir, 'user-style.md'), [
       '---',
@@ -47,7 +47,7 @@ describe('memory index export', () => {
   })
 
   it('indexes tombstoned memory entries for auditability', async () => {
-    const memoryDir = join(dir, '.agent-kernel', 'memory')
+    const memoryDir = join(dir, '.kala', 'memory')
     const tombstoneDir = join(memoryDir, '.tombstones')
     mkdirSync(tombstoneDir, { recursive: true })
     writeFileSync(join(tombstoneDir, 'old-rule.2026-07-09T00-00-00-000Z.md'), 'prefer yarn', 'utf8')
@@ -116,7 +116,7 @@ describe('memory index export', () => {
   })
 
   it('flags stale memories older than the threshold', async () => {
-    const memoryDir = join(dir, '.agent-kernel', 'memory')
+    const memoryDir = join(dir, '.kala', 'memory')
     mkdirSync(memoryDir, { recursive: true })
     writeFileSync(join(memoryDir, 'fresh.md'), [
       '---',
@@ -151,8 +151,8 @@ describe('memory index export', () => {
   })
 
   it('flags duplicate keys across workspace and global scopes as conflicts', async () => {
-    const workspaceMemoryDir = join(dir, '.agent-kernel', 'memory')
-    const globalMemoryDir = join(dir, 'home', '.agent-kernel', 'memory')
+    const workspaceMemoryDir = join(dir, '.kala', 'memory')
+    const globalMemoryDir = join(dir, 'home', '.kala', 'memory')
     mkdirSync(workspaceMemoryDir, { recursive: true })
     mkdirSync(globalMemoryDir, { recursive: true })
     writeFileSync(join(workspaceMemoryDir, 'style.md'), '---\nname: style\n---\nuse tabs', 'utf8')
@@ -178,7 +178,7 @@ describe('memory index export', () => {
   })
 
   it('does not flag tombstoned entries as stale or conflicting', async () => {
-    const memoryDir = join(dir, '.agent-kernel', 'memory')
+    const memoryDir = join(dir, '.kala', 'memory')
     const tombstoneDir = join(memoryDir, '.tombstones')
     mkdirSync(tombstoneDir, { recursive: true })
     writeFileSync(join(tombstoneDir, 'style.2025-01-01T00-00-00-000Z.md'), 'obsolete', 'utf8')

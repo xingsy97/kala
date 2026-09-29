@@ -41,7 +41,7 @@ Transport options:
   --local                    Operate on this system (default)
   --lxd <container>          Operate through the local LXD control plane
   --ssh <target>             Operate through SSH and scp
-  --deploy-root <path>       Default: /var/lib/agent-runlab/deploy
+  --deploy-root <path>       Default: /var/lib/kala/deploy
 
 Stage options:
   --release-dir <path>       Verified local release directory; default: release
@@ -49,7 +49,7 @@ Stage options:
   --operation-id <id>        Stable idempotency id; generated when omitted
   --deployment-id <id>       Stable deployment id; generated when omitted
   --origin-session <id> --origin-call <id>
-                              Defaults to AGENT_RUNLAB_SESSION_ID/CALL_ID inside a Tool
+                              Defaults to KALA_SESSION_ID/CALL_ID inside a Tool
   --skip-build               Reuse release assets after verification
   --local-development        Stage a repository-built localDevelopment release (local/LXD only)
   --legacy-local-development Stage the old asset set once to upgrade a pre-Copilot-runtime Supervisor
@@ -63,7 +63,7 @@ const command = args[0]
 if (args.includes('--local-development') && command !== 'stage') throw new Error('--local-development is a stage-only option')
 const positional = args.slice(1).filter((value, index, all) => !value.startsWith('--') && (index === 0 || !optionTakesValue(all[index - 1])))
 const transport = createTransport(args)
-const deployRoot = resolveTargetPath(optionValue(args, '--deploy-root') ?? '/var/lib/agent-runlab/deploy')
+const deployRoot = resolveTargetPath(optionValue(args, '--deploy-root') ?? '/var/lib/kala/deploy')
 
 if (command === 'stage') stage()
 else if (command === 'status') status(requiredIdentity(positional[0]))
@@ -123,8 +123,8 @@ function stage() {
     transport.stageRelease(releaseDir, stagedReleaseDir, release.files, release.sums)
     const deploymentId = optionValue(args, '--deployment-id') ?? 'deployment-' + randomUUID()
     assertIdentifier(deploymentId, 'deployment id')
-    const originSession = optionValue(args, '--origin-session') ?? process.env.AGENT_RUNLAB_SESSION_ID
-    const originCall = optionValue(args, '--origin-call') ?? process.env.AGENT_RUNLAB_CALL_ID
+    const originSession = optionValue(args, '--origin-session') ?? process.env.KALA_SESSION_ID
+    const originCall = optionValue(args, '--origin-call') ?? process.env.KALA_CALL_ID
     if (Boolean(originSession) !== Boolean(originCall)) throw new Error('origin Session and call identity must be supplied together')
     const request = {
       schemaVersion: 1, action: 'deploy', operationId, deploymentId, topology: 'dedicated-slots', unitId: 'local',
@@ -153,6 +153,8 @@ async function wait(identity) {
   const deadline = Date.now() + timeoutMs
   let lastRevision = -1
   while (Date.now() < deadline) {
+    const rejection = findRejection(identity)
+    if (rejection) throw new Error(`deployment request rejected: ${String(rejection.message ?? rejection.code ?? 'unknown reason')}`)
     try {
       const receipt = findReceipt(identity)
       if (receipt) {
@@ -176,7 +178,7 @@ function inspect() {
   const route = readRemoteJson(join(deployRoot, 'route-state.json'))
   validateRoute(route)
   const receipts = transport.list(join(deployRoot, 'receipts')).filter((name) => name.endsWith('.json')).map((name) => readRemoteJson(join(deployRoot, 'receipts', name))).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
-  const services = ['agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@blue.service', 'agent-runlab-dedicated-unit@green.service', 'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service']
+  const services = ['kala-dedicated-ingress.service', 'kala-dedicated-unit@blue.service', 'kala-dedicated-unit@green.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-control-updater.service']
   const processes = Object.fromEntries(services.map((service) => [service, transport.systemctl(service)]))
   const statusPath = join(deployRoot, 'operator-status.json')
   const operator = transport.exists(statusPath) ? readRemoteJson(statusPath) : undefined
@@ -261,8 +263,8 @@ function assertStageReplay(request, releaseDir = optionValue(args, '--release-di
   if (request.action !== 'deploy' || !request.operationIds?.includes?.(optionValue(args, '--operation-id')) && request.operationId !== optionValue(args, '--operation-id')) throw new Error('operationId conflicts with an existing deployment request')
   const explicitDeployment = optionValue(args, '--deployment-id')
   const explicitRelease = optionValue(args, '--release-id')
-  const explicitOrigin = optionValue(args, '--origin-session') ?? process.env.AGENT_RUNLAB_SESSION_ID
-  const explicitCall = optionValue(args, '--origin-call') ?? process.env.AGENT_RUNLAB_CALL_ID
+  const explicitOrigin = optionValue(args, '--origin-session') ?? process.env.KALA_SESSION_ID
+  const explicitCall = optionValue(args, '--origin-call') ?? process.env.KALA_CALL_ID
   if (explicitDeployment && request.deploymentId !== explicitDeployment) throw new Error('operationId conflicts with a different deployment id')
   if (explicitRelease && request.releaseId !== explicitRelease) throw new Error('operationId conflicts with a different release id')
   if (Boolean(explicitOrigin) !== Boolean(explicitCall)) throw new Error('origin Session and call identity must be supplied together')
@@ -280,6 +282,11 @@ function writeStageAccepted(request, replayed) {
 
 function writeMutationAccepted(request, replayed) {
   process.stdout.write(JSON.stringify({ accepted: true, replayed, action: request.action, operationId: request.operationId, deploymentId: request.deploymentId, targetDeploymentId: request.targetDeploymentId, expectedRouteGeneration: request.expectedRouteGeneration }, null, 2) + '\n')
+}
+
+function findRejection(identity) {
+  const path = join(deployRoot, 'requests', `${identity}.json.rejected.error`)
+  return transport.exists(path) ? readRemoteJson(path) : undefined
 }
 
 function findReceipt(identity) {

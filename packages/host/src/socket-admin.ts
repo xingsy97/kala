@@ -43,9 +43,9 @@ export function loadSocketAdminConfig(opts: {
   record: SocketAdminRecord | null
   embeddedAssets?: readonly EmbeddedSocketAdminAsset[]
 }): { runtime?: SocketAdminConfig; summary: SocketAdminSummary } {
-  const username = process.env.AGENT_KERNEL_SOCKET_ADMIN_USER?.trim() || DEFAULT_USERNAME
-  const envMode = process.env.AGENT_KERNEL_SOCKET_ADMIN_MODE === undefined ? undefined : parseMode(process.env.AGENT_KERNEL_SOCKET_ADMIN_MODE)
-  const path = normalizeMountPath(process.env.AGENT_KERNEL_SOCKET_ADMIN_PATH ?? DEFAULT_PATH)
+  const username = process.env.KALA_SOCKET_ADMIN_USER?.trim() || DEFAULT_USERNAME
+  const envMode = process.env.KALA_SOCKET_ADMIN_MODE === undefined ? undefined : parseMode(process.env.KALA_SOCKET_ADMIN_MODE)
+  const path = normalizeMountPath(process.env.KALA_SOCKET_ADMIN_PATH ?? DEFAULT_PATH)
   if (!opts.record) {
     const mode = envMode ?? DEFAULT_MODE
     return {
@@ -62,7 +62,7 @@ export function loadSocketAdminConfig(opts: {
   }
   const loadedUsername = opts.record.username || username
   const mode = envMode ?? opts.record.mode ?? DEFAULT_MODE
-  const explicitDist = process.env.AGENT_KERNEL_SOCKET_ADMIN_DIST?.trim()
+  const explicitDist = process.env.KALA_SOCKET_ADMIN_DIST?.trim()
   if (explicitDist) {
     const distDir = resolve(explicitDist)
     requireAdminDist(distDir)
@@ -79,7 +79,7 @@ export function loadSocketAdminConfig(opts: {
   }
   const distDir = findSocketAdminDist([process.cwd(), dirname(opts.currentModulePath)])
   if (!distDir) {
-    throw new Error('Socket.IO Admin UI dist is missing; run `pnpm prepare:socket-admin-ui` or set AGENT_KERNEL_SOCKET_ADMIN_DIST')
+    throw new Error('Socket.IO Admin UI dist is missing; run `pnpm prepare:socket-admin-ui` or set KALA_SOCKET_ADMIN_DIST')
   }
   requireAdminDist(distDir)
   return {
@@ -99,7 +99,7 @@ function parseMode(value: string | undefined): SocketAdminMode {
   if (!trimmed) return DEFAULT_MODE
   if (trimmed === 'development') return 'development'
   if (trimmed === 'production') return 'production'
-  throw new Error('AGENT_KERNEL_SOCKET_ADMIN_MODE must be production or development')
+  throw new Error('KALA_SOCKET_ADMIN_MODE must be production or development')
 }
 
 function activeSummary(input: {

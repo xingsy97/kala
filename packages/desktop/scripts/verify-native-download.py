@@ -12,7 +12,7 @@ import threading
 import time
 
 
-output = Path(os.environ.get("RUNLAB_DESKTOP_EVIDENCE", ".artifacts")).resolve()
+output = Path(os.environ.get("KALA_DESKTOP_EVIDENCE", ".artifacts")).resolve()
 output.mkdir(parents=True, exist_ok=True)
 runtime = output / "download-runtime"
 runtime.mkdir(mode=0o700, exist_ok=True)
@@ -26,7 +26,7 @@ logs = []
 requested = []
 browser_checks = []
 page_requests = []
-binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")
+binary = os.environ.get("KALA_DESKTOP_BINARY", "/usr/bin/kala-desktop")
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -50,11 +50,11 @@ class Fixture(BaseHTTPRequestHandler):
   let denied = false;
   try { await window.__TAURI__.core.invoke('connect', {endpoint:'https://example.org'}); }
   catch { denied = true; }
-  const bridge=window.__RUNLAB_DESKTOP_BRIDGE__;
+  const bridge=window.__KALA_DESKTOP_BRIDGE__;
   const info=await bridge.getInfo();
   await bridge.setActivity({status:'idle',running:0,attention:0,completed:0});
   document.dispatchEvent(new KeyboardEvent('keydown', {key:'O',ctrlKey:true,shiftKey:true,bubbles:true}));
-  await fetch('/checks', {method:'POST',body:JSON.stringify({remoteIpcDenied:denied,desktopMarker:window.__RUNLAB_DESKTOP__ === true,bridgeVersion:bridge.version,version:info.version})});
+  await fetch('/checks', {method:'POST',body:JSON.stringify({remoteIpcDenied:denied,desktopMarker:window.__KALA_DESKTOP__ === true,bridgeVersion:bridge.version,version:info.version})});
 })();
 </script>'''
             self.send_response(200)
@@ -413,7 +413,7 @@ try:
         time.sleep(0.1)
     assert len(page_requests) > count, "Reconnect did not navigate the existing dashboard"
     assert listening_ports() == baseline_ports, "Desktop created a listening TCP port"
-    live_origin = os.environ.get("RUNLAB_DESKTOP_LIVE_ORIGIN")
+    live_origin = os.environ.get("KALA_DESKTOP_LIVE_ORIGIN")
     if live_origin:
         xdo("windowfocus", dashboard)
         xdo("key", "ctrl+shift+o")
@@ -435,7 +435,7 @@ try:
     launcher = window_named("Kala.*Connect")
     close_window(launcher)
     assert app.wait(timeout=10) == 0
-    tray_checks = verify_tray() if os.environ.get("RUNLAB_DESKTOP_TEST_TRAY") == "1" else {}
+    tray_checks = verify_tray() if os.environ.get("KALA_DESKTOP_TEST_TRAY") == "1" else {}
     assert listening_ports() == baseline_ports
     evidence = {"nativeDownloadConfirmation": True, "cancelledWithoutWriting": True,
                 "binary": binary, "binarySha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),

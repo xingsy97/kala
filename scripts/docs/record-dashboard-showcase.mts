@@ -53,7 +53,7 @@ mkdirSync(captureFrames, { recursive: true })
 for (const item of WORKSPACES) {
   const root = workspaceRoots.get(item.id)!
   mkdirSync(root, { recursive: true })
-  writeFileSync(join(root, '.agent-kernel-workspace-id'), `${item.id}\n`)
+  writeFileSync(join(root, '.kala-workspace-id'), `${item.id}\n`)
   writeFileSync(join(root, 'SHOWCASE.md'), `# ${item.name} release workspace\n\nV3 fixture: isolated, reproducible, and browser-recorded.\n`)
   writeFileSync(join(root, 'release-status.json'), `${JSON.stringify({ machine: item.name, release: 'V3', checks: 'passing' }, null, 2)}\n`)
   mkdirSync(join(root, 'bin'))
@@ -84,10 +84,10 @@ async function main(): Promise<void> {
     await run(join(dashboardDir, 'node_modules/.bin/tsc'), ['-p', 'tsconfig.json'], 120_000, false, dashboardDir)
     await run(process.execPath, ['--max-old-space-size=6144', join(dashboardDir, 'node_modules/vite/bin/vite.js'), 'build'], 180_000, false, dashboardDir)
   }
-  host = start(process.execPath, [tsxCli, 'packages/host/bin/agent-kernel-host.ts'], {
-    HOST_PORT: String(PORT), SESSIONS_DIR: sessionsDir, DASHBOARD_DIR: join(ROOT, 'packages/dashboard/dist'),
-    AGENT_KERNEL_PROVIDER: 'openai', OPENAI_API_KEY: 'showcase-offline-not-used', HOST_MODEL: 'gpt-4o-mini',
-    EXECUTOR_TOKENS: JSON.stringify(WORKSPACES.map((item) => ({ token: item.token, workspaceId: item.id, label: item.name }))),
+  host = start(process.execPath, [tsxCli, 'packages/host/bin/kala-host.ts'], {
+    KALA_PORT: String(PORT), KALA_SESSIONS_DIR: sessionsDir, KALA_DASHBOARD_DIR: join(ROOT, 'packages/dashboard/dist'),
+    KALA_PROVIDER: 'openai', OPENAI_API_KEY: 'showcase-offline-not-used', HOST_MODEL: 'gpt-4o-mini',
+    KALA_EXECUTOR_TOKENS: JSON.stringify(WORKSPACES.map((item) => ({ token: item.token, workspaceId: item.id, label: item.name }))),
   }, hostLog)
   await waitForLog(hostLog, `host listening on http://127.0.0.1:${PORT}`, 30_000)
 
@@ -589,9 +589,9 @@ async function findByText(selector: string, text: string) {
 }
 function startExecutor(item: typeof WORKSPACES[number]): ChildProcess {
   const root = workspaceRoots.get(item.id)!
-  return start(process.execPath, [tsxCli, 'packages/executor/bin/agent-kernel-executor.ts'], {
-    HOST_URL, WORKSPACE_NAME: item.name, SANDBOX_ROOTS: root, AGENT_KERNEL_WORKSPACE_ID_FILE: join(root, '.agent-kernel-workspace-id'),
-    AGENT_KERNEL_EXECUTOR_PROFILE: `showcase-${item.name}-${process.pid}`,
+  return start(process.execPath, [tsxCli, 'packages/executor/bin/kala-executor.ts'], {
+    HOST_URL, WORKSPACE_NAME: item.name, SANDBOX_ROOTS: root, KALA_WORKSPACE_ID_FILE: join(root, '.kala-workspace-id'),
+    KALA_EXECUTOR_PROFILE: `showcase-${item.name}-${process.pid}`,
     EXECUTOR_TOKEN: item.token, PATH: `${join(root, 'bin')}:${process.env.PATH ?? '/usr/bin:/bin'}`,
   }, executorLog)
 }

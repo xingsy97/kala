@@ -26,7 +26,7 @@ export function resolveHostEndpoint(): ResolvedHostEndpoint {
     const stored = window.localStorage?.getItem(STORAGE_KEY)
     if (stored) return { url: normalize(stored), source: 'settings' }
   } catch {}
-  const buildTime = (import.meta.env?.VITE_AGENT_KERNEL_HOST as string | undefined)?.trim()
+  const buildTime = (import.meta.env?.VITE_KALA_HOST as string | undefined)?.trim()
   if (buildTime) return { url: normalize(buildTime), source: 'build' }
   return { url: window.location.origin, source: 'default' }
 }

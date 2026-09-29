@@ -84,7 +84,7 @@ describe('DesktopDownloadDialog', () => {
   })
 
   it('copies the full approved APT block and exposes clipboard failures without losing commands', async () => {
-    const commands = "bash <<'RUNLAB_DESKTOP_INSTALL'\nset -euo pipefail\n# Full approved fixture\nRUNLAB_DESKTOP_INSTALL"
+    const commands = "bash <<'KALA_DESKTOP_INSTALL'\nset -euo pipefail\n# Full approved fixture\nKALA_DESKTOP_INSTALL"
     vi.mocked(loadDesktopApt).mockResolvedValue(commands)
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })

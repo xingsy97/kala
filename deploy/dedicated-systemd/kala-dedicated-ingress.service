@@ -1,0 +1,39 @@
+[Unit]
+Description=Kala Dedicated Stable Ingress
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=kala
+Group=kala
+Environment=KALA_BIND_HOST=127.0.0.1
+Environment=KALA_PORT=13000
+Environment=KALA_PUBLIC_URLS=http://localhost:13000,http://127.0.0.1:13000
+EnvironmentFile=-/etc/kala/ingress.env
+Environment=KALA_ROUTE_STATE=/var/lib/kala/deploy/route-state.json
+Environment=KALA_ADMISSION_LEDGER=/var/lib/kala/admission/ledger.json
+Environment=KALA_CANDIDATE_STATE=/var/lib/kala/deploy/candidate-state.json
+Environment=KALA_OPERATOR_STATUS=/var/lib/kala/deploy/operator-status.json
+Environment=KALA_DEPLOYMENT_REQUESTS=/var/lib/kala/deploy/requests
+Environment=KALA_DASHBOARD_STATE=/var/lib/kala/deploy/dashboard/route-state.json
+Environment=KALA_DASHBOARD_RELEASES=/var/lib/kala/deploy/dashboard/releases
+Environment=KALA_INGRESS_READINESS=/run/kala/ingress-readiness.json
+EnvironmentFile=-/etc/kala/handoff.env
+ExecStartPre=/usr/bin/rm -f /run/kala/ingress-readiness.json
+ExecStart=/usr/bin/node /var/lib/kala/deploy/control-current/kala-dedicated-ingress.cjs
+Restart=always
+RestartSec=2s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/kala/deploy/route-state.json -/var/lib/kala/deploy/candidate-state.json -/var/lib/kala/deploy/operator-status.json /var/lib/kala/deploy/dashboard
+ReadWritePaths=/var/lib/kala/admission /var/lib/kala/deploy/requests
+RuntimeDirectory=kala
+RuntimeDirectoryPreserve=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

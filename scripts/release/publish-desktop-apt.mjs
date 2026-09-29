@@ -6,10 +6,10 @@ import { writeSignedRepository } from './desktop-apt-repository.mjs'
 import { aptInstallSnippet } from '../../packages/dashboard/public/downloads/desktop/apt-snippet.js'
 
 const [artifactArg, outputArg, ...extra] = process.argv.slice(2)
-const fingerprint = process.env.RUNLAB_APT_SIGNING_FINGERPRINT
-const installation = { schemaVersion: 1, url: process.env.RUNLAB_APT_PUBLIC_URL, fingerprint }
+const fingerprint = process.env.KALA_APT_SIGNING_FINGERPRINT
+const installation = { schemaVersion: 1, url: process.env.KALA_APT_PUBLIC_URL, fingerprint }
 if (!artifactArg || !outputArg || extra.length || !/^(?:[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64})$/.test(fingerprint ?? '')) {
-  throw new Error('Usage: RUNLAB_APT_SIGNING_FINGERPRINT=<existing full signing-key fingerprint> node scripts/release/publish-desktop-apt.mjs <locally-built-deb> <new-output-directory>. No key is generated.')
+  throw new Error('Usage: KALA_APT_SIGNING_FINGERPRINT=<existing full signing-key fingerprint> node scripts/release/publish-desktop-apt.mjs <locally-built-deb> <new-output-directory>. No key is generated.')
 }
 const artifact = resolve(artifactArg)
 const output = resolve(outputArg)

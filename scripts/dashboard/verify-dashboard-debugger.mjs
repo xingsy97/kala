@@ -160,7 +160,7 @@ try {
   console.log('fixture written', { sessionsDir, fixturePath })
   host = spawn('pnpm', ['--filter', '@agent-kernel/host', 'dev'], {
     cwd: repo,
-    env: { ...process.env, HOST_PORT: String(port), SESSIONS_DIR: sessionsDir, DASHBOARD_DIR: join(repo, 'packages/dashboard/dist') },
+    env: { ...process.env, KALA_PORT: String(port), KALA_SESSIONS_DIR: sessionsDir, KALA_DASHBOARD_DIR: join(repo, 'packages/dashboard/dist') },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   })

@@ -39,7 +39,7 @@ export function ConnectionSection(): JSX.Element {
       throw error
     }
   })
-  const crossOriginHelp = <>{t('settings.connection.crossOriginPrefix')}{' '}<code className="rounded bg-muted px-1">AGENT_KERNEL_ALLOWED_ORIGINS</code>.</>
+  const crossOriginHelp = <>{t('settings.connection.crossOriginPrefix')}{' '}<code className="rounded bg-muted px-1">KALA_PUBLIC_URLS</code>.</>
 
   const save = () => {
     setStoredHostEndpoint(draft.trim() === '' ? null : draft.trim())

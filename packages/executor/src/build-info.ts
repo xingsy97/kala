@@ -9,9 +9,9 @@ export type ExecutorBuildInfo = {
 }
 
 export function executorBuildInfo(): ExecutorBuildInfo {
-  const globalValue = (globalThis as typeof globalThis & { __AGENT_KERNEL_BUILD_INFO__?: unknown }).__AGENT_KERNEL_BUILD_INFO__
+  const globalValue = (globalThis as typeof globalThis & { __KALA_BUILD_INFO__?: unknown }).__KALA_BUILD_INFO__
   if (!isRecord(globalValue)) {
-    return { releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? packageJson.version, productVersion: packageJson.version, gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown', builtAt: 'unknown', artifactKind: 'source' }
+    return { releaseTag: process.env.KALA_RELEASE_TAG ?? packageJson.version, productVersion: packageJson.version, gitCommit: process.env.KALA_GIT_COMMIT ?? 'unknown', builtAt: 'unknown', artifactKind: 'source' }
   }
   return {
     releaseTag: typeof globalValue.releaseTag === 'string' ? globalValue.releaseTag : packageJson.version,

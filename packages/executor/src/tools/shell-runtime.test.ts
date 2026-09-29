@@ -25,11 +25,11 @@ describe('shell runtime',()=>{
   })
   it('parses shell resource limits from the executor environment',()=>{
     expect(shellResourceLimitsFromEnv({
-      AGENT_RUNLAB_SHELL_CPU_SECONDS: '2',
-      AGENT_RUNLAB_SHELL_MEMORY_MB: '128',
-      AGENT_RUNLAB_SHELL_FILE_BYTES: '1024',
-      AGENT_RUNLAB_SHELL_MAX_PROCESSES: '32',
+      KALA_SHELL_CPU_SECONDS: '2',
+      KALA_SHELL_MEMORY_MB: '128',
+      KALA_SHELL_FILE_BYTES: '1024',
+      KALA_SHELL_MAX_PROCESSES: '32',
     })).toEqual({cpuSeconds:2,memoryMb:128,fileBytes:1024,maxProcesses:32})
-    expect(()=>shellResourceLimitsFromEnv({AGENT_RUNLAB_SHELL_CPU_SECONDS:'0'})).toThrow('AGENT_RUNLAB_SHELL_CPU_SECONDS')
+    expect(()=>shellResourceLimitsFromEnv({KALA_SHELL_CPU_SECONDS:'0'})).toThrow('KALA_SHELL_CPU_SECONDS')
   })
 })

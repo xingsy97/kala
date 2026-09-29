@@ -72,7 +72,7 @@ describe('memory tools', () => {
     )
     expect(result).toMatch(/session memory upserted/)
     // Ensure nothing landed on disk in the workspace scope path
-    expect(existsSync(join(workspace, '.agent-kernel', 'memory'))).toBe(false)
+    expect(existsSync(join(workspace, '.kala', 'memory'))).toBe(false)
   })
 
   it('session-scope read points to state.memory', async () => {
@@ -93,7 +93,7 @@ describe('memory tools', () => {
       makeCtx(workspace),
     )
     expect(result).toMatch(/^created scope=workspace/)
-    const file = join(workspace, '.agent-kernel', 'memory', 'build_cmd.md')
+    const file = join(workspace, '.kala', 'memory', 'build_cmd.md')
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, 'utf8')).toBe('pnpm build')
   })
@@ -128,7 +128,7 @@ describe('memory tools', () => {
     )
     expect(result).toMatch(/^updated scope=workspace/)
     expect(
-      readFileSync(join(workspace, '.agent-kernel', 'memory', 'k.md'), 'utf8'),
+      readFileSync(join(workspace, '.kala', 'memory', 'k.md'), 'utf8'),
     ).toBe('v2')
   })
 
@@ -185,14 +185,14 @@ describe('memory tools', () => {
       { operation: 'write', scope: 'workspace', key: 'k', content: 'v' },
       makeCtx(workspace),
     )
-    const file = join(workspace, '.agent-kernel', 'memory', 'k.md')
+    const file = join(workspace, '.kala', 'memory', 'k.md')
     expect(existsSync(file)).toBe(true)
     await memoryTool.run(
       { operation: 'delete', scope: 'workspace', key: 'k' },
       makeCtx(workspace),
     )
     expect(existsSync(file)).toBe(false)
-    const tombstoneDir = join(workspace, '.agent-kernel', 'memory', '.tombstones')
+    const tombstoneDir = join(workspace, '.kala', 'memory', '.tombstones')
     const files = readdirSync(tombstoneDir).sort()
     const archived = files.find((name) => name.endsWith('.md'))
     const tombstone = files.find((name) => name.endsWith('.json'))
@@ -218,12 +218,12 @@ describe('memory tools', () => {
   // global scope
   // ==========================================================================
 
-  it('global-scope write lands under HOME/.agent-kernel/memory/', async () => {
+  it('global-scope write lands under HOME/.kala/memory/', async () => {
     await memoryTool.run(
       { operation: 'write', scope: 'global', key: 'signature', content: 'zhangsan' },
       makeCtx(workspace),
     )
-    const file = join(fakeHome, '.agent-kernel', 'memory', 'signature.md')
+    const file = join(fakeHome, '.kala', 'memory', 'signature.md')
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, 'utf8')).toBe('zhangsan')
   })
@@ -239,10 +239,10 @@ describe('memory tools', () => {
     )
     // Two independent entries
     expect(
-      readFileSync(join(workspace, '.agent-kernel', 'memory', 'k.md'), 'utf8'),
+      readFileSync(join(workspace, '.kala', 'memory', 'k.md'), 'utf8'),
     ).toBe('ws')
     expect(
-      readFileSync(join(fakeHome, '.agent-kernel', 'memory', 'k.md'), 'utf8'),
+      readFileSync(join(fakeHome, '.kala', 'memory', 'k.md'), 'utf8'),
     ).toBe('gl')
   })
 

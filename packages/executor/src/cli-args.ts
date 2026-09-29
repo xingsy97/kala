@@ -22,7 +22,7 @@ export type ExecutorCliArgs = {
 
 const SERVICE_ACTIONS = new Set<ServiceAction>(['install', 'status', 'logs', 'start', 'stop', 'restart', 'uninstall'])
 
-/** Parses both the historical daemon flags and the runlab-executor service surface. */
+/** Parses both the daemon flags and the kala-executor service surface. */
 export function parseExecutorCliArgs(argv: readonly string[]): ExecutorCliArgs {
   const out: ExecutorCliArgs = { command: 'run', sandboxRoots: [] }
   let start = 0

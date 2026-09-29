@@ -55,7 +55,7 @@ export async function rollbackManagedUpdate(options: Pick<ManagedUpdateOptions, 
 function linuxServiceUpdateLifecycle(options: ManagedUpdateOptions): UpdateLifecycle {
   return {
     async selfTest(generationPath, manifest) {
-      const executable = join(generationPath, manifest.artifact.file ?? 'runlab-executor')
+      const executable = join(generationPath, manifest.artifact.file ?? 'kala-executor')
       await access(executable, constants.X_OK)
       const result = await run(executable, ['--version'], 20_000)
       if (result.code !== 0 || !result.stdout.includes(manifest.release)) throw new Error(`Executor self-test failed: ${result.stderr || result.stdout}`)
@@ -80,7 +80,7 @@ function linuxServiceUpdateLifecycle(options: ManagedUpdateOptions): UpdateLifec
 }
 
 async function restartService(mode: 'system' | 'user'): Promise<void> {
-  const args = [...(mode === 'user' ? ['--user'] : []), 'restart', 'runlab-executor.service']
+  const args = [...(mode === 'user' ? ['--user'] : []), 'restart', 'kala-executor.service']
   const result = await run('systemctl', args, 90_000)
   if (result.code !== 0) throw new Error(`failed to restart Executor service: ${result.stderr || result.stdout}`)
 }

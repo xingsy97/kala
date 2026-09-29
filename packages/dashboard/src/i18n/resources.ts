@@ -426,7 +426,7 @@ export const resources = {
         loadingDescription: 'Reading the current runtime and Dashboard configuration.',
         loadErrorTitle: 'Settings unavailable',
         loadFailed: 'Failed to load settings: {{error}}',
-        connection: { title: 'Service endpoint', subtitle: 'Where this dashboard connects for Socket.IO, models, and settings.', current: 'Currently used', none: '(none)', source: 'Source: {{source}}', priority: 'Priority: URL ?host= > saved in browser > build-time env > same origin.', override: 'Override host endpoint', crossOriginPrefix: 'Leave empty to use the default. Cross-origin endpoints require the host to set', testing: 'Testing…', test: 'Test connection', reset: 'Reset to default', reachable: 'reachable', unreachable: 'unreachable', sources: { query: 'URL ?host= parameter (temporary override)', settings: 'Saved in this browser', build: 'Set at build time (VITE_AGENT_KERNEL_HOST)', default: 'Same origin (default)' } },
+        connection: { title: 'Service endpoint', subtitle: 'Where this dashboard connects for Socket.IO, models, and settings.', current: 'Currently used', none: '(none)', source: 'Source: {{source}}', priority: 'Priority: URL ?host= > saved in browser > build-time env > same origin.', override: 'Override host endpoint', crossOriginPrefix: 'Leave empty to use the default. Cross-origin endpoints require the host to set', testing: 'Testing…', test: 'Test connection', reset: 'Reset to default', reachable: 'reachable', unreachable: 'unreachable', sources: { query: 'URL ?host= parameter (temporary override)', settings: 'Saved in this browser', build: 'Set at build time (VITE_KALA_HOST)', default: 'Same origin (default)' } },
         sectionsLabel: 'Settings sections',
         groups: { personal: 'Personal', workspace: 'Workspace', agent: 'Agent', administration: 'Administration' },
         sections: {
@@ -2224,7 +2224,7 @@ export const resources = {
         loadingDescription: '正在读取当前运行时与 Dashboard 配置。',
         loadErrorTitle: '设置暂时不可用',
         loadFailed: '加载设置失败：{{error}}',
-        connection: { title: 'Service 地址', subtitle: 'Dashboard 连接 Socket.IO、模型和设置接口时使用的地址。', current: '当前使用', none: '（无）', source: '来源：{{source}}', priority: '优先级：URL ?host= > 浏览器保存值 > 构建环境变量 > 同源地址。', override: '覆盖 Service 地址', crossOriginPrefix: '留空则使用默认值。跨域地址要求 Service 设置', testing: '测试中…', test: '测试连接', reset: '恢复默认值', reachable: '可访问', unreachable: '无法访问', sources: { query: 'URL ?host= 参数（临时覆盖）', settings: '保存在此浏览器中', build: '构建时设置（VITE_AGENT_KERNEL_HOST）', default: '同源地址（默认）' } },
+        connection: { title: 'Service 地址', subtitle: 'Dashboard 连接 Socket.IO、模型和设置接口时使用的地址。', current: '当前使用', none: '（无）', source: '来源：{{source}}', priority: '优先级：URL ?host= > 浏览器保存值 > 构建环境变量 > 同源地址。', override: '覆盖 Service 地址', crossOriginPrefix: '留空则使用默认值。跨域地址要求 Service 设置', testing: '测试中…', test: '测试连接', reset: '恢复默认值', reachable: '可访问', unreachable: '无法访问', sources: { query: 'URL ?host= 参数（临时覆盖）', settings: '保存在此浏览器中', build: '构建时设置（VITE_KALA_HOST）', default: '同源地址（默认）' } },
         sectionsLabel: '设置分区',
         groups: { personal: '个人', workspace: '工作区', agent: 'Agent', administration: '管理' },
         sections: {

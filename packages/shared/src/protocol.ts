@@ -910,7 +910,7 @@ export type GitDiffResult = {
 /**
  * Fetch the full contents of an overflowed tool result. When a tool's output
  * exceeds the executor's inline byte cap, the executor spills the full text
- * to `<workspaceRoot>/.agent-kernel/overflow/<sessionId>/<callId>.txt` and
+ * to `<workspaceRoot>/.kala/overflow/<sessionId>/<callId>.txt` and
  * emits only a preview + marker inline. The dashboard's "View full output"
  * button issues this request to fetch the spill file.
  */
@@ -1226,7 +1226,7 @@ export type SubAgentListResult = {
 
 /**
  * List loaded agent-type definitions from the host's registry (built-ins +
- * workspace `.agent-kernel/agents/` + user `~/.config/agent-kernel/agents/`).
+ * workspace `.kala/agents/` + user `~/.config/kala/agents/`).
  * Used by the Composer's `@agent-name` mention affordance.
  */
 export type ClientListAgentTypes = {

@@ -24,14 +24,14 @@ function findExecutable(names: readonly string[], env: NodeJS.ProcessEnv = proce
 export function discoverShells(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): ShellSpec[] {
   const found: ShellSpec[] = []
   const add = (family: ShellFamily, names: readonly string[]) => { const executable = findExecutable(names, env); if (executable && !found.some((item) => item.family === family)) found.push({ family, executable }) }
-  const configured = env.AGENT_KERNEL_SHELL?.trim()
+  const configured = env.KALA_SHELL?.trim()
   if (configured) {
     const executable = findExecutable([configured], env)
     if (executable) found.push({ family: inferShellFamily(executable), executable })
   }
   if (platform === 'win32') {
     add('powershell', ['pwsh.exe', 'pwsh', 'powershell.exe', 'powershell'])
-    add('bash', [env.AGENT_KERNEL_GIT_BASH ?? '', 'bash.exe', 'bash'].filter(Boolean))
+    add('bash', [env.KALA_GIT_BASH ?? '', 'bash.exe', 'bash'].filter(Boolean))
     add('cmd', [env.COMSPEC ?? '', 'cmd.exe', 'cmd'].filter(Boolean))
   } else {
     const configuredShell = env.SHELL?.trim()
@@ -69,10 +69,10 @@ export function shellArgv(shell: ShellSpec, command: string, limits: ShellResour
 
 export function shellResourceLimitsFromEnv(env: NodeJS.ProcessEnv = process.env): ShellResourceLimits {
   return {
-    ...positiveIntEnv(env, 'AGENT_RUNLAB_SHELL_CPU_SECONDS', 'cpuSeconds'),
-    ...positiveIntEnv(env, 'AGENT_RUNLAB_SHELL_MEMORY_MB', 'memoryMb'),
-    ...positiveIntEnv(env, 'AGENT_RUNLAB_SHELL_FILE_BYTES', 'fileBytes'),
-    ...positiveIntEnv(env, 'AGENT_RUNLAB_SHELL_MAX_PROCESSES', 'maxProcesses'),
+    ...positiveIntEnv(env, 'KALA_SHELL_CPU_SECONDS', 'cpuSeconds'),
+    ...positiveIntEnv(env, 'KALA_SHELL_MEMORY_MB', 'memoryMb'),
+    ...positiveIntEnv(env, 'KALA_SHELL_FILE_BYTES', 'fileBytes'),
+    ...positiveIntEnv(env, 'KALA_SHELL_MAX_PROCESSES', 'maxProcesses'),
   }
 }
 

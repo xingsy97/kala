@@ -39,35 +39,35 @@ try {
   exec(['mkdir', '-p', '/tmp/candidate', '/tmp/predecessor'])
   pushRelease(candidate, '/tmp/candidate')
   pushRelease(predecessor, '/tmp/predecessor')
-  exec(['mkdir', '-p', '/usr/local/lib/agent-runlab-acceptance', '/var/lib/agent-runlab-acceptance/workspace'])
+  exec(['mkdir', '-p', '/usr/local/lib/agent-runlab-acceptance', '/var/lib/kala-acceptance/workspace'])
   run('lxc', ['file', 'push', join(predecessorInput, 'kala-executor-linux-x64'), container + '/usr/local/lib/agent-runlab-acceptance/kala-executor-linux-x64'])
   run('lxc', ['file', 'push', join(root, 'scripts/release/fixtures/dedicated-acceptance-provider.mjs'), container + '/usr/local/lib/agent-runlab-acceptance/dedicated-acceptance-provider.mjs'])
   exec(['chmod', '+x', '/usr/bin/node', '/usr/local/lib/agent-runlab-acceptance/kala-executor-linux-x64'])
   if (!exec(['node', '--version']).stdout.startsWith('v22.')) throw new Error('clean Dedicated environment did not receive Node.js 22')
-  exec(['mkdir', '-p', '/etc/agent-runlab'])
-  const deployCommand = "runlab-dedicated upgrade --release-dir /tmp/candidate --no-wait --operation-id " + operationId
-  pushText('/etc/agent-runlab/dedicated.env', [
-    'AGENT_KERNEL_PROVIDER=anthropic',
+  exec(['mkdir', '-p', '/etc/kala'])
+  const deployCommand = "kala-dedicated upgrade --release-dir /tmp/candidate --no-wait --operation-id " + operationId
+  pushText('/etc/kala/dedicated.env', [
+    'KALA_PROVIDER=anthropic',
     'ANTHROPIC_API_KEY=acceptance-not-secret',
     'ANTHROPIC_BASE_URL=http://127.0.0.1:18080/v1',
     'HOST_MODEL=acceptance-model',
-    'AK_ALLOW_ALL_OK=1',
-    'EXECUTOR_TOKENS=' + JSON.stringify([{ token }]),
+    'KALA_ALLOW_ALL_OK=1',
+    'KALA_EXECUTOR_TOKENS=' + JSON.stringify([{ token }]),
   ].join('\n') + '\n')
-  pushText('/etc/systemd/system/runlab-acceptance-provider.service', service('Acceptance provider', '/usr/bin/node /usr/local/lib/agent-runlab-acceptance/dedicated-acceptance-provider.mjs', 'Environment=' + quoteSystemd('RUNLAB_ACCEPTANCE_DEPLOY_COMMAND=' + deployCommand)))
-  pushText('/etc/systemd/system/runlab-acceptance-executor.service', service('Acceptance Executor', '/usr/local/lib/agent-runlab-acceptance/kala-executor-linux-x64 --host http://127.0.0.1:13000 --sandbox-root /var/lib/agent-runlab-acceptance/workspace', 'Environment=EXECUTOR_TOKEN=' + token + '\nEnvironment=WORKSPACE_NAME=acceptance-workspace'))
+  pushText('/etc/systemd/system/runlab-acceptance-provider.service', service('Acceptance provider', '/usr/bin/node /usr/local/lib/agent-runlab-acceptance/dedicated-acceptance-provider.mjs', 'Environment=' + quoteSystemd('KALA_ACCEPTANCE_DEPLOY_COMMAND=' + deployCommand)))
+  pushText('/etc/systemd/system/runlab-acceptance-executor.service', service('Acceptance Executor', '/usr/local/lib/agent-runlab-acceptance/kala-executor-linux-x64 --host http://127.0.0.1:13000 --sandbox-root /var/lib/kala-acceptance/workspace', 'Environment=EXECUTOR_TOKEN=' + token + '\nEnvironment=WORKSPACE_NAME=acceptance-workspace'))
   exec(['systemctl', 'daemon-reload'])
   exec(['systemctl', 'enable', '--now', 'runlab-acceptance-provider.service'])
 
   const staged = execNode('/tmp/predecessor/kala-dedicated.mjs', ['install', '--release-dir', '/tmp/predecessor', '--stage-only'])
   if (staged.phase !== 'installed_disabled') throw new Error('Dedicated staged install did not produce installed_disabled')
-  exec(['chown', '-R', 'agent-runlab:agent-runlab', '/var/lib/agent-runlab-acceptance/workspace'])
-  for (const unit of ['agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@blue.service', 'agent-runlab-dedicated-unit@green.service', 'agent-runlab-dedicated-deploy-supervisor.service']) {
+  exec(['chown', '-R', 'agent-runlab:agent-runlab', '/var/lib/kala-acceptance/workspace'])
+  for (const unit of ['kala-dedicated-ingress.service', 'kala-dedicated-unit@blue.service', 'kala-dedicated-unit@green.service', 'kala-dedicated-deploy-supervisor.service']) {
     if (exec(['systemctl', 'is-active', unit], true).stdout.trim() === 'active') throw new Error('staged Dedicated service became active: ' + unit)
     if (exec(['systemctl', 'is-enabled', unit], true).stdout.trim() === 'enabled') throw new Error('staged Dedicated service became enabled: ' + unit)
   }
-  exec(['systemd-analyze', 'verify', '/etc/systemd/system/agent-runlab-dedicated-ingress.service', '/etc/systemd/system/agent-runlab-dedicated-unit@.service', '/etc/systemd/system/agent-runlab-dedicated-deploy-supervisor.service'])
-  exec(['systemctl', 'start', '--no-block', 'agent-runlab-dedicated-migration-finalizer.service'])
+  exec(['systemd-analyze', 'verify', '/etc/systemd/system/kala-dedicated-ingress.service', '/etc/systemd/system/kala-dedicated-unit@.service', '/etc/systemd/system/kala-dedicated-deploy-supervisor.service'])
+  exec(['systemctl', 'start', '--no-block', 'kala-dedicated-migration-finalizer.service'])
   await waitFor(() => migrationPhase() === 'cutover_completed', 90_000, 'Dedicated clean cutover')
   exec(['systemctl', 'enable', '--now', 'runlab-acceptance-executor.service'])
   await waitFor(() => serviceActive('runlab-acceptance-executor.service'), 30_000, 'Executor service')
@@ -85,7 +85,7 @@ try {
   const executors = await responseEvent(socket, 'client:list_executors', 'server:executors', {})
   const executor = executors.executors.find((entry) => entry.workspaceName === 'acceptance-workspace')
   if (!executor?.workspaceId) throw new Error('Dedicated Executor did not connect through Stable Ingress')
-  assertAck(await ack(socket, 'client:create_session', { operationId: 'operation-create-' + runId, sessionId, workspaceId: executor.workspaceId, workspaceName: executor.workspaceName, cwd: '/var/lib/agent-runlab-acceptance/workspace' }))
+  assertAck(await ack(socket, 'client:create_session', { operationId: 'operation-create-' + runId, sessionId, workspaceId: executor.workspaceId, workspaceName: executor.workspaceName, cwd: '/var/lib/kala-acceptance/workspace' }))
   assertAck(await ack(socket, 'client:set_approval_mode', { sessionId, mode: 'allow_all' }))
   assertAck(await ack(socket, 'client:user_message', { operationId: 'operation-message-' + runId, sessionId, text: 'SELF_DEPLOY_ACCEPTANCE' }))
 
@@ -103,7 +103,7 @@ try {
   if (after.filter((entry) => JSON.stringify(entry).includes('acceptance-deploy-call')).length !== 2) throw new Error('self-deployment Tool call/result were lost or duplicated')
   const continuationCursor = after.at(-1)?.seq
   if (!Number.isSafeInteger(continuationCursor)) throw new Error('Dedicated continuation did not expose a monotonic Session cursor')
-  const routeAfterUpgrade = json(exec(['cat', '/var/lib/agent-runlab/deploy/route-state.json']).stdout)
+  const routeAfterUpgrade = json(exec(['cat', '/var/lib/kala/deploy/route-state.json']).stdout)
   if (routeAfterUpgrade.generation < 2 || routeAfterUpgrade.slots[routeAfterUpgrade.activeSlot].releaseId === staged.releaseId) throw new Error('Dedicated route did not move to the candidate release')
   await assertBrowserReady(page, origin)
 
@@ -115,12 +115,12 @@ try {
     return status.includes('Status: RUNNING')
   }, 30_000, 'Dedicated container restart')
   await waitFor(async () => /running|degraded/u.test(exec(['systemctl', 'is-system-running'], true).stdout), 120_000, 'Dedicated reboot')
-  await waitFor(() => serviceActive('agent-runlab-dedicated-ingress.service') && serviceActive('agent-runlab-dedicated-deploy-supervisor.service'), 60_000, 'Dedicated services after reboot')
+  await waitFor(() => serviceActive('kala-dedicated-ingress.service') && serviceActive('kala-dedicated-deploy-supervisor.service'), 60_000, 'Dedicated services after reboot')
   origin = 'http://' + containerAddress() + ':13000'
   await waitForHttp(origin + '/runtime/capabilities', 60_000)
   await waitFor(async () => {
-    const listed = execNode('/usr/local/bin/runlab-dedicated', ['status'])
-    return listed.services?.['agent-runlab-dedicated-ingress.service']?.activeState === 'active'
+    const listed = execNode('/usr/local/bin/kala-dedicated', ['status'])
+    return listed.services?.['kala-dedicated-ingress.service']?.activeState === 'active'
   }, 30_000, 'operator status after reboot')
   await assertBrowserReady(page, origin)
   socket.close()
@@ -130,13 +130,13 @@ try {
   if (afterReboot.at(-1)?.seq !== continuationCursor || afterReboot.some((entry) => JSON.stringify(entry).includes('[interrupted]'))) throw new Error('Dedicated reboot changed the settled Session cursor')
 
   exec(['mkdir', '-m', '0700', '/var/backups/runlab-acceptance'])
-  exec(['sh', '-c', "printf 'before\\n' > /var/lib/agent-runlab/.agent-kernel/acceptance-marker"])
-  const backup = execNode('/usr/local/bin/runlab-dedicated', ['backup', '--output', '/var/backups/runlab-acceptance', '--operation-id', 'operation-backup-' + runId])
-  exec(['sh', '-c', "printf 'after\\n' > /var/lib/agent-runlab/.agent-kernel/acceptance-marker"])
-  const restored = execNode('/usr/local/bin/runlab-dedicated', ['restore', '--backup', '/var/backups/runlab-acceptance', '--confirm', 'RESTORE:' + backup.backupId, '--operation-id', 'operation-restore-' + runId])
-  if (!restored.ok || exec(['cat', '/var/lib/agent-runlab/.agent-kernel/acceptance-marker']).stdout !== 'before\n') throw new Error('Dedicated backup restore did not restore exact state')
+  exec(['sh', '-c', "printf 'before\\n' > /var/lib/kala/.kala/acceptance-marker"])
+  const backup = execNode('/usr/local/bin/kala-dedicated', ['backup', '--output', '/var/backups/kala-acceptance', '--operation-id', 'operation-backup-' + runId])
+  exec(['sh', '-c', "printf 'after\\n' > /var/lib/kala/.kala/acceptance-marker"])
+  const restored = execNode('/usr/local/bin/kala-dedicated', ['restore', '--backup', '/var/backups/kala-acceptance', '--confirm', 'RESTORE:' + backup.backupId, '--operation-id', 'operation-restore-' + runId])
+  if (!restored.ok || exec(['cat', '/var/lib/kala/.kala/acceptance-marker']).stdout !== 'before\n') throw new Error('Dedicated backup restore did not restore exact state')
 
-  const rollbackRequest = execNode('/usr/local/bin/runlab-dedicated', ['rollback', deployment.deploymentId, '--operation-id', 'operation-rollback-' + runId, '--no-wait'])
+  const rollbackRequest = execNode('/usr/local/bin/kala-dedicated', ['rollback', deployment.deploymentId, '--operation-id', 'operation-rollback-' + runId, '--no-wait'])
   await waitFor(() => {
     const value = deploymentReceipt(rollbackRequest.deploymentId)
     if (value?.action !== 'rollback') return false
@@ -162,8 +162,8 @@ try {
 } catch (error) {
   if (created) {
     for (const args of [
-      ['systemctl', '--no-pager', '--full', 'status', 'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-deploy-supervisor.service', 'runlab-acceptance-executor.service'],
-      ['journalctl', '--no-pager', '-n', '300', '-u', 'agent-runlab-dedicated-ingress.service', '-u', 'agent-runlab-dedicated-deploy-supervisor.service', '-u', 'runlab-acceptance-executor.service'],
+      ['systemctl', '--no-pager', '--full', 'status', 'kala-dedicated-ingress.service', 'kala-dedicated-deploy-supervisor.service', 'runlab-acceptance-executor.service'],
+      ['journalctl', '--no-pager', '-n', '300', '-u', 'kala-dedicated-ingress.service', '-u', 'kala-dedicated-deploy-supervisor.service', '-u', 'runlab-acceptance-executor.service'],
     ]) {
       const diagnostic = exec(args, true)
       process.stderr.write(`\n[Dedicated failure diagnostic: ${args[0]}]\n${diagnostic.stdout}${diagnostic.stderr}`)
@@ -203,16 +203,16 @@ function pushRelease(source, target) { for (const name of readdirSync(source)) r
 function exec(args, allowFailure = false) { return run('lxc', ['exec', container, '--', ...args], allowFailure) }
 function execNode(path, args) { return json(exec(['node', path, ...args]).stdout) }
 function serviceActive(name) { return exec(['systemctl', 'is-active', name], true).stdout.trim() === 'active' }
-function migrationPhase() { try { return json(exec(['cat', '/var/lib/agent-runlab/deploy/migration-receipt.json']).stdout).phase } catch { return '' } }
+function migrationPhase() { try { return json(exec(['cat', '/var/lib/kala/deploy/migration-receipt.json']).stdout).phase } catch { return '' } }
 function latestDeployment() {
   try {
-    const names = exec(['find', '/var/lib/agent-runlab/deploy/receipts', '-maxdepth', '1', '-type', 'f', '-name', '*.json', '-printf', '%f\n'], true).stdout.trim().split(/\r?\n/u).filter(Boolean)
-    const values = names.map((name) => json(exec(['cat', '/var/lib/agent-runlab/deploy/receipts/' + name]).stdout))
+    const names = exec(['find', '/var/lib/kala/deploy/receipts', '-maxdepth', '1', '-type', 'f', '-name', '*.json', '-printf', '%f\n'], true).stdout.trim().split(/\r?\n/u).filter(Boolean)
+    const values = names.map((name) => json(exec(['cat', '/var/lib/kala/deploy/receipts/' + name]).stdout))
     return values.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0] ?? null
   } catch { return null }
 }
 function deploymentReceipt(deploymentId) {
-  try { return json(exec(['cat', '/var/lib/agent-runlab/deploy/receipts/' + deploymentId + '.json']).stdout) } catch { return null }
+  try { return json(exec(['cat', '/var/lib/kala/deploy/receipts/' + deploymentId + '.json']).stdout) } catch { return null }
 }
 function containerAddress() { const value = run('lxc', ['list', container, '--format', 'json']).stdout; const item = json(value)[0]; const network = item.state?.network ?? {}; const addresses = [...(network.eth0?.addresses ?? []), ...Object.entries(network).filter(([name]) => name !== 'eth0' && name !== 'docker0').flatMap(([, entry]) => entry.addresses ?? [])]; const address = addresses.find((entry) => entry.family === 'inet' && entry.scope === 'global')?.address; if (!address) throw new Error('clean LXD environment has no reachable address'); return address }
 async function history() { const value = await responseEvent(socket, 'client:load_history', 'server:history', { sessionId }); return value.entries ?? [] }

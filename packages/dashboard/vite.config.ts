@@ -30,7 +30,7 @@ export default defineConfig({
   build: {
     // Profiling builds keep production minification/chunking while emitting maps
     // beside the artifact for local CDP attribution. Release builds remain map-free.
-    sourcemap: process.env.RUNLAB_PROFILE_SOURCEMAP === '1' ? 'hidden' : false,
+    sourcemap: process.env.KALA_PROFILE_SOURCEMAP === '1' ? 'hidden' : false,
   },
   plugins: [
     react(),

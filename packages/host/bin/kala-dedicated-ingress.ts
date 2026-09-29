@@ -1,6 +1,8 @@
 import process from 'node:process'
 import { rm } from 'node:fs/promises'
 
+import { parsePublicUrls } from '@agent-kernel/shared'
+
 import { startDedicatedIngress } from '../src/tenant-runtime/dedicated-ingress.js'
 import type { AuthConfig } from '../src/auth-control.js'
 import { writeJsonFile } from '../src/tenant-runtime/atomic-json-file.js'
@@ -18,25 +20,27 @@ function positiveInteger(name: string, fallback: number): number {
 }
 
 async function main(): Promise<void> {
-  const publicPort = port('AGENT_RUNLAB_INGRESS_PORT', 13000)
-  const unitPort = port('AGENT_RUNLAB_UNIT_PORT', 13001)
-  const unitHost = process.env.AGENT_RUNLAB_UNIT_HOST?.trim() || '127.0.0.1'
+  const publicPort = port('KALA_PORT', 13000)
+  const unitPort = port('KALA_UNIT_PORT', 13001)
+  const unitHost = process.env.KALA_UNIT_HOST?.trim() || '127.0.0.1'
+  const publicUrls = parsePublicUrls(required('KALA_PUBLIC_URLS'))
   const ingress = await startDedicatedIngress({
     port: publicPort,
-    listenHost: process.env.AGENT_RUNLAB_INGRESS_HOST?.trim() || '0.0.0.0',
+    listenHost: process.env.KALA_BIND_HOST?.trim() || '127.0.0.1',
+    publicUrls,
     unitOrigin: `http://${unitHost}:${unitPort}`,
-    ...(process.env.AGENT_RUNLAB_ROUTE_STATE?.trim() ? { routeStatePath: process.env.AGENT_RUNLAB_ROUTE_STATE.trim() } : {}),
-    ...(process.env.AGENT_RUNLAB_ADMISSION_LEDGER?.trim() ? { admissionLedgerPath: process.env.AGENT_RUNLAB_ADMISSION_LEDGER.trim() } : {}),
-    ...(process.env.AGENT_RUNLAB_ADMISSION_CAPACITY ? { admissionCapacity: positiveInteger('AGENT_RUNLAB_ADMISSION_CAPACITY', 1000) } : {}),
-    ...(process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET?.trim() ? { ingressHandoffSecret: process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET.trim() } : {}),
-    ...(process.env.AGENT_RUNLAB_CANDIDATE_STATE?.trim() ? { candidateStatePath: process.env.AGENT_RUNLAB_CANDIDATE_STATE.trim() } : {}),
-    ...(process.env.AGENT_RUNLAB_OPERATOR_STATUS?.trim() ? { operatorStatusPath: process.env.AGENT_RUNLAB_OPERATOR_STATUS.trim() } : {}),
-    ...(process.env.AGENT_RUNLAB_DEPLOYMENT_REQUESTS?.trim() ? { deploymentRequestsPath: process.env.AGENT_RUNLAB_DEPLOYMENT_REQUESTS.trim() } : {}),
-    ...(process.env.AGENT_RUNLAB_DASHBOARD_STATE?.trim() ? { dashboardStatePath: process.env.AGENT_RUNLAB_DASHBOARD_STATE.trim() } : {}),
-    ...(process.env.AGENT_RUNLAB_DASHBOARD_RELEASES?.trim() ? { dashboardReleasesRoot: process.env.AGENT_RUNLAB_DASHBOARD_RELEASES.trim() } : {}),
+    ...(process.env.KALA_ROUTE_STATE?.trim() ? { routeStatePath: process.env.KALA_ROUTE_STATE.trim() } : {}),
+    ...(process.env.KALA_ADMISSION_LEDGER?.trim() ? { admissionLedgerPath: process.env.KALA_ADMISSION_LEDGER.trim() } : {}),
+    ...(process.env.KALA_ADMISSION_CAPACITY ? { admissionCapacity: positiveInteger('KALA_ADMISSION_CAPACITY', 1000) } : {}),
+    ...(process.env.KALA_INGRESS_HANDOFF_SECRET?.trim() ? { ingressHandoffSecret: process.env.KALA_INGRESS_HANDOFF_SECRET.trim() } : {}),
+    ...(process.env.KALA_CANDIDATE_STATE?.trim() ? { candidateStatePath: process.env.KALA_CANDIDATE_STATE.trim() } : {}),
+    ...(process.env.KALA_OPERATOR_STATUS?.trim() ? { operatorStatusPath: process.env.KALA_OPERATOR_STATUS.trim() } : {}),
+    ...(process.env.KALA_DEPLOYMENT_REQUESTS?.trim() ? { deploymentRequestsPath: process.env.KALA_DEPLOYMENT_REQUESTS.trim() } : {}),
+    ...(process.env.KALA_DASHBOARD_STATE?.trim() ? { dashboardStatePath: process.env.KALA_DASHBOARD_STATE.trim() } : {}),
+    ...(process.env.KALA_DASHBOARD_RELEASES?.trim() ? { dashboardReleasesRoot: process.env.KALA_DASHBOARD_RELEASES.trim() } : {}),
     auth: ingressAuth(),
   })
-  const readinessPath = process.env.AGENT_RUNLAB_INGRESS_READINESS?.trim()
+  const readinessPath = process.env.KALA_INGRESS_READINESS?.trim()
   if (readinessPath) await writeJsonFile(readinessPath, { schemaVersion: 1, pid: process.pid, readyAt: new Date().toISOString() }, 0o644)
   process.stdout.write(`${JSON.stringify({ event: 'dedicated_ingress_ready', port: ingress.port, unitId: ingress.unitId })}\n`)
   let closing: Promise<void> | undefined
@@ -58,13 +62,19 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => { void close() })
 }
 
+function required(name: string): string {
+  const value = process.env[name]?.trim()
+  if (!value) throw new Error(`${name} is required`)
+  return value
+}
+
 function ingressAuth(): AuthConfig | undefined {
-  const sharedToken = process.env.HOST_AUTH_TOKEN?.trim()
-  const githubRequired = process.env.HOST_GITHUB_OAUTH_REQUIRED === '1'
+  const sharedToken = process.env.KALA_AUTH_TOKEN?.trim()
+  const githubRequired = process.env.KALA_GITHUB_OAUTH_REQUIRED === '1'
   if (!sharedToken && !githubRequired) return undefined
   return {
     ...(sharedToken ? { sharedToken } : {}),
-    ...(githubRequired ? { github: { required: true, ...(process.env.HOST_AUTH_SESSION_SECRET ? { sessionSecret: process.env.HOST_AUTH_SESSION_SECRET } : {}), usernameWhitelist: (process.env.GITHUB_USERNAME_WHITELIST ?? '').split(',').map((value) => value.trim()).filter(Boolean) } } : {}),
+    ...(githubRequired ? { github: { required: true, ...(process.env.KALA_AUTH_SESSION_SECRET ? { sessionSecret: process.env.KALA_AUTH_SESSION_SECRET } : {}), usernameWhitelist: (process.env.GITHUB_USERNAME_WHITELIST ?? '').split(',').map((value) => value.trim()).filter(Boolean) } } : {}),
   }
 }
 

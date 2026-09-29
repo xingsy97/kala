@@ -26,9 +26,9 @@ export function generateExecutorInstallerSh({ repo, tag }) {
   const base = githubReleaseBase(repo, tag)
   return `#!/usr/bin/env bash
 set -euo pipefail
-BASE_URL="\${RUNLAB_RELEASE_ASSETS_URL:-${base}}"
-MAX_METADATA_BYTES="\${RUNLAB_INSTALLER_MAX_METADATA_BYTES:-1048576}"
-WORK_DIR="\${RUNLAB_INSTALLER_WORK_DIR:-$(mktemp -d)}"
+BASE_URL="\${KALA_RELEASE_ASSETS_URL:-${base}}"
+MAX_METADATA_BYTES="\${KALA_INSTALLER_MAX_METADATA_BYTES:-1048576}"
+WORK_DIR="\${KALA_INSTALLER_WORK_DIR:-$(mktemp -d)}"
 mkdir -p "$WORK_DIR"
 trap 'rm -rf "$WORK_DIR"' EXIT
 fail() { printf 'Kala installer: %s\\n' "$*" >&2; exit 1; }

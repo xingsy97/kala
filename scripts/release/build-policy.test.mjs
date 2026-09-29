@@ -9,7 +9,7 @@ test('README presents Kala as the public project and installer repository', () =
   assert.match(readme, /^# Kala$/m)
   assert.match(readme, /github\.com\/xingsy97\/kala\/releases\/latest\/download\/run\.sh/)
   assert.match(readme, /KALA_PROVIDER=openai/)
-  assert.doesNotMatch(readme, /akernel|@agent-kernel|AGENT_KERNEL_PROVIDER/i)
+  assert.doesNotMatch(readme, /akernel|@agent-kernel|AK_PROVIDER/i)
 })
 
 test('evaluation images build orchestrator and dashboard from source', () => {
@@ -82,8 +82,8 @@ test('Dashboard release manifest materializes the file iterator before mapping a
 
 test('release verification rejects embedded Dashboard assignment without rejecting runtime feature detection', () => {
   const verifier = read('scripts/release/verify-release-assets.mjs')
-  assert.ok(verifier.includes("platformRuntime.includes('globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=')"))
-  assert.ok(!verifier.includes("platformRuntime.includes('__AGENT_KERNEL_EMBEDDED_DASHBOARD__')"))
+  assert.ok(verifier.includes("platformRuntime.includes('globalThis.__KALA_EMBEDDED_DASHBOARD__=')"))
+  assert.ok(!verifier.includes("platformRuntime.includes('__KALA_EMBEDDED_DASHBOARD__')"))
 })
 
 test('release scripts enforce Linux and macOS assets and reject Windows offers', () => {
@@ -97,7 +97,7 @@ test('release scripts enforce Linux and macOS assets and reject Windows offers',
   assert.doesNotMatch(builder, /generateExecutorInstallerSh|COPILOT_CLI_PATH/)
   assert.match(builder, /Release downloads require HTTPS except for loopback URLs/)
   assert.match(builder, /cosign verify-blob/)
-  assert.match(builder, /AGENT_KERNEL_RELEASE_TRUST/)
+  assert.match(builder, /KALA_RELEASE_TRUST/)
   assert.match(builder, /Host-mediated release trust requires a valid internal installation session/)
   assert.match(builder, /\$\{1:-\}" != "--internal-installer"/)
   assert.match(builder, /\[ "\$BASE_URL" != "\$host_asset_base" \]/)

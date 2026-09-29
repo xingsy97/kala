@@ -48,10 +48,10 @@ try {
       cwd: root,
       env: {
         ...process.env,
-        HOST_LISTEN_HOST: '0.0.0.0',
-        HOST_PORT: String(port),
-        SESSIONS_DIR: sessionsDir,
-        AGENT_KERNEL_ARTIFACTS_DIR: artifactsDir,
+        KALA_BIND_HOST: '0.0.0.0',
+        KALA_PORT: String(port),
+        KALA_SESSIONS_DIR: sessionsDir,
+        KALA_ARTIFACTS_DIR: artifactsDir,
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? 'e2e-unused',
       },
     })
@@ -67,10 +67,10 @@ try {
     await actor.page.waitForSelector('[data-testid="connect-workspace-dialog"]')
     await actor.page.waitForFunction(() => {
       const text = document.querySelector('[data-testid="executor-terminal-command"]')?.textContent ?? ''
-      return text.includes('RUNLAB_SETUP_CODE=') && text.includes('/install')
+      return text.includes('KALA_SETUP_CODE=') && text.includes('/install')
     })
     const command = await actor.page.$eval('[data-testid="executor-terminal-command"] pre', (element) => element.textContent ?? '')
-    redactedCommand = command.replace(/RUNLAB_SETUP_CODE='[^']+'/u, "RUNLAB_SETUP_CODE='[REDACTED]'")
+    redactedCommand = command.replace(/KALA_SETUP_CODE='[^']+'/u, "KALA_SETUP_CODE='[REDACTED]'")
     return command
   }, (command) => ({ command: redactedCommand, physicalLines: command.split(/\r?\n/u).length }))
 
@@ -99,12 +99,12 @@ try {
         return records.installations.find((item) => item.status === 'completed')?.id
       }, { timeoutMs: 60_000, name: 'completed installation record' })
     } catch (error) {
-      const serviceDiagnostics = await runCommand('lxc', ['exec', container, '--', 'sh', '-lc', 'systemctl status runlab-executor.service --no-pager || true; journalctl -u runlab-executor.service -n 100 --no-pager || true'], { allowFailure: true })
+      const serviceDiagnostics = await runCommand('lxc', ['exec', container, '--', 'sh', '-lc', 'systemctl status kala-executor.service --no-pager || true; journalctl -u kala-executor.service -n 100 --no-pager || true'], { allowFailure: true })
       const records = await (await import('node:fs/promises')).readFile(join(stateRoot, 'executor-installations.json'), 'utf8').catch(() => '<missing>')
       throw new Error(`installation did not complete\nstdout:\n${execution.stdout}\nstderr:\n${execution.stderr}\nrecords:\n${records}\nservice:\n${serviceDiagnostics.stdout}\n${serviceDiagnostics.stderr}`, { cause: error })
     }
     if (/% Total|Xferd|Average Speed/u.test(`${execution.stdout}\n${execution.stderr}`)) throw new Error(`installer output contains curl progress noise:\n${execution.stdout}\n${execution.stderr}`)
-    for (const expected of ['[1/4] Downloading verified installer', '[2/4] Validating setup code', '[3/4] Installing Executor', '[4/4] Service started and connected', 'SERVICE INSTALLED AND RUNNING', 'systemctl status runlab-executor.service', 'journalctl -u runlab-executor.service -f', 'systemctl restart runlab-executor.service', 'systemctl stop runlab-executor.service', 'service uninstall --system']) {
+    for (const expected of ['[1/4] Downloading verified installer', '[2/4] Validating setup code', '[3/4] Installing Executor', '[4/4] Service started and connected', 'SERVICE INSTALLED AND RUNNING', 'systemctl status kala-executor.service', 'journalctl -u kala-executor.service -f', 'systemctl restart kala-executor.service', 'systemctl stop kala-executor.service', 'service uninstall --system']) {
       if (!execution.stdout.includes(expected)) throw new Error(`installer output omitted lifecycle summary: ${expected}\n${execution.stdout}`)
     }
     return execution
@@ -112,11 +112,11 @@ try {
 
   await harness.step('verify service, files, authoritative state, and visible Workspace', async () => {
     const service = await runCommand('lxc', ['exec', container, '--', 'sh', '-lc', [
-      'systemctl is-active runlab-executor.service',
-      'systemctl is-enabled runlab-executor.service',
-      'stat -c "%a %n" /etc/runlab-executor/executor.json /etc/runlab-executor/credential /etc/systemd/system/runlab-executor.service',
-      'systemctl show runlab-executor.service --property=MainPID --value',
-      'cat /root/.agent-kernel/workspace-id',
+      'systemctl is-active kala-executor.service',
+      'systemctl is-enabled kala-executor.service',
+      'stat -c "%a %n" /etc/runlab-executor/executor.json /etc/runlab-executor/credential /etc/systemd/system/kala-executor.service',
+      'systemctl show kala-executor.service --property=MainPID --value',
+      'cat /root/.kala/workspace-id',
     ].join('; ')])
     const snapshot = await fetch(`${localProbe}/api/executor-installs/${encodeURIComponent(installationId)}`).then((response) => response.json())
     await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]', { timeout: 30_000 })
@@ -159,7 +159,7 @@ try {
     const restart = await runCommand('lxc', ['exec', container, '--', cli, 'service', 'restart', '--system'])
     if (!restart.stdout.includes('SERVICE INSTALLED AND RUNNING') || !restart.stdout.includes('Manage the Kala Executor service')) throw new Error(`CLI restart omitted lifecycle controls: ${restart.stdout}`)
     await waitFor(async () => {
-      const value = await runCommand('lxc', ['exec', container, '--', 'systemctl', 'is-active', 'runlab-executor.service'], { allowFailure: true })
+      const value = await runCommand('lxc', ['exec', container, '--', 'systemctl', 'is-active', 'kala-executor.service'], { allowFailure: true })
       return value.stdout.trim() === 'active'
     }, { timeoutMs: 30_000, name: 'restarted service' })
     await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]', { timeout: 30_000 })
@@ -171,22 +171,22 @@ try {
       const response = await fetch('/api/executor-installs', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '__RUNLAB_CURRENT_DIRECTORY__' }),
+        body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '__KALA_CURRENT_DIRECTORY__' }),
       })
       if (!response.ok) throw new Error(await response.text())
       return await response.json()
     })
     const command = typeof created.command === 'string' ? created.command : ''
-    if (!command.includes('RUNLAB_SETUP_CODE=') || !created.id) throw new Error(`fresh install command is invalid: ${JSON.stringify(created)}`)
+    if (!command.includes('KALA_SETUP_CODE=') || !created.id) throw new Error(`fresh install command is invalid: ${JSON.stringify(created)}`)
     const execution = await runCommand('lxc', ['exec', container, '--cwd', workspace, '--', 'sh', '-lc', command], { cwd: root, timeoutMs: 180_000 })
     await waitFor(async () => {
       const snapshot = await fetch(`${localProbe}/api/executor-installs/${encodeURIComponent(created.id)}`).then((response) => response.json())
       return snapshot.status === 'completed' && snapshot
     }, { timeoutMs: 60_000, name: 'repeated installation completion' })
     const proof = await runCommand('lxc', ['exec', container, '--', 'sh', '-lc', [
-      'systemctl is-active runlab-executor.service',
-      'systemctl show runlab-executor.service --property=MainPID --value',
-      'cat /root/.agent-kernel/workspace-id',
+      'systemctl is-active kala-executor.service',
+      'systemctl show kala-executor.service --property=MainPID --value',
+      'cat /root/.kala/workspace-id',
     ].join('; ')])
     const [active, pidText, workspaceId] = proof.stdout.trim().split('\n')
     const pid = Number(pidText)

@@ -8,7 +8,7 @@ import { composeArgs, identityDeploymentEnv, root, selectedProfile } from './pro
 const profile = selectedProfile()
 const failures = []
 const warnings = []
-const secretDir = resolve(root, process.env.RUNLAB_SECRETS_DIR ?? 'deploy/private-cloud/.secrets')
+const secretDir = resolve(root, process.env.KALA_SECRETS_DIR ?? 'deploy/private-cloud/.secrets')
 const requiredSecrets = ['control_postgres_password', 'session_secret', 'ingress_secret', 'oidc_client_id', 'oidc_client_secret', 'llm_api_key']
 for (const name of requiredSecrets) {
   const path = resolve(secretDir, name)
@@ -27,7 +27,8 @@ else {
   if (compose.stdout.includes('/var/run/docker.sock')) failures.push('Docker socket mount is forbidden')
 }
 const isPublicProfile = profile === 'cloudflare' || profile === 'external-nfs'
-const publicOrigin = process.env.RUNLAB_PUBLIC_ORIGIN ?? (isPublicProfile ? '' : 'http://localhost:13001')
+const publicUrls = process.env.KALA_PUBLIC_URLS ?? (isPublicProfile ? '' : 'http://localhost:13001')
+const publicOrigin = publicUrls.split(',').map((value) => value.trim()).find((value) => value && !value.includes('*')) ?? ''
 const issuer = process.env.OIDC_ISSUER ?? ''
 try {
   await access(identityDeploymentEnv, constants.R_OK)
@@ -37,20 +38,20 @@ try {
 const identity = spawnSync('docker', ['compose', '--env-file', identityDeploymentEnv, '-f', 'deploy/identity/compose.yaml', 'ps', '--status', 'running', '--services'], { cwd: root, encoding: 'utf8', env: process.env })
 const identityServices = new Set(identity.stdout.trim().split('\n').filter(Boolean))
 if (identity.status !== 0 || !identityServices.has('zitadel') || !identityServices.has('zitadel-login') || !identityServices.has('caddy')) failures.push('Shared Identity Compose project must be running before Private Cloud deployment')
-if (isPublicProfile && !publicOrigin) failures.push('RUNLAB_PUBLIC_ORIGIN is required for public profiles')
+if (isPublicProfile && !publicOrigin) failures.push('KALA_PUBLIC_URLS must contain an exact URL for public profiles')
 if (!issuer) failures.push('OIDC_ISSUER is required')
-if (isPublicProfile && !publicOrigin.startsWith('https://')) failures.push('public profile requires HTTPS RUNLAB_PUBLIC_ORIGIN')
+if (isPublicProfile && !publicOrigin.startsWith('https://')) failures.push('public profile requires an HTTPS URL in KALA_PUBLIC_URLS')
 try {
   const response = await fetch(`${issuer.replace(/\/$/u, '')}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(5000) })
   if (!response.ok) failures.push(`OIDC discovery returned ${response.status}`)
   else if ((await response.json()).issuer !== issuer.replace(/\/$/u, '')) failures.push('OIDC discovery issuer mismatch')
 } catch (error) { failures.push(`OIDC discovery failed: ${error.message}`) }
-const providerPath = resolve(root, process.env.RUNLAB_PROVIDER_CATALOG_FILE ?? 'deploy/private-cloud/local/runtime-provider-catalog.json')
+const providerPath = resolve(root, process.env.KALA_PROVIDER_CATALOG_FILE ?? 'deploy/private-cloud/local/runtime-provider-catalog.json')
 try { JSON.parse(await readFile(providerPath, 'utf8')) } catch (error) { failures.push(`provider catalog invalid: ${error.message}`) }
 const disk = await statfs(root)
 const free = disk.bavail * disk.bsize
 if (free < 5 * 1024 ** 3) warnings.push(`less than 5 GiB free at ${root}`)
-if (profile.includes('nfs') && !process.env.RUNLAB_EXTERNAL_NFS_ADDRESS && profile === 'external-nfs') failures.push('RUNLAB_EXTERNAL_NFS_ADDRESS is required')
+if (profile.includes('nfs') && !process.env.KALA_EXTERNAL_NFS_ADDRESS && profile === 'external-nfs') failures.push('KALA_EXTERNAL_NFS_ADDRESS is required')
 for (const warning of warnings) console.warn(`WARN ${warning}`)
 for (const failure of failures) console.error(`FAIL ${failure}`)
 if (failures.length) process.exit(1)

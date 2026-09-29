@@ -10,7 +10,7 @@
 - One product origin through Runtime Ingress Gateway; no tenant subdomains.
 - ZITADEL owns authentication/MFA/federation. PostgreSQL owns control-plane authority.
 - Runtime Host owns core Agent state machines; Organization-scoped Tenant Runtime Units isolate runtime state.
-- Session JSONL is the authoritative hot Session record and must live on one shared NFS-backed `tenant-data` volume at `/var/lib/agent-runlab` for every SaaS deployment.
+- Session JSONL is the authoritative hot Session record and must live on one shared NFS-backed `tenant-data` volume at `/var/lib/kala` for every SaaS deployment.
 - MinIO/S3 stores Artifacts, exports, support bundles, and archived immutable Session segments; it is not the active JSONL filesystem.
 - SaaS hides Benchmark/Evaluation only. Workspace, File, Git, Shell, Executor, Agent, and Session capabilities remain product features.
 - LXD `13000` is Standalone and is outside this SaaS deployment program.

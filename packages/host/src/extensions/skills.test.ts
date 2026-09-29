@@ -188,7 +188,7 @@ describe('skills', () => {
     const manager = createSkillManager(store, config)
 
     expect((await manager.registryFor(record)).skills).toEqual([])
-    writeSkill(join(workspace, '.agents', 'skills'), 'new-skill')
+    writeSkill(join(workspace, '.agent', 'skills'), 'new-skill')
 
     const registry = await manager.refreshSession(record)
 
@@ -202,8 +202,8 @@ describe('skills', () => {
   it('keeps skill discovery scoped by workspace cwd', async () => {
     const workspaceA = join(dir, 'a')
     const workspaceB = join(dir, 'b')
-    writeSkill(join(workspaceA, '.agents', 'skills'), 'a-skill')
-    writeSkill(join(workspaceB, '.agents', 'skills'), 'b-skill')
+    writeSkill(join(workspaceA, '.agent', 'skills'), 'a-skill')
+    writeSkill(join(workspaceB, '.agent', 'skills'), 'b-skill')
     const store = new SessionStore(join(dir, 'sessions'))
     const config = createConfig({ tools: createBuiltinTools(), systemPrompt: 'sys' })
     const a = await store.create({ sessionId: 'a', config, initialCwd: workspaceA })
@@ -216,7 +216,7 @@ describe('skills', () => {
 
   it('discovers and loads executor-only workspace skills without Host access', async () => {
     const cwd = '/workspace/example-project'
-    const root = join(cwd, '.agents', 'skills')
+    const root = join(cwd, '.agent', 'skills')
     const path = join(root, 'local-skill', 'SKILL.md')
     const body = ['---', 'name: local-skill', 'description: Executor-only skill.', '---', '# executor body'].join('\n')
     const store = new SessionStore(join(dir, 'sessions'))
@@ -249,8 +249,8 @@ describe('skills', () => {
 
   it('discovers workspace skills through a Windows Executor path', async () => {
     const cwd = String.raw`C:\workspace\example-project`
-    const root = String.raw`C:\workspace\example-project\.agents\skills`
-    const skillPath = String.raw`C:\workspace\example-project\.agents\skills\windows-skill\SKILL.md`
+    const root = String.raw`C:\workspace\example-project\.agent\skills`
+    const skillPath = String.raw`C:\workspace\example-project\.agent\skills\windows-skill\SKILL.md`
     const body = ['---', 'name: windows-skill', 'description: Windows workspace skill.', '---', '# windows body'].join('\n')
     const store = new SessionStore(join(dir, 'sessions'))
     const record = await store.create({
@@ -267,7 +267,7 @@ describe('skills', () => {
           workspaceId,
           path: root,
           roots: [String.raw`C:\workspace`],
-          entries: [{ name: 'windows-skill', path: String.raw`C:\workspace\example-project\.agents\skills\windows-skill`, type: 'directory' }],
+          entries: [{ name: 'windows-skill', path: String.raw`C:\workspace\example-project\.agent\skills\windows-skill`, type: 'directory' }],
         }
       },
       async workspaceReadBinary(request) {
@@ -288,7 +288,7 @@ describe('skills', () => {
 
   it('rejects truncated Executor skill content during load', async () => {
     const cwd = '/workspace/example-project'
-    const root = join(cwd, '.agents', 'skills')
+    const root = join(cwd, '.agent', 'skills')
     const skillPath = join(root, 'remote-skill', 'SKILL.md')
     const body = ['---', 'name: remote-skill', 'description: Remote skill.', '---', '# body'].join('\n')
     let reads = 0

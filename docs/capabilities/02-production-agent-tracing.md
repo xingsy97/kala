@@ -144,9 +144,9 @@ and event `seq`.
 Implemented local export command:
 
 ```bash
-agent-kernel-host enhancement trace export-session \
+kala-host enhancement trace export-session \
   --root-dir runs/enhancement \
-  --session-log ~/.agent-kernel/sessions/<session>.jsonl \
+  --session-log ~/.kala/sessions/<session>.jsonl \
   --run-id smoke-001 \
   --eval-instance-id sympy__sympy-20590
 ```
@@ -165,8 +165,8 @@ artifact is derived from the JSONL ledger and does not participate in replay.
 
 The live host can also write message assembly artifacts before each LLM call
 when `artifactRootDir` is configured. The CLI enables this by default under
-`~/.agent-kernel/artifacts`; set `AGENT_KERNEL_ARTIFACTS_DIR=0` to disable it or
-set `AGENT_KERNEL_ARTIFACTS_DIR=/path` to choose another location. These files
+`~/.kala/artifacts`; set `KALA_ARTIFACTS_DIR=0` to disable it or
+set `KALA_ARTIFACTS_DIR=/path` to choose another location. These files
 show message count, tool registry size, estimated token contribution by role,
 and preflight compaction stages without changing the kernel event protocol.
 
@@ -218,7 +218,7 @@ open standard path should be OpenTelemetry/OpenInference.
 
 The current implementation has a concrete trace/artifact foundation:
 
-- `agent-kernel-host enhancement trace export-session` writes
+- `kala-host enhancement trace export-session` writes
   `traces/<session_id>.openinference.json` plus redacted LLM request/response
   artifacts under `llm/<session_id>/<seq>.*.json`.
 - Live host artifact capture writes `message-assembly`, `router-decisions`, and

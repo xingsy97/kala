@@ -39,7 +39,7 @@ type NodePtyModule = {
 }
 
 async function tryLoadNodePty(): Promise<NodePtyModule | undefined> {
-  if (process.env.AGENT_KERNEL_TERMINAL_DISABLE_PTY === '1') return undefined
+  if (process.env.KALA_TERMINAL_DISABLE_PTY === '1') return undefined
   try {
     const mod = await import('node-pty') as NodePtyModule | { default?: NodePtyModule }
     return 'spawn' in mod ? mod : mod.default

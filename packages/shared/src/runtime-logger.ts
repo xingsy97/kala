@@ -23,11 +23,11 @@ const REDACT_PATHS = [
   'password',
   'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
-  'HOST_AUTH_TOKEN',
+  'KALA_AUTH_TOKEN',
   'EXECUTOR_TOKEN',
   'process.env.ANTHROPIC_API_KEY',
   'process.env.OPENAI_API_KEY',
-  'process.env.HOST_AUTH_TOKEN',
+  'process.env.KALA_AUTH_TOKEN',
   'process.env.EXECUTOR_TOKEN',
 ]
 

@@ -12,7 +12,7 @@ export function aptInstallSnippet(config) {
   }
   const url = config.url.replace(/\/$/, '')
   const fingerprint = config.fingerprint.toUpperCase()
-  return `bash <<'RUNLAB_DESKTOP_INSTALL'
+  return `bash <<'KALA_DESKTOP_INSTALL'
 set -euo pipefail
 if [ "$(dpkg --print-architecture)" != amd64 ]; then
   printf '%s\\n' 'This desktop package supports amd64 only.' >&2
@@ -52,5 +52,5 @@ printf '%s\\n' \\
   | sudo tee /etc/apt/sources.list.d/kala-desktop.sources >/dev/null
 sudo apt-get -o APT::Update::Error-Mode=any update
 sudo apt-get install -y kala-desktop
-RUNLAB_DESKTOP_INSTALL`
+KALA_DESKTOP_INSTALL`
 }

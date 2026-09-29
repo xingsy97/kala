@@ -1378,7 +1378,7 @@ function MemoryRuntime({ state: _state }: { state: AgentState | null }): JSX.Ele
             <div className="space-y-2 text-muted-foreground">
               <div className="font-mono text-foreground">{scope}</div>
               <p>{t('inspector.runtime.workspaceMemoryNote', { scope })}</p>
-              <p className="font-mono text-caption">{scope === 'workspace' ? '<workspace>/.agent-kernel/memory/' : '~/.agent-kernel/memory/'}</p>
+              <p className="font-mono text-caption">{scope === 'workspace' ? '<workspace>/.kala/memory/' : '~/.kala/memory/'}</p>
             </div>
           )}
         </div>

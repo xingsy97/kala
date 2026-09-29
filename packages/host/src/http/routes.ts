@@ -85,6 +85,7 @@ import type { AzureSpeechCredentialStore } from '../speech/credential-store.js'
 import { normalizeAzureSpeechEndpoint } from '../speech/credential-store.js'
 import { transcribeAzureSpeechAudio } from '../speech/fast-transcription.js'
 import { issueAzureSpeechToken } from '../speech/token-service.js'
+import { validatedPublicOrigin } from './public-access-gate.js'
 import { ContentInputError, resolveContentToPath } from './content-inputs.js'
 import {
   HttpThemeError,
@@ -197,22 +198,11 @@ type EnhancementActionRequest = {
   pricingContent?: string
 }
 
-function parseAllowedOriginsFromEnv(): string[] | null {
-  const raw = process.env.AGENT_KERNEL_ALLOWED_ORIGINS
-  if (!raw) return null
-  const list = raw.split(',').map((s) => s.trim()).filter(Boolean)
-  return list.length > 0 ? list : null
-}
-
 function applyCorsHeaders(req: IncomingMessage, headers: Record<string, string>): void {
-  const allowed = parseAllowedOriginsFromEnv()
-  if (allowed === null) {
-    headers['access-control-allow-origin'] = '*'
-    return
-  }
   const origin = req.headers.origin
-  if (typeof origin === 'string' && allowed.includes(origin)) {
-    headers['access-control-allow-origin'] = origin
+  const publicOrigin = validatedPublicOrigin(req)
+  if (typeof origin === 'string' && publicOrigin) {
+    headers['access-control-allow-origin'] = publicOrigin
     headers['vary'] = 'Origin'
     headers['access-control-allow-credentials'] = 'true'
   }
@@ -1452,7 +1442,7 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
 }
 
 function internalIngressAuthorized(req: IncomingMessage): boolean {
-  const expected = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
+  const expected = process.env.KALA_INGRESS_HANDOFF_SECRET
   const supplied = req.headers['x-agent-runlab-ingress-handoff']
   return Boolean(expected && typeof supplied === 'string' && supplied.length === expected.length && supplied === expected)
 }

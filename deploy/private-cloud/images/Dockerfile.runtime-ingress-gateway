@@ -18,4 +18,4 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=65532:65532 /out/ingress/ /app/packages/runtime-ingress-gateway/
 USER 65532:65532
-CMD ["packages/runtime-ingress-gateway/dist/src/bin/agent-runlab-runtime-ingress.js"]
+CMD ["packages/runtime-ingress-gateway/dist/src/bin/kala-runtime-ingress.js"]

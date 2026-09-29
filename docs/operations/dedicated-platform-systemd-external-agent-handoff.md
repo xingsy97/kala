@@ -18,12 +18,12 @@ Migrate the existing legacy single-process installation to Kala Dedicated (`plat
 
 ```text
 public :13000
-  -> agent-runlab-dedicated-ingress.service
+  -> kala-dedicated-ingress.service
        -> active private slot
-          agent-runlab-dedicated-unit@blue.service (:13001)
-          or agent-runlab-dedicated-unit@green.service (:13002)
+          kala-dedicated-unit@blue.service (:13001)
+          or kala-dedicated-unit@green.service (:13002)
 
-agent-runlab-dedicated-deploy-supervisor.service
+kala-dedicated-deploy-supervisor.service
   -> immutable releases, deferred blue/green cutover, verification, rollback
 ```
 
@@ -69,7 +69,7 @@ Edit source files, not generated `release/` copies:
 | Settings fingerprint | `scripts/deploy/dedicated-settings-fingerprint.mjs` |
 | Manual rollback | `scripts/deploy/rollback-dedicated-systemd.mjs` |
 | Supervisor runtime | `packages/host/src/tenant-runtime/dedicated-deploy-supervisor.ts` |
-| Supervisor daemon | `packages/host/bin/agent-runlab-dedicated-deploy-supervisor.ts` |
+| Supervisor daemon | `packages/host/bin/kala-dedicated-deploy-supervisor.ts` |
 | Packaging tests | `scripts/deploy/dedicated-systemd.test.mjs` |
 | Release builder | `scripts/release/build-release-assets.mjs` |
 
@@ -316,7 +316,7 @@ Privately record:
 
 - legacy service name and MainPID;
 - public port and bind address;
-- actual HOME, `SESSIONS_DIR`, artifact root, Executor identity path;
+- actual HOME, `KALA_SESSIONS_DIR`, artifact root, Executor identity path;
 - active release/bundle path and SHA-256;
 - state-tree owner, mode, filesystem device, size, free space;
 - provider config locations without recording credential values;
@@ -327,12 +327,12 @@ Privately record:
 Filesystem checks:
 
 ```bash
-legacy_state='<discovered-real-.agent-kernel-path>'
-stat -c 'path=%n dev=%d owner=%U:%G mode=%a' "$legacy_state" /var/lib/agent-runlab
+legacy_state='<discovered-real-.kala-path>'
+stat -c 'path=%n dev=%d owner=%U:%G mode=%a' "$legacy_state" /var/lib/kala
 du -sh "$legacy_state"
-df -h "$legacy_state" /var/lib/agent-runlab
+df -h "$legacy_state" /var/lib/kala
 findmnt -T "$legacy_state"
-findmnt -T /var/lib/agent-runlab
+findmnt -T /var/lib/kala
 ```
 
 The migration requires source and target state roots on the same filesystem for atomic rename. If device IDs differ, stop: redesign migration and rollback before proceeding.
@@ -450,7 +450,7 @@ Create a read-only filesystem snapshot or backup while respecting the running ap
 
 The backup must cover:
 
-- complete legacy `.agent-kernel` state;
+- complete legacy `.kala` state;
 - provider/model configuration required by the service;
 - current service unit and environment-file locations;
 - current release/bundle;
@@ -464,10 +464,10 @@ Keep the backup and evidence outside Git with restrictive permissions.
 Create only on the target, mode `0600` where secrets may appear:
 
 ```text
-/etc/agent-runlab/dedicated.env
-/etc/agent-runlab/ingress.env
-/etc/agent-runlab/supervisor.env
-/etc/agent-runlab/migration.env
+/etc/kala/dedicated.env
+/etc/kala/ingress.env
+/etc/kala/supervisor.env
+/etc/kala/migration.env
 ```
 
 Do not commit real domains, ports, tokens, API keys, provider endpoints, filesystem paths, or credentials. The unit templates may contain public defaults; target-specific values stay in environment files.
@@ -478,12 +478,12 @@ After all blockers are fixed and Shadow passes, use the generated release instal
 
 ```bash
 sudo env \
-  AGENT_RUNLAB_INSTALL_ROOT=/opt/agent-runlab \
-  AGENT_RUNLAB_DATA_ROOT=/var/lib/agent-runlab \
-  AGENT_RUNLAB_SYSTEMD_DIR=/etc/systemd/system \
-  AGENT_RUNLAB_RELEASE_ID='<immutable-release-id>' \
-  AGENT_RUNLAB_LEGACY_DATA_ROOT='<discovered-legacy-home-or-state-root>' \
-  AGENT_RUNLAB_CONTAINER_BACKEND='<none-or-explicitly-approved-docker>' \
+  KALA_INSTALL_ROOT=/opt/kala \
+  KALA_DATA_ROOT=/var/lib/kala \
+  KALA_SYSTEMD_DIR=/etc/systemd/system \
+  KALA_RELEASE_ID='<immutable-release-id>' \
+  KALA_LEGACY_DATA_ROOT='<discovered-legacy-home-or-state-root>' \
+  KALA_CONTAINER_BACKEND='<none-or-explicitly-approved-docker>' \
   node release/install-dedicated-systemd.mjs release
 
 sudo systemctl daemon-reload
@@ -492,16 +492,16 @@ sudo systemctl daemon-reload
 Immediately assert staging did not start or enable the new topology:
 
 ```bash
-systemctl is-active agent-runlab-dedicated-ingress.service || true
-systemctl is-active agent-runlab-dedicated-unit@blue.service || true
-systemctl is-active agent-runlab-dedicated-unit@green.service || true
-systemctl is-active agent-runlab-dedicated-deploy-supervisor.service || true
-systemctl is-active agent-runlab-dedicated-control-updater.service || true
-systemctl is-enabled agent-runlab-dedicated-ingress.service || true
-systemctl is-enabled agent-runlab-dedicated-unit@blue.service || true
-systemctl is-enabled agent-runlab-dedicated-unit@green.service || true
-systemctl is-enabled agent-runlab-dedicated-deploy-supervisor.service || true
-systemctl is-enabled agent-runlab-dedicated-control-updater.service || true
+systemctl is-active kala-dedicated-ingress.service || true
+systemctl is-active kala-dedicated-unit@blue.service || true
+systemctl is-active kala-dedicated-unit@green.service || true
+systemctl is-active kala-dedicated-deploy-supervisor.service || true
+systemctl is-active kala-dedicated-control-updater.service || true
+systemctl is-enabled kala-dedicated-ingress.service || true
+systemctl is-enabled kala-dedicated-unit@blue.service || true
+systemctl is-enabled kala-dedicated-unit@green.service || true
+systemctl is-enabled kala-dedicated-deploy-supervisor.service || true
+systemctl is-enabled kala-dedicated-control-updater.service || true
 ```
 
 Expected: inactive and disabled before cutover.
@@ -510,20 +510,20 @@ Validate units without starting them:
 
 ```bash
 systemd-analyze verify \
-  /etc/systemd/system/agent-runlab-dedicated-ingress.service \
-  /etc/systemd/system/agent-runlab-dedicated-unit@.service \
-  /etc/systemd/system/agent-runlab-dedicated-deploy-supervisor.service \
-  /etc/systemd/system/agent-runlab-dedicated-control-updater.service \
-  /etc/systemd/system/agent-runlab-dedicated-migration-finalizer.service
+  /etc/systemd/system/kala-dedicated-ingress.service \
+  /etc/systemd/system/kala-dedicated-unit@.service \
+  /etc/systemd/system/kala-dedicated-deploy-supervisor.service \
+  /etc/systemd/system/kala-dedicated-control-updater.service \
+  /etc/systemd/system/kala-dedicated-migration-finalizer.service
 
-systemctl cat agent-runlab-dedicated-ingress.service
-systemctl cat agent-runlab-dedicated-unit@.service
-systemctl cat agent-runlab-dedicated-deploy-supervisor.service
-systemctl cat agent-runlab-dedicated-control-updater.service
-systemctl cat agent-runlab-dedicated-migration-finalizer.service
+systemctl cat kala-dedicated-ingress.service
+systemctl cat kala-dedicated-unit@.service
+systemctl cat kala-dedicated-deploy-supervisor.service
+systemctl cat kala-dedicated-control-updater.service
+systemctl cat kala-dedicated-migration-finalizer.service
 ```
 
-Inspect `/var/lib/agent-runlab/deploy/migration-receipt.json`; expected phase is `installed_disabled`.
+Inspect `/var/lib/kala/deploy/migration-receipt.json`; expected phase is `installed_disabled`.
 The receipt must also contain revision `1`, the immutable release digest, and
 the executable bundle SHA-256. The Finalizer deliberately keeps the source and
 target state parents in one mount namespace object so their directory rename
@@ -541,7 +541,7 @@ Re-run immediately before cutover:
 - no deployment/restart already active;
 - no second writer;
 - state source/target device IDs still match;
-- target `.agent-kernel` does not already exist;
+- target `.kala` does not already exist;
 - candidate release checksum matches recorded digest;
 - rollback script and legacy service definition are present;
 - quiescence/reservation endpoints work;
@@ -563,20 +563,20 @@ no required child Session active
 The finalizer must run outside the legacy service cgroup. Start it without synchronously depending on the old Dashboard:
 
 ```bash
-sudo systemctl start --no-block agent-runlab-dedicated-migration-finalizer.service
+sudo systemctl start --no-block kala-dedicated-migration-finalizer.service
 ```
 
 Poll from the independent SSH/console channel:
 
 ```bash
-watch -n 1 'systemctl --no-pager --full status agent-runlab-dedicated-migration-finalizer.service agent-runlab-dedicated-ingress.service agent-runlab-dedicated-unit@blue.service agent-runlab-dedicated-unit@green.service agent-runlab-dedicated-deploy-supervisor.service agent-runlab-dedicated-control-updater.service'
+watch -n 1 'systemctl --no-pager --full status kala-dedicated-migration-finalizer.service kala-dedicated-ingress.service kala-dedicated-unit@blue.service kala-dedicated-unit@green.service kala-dedicated-deploy-supervisor.service kala-dedicated-control-updater.service'
 ```
 
 Also inspect, without exposing secrets:
 
 ```bash
-sudo journalctl -u agent-runlab-dedicated-migration-finalizer.service -n 200 --no-pager
-sudo cat /var/lib/agent-runlab/deploy/migration-receipt.json
+sudo journalctl -u kala-dedicated-migration-finalizer.service -n 200 --no-pager
+sudo cat /var/lib/kala/deploy/migration-receipt.json
 ```
 
 Never force-stop the old Host merely because waiting is slow. Investigate the named quiescence blocker or abort before data movement.
@@ -594,15 +594,15 @@ Do not declare success merely because port 13000 returns 200.
 Verify:
 
 ```bash
-systemctl is-active agent-runlab-dedicated-ingress.service
-systemctl is-active agent-runlab-dedicated-unit@blue.service || systemctl is-active agent-runlab-dedicated-unit@green.service
-systemctl is-active agent-runlab-dedicated-deploy-supervisor.service
-systemctl is-enabled agent-runlab-dedicated-ingress.service
-systemctl is-enabled agent-runlab-dedicated-deploy-supervisor.service
+systemctl is-active kala-dedicated-ingress.service
+systemctl is-active kala-dedicated-unit@blue.service || systemctl is-active kala-dedicated-unit@green.service
+systemctl is-active kala-dedicated-deploy-supervisor.service
+systemctl is-enabled kala-dedicated-ingress.service
+systemctl is-enabled kala-dedicated-deploy-supervisor.service
 
 curl -fsS http://127.0.0.1:13000/runtime/capabilities
 curl -fsS http://127.0.0.1:13000/settings >/dev/null
-cat /var/lib/agent-runlab/deploy/route-state.json
+cat /var/lib/kala/deploy/route-state.json
 ```
 
 Acceptance evidence must prove:
@@ -640,7 +640,7 @@ Exercise at least one safe real flow through public Ingress:
 Automatic rollback is required if any mandatory check fails during cutover. Manual rollback during the observation window uses the reviewed generated script only after verifying its receipt and data paths:
 
 ```bash
-sudo node /opt/agent-runlab/control/rollback-dedicated-systemd.mjs
+sudo node /opt/kala/control/rollback-dedicated-systemd.mjs
 ```
 
 Rollback acceptance:

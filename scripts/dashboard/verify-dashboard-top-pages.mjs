@@ -18,7 +18,7 @@ if (!chrome) throw new Error('Chromium not found; set CHROME_PATH')
 await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], 90_000)
 const host = spawn('pnpm', ['--filter', '@agent-kernel/host', 'dev'], {
   cwd: ROOT,
-  env: { ...process.env, HOST_PORT: String(PORT), SESSIONS_DIR: SESSIONS, DASHBOARD_DIR: join(ROOT, 'packages/dashboard/dist') },
+  env: { ...process.env, KALA_PORT: String(PORT), KALA_SESSIONS_DIR: SESSIONS, KALA_DASHBOARD_DIR: join(ROOT, 'packages/dashboard/dist') },
   detached: true,
   stdio: ['ignore', 'pipe', 'pipe'],
 })

@@ -105,7 +105,7 @@ async function fetchWithRetry(
         method: 'GET',
         headers: {
           accept: 'application/json',
-          'user-agent': 'agent-kernel-host',
+          'user-agent': 'kala-host',
           ...(options.hfToken ? { authorization: `Bearer ${options.hfToken}` } : {}),
         },
         signal: controller.signal,

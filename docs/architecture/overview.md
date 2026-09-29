@@ -25,7 +25,7 @@
    │    └──────────────────────┘   └──────────────────────┘         │
    │    ┌──────────────────────┐   ┌──────────────────────┐         │
    │    │ Host loop            │   │ Event log (JSONL)    │         │
-   │    │ (consumes effects,   │   │  ~/.agent-kernel/    │         │
+   │    │ (consumes effects,   │   │  ~/.kala/    │         │
    │    │  dispatches events)  │   │   sessions/*.jsonl   │         │
    │    └──────────────────────┘   └──────────────────────┘         │
    │    ┌──────────────────────┐   ┌──────────────────────┐         │
@@ -86,7 +86,7 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 - Serve two Socket.IO namespaces: `/dashboard` and `/executor`, rooms `session:<id>`, and serve the pre-built Dashboard bundle from `packages/dashboard/dist/`
 - Drive context compaction (both auto via host `ContextSnapshot.pressureLevel === 'hard'` and manual via `client:compact` / the `/compact` slash command). The summarizer is invoked with the LLM adapter; successful replacement is recorded as `messages_replaced(reason='compaction')`, while attempt metadata is written as runtime metadata/artifacts.
 - Provide the host-side `agent` builtin tool: spawn a child JSONL session in the same workspace, inheriting the parent's `approvalMode`, and return the child's final assistant text.
-- Auto-import LLM providers/models from `~/.claude/settings.json` and `~/.codex/config.toml`, merge user-managed model ids from `~/.config/agent-kernel/models.json`, and expose sanitized snapshots to the dashboard via HTTP `GET /models` and `GET /settings`.
+- Auto-import LLM providers/models from `~/.claude/settings.json` and `~/.codex/config.toml`, merge user-managed model ids from `~/.config/kala/models.json`, and expose sanitized snapshots to the dashboard via HTTP `GET /models` and `GET /settings`.
 
 **Non-goals**:
 - Does not implement tools directly (executor does)
@@ -96,7 +96,7 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 
 Lives close to the files it needs to touch. Dials **out** to Host via Socket.IO. Never accepts inbound connections.
 
-**One executor per workspace, one workspace per local profile.** The executor's `workspaceId` (a stable ULID persisted in `~/.agent-kernel/workspace-id`) is the routing key Host uses to dispatch tool calls; the `workspaceName` (defaults to `os.hostname()`) is the display label. Two executor processes with the same `workspaceId` are treated as replicas of the same workspace. A development machine can run an additional isolated executor with `--profile dev`, which stores its lock, `workspace-id`, and token under `~/.agent-kernel/profiles/dev/`.
+**One executor per workspace, one workspace per local profile.** The executor's `workspaceId` (a stable ULID persisted in `~/.kala/workspace-id`) is the routing key Host uses to dispatch tool calls; the `workspaceName` (defaults to `os.hostname()`) is the display label. Two executor processes with the same `workspaceId` are treated as replicas of the same workspace. A development machine can run an additional isolated executor with `--profile dev`, which stores its lock, `workspace-id`, and token under `~/.kala/profiles/dev/`.
 
 **Two forms**:
 
@@ -281,7 +281,7 @@ This principle is a review gate. When a feature adds state, first ask whether it
 ### 6.1 Sessions on disk
 
 ```
-~/.agent-kernel/
+~/.kala/
 ├── config.json                        # user config: default provider, tokens, executor URL
 └── sessions/
     ├── 2026-07-04T17-30-15_s1.jsonl   # per-session event log

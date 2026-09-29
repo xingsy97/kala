@@ -41,21 +41,21 @@ Commands:
 pnpm install
 pnpm --filter @agent-kernel/host build
 
-export SESSION_LOG="$HOME/.agent-kernel/sessions/<session_id>.jsonl"
+export SESSION_LOG="$HOME/.kala/sessions/<session_id>.jsonl"
 export ROOT="runs/rollouts-metadata"
 
-node packages/host/dist/bin/agent-kernel-host.js enhancement rollout export-session \
+node packages/host/dist/bin/kala-host.js enhancement rollout export-session \
   --root-dir "$ROOT" \
   --session-log "$SESSION_LOG" \
   --task-id swebench:sympy__sympy-20590 \
   --framework slime \
   --model local-policy
 
-node packages/host/dist/bin/agent-kernel-host.js enhancement rollout export-segments \
+node packages/host/dist/bin/kala-host.js enhancement rollout export-segments \
   --root-dir "$ROOT" \
   --session-log "$SESSION_LOG"
 
-node packages/host/dist/bin/agent-kernel-host.js enhancement rollout export-adapter \
+node packages/host/dist/bin/kala-host.js enhancement rollout export-adapter \
   --root-dir "$ROOT" \
   --sidecar "$ROOT/rollouts/<rollout_id>.json" \
   --framework verl
@@ -94,15 +94,15 @@ python -m sglang.launch_server \
   --context-length 4096 \
   --mem-fraction-static 0.55
 
-AGENT_KERNEL_PROVIDER=policy-gateway \
-AGENT_KERNEL_POLICY_BASE_URL=http://127.0.0.1:30080 \
-AGENT_KERNEL_POLICY_ENDPOINT=native-generate \
-AGENT_KERNEL_ARTIFACT_ROOT="$ARTIFACT_ROOT" \
-node packages/host/dist/bin/agent-kernel-host.js rl run-rollout-smoke \
+KALA_PROVIDER=policy-gateway \
+KALA_POLICY_BASE_URL=http://127.0.0.1:30080 \
+KALA_POLICY_ENDPOINT=native-generate \
+KALA_ARTIFACT_ROOT="$ARTIFACT_ROOT" \
+node packages/host/dist/bin/kala-host.js rl run-rollout-smoke \
   --prompt "Create a file hello.txt containing hello" \
   --workspace /tmp/agent-kernel-rl-smoke
 
-node packages/host/dist/bin/agent-kernel-host.js rl inspect-rollout \
+node packages/host/dist/bin/kala-host.js rl inspect-rollout \
   --root-dir "$ARTIFACT_ROOT" \
   --latest
 ```
@@ -136,19 +136,19 @@ Commands:
 ```bash
 export ROOT=runs/swebench-rl-smoke
 
-node packages/host/dist/bin/agent-kernel-host.js rl prepare-swebench-dataset \
+node packages/host/dist/bin/kala-host.js rl prepare-swebench-dataset \
   --source swebench_verified \
   --output "$ROOT/tasks.jsonl" \
   --limit 1
 
-AGENT_KERNEL_PROVIDER=policy-gateway \
-AGENT_KERNEL_POLICY_BASE_URL=http://127.0.0.1:30080 \
-node packages/host/dist/bin/agent-kernel-host.js rl run-rollout-smoke \
+KALA_PROVIDER=policy-gateway \
+KALA_POLICY_BASE_URL=http://127.0.0.1:30080 \
+node packages/host/dist/bin/kala-host.js rl run-rollout-smoke \
   --task-file "$ROOT/tasks.jsonl" \
   --artifact-root "$ROOT" \
   --verifier docker
 
-node packages/host/dist/bin/agent-kernel-host.js rl inspect-rollout \
+node packages/host/dist/bin/kala-host.js rl inspect-rollout \
   --root-dir "$ROOT" \
   --latest
 ```
@@ -191,8 +191,8 @@ cd references/slime
 export HF_CHECKPOINT=/models/Qwen2.5-0.5B-Instruct
 export REF_MODEL_PATH=/models/Qwen2.5-0.5B-Instruct_torch_dist
 export PROMPT_DATA=/data/agent_kernel_swe_smoke.jsonl
-export AGENT_KERNEL_HOST_URL=http://127.0.0.1:13000
-export AGENT_KERNEL_ARTIFACT_ROOT=/tmp/agent-kernel-slime-artifacts
+export KALA_HOST_URL=http://127.0.0.1:13000
+export KALA_ARTIFACT_ROOT=/tmp/agent-kernel-slime-artifacts
 export ADAPTER_PUBLIC_HOST=$(hostname -I | awk '{print $1}')
 export ADAPTER_PORT=18001
 

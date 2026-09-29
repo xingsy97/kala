@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto'
 
 import { io } from 'socket.io-client'
 
-const origin = process.env.RUNLAB_URL ?? process.env.DASHBOARD_URL
-if (!origin) throw new Error('set RUNLAB_URL or DASHBOARD_URL to the Kala origin')
+const origin = process.env.KALA_URL ?? process.env.DASHBOARD_URL
+if (!origin) throw new Error('set KALA_URL or DASHBOARD_URL to the Kala origin')
 
 const cases = [
   {

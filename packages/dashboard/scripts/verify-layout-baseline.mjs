@@ -16,7 +16,7 @@ import {
   verifyAcrossThemes,
 } from './verify-lib.mjs'
 
-const url = process.env.AK_DASHBOARD_URL ?? 'http://localhost:3000'
+const url = process.env.KALA_DASHBOARD_URL ?? 'http://localhost:3000'
 
 const { browser, page, errors } = await launchDashboard({ url })
 

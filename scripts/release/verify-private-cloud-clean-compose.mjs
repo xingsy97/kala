@@ -16,7 +16,7 @@ const tag = required('--tag')
 const revision = required('--revision')
 const predecessorRevision = required('--predecessor-revision')
 const output = resolve(required('--output'))
-const configTemplate = resolve(requiredEnv('RUNLAB_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE'))
+const configTemplate = resolve(requiredEnv('KALA_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE'))
 const scratch = mkdtempSync(join(tmpdir(), 'runlab-rc-private-cloud-'))
 const operatorRoot = join(scratch, 'operator')
 const config = join(scratch, 'config')
@@ -52,7 +52,7 @@ try {
 
   const predecessorOperator = join(predecessor, 'kala-private-cloud')
   const candidateOperator = join(candidate, 'kala-private-cloud')
-  const env = { ...process.env, RUNLAB_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot }
+  const env = { ...process.env, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot }
   const installedResult = operator(predecessorOperator, ['install', '--bundle', predecessor, '--config-dir', config], env)
   installed = true
   if (!installedResult.ok || installedResult.receipt?.phase !== 'completed') throw new Error('Private Cloud clean install did not complete')
@@ -135,7 +135,7 @@ try {
   if (installed) {
     try {
       const active = json(readFileSync(join(operatorRoot, 'installation.json'), 'utf8'))
-      operator(join(candidate, 'kala-private-cloud'), ['uninstall', '--confirm', 'UNINSTALL:' + active.installationId], { ...process.env, RUNLAB_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot })
+      operator(join(candidate, 'kala-private-cloud'), ['uninstall', '--confirm', 'UNINSTALL:' + active.installationId], { ...process.env, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot })
     } catch {}
   }
   cleanupProject(project)
@@ -151,7 +151,7 @@ function rewriteDeploymentEnv(path, project) { const lines = readFileSync(path, 
 function operator(binary, args, env) { const result = run(binary, args, false, env); return json(result.stdout) }
 function assertServicesReady(services) { for (const name of ['runtime-host', 'runtime-ingress', 'dashboard']) if (services?.[name]?.state !== 'running' || !['', 'healthy'].includes(services[name].health)) throw new Error('Private Cloud service is not ready: ' + name) }
 function inspectVolume(release, config, name) { const invocation = composeInvocation(release, config, ['config', '--format', 'json']); const value = json(run(invocation.command, invocation.args, false, invocation.env, invocation.cwd).stdout); return value.volumes?.[name]?.name ?? envFile(join(config, 'deployment.env')).COMPOSE_PROJECT_NAME + '_' + name }
-function composeInvocation(release, config, args) { const deployment = envFile(join(config, 'deployment.env')); const storage = deployment.RUNLAB_STORAGE === 'local-volume' ? 'compose.storage-local.yaml' : deployment.RUNLAB_STORAGE === 'external-nfs' ? 'compose.storage-external-nfs.yaml' : 'compose.storage-nfs.yaml'; const profile = deployment.RUNLAB_PROFILE === 'local' ? 'compose.local.yaml' : 'compose.cloudflare.yaml'; const lock = json(readFileSync(join(release, 'image-lock.json'), 'utf8')); return { command: 'docker', cwd: release, env: { ...process.env, ...deployment, RUNLAB_RUNTIME_IMAGE: lock.images.runtime, RUNLAB_INGRESS_IMAGE: lock.images.ingress, RUNLAB_DASHBOARD_IMAGE: lock.images.dashboard, RUNLAB_SECRETS_DIR: join(config, 'secrets'), RUNLAB_PROVIDER_CATALOG_FILE: join(config, 'runtime-provider-catalog.json'), RUNLAB_DEPLOYMENT_CONFIG_FILE: join(release, 'deployment.json') }, args: ['compose', '--project-name', deployment.COMPOSE_PROJECT_NAME, '--env-file', join(config, 'deployment.env'), '-f', join(release, 'compose.yaml'), '-f', join(release, storage), '-f', join(release, profile), ...args] } }
+function composeInvocation(release, config, args) { const deployment = envFile(join(config, 'deployment.env')); const storage = deployment.KALA_STORAGE === 'local-volume' ? 'compose.storage-local.yaml' : deployment.KALA_STORAGE === 'external-nfs' ? 'compose.storage-external-nfs.yaml' : 'compose.storage-nfs.yaml'; const profile = deployment.KALA_PROFILE === 'local' ? 'compose.local.yaml' : 'compose.cloudflare.yaml'; const lock = json(readFileSync(join(release, 'image-lock.json'), 'utf8')); return { command: 'docker', cwd: release, env: { ...process.env, ...deployment, KALA_RUNTIME_IMAGE: lock.images.runtime, KALA_INGRESS_IMAGE: lock.images.ingress, KALA_DASHBOARD_IMAGE: lock.images.dashboard, KALA_SECRETS_DIR: join(config, 'secrets'), KALA_PROVIDER_CATALOG_FILE: join(config, 'runtime-provider-catalog.json'), KALA_DEPLOYMENT_CONFIG_FILE: join(release, 'deployment.json') }, args: ['compose', '--project-name', deployment.COMPOSE_PROJECT_NAME, '--env-file', join(config, 'deployment.env'), '-f', join(release, 'compose.yaml'), '-f', join(release, storage), '-f', join(release, profile), ...args] } }
 function envFile(path) { return Object.fromEntries(readFileSync(path, 'utf8').split(/\r?\n/u).map((line) => line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/u)).filter(Boolean).map((match) => [match[1], match[2]])) }
 function infrastructureImage(release, name) { const match = readFileSync(join(release, 'compose.yaml'), 'utf8').match(new RegExp('image: (' + name + '(?::[^\\s@]+)?@sha256:[0-9a-f]{64})', 'u')); if (!match) throw new Error('missing immutable ' + name + ' image'); return match[1] }
 function cleanupProject(name) {

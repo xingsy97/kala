@@ -92,7 +92,7 @@ const forbiddenProductSource = new Map([
   ['packages/host/src/http/routes.ts', [/['"]\/eval\//u, /src\/eval/u]],
   ['packages/host/src/ops-cli.ts', [/eval-bench/u, /benchmark-cli/u]],
   ['packages/host/src/index.ts', [/src\/eval/u, /benchmark-orchestrator/u]],
-  ['packages/host/bin/agent-kernel-host.ts', [/eval-bench/u, /benchmark-cli/u]],
+  ['packages/host/bin/kala-host.ts', [/eval-bench/u, /benchmark-cli/u]],
   ['packages/dashboard/src/app.tsx', [/#\/benchmarks/u, /features\/benchmarks/u]],
   ['packages/dashboard/src/app-shell/section.ts', [/benchmarks/u, /evaluations/u]],
   ['packages/dashboard/src/app-shell/AppShellNav.tsx', [/benchmarks/u, /evaluations/u]],

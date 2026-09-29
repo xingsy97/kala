@@ -17,6 +17,6 @@ services:
 
   runtime-host:
     volumes:
-      - ./local/runtime-provider-catalog.acceptance.json:/etc/agent-runlab/runtime-provider-catalog.json:ro
+      - ./local/runtime-provider-catalog.acceptance.json:/etc/kala/runtime-provider-catalog.json:ro
     depends_on:
       mock-llm: { condition: service_started }

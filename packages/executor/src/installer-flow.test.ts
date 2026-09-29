@@ -14,7 +14,7 @@ describe('installer flow', () => {
     expect(env.EXECUTOR_INSTALL_MODE).toBe('service')
     const root = mkdtempSync(join(tmpdir(), 'installer-flow-')); roots.push(root)
     const path = join(root, 'private', 'session.json')
-    writeInstallerSession(path, { version: 1, mode: 'user', executable: '/bin/runlab-executor', host: 'https://host', sandboxRoots: ['/repo'], credential: { token: 'ak_exec_test' } })
+    writeInstallerSession(path, { version: 1, mode: 'user', executable: '/bin/kala-executor', host: 'https://host', sandboxRoots: ['/repo'], credential: { token: 'ak_exec_test' } })
     expect(JSON.parse(readFileSync(path, 'utf8')).host).toBe('https://host')
     if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600)
   })

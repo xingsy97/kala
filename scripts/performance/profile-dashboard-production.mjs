@@ -33,7 +33,7 @@ writeSession(shortSessionId, 8)
 try {
   host = spawn(process.execPath, [bundle], {
     cwd: root,
-    env: { ...process.env, HOST_LISTEN_HOST: '127.0.0.1', HOST_PORT: String(port), SESSIONS_DIR: sessionsDir },
+    env: { ...process.env, KALA_BIND_HOST: '127.0.0.1', KALA_PORT: String(port), KALA_SESSIONS_DIR: sessionsDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   host.stdout.on('data', (chunk) => hostLogs.push(chunk.toString()))

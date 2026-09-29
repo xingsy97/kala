@@ -1,0 +1,27 @@
+[Unit]
+Description=Kala Dedicated Deploy Supervisor
+After=network-online.target kala-dedicated-ingress.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+Group=kala
+EnvironmentFile=-/etc/kala/supervisor.env
+EnvironmentFile=-/etc/kala/handoff.env
+Environment=KALA_SLOT_VERIFY_TIMEOUT_MS=300000
+ExecStart=/usr/bin/flock --exclusive --nonblock --no-fork /var/lib/kala/deploy/supervisor.lock /usr/bin/node /var/lib/kala/deploy/control-current/kala-dedicated-deploy-supervisor.cjs
+Restart=always
+RestartSec=2s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kala/deploy /run/systemd/system
+ReadOnlyPaths=/var/lib/kala/admission /var/lib/kala/units/local/write.lock
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

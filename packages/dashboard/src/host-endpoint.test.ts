@@ -26,33 +26,33 @@ describe('host-endpoint', () => {
   })
 
   it('keeps desktop HTTP and Socket.IO on the selected origin despite web overrides', () => {
-    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
-    vi.stubEnv('VITE_AGENT_KERNEL_HOST', 'https://build.example')
+    Object.defineProperty(window, '__KALA_DESKTOP__', { value: true, configurable: true })
+    vi.stubEnv('VITE_KALA_HOST', 'https://build.example')
     try {
       localStorage.setItem(STORAGE_KEY, 'https://stored.example')
       setLocation('https://desktop.example/?host=https://query.example')
       expect(resolveHostEndpoint()).toEqual({ url: 'https://desktop.example', source: 'default' })
     } finally {
-      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+      delete (window as Window & { __KALA_DESKTOP__?: boolean }).__KALA_DESKTOP__
       vi.unstubAllEnvs()
     }
   })
 
-  it('reads build-time VITE_AGENT_KERNEL_HOST', () => {
-    vi.stubEnv('VITE_AGENT_KERNEL_HOST', 'http://build.example:4000')
+  it('reads build-time VITE_KALA_HOST', () => {
+    vi.stubEnv('VITE_KALA_HOST', 'http://build.example:4000')
     expect(resolveHostEndpoint()).toEqual({ url: 'http://build.example:4000', source: 'build' })
     vi.unstubAllEnvs()
   })
 
   it('settings storage overrides build-time', () => {
-    vi.stubEnv('VITE_AGENT_KERNEL_HOST', 'http://build.example:4000')
+    vi.stubEnv('VITE_KALA_HOST', 'http://build.example:4000')
     localStorage.setItem(STORAGE_KEY, 'http://user.example:5000')
     expect(resolveHostEndpoint()).toEqual({ url: 'http://user.example:5000', source: 'settings' })
     vi.unstubAllEnvs()
   })
 
   it('query param overrides everything', () => {
-    vi.stubEnv('VITE_AGENT_KERNEL_HOST', 'http://build.example:4000')
+    vi.stubEnv('VITE_KALA_HOST', 'http://build.example:4000')
     localStorage.setItem(STORAGE_KEY, 'http://user.example:5000')
     setLocation('http://localhost:3000/?host=http://query.example:6000')
     expect(resolveHostEndpoint()).toEqual({ url: 'http://query.example:6000', source: 'query' })

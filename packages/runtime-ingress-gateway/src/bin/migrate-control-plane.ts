@@ -5,9 +5,9 @@ import { resolve } from 'node:path'
 import { createPostgresControlPlaneDatabase, migrateControlPlane, readControlPlaneMigrations } from '../persistence/postgres.js'
 
 async function main(): Promise<void> {
-  const connectionString = process.env.RUNTIME_INGRESS_DATABASE_URL
-  if (!connectionString) throw new Error('RUNTIME_INGRESS_DATABASE_URL is required')
-  const directory = resolve(process.env.RUNTIME_INGRESS_MIGRATIONS_DIR ?? 'migrations')
+  const connectionString = process.env.KALA_INGRESS_DATABASE_URL
+  if (!connectionString) throw new Error('KALA_INGRESS_DATABASE_URL is required')
+  const directory = resolve(process.env.KALA_INGRESS_MIGRATIONS_DIR ?? 'migrations')
   const database = createPostgresControlPlaneDatabase({ connectionString, applicationName: 'agent-runlab-control-plane-migrator', maxConnections: 1 })
   try {
     const migrations = await readControlPlaneMigrations(directory)

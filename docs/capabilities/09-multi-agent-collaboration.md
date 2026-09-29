@@ -68,9 +68,9 @@ Show subagents as expandable linked sessions:
 Implemented subagent graph export:
 
 ```bash
-agent-kernel-host enhancement subagents graph \
+kala-host enhancement subagents graph \
   --root-dir runs/subagents \
-  --sessions-dir ~/.agent-kernel/sessions
+  --sessions-dir ~/.kala/sessions
 ```
 
 The command scans JSONL headers and writes `subagent-graph.json` with session
@@ -104,7 +104,7 @@ The current implementation has the right primitive:
   `parentCursor` metadata, not special reducer state.
 - Dashboard transcript renders subagent cards and can expand child session
   content.
-- `agent-kernel-host enhancement subagents graph` scans session headers and
+- `kala-host enhancement subagents graph` scans session headers and
   writes `subagent-graph.json` with nodes and parent-child edges.
 - Dashboard Ops view renders subagent graph artifacts.
 - Browser e2e covers subagent card rendering/scroll behavior and enhancement

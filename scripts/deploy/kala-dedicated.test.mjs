@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
-const script = fileURLToPath(new URL('./runlab-dedicated.mjs', import.meta.url))
+const script = fileURLToPath(new URL('./kala-dedicated.mjs', import.meta.url))
 const roots = []
 const children = []
 afterEach(() => { for (const child of children.splice(0)) child.kill('SIGTERM'); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -85,13 +85,13 @@ describe('Dedicated operator CLI', () => {
 })
 
 function createFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'runlab-dedicated-operator-')); roots.push(root)
+  const root = mkdtempSync(join(tmpdir(), 'kala-dedicated-operator-')); roots.push(root)
   const data = join(root, 'var/lib/agent-runlab')
   const install = join(root, 'opt/agent-runlab')
   const config = join(root, 'etc/agent-runlab')
   const systemd = join(root, 'etc/systemd/system')
   const operator = join(root, 'var/lib/agent-runlab-operator')
-  const operatorBin = join(root, 'usr/local/bin/runlab-dedicated')
+  const operatorBin = join(root, 'usr/local/bin/kala-dedicated')
   const bin = join(root, 'bin')
   for (const path of [data, install, config, systemd, operator, bin]) mkdirSync(path, { recursive: true })
   mkdirSync(join(data, 'deploy'), { recursive: true })
@@ -119,9 +119,9 @@ fs.writeFileSync(statePath,JSON.stringify(state));
   return {
     root, data, install, config, systemd, operator, operatorBin, bin,
     env: {
-      ...process.env, PATH: `${bin}:${process.env.PATH}`, AGENT_RUNLAB_DATA_ROOT: data, AGENT_RUNLAB_INSTALL_ROOT: install,
-      AGENT_RUNLAB_CONFIG_ROOT: config, AGENT_RUNLAB_SYSTEMD_DIR: systemd, AGENT_RUNLAB_OPERATOR_ROOT: operator,
-      AGENT_RUNLAB_OPERATOR_BIN: operatorBin, NODE_ENV: 'test', AGENT_RUNLAB_OPERATOR_TEST_MODE: '1', AGENT_RUNLAB_OPERATOR_TEST_ORIGIN: runtimeOrigin,
+      ...process.env, PATH: `${bin}:${process.env.PATH}`, KALA_DATA_ROOT: data, KALA_INSTALL_ROOT: install,
+      KALA_CONFIG_ROOT: config, KALA_SYSTEMD_DIR: systemd, KALA_OPERATOR_ROOT: operator,
+      KALA_OPERATOR_BIN: operatorBin, NODE_ENV: 'test', KALA_OPERATOR_TEST_MODE: '1', KALA_OPERATOR_TEST_ORIGIN: runtimeOrigin,
     },
     systemctlLog: () => readFileSync(join(root, 'systemctl.log'), 'utf8').trim().split('\n').filter(Boolean),
   }
@@ -137,5 +137,5 @@ function startRuntimeFixture(root) {
 }
 function execute(fixture, args) { return spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: fixture.env }) }
 function run(fixture, args) { const result = execute(fixture, args); if (result.status !== 0) throw new Error(result.stderr); return JSON.parse(result.stdout) }
-function services() { return ['agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@blue.service', 'agent-runlab-dedicated-unit@green.service', 'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service', 'agent-runlab-dedicated-migration-finalizer.service'] }
-function unitFiles() { return ['agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@.service', 'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service', 'agent-runlab-dedicated-migration-finalizer.service'] }
+function services() { return ['kala-dedicated-ingress.service', 'kala-dedicated-unit@blue.service', 'kala-dedicated-unit@green.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-control-updater.service', 'kala-dedicated-migration-finalizer.service'] }
+function unitFiles() { return ['kala-dedicated-ingress.service', 'kala-dedicated-unit@.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-control-updater.service', 'kala-dedicated-migration-finalizer.service'] }

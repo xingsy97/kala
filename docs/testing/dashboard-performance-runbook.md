@@ -183,7 +183,7 @@ The paid model is the only controlled boundary. Host, Executor, Socket.IO, persi
 First create a profiling build:
 
 ```bash
-RUNLAB_PROFILE_SOURCEMAP=1 pnpm run build:release-assets -- --skip-package-build
+KALA_PROFILE_SOURCEMAP=1 pnpm run build:release-assets -- --skip-package-build
 ```
 
 Then:
@@ -198,7 +198,7 @@ pnpm run perf:analyze-cpu -- \
 Restore the release afterward:
 
 ```bash
-RUNLAB_PROFILE_SOURCEMAP=0 pnpm run build:release-assets -- --skip-package-build
+KALA_PROFILE_SOURCEMAP=0 pnpm run build:release-assets -- --skip-package-build
 find packages/dashboard/dist -name '*.map' -print -quit | grep -q . && exit 1 || true
 ```
 
@@ -257,7 +257,7 @@ The suite builds workspace packages before profiling so Dashboard source maps, H
 
 ### CPU hotspots remain minified
 
-The profile and source maps must come from the same build. The analyzer fails by default when no profile bundle URL matches a source map. Run the suite, or rebuild with `RUNLAB_PROFILE_SOURCEMAP=1` and profile before rebuilding again. Use `--allow-unmapped` only for deliberate minified fallback analysis.
+The profile and source maps must come from the same build. The analyzer fails by default when no profile bundle URL matches a source map. Run the suite, or rebuild with `KALA_PROFILE_SOURCEMAP=1` and profile before rebuilding again. Use `--allow-unmapped` only for deliberate minified fallback analysis.
 
 ### Cold-load frame count is zero
 

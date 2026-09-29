@@ -113,7 +113,7 @@ if (includesHost) {
   }
   try { inspectDedicatedSupportBundle(join(releaseDir, DEDICATED_SUPPORT_ARCHIVE)) } catch (error) { fail(error.message) }
   const hostBundle = readFileSync(join(releaseDir, 'kala-dashboard-with-runtime.cjs'), 'utf8')
-  const embeddedAssetsPrefix = 'globalThis.__AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__='
+  const embeddedAssetsPrefix = 'globalThis.__KALA_EMBEDDED_RELEASE_ASSETS__='
   const embeddedAssetsStart = hostBundle.indexOf(embeddedAssetsPrefix)
   if (embeddedAssetsStart < 0) fail('release Host bundle is missing embedded release assets')
   const embeddedAssetsEnd = hostBundle.indexOf(';\n', embeddedAssetsStart + embeddedAssetsPrefix.length)
@@ -123,12 +123,12 @@ if (includesHost) {
   const embeddedAssets = JSON.parse(hostBundle.slice(embeddedAssetsStart + embeddedAssetsPrefix.length, embeddedAssetsEnd))
   for (const asset of embeddedAssets) assertSupportedReleaseAssetName(asset?.path, 'embedded Host assets')
   if (!embeddedAssets.some((asset) => asset.path === 'run.sh')) fail('release Host bundle must embed run.sh')
-  if (!hostBundle.includes('__AGENT_KERNEL_EMBEDDED_DOCS__')
+  if (!hostBundle.includes('__KALA_EMBEDDED_DOCS__')
     || !hostBundle.includes(Buffer.from('# Dedicated Platform Runtime Unit Refactor').toString('base64'))) {
     fail('release Host bundle is missing embedded product documentation')
   }
   const platformRuntime = readFileSync(join(releaseDir, 'kala-runtime.cjs'), 'utf8')
-  if (platformRuntime.includes('globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=')) fail('Self-hosted Platform Runtime must not embed Dashboard assets')
+  if (platformRuntime.includes('globalThis.__KALA_EMBEDDED_DASHBOARD__=')) fail('Self-hosted Platform Runtime must not embed Dashboard assets')
   try {
     const dashboard = verifyDashboardArchive(join(releaseDir, dashboardArchiveName)).manifest
     if (dashboard.version !== manifest.version || JSON.stringify(dashboard.source) !== JSON.stringify(manifest.source)) {
@@ -173,7 +173,7 @@ for (const asset of manifest.assets) {
     if (text.includes('curl')) fail(`${asset} must be wget-only and must not mention curl`)
     if (text.includes('copilot-cli') || text.includes('COPILOT_CLI_PATH')) fail(`${asset} must not download a standalone Copilot CLI`)
     if (!text.includes('Release downloads require HTTPS except for loopback URLs') || !text.includes('cosign verify-blob')) fail(`${asset} must reject public unsigned installs`)
-    if (!text.includes('AGENT_KERNEL_RELEASE_TRUST') || !text.includes('Host-mediated release trust requires a valid internal installation session') || !text.includes('"$BASE_URL" != "$host_asset_base"')) {
+    if (!text.includes('KALA_RELEASE_TRUST') || !text.includes('Host-mediated release trust requires a valid internal installation session') || !text.includes('"$BASE_URL" != "$host_asset_base"')) {
       fail(`${asset} must narrowly bind Host-mediated trust to an internal installation session`)
     }
     if (/wget\s+-qO-.*\|.*bash/.test(text)) {
@@ -183,8 +183,8 @@ for (const asset of manifest.assets) {
       fail(`${asset} user-facing examples must use diagnostic temp-file bootstrap commands`)
     }
     if (/win32|mingw|msys|cygwin|\.exe|\.ps1|conpty/iu.test(text)) fail(`${asset} must not offer Windows release assets`)
-    if (!text.includes('AGENT_KERNEL_RUNTIME:-auto')) {
-      fail(`${asset} must support AGENT_KERNEL_RUNTIME=auto|cjs|native`)
+    if (!text.includes('KALA_RUNTIME:-auto')) {
+      fail(`${asset} must support KALA_RUNTIME=auto|cjs|native`)
     }
     if (!text.includes('[ "$runtime" = "auto" ] && has_node22')) {
       fail(`${asset} must prefer compact .cjs assets when Node.js 22+ is available`)
@@ -286,7 +286,7 @@ if (manifest.assets.includes('kala-executor.cjs')) {
   })
   if (executorHelp.status !== 0) fail('executor --help smoke test should exit 0')
   const helpOutput = `${executorHelp.stdout}\n${executorHelp.stderr}`
-  if (!helpOutput.includes('Kala Executor') || !helpOutput.includes('Usage:') || !helpOutput.includes('runlab-executor --host <url>') || !helpOutput.includes('--sandbox-root <path>') || !helpOutput.includes('service status|logs|start|stop|restart|uninstall')) {
+  if (!helpOutput.includes('Kala Executor') || !helpOutput.includes('Usage:') || !helpOutput.includes('kala-executor --host <url>') || !helpOutput.includes('--sandbox-root <path>') || !helpOutput.includes('service status|logs|start|stop|restart|uninstall')) {
     fail('executor --help smoke test did not print daemon and service lifecycle usage')
   }
   if (helpOutput.includes('connecting to')) {

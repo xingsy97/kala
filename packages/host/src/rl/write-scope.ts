@@ -83,10 +83,10 @@ function matchGlob(path: string, glob: string): boolean {
   // Support **, *, ?, and literal segments. Convert to regex.
   const re = '^' + glob
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '__AGENT_KERNEL_DOUBLE_STAR__')
+    .replace(/\*\*/g, '__KALA_DOUBLE_STAR__')
     .replace(/\*/g, '[^/]*')
     .replace(/\?/g, '[^/]')
-    .replace(/__AGENT_KERNEL_DOUBLE_STAR__/g, '.*') + '$'
+    .replace(/__KALA_DOUBLE_STAR__/g, '.*') + '$'
   return new RegExp(re).test(path)
 }
 

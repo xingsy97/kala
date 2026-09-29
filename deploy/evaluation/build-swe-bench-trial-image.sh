@@ -53,7 +53,7 @@ lxc init "$tool_image" "$tool_exporter" --no-profiles --storage "$storage_pool" 
   --config user.agent-eval.managed=true --config user.agent-eval.purpose=tool-exporter
 lxc start "$tool_exporter"
 for attempt in $(seq 1 60); do lxc exec "$tool_exporter" -- true >/dev/null 2>&1 && break; sleep 1; done
-lxc exec "$tool_exporter" -- tar --exclude=opt/agent-eval/swebench --exclude=opt/agent-eval/tool-layer.tar -cf /opt/agent-eval/tool-layer.tar /opt/agent-eval /usr/lib/node_modules /usr/bin/node /usr/bin/codex /usr/bin/claude /usr/local/bin/agent-kernel-host /usr/local/bin/agent-kernel-executor /usr/local/bin/agent-eval-runlab-driver /usr/local/bin/agent-eval-codex-app-server /usr/local/bin/agent-eval-swe-bench-grade /usr/bin/busybox
+lxc exec "$tool_exporter" -- tar --exclude=opt/agent-eval/swebench --exclude=opt/agent-eval/tool-layer.tar -cf /opt/agent-eval/tool-layer.tar /opt/agent-eval /usr/lib/node_modules /usr/bin/node /usr/bin/codex /usr/bin/claude /usr/local/bin/kala-host /usr/local/bin/kala-executor /usr/local/bin/agent-eval-runlab-driver /usr/local/bin/agent-eval-codex-app-server /usr/local/bin/agent-eval-swe-bench-grade /usr/bin/busybox
 lxc file pull "$tool_exporter/opt/agent-eval/tool-layer.tar" "$staging/tool-layer.tar"
 lxc file pull "$tool_exporter/usr/bin/busybox" "$staging/busybox"
 lxc delete --force "$tool_exporter"

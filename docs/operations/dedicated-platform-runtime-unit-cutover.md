@@ -9,9 +9,9 @@
 - The release passed component, integration, Shadow installation, successful cutover, and rollback tests.
 - The release contains Host, Ingress, Supervisor, systemd templates, install script, cutover script, manifest, and checksums.
 - A restorable backup or platform snapshot exists.
-- The legacy mutable HOME or `.agent-kernel` state root is known to the operator; migration includes Sessions, Artifacts, Executor identities, Workspace aliases, encrypted credential master key, Web Search credential, Push VAPID key, Audit, Memos, Session Artifact registry, Claude provider settings, manual model catalog, and Agent runtime settings without logging their contents.
+- The legacy mutable HOME or `.kala` state root is known to the operator; migration includes Sessions, Artifacts, Executor identities, Workspace aliases, encrypted credential master key, Web Search credential, Push VAPID key, Audit, Memos, Session Artifact registry, Claude provider settings, manual model catalog, and Agent runtime settings without logging their contents.
 - The cutover records and compares a sanitised settings fingerprint containing only provider IDs, model refs, and default model; any drift triggers automatic rollback.
-- If Docker-backed Benchmark/Evaluation is enabled, the dedicated LXD/VM boundary is accepted as the security boundary and `agent-runlab` Docker-group membership is explicitly recorded; otherwise set `AGENT_RUNLAB_CONTAINER_BACKEND=none`.
+- If Docker-backed Benchmark/Evaluation is enabled, the dedicated LXD/VM boundary is accepted as the security boundary and `agent-runlab` Docker-group membership is explicitly recorded; otherwise set `KALA_CONTAINER_BACKEND=none`.
 - The legacy service name is known to the operator.
 - No earlier migration receipt is active.
 - The target is a supported Linux environment with Node.js 22+, systemd, and `flock`.
@@ -22,8 +22,8 @@ From the external administrative shell:
 
 ```bash
 sudo env \
-  AGENT_RUNLAB_RELEASE_ID=<release-id> \
-  AGENT_RUNLAB_LEGACY_DATA_ROOT=<legacy-data-root> \
+  KALA_RELEASE_ID=<release-id> \
+  KALA_LEGACY_DATA_ROOT=<legacy-data-root> \
   node install-dedicated-systemd.mjs <release-directory>
 ```
 
@@ -42,11 +42,11 @@ Verify:
 ```bash
 sudo systemctl daemon-reload
 sudo systemd-analyze verify \
-  agent-runlab-dedicated-ingress.service \
-  agent-runlab-dedicated-unit@.service \
-  agent-runlab-dedicated-deploy-supervisor.service \
-  agent-runlab-dedicated-control-updater.service \
-  agent-runlab-dedicated-migration-finalizer.service
+  kala-dedicated-ingress.service \
+  kala-dedicated-unit@.service \
+  kala-dedicated-deploy-supervisor.service \
+  kala-dedicated-control-updater.service \
+  kala-dedicated-migration-finalizer.service
 sudo test -f <data-root>/deploy/migration-receipt.json
 sudo test -L <data-root>/deploy/current
 sudo test -r <legacy-data-root>/sessions
@@ -58,7 +58,7 @@ Confirm no hosted Session is being used to execute the following cutover command
 
 ```bash
 sudo env \
-  AGENT_RUNLAB_LEGACY_SERVICE=<legacy-service> \
+  KALA_LEGACY_SERVICE=<legacy-service> \
   node cutover-dedicated-systemd.mjs
 ```
 
@@ -69,7 +69,7 @@ The script performs this bounded sequence:
 3. assign the Unit service account as owner;
 4. start private slot `blue` for logical Unit `local`;
 5. verify the full Dedicated capability profile and single-writer lease;
-6. atomically move the large `.agent-kernel` state tree within the same filesystem (no 27GB duplicate), change ownership, copy only bounded provider settings, publish generation-1 route state, and start Stable Ingress on the public address;
+6. atomically move the large `.kala` state tree within the same filesystem (no 27GB duplicate), change ownership, copy only bounded provider settings, publish generation-1 route state, and start Stable Ingress on the public address;
 7. verify public routing;
 8. start Deploy Supervisor;
 9. persist a completed migration receipt.
@@ -81,9 +81,9 @@ If any mandatory step fails, the script stops the new services, restarts the leg
 All checks are mandatory:
 
 ```bash
-systemctl is-active agent-runlab-dedicated-ingress.service
-systemctl is-active agent-runlab-dedicated-unit@blue.service || systemctl is-active agent-runlab-dedicated-unit@green.service
-systemctl is-active agent-runlab-dedicated-deploy-supervisor.service
+systemctl is-active kala-dedicated-ingress.service
+systemctl is-active kala-dedicated-unit@blue.service || systemctl is-active kala-dedicated-unit@green.service
+systemctl is-active kala-dedicated-deploy-supervisor.service
 curl -fsS <public-origin>/runtime/capabilities
 curl -fsS <private-unit-origin>/internal/runtime/quiescence
 ```
@@ -93,7 +93,7 @@ The capability response must indicate Dedicated mode and enabled Agent, Workspac
 Then verify through the product UI:
 
 - Dashboard loads without console or request errors;
-- `/var/lib/agent-runlab/deploy/dashboard/route-state.json` identifies an immutable Dashboard release, digest, asset digest, and generation;
+- `/var/lib/kala/deploy/dashboard/route-state.json` identifies an immutable Dashboard release, digest, asset digest, and generation;
 - a Runtime blue/green deployment leaves Dashboard generation unchanged;
 - a `deploy:dashboard` acceptance increments only Dashboard generation and leaves Ingress/Runtime PIDs, active slot, Unit route generation, Session cursor continuity, and Executor attachment unchanged;
 - an existing Session is readable;
@@ -128,11 +128,11 @@ Run the packaged external rollback transaction:
 
 ```bash
 sudo env \
-  AGENT_RUNLAB_LEGACY_SERVICE=<legacy-service> \
+  KALA_LEGACY_SERVICE=<legacy-service> \
   node rollback-dedicated-systemd.mjs
 ```
 
-The transaction stops both slots and control services, restores ownership, atomically moves `.agent-kernel` back to the legacy HOME, removes the bounded copied provider files, starts the legacy service, and verifies its public capability endpoint. Never start the legacy service directly while the state tree remains under `/var/lib/agent-runlab`; that would create an empty or divergent state root. If new Unit writes occurred after cutover, the move preserves them as the new legacy authority; do not merge Session files manually.
+The transaction stops both slots and control services, restores ownership, atomically moves `.kala` back to the legacy HOME, removes the bounded copied provider files, starts the legacy service, and verifies its public capability endpoint. Never start the legacy service directly while the state tree remains under `/var/lib/kala`; that would create an empty or divergent state root. If new Unit writes occurred after cutover, the move preserves them as the new legacy authority; do not merge Session files manually.
 
 ## Completion
 

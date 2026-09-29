@@ -63,14 +63,14 @@ const payload: ServerSettingsPayload = {
       { id: 'custom', label: 'Custom', description: 'Editable prompt.' },
     ],
     customPrompt: 'Codex prompt\n\nWhen referencing a file, use [filename](path/to/this/file).',
-    configPath: '<home>/.config/agent-kernel/agent.json',
+    configPath: '<home>/.config/kala/agent.json',
   },
   paths: {
     claudeSettings: '<home>/.claude/settings.json',
     codexConfig: '<home>/.codex/config.toml',
-    manualModels: '<home>/.config/agent-kernel/models.json',
-    hooksConfig: '<home>/.config/agent-kernel/config.toml',
-    sessionsDir: '<home>/.agent-kernel/sessions',
+    manualModels: '<home>/.config/kala/models.json',
+    hooksConfig: '<home>/.config/kala/config.toml',
+    sessionsDir: '<home>/.kala/sessions',
   },
   mcp: {
     supported: false,
@@ -83,7 +83,7 @@ const payload: ServerSettingsPayload = {
     username: 'admin',
     runtimeMode: 'production',
     configuredMode: 'production',
-    configPath: '<home>/.config/agent-kernel/socket-admin.json',
+    configPath: '<home>/.config/kala/socket-admin.json',
     distSource: 'embedded',
     createdAt: '2026-07-20T00:00:00.000Z',
   },
@@ -129,33 +129,33 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
     expect(screen.queryByText(i18n.t('settings.connection.priority'))).toBeNull()
-    expect(screen.queryByText('AGENT_KERNEL_ALLOWED_ORIGINS')).toBeNull()
+    expect(screen.queryByText('KALA_PUBLIC_URLS')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'About Override host endpoint' }))
-    expect(screen.getByRole('tooltip').textContent).toContain('AGENT_KERNEL_ALLOWED_ORIGINS')
+    expect(screen.getByRole('tooltip').textContent).toContain('KALA_PUBLIC_URLS')
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.change(screen.getByTestId('settings-connection-endpoint'), { target: { value: 'https://other.example' } })
-    expect(screen.getByText('AGENT_KERNEL_ALLOWED_ORIGINS').closest('[data-description-kind="notice"]')).toBeTruthy()
+    expect(screen.getByText('KALA_PUBLIC_URLS').closest('[data-description-kind="notice"]')).toBeTruthy()
     fetchMock.mockRejectedValueOnce(new Error('Controlled connection failure'))
     fireEvent.click(screen.getByTestId('settings-connection-test'))
     expect((await screen.findByRole('alert')).textContent).toContain('Controlled connection failure')
     fireEvent.change(screen.getByTestId('settings-connection-endpoint'), { target: { value: 'invalid' } })
-    expect(screen.queryByText('AGENT_KERNEL_ALLOWED_ORIGINS')).toBeNull()
+    expect(screen.queryByText('KALA_PUBLIC_URLS')).toBeNull()
   })
 
   it.each(['query', 'build'])('shows cross-origin requirements for the effective %s endpoint even with an empty draft', async (source) => {
     const previousUrl = window.location.href
     const remote = 'https://remote-host.example'
     if (source === 'query') window.history.replaceState(null, '', `?host=${encodeURIComponent(remote)}`)
-    else vi.stubEnv('VITE_AGENT_KERNEL_HOST', remote)
+    else vi.stubEnv('VITE_KALA_HOST', remote)
     fetchMock.mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }))
     const view = render(<SettingsDialog open onOpenChange={() => {}} />)
     try {
       await waitForSettingsLoaded()
       expect(screen.getByText(remote)).toBeTruthy()
       expect((screen.getByTestId('settings-connection-endpoint') as HTMLInputElement).value).toBe('')
-      expect(screen.getByText('AGENT_KERNEL_ALLOWED_ORIGINS').closest('[data-description-kind="notice"]')).toBeTruthy()
+      expect(screen.getByText('KALA_PUBLIC_URLS').closest('[data-description-kind="notice"]')).toBeTruthy()
       fireEvent.change(screen.getByTestId('settings-connection-endpoint'), { target: { value: window.location.origin } })
-      expect(screen.getByText('AGENT_KERNEL_ALLOWED_ORIGINS').closest('[data-description-kind="notice"]')).toBeTruthy()
+      expect(screen.getByText('KALA_PUBLIC_URLS').closest('[data-description-kind="notice"]')).toBeTruthy()
     } finally {
       view.unmount()
       window.history.replaceState(null, '', previousUrl)
@@ -185,7 +185,7 @@ describe('SettingsDialog', () => {
     expect(screen.getByText(i18n.t('settings.hooks.subtitle')).getAttribute('data-description-kind')).toBe('notice')
     fireEvent.click(screen.getByTestId('settings-tab-approvals'))
     expect(screen.getByText(i18n.t('settings.approvals.subtitle')).getAttribute('data-description-kind')).toBe('notice')
-    expect(screen.getByText('AK_ALLOW_ALL_OK=1')).toBeTruthy()
+    expect(screen.getByText('KALA_ALLOW_ALL_OK=1')).toBeTruthy()
   })
 
   it('configures, tests, and removes web search', async () => {
@@ -395,7 +395,7 @@ describe('SettingsDialog', () => {
         username: 'admin',
         runtimeMode: 'development',
         configuredMode: 'development',
-        configPath: '<home>/.config/agent-kernel/socket-admin.json',
+        configPath: '<home>/.config/kala/socket-admin.json',
       },
     }
     const initialized: ServerSettingsPayload = {

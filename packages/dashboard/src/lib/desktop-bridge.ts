@@ -23,7 +23,7 @@ export const validDesktopSessionId = (value: unknown): value is string => typeof
 
 export function getDesktopBridge(): DesktopBridge | null {
   if (!isDesktopClient()) return null
-  const bridge: unknown = (window as Window & { __RUNLAB_DESKTOP_BRIDGE__?: unknown }).__RUNLAB_DESKTOP_BRIDGE__
+  const bridge: unknown = (window as Window & { __KALA_DESKTOP_BRIDGE__?: unknown }).__KALA_DESKTOP_BRIDGE__
   if (!record(bridge) || bridge.version !== 1 || !['getInfo', 'setActivity', 'notify', 'subscribe'].every((key) => typeof bridge[key] === 'function')) return null
   return bridge as unknown as DesktopBridge
 }

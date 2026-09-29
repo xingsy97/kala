@@ -1495,8 +1495,8 @@ describe('wire protocol', () => {
   })
 
   it('protects the Supervisor origin-result barrier with the private handoff secret', async () => {
-    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'origin-barrier-test-secret'
+    const previous = process.env.KALA_INGRESS_HANDOFF_SECRET
+    process.env.KALA_INGRESS_HANDOFF_SECRET = 'origin-barrier-test-secret'
     try {
       const path = `${url}/internal/runtime/tool-result/session-origin/call-origin`
       expect((await fetch(path)).status).toBe(401)
@@ -1504,14 +1504,14 @@ describe('wire protocol', () => {
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ persisted: false })
     } finally {
-      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+      if (previous === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
+      else process.env.KALA_INGRESS_HANDOFF_SECRET = previous
     }
   })
 
   it('protects internal planned-restart control with the handoff secret', async () => {
-    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'restart-control-test-secret'
+    const previous = process.env.KALA_INGRESS_HANDOFF_SECRET
+    process.env.KALA_INGRESS_HANDOFF_SECRET = 'restart-control-test-secret'
     try {
       expect((await fetch(`${url}/internal/runtime/restart/status`)).status).toBe(401)
       const authorized = await fetch(`${url}/internal/runtime/restart/status`, {
@@ -1528,8 +1528,8 @@ describe('wire protocol', () => {
       expect(await requested.json()).toMatchObject({ phase: 'draining', mode: 'checkpoint' })
       await fetch(`${url}/runtime/restart/abort`, { method: 'POST' })
     } finally {
-      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+      if (previous === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
+      else process.env.KALA_INGRESS_HANDOFF_SECRET = previous
     }
   })
 
@@ -1558,8 +1558,8 @@ describe('wire protocol', () => {
   })
 
   it('acknowledges internal admission as durably accepted before the operation reaches Session JSONL', async () => {
-    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'admission-jsonl-test-secret'
+    const previous = process.env.KALA_INGRESS_HANDOFF_SECRET
+    process.env.KALA_INGRESS_HANDOFF_SECRET = 'admission-jsonl-test-secret'
     try {
       const sessionId = 'admission-jsonl-session'
       await server.store.create({ sessionId, config })
@@ -1585,14 +1585,14 @@ describe('wire protocol', () => {
       const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
       expect(parsed.events.filter((entry) => entry.event.kind === 'user_message' && entry.event.operationId === 'operation-admission-jsonl')).toHaveLength(1)
     } finally {
-      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+      if (previous === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
+      else process.env.KALA_INGRESS_HANDOFF_SECRET = previous
     }
   })
 
   it('keeps deleted, stopped, and delete-before-arrival operationIds cancelled across retries and restart', async () => {
-    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'admission-cancellation-test-secret'
+    const previous = process.env.KALA_INGRESS_HANDOFF_SECRET
+    process.env.KALA_INGRESS_HANDOFF_SECRET = 'admission-cancellation-test-secret'
     let releaseFirst!: () => void
     try {
       await server.close()
@@ -1691,14 +1691,14 @@ describe('wire protocol', () => {
       }
     } finally {
       releaseFirst?.()
-      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+      if (previous === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
+      else process.env.KALA_INGRESS_HANDOFF_SECRET = previous
     }
   })
 
   it('honors a delete-before-arrival tombstone for a Copilot Session without invoking its runtime', async () => {
-    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'copilot-cancellation-test-secret'
+    const previous = process.env.KALA_INGRESS_HANDOFF_SECRET
+    process.env.KALA_INGRESS_HANDOFF_SECRET = 'copilot-cancellation-test-secret'
     try {
       const sessionId = 'copilot-admission-cancellation'
       await server.store.create({ sessionId, agentRuntime: 'copilot', agentRuntimeVersion: '1.0.11', externalSessionId: sessionId, config })
@@ -1724,14 +1724,14 @@ describe('wire protocol', () => {
       await expect(response.json()).resolves.toMatchObject({ accepted: true, committed: false })
       expect(server.store.get(sessionId)?.state.messages.some((message) => message.role === 'user')).toBe(false)
     } finally {
-      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+      if (previous === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
+      else process.env.KALA_INGRESS_HANDOFF_SECRET = previous
     }
   })
 
   it('returns a stable machine-readable failure when internal admission targets a deleted Session', async () => {
-    const previous = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'admission-missing-session-secret'
+    const previous = process.env.KALA_INGRESS_HANDOFF_SECRET
+    process.env.KALA_INGRESS_HANDOFF_SECRET = 'admission-missing-session-secret'
     try {
       const response = await fetch(`${url}/internal/runtime/admission/commit`, {
         method: 'POST',
@@ -1741,8 +1741,8 @@ describe('wire protocol', () => {
       expect(response.status).toBe(404)
       await expect(response.json()).resolves.toMatchObject({ code: 'SESSION_NOT_FOUND', error: expect.stringContaining('no longer exists') })
     } finally {
-      if (previous === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previous
+      if (previous === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
+      else process.env.KALA_INGRESS_HANDOFF_SECRET = previous
     }
   })
 
@@ -3490,8 +3490,8 @@ describe('wire protocol', () => {
     await server.close()
     const artifactRootDir = join(dir, 'artifacts')
     const workspaceRoot = join(dir, 'workspace')
-    await mkdir(join(workspaceRoot, '.agent-kernel', 'memory'), { recursive: true })
-    await writeFile(join(workspaceRoot, '.agent-kernel', 'memory', 'style.md'), '---\nname: Style\nconfidence: 0.8\n---\nUse concise answers.\n', 'utf8')
+    await mkdir(join(workspaceRoot, '.kala', 'memory'), { recursive: true })
+    await writeFile(join(workspaceRoot, '.kala', 'memory', 'style.md'), '---\nname: Style\nconfidence: 0.8\n---\nUse concise answers.\n', 'utf8')
 
     const http = createServer()
     await new Promise<void>((resolve) => http.listen(0, resolve))
@@ -5819,8 +5819,8 @@ describe('wire protocol', () => {
   })
 
   it.each(['kernel', 'copilot'] as const)('lets Stop tombstone a %s queue item during the post-claim barrier', async (agentRuntime) => {
-    const previousSecret = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'claimed-queue-race-secret'
+    const previousSecret = process.env.KALA_INGRESS_HANDOFF_SECRET
+    process.env.KALA_INGRESS_HANDOFF_SECRET = 'claimed-queue-race-secret'
     const sessionId = `wire-claimed-queue-${agentRuntime}`
     const operationId = `claimed-operation-${agentRuntime}`
     let releaseClaim!: () => void
@@ -5902,14 +5902,14 @@ describe('wire protocol', () => {
       dashboard.close()
     } finally {
       releaseClaim?.()
-      if (previousSecret === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previousSecret
+      if (previousSecret === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
+      else process.env.KALA_INGRESS_HANDOFF_SECRET = previousSecret
     }
   })
 
   it.each(['kernel', 'copilot'] as const)('still cancels the %s runtime when Stop races a claimed item whose dispatch already committed', async (agentRuntime) => {
-    const previousSecret = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-    process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = 'committed-queue-race-secret'
+    const previousSecret = process.env.KALA_INGRESS_HANDOFF_SECRET
+    process.env.KALA_INGRESS_HANDOFF_SECRET = 'committed-queue-race-secret'
     const sessionId = `wire-committed-queue-${agentRuntime}`
     const operationId = `committed-operation-${agentRuntime}`
     let releaseClaim!: () => void
@@ -5981,8 +5981,8 @@ describe('wire protocol', () => {
       dashboard.close()
     } finally {
       releaseClaim?.()
-      if (previousSecret === undefined) delete process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET
-      else process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET = previousSecret
+      if (previousSecret === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
+      else process.env.KALA_INGRESS_HANDOFF_SECRET = previousSecret
     }
   })
 

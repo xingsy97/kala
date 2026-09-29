@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 
 import { EXECUTOR_PROFILE_ENV, executorProfileDir } from './workspace-id.js'
 
-export const EXECUTOR_TOKEN_FILE_ENV = 'AGENT_KERNEL_EXECUTOR_TOKEN_FILE'
+export const EXECUTOR_TOKEN_FILE_ENV = 'KALA_EXECUTOR_TOKEN_FILE'
 
 export function executorTokenPath(profile?: string): string {
   const override = process.env[EXECUTOR_TOKEN_FILE_ENV]

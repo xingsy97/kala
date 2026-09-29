@@ -45,7 +45,7 @@ Skips (silent no-op returning a short toast):
 No new directories. Consolidator writes into the existing workspace memory root exactly like `memory { operation: "write" }` does today:
 
 ```
-<workspace>/.agent-kernel/memory/
+<workspace>/.kala/memory/
   MEMORY.md
   <key>.md            ← agent-authored, and now also consolidator-authored
 ```
@@ -77,7 +77,7 @@ The `source: consolidator` field is what enables the "don't downgrade" check on 
 - **No `.staging/` directory.** Direct write.
 - **No auto-fire on session-done.** Slash command only.
 - **No cross-session consolidation.** Runs against the *current* session's messages, not accumulated staged extracts.
-- **No global-scope consolidation.** Workspace only (`<workspace>/.agent-kernel/memory/`). Global memory lives at `~/.agent-kernel/memory/` and grows via explicit `memory { operation: "write" }` — cross-workspace signal is harder to reason about and out of scope.
+- **No global-scope consolidation.** Workspace only (`<workspace>/.kala/memory/`). Global memory lives at `~/.kala/memory/` and grows via explicit `memory { operation: "write" }` — cross-workspace signal is harder to reason about and out of scope.
 - **No merging into existing files.** If the LLM emits a name that collides with an existing memory, we either skip (higher confidence exists) or overwrite (equal or lower). We do not read the existing content and hand it back to the LLM for a merge pass. Simpler; matches Claude Code.
 
 ## 3. Wire protocol changes

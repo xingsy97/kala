@@ -86,7 +86,7 @@ export function desktopLocalInstallCommands(input) {
   const manifest = validateDesktopRelease(input)
   const names = [...new Set([manifest.artifact.file, manifest.artifact.file.replaceAll('~', '_')])]
   const setup = `command -v install >/dev/null || { printf '%s\\n' 'Required tool missing: install' >&2; exit 1; }
-source="\${RUNLAB_DESKTOP_PACKAGE:-}"
+source="\${KALA_DESKTOP_PACKAGE:-}"
 if [ -z "$source" ]; then
   downloads="$HOME/Downloads"
   if command -v xdg-user-dir >/dev/null; then downloads="$(xdg-user-dir DOWNLOAD)"; fi
@@ -97,7 +97,7 @@ if [ -z "$source" ]; then
 fi
 if [ -z "$source" ] || [ ! -f "$source" ]; then
   printf '%s\\n' 'Downloaded package not found. Place it in Downloads or the current directory.' \\
-    'For another filename/location, export RUNLAB_DESKTOP_PACKAGE="/full/path/to/package.deb" and run this block again.' >&2
+    'For another filename/location, export KALA_DESKTOP_PACKAGE="/full/path/to/package.deb" and run this block again.' >&2
   exit 1
 fi`
   return desktopInstallerScript(manifest, [manifest.artifact], setup,
@@ -138,5 +138,5 @@ ${verifyList ? `sha256sum --strict --check '${manifest.checksums.file}'\n` : ''}
 chmod 644 -- "$tmp/${manifest.artifact.file}"
 chmod 755 -- "$tmp"
 sudo apt install -y -- "$tmp/${manifest.artifact.file}"`
-  return heredoc ? `bash <<'RUNLAB_DESKTOP_INSTALL'\n${script}\nRUNLAB_DESKTOP_INSTALL` : script
+  return heredoc ? `bash <<'KALA_DESKTOP_INSTALL'\n${script}\nKALA_DESKTOP_INSTALL` : script
 }

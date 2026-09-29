@@ -11,7 +11,7 @@ The Executor runs where the *files* live — usually behind a home router or cor
 Consequence: no port forwarding, no ngrok, no VPN. Just:
 
 ```bash
-agent-kernel-executor --host=http://localhost:3000 --sandbox-root <workspace-root>
+kala-executor --host=http://localhost:3000 --sandbox-root <workspace-root>
 ```
 
 By default, one local executor profile maps to one workspace identity and one
@@ -19,12 +19,12 @@ single-instance lock. Use an explicit profile when a development machine must ru
 a test executor beside a release executor:
 
 ```bash
-agent-kernel-executor --host=http://localhost:3000 --profile dev --sandbox-root <workspace-root>
+kala-executor --host=http://localhost:3000 --profile dev --sandbox-root <workspace-root>
 ```
 
 Named profiles store their lock, `workspace-id`, and executor token under
-`~/.agent-kernel/profiles/<profile>/`. The default profile continues to use the
-legacy `~/.agent-kernel/` files.
+`~/.kala/profiles/<profile>/`. The default profile continues to use the
+legacy `~/.kala/` files.
 
 ## Responsibilities
 

@@ -1,4 +1,4 @@
-name: agent-runlab-private-cloud
+name: kala-private-cloud
 
 services:
   init-volumes:
@@ -69,22 +69,22 @@ services:
     cpus: 0.5
 
   control-plane-init:
-    image: ${RUNLAB_INGRESS_IMAGE:?RUNLAB_INGRESS_IMAGE must be an immutable name@sha256 digest}
+    image: ${KALA_INGRESS_IMAGE:?KALA_INGRESS_IMAGE must be an immutable name@sha256 digest}
     user: "0:0"
     command:
       - /bin/sh
       - -ec
       - |
         password="$$(cat /run/secrets/control_postgres_password)"
-        export RUNTIME_INGRESS_ADMIN_DATABASE_URL="postgresql://runlab:$$password@control-postgres:5432/postgres?sslmode=disable"
-        export RUNTIME_INGRESS_DATABASE_URL="postgresql://runlab:$$password@control-postgres:5432/runlab_control?sslmode=disable"
-        export RUNTIME_INGRESS_MIGRATIONS_DIR=/app/packages/runtime-ingress-gateway/migrations
+        export KALA_INGRESS_ADMIN_DATABASE_URL="postgresql://runlab:$$password@control-postgres:5432/postgres?sslmode=disable"
+        export KALA_INGRESS_DATABASE_URL="postgresql://runlab:$$password@control-postgres:5432/runlab_control?sslmode=disable"
+        export KALA_INGRESS_MIGRATIONS_DIR=/app/packages/runtime-ingress-gateway/migrations
         node /app/packages/runtime-ingress-gateway/dist/src/bin/init-control-plane.js
         chown -R 10001:10001 /control
         if [ -f /control/tenant-directory.json ]; then
-          export RUNTIME_INGRESS_JSON_DIRECTORY=/control/tenant-directory.json
-          export RUNTIME_INGRESS_JSON_SESSIONS=/control/login-states.json.sessions
-          export RUNTIME_INGRESS_JSON_BACKUP_PREFIX=/control/pre-postgres
+          export KALA_INGRESS_JSON_DIRECTORY=/control/tenant-directory.json
+          export KALA_INGRESS_JSON_SESSIONS=/control/login-states.json.sessions
+          export KALA_INGRESS_JSON_BACKUP_PREFIX=/control/pre-postgres
           node /app/packages/runtime-ingress-gateway/dist/src/bin/import-json-control.js
         fi
     secrets: [control_postgres_password]
@@ -105,34 +105,34 @@ services:
     cpus: 0.5
 
   runtime-host:
-    image: ${RUNLAB_RUNTIME_IMAGE:?RUNLAB_RUNTIME_IMAGE must be an immutable name@sha256 digest}
+    image: ${KALA_RUNTIME_IMAGE:?KALA_RUNTIME_IMAGE must be an immutable name@sha256 digest}
     restart: unless-stopped
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
     environment:
-      RUNTIME_HOST_PORT: 13002
-      RUNTIME_HOST_LISTEN_HOST: 0.0.0.0
-      RUNTIME_HOST_DATA_ROOT: /var/lib/agent-runlab
-      RUNTIME_HOST_MAX_LOADED_UNITS: 100
-      RUNTIME_HOST_DOCS_DIR: /app/docs
-      RUNTIME_HOST_RELEASE_ASSETS_DIR: /app/release
-      RUNTIME_HOST_LLM_CATALOG_FILE: /etc/agent-runlab/runtime-provider-catalog.json
-      RUNTIME_HOST_SECRET_ROOT: /run/agent-runlab-secrets
-      AGENT_RUNLAB_DEPLOYMENT_CONFIG: /etc/agent-runlab/deployment.json
-      AK_ALLOW_ALL_OK: ${AK_ALLOW_ALL_OK:-1}
-      RUNTIME_INGRESS_SHARED_SECRET_FILE: /run/agent-runlab-secrets/ingress_secret
+      KALA_RUNTIME_KALA_PORT: 13002
+      KALA_RUNTIME_KALA_BIND_HOST: 0.0.0.0
+      KALA_RUNTIME_HOST_DATA_ROOT: /var/lib/kala
+      KALA_RUNTIME_HOST_MAX_LOADED_UNITS: 100
+      KALA_RUNTIME_HOST_DOCS_DIR: /app/docs
+      KALA_RUNTIME_HOST_RELEASE_ASSETS_DIR: /app/release
+      KALA_RUNTIME_HOST_LLM_CATALOG_FILE: /etc/kala/runtime-provider-catalog.json
+      KALA_RUNTIME_HOST_SECRET_ROOT: /run/kala-secrets
+      KALA_DEPLOYMENT_CONFIG: /etc/kala/deployment.json
+      KALA_ALLOW_ALL_OK: ${KALA_ALLOW_ALL_OK:-1}
+      KALA_INGRESS_SHARED_SECRET_FILE: /run/kala-secrets/ingress_secret
     volumes:
-      - tenant-data:/var/lib/agent-runlab
-      - host-secrets:/run/agent-runlab-secrets:ro
-      - ${RUNLAB_PROVIDER_CATALOG_FILE:-./local/runtime-provider-catalog.json}:/etc/agent-runlab/runtime-provider-catalog.json:ro
-      - ${RUNLAB_DEPLOYMENT_CONFIG_FILE:-./deployment.json}:/etc/agent-runlab/deployment.json:ro
+      - tenant-data:/var/lib/kala
+      - host-secrets:/run/kala-secrets:ro
+      - ${KALA_PROVIDER_CATALOG_FILE:-./local/runtime-provider-catalog.json}:/etc/kala/runtime-provider-catalog.json:ro
+      - ${KALA_DEPLOYMENT_CONFIG_FILE:-./deployment.json}:/etc/kala/deployment.json:ro
     networks: [runtime, egress]
     depends_on:
       init-volumes: { condition: service_completed_successfully }
       init-app-secrets: { condition: service_completed_successfully }
     healthcheck:
-      test: [CMD, node, -e, "fetch('http://127.0.0.1:13002/internal/health',{headers:{'x-agent-runlab-ingress-secret':require('fs').readFileSync('/run/agent-runlab-secrets/ingress_secret','utf8').trim()}}).then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:13002/internal/health',{headers:{'x-agent-runlab-ingress-secret':require('fs').readFileSync('/run/kala-secrets/ingress_secret','utf8').trim()}}).then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -146,7 +146,7 @@ services:
     cpus: 2.0
 
   dashboard:
-    image: ${RUNLAB_DASHBOARD_IMAGE:?RUNLAB_DASHBOARD_IMAGE must be an immutable name@sha256 digest}
+    image: ${KALA_DASHBOARD_IMAGE:?KALA_DASHBOARD_IMAGE must be an immutable name@sha256 digest}
     restart: unless-stopped
     logging:
       driver: json-file
@@ -167,31 +167,31 @@ services:
     cpus: 0.25
 
   runtime-ingress:
-    image: ${RUNLAB_INGRESS_IMAGE:?RUNLAB_INGRESS_IMAGE must be an immutable name@sha256 digest}
+    image: ${KALA_INGRESS_IMAGE:?KALA_INGRESS_IMAGE must be an immutable name@sha256 digest}
     restart: unless-stopped
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
     ports:
-      - ${RUNLAB_LISTEN_ADDRESS:-127.0.0.1}:${RUNLAB_PORT:-13001}:13001
+      - ${KALA_PUBLIC_LISTEN:-127.0.0.1:13001}:13001
     environment:
-      RUNTIME_INGRESS_PORT: 13001
-      RUNTIME_INGRESS_LISTEN_HOST: 0.0.0.0
-      INGRESS_PUBLIC_ORIGIN: ${RUNLAB_PUBLIC_ORIGIN:-http://localhost:13001}
-      RUNTIME_HOST_ORIGIN: http://runtime-host:13002
-      RUNTIME_DASHBOARD_ORIGIN: http://dashboard:8080
-      RUNTIME_INGRESS_IDENTITY_ORIGIN: ${OIDC_DISCOVERY_ORIGIN:?set OIDC_DISCOVERY_ORIGIN in the ignored deployment environment}
-      RUNTIME_INGRESS_DATABASE_URL_FILE: /run/agent-runlab-secrets/control_database_url
-      RUNTIME_INGRESS_LOGIN_STATE_STORE: /var/lib/agent-runlab-control/login-states.json
-      RUNTIME_INGRESS_SESSION_SECRET_FILE: /run/agent-runlab-secrets/session_secret
-      RUNTIME_INGRESS_SHARED_SECRET_FILE: /run/agent-runlab-secrets/ingress_secret
+      KALA_INGRESS_PORT: 13001
+      KALA_INGRESS_LISTEN_HOST: 0.0.0.0
+      KALA_PUBLIC_URLS: ${KALA_PUBLIC_URLS:-http://localhost:13001}
+      KALA_RUNTIME_HOST_ORIGIN: http://runtime-host:13002
+      KALA_INGRESS_DASHBOARD_ORIGIN: http://dashboard:8080
+      KALA_INGRESS_IDENTITY_ORIGIN: ${OIDC_DISCOVERY_ORIGIN:?set OIDC_DISCOVERY_ORIGIN in the ignored deployment environment}
+      KALA_INGRESS_DATABASE_URL_FILE: /run/kala-secrets/control_database_url
+      KALA_INGRESS_LOGIN_STATE_STORE: /var/lib/kala-control/login-states.json
+      KALA_INGRESS_SESSION_SECRET_FILE: /run/kala-secrets/session_secret
+      KALA_INGRESS_SHARED_SECRET_FILE: /run/kala-secrets/ingress_secret
       OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in the ignored deployment environment}
-      RUNTIME_INGRESS_ALLOW_INSECURE_HTTP: ${RUNLAB_ALLOW_INSECURE_HTTP:-0}
-      OIDC_CLIENT_ID_FILE: /run/agent-runlab-secrets/oidc_client_id
-      OIDC_CLIENT_SECRET_FILE: /run/agent-runlab-secrets/oidc_client_secret
+      KALA_INGRESS_ALLOW_INSECURE_HTTP: ${KALA_ALLOW_INSECURE_HTTP:-0}
+      OIDC_CLIENT_ID_FILE: /run/kala-secrets/oidc_client_id
+      OIDC_CLIENT_SECRET_FILE: /run/kala-secrets/oidc_client_secret
     volumes:
-      - control-data:/var/lib/agent-runlab-control
-      - gateway-secrets:/run/agent-runlab-secrets:ro
+      - control-data:/var/lib/kala-control
+      - gateway-secrets:/run/kala-secrets:ro
     networks: [edge, runtime, control]
     depends_on:
       init-volumes: { condition: service_completed_successfully }
@@ -229,9 +229,9 @@ volumes:
   gateway-secrets: {}
 
 secrets:
-  control_postgres_password: { file: "${RUNLAB_SECRETS_DIR:-./.secrets}/control_postgres_password" }
-  session_secret: { file: "${RUNLAB_SECRETS_DIR:-./.secrets}/session_secret" }
-  ingress_secret: { file: "${RUNLAB_SECRETS_DIR:-./.secrets}/ingress_secret" }
-  oidc_client_id: { file: "${RUNLAB_SECRETS_DIR:-./.secrets}/oidc_client_id" }
-  oidc_client_secret: { file: "${RUNLAB_SECRETS_DIR:-./.secrets}/oidc_client_secret" }
-  llm_api_key: { file: "${RUNLAB_SECRETS_DIR:-./.secrets}/llm_api_key" }
+  control_postgres_password: { file: "${KALA_SECRETS_DIR:-./.secrets}/control_postgres_password" }
+  session_secret: { file: "${KALA_SECRETS_DIR:-./.secrets}/session_secret" }
+  ingress_secret: { file: "${KALA_SECRETS_DIR:-./.secrets}/ingress_secret" }
+  oidc_client_id: { file: "${KALA_SECRETS_DIR:-./.secrets}/oidc_client_id" }
+  oidc_client_secret: { file: "${KALA_SECRETS_DIR:-./.secrets}/oidc_client_secret" }
+  llm_api_key: { file: "${KALA_SECRETS_DIR:-./.secrets}/llm_api_key" }

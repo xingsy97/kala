@@ -19,5 +19,5 @@ function inspect() {
   const dashboardId = ids.dashboard
   return { containerId: dashboardId, imageId: dashboardId ? output('docker', ['inspect', '--format', '{{.Image}}', dashboardId]).trim() : '', runtimeContainerId: ids['runtime-host'], ingressContainerId: ids['runtime-ingress'] }
 }
-function output(command, args) { const result = spawnSync(command, args, { cwd: root, encoding: 'utf8', env: { ...process.env, RUNLAB_PROFILE: profile } }); if (result.status !== 0) throw new Error(result.stderr || `${command} failed`); return result.stdout }
-function run(command, args) { const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', env: { ...process.env, RUNLAB_PROFILE: profile } }); if (result.status !== 0) process.exit(result.status ?? 1) }
+function output(command, args) { const result = spawnSync(command, args, { cwd: root, encoding: 'utf8', env: { ...process.env, KALA_PROFILE: profile } }); if (result.status !== 0) throw new Error(result.stderr || `${command} failed`); return result.stdout }
+function run(command, args) { const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', env: { ...process.env, KALA_PROFILE: profile } }); if (result.status !== 0) process.exit(result.status ?? 1) }

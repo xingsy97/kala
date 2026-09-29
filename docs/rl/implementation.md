@@ -182,12 +182,12 @@ runtime while writing token-capture artifacts.
 Configuration:
 
 ```bash
-AGENT_KERNEL_PROVIDER=policy-gateway
-AGENT_KERNEL_POLICY_BASE_URL=http://127.0.0.1:30080
-AGENT_KERNEL_POLICY_MODEL=Qwen/Qwen2.5-1.5B-Instruct
-AGENT_KERNEL_POLICY_TOKENIZER=/models/Qwen2.5-1.5B-Instruct
-AGENT_KERNEL_POLICY_ROUTE_KEY=<rollout_or_session_id>
-AGENT_KERNEL_POLICY_WEIGHT_VERSION=<trainer_step_or_checkpoint_id>
+KALA_PROVIDER=policy-gateway
+KALA_POLICY_BASE_URL=http://127.0.0.1:30080
+KALA_POLICY_MODEL=Qwen/Qwen2.5-1.5B-Instruct
+KALA_POLICY_TOKENIZER=/models/Qwen2.5-1.5B-Instruct
+KALA_POLICY_ROUTE_KEY=<rollout_or_session_id>
+KALA_POLICY_WEIGHT_VERSION=<trainer_step_or_checkpoint_id>
 ```
 
 The gateway should call SGLang native `/generate` in token-first mode for the
@@ -388,7 +388,7 @@ Adapter flow:
 - artifact dry-run mode: `trajectory_path` + `reward_path` in sample metadata
   or args;
 - live local mode: `agent_kernel_task_file` + `agent_kernel_root_dir`, which
-  invokes `agent-kernel-host rl run-rollout-smoke`, checks for
+  invokes `kala-host rl run-rollout-smoke`, checks for
   `slime-sample-ready`, then builds the slime-compatible sample.
 
 Minimum `Sample` fields that must be populated for training readiness:
@@ -420,17 +420,17 @@ metadata-only logs are trainable.
 Implemented CLI commands:
 
 ```bash
-agent-kernel-host rl validate-task-pool --task-file tasks.jsonl
-agent-kernel-host rl run-rollout-smoke --task-file tasks.jsonl \
+kala-host rl validate-task-pool --task-file tasks.jsonl
+kala-host rl run-rollout-smoke --task-file tasks.jsonl \
     --root-dir runs/rl-smoke \
     --policy-base-url http://127.0.0.1:30080 \
     --model Qwen/Qwen2.5-1.5B-Instruct --require-logprobs
-agent-kernel-host rl inspect-rollout --root-dir runs/rl-smoke \
+kala-host rl inspect-rollout --root-dir runs/rl-smoke \
     --rollout runs/rl-smoke/rl-rollouts/<id>.json
-agent-kernel-host rl build-trajectory --root-dir runs/rl-smoke \
+kala-host rl build-trajectory --root-dir runs/rl-smoke \
     --rollout-id <id> --task-id <task> --session-id <session> \
     --token-captures <path>
-agent-kernel-host rl validate-slime-sample \
+kala-host rl validate-slime-sample \
     --trajectory runs/rl-smoke/trajectories/<id>.json \
     --reward runs/rl-smoke/rewards/<id>.json
 ```
@@ -771,7 +771,7 @@ Source-side implementation:
   `packages/host/src/rl/verifier.ts`.
 - Host live rollout smoke runner in `packages/host/src/rl/rollout-runner.ts`.
 - SGLang policy gateway provider in `packages/host/src/llm/policy-gateway.ts`.
-- CLI commands under `agent-kernel-host rl ...` through
+- CLI commands under `kala-host rl ...` through
   `packages/host/src/ops-cli.ts`.
 - Python slime adapter under `integrations/slime_agent_kernel/`.
 - Python trainer-environment preflight under

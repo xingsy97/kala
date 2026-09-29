@@ -9,7 +9,7 @@ vi.mock('../lib/desktop-download.js', () => ({
   loadDesktopUpdateMetadata: vi.fn(), loadDesktopDownload: vi.fn(), loadDesktopApt: async () => null,
 }))
 const release = { schemaVersion: 2 as const, platform: 'linux-amd64' as const, version: '0.2.0~rc.4', artifact: { file: 'release.deb', sha256: 'a'.repeat(64), size: 100 }, dependencies: { file: 'deps.json', sha256: 'b'.repeat(64) }, checksums: { file: 'sums.txt', sha256: 'c'.repeat(64) } }
-const desktopWindow = window as Window & { __RUNLAB_DESKTOP__?: boolean; __RUNLAB_DESKTOP_BRIDGE__?: unknown }
+const desktopWindow = window as Window & { __KALA_DESKTOP__?: boolean; __KALA_DESKTOP_BRIDGE__?: unknown }
 let clock = 0
 beforeEach(() => {
   vi.clearAllMocks()
@@ -17,11 +17,11 @@ beforeEach(() => {
   vi.mocked(loadDesktopUpdateMetadata).mockResolvedValue(release)
   vi.mocked(loadDesktopDownload).mockResolvedValue({ release, commands: 'curl --output package.deb https://example.org/package.deb\nsudo apt install -y ./package.deb', localCommands: 'install -m 644 package.deb /tmp/package.deb' })
 })
-afterEach(() => { vi.restoreAllMocks(); delete desktopWindow.__RUNLAB_DESKTOP__; delete desktopWindow.__RUNLAB_DESKTOP_BRIDGE__ })
+afterEach(() => { vi.restoreAllMocks(); delete desktopWindow.__KALA_DESKTOP__; delete desktopWindow.__KALA_DESKTOP_BRIDGE__ })
 
 function native(version = '0.2.0-rc.3') {
-  desktopWindow.__RUNLAB_DESKTOP__ = true
-  desktopWindow.__RUNLAB_DESKTOP_BRIDGE__ = {
+  desktopWindow.__KALA_DESKTOP__ = true
+  desktopWindow.__KALA_DESKTOP_BRIDGE__ = {
     version: 1, getInfo: async () => ({ version, focused: true, visible: true }),
     notify: async () => {}, setActivity: async () => {}, subscribe: () => () => {},
   }
@@ -33,7 +33,7 @@ describe('native desktop update surfaces', () => {
     expect(screen.queryByTestId('desktop-update-available')).toBeNull()
     expect(loadDesktopUpdateMetadata).not.toHaveBeenCalled()
     unmount()
-    desktopWindow.__RUNLAB_DESKTOP__ = true
+    desktopWindow.__KALA_DESKTOP__ = true
     render(<DesktopUpdateSettings />)
     expect(screen.getByRole('alert').textContent).toContain('older desktop client')
     expect((screen.getByTestId('desktop-check-update') as HTMLButtonElement).disabled).toBe(true)

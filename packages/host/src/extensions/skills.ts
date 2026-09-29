@@ -91,8 +91,8 @@ export function defaultSkillRoots(): readonly string[] {
 
 export function skillRootsForCwd(cwd: string): readonly string[] {
   return [
-    join(resolve(cwd), '.agents', 'skills'),
-    join(homedir(), '.agents', 'skills'),
+    join(resolve(cwd), '.agent', 'skills'),
+    join(homedir(), '.agent', 'skills'),
   ]
 }
 
@@ -147,8 +147,8 @@ async function sessionSkills(
   const workspaceId = record.workspaceId
   const cwd = record.state.cwd
   const remotePath = cwd ? workspacePathApi(cwd) : undefined
-  const root = cwd && remotePath ? remotePath.join(remotePath.normalize(cwd), '.agents', 'skills') : undefined
-  const global = await discoverSkills([join(homedir(), '.agents', 'skills')])
+  const root = cwd && remotePath ? remotePath.join(remotePath.normalize(cwd), '.agent', 'skills') : undefined
+  const global = await discoverSkills([join(homedir(), '.agent', 'skills')])
   const diagnostics = [...global.diagnostics]
   const project = new Map<string, SkillInfo>()
   const warn = (message: string, path = root ?? '') => diagnostics.push({ level: 'warning' as const, path, message })

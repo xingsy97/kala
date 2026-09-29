@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-const sessionsDir = process.argv[2] ?? join(homedir(), '.agent-kernel', 'sessions')
+const sessionsDir = process.argv[2] ?? join(homedir(), '.kala', 'sessions')
 
 const memorySchema = {
   name: 'memory',

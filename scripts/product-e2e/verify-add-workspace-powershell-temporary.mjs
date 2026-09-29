@@ -21,9 +21,9 @@ let executor
 try {
   host = startProcess(bundle, [], { cwd: root, env: {
     ...process.env,
-    HOST_LISTEN_HOST: '0.0.0.0', HOST_PORT: String(port),
-    AGENT_KERNEL_STATE_DIR: join(stateRoot, 'state'), SESSIONS_DIR: join(stateRoot, 'sessions'),
-    AGENT_KERNEL_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), ANTHROPIC_API_KEY: 'unused',
+    KALA_BIND_HOST: '0.0.0.0', KALA_PORT: String(port),
+    KALA_STATE_DIR: join(stateRoot, 'state'), KALA_SESSIONS_DIR: join(stateRoot, 'sessions'),
+    KALA_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), ANTHROPIC_API_KEY: 'unused',
   } })
   host.stdout?.on('data', (chunk) => hostLogs.push(chunk.toString()))
   host.stderr?.on('data', (chunk) => hostLogs.push(chunk.toString()))
@@ -31,12 +31,12 @@ try {
 
   const createdResponse = await fetch(`${origin}/api/executor-installs`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ platform: 'windows', mode: 'temporary', workspaceRoot: '__RUNLAB_CURRENT_DIRECTORY__', label: 'powershell-e2e' }),
+    body: JSON.stringify({ platform: 'windows', mode: 'temporary', workspaceRoot: '__KALA_CURRENT_DIRECTORY__', label: 'powershell-e2e' }),
   })
   if (!createdResponse.ok) throw new Error(`create installation failed: ${createdResponse.status}`)
   const created = await createdResponse.json()
-  const command = `$env:RUNLAB_SETUP_CODE='${created.setupCode}'; $env:RUNLAB_INSTALL_MODE='temporary'; irm '${origin}/install.ps1' | iex`
-  executor = startProcess('sg', ['docker', '-c', `docker run --rm --name ${container} --network host -e RUNLAB_SETUP_CODE='${created.setupCode}' -e RUNLAB_INSTALL_MODE=temporary -w /tmp ${image} pwsh -NoLogo -NoProfile -Command \"irm '${origin}/install.ps1' | iex\"`], { cwd: root })
+  const command = `$env:KALA_SETUP_CODE='${created.setupCode}'; $env:KALA_INSTALL_MODE='temporary'; irm '${origin}/install.ps1' | iex`
+  executor = startProcess('sg', ['docker', '-c', `docker run --rm --name ${container} --network host -e KALA_SETUP_CODE='${created.setupCode}' -e KALA_INSTALL_MODE=temporary -w /tmp ${image} pwsh -NoLogo -NoProfile -Command \"irm '${origin}/install.ps1' | iex\"`], { cwd: root })
   executor.stdout?.on('data', (chunk) => executorLogs.push(chunk.toString()))
   executor.stderr?.on('data', (chunk) => executorLogs.push(chunk.toString()))
 

@@ -57,7 +57,7 @@ export interface ManagedWindowsInstallation {
   installationId: string
 }
 
-const DEFAULT_VENDOR = 'Agent RunLab'
+const DEFAULT_VENDOR = 'Kala'
 const DEFAULT_PRODUCT = 'Executor'
 
 function safeValue(value: string, label: string): string {
@@ -76,7 +76,7 @@ export function windowsServiceLayout(options: WindowsServicePlanOptions): Window
   const product = safeValue(options.product ?? DEFAULT_PRODUCT, 'product')
   const programFiles = safeValue(options.programFiles ?? 'C:\\Program Files', 'Program Files path')
   const programData = safeValue(options.programData ?? 'C:\\ProgramData', 'ProgramData path')
-  const executableName = safeValue(options.executableName ?? 'runlab-executor.exe', 'executable name')
+  const executableName = safeValue(options.executableName ?? 'kala-executor.exe', 'executable name')
   const installDir = win32.join(programFiles, vendor, product)
   const dataDir = win32.join(programData, vendor, product)
   return {

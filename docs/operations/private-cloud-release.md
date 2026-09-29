@@ -12,7 +12,7 @@ configuration, and private secrets. It never needs Git, Node.js, pnpm, or source
 
 Every bundle contains `compose.yaml`, supported storage and edge overrides,
 `deployment.json`, environment examples, `image-lock.json`, `manifest.json`, and
-the matching Linux x64 or arm64 `runlab-private-cloud` native executable (the
+the matching Linux x64 or arm64 `kala-private-cloud` native executable (the
 repository `.mjs` entry remains a development/test path). The production Compose model contains
 no `build:` key. Every image, including infrastructure and one-shot jobs, is a
 registry name followed by an exact `@sha256:` digest. `image-lock.json` binds the
@@ -25,14 +25,14 @@ It is not a release asset and is never accepted by the public operator.
 ## Supported lifecycle
 
 ```text
-runlab-private-cloud install --bundle DIR --config-dir DIR
-runlab-private-cloud status
-runlab-private-cloud upgrade --bundle DIR
-runlab-private-cloud upgrade-dashboard --bundle DIR
-runlab-private-cloud rollback
-runlab-private-cloud backup --output EMPTY_PERSISTENT_DIR
-runlab-private-cloud restore --backup DIR --confirm RESTORE:<backup-id>
-runlab-private-cloud uninstall --confirm UNINSTALL:<installation-id>
+kala-private-cloud install --bundle DIR --config-dir DIR
+kala-private-cloud status
+kala-private-cloud upgrade --bundle DIR
+kala-private-cloud upgrade-dashboard --bundle DIR
+kala-private-cloud rollback
+kala-private-cloud backup --output EMPTY_PERSISTENT_DIR
+kala-private-cloud restore --backup DIR --confirm RESTORE:<backup-id>
+kala-private-cloud uninstall --confirm UNINSTALL:<installation-id>
 ```
 
 The operator owns a versioned installation record, immutable copied releases, an

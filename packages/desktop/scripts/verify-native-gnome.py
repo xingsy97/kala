@@ -14,7 +14,7 @@ import threading
 import time
 from urllib.request import Request, urlopen
 
-output = Path(os.environ.get("RUNLAB_DESKTOP_EVIDENCE", ".artifacts/gnome")).resolve()
+output = Path(os.environ.get("KALA_DESKTOP_EVIDENCE", ".artifacts/gnome")).resolve()
 output.mkdir(parents=True, exist_ok=True)
 runtime = output / "runtime"
 runtime.mkdir(mode=0o700, exist_ok=True)
@@ -27,9 +27,9 @@ env = {**os.environ, "DISPLAY": "127.0.0.1:96", "TMPDIR": str(runtime),
 Path(env["HOME"]).mkdir(exist_ok=True)
 env.pop("TAURI_WEBVIEW_AUTOMATION", None)
 env.pop("SESSION_MANAGER", None)
-if os.environ.get("RUNLAB_DESKTOP_SOFTWARE_GL") == "1":
+if os.environ.get("KALA_DESKTOP_SOFTWARE_GL") == "1":
     env["LIBGL_ALWAYS_SOFTWARE"] = "1"
-elif os.environ.get("RUNLAB_DESKTOP_SOFTWARE_GL") == "0":
+elif os.environ.get("KALA_DESKTOP_SOFTWARE_GL") == "0":
     env.pop("LIBGL_ALWAYS_SOFTWARE", None)
 processes = []
 logs = []
@@ -38,26 +38,26 @@ page_checks = []
 feature_commands = []
 feature_checks = []
 feature_failures = []
-features = os.environ.get("RUNLAB_DESKTOP_TEST_FEATURES") == "1"
-real_dashboard = os.environ.get("RUNLAB_DESKTOP_REAL_DASHBOARD") == "1"
-measure_cpu = os.environ.get("RUNLAB_DESKTOP_MEASURE_CPU") == "1"
-long_cpu = os.environ.get("RUNLAB_DESKTOP_LONG_CPU") == "1"
-background_cpu = os.environ.get("RUNLAB_DESKTOP_BACKGROUND_CPU") == "1"
-background_cpu_seconds = int(os.environ.get("RUNLAB_DESKTOP_BACKGROUND_CPU_SECONDS", "90"))
-favicon_diagnostic = os.environ.get("RUNLAB_DESKTOP_FAVICON_DIAGNOSTIC") == "1"
-render_diagnostic = os.environ.get("RUNLAB_DESKTOP_RENDER_DIAGNOSTIC") == "1"
-targeted_cpu = os.environ.get("RUNLAB_DESKTOP_TARGETED_CPU") == "1"
-targeted_cpu_seconds = int(os.environ.get("RUNLAB_DESKTOP_TARGETED_CPU_SECONDS", "90"))
-composer_diagnostic = os.environ.get("RUNLAB_DESKTOP_COMPOSER_DIAGNOSTIC") == "1"
-smooth_diagnostic = os.environ.get("RUNLAB_DESKTOP_SMOOTH_DIAGNOSTIC") == "1"
-smooth_case_seconds = int(os.environ.get("RUNLAB_DESKTOP_SMOOTH_CASE_SECONDS", "8"))
-smooth_batch = os.environ.get("RUNLAB_DESKTOP_SMOOTH_BATCH", "initial")
-cpu_only = os.environ.get("RUNLAB_DESKTOP_CPU_ONLY") == "1"
+features = os.environ.get("KALA_DESKTOP_TEST_FEATURES") == "1"
+real_dashboard = os.environ.get("KALA_DESKTOP_REAL_DASHBOARD") == "1"
+measure_cpu = os.environ.get("KALA_DESKTOP_MEASURE_CPU") == "1"
+long_cpu = os.environ.get("KALA_DESKTOP_LONG_CPU") == "1"
+background_cpu = os.environ.get("KALA_DESKTOP_BACKGROUND_CPU") == "1"
+background_cpu_seconds = int(os.environ.get("KALA_DESKTOP_BACKGROUND_CPU_SECONDS", "90"))
+favicon_diagnostic = os.environ.get("KALA_DESKTOP_FAVICON_DIAGNOSTIC") == "1"
+render_diagnostic = os.environ.get("KALA_DESKTOP_RENDER_DIAGNOSTIC") == "1"
+targeted_cpu = os.environ.get("KALA_DESKTOP_TARGETED_CPU") == "1"
+targeted_cpu_seconds = int(os.environ.get("KALA_DESKTOP_TARGETED_CPU_SECONDS", "90"))
+composer_diagnostic = os.environ.get("KALA_DESKTOP_COMPOSER_DIAGNOSTIC") == "1"
+smooth_diagnostic = os.environ.get("KALA_DESKTOP_SMOOTH_DIAGNOSTIC") == "1"
+smooth_case_seconds = int(os.environ.get("KALA_DESKTOP_SMOOTH_CASE_SECONDS", "8"))
+smooth_batch = os.environ.get("KALA_DESKTOP_SMOOTH_BATCH", "initial")
+cpu_only = os.environ.get("KALA_DESKTOP_CPU_ONLY") == "1"
 untrusted_server = None
 fixture_trust = None
 probe = r"""
 const instance=crypto.randomUUID();
-const bridge=window.__RUNLAB_DESKTOP_BRIDGE__;
+const bridge=window.__KALA_DESKTOP_BRIDGE__;
 const composer=()=>document.querySelector('[data-testid="composer-input"]')||document.querySelector('input');
 let faviconChanges=0;
 let heldFavicon=null,heldFaviconWrites=0,pausedSheens=[],pausedThinkingIndicators=[];
@@ -422,7 +422,7 @@ try:
         untrusted_server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
         untrusted_server.socket = tls.wrap_socket(untrusted_server.socket, server_side=True)
         threading.Thread(target=untrusted_server.serve_forever, daemon=True).start()
-        env.update({"RUNLAB_DESKTOP_PROBE_ORIGIN": origin, "RUNLAB_DESKTOP_EVIDENCE": str(output)})
+        env.update({"KALA_DESKTOP_PROBE_ORIGIN": origin, "KALA_DESKTOP_EVIDENCE": str(output)})
         start("real-host", ["node", "--import", "./packages/host/node_modules/tsx/dist/loader.mjs",
               "packages/desktop/tests/native-dashboard-host.mjs"])
         origin_file = output / "host-origin"
@@ -517,7 +517,7 @@ window.destroy()
                              "NameHasOwner", "(s)", ("org.freedesktop.Notifications",))[0],
                  "The distribution GNOME notification daemon did not start")
     assert shell.poll() is None
-    app = start("desktop", [os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")])
+    app = start("desktop", [os.environ.get("KALA_DESKTOP_BINARY", "/usr/bin/kala-desktop")])
     launcher = wait_for(lambda: visible_windows()[-1] if visible_windows() else None, "Launcher missing")
     registered = wait_for(lambda: watcher()["RegisteredStatusNotifierItems"], "GNOME did not register the tray")
     time.sleep(5)
@@ -525,7 +525,7 @@ window.destroy()
     run("xdotool", "windowactivate", "--sync", launcher)
     time.sleep(1)
     window = launcher
-    expect_bug = os.environ.get("RUNLAB_DESKTOP_EXPECT_BUG") == "1"
+    expect_bug = os.environ.get("KALA_DESKTOP_EXPECT_BUG") == "1"
     if not expect_bug:
         run("xdotool", "key", "ctrl+a")
         run("xdotool", "type", "--clearmodifiers", origin)
@@ -557,8 +557,8 @@ window.destroy()
     time.sleep(2)
     screenshot("gnome-after-close.png")
     evidence = {"shell": run("gnome-shell", "--version").strip(),
-                "binary": os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop"),
-                "binarySha256": hashlib.sha256(Path(os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")).read_bytes()).hexdigest(),
+                "binary": os.environ.get("KALA_DESKTOP_BINARY", "/usr/bin/kala-desktop"),
+                "binarySha256": hashlib.sha256(Path(os.environ.get("KALA_DESKTOP_BINARY", "/usr/bin/kala-desktop")).read_bytes()).hexdigest(),
                 "extension": run("dpkg-query", "-W", "gnome-shell-extension-appindicator").strip(),
                 "watcherBeforeClose": registered, "watcherAfterClose": watcher(),
                 "processAliveAfterClose": app.poll() is None, "visibleWindowsAfterClose": visible_windows(),
@@ -649,7 +649,7 @@ window.destroy()
 
         if measure_cpu:
             assert real_dashboard, "CPU acceptance requires the real production Dashboard"
-            binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")
+            binary = os.environ.get("KALA_DESKTOP_BINARY", "/usr/bin/kala-desktop")
             samples = []
 
             def profile_state(name, hide=False, seconds=None):
@@ -972,7 +972,7 @@ window.destroy()
         wait_for(lambda: watcher()["RegisteredStatusNotifierItems"], "Reenabled GNOME tray did not recover")
         time.sleep(2)
         if features:
-            binary = os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")
+            binary = os.environ.get("KALA_DESKTOP_BINARY", "/usr/bin/kala-desktop")
             run("xdotool", "windowactivate", "--sync", window)
             run("xdotool", "key", "alt+F4")
             wait_for(lambda: not visible_windows(), "Close before repeat launch failed")

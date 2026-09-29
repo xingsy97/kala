@@ -28,7 +28,7 @@ const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_DASHBOARD_PORT ?? 3173)
 const HOST_URL = `http://localhost:${PORT}`
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? HOST_URL
-const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-dashboard-sessions-'))
+const KALA_SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-dashboard-sessions-'))
 const WORKSPACE = mkdtempSync(join(tmpdir(), 'agent-kernel-dashboard-workspace-'))
 const WORKSPACE_ID_FILE = join(tmpdir(), `agent-kernel-dashboard-workspace-id-${process.pid}`)
 const CHROME_DEBUG_URL = process.env.CHROME_DEBUG_URL ?? 'http://127.0.0.1:9222'
@@ -65,10 +65,10 @@ try {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
-        HOST_PORT: String(PORT),
-        SESSIONS_DIR,
-        DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
-        EXECUTOR_TOKENS: JSON.stringify([{ token: E2E_EXECUTOR_TOKEN }]),
+        KALA_PORT: String(PORT),
+        KALA_SESSIONS_DIR,
+        KALA_DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
+        KALA_EXECUTOR_TOKENS: JSON.stringify([{ token: E2E_EXECUTOR_TOKEN }]),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
@@ -86,8 +86,8 @@ try {
         HOST_URL,
         WORKSPACE_NAME: 'dashboard-real-e2e',
         SANDBOX_ROOTS: WORKSPACE,
-        AGENT_KERNEL_WORKSPACE_ID_FILE: WORKSPACE_ID_FILE,
-        AGENT_KERNEL_EXECUTOR_PROFILE: `dashboard-real-${process.pid}`,
+        KALA_WORKSPACE_ID_FILE: WORKSPACE_ID_FILE,
+        KALA_EXECUTOR_PROFILE: `dashboard-real-${process.pid}`,
         EXECUTOR_TOKEN: E2E_EXECUTOR_TOKEN,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -194,7 +194,7 @@ async function createSessionFromFinder(page) {
   )
 
   const sessionId = new URL(page.url()).searchParams.get('sessionId')
-  const header = readSessionHeader(SESSIONS_DIR, sessionId)
+  const header = readSessionHeader(KALA_SESSIONS_DIR, sessionId)
   check('new session dialog creates session with selected initial cwd', header?.initialCwd === child && header?.initialState?.cwd === child, JSON.stringify(header ?? null).slice(0, 400))
   check('new session finder opens nested workspace directories', true, child)
 }
@@ -252,7 +252,7 @@ async function verifySessionCwd(page) {
   }
 
   const sessionId = new URL(page.url()).searchParams.get('sessionId')
-  let entries = readSessionEntries(SESSIONS_DIR, sessionId)
+  let entries = readSessionEntries(KALA_SESSIONS_DIR, sessionId)
   const cwdEvent = entries.find((e) => e.event.kind === 'cwd_changed' && e.event.cwd === cwd)
   check('session cwd can be changed from toolbar', Boolean(cwdEvent), JSON.stringify(cwdEvent ?? null))
 
@@ -264,7 +264,7 @@ async function verifySessionCwd(page) {
     () => document.querySelector('[data-testid="session-error"]')?.textContent?.includes('cwd outside sandbox roots'),
     { timeout: 3_000 },
   )
-  entries = readSessionEntries(SESSIONS_DIR, sessionId)
+  entries = readSessionEntries(KALA_SESSIONS_DIR, sessionId)
   const outsideEvent = entries.find((e) => e.event.kind === 'cwd_changed' && e.event.cwd === '/tmp/outside-agent-kernel-cwd')
   const label = await page.$eval('[data-testid="cwd-label"]', (el) => el.textContent || '')
   check('invalid session cwd is rejected by real host validation', !outsideEvent && label.includes(cwd), label)
@@ -291,7 +291,7 @@ async function verifyQueuedDeliveryUi(page) {
   check('queue pending message dock uses Radix ScrollArea', queued.hasRadixViewport, JSON.stringify(queued))
 
   const sessionId = new URL(page.url()).searchParams.get('sessionId')
-  const beforeEntries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const beforeEntries = readSessionEntries(KALA_SESSIONS_DIR, sessionId)
   const queuedAlreadyAppended = beforeEntries.some(
     (e) => e.event.kind === 'user_message' && String(e.event.text).includes('queue-visible-token'),
   )
@@ -306,7 +306,7 @@ async function verifyQueuedDeliveryUi(page) {
     { timeout: TURN_TIMEOUT_MS },
   )
   await page.click('[data-testid="send-mode-steer"]')
-  const afterEntries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const afterEntries = readSessionEntries(KALA_SESSIONS_DIR, sessionId)
   const queuedAppended = afterEntries.some(
     (e) => e.event.kind === 'user_message' && String(e.event.text).includes('queue-visible-token'),
   )
@@ -434,7 +434,7 @@ async function verifyCompact(page) {
     after: performance.getEntriesByType('navigation').length,
   }))
   const sessionId = new URL(afterUrl).searchParams.get('sessionId')
-  const entries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const entries = readSessionEntries(KALA_SESSIONS_DIR, sessionId)
   const compactEvents = entries.filter((e) => e.event.kind === 'compact_replaced')
   const bodyText = await page.evaluate(() => document.body.textContent || '')
   const compactUi = await page.evaluate(() => {
@@ -566,7 +566,7 @@ async function verifyBackgroundTerminalPanel(page) {
   await waitForDone(page, TURN_TIMEOUT_MS)
   const panel = await page.$eval('[data-testid="background-terminal-panel"]', (el) => el.textContent || '')
   const sessionId = new URL(page.url()).searchParams.get('sessionId')
-  const entries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const entries = readSessionEntries(KALA_SESSIONS_DIR, sessionId)
   const backgroundStart = entries.find(
     (e) => e.event.kind === 'tool_result' && String(e.event.content).includes('taskId'),
   )

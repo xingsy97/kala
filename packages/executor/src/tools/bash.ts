@@ -58,8 +58,8 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       ...(ctx.env ?? {}),
-      AGENT_RUNLAB_SESSION_ID: ctx.sessionId,
-      AGENT_RUNLAB_CALL_ID: ctx.callId,
+      KALA_SESSION_ID: ctx.sessionId,
+      KALA_CALL_ID: ctx.callId,
     }
 
     const cwd = cwdInput ?? ctx.cwd ?? ctx.sandbox.roots[0] ?? process.cwd()

@@ -15,7 +15,7 @@
     }
   },
   "bin": {
-    "agent-kernel-executor": "./dist/bin/agent-kernel-executor.js"
+    "kala-executor": "./dist/bin/kala-executor.js"
   },
   "files": [
     "dist",
@@ -28,8 +28,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx watch bin/agent-kernel-executor.ts",
-    "dev:restart": "node ../../scripts/dev/restart-every.mjs --interval-ms 180000 -- tsx bin/agent-kernel-executor.ts",
+    "dev": "tsx watch bin/kala-executor.ts",
+    "dev:restart": "node ../../scripts/dev/restart-every.mjs --interval-ms 180000 -- tsx bin/kala-executor.ts",
     "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },
   "dependencies": {

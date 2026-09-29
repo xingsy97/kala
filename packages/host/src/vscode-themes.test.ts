@@ -13,16 +13,16 @@ describe('vscode theme marketplace service', () => {
   beforeEach(async () => {
     vi.resetModules()
     cacheDir = await mkdtemp(join(tmpdir(), 'agent-kernel-vscode-themes-'))
-    process.env.AGENT_KERNEL_OPEN_VSX_BASE_URL = 'https://example.test'
-    process.env.AGENT_KERNEL_VSCODE_THEME_CACHE_DIR = cacheDir
+    process.env.KALA_OPEN_VSX_BASE_URL = 'https://example.test'
+    process.env.KALA_VSCODE_THEME_CACHE_DIR = cacheDir
     ;({ searchMarketplaceThemes, readMarketplaceThemeExtension, readMarketplaceTheme } = await import('./vscode-themes.js'))
   })
 
   afterEach(async () => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
-    delete process.env.AGENT_KERNEL_OPEN_VSX_BASE_URL
-    delete process.env.AGENT_KERNEL_VSCODE_THEME_CACHE_DIR
+    delete process.env.KALA_OPEN_VSX_BASE_URL
+    delete process.env.KALA_VSCODE_THEME_CACHE_DIR
     await rm(cacheDir, { recursive: true, force: true })
   })
 

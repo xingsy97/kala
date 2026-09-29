@@ -23,7 +23,7 @@ test('integration, browser/security, and container acceptance are separate layer
   assert.match(browserSecurity, /layer: \[browser, security\]/u)
   const system = await workflow('product-system-e2e.yml')
   assert.equal((system.match(/build:release-assets -- --tag latest --repo xingsy97\/kala/gu) ?? []).length, 2)
-  assert.match(system, /RUNLAB_LXD_RUNNER_ENABLED == 'true'/u)
+  assert.match(system, /KALA_LXD_RUNNER_ENABLED == 'true'/u)
   const acceptance = await workflow('container-acceptance.yml')
   assert.match(acceptance, /layer: \[sandbox-acceptance, release-acceptance\]/u)
   assert.doesNotMatch(automaticEvents(acceptance), /pull_request:/u)

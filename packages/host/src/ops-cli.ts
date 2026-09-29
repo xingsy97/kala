@@ -321,10 +321,10 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       taskFile: required(rest, '--task-file'),
       taskId: value(rest, '--task-id'),
       rolloutId: value(rest, '--rollout-id'),
-      policyBaseUrl: value(rest, '--policy-base-url') ?? process.env.AGENT_KERNEL_POLICY_BASE_URL,
-      model: value(rest, '--model') ?? process.env.AGENT_KERNEL_POLICY_MODEL ?? 'policy-model-unspecified',
-      tokenizerPath: value(rest, '--tokenizer') ?? process.env.AGENT_KERNEL_POLICY_TOKENIZER,
-      weightVersion: value(rest, '--weight-version') ?? process.env.AGENT_KERNEL_POLICY_WEIGHT_VERSION,
+      policyBaseUrl: value(rest, '--policy-base-url') ?? process.env.KALA_POLICY_BASE_URL,
+      model: value(rest, '--model') ?? process.env.KALA_POLICY_MODEL ?? 'policy-model-unspecified',
+      tokenizerPath: value(rest, '--tokenizer') ?? process.env.KALA_POLICY_TOKENIZER,
+      weightVersion: value(rest, '--weight-version') ?? process.env.KALA_POLICY_WEIGHT_VERSION,
       requireLogprobs: flag(rest, '--require-logprobs'),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(maxNewTokens !== undefined ? { maxNewTokens } : {}),
@@ -651,7 +651,7 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
 }
 
 function policyGatewayFromCli(command: Extract<EnhancementCliCommand, { kind: 'rl-run-rollout-smoke' }>, rolloutId: string): LLMAdapter {
-  if (!command.policyBaseUrl) throw new Error('rl run-rollout-smoke requires --policy-base-url or AGENT_KERNEL_POLICY_BASE_URL unless --fixture-policy is used')
+  if (!command.policyBaseUrl) throw new Error('rl run-rollout-smoke requires --policy-base-url or KALA_POLICY_BASE_URL unless --fixture-policy is used')
   return policyGatewayAdapter({
     baseUrl: command.policyBaseUrl,
     artifactRoot: command.rootDir,

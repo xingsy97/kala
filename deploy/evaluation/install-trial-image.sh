@@ -22,7 +22,7 @@ test "$(git -C /opt/agent-eval/swebench-source rev-parse HEAD)" = f7bbbb2ccdf479
 /opt/agent-eval/swebench/bin/pip install --no-cache-dir -e /opt/agent-eval/swebench-source
 
 install -d -m 0755 /opt/agent-eval/bin
-install -m 0755 /root/agent-eval-install/agent-kernel-host.cjs /opt/agent-eval/bin/agent-kernel-host.cjs
+install -m 0755 /root/agent-eval-install/kala-host.cjs /opt/agent-eval/bin/kala-host.cjs
 install -m 0755 /root/agent-eval-install/kala-executor.cjs /opt/agent-eval/bin/kala-executor.cjs
 install -m 0755 /root/agent-eval-install/agent-eval-runlab-driver.cjs /opt/agent-eval/bin/agent-eval-runlab-driver.cjs
 install -m 0755 /root/agent-eval-install/agent-eval-codex-app-server.js /opt/agent-eval/bin/agent-eval-codex-app-server.js
@@ -30,18 +30,18 @@ install -m 0755 /root/agent-eval-install/agent-eval-swe-bench-grade.js /opt/agen
 printf '%s\n' '{"type":"module"}' > /opt/agent-eval/package.json
 chmod 0444 /opt/agent-eval/package.json
 
-printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/agent-kernel-host.cjs "$@"' > /usr/local/bin/agent-kernel-host
-printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/kala-executor.cjs "$@"' > /usr/local/bin/agent-kernel-executor
+printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/kala-host.cjs "$@"' > /usr/local/bin/kala-host
+printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/kala-executor.cjs "$@"' > /usr/local/bin/kala-executor
 printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/agent-eval-runlab-driver.cjs "$@"' > /usr/local/bin/agent-eval-runlab-driver
 printf '%s\n' '#!/bin/sh' 'exec node /opt/agent-eval/bin/agent-eval-codex-app-server.js "$@"' > /usr/local/bin/agent-eval-codex-app-server
 printf '%s\n' '#!/bin/sh' 'PATH=/opt/agent-eval/swebench/bin:$PATH PYTHONPATH=/opt/agent-eval/swebench-source${PYTHONPATH:+:$PYTHONPATH} exec node /opt/agent-eval/bin/agent-eval-swe-bench-grade.js "$@"' > /usr/local/bin/agent-eval-swe-bench-grade
-chmod 0755 /usr/local/bin/agent-kernel-host /usr/local/bin/agent-kernel-executor /usr/local/bin/agent-eval-runlab-driver /usr/local/bin/agent-eval-codex-app-server /usr/local/bin/agent-eval-swe-bench-grade
+chmod 0755 /usr/local/bin/kala-host /usr/local/bin/kala-executor /usr/local/bin/agent-eval-runlab-driver /usr/local/bin/agent-eval-codex-app-server /usr/local/bin/agent-eval-swe-bench-grade
 
 node --version
 codex --version
 claude --version
-agent-kernel-host --version
-agent-kernel-executor --version
+kala-host --version
+kala-executor --version
 agent-eval-runlab-driver --version
 if [ -n "${AGENT_EVAL_SWEBENCH_OFFICIAL_IMAGE:-}" ]; then
   install -d -m 0755 /etc/agent-eval

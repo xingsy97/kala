@@ -7,7 +7,7 @@
  *
  * Requires:
  *   - host running at HOST_URL
- *   - SESSIONS_DIR pointing at the same dir the host wrote (default
+ *   - KALA_SESSIONS_DIR pointing at the same dir the host wrote (default
  *     /tmp/agent-kernel-e2e-sessions)
  *   - dashboard reachable at DASHBOARD_URL
  */
@@ -21,7 +21,7 @@ import puppeteer from 'puppeteer-core'
 const HOST_URL = process.env.HOST_URL ?? 'http://localhost:3000'
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? HOST_URL
 const CHROME = process.env.CHROME_PATH ?? '/usr/bin/google-chrome'
-const SESSIONS_DIR = process.env.SESSIONS_DIR ?? '/tmp/agent-kernel-e2e-sessions'
+const KALA_SESSIONS_DIR = process.env.KALA_SESSIONS_DIR ?? '/tmp/agent-kernel-e2e-sessions'
 const MODEL = process.env.VERIFY_MODEL ?? 'gpt-5.5'
 const SESSION_ID = process.env.VERIFY_SESSION_ID ?? '01JVERIFYNOAUTHERRORXXXX'
 
@@ -67,7 +67,7 @@ try {
   // Give the host a moment to hit the LLM.
   await sleep(8_000)
 
-  const events = readSessionEvents(SESSIONS_DIR, SESSION_ID)
+  const events = readSessionEvents(KALA_SESSIONS_DIR, SESSION_ID)
   const errorEvents = events.filter((e) => e.kind === 'llm_error')
   const has401 = errorEvents.some((e) =>
     /HTTP 401|authentication_error|invalid x-api-key/i.test(e.error ?? ''),

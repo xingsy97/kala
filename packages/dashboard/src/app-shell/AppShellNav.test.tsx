@@ -111,13 +111,13 @@ describe('AppShellNav', () => {
   })
 
   it('hides browser installation entry inside the installed desktop', () => {
-    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
+    Object.defineProperty(window, '__KALA_DESKTOP__', { value: true, configurable: true })
     try {
       renderNav()
       expect(screen.queryByTestId('app-shell-download-desktop')).toBeNull()
       expect(screen.getByLabelText('Kala').querySelector('img')?.getAttribute('src')).toBe('/icons/octopus-desktop.svg')
     } finally {
-      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
+      delete (window as Window & { __KALA_DESKTOP__?: boolean }).__KALA_DESKTOP__
     }
   })
 

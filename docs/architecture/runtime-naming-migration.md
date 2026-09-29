@@ -8,12 +8,12 @@ Technical names describe their responsibility rather than a removed product mode
 
 - package: `packages/runtime-ingress-gateway`, `@agent-kernel/runtime-ingress-gateway`;
 - symbols: `RuntimeIngressGateway`, `startRuntimeIngressGateway`;
-- binary: `agent-runlab-runtime-ingress`;
+- binary: `kala-runtime-ingress`;
 - Platform runtime: `RuntimeHost`;
 - trusted selector: `RuntimeUnitIngress`;
 - isolated runtime: `TenantRuntimeUnit`;
-- Private Cloud environment: `RUNTIME_INGRESS_*`, `RUNTIME_HOST_*`, and `INGRESS_PUBLIC_ORIGIN`;
-- Dedicated services and assets: `agent-runlab-dedicated-*`, `deploy/dedicated-systemd/`, and `deploy:dedicated`;
+- Private Cloud environment: `KALA_INGRESS_*`, `KALA_RUNTIME_HOST_*`, `KALA_PUBLIC_LISTEN`, and `KALA_PUBLIC_URLS`;
+- Dedicated services and assets: `kala-dedicated-*`, `deploy/dedicated-systemd/`, and `deploy:dedicated`;
 - Private Cloud stack: `deploy/private-cloud/`, `scripts/private-cloud-local/`, and `private-cloud:*`.
 
 ## Clean cutover

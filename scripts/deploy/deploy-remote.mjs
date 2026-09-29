@@ -47,15 +47,15 @@ Safety:
 }
 const dryRun = rawArgs.includes('--dry-run')
 const effectiveArgs = rawArgs.filter((arg) => arg !== '--dry-run')
-const lxdContainer = optionValueLocal(effectiveArgs, '--lxd') ?? process.env.AK_DEPLOY_LXD
-const supervisorInstalled = /^(?:1|true|yes|on)$/iu.test(process.env.AGENT_RUNLAB_DEPLOY_SUPERVISOR_INSTALLED ?? '')
+const lxdContainer = optionValueLocal(effectiveArgs, '--lxd') ?? process.env.KALA_DEPLOY_LXD
+const supervisorInstalled = /^(?:1|true|yes|on)$/iu.test(process.env.KALA_DEPLOY_SUPERVISOR_INSTALLED ?? '')
 assertSafeDeploymentInvocation({ env: process.env, supervisorInstalled })
 if (lxdContainer) {
   const lxdPlan = {
     mode: 'lxd',
     container: lxdContainer,
-    remoteBin: optionValueLocal(effectiveArgs, '--remote-bin') ?? process.env.AK_DEPLOY_REMOTE_BIN ?? '/home/ubuntu/.bin',
-    service: optionValueLocal(effectiveArgs, '--service') ?? process.env.AK_DEPLOY_SERVICE ?? 'agent-runlab-host',
+    remoteBin: optionValueLocal(effectiveArgs, '--remote-bin') ?? process.env.KALA_DEPLOY_REMOTE_BIN ?? '/home/ubuntu/.bin',
+    service: optionValueLocal(effectiveArgs, '--service') ?? process.env.KALA_DEPLOY_SERVICE ?? 'agent-runlab-host',
     skipBuild: effectiveArgs.includes('--skip-build'),
     retiredAssets: RETIRED_RELEASE_ASSETS,
   }
@@ -102,7 +102,7 @@ const bundleHash = sums.match(/^([a-f0-9]{64})\s+kala-dashboard-with-runtime\.cj
 if (!bundleHash) throw new Error('bundle hash is missing from SHA256SUMS')
 const generation = createGenerationPlan({
   remoteBin, service, hostUrl, files, bundleHash, restartTimeoutMs, statusTimeoutMs,
-  sessionId: process.env.AGENT_RUNLAB_SESSION_ID, callId: process.env.AGENT_RUNLAB_CALL_ID,
+  sessionId: process.env.KALA_SESSION_ID, callId: process.env.KALA_CALL_ID,
 })
 const txLocal = join('/tmp', `agent-runlab-deploy-${generation.deployId}.json`)
 writeFileSync(txLocal, `${transactionJson(generation)}\n`, { mode: 0o600 })
@@ -154,7 +154,7 @@ function run(command, args, options = {}) {
 
 function deployLxd({ container, remoteBin, service, skipBuild }) {
   const releaseDir = join(root, 'release')
-  const hostUrl = optionValueLocal(effectiveArgs, '--host-url') ?? process.env.AK_DEPLOY_HOST_URL ?? 'http://127.0.0.1:13000'
+  const hostUrl = optionValueLocal(effectiveArgs, '--host-url') ?? process.env.KALA_DEPLOY_HOST_URL ?? 'http://127.0.0.1:13000'
   const capabilities = run('lxc', ['exec', container, '--', 'curl', '-fsS', '--max-time', '5', `${hostUrl.replace(/\/$/u, '')}/runtime/capabilities`], { capture: true })
   assertPortableTarget(JSON.parse(capabilities.stdout))
   if (!skipBuild) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
@@ -166,8 +166,8 @@ function deployLxd({ container, remoteBin, service, skipBuild }) {
   for (const file of files) if (!existsSync(join(releaseDir, file))) throw new Error(`missing release asset: ${file}`)
   const plan = createGenerationPlan({
     remoteBin, service, hostUrl, files, bundleHash,
-    sessionId: process.env.AGENT_RUNLAB_SESSION_ID,
-    callId: process.env.AGENT_RUNLAB_CALL_ID,
+    sessionId: process.env.KALA_SESSION_ID,
+    callId: process.env.KALA_CALL_ID,
   })
   const txLocal = join('/tmp', `agent-runlab-deploy-${plan.deployId}.json`)
   writeFileSync(txLocal, `${transactionJson(plan)}\n`, { mode: 0o600 })

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * `agent-kernel-executor` CLI.
+ * `kala-executor` CLI.
  *
  * Env / flags:
  *   HOST_URL / --host           required (e.g. http://localhost:3000)
  *   WORKSPACE_NAME / --name     optional display label; defaults to os.hostname().
  *                               Free to rename — routing uses the workspaceId
- *                               (persisted at ~/.agent-kernel/workspace-id).
+ *                               (persisted at ~/.kala/workspace-id).
  *   SANDBOX_ROOTS / --sandbox-root
  *     optional workspace root(s). Absolute path(s). `SANDBOX_ROOTS` is a
  *     `:`-separated list; `--sandbox-root <path>` is repeatable. Session cwd
@@ -15,12 +15,12 @@
  *   EXECUTOR_TOKEN / --token    optional long-term executor token
  *   EXECUTOR_INVITE / --invite  optional invite token from Dashboard
  *   EXECUTOR_ID / --id          optional; defaults to a ULID
- *   AGENT_KERNEL_EXECUTOR_PROFILE / --profile
+ *   KALA_EXECUTOR_PROFILE / --profile
  *     optional local profile. Non-default profiles use isolated lock,
- *     workspace-id, and executor-token files under ~/.agent-kernel/profiles/<profile>/.
- *   AGENT_KERNEL_AUTO_UPDATE / --auto-update
+ *     workspace-id, and executor-token files under ~/.kala/profiles/<profile>/.
+ *   KALA_AUTO_UPDATE / --auto-update
  *     optional; update the release asset from the latest GitHub Release before connecting.
- *   AGENT_KERNEL_NO_UPDATE_CHECK / --no-update-check
+ *   KALA_NO_UPDATE_CHECK / --no-update-check
  *     optional; disable the default latest-release reminder.
  *
  * The executor is a daemon: it does NOT bind to a sessionId at startup.
@@ -56,7 +56,7 @@ import type { InstallerSession } from '../src/installer-session.js'
 import { spawn } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
 
-const logger = createRuntimeLogger('agent-kernel-executor')
+const logger = createRuntimeLogger('kala-executor')
 
 type Args = {
   help?: boolean
@@ -82,12 +82,12 @@ function parseArgs(argv: readonly string[]): Args {
   const out: Args = { sandboxRoots: [], command: argv[0] === 'update' ? 'update' : argv[0] === 'service' ? 'service' : 'run' }
   let start = 0
   if (out.command === 'update') {
-    if (argv[1] !== 'apply' && argv[1] !== 'rollback') throw new Error('Usage: runlab-executor update apply|rollback --config <path>')
+    if (argv[1] !== 'apply' && argv[1] !== 'rollback') throw new Error('Usage: kala-executor update apply|rollback --config <path>')
     out.updateAction = argv[1]
     start = 2
   } else if (out.command === 'service') {
     const action = argv[1]
-    if (!['status', 'logs', 'start', 'stop', 'restart', 'uninstall'].includes(action ?? '')) throw new Error('Usage: runlab-executor service status|logs|start|stop|restart|uninstall [--system|--user]')
+    if (!['status', 'logs', 'start', 'stop', 'restart', 'uninstall'].includes(action ?? '')) throw new Error('Usage: kala-executor service status|logs|start|stop|restart|uninstall [--system|--user]')
     out.serviceAction = action as Args['serviceAction']
     start = 2
   }
@@ -151,9 +151,9 @@ function printHelp(): void {
   process.stdout.write(`Kala Executor
 
 Usage:
-  runlab-executor --host <url> [options]
-  runlab-executor service status|logs|start|stop|restart|uninstall [--system|--user]
-  runlab-executor update apply|rollback --config <path>
+  kala-executor --host <url> [options]
+  kala-executor service status|logs|start|stop|restart|uninstall [--system|--user]
+  kala-executor update apply|rollback --config <path>
 
 Options:
   -h, --help                 Show this help and exit.
@@ -167,7 +167,7 @@ Options:
   --profile <name>           Local profile for lock, workspace id, and token files.
   --auto-update              Update release asset before connecting.
   --no-update-check          Disable release update check.
-  --update-repo <owner/repo> GitHub release repo. Defaults to AGENT_KERNEL_UPDATE_REPO.
+  --update-repo <owner/repo> GitHub release repo. Defaults to KALA_UPDATE_REPO.
   --config <path>             Managed service JSON config; credentials are loaded from its protected file.
   --system                    Manage the system service.
   --user                      Manage the current user's service.
@@ -178,19 +178,19 @@ Common environment:
   SANDBOX_ROOTS              Colon-separated sandbox roots.
   EXECUTOR_TOKEN             Long-term executor token.
   EXECUTOR_INVITE            One-time invite token.
-  AGENT_KERNEL_EXECUTOR_PROFILE
+  KALA_EXECUTOR_PROFILE
                              Local profile. Example: dev.
   LOG_LEVEL                  trace, debug, info, warn, error. Default: info.
   LOG_FORMAT                 pretty/human or json. Default: pretty.
 
 Examples:
-  runlab-executor --host http://localhost:3000 --sandbox-root /workspace
-  runlab-executor --host http://localhost:3000 --profile dev
-  runlab-executor service status
-  runlab-executor service logs
-  runlab-executor service restart
-  runlab-executor service stop
-  runlab-executor service uninstall
+  kala-executor --host http://localhost:3000 --sandbox-root /workspace
+  kala-executor --host http://localhost:3000 --profile dev
+  kala-executor service status
+  kala-executor service logs
+  kala-executor service restart
+  kala-executor service stop
+  kala-executor service uninstall
 `)
 }
 
@@ -205,11 +205,11 @@ function printServiceCommands(mode: ServiceMode, executable = process.execPath):
   process.stdout.write(`  SERVICE INSTALLED AND RUNNING\n`)
   process.stdout.write(`============================================================\n`)
   process.stdout.write(`\nManage the Kala Executor service:\n\n`)
-  process.stdout.write(`  Status    systemctl${user} status runlab-executor.service\n`)
-  process.stdout.write(`  Logs      journalctl${user} -u runlab-executor.service -f\n`)
-  process.stdout.write(`  Restart   systemctl${user} restart runlab-executor.service\n`)
-  process.stdout.write(`  Stop      systemctl${user} stop runlab-executor.service\n`)
-  process.stdout.write(`  Start     systemctl${user} start runlab-executor.service\n`)
+  process.stdout.write(`  Status    systemctl${user} status kala-executor.service\n`)
+  process.stdout.write(`  Logs      journalctl${user} -u kala-executor.service -f\n`)
+  process.stdout.write(`  Restart   systemctl${user} restart kala-executor.service\n`)
+  process.stdout.write(`  Stop      systemctl${user} stop kala-executor.service\n`)
+  process.stdout.write(`  Start     systemctl${user} start kala-executor.service\n`)
   process.stdout.write(`  Uninstall ${JSON.stringify(executable)} service uninstall ${modeFlag}\n`)
   process.stdout.write(`\nThese commands are also available through the installed Executor CLI.\n`)
 }
@@ -225,7 +225,7 @@ function printForegroundCommands(): void {
 }
 
 /**
- * Acquire a single-instance lock at `~/.agent-kernel/executor.lock`. Fails
+ * Acquire a single-instance lock at `~/.kala/executor.lock`. Fails
  * fast (no retry) if another executor process on the same user account is
  * already running. The lock is released automatically on process exit;
  * `proper-lockfile` also uses mtime-based stale detection so a crashed
@@ -249,7 +249,7 @@ async function runInternalInstaller(): Promise<void> {
   await waitForApproval(env)
   const workspaceId = loadOrCreateWorkspaceId()
   const redeemed = await redeemInstallation(env, workspaceId)
-  const workspaceRoot = env.EXECUTOR_INSTALL_ROOT === '__RUNLAB_CURRENT_DIRECTORY__' ? resolve(process.cwd()) : resolve(env.EXECUTOR_INSTALL_ROOT)
+  const workspaceRoot = env.EXECUTOR_INSTALL_ROOT === '__KALA_CURRENT_DIRECTORY__' ? resolve(process.cwd()) : resolve(env.EXECUTOR_INSTALL_ROOT)
   process.stdout.write(`Kala workspace root: ${workspaceRoot}\n`)
   const service = env.EXECUTOR_INSTALL_MODE === 'service'
   if (service && process.platform === 'win32') return await installWindowsService(env, workspaceRoot, redeemed.token)
@@ -301,12 +301,12 @@ async function runInternalInstaller(): Promise<void> {
 }
 
 async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment>, workspaceRoot: string, token: string): Promise<void> {
-  const serviceName = 'RunLabExecutor'
+  const serviceName = 'KalaExecutor'
   const plan = createWindowsServicePlan({
     serviceName, displayName: 'Kala Executor',
     programFiles: process.env.ProgramFiles, programData: process.env.ProgramData,
   })
-  if (basename(process.execPath).toLowerCase() === 'node.exe') throw new Error('Windows service mode requires the native runlab-executor asset')
+  if (basename(process.execPath).toLowerCase() === 'node.exe') throw new Error('Windows service mode requires the native kala-executor asset')
   mkdirSync(plan.layout.installDir, { recursive: true, mode: 0o700 })
   mkdirSync(plan.layout.dataDir, { recursive: true, mode: 0o700 })
   const credentialPath = join(plan.layout.dataDir, 'credential')
@@ -413,12 +413,12 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   const sandboxRoots = args.sandboxRoots.length > 0 ? args.sandboxRoots : managed?.sandboxRoots ?? envRoots
   const managedCredential = managed ? readExecutorCredential(managed.credentialFile) : undefined
   const invite = args.invite ?? (managedCredential?.startsWith('ak_invite_') ? managedCredential : undefined) ?? process.env.EXECUTOR_INVITE
-  const profile = normalizeExecutorProfile(args.profile ?? managed?.profile ?? process.env.AGENT_KERNEL_EXECUTOR_PROFILE)
+  const profile = normalizeExecutorProfile(args.profile ?? managed?.profile ?? process.env.KALA_EXECUTOR_PROFILE)
   const token = args.token ?? (managedCredential?.startsWith('ak_exec_') ? managedCredential : undefined) ?? process.env.EXECUTOR_TOKEN ?? (invite ? undefined : loadExecutorToken(undefined, profile))
   const executorId = args.id ?? process.env.EXECUTOR_ID
-  const autoUpdate = args.autoUpdate === true || process.env.AGENT_KERNEL_AUTO_UPDATE === '1'
-  const noUpdateCheck = args.noUpdateCheck === true || process.env.AGENT_KERNEL_NO_UPDATE_CHECK === '1'
-  const updateRepo = args.updateRepo ?? process.env.AGENT_KERNEL_UPDATE_REPO
+  const autoUpdate = args.autoUpdate === true || process.env.KALA_AUTO_UPDATE === '1'
+  const noUpdateCheck = args.noUpdateCheck === true || process.env.KALA_NO_UPDATE_CHECK === '1'
+  const updateRepo = args.updateRepo ?? process.env.KALA_UPDATE_REPO
 
   if (!host) {
     logger.error(
@@ -468,11 +468,11 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     void lockfile.unlock(lockPath, { realpath: false }).catch(() => undefined)
   })
 
-  if (updateRepo && !noUpdateCheck && process.env.AGENT_KERNEL_SKIP_UPDATE_ONCE !== '1') {
+  if (updateRepo && !noUpdateCheck && process.env.KALA_SKIP_UPDATE_ONCE !== '1') {
     try {
       await checkExecutorUpdate({
         repo: updateRepo,
-        currentTag: process.env.AGENT_KERNEL_RELEASE_TAG,
+        currentTag: process.env.KALA_RELEASE_TAG,
         autoUpdate,
         argv: process.argv.slice(2),
         logger,
@@ -557,7 +557,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
 
 async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): Promise<void> {
   if (action === 'logs') throw new Error('Windows service logs are available through Windows Event Viewer and are not streamed by this command')
-  const plan = createWindowsServicePlan({ serviceName: 'RunLabExecutor', displayName: 'Kala Executor', programFiles: process.env.ProgramFiles, programData: process.env.ProgramData })
+  const plan = createWindowsServicePlan({ serviceName: 'KalaExecutor', displayName: 'Kala Executor', programFiles: process.env.ProgramFiles, programData: process.env.ProgramData })
   const actions: readonly WindowsServiceAction[] = action === 'status' ? ['query'] : action === 'start' ? ['start'] : action === 'stop' ? ['stop'] : action === 'restart' ? ['stop', 'start'] : ['stop', 'delete']
   if (action === 'uninstall') {
     if (!existsSync(plan.layout.configPath)) throw new Error('No managed Windows Executor service configuration was found')
@@ -578,7 +578,7 @@ async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): 
 }
 
 function scheduleWindowsSelfRemoval(installDir: string): void {
-  const script = join(tmpdir(), `runlab-executor-uninstall-${process.pid}.ps1`)
+  const script = join(tmpdir(), `kala-executor-uninstall-${process.pid}.ps1`)
   writeFileSync(script, `param([string]$Target,[int]$OwnerPid,[string]$Script)\n+$ErrorActionPreference='SilentlyContinue'\n+Wait-Process -Id $OwnerPid -Timeout 60\n+Remove-Item -LiteralPath $Target -Recurse -Force\n+Remove-Item -LiteralPath $Script -Force\n+`, { mode: 0o600 })
   const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installDir, String(process.pid), script], { detached: true, windowsHide: true, stdio: 'ignore' })
   child.unref()

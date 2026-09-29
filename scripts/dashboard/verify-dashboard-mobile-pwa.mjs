@@ -26,7 +26,7 @@ const PORT = Number(process.env.VERIFY_MOBILE_PWA_PORT ?? 3186)
 const HOST_URL = `http://localhost:${PORT}`
 const SESSION_ID = `mobile-pwa-${Date.now()}`
 const ARTIFACT_ID = `mobile-preview-${Date.now()}`
-const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-mobile-pwa-sessions-'))
+const KALA_SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-mobile-pwa-sessions-'))
 const SHOTS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-mobile-pwa-shots-'))
 const CHROME = process.env.CHROME_PATH ?? detectBrowser()
 
@@ -100,8 +100,8 @@ try {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      HOST_PORT: String(PORT),
-      SESSIONS_DIR,
+      KALA_PORT: String(PORT),
+      KALA_SESSIONS_DIR,
     },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -722,7 +722,7 @@ async function verifyConnectWorkspaceDialog(page, name) {
     && metrics.dialog.right <= metrics.viewportWidth + 1 && metrics.dialog.bottom <= metrics.viewportHeight + 1
   const childrenFit = [metrics.command].every((rect) => !rect || (rect.left >= metrics.dialog.left - 1 && rect.right <= metrics.dialog.right + 1))
   check(`${name}: Connect Workspace fits without horizontal overflow`, fits && childrenFit && metrics.documentScrollWidth <= metrics.viewportWidth + 1 && metrics.dialogScrollWidth <= metrics.dialogClientWidth + 1, JSON.stringify(metrics))
-  check(`${name}: installer command has stable URL, injected setup environment, and no sudo`, /\/install(?:\.ps1)?/.test(metrics.text) && !/sudo|ak_install_|[?&](?:invite|token|session)=/i.test(metrics.text) && /RUNLAB_SETUP_CODE/.test(metrics.text), metrics.text)
+  check(`${name}: installer command has stable URL, injected setup environment, and no sudo`, /\/install(?:\.ps1)?/.test(metrics.text) && !/sudo|ak_install_|[?&](?:invite|token|session)=/i.test(metrics.text) && /KALA_SETUP_CODE/.test(metrics.text), metrics.text)
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="connect-workspace-dialog"]'))
   await sleep(150)
@@ -827,9 +827,9 @@ function writeSessionFixture() {
       effects: [{ kind: 'finish' }],
     },
   ]
-  mkdirSync(SESSIONS_DIR, { recursive: true })
-  writeFileSync(join(SESSIONS_DIR, `${Date.now()}_${SESSION_ID}.jsonl`), `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`)
-  const artifactRoot = join(SESSIONS_DIR, '..', 'session-artifacts')
+  mkdirSync(KALA_SESSIONS_DIR, { recursive: true })
+  writeFileSync(join(KALA_SESSIONS_DIR, `${Date.now()}_${SESSION_ID}.jsonl`), `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`)
+  const artifactRoot = join(KALA_SESSIONS_DIR, '..', 'session-artifacts')
   const artifactContent = join(artifactRoot, 'content')
   mkdirSync(artifactContent, { recursive: true })
   writeFileSync(join(artifactContent, `${ARTIFACT_ID}.png`), Buffer.from(imageData, 'base64'))

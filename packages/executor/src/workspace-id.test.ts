@@ -48,13 +48,13 @@ describe('loadOrCreateWorkspaceId', () => {
 
   it('uses an isolated workspace id path for a named profile', () => {
     const profilePath = workspaceIdPath('dev')
-    expect(profilePath).toMatch(/\.agent-kernel\/profiles\/dev\/workspace-id$/)
-    expect(executorProfileDir('dev')).toMatch(/\.agent-kernel\/profiles\/dev$/)
+    expect(profilePath).toMatch(/\.kala\/profiles\/dev\/workspace-id$/)
+    expect(executorProfileDir('dev')).toMatch(/\.kala\/profiles\/dev$/)
   })
 
   it('keeps the default profile on the legacy workspace id path', () => {
-    expect(workspaceIdPath('default')).toMatch(/\.agent-kernel\/workspace-id$/)
-    expect(workspaceIdPath(undefined)).toMatch(/\.agent-kernel\/workspace-id$/)
+    expect(workspaceIdPath('default')).toMatch(/\.kala\/workspace-id$/)
+    expect(workspaceIdPath(undefined)).toMatch(/\.kala\/workspace-id$/)
   })
 
   it('rejects unsafe profile names', () => {

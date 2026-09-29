@@ -14,7 +14,7 @@ Server absolute paths, artifact hashes, JSONL filenames, and raw `instance_id` s
 
 **Enforcement**:
 
-- `packages/dashboard/scripts/verify-visual-pages.mjs` scans each page's main-body DOM: matches for `/\/home\//`, `/\/tmp\//`, `/\.agent-kernel/`, `/\.jsonl\b/` cause a failure.
+- `packages/dashboard/scripts/verify-visual-pages.mjs` scans each page's main-body DOM: matches for `/\/home\//`, `/\/tmp\//`, `/\.kala/`, `/\.jsonl\b/` cause a failure.
 - The only allowed exceptions are the Artifacts page Raw JSON viewer and content inside an explicit `<details>` element.
 
 ### A2. User language, not component names

@@ -1,4 +1,4 @@
-Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, writable: false, configurable: false })
+Object.defineProperty(window, '__KALA_DESKTOP__', { value: true, writable: false, configurable: false })
 ;(() => {
   const listeners = new Set()
   let pendingSession = null
@@ -22,7 +22,7 @@ Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, writable: fal
   const invoke = (command, args) => window.__TAURI__.core.invoke(command, args)
   const nativeIntegration = location.protocol === 'https:'
     || (location.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname))
-  Object.defineProperty(window, '__RUNLAB_DESKTOP_CONNECTION__', {
+  Object.defineProperty(window, '__KALA_DESKTOP_CONNECTION__', {
     value: Object.freeze({ confirmConnection: () => invoke('desktop_connection_ready') }),
     writable: false, configurable: false,
   })
@@ -56,7 +56,7 @@ Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, writable: fal
   }
   if (document.readyState === 'loading' || !document.body) document.addEventListener('DOMContentLoaded', installWindowControls, { once: true })
   else installWindowControls()
-  if (nativeIntegration) Object.defineProperty(window, '__RUNLAB_DESKTOP_BRIDGE__', {
+  if (nativeIntegration) Object.defineProperty(window, '__KALA_DESKTOP_BRIDGE__', {
     value: Object.freeze({
       version: 1,
       getInfo: () => invoke('desktop_status'),

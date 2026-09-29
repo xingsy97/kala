@@ -45,32 +45,32 @@ const allEntries = [
     cjsName: 'kala-dashboard-with-runtime',
     role: 'host',
     component: 'host',
-    entry: join(root, 'packages/host/bin/agent-kernel-host.ts'),
+    entry: join(root, 'packages/host/bin/kala-host.ts'),
   },
   {
     name: 'kala-runtime',
     role: 'runtime',
     component: 'host',
-    entry: join(root, 'packages/host/bin/agent-kernel-host.ts'),
+    entry: join(root, 'packages/host/bin/kala-host.ts'),
     platformOnly: true,
   },
   {
     name: 'kala-executor',
     role: 'executor',
     component: 'executor',
-    entry: join(root, 'packages/executor/bin/agent-kernel-executor.ts'),
+    entry: join(root, 'packages/executor/bin/kala-executor.ts'),
   },
   {
     name: 'kala-dedicated-ingress',
     role: 'dedicated-ingress',
     component: 'host',
-    entry: join(root, 'packages/host/bin/agent-runlab-dedicated-ingress.ts'),
+    entry: join(root, 'packages/host/bin/kala-dedicated-ingress.ts'),
   },
   {
     name: 'kala-dedicated-deploy-supervisor',
     role: 'dedicated-deploy-supervisor',
     component: 'host',
-    entry: join(root, 'packages/host/bin/agent-runlab-dedicated-deploy-supervisor.ts'),
+    entry: join(root, 'packages/host/bin/kala-dedicated-deploy-supervisor.ts'),
   },
 ]
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
@@ -220,7 +220,7 @@ function finalizeRelease() {
   }
   if (component !== 'dashboard') {
     if (component === 'all' || component === 'host') {
-      copyFileSync(join(root, 'scripts/deploy/runlab-dedicated.mjs'), join(outDir, 'kala-dedicated.mjs'))
+      copyFileSync(join(root, 'scripts/deploy/kala-dedicated.mjs'), join(outDir, 'kala-dedicated.mjs'))
       chmodSync(join(outDir, 'kala-dedicated.mjs'), 0o755)
       bootstrapAssets.push('kala-dedicated.mjs')
       buildDedicatedSupportBundle({ root, output: join(outDir, DEDICATED_SUPPORT_ARCHIVE) })
@@ -423,7 +423,7 @@ function embeddedDashboardBanner(dir) {
     const rel = relative(dir, file).replace(/\\/g, '/')
     assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
   }
-  return `globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=${JSON.stringify(assets)};\n`
+  return `globalThis.__KALA_EMBEDDED_DASHBOARD__=${JSON.stringify(assets)};\n`
 }
 
 function writeDashboardReleaseManifest(dir) {
@@ -453,7 +453,7 @@ function embeddedDocsBanner(dir) {
     const rel = relative(dir, file).replace(/\\/g, '/')
     assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
   }
-  return `globalThis.__AGENT_KERNEL_EMBEDDED_DOCS__=${JSON.stringify(assets)};\n`
+  return `globalThis.__KALA_EMBEDDED_DOCS__=${JSON.stringify(assets)};\n`
 }
 
 function assertDashboardDistReady(dir) {
@@ -471,11 +471,11 @@ function embeddedSocketAdminBanner(dir) {
     const rel = relative(dir, file).replace(/\\/g, '/')
     assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
   }
-  return `globalThis.__AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__=${JSON.stringify(assets)};\n`
+  return `globalThis.__KALA_EMBEDDED_SOCKET_ADMIN_UI__=${JSON.stringify(assets)};\n`
 }
 
 function resolveSocketAdminDist() {
-  const configured = process.env.AGENT_KERNEL_SOCKET_ADMIN_DIST
+  const configured = process.env.KALA_SOCKET_ADMIN_DIST
   if (configured) return configured
 
   const localPrepared = join(root, '.presq/socket.io-admin-ui/dist')
@@ -531,7 +531,7 @@ function embeddedReleaseAssetsBanner(dir, names) {
     assets.push({ path: name, contentBase64: readFileSync(file).toString('base64') })
   }
   if (assets.length === 0) return ''
-  return `globalThis.__AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__=${JSON.stringify(assets)};\n`
+  return `globalThis.__KALA_EMBEDDED_RELEASE_ASSETS__=${JSON.stringify(assets)};\n`
 }
 
 function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
@@ -545,7 +545,7 @@ function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
     dashboardMode,
     socketAdminMode,
   }
-  return `globalThis.__AGENT_KERNEL_BUILD_INFO__=${JSON.stringify(info)};\n`
+  return `globalThis.__KALA_BUILD_INFO__=${JSON.stringify(info)};\n`
 }
 
 function readSourceIdentity() {
@@ -719,16 +719,17 @@ function unifiedBootstrap({ repo, tag, component }) {
     'if [ "$TAG" = "latest" ]; then',
     '  DEFAULT_BASE_URL="https://github.com/${REPO}/releases/latest/download"',
     'fi',
-    'BASE_URL="${AGENT_KERNEL_RELEASE_BASE_URL:-$DEFAULT_BASE_URL}"',
+    'BASE_URL="${KALA_RELEASE_BASE_URL:-$DEFAULT_BASE_URL}"',
     'case "$BASE_URL" in',
     '  https://*) PUBLIC_RELEASE=1 ;;',
     '  http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|http://\\[::1\\]|http://\\[::1\\]:*) PUBLIC_RELEASE=0 ;;',
+    '  http://*) if [ "${KALA_RELEASE_TRUST:-}" = "host" ]; then PUBLIC_RELEASE=0; else echo "Release downloads require HTTPS except for loopback URLs" >&2; exit 1; fi ;;',
     '  *) echo "Release downloads require HTTPS except for loopback URLs" >&2; exit 1 ;;',
     'esac',
-    'COMPONENT="${COMPONENT:-${AGENT_KERNEL_COMPONENT:-${1:-$DEFAULT_COMPONENT}}}"',
-    'BOOTSTRAP_LOG_LEVEL="${AGENT_KERNEL_BOOTSTRAP_LOG_LEVEL:-info}"',
+    'COMPONENT="${COMPONENT:-${KALA_COMPONENT:-${1:-$DEFAULT_COMPONENT}}}"',
+    'BOOTSTRAP_LOG_LEVEL="${KALA_BOOTSTRAP_LOG_LEVEL:-info}"',
     'VERIFY_SIGSTORE="$PUBLIC_RELEASE"',
-    'if [ "${AGENT_KERNEL_RELEASE_TRUST:-}" = "host" ]; then',
+    'if [ "${KALA_RELEASE_TRUST:-}" = "host" ]; then',
     '  host_asset_base="${HOST_URL%/}/install/assets"',
     '  if [ "${1:-}" != "--internal-installer" ] || [ -z "${EXECUTOR_INSTALL_ID:-}" ] || [ -z "${EXECUTOR_INSTALL_BOOTSTRAP:-}" ] || [ "$BASE_URL" != "$host_asset_base" ]; then',
     '    echo "Host-mediated release trust requires a valid internal installation session" >&2',
@@ -748,7 +749,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  printf "  %sCOMPONENT=%s bash \\\"\\$tmp\\\"\\n" "$env_prefix" "$example_component" >&2',
     '}',
     '',
-    'USER_WORK_DIR="${AGENT_KERNEL_RUN_DIR:-}"',
+    'USER_WORK_DIR="${KALA_RUN_DIR:-}"',
     'if [ -n "$USER_WORK_DIR" ]; then',
     '  WORK_DIR="$USER_WORK_DIR"',
     '  mkdir -p "$WORK_DIR"',
@@ -805,7 +806,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  exit 1',
     'fi',
     '',
-    'FRONTEND_DIR="${AGENT_KERNEL_FRONTEND_DIR:-${WORK_DIR}/frontend}"',
+    'FRONTEND_DIR="${KALA_FRONTEND_DIR:-${WORK_DIR}/frontend}"',
     'case "$COMPONENT" in',
     '  frontend|host-frontend) mkdir -p "$FRONTEND_DIR" ;;',
     'esac',
@@ -925,14 +926,14 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  if [ "$base" = "kala-host" ]; then',
     '    cjs="kala-dashboard-with-runtime.cjs"',
     '  fi',
-    '  runtime="${AGENT_KERNEL_RUNTIME:-auto}"',
-    '  case "$runtime" in auto|cjs|native) ;; *) echo "AGENT_KERNEL_RUNTIME must be auto, cjs, or native" >&2; exit 1 ;; esac',
+    '  runtime="${KALA_RUNTIME:-auto}"',
+    '  case "$runtime" in auto|cjs|native) ;; *) echo "KALA_RUNTIME must be auto, cjs, or native" >&2; exit 1 ;; esac',
     '  if [ "$runtime" = "cjs" ] || { [ "$runtime" = "auto" ] && has_node22; }; then',
     '    if checksum_exists "$cjs"; then',
     '      download "$cjs"',
     '      verify_file "$cjs"',
     '      chmod +x "${WORK_DIR}/${cjs}"',
-    '      AGENT_KERNEL_RELEASE_TAG="$TAG" AGENT_KERNEL_UPDATE_REPO="$REPO" exec node "${WORK_DIR}/${cjs}" "$@"',
+    '      KALA_RELEASE_TAG="$TAG" KALA_UPDATE_REPO="$REPO" exec node "${WORK_DIR}/${cjs}" "$@"',
     '    fi',
     '    if [ "$runtime" = "cjs" ]; then',
     '      log "missing checksum for $cjs"',
@@ -943,11 +944,11 @@ function unifiedBootstrap({ repo, tag, component }) {
     '    download "$native"',
     '    verify_file "$native"',
     '    chmod +x "${WORK_DIR}/${native}"',
-    '    AGENT_KERNEL_RELEASE_TAG="$TAG" AGENT_KERNEL_UPDATE_REPO="$REPO" exec "${WORK_DIR}/${native}" "$@"',
+    '    KALA_RELEASE_TAG="$TAG" KALA_UPDATE_REPO="$REPO" exec "${WORK_DIR}/${native}" "$@"',
     '  fi',
     '  if [ "$runtime" = "native" ]; then',
     '    log "no native binary published for platform ${target:-unsupported}"',
-    '    log "available runtimes: set AGENT_KERNEL_RUNTIME=cjs (needs Node.js 22+) or unset it for auto"',
+    '    log "available runtimes: set KALA_RUNTIME=cjs (needs Node.js 22+) or unset it for auto"',
     '    exit 1',
     '  fi',
     '  if ! has_node22; then',
@@ -958,7 +959,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  download "$cjs"',
     '  verify_file "$cjs"',
     '  chmod +x "${WORK_DIR}/${cjs}"',
-    '  AGENT_KERNEL_RELEASE_TAG="$TAG" AGENT_KERNEL_UPDATE_REPO="$REPO" exec node "${WORK_DIR}/${cjs}" "$@"',
+    '  KALA_RELEASE_TAG="$TAG" KALA_UPDATE_REPO="$REPO" exec node "${WORK_DIR}/${cjs}" "$@"',
     '}',
     '',
     'print_start_banner() {',
@@ -997,6 +998,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  executor)',
     '    case "${HOST_URL:-}" in',
     '      https://*|http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|http://\\[::1\\]|http://\\[::1\\]:*) ;;',
+    '      http://*) if [ "${KALA_RELEASE_TRUST:-}" != "host" ]; then log "HOST_URL requires HTTPS except for loopback URLs"; exit 1; fi ;;',
     '      *) log "HOST_URL requires HTTPS except for loopback URLs"; exit 1 ;;',
     '    esac',
     '    run_asset kala-executor "$@"',

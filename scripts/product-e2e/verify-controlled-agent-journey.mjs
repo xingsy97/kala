@@ -39,12 +39,12 @@ let result
 let thrown
 
 mkdirSync(join(home, '.claude'), { recursive: true })
-mkdirSync(join(home, '.config', 'agent-kernel'), { recursive: true })
+mkdirSync(join(home, '.config', 'kala'), { recursive: true })
 mkdirSync(sessionsDir, { recursive: true })
 mkdirSync(workspace, { recursive: true })
 writeFileSync(join(workspace, 'controlled.txt'), 'CONTROLLED_TOOL_FILE\n', 'utf8')
 writeFileSync(join(home, '.claude', 'settings.json'), '{}\n', 'utf8')
-writeFileSync(join(home, '.config', 'agent-kernel', 'agent.json'), `${JSON.stringify({ systemPromptPreset: 'custom', customSystemPrompt: customPrompt }, null, 2)}\n`)
+writeFileSync(join(home, '.config', 'kala', 'agent.json'), `${JSON.stringify({ systemPromptPreset: 'custom', customSystemPrompt: customPrompt }, null, 2)}\n`)
 
 const provider = createServer(async (req, res) => {
   if (req.method !== 'POST' || req.url !== '/v1/messages') { res.writeHead(404).end(); return }
@@ -130,8 +130,8 @@ function startHost(label) {
   const host = startProcess(bundle, [], { cwd: root, env: {
     ...process.env,
     HOME: home,
-    HOST_LISTEN_HOST: '127.0.0.1', HOST_PORT: String(hostPort), SESSIONS_DIR: sessionsDir,
-    AGENT_KERNEL_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), EXECUTOR_TOKENS: JSON.stringify([{ token }]),
+    KALA_BIND_HOST: '127.0.0.1', KALA_PORT: String(hostPort), KALA_SESSIONS_DIR: sessionsDir,
+    KALA_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), KALA_EXECUTOR_TOKENS: JSON.stringify([{ token }]),
     ANTHROPIC_API_KEY: 'controlled-key', ANTHROPIC_MODEL: 'controlled-model', ANTHROPIC_BASE_URL: `${providerOrigin}/v1/messages`,
   } })
   harness.registerProcess(label, host, hostLogs)
@@ -150,7 +150,7 @@ try {
     await waitForHttp(`${origin}/settings`)
     const executor = startProcess(executorAsset, ['--host', origin, '--sandbox-root', workspace], { cwd: workspace, env: {
       ...process.env, HOME: home, HOST_URL: origin, EXECUTOR_TOKEN: token, WORKSPACE_NAME: 'controlled-agent-workspace',
-      AGENT_KERNEL_WORKSPACE_ID_FILE: join(stateRoot, 'workspace-id'),
+      KALA_WORKSPACE_ID_FILE: join(stateRoot, 'workspace-id'),
     } })
     harness.registerProcess('production-executor', executor, executorLogs)
     await waitFor(() => executorLogs.some((line) => line.includes('executor announced')), { timeoutMs: 30_000, name: 'Executor announce' })

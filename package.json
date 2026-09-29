@@ -16,6 +16,7 @@
     "build:private-cloud-operator": "node scripts/release/build-private-cloud-operator.mjs",
     "deploy:remote": "node scripts/deploy/deploy-remote.mjs",
     "deploy:dedicated": "node scripts/deploy/deploy-dedicated.mjs",
+    "deploy:public-listeners": "node scripts/deploy/configure-lxd-public-listeners.mjs",
     "deploy:dashboard": "node scripts/deploy/deploy-dashboard.mjs",
     "verify:release-assets": "node scripts/release/verify-release-assets.mjs",
     "verify:agent-runtime-tools": "node scripts/runtime/verify-agent-runtime-tools.mjs",

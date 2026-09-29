@@ -63,9 +63,9 @@ The product path is invite based:
 5. Host validates the invite, binds it to the announced `workspaceId` on first
    use, mints a long-term executor token, and persists only its hash.
 6. Host returns the long-term token in `executor:welcome`.
-7. Executor writes it to `~/.agent-kernel/executor-token` and uses it on later
+7. Executor writes it to `~/.kala/executor-token` and uses it on later
    reconnects. If the operator starts the executor with `--profile <name>`, the
-   token is stored under `~/.agent-kernel/profiles/<name>/executor-token`
+   token is stored under `~/.kala/profiles/<name>/executor-token`
    instead.
 
 The operator never has to type a `workspaceId` or JSON token mapping.
@@ -133,23 +133,23 @@ else's workspace id.
 
 ## 4. Dashboard Authentication
 
-For local development, `HOST_AUTH_TOKEN` can protect dashboard and executor
+For local development, `KALA_AUTH_TOKEN` can protect dashboard and executor
 Socket.IO handshakes. For public deployments, GitHub OAuth can be required.
 
 Configuration is environment driven and surfaced read-only in `/settings`:
 
 | Env | Meaning |
 |---|---|
-| `HOST_AUTH_TOKEN` | Shared bearer token fallback for local/private deployments. |
-| `HOST_GITHUB_OAUTH_REQUIRED=1` | Require GitHub OAuth for dashboard and protected HTTP routes. |
+| `KALA_AUTH_TOKEN` | Shared bearer token fallback for local/private deployments. |
+| `KALA_GITHUB_OAUTH_REQUIRED=1` | Require GitHub OAuth for dashboard and protected HTTP routes. |
 | `GITHUB_CLIENT_ID` | GitHub OAuth app client id. |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret. Never returned in settings. |
 | `GITHUB_OAUTH_CALLBACK_URL` | Public callback URL, e.g. `https://host.example.com/auth/github/callback`. |
 | `GITHUB_USERNAME_WHITELIST` | Optional comma-separated login allowlist. |
-| `HOST_AUTH_SESSION_SECRET` | HMAC secret for dashboard login cookies. |
-| `EXECUTOR_TOKENS` | Optional JSON array of executor token scopes, for example `[{"token":"ak-exec-secret","workspaceId":"ws-prod-1","label":"prod"}]`. |
-| `HOST_EXECUTOR_IDENTITIES` | Persistent executor identity file. Defaults to `~/.agent-kernel/executor-identities.json` when the host CLI is used. |
-| `HOST_AUDIT_DIR` | Audit JSONL directory. Defaults to `~/.agent-kernel/audit` when the host CLI is used. |
+| `KALA_AUTH_SESSION_SECRET` | HMAC secret for dashboard login cookies. |
+| `KALA_EXECUTOR_TOKENS` | Optional JSON array of executor token scopes, for example `[{"token":"ak-exec-secret","workspaceId":"ws-prod-1","label":"prod"}]`. |
+| `KALA_EXECUTOR_IDENTITIES` | Persistent executor identity file. Defaults to `~/.kala/executor-identities.json` when the host CLI is used. |
+| `KALA_AUDIT_DIR` | Audit JSONL directory. Defaults to `~/.kala/audit` when the host CLI is used. |
 
 When GitHub OAuth is required:
 
@@ -174,7 +174,7 @@ Audit log is the control-plane accountability record: actor, action, target,
 outcome, and security-relevant metadata. It should reference session JSONL by
 `sessionId`, `sessionSeq`, `callId`, or artifact URI instead of copying payloads.
 
-Audit entries are JSONL under `~/.agent-kernel/audit/audit-YYYY-MM-DD.jsonl` by
+Audit entries are JSONL under `~/.kala/audit/audit-YYYY-MM-DD.jsonl` by
 default. Each entry has this shape:
 
 ```json

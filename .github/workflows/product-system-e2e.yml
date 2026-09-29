@@ -64,7 +64,7 @@ jobs:
     # Keep this stronger system matrix visible but do not queue it forever when
     # the repository has no registered LXD runner. Portable release acceptance
     # uses matching hosted runners instead.
-    if: vars.RUNLAB_LXD_RUNNER_ENABLED == 'true'
+    if: vars.KALA_LXD_RUNNER_ENABLED == 'true'
     runs-on: [self-hosted, linux, x64, lxd-container]
     timeout-minutes: 45
     steps:

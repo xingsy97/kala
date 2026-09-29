@@ -20,7 +20,7 @@ Fork emits `session:forked` and creates an independent JSONL log without modifyi
 
 ### 1.4 Approval and permission modes
 
-The kernel owns `approvalMode`: `auto`, `ask`, `deny`, and `allow_all`. `client:set_approval_mode` switches modes. `allow_all` requires the host environment guard `AK_ALLOW_ALL_OK=1`, and the dashboard confirms the switch.
+The kernel owns `approvalMode`: `auto`, `ask`, `deny`, and `allow_all`. `client:set_approval_mode` switches modes. `allow_all` requires the host environment guard `KALA_ALLOW_ALL_OK=1`, and the dashboard confirms the switch.
 
 ### 1.5 Precise editing
 
@@ -80,7 +80,7 @@ Light and dark themes use Tailwind plus shadcn semantic HSL tokens. Settings con
 
 ### 1.19 Hooks system
 
-`pre_tool_use`, `post_tool_use`, `session_start`, and `session_end` hooks run external commands configured in `~/.config/agent-kernel/config.toml`. Host loop triggers hooks around tool dispatch and session lifecycle. Hook payloads are JSON over stdin. `pre_tool_use` non-zero exit blocks the tool and produces a failed `tool_result`.
+`pre_tool_use`, `post_tool_use`, `session_start`, and `session_end` hooks run external commands configured in `~/.config/kala/config.toml`. Host loop triggers hooks around tool dispatch and session lifecycle. Hook payloads are JSON over stdin. `pre_tool_use` non-zero exit blocks the tool and produces a failed `tool_result`.
 
 ### 1.20 Extended thinking
 
@@ -92,7 +92,7 @@ Anthropic adapter can apply ephemeral cache-control breakpoints to system prompt
 
 ### 1.22 Three-layer memory
 
-`memory` is one executor tool with `operation: list | read | write | delete` and `scope: session | workspace | global`. It should not be split into separate `memory_read`, `memory_write`, and `memory_delete` tools. Session scope is the only reducer-lift exception: successful session memory writes/deletes update `state.memory[]`. Workspace memory persists under the workspace `.agent-kernel/memory/`; global memory persists under the user `.agent-kernel/memory/`. Keys are constrained to avoid path traversal and content is size-bounded.
+`memory` is one executor tool with `operation: list | read | write | delete` and `scope: session | workspace | global`. It should not be split into separate `memory_read`, `memory_write`, and `memory_delete` tools. Session scope is the only reducer-lift exception: successful session memory writes/deletes update `state.memory[]`. Workspace memory persists under the workspace `.kala/memory/`; global memory persists under the user `.kala/memory/`. Keys are constrained to avoid path traversal and content is size-bounded.
 
 ---
 

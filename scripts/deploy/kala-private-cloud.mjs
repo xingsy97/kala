@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 
 const argv = process.argv.slice(2); if (argv[0] === '--') argv.shift()
 const command = argv[0]
-const operatorRoot = bounded(process.env.RUNLAB_PRIVATE_CLOUD_OPERATOR_ROOT ?? '/var/lib/agent-runlab-private-cloud', 'operator root')
+const operatorRoot = bounded(process.env.KALA_PRIVATE_CLOUD_OPERATOR_ROOT ?? '/var/lib/kala-private-cloud', 'operator root')
 const receiptsRoot = join(operatorRoot, 'receipts')
 const releasesRoot = join(operatorRoot, 'releases')
 const installationPath = join(operatorRoot, 'installation.json')
@@ -185,7 +185,7 @@ function verifyBundle(dir, manifest = requiredJson(join(dir, 'manifest.json'))) 
   const lock = requiredJson(join(dir, 'image-lock.json')); if (lock.version !== manifest.version || lock.revision !== manifest.revision || !['runtime', 'ingress', 'dashboard'].every((key) => immutable(lock.images?.[key]))) throw new Error('invalid image lock')
   const composeText = readFileSync(join(dir, 'compose.yaml'), 'utf8'); if (/^\s+build:/mu.test(composeText)) throw new Error('release Compose contains source build')
   for (const match of composeText.matchAll(/^\s+image:\s+([^$\s][^\s]*)/gmu)) if (!immutable(match[1])) throw new Error(`release Compose image is not digest pinned: ${match[1]}`)
-  if (!['RUNLAB_RUNTIME_IMAGE', 'RUNLAB_INGRESS_IMAGE', 'RUNLAB_DASHBOARD_IMAGE'].every((name) => composeText.includes(name))) throw new Error('release Compose does not consume all component image locks')
+  if (!['KALA_RUNTIME_IMAGE', 'KALA_INGRESS_IMAGE', 'KALA_DASHBOARD_IMAGE'].every((name) => composeText.includes(name))) throw new Error('release Compose does not consume all component image locks')
 }
 function loadRelease(record) { const dir = bounded(record.releaseDir, 'release directory'); const manifest = requiredJson(join(dir, 'manifest.json')); verifyBundle(dir, manifest); return { id: record.releaseId, dir, manifest, lock: requiredJson(join(dir, 'image-lock.json')) } }
 function releaseRecord(release) { return { schemaVersion: 1, releaseId: release.id, releaseDir: release.dir, version: release.manifest.version, revision: release.manifest.revision, images: release.lock.images, activatedAt: now() } }
@@ -193,11 +193,11 @@ function releaseRecord(release) { return { schemaVersion: 1, releaseId: release.
 function compose(release, configDir, args, options = {}) { const invocation = composeInvocation(release, configDir, args); return run(invocation.command, invocation.args, { cwd: invocation.cwd, env: invocation.env, input: options.input }) }
 function composeInvocation(release, configDir, args) { return { command: 'docker', args: ['compose', ...composeFiles(release, configDir), ...args], cwd: release.dir, env: composeEnv(release, configDir) } }
 function composeFiles(release, configDir) {
-  const profile = deploymentEnv(configDir).RUNLAB_PROFILE ?? 'cloudflare'; const storage = deploymentEnv(configDir).RUNLAB_STORAGE ?? (profile === 'local' ? 'nfs' : 'nfs')
+  const profile = deploymentEnv(configDir).KALA_PROFILE ?? 'cloudflare'; const storage = deploymentEnv(configDir).KALA_STORAGE ?? (profile === 'local' ? 'nfs' : 'nfs')
   const files = ['compose.yaml', storage === 'external-nfs' ? 'compose.storage-external-nfs.yaml' : storage === 'local-volume' ? 'compose.storage-local.yaml' : 'compose.storage-nfs.yaml', profile === 'local' ? 'compose.local.yaml' : 'compose.cloudflare.yaml']
   return ['--project-name', projectName(configDir), '--env-file', join(configDir, 'deployment.env'), ...files.flatMap((file) => ['-f', join(release.dir, file)])]
 }
-function composeEnv(release, configDir) { return { ...process.env, ...deploymentEnv(configDir), RUNLAB_RUNTIME_IMAGE: release.lock.images.runtime, RUNLAB_INGRESS_IMAGE: release.lock.images.ingress, RUNLAB_DASHBOARD_IMAGE: release.lock.images.dashboard, RUNLAB_SECRETS_DIR: join(configDir, 'secrets'), RUNLAB_PROVIDER_CATALOG_FILE: join(configDir, 'runtime-provider-catalog.json'), RUNLAB_DEPLOYMENT_CONFIG_FILE: join(release.dir, 'deployment.json') } }
+function composeEnv(release, configDir) { return { ...process.env, ...deploymentEnv(configDir), KALA_RUNTIME_IMAGE: release.lock.images.runtime, KALA_INGRESS_IMAGE: release.lock.images.ingress, KALA_DASHBOARD_IMAGE: release.lock.images.dashboard, KALA_SECRETS_DIR: join(configDir, 'secrets'), KALA_PROVIDER_CATALOG_FILE: join(configDir, 'runtime-provider-catalog.json'), KALA_DEPLOYMENT_CONFIG_FILE: join(release.dir, 'deployment.json') } }
 function inspectServices(release, configDir) { const invocation = composeInvocation(release, configDir, ['ps', '--format', 'json']); const result = captureSync(invocation.command, invocation.args, invocation.cwd, invocation.env); const rows = result.trim() ? result.trim().split(/\r?\n/u).map((line) => JSON.parse(line)) : []; return Object.fromEntries(rows.map((row) => [row.Service, { containerId: row.ID, image: row.Image, state: row.State, health: row.Health ?? '' }])) }
 function resolveVolumes(release, configDir) { const text = captureSync('docker', ['compose', ...composeFiles(release, configDir), 'config', '--format', 'json'], release.dir, composeEnv(release, configDir)); const config = JSON.parse(text); return Object.fromEntries(['tenant-data', 'control-data'].map((name) => [name, config.volumes?.[name]?.name ?? `${projectName(configDir)}_${name}`])) }
 function infrastructure(release, name) { const composeText = readFileSync(join(release.dir, 'compose.yaml'), 'utf8'); const match = composeText.match(new RegExp(`image: (${name}(?::[^\s@]+)?@sha256:[0-9a-f]{64})`, 'u')); if (!match) throw new Error(`missing pinned ${name} infrastructure image`); return match[1] }
@@ -210,7 +210,7 @@ function publicReceipt(receipt) { return receipt && { operationId: receipt.opera
 function installed() { const value = requiredJson(installationPath); if (value.schemaVersion !== 1 || !value.installationId || !value.configDir) throw new Error('invalid installation record'); requireConfig(value.configDir); return value }
 function requireConfig(dir) { for (const name of ['deployment.env', 'runtime-provider-catalog.json']) if (!existsSync(join(dir, name))) throw new Error(`configuration is missing ${name}`); if (!existsSync(join(dir, 'secrets'))) throw new Error('configuration is missing secrets directory') }
 function deploymentEnv(dir) { const result = {}; for (const line of readFileSync(join(dir, 'deployment.env'), 'utf8').split(/\r?\n/u)) { const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/u); if (match) result[match[1]] = match[2] } return result }
-function projectName(configDir) { const value = deploymentEnv(configDir).COMPOSE_PROJECT_NAME ?? 'agent-runlab-private-cloud'; if (!/^[a-z0-9][a-z0-9_-]+$/u.test(value)) throw new Error('invalid COMPOSE_PROJECT_NAME'); return value }
+function projectName(configDir) { const value = deploymentEnv(configDir).COMPOSE_PROJECT_NAME ?? 'kala-private-cloud'; if (!/^[a-z0-9][a-z0-9_-]+$/u.test(value)) throw new Error('invalid COMPOSE_PROJECT_NAME'); return value }
 function ensureOperatorRoot() { mkdirSync(receiptsRoot, { recursive: true, mode: 0o700 }); mkdirSync(releasesRoot, { recursive: true, mode: 0o700 }) }
 function acquireOperationLock() {
   ensureOperatorRoot(); const path = join(operatorRoot, 'operation.lock')

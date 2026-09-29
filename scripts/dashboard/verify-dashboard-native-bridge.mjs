@@ -89,7 +89,7 @@ try {
         constructor() { window.__browserNotificationCount++ }
       }
       if (!native) return
-      window.__RUNLAB_DESKTOP__ = true
+      window.__KALA_DESKTOP__ = true
       if (!bridge) return
       const listeners = new Set()
       window.__nativeFixture = {
@@ -100,7 +100,7 @@ try {
           for (const listener of listeners) listener(event)
         },
       }
-      window.__RUNLAB_DESKTOP_BRIDGE__ = Object.freeze({
+      window.__KALA_DESKTOP_BRIDGE__ = Object.freeze({
         version: 1,
         getInfo: async () => ({ ...window.__nativeFixture.info }),
         setActivity: async (activity) => window.__nativeFixture.activities.push({ ...activity }),

@@ -12,7 +12,7 @@
 
 - Receipt/in-flight/completed identities are now scoped as `sessionId:callId`.
 - Tool cancellation uses the same scoped identity.
-- Hosted loopback Executors persist receipts under the Unit Workspace `.agent-kernel` directory.
+- Hosted loopback Executors persist receipts under the Unit Workspace `.kala` directory.
 - Added a two-Session/same-callId regression proving both tools execute independently.
 
 ## Evidence

@@ -25,7 +25,7 @@ Every `tool_result` payload is measured (UTF-8 byte length) at the executor befo
 ### 2.2 Storage layout
 
 ```
-<workspaceRoot>/.agent-kernel/overflow/
+<workspaceRoot>/.kala/overflow/
   <sessionId>/
     <callId>.txt         ← full tool output, UTF-8
 ```
@@ -50,7 +50,7 @@ The message content the LLM sees:
 {last roughly N/2 lines of output}
 
 --- output truncated: 8712 / 45210 lines, 268134 / 1418072 bytes stored at overflow://call_01J6...
---- use `read { path: '<workspaceRoot>/.agent-kernel/overflow/<sessionId>/<callId>.txt' }` to read more
+--- use `read { path: '<workspaceRoot>/.kala/overflow/<sessionId>/<callId>.txt' }` to read more
 ```
 
 - `previewLines` default: 400. The budget is split between head and tail so the
@@ -102,7 +102,7 @@ export type OverflowContentsResult = {
 }
 ```
 
-Host resolves the overflow file path from `<workspaceRoot>/.agent-kernel/overflow/<sessionId>/<callId>.txt`, applies sandbox rules (workspace-scoped read), returns the bytes. Enforces a max response size (default 4 MB) matching `fs:read_file`.
+Host resolves the overflow file path from `<workspaceRoot>/.kala/overflow/<sessionId>/<callId>.txt`, applies sandbox rules (workspace-scoped read), returns the bytes. Enforces a max response size (default 4 MB) matching `fs:read_file`.
 
 Kernel: no changes. `state.messages` still contains the truncated preview; the reducer never has to know about the on-disk file.
 
@@ -124,7 +124,7 @@ Exports:
 export type OverflowConfig = {
   inlineBytes: number      // default 32768
   previewLines: number     // default 400
-  overflowDir: string      // <workspaceRoot>/.agent-kernel/overflow
+  overflowDir: string      // <workspaceRoot>/.kala/overflow
 }
 
 export type OverflowResult = {
@@ -152,7 +152,7 @@ Executor CLI flags + env, matching how `sandboxRoots` is done today:
 --overflow-preview-lines <n>  Default 400.
 ```
 
-Or env: `AK_OVERFLOW_INLINE_BYTES`, `AK_OVERFLOW_PREVIEW_LINES`.
+Or env: `KALA_OVERFLOW_INLINE_BYTES`, `KALA_OVERFLOW_PREVIEW_LINES`.
 
 Kernel / host do not see these knobs. They travel with the executor.
 
@@ -183,7 +183,7 @@ Downside: a user's actual tool output could contain the exact marker string. Thi
 ## 10. Cleanup
 
 - Session deletion (existing `client:delete_session` path): before unlinking the JSONL log, host asks the owning workspace executor to remove `<overflow>/<sessionId>/`.
-- Executor startup: no cleanup. Stale overflow dirs cost disk, not correctness. Users can `rm -rf .agent-kernel/overflow` at any time.
+- Executor startup: no cleanup. Stale overflow dirs cost disk, not correctness. Users can `rm -rf .kala/overflow` at any time.
 - Fork: host asks the owning workspace executor to copy `<overflow>/<parent>/` → `<overflow>/<child>/`.
 
 ## 11. Testing plan

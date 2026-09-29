@@ -24,7 +24,7 @@ A list of engineering mistakes that have been made in this repository, kept as a
 
 ## 4. Presenting an internal name as a user-facing default that does not run
 
-- **Symptom**: the Infer step's Agent Recipe default was labelled "executor", but `agent-kernel-executor` is a Socket.IO daemon with no `run` subcommand, so choosing the default failed 5/5 times.
+- **Symptom**: the Infer step's Agent Recipe default was labelled "executor", but `kala-executor` is a Socket.IO daemon with no `run` subcommand, so choosing the default failed 5/5 times.
 - **Root cause**: an internal component name was surfaced as a user-facing option, and no end-to-end verification confirmed the default path worked.
 - **Lesson**: every default UI option must be exercised in CI or e2e and must succeed. Default names must answer "what does this choice do", not name a component. A correct example: "Smoke-test recipe (empty patch — verifies pipeline only)". See principles.md B2.
 

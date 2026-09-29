@@ -56,7 +56,7 @@ Remaining gap:
 Current implementation:
 
 - Executor-side overflow caps in-history tool output at 32 KiB by default.
-- Full output is written to `.agent-kernel/overflow/<sessionId>/<callId>.txt`.
+- Full output is written to `.kala/overflow/<sessionId>/<callId>.txt`.
 - The model receives a preview plus an `overflow://<callId>` marker and a real
   file path it can read if needed.
 - The dashboard can fetch full overflow content lazily through the host.

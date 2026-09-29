@@ -79,11 +79,11 @@ flowchart LR
 The Linux service layout is:
 
 ```text
-agent-runlab-dedicated-ingress.service
-agent-runlab-dedicated-unit@blue.service
-agent-runlab-dedicated-unit@green.service
-agent-runlab-dedicated-deploy-supervisor.service
-agent-runlab-dedicated-control-updater.service (static oneshot)
+kala-dedicated-ingress.service
+kala-dedicated-unit@blue.service
+kala-dedicated-unit@green.service
+kala-dedicated-deploy-supervisor.service
+kala-dedicated-control-updater.service (static oneshot)
 ```
 
 The services must be separate processes and separate cgroups. Restarting the Runtime Unit must not stop Ingress or Supervisor.
@@ -351,7 +351,7 @@ If verification fails:
 
 The migration must not require moving or rewriting existing Session, Artifact, Executor identity, Workspace alias, or notification data merely to introduce the Unit boundary.
 
-The external cutover atomically renames the existing `.agent-kernel` state tree into the `local` Unit HOME only after the legacy service has stopped, then assigns the Unit service account as owner. The source and target must be on the same filesystem; this avoids duplicating large Session data, avoids ENOSPC during migration, and preserves inode identity. Bounded home configuration files used by the Host (provider/model, Agent prompt, hooks, and Socket.IO Admin settings) are copied separately with source-digest fencing. Release files remain separate from mutable data.
+The external cutover atomically renames the existing `.kala` state tree into the `local` Unit HOME only after the legacy service has stopped, then assigns the Unit service account as owner. The source and target must be on the same filesystem; this avoids duplicating large Session data, avoids ENOSPC during migration, and preserves inode identity. Bounded home configuration files used by the Host (provider/model, Agent prompt, hooks, and Socket.IO Admin settings) are copied separately with source-digest fencing. Release files remain separate from mutable data.
 
 Migration compares a canonical settings fingerprint before and after activation. Provider IDs
 and provider-qualified model references remain exact. A bare default-model ID is normalized

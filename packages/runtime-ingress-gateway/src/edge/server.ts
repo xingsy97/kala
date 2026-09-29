@@ -2,6 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 
 import httpProxy from 'http-proxy'
+import { parsePublicUrls, validatePublicRequest, type PublicUrlPattern } from '@agent-kernel/shared'
 
 import type { LoginStateStore } from '../auth/login-state-store.js'
 import type { OidcClient } from '../auth/oidc-client.js'
@@ -92,6 +93,7 @@ export async function startRuntimeIngressGateway(options: {
   cacheNamespaceSecret: string
   secretBox: SessionSecretBox
   publicOrigin: string
+  publicUrls?: readonly PublicUrlPattern[]
   listenHost?: string
   ingressSecret: string
   rateLimiter?: RateLimiter
@@ -121,8 +123,13 @@ export async function startRuntimeIngressGateway(options: {
     return await options.sessions.touch(session.id, Date.now(), Date.now() + 86_400_000)
   }
   const publicUrl = new URL(options.publicOrigin)
+  let publicUrls = options.publicUrls
   const secure = publicUrl.protocol === 'https:' ? '; Secure' : ''
   const callbackUri = `${options.publicOrigin}/auth/callback`
+  const requestPublicOrigin = (request: IncomingMessage): string => {
+    const value = request.headers['x-kala-public-origin']
+    return typeof value === 'string' ? value : publicUrl.origin
+  }
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const url = new URL(request.url ?? '/', options.publicOrigin)
     if (isPublicInstallerPath(url.pathname)) {
@@ -213,7 +220,7 @@ export async function startRuntimeIngressGateway(options: {
     if (url.pathname === '/auth/logout') {
       if (request.method !== 'POST') { response.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' }); response.end(); return }
       const origin = request.headers.origin
-      if (origin && origin !== publicUrl.origin) { response.writeHead(403, { 'cache-control': 'no-store' }); response.end(); return }
+      if (origin && origin !== requestPublicOrigin(request)) { response.writeHead(403, { 'cache-control': 'no-store' }); response.end(); return }
       const session = await authenticate(request)
       if (session) await options.sessions.revoke(session.id, 'logout', Date.now())
       const formNavigation = request.headers['sec-fetch-mode'] === 'navigate' || (request.headers.accept ?? '').includes('text/html')
@@ -231,7 +238,7 @@ export async function startRuntimeIngressGateway(options: {
     if (url.pathname === '/auth/logout-all') {
       if (request.method !== 'POST') { response.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' }); response.end(); return }
       const origin = request.headers.origin
-      if (origin && origin !== publicUrl.origin) { response.writeHead(403, { 'cache-control': 'no-store' }); response.end(); return }
+      if (origin && origin !== requestPublicOrigin(request)) { response.writeHead(403, { 'cache-control': 'no-store' }); response.end(); return }
       const session = await authenticate(request)
       if (!session) { response.writeHead(401, { 'cache-control': 'no-store' }); response.end(); return }
       await options.sessions.revokeAllForIdentity(session.identity, 'logout_all', Date.now())
@@ -251,7 +258,7 @@ export async function startRuntimeIngressGateway(options: {
     if (sessionDelete) {
       if (request.method !== 'DELETE') { response.writeHead(405, { allow: 'DELETE', 'cache-control': 'no-store' }); response.end(); return }
       const origin = request.headers.origin
-      if (origin && origin !== publicUrl.origin) { response.writeHead(403, { 'cache-control': 'no-store' }); response.end(); return }
+      if (origin && origin !== requestPublicOrigin(request)) { response.writeHead(403, { 'cache-control': 'no-store' }); response.end(); return }
       const session = await authenticate(request)
       if (!session) { response.writeHead(401, { 'cache-control': 'no-store' }); response.end(); return }
       const owned = (await options.sessions.listForIdentity(session.identity, Date.now())).find((item) => item.id === sessionDelete[1])
@@ -390,7 +397,15 @@ export async function startRuntimeIngressGateway(options: {
     }
     proxy.web(request, response, { target: options.hostOrigin }, () => { if (!response.headersSent) response.writeHead(502); response.end() })
   }
-  const http = createServer((request, response) => { void handler(request, response).catch((error) => {
+  const http = createServer((request, response) => {
+    const access = validatePublicRequest(publicUrls!, request.headers.host, typeof request.headers.origin === 'string' ? request.headers.origin : undefined)
+    if (!access.ok) {
+      response.writeHead(access.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ error: access.error }))
+      return
+    }
+    request.headers['x-kala-public-origin'] = access.origin
+    void handler(request, response).catch((error) => {
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(`${JSON.stringify({ event: 'runtime_ingress_request_failed', method: request.method, path: request.url?.split('?')[0], error: message })}\n`)
     const organizationMissing = message === 'organization_not_provisioned'
@@ -398,14 +413,21 @@ export async function startRuntimeIngressGateway(options: {
     response.end(JSON.stringify(organizationMissing
       ? { error: 'organization_not_provisioned', message: 'Your identity is valid, but this account has not been enabled for an Kala organization.' }
       : { error: 'internal_server_error' }))
-  }) })
+    })
+  })
   http.on('upgrade', (request, socket, head) => { void (async () => {
+    const access = validatePublicRequest(publicUrls!, request.headers.host, typeof request.headers.origin === 'string' ? request.headers.origin : undefined)
+    if (!access.ok) {
+      socket.end(`HTTP/1.1 ${access.status} ${access.status === 400 ? 'Bad Request' : 'Forbidden'}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
+      return
+    }
+    request.headers['x-kala-public-origin'] = access.origin
     const session = await authenticate(request)
     const identity = session?.identity
     const organizationAccess = identity && options.organizations ? await options.organizations.findAccess(identity) : undefined
     if (organizationAccess && organizationAccess.organization.status !== 'active') { socket.destroy(); return }
     const assignment = organizationAccess ? { unitId: organizationAccess.organization.unitId, identity: identity! } : identity ? await options.directory.findByIdentity(identity) : undefined
-    const executorInvite = typeof request.headers['x-agent-runlab-executor-invite'] === 'string' ? request.headers['x-agent-runlab-executor-invite'] : undefined
+    const executorInvite = typeof request.headers['x-kala-executor-invite'] === 'string' ? request.headers['x-kala-executor-invite'] : undefined
     const inviteUnitId = !assignment && executorInvite ? await options.directory.findUnitByExecutorInvite(executorInvite) : undefined
     const unitId = assignment?.unitId ?? inviteUnitId
     // Dashboard Socket.IO is a bidirectional command channel, not a read-only
@@ -421,5 +443,6 @@ export async function startRuntimeIngressGateway(options: {
   })().catch(() => socket.destroy()) })
   await new Promise<void>((resolve) => http.listen(options.port, options.listenHost ?? '127.0.0.1', resolve))
   const address = http.address(); const port = typeof address === 'object' && address ? address.port : options.port
+  publicUrls ??= parsePublicUrls(publicUrl.port === '0' ? `http://127.0.0.1:${port}` : options.publicOrigin)
   return { http, port, async close() { proxy.close(); dashboardProxy?.close(); await new Promise<void>((resolve) => http.close(() => resolve())) } }
 }

@@ -217,7 +217,7 @@ async function downloadBytes(url: string, maxBytes: number, opts: GenerationUpda
   try {
     const response = await (opts.fetch ?? globalThis.fetch)(url, {
       signal: controller.signal,
-      headers: { accept: 'application/json, application/octet-stream', 'user-agent': 'agent-kernel-executor' },
+      headers: { accept: 'application/json, application/octet-stream', 'user-agent': 'kala-executor' },
     })
     if (!response.ok) throw new Error(`download failed ${url}: ${response.status}`)
     const declared = Number(response.headers.get('content-length'))
@@ -321,7 +321,7 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 type LegacyOptions = { repo: string; currentTag?: string; autoUpdate: boolean; argv: readonly string[]; logger: RuntimeLogger }
 export async function checkExecutorUpdate(opts: LegacyOptions): Promise<void> {
   const response = await fetch(`https://api.github.com/repos/${opts.repo}/releases/latest`, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'agent-kernel-executor' },
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'kala-executor' },
   })
   if (!response.ok) throw new Error(`GitHub latest release request failed: ${response.status}`)
   const latest = await response.json() as { tag_name?: string; html_url?: string }

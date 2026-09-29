@@ -84,10 +84,10 @@ describe('loadRuntimeConfig', () => {
         '[model_providers.newapi]',
         'name = "newapi"',
         'base_url = "https://api.example.test/v1"',
-        'env_key = "AK_TEST_TK_KEY"',
+        'env_key = "KALA_TEST_TK_KEY"',
       ].join('\n'),
     )
-    process.env.AK_TEST_TK_KEY = 'test-openai-key'
+    process.env.KALA_TEST_TK_KEY = 'test-openai-key'
     try {
       const cfg = loadRuntimeConfig({
         claudeSettingsPath: claudePath,
@@ -127,7 +127,7 @@ describe('loadRuntimeConfig', () => {
       expect(openai?.apiKey).toBe('test-openai-key')
       expect(openai?.baseUrl).toBe('https://api.example.test/v1')
     } finally {
-      delete process.env.AK_TEST_TK_KEY
+      delete process.env.KALA_TEST_TK_KEY
     }
   })
 
@@ -144,13 +144,13 @@ describe('loadRuntimeConfig', () => {
       const loaded = loadEnvFile(envPath, { sourceName: 'env-file' })
       expect(loaded.ANTHROPIC_BASE_URL).toBe('https://api.example.test/anthropic')
       expect(process.env.ANTHROPIC_BASE_URL).toBe('https://api.example.test/anthropic')
-      expect(process.env.AGENT_KERNEL_ENV_SOURCE_ANTHROPIC_BASE_URL).toBe('env-file')
+      expect(process.env.KALA_ENV_SOURCE_ANTHROPIC_BASE_URL).toBe('env-file')
       expect(process.env.ANTHROPIC_API_KEY).toBe('test-key-from-env')
     } finally {
       delete process.env.ANTHROPIC_API_KEY
       delete process.env.ANTHROPIC_BASE_URL
       delete process.env.ANTHROPIC_MODEL
-      delete process.env.AGENT_KERNEL_ENV_SOURCE_ANTHROPIC_BASE_URL
+      delete process.env.KALA_ENV_SOURCE_ANTHROPIC_BASE_URL
     }
   })
 
@@ -177,7 +177,7 @@ describe('loadRuntimeConfig', () => {
       })
     } finally {
       delete process.env.ANTHROPIC_BASE_URL
-      delete process.env.AGENT_KERNEL_ENV_SOURCE_ANTHROPIC_BASE_URL
+      delete process.env.KALA_ENV_SOURCE_ANTHROPIC_BASE_URL
     }
   })
 
@@ -281,7 +281,7 @@ describe('loadRuntimeConfig', () => {
         '[model_providers.newapi]',
         'name = "newapi"',
         'base_url = "https://api.example.test/v1"',
-        'env_key = "AK_TEST_UNSET_KEY"',
+        'env_key = "KALA_TEST_UNSET_KEY"',
       ].join('\n'),
     )
     // Isolate every local config source so the test cannot read operator credentials.
@@ -306,7 +306,7 @@ describe('loadRuntimeConfig', () => {
         '[model_providers.newapi]',
         'name = "napi"',
         'base_url = "https://api.example.test/v1"',
-        'env_key = "AK_TEST_AUTH_ONLY_KEY"',
+        'env_key = "KALA_TEST_AUTH_ONLY_KEY"',
       ].join('\n'),
     )
     writeFileSync(authPath, JSON.stringify({ OPENAI_API_KEY: 'auth-openai-key' }))

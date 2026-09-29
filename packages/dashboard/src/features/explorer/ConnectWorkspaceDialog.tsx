@@ -316,7 +316,7 @@ function InstallStatus({ status, label }: { status: string; label: string }): JS
 }
 
 function toApiInput(form: FormState): CreateExecutorInstall {
-  return { platform: form.platform, mode: form.mode, workspaceRoot: '__RUNLAB_CURRENT_DIRECTORY__' }
+  return { platform: form.platform, mode: form.mode, workspaceRoot: '__KALA_CURRENT_DIRECTORY__' }
 }
 
 function sameForm(left: FormState, right: FormState): boolean {

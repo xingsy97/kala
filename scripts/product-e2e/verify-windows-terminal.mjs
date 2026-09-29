@@ -16,7 +16,7 @@ const stateRoot = mkdtempSync(join(tmpdir(), 'runlab-windows-terminal-'))
 const port = Number(process.env.PRODUCT_E2E_WINDOWS_TERMINAL_PORT ?? 3325)
 const origin = `http://127.0.0.1:${port}`
 const sessionId = 'windows-terminal-e2e'
-const marker = `RUNLAB_CONPTY_${Date.now()}`
+const marker = `KALA_CONPTY_${Date.now()}`
 const logs = []
 const serviceMode = process.env.PRODUCT_E2E_WINDOWS_SERVICE === '1'
 let host
@@ -26,8 +26,8 @@ let dashboard
 try {
   if (process.platform !== 'win32') throw new Error('verify-windows-terminal.mjs must run on a real Windows runner')
   host = start('node', [hostBundle], {
-    HOST_LISTEN_HOST: '127.0.0.1', HOST_PORT: String(port), AGENT_KERNEL_STATE_DIR: join(stateRoot, 'state'),
-    SESSIONS_DIR: join(stateRoot, 'sessions'), AGENT_KERNEL_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), ANTHROPIC_API_KEY: 'unused',
+    KALA_BIND_HOST: '127.0.0.1', KALA_PORT: String(port), KALA_STATE_DIR: join(stateRoot, 'state'),
+    KALA_SESSIONS_DIR: join(stateRoot, 'sessions'), KALA_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), ANTHROPIC_API_KEY: 'unused',
   })
   await waitForHttp(`${origin}/models`)
   const created = await fetch(`${origin}/api/executor-installs`, {

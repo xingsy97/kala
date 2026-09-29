@@ -1,0 +1,44 @@
+[Unit]
+Description=Kala Dedicated Runtime Slot %i for logical Unit local
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=kala
+Group=kala
+EnvironmentFile=-/etc/kala/dedicated.env
+EnvironmentFile=/etc/kala/slots/%i.env
+EnvironmentFile=-/etc/kala/handoff.env
+EnvironmentFile=-/var/lib/kala/deploy/runtime.env
+Environment=HOME=/var/lib/kala
+Environment=KALA_DEPLOYMENT_CONFIG=/etc/kala/deployment.json
+Environment=KALA_BIND_HOST=127.0.0.1
+Environment=KALA_SESSIONS_DIR=/var/lib/kala/.kala/sessions
+Environment=KALA_ARTIFACTS_DIR=/var/lib/kala/.kala/artifacts
+Environment=KALA_EXECUTOR_IDENTITIES=/var/lib/kala/.kala/executor-identities.json
+Environment=KALA_WRITE_LEASE=/var/lib/kala/units/local/write.lock
+Environment=KALA_RUNTIME_READINESS=/run/kala/unit-%i-readiness.json
+Environment=KALA_PROCESS_READINESS=/run/kala/unit-%i-process-ready.json
+Environment=KALA_ROUTE_STATE=/var/lib/kala/deploy/route-state.json
+Environment=KALA_SLOT=%i
+ExecStartPre=/usr/bin/rm -f /run/kala/unit-%i-readiness.json
+ExecStartPre=/usr/bin/rm -f /run/kala/unit-%i-process-ready.json
+ExecStart=/usr/bin/flock --exclusive --nonblock --no-fork /var/lib/kala/units/local/write.lock /usr/bin/node /var/lib/kala/deploy/slots/%i/kala-runtime.cjs --port ${KALA_PORT}
+ExecStopPost=/usr/bin/rm -f /run/kala/unit-%i-readiness.json /run/kala/unit-%i-process-ready.json
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=90s
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/kala/deploy
+ReadWritePaths=/var/lib/kala/units/local /var/lib/kala/.kala /var/lib/kala/.cache /var/lib/kala/deploy/requests /var/lib/kala/deploy/submissions /run/kala
+RuntimeDirectory=kala
+RuntimeDirectoryPreserve=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

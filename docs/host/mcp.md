@@ -52,7 +52,7 @@ MCP server declarations live next to executor sandbox roots, through CLI argumen
 Example CLI shape:
 
 ```bash
-agent-kernel-executor \
+kala-executor \
   --host http://localhost:3000 \
   --sandbox-root /workspace/project \
   --mcp filesystem='npx -y @modelcontextprotocol/server-filesystem /workspace/project' \
@@ -99,7 +99,7 @@ MCP tools use the same `approvalMode` as built-in tools.
 | `auto` | no approval | no approval |
 | `ask` | ask every call | ask every call |
 | `deny` | disallow calls | disallow calls |
-| `allow_all` | no approval, guarded by `AK_ALLOW_ALL_OK=1` | no approval, guarded by `AK_ALLOW_ALL_OK=1` |
+| `allow_all` | no approval, guarded by `KALA_ALLOW_ALL_OK=1` | no approval, guarded by `KALA_ALLOW_ALL_OK=1` |
 
 Do not add an MCP-specific approval tier. The server-trust decision happens when the operator starts the executor with `--mcp`. Runtime approval is a per-call confirmation and should not branch by source.
 

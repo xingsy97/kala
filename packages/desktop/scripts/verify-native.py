@@ -16,7 +16,7 @@ import urllib.request
 
 
 def main():
-    output = Path(os.environ.get("RUNLAB_DESKTOP_EVIDENCE", ".artifacts")).resolve()
+    output = Path(os.environ.get("KALA_DESKTOP_EVIDENCE", ".artifacts")).resolve()
     output.mkdir(parents=True, exist_ok=True)
     runtime = output / "runtime"
     runtime.mkdir(mode=0o700, exist_ok=True)
@@ -66,7 +66,7 @@ def main():
                 time.sleep(0.25)
         result = request("POST", "/session", {
             "capabilities": {"alwaysMatch": {"webkitgtk:browserOptions": {
-                "binary": os.environ.get("RUNLAB_DESKTOP_BINARY", "/usr/bin/kala-desktop")
+                "binary": os.environ.get("KALA_DESKTOP_BINARY", "/usr/bin/kala-desktop")
             }}}
         })
         session = result["sessionId"]
@@ -100,7 +100,7 @@ def main():
         request("POST", f"{prefix}/window", {"handle": dashboard})
         deadline = time.monotonic() + 40
         while True:
-            state = execute("return {origin:location.origin, ready:document.readyState, text:document.body?.innerText || '', desktop:window.__RUNLAB_DESKTOP__ === true}")
+            state = execute("return {origin:location.origin, ready:document.readyState, text:document.body?.innerText || '', desktop:window.__KALA_DESKTOP__ === true}")
             if state["ready"] == "complete" and len(state["text"]) > 100:
                 break
             if time.monotonic() > deadline:

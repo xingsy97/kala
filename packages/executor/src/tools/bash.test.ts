@@ -58,12 +58,12 @@ describe('bash', () => {
 
   it('injects immutable Session and call identities into deployment shell processes', async () => {
     const out = await shellTool.run(
-      { command: 'printf "%s\n%s\n" "$AGENT_RUNLAB_SESSION_ID" "$AGENT_RUNLAB_CALL_ID"' },
+      { command: 'printf "%s\n%s\n" "$KALA_SESSION_ID" "$KALA_CALL_ID"' },
       {
         ...makeCtx(root),
         sessionId: 'session-origin-shell',
         callId: 'call-origin-shell',
-        env: { ...process.env, AGENT_RUNLAB_SESSION_ID: 'forged-session', AGENT_RUNLAB_CALL_ID: 'forged-call' },
+        env: { ...process.env, KALA_SESSION_ID: 'forged-session', KALA_CALL_ID: 'forged-call' },
       },
     )
 

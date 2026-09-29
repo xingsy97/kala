@@ -6,22 +6,22 @@ import process from 'node:process'
 import { gunzipSync } from 'node:zlib'
 
 const source = resolve(process.argv[2] ?? 'release')
-const root = resolve(process.env.AGENT_RUNLAB_INSTALL_ROOT ?? '/opt/agent-runlab')
-const dataRoot = resolve(process.env.AGENT_RUNLAB_DATA_ROOT ?? '/var/lib/agent-runlab')
-const unitDir = resolve(process.env.AGENT_RUNLAB_SYSTEMD_DIR ?? '/etc/systemd/system')
-const releaseId = process.env.AGENT_RUNLAB_RELEASE_ID?.trim() || `release-${Date.now()}`
-const legacyDataRoot = process.env.AGENT_RUNLAB_LEGACY_DATA_ROOT?.trim()
+const root = resolve(process.env.KALA_INSTALL_ROOT ?? '/opt/kala')
+const dataRoot = resolve(process.env.KALA_DATA_ROOT ?? '/var/lib/kala')
+const unitDir = resolve(process.env.KALA_SYSTEMD_DIR ?? '/etc/systemd/system')
+const releaseId = process.env.KALA_RELEASE_ID?.trim() || `release-${Date.now()}`
+const legacyDataRoot = process.env.KALA_LEGACY_DATA_ROOT?.trim()
 const releaseDir = join(dataRoot, 'deploy', 'releases', releaseId)
 const supportArchive = 'kala-dedicated-support.tar.gz'
 const supportManifest = 'dedicated-support-manifest.json'
 const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const dedicatedServices = [
-  'agent-runlab-dedicated-ingress.service',
-  'agent-runlab-dedicated-unit@blue.service',
-  'agent-runlab-dedicated-unit@green.service',
-  'agent-runlab-dedicated-deploy-supervisor.service',
-  'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service',
+  'kala-dedicated-ingress.service',
+  'kala-dedicated-unit@blue.service',
+  'kala-dedicated-unit@green.service',
+  'kala-dedicated-deploy-supervisor.service',
+  'kala-dedicated-control-updater.service',
+  'kala-dedicated-migration-finalizer.service',
 ]
 
 async function main() {
@@ -59,7 +59,7 @@ async function main() {
   // A clean installation needs an empty state root before its first Unit
   // start. A legacy migration must leave the destination absent so the
   // Finalizer can atomically rename the authoritative source into place.
-  if (!legacyDataRoot) await mkdir(join(dataRoot, '.agent-kernel'), { recursive: true, mode: 0o700 })
+  if (!legacyDataRoot) await mkdir(join(dataRoot, '.kala'), { recursive: true, mode: 0o700 })
   await mkdir(join(dataRoot, '.cache'), { recursive: true, mode: 0o700 })
   await mkdir(join(dataRoot, 'admission'), { recursive: true, mode: 0o700 })
   await activate(join(dataRoot, 'deploy', 'current'), releaseDir)
@@ -68,24 +68,24 @@ async function main() {
   await activate(join(dataRoot, 'deploy', 'slots', 'blue'), releaseDir)
   await activate(join(dataRoot, 'deploy', 'slots', 'green'), releaseDir)
   await installInitialDashboardRelease(source, dataRoot, releaseId)
-  await mkdir('/etc/agent-runlab/slots', { recursive: true, mode: 0o755 })
+  await mkdir('/etc/kala/slots', { recursive: true, mode: 0o755 })
   await ensureHandoffSecret()
-  await copyFile(join(source, 'deployment.json'), '/etc/agent-runlab/deployment.json')
-  await writeFile('/etc/agent-runlab/slots/blue.env', 'HOST_PORT=13001\n', { mode: 0o644 })
-  await writeFile('/etc/agent-runlab/slots/green.env', 'HOST_PORT=13002\n', { mode: 0o644 })
+  await copyFile(join(source, 'deployment.json'), '/etc/kala/deployment.json')
+  await writeFile('/etc/kala/slots/blue.env', 'KALA_PORT=13001\n', { mode: 0o644 })
+  await writeFile('/etc/kala/slots/green.env', 'KALA_PORT=13002\n', { mode: 0o644 })
   const route = { schemaVersion: 1, generation: 1, activeSlot: 'blue', slots: { blue: { origin: 'http://127.0.0.1:13001', releaseId }, green: { origin: 'http://127.0.0.1:13002', releaseId } }, updatedAt: new Date().toISOString() }
   await writeAtomicJson(join(dataRoot, 'deploy', 'route-state.json'), route, 0o644)
   for (const [asset, service] of [
-    ['kala-dedicated-ingress.service', 'agent-runlab-dedicated-ingress.service'],
-    ['kala-dedicated-unit@.service', 'agent-runlab-dedicated-unit@.service'],
-    ['kala-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-deploy-supervisor.service'],
-    ['kala-dedicated-control-updater.service', 'agent-runlab-dedicated-control-updater.service'],
-    ['kala-dedicated-migration-finalizer.service', 'agent-runlab-dedicated-migration-finalizer.service'],
+    ['kala-dedicated-ingress.service', 'kala-dedicated-ingress.service'],
+    ['kala-dedicated-unit@.service', 'kala-dedicated-unit@.service'],
+    ['kala-dedicated-deploy-supervisor.service', 'kala-dedicated-deploy-supervisor.service'],
+    ['kala-dedicated-control-updater.service', 'kala-dedicated-control-updater.service'],
+    ['kala-dedicated-migration-finalizer.service', 'kala-dedicated-migration-finalizer.service'],
   ]) await copyFile(join(source, asset), join(unitDir, service))
   await run('chown', ['-R', 'root:root', join(dataRoot, 'deploy')])
   await run('chmod', ['-R', 'go-w', join(dataRoot, 'deploy')])
-  await run('chown', ['root:agent-runlab', join(dataRoot, 'deploy'), join(dataRoot, 'deploy', 'requests'), join(dataRoot, 'deploy', 'submissions'), join(dataRoot, 'deploy', 'receipts'), join(dataRoot, 'deploy', 'control-updates'), join(dataRoot, 'deploy', 'control-updates', 'requests'), join(dataRoot, 'deploy', 'control-updates', 'receipts')])
-  await run('chown', ['root:agent-runlab', join(dataRoot, 'deploy', 'dashboard'), join(dataRoot, 'deploy', 'dashboard', 'releases'), join(dataRoot, 'deploy', 'dashboard', 'route-state.json'), join(dataRoot, 'deploy', 'dashboard', 'requests'), join(dataRoot, 'deploy', 'dashboard', 'submissions'), join(dataRoot, 'deploy', 'dashboard', 'receipts')])
+  await run('chown', ['root:kala', join(dataRoot, 'deploy'), join(dataRoot, 'deploy', 'requests'), join(dataRoot, 'deploy', 'submissions'), join(dataRoot, 'deploy', 'receipts'), join(dataRoot, 'deploy', 'control-updates'), join(dataRoot, 'deploy', 'control-updates', 'requests'), join(dataRoot, 'deploy', 'control-updates', 'receipts')])
+  await run('chown', ['root:kala', join(dataRoot, 'deploy', 'dashboard'), join(dataRoot, 'deploy', 'dashboard', 'releases'), join(dataRoot, 'deploy', 'dashboard', 'route-state.json'), join(dataRoot, 'deploy', 'dashboard', 'requests'), join(dataRoot, 'deploy', 'dashboard', 'submissions'), join(dataRoot, 'deploy', 'dashboard', 'receipts')])
   await run('chmod', ['711', dataRoot, join(dataRoot, 'units'), join(dataRoot, 'deploy', 'releases'), join(dataRoot, 'deploy', 'slots')])
   await run('chmod', ['750', join(dataRoot, 'deploy'), join(dataRoot, 'deploy', 'receipts')])
   await run('chmod', ['750', join(dataRoot, 'deploy', 'control-updates'), join(dataRoot, 'deploy', 'control-updates', 'requests'), join(dataRoot, 'deploy', 'control-updates', 'receipts')])
@@ -93,7 +93,7 @@ async function main() {
   await run('chmod', ['3770', join(dataRoot, 'deploy', 'dashboard', 'requests'), join(dataRoot, 'deploy', 'dashboard', 'submissions')])
   await run('chmod', ['3770', join(dataRoot, 'deploy', 'requests'), join(dataRoot, 'deploy', 'submissions')])
   await run('chmod', ['555', releaseDir])
-  await run('chown', ['-R', 'agent-runlab:agent-runlab', join(dataRoot, 'units', 'local'), ...(legacyDataRoot ? [] : [join(dataRoot, '.agent-kernel')]), join(dataRoot, '.cache'), join(dataRoot, 'admission')])
+  await run('chown', ['-R', 'kala:kala', join(dataRoot, 'units', 'local'), ...(legacyDataRoot ? [] : [join(dataRoot, '.kala')]), join(dataRoot, '.cache'), join(dataRoot, 'admission')])
   const containerBackend = await configureContainerBackend()
   const normalizedLegacyDataRoot = legacyDataRoot ? await configureLegacyMigrationAccess(legacyDataRoot) : undefined
   await run('systemctl', ['daemon-reload'])
@@ -271,7 +271,7 @@ function parseSums(value) {
 }
 
 async function configureContainerBackend() {
-  const requested = (process.env.AGENT_RUNLAB_CONTAINER_BACKEND ?? 'auto').trim()
+  const requested = (process.env.KALA_CONTAINER_BACKEND ?? 'auto').trim()
   if (requested === 'none') return 'none'
   const dockerAvailable = await run('test', ['-S', '/var/run/docker.sock'], true)
   if (!dockerAvailable) {
@@ -281,9 +281,9 @@ async function configureContainerBackend() {
   if (!await run('getent', ['group', 'docker'], true)) throw new Error('Docker socket exists but docker group is missing')
   // Docker-group membership is root-equivalent. Permit it only inside the
   // dedicated VM/LXD boundary and record the decision in the receipt.
-  await run('usermod', ['--append', '--groups', 'docker', 'agent-runlab'])
-  if (!await run('runuser', ['-u', 'agent-runlab', '--', 'docker', 'info'], true)) {
-    if (requested === 'docker') throw new Error('Docker daemon is not usable by the agent-runlab service account')
+  await run('usermod', ['--append', '--groups', 'docker', 'kala'])
+  if (!await run('runuser', ['-u', 'kala', '--', 'docker', 'info'], true)) {
+    if (requested === 'docker') throw new Error('Docker daemon is not usable by the kala service account')
     return 'none'
   }
   return 'docker'
@@ -295,14 +295,14 @@ async function assertNode22() {
 }
 
 async function ensureServiceUser() {
-  if (!await run('id', ['-u', 'agent-runlab'], true)) await run('useradd', ['--system', '--home', '/var/lib/agent-runlab', '--shell', '/usr/sbin/nologin', 'agent-runlab'])
+  if (!await run('id', ['-u', 'kala'], true)) await run('useradd', ['--system', '--home', '/var/lib/kala', '--shell', '/usr/sbin/nologin', 'kala'])
 }
 
 async function ensureHandoffSecret() {
-  const path = '/etc/agent-runlab/handoff.env'
+  const path = '/etc/kala/handoff.env'
   try {
     const existing = await readFile(path, 'utf8')
-    if (!/^AGENT_RUNLAB_INGRESS_HANDOFF_SECRET=[A-Za-z0-9_-]{43}\n$/u.test(existing)) throw new Error('existing Dedicated handoff secret file is invalid')
+    if (!/^KALA_INGRESS_HANDOFF_SECRET=[A-Za-z0-9_-]{43}\n$/u.test(existing)) throw new Error('existing Dedicated handoff secret file is invalid')
     return
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
@@ -310,7 +310,7 @@ async function ensureHandoffSecret() {
   const secret = randomBytes(32).toString('base64url')
   const file = await open(path, 'wx', 0o600)
   try {
-    await file.writeFile(`AGENT_RUNLAB_INGRESS_HANDOFF_SECRET=${secret}\n`)
+    await file.writeFile(`KALA_INGRESS_HANDOFF_SECRET=${secret}\n`)
     await file.sync()
   } finally { await file.close() }
   const directory = await open(dirname(path), 'r')
@@ -319,12 +319,14 @@ async function ensureHandoffSecret() {
 
 async function configureLegacyMigrationAccess(value) {
   const normalized = resolve(value)
-  const sourceState = normalized.endsWith('/.agent-kernel') ? normalized : join(normalized, '.agent-kernel')
+  const sourceState = normalized.endsWith('/.agent-kernel') || normalized.endsWith('/.kala')
+    ? normalized
+    : join(normalized, '.agent-kernel')
   const legacyHome = dirname(sourceState)
   if (['/', '/home', '/root', '/var', '/srv', '/opt', '/usr'].includes(legacyHome)) throw new Error('legacy data root resolves to an unsafe broad migration path')
   const sourceStat = await lstat(sourceState)
   if (!sourceStat.isDirectory() || sourceStat.isSymbolicLink()) throw new Error('legacy state root must be a real directory')
-  try { await lstat(join(dataRoot, '.agent-kernel')); throw new Error('target state root already exists') } catch (error) { if (error.code !== 'ENOENT') throw error }
+  try { await lstat(join(dataRoot, '.kala')); throw new Error('target state root already exists') } catch (error) { if (error.code !== 'ENOENT') throw error }
   if (sourceStat.dev !== (await stat(dataRoot)).dev) throw new Error('legacy and target state must share a filesystem')
   return normalized
 }

@@ -9,15 +9,16 @@ import { fileURLToPath } from 'node:url'
 
 const updater = fileURLToPath(new URL('./update-dedicated-control-plane.mjs', import.meta.url))
 const unitNames = [
-  'agent-runlab-dedicated-ingress.service',
-  'agent-runlab-dedicated-unit@.service',
-  'agent-runlab-dedicated-deploy-supervisor.service',
-  'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service',
+  'kala-dedicated-ingress.service',
+  'kala-dedicated-unit@.service',
+  'kala-dedicated-deploy-supervisor.service',
+  'kala-dedicated-control-updater.service',
+  'kala-dedicated-migration-finalizer.service',
 ]
-const unitAssets = unitNames.map((name) => name.replace('agent-runlab-', 'kala-'))
+const unitAssets = [...unitNames]
+const legacyUnitAssets = unitNames.map((name) => name.replace('kala-', 'agent-runlab-'))
 const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', ...unitAssets, 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs'].sort()
-const legacySupportAssets = [...supportAssets.filter((name) => !unitAssets.includes(name)), ...unitNames, 'agent-runlab-runtime.cjs'].sort()
+const legacySupportAssets = [...supportAssets.filter((name) => !unitAssets.includes(name)), ...legacyUnitAssets, 'agent-runlab-runtime.cjs'].sort()
 
 test('control updater atomically activates target and advances its own executable last', async () => {
   const fixture = await createFixture()
@@ -159,7 +160,7 @@ if (args[0] === 'show' && kind) process.stdout.write(String(state[kind]) + '\\n'
 else if (args[0] === 'is-active' && kind) process.stdout.write('active\\n')
 else if (args[0] === 'daemon-reload') {}
 else if (args[0] === 'restart' && kind) {
-  const activeRelease = basename(await readlink(process.env.AGENT_RUNLAB_CONTROL_CURRENT))
+  const activeRelease = basename(await readlink(process.env.KALA_CONTROL_CURRENT))
   if (activeRelease === 'target-release' && process.env.TEST_FAIL_COMPONENT === kind) {
     process.stderr.write('broken target ' + kind + '\\n')
     process.exitCode = 1
@@ -167,8 +168,8 @@ else if (args[0] === 'restart' && kind) {
     state[kind] += 1
     await writeFile(statePath, JSON.stringify(state))
     const now = new Date().toISOString()
-    if (kind === 'ingress') await writeFile(process.env.AGENT_RUNLAB_INGRESS_READINESS, JSON.stringify({ schemaVersion: 1, pid: state.ingress, readyAt: now }))
-    else await writeFile(process.env.AGENT_RUNLAB_OPERATOR_STATUS, JSON.stringify({ schemaVersion: 1, generatedAt: now, services: { supervisor: { pid: state.supervisor } } }))
+    if (kind === 'ingress') await writeFile(process.env.KALA_INGRESS_READINESS, JSON.stringify({ schemaVersion: 1, pid: state.ingress, readyAt: now }))
+    else await writeFile(process.env.KALA_OPERATOR_STATUS, JSON.stringify({ schemaVersion: 1, generatedAt: now, services: { supervisor: { pid: state.supervisor } } }))
     if (activeRelease === 'target-release' && process.env.TEST_CRASH_AFTER === kind) {
       try { await readFile(process.env.TEST_CRASH_MARKER) }
       catch { await writeFile(process.env.TEST_CRASH_MARKER, kind); process.kill(process.ppid, 'SIGKILL') }
@@ -180,12 +181,12 @@ else if (args[0] === 'restart' && kind) {
   return {
     root, deployRoot, updateRoot, unitDir, controlLink, updaterLink, targetRelease: target.path,
     env: {
-      AGENT_RUNLAB_DEPLOY_ROOT: deployRoot, AGENT_RUNLAB_CONTROL_CURRENT: controlLink,
-      AGENT_RUNLAB_CONTROL_UPDATER_CURRENT: updaterLink, AGENT_RUNLAB_CONTROL_UPDATE_ROOT: updateRoot,
-      AGENT_RUNLAB_SYSTEMD_DIR: unitDir, AGENT_RUNLAB_DEPLOYMENT_CONFIG: join(configDir, 'deployment.json'),
-      AGENT_RUNLAB_SYSTEMCTL: fakeSystemctl, AGENT_RUNLAB_INGRESS_READINESS: ingressReadiness,
-      AGENT_RUNLAB_OPERATOR_STATUS: operatorStatus, TEST_SYSTEMCTL_STATE: statePath, TEST_CRASH_MARKER: crashMarker,
-      AGENT_RUNLAB_CHOWN: '/usr/bin/true',
+      KALA_DEPLOY_ROOT: deployRoot, KALA_CONTROL_CURRENT: controlLink,
+      KALA_CONTROL_UPDATER_CURRENT: updaterLink, KALA_CONTROL_UPDATE_ROOT: updateRoot,
+      KALA_SYSTEMD_DIR: unitDir, KALA_DEPLOYMENT_CONFIG: join(configDir, 'deployment.json'),
+      KALA_SYSTEMCTL: fakeSystemctl, KALA_INGRESS_READINESS: ingressReadiness,
+      KALA_OPERATOR_STATUS: operatorStatus, TEST_SYSTEMCTL_STATE: statePath, TEST_CRASH_MARKER: crashMarker,
+      KALA_CHOWN: '/usr/bin/true',
       ...(options.failComponent ? { TEST_FAIL_COMPONENT: options.failComponent } : {}),
       ...(options.crashAfter ? { TEST_CRASH_AFTER: options.crashAfter } : {}),
     },

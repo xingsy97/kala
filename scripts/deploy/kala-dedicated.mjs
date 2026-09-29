@@ -14,31 +14,31 @@ const command = argv[0]
 // when executing an operator command, not while inspecting a release on Windows.
 if (!command || ['-h', '--help', 'help'].includes(command)) { help(); process.exit(0) }
 const scriptDir = dirname(fileURLToPath(import.meta.url))
-const dataRoot = boundedRoot(process.env.AGENT_RUNLAB_DATA_ROOT ?? '/var/lib/agent-runlab', 'data root')
-const installRoot = boundedRoot(process.env.AGENT_RUNLAB_INSTALL_ROOT ?? '/opt/agent-runlab', 'install root')
-const configRoot = boundedRoot(process.env.AGENT_RUNLAB_CONFIG_ROOT ?? '/etc/agent-runlab', 'configuration root')
-const systemdDir = boundedRoot(process.env.AGENT_RUNLAB_SYSTEMD_DIR ?? '/etc/systemd/system', 'systemd root')
-const operatorRoot = boundedRoot(process.env.AGENT_RUNLAB_OPERATOR_ROOT ?? '/var/lib/agent-runlab-operator', 'operator root')
-const operatorBin = resolve(process.env.AGENT_RUNLAB_OPERATOR_BIN ?? '/usr/local/bin/runlab-dedicated')
+const dataRoot = boundedRoot(process.env.KALA_DATA_ROOT ?? '/var/lib/kala', 'data root')
+const installRoot = boundedRoot(process.env.KALA_INSTALL_ROOT ?? '/opt/kala', 'install root')
+const configRoot = boundedRoot(process.env.KALA_CONFIG_ROOT ?? '/etc/kala', 'configuration root')
+const systemdDir = boundedRoot(process.env.KALA_SYSTEMD_DIR ?? '/etc/systemd/system', 'systemd root')
+const operatorRoot = boundedRoot(process.env.KALA_OPERATOR_ROOT ?? '/var/lib/kala-operator', 'operator root')
+const operatorBin = resolve(process.env.KALA_OPERATOR_BIN ?? '/usr/local/bin/kala-dedicated')
 const deployRoot = join(dataRoot, 'deploy')
 const supportArchive = 'kala-dedicated-support.tar.gz'
 const supportManifest = 'dedicated-support-manifest.json'
 const supportAssets = ['cutover-dedicated-systemd.mjs', 'dedicated-data-migration.mjs', 'dedicated-settings-fingerprint.mjs', 'deploy-dashboard.mjs', 'deploy-dedicated.mjs', 'deployment.json', 'install-dedicated-systemd.mjs', 'kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-migration-finalizer.service', 'kala-dedicated-unit@.service', 'rollback-dedicated-systemd.mjs', 'update-dedicated-control-plane.mjs']
 const services = [
-  'agent-runlab-dedicated-ingress.service',
-  'agent-runlab-dedicated-unit@blue.service',
-  'agent-runlab-dedicated-unit@green.service',
-  'agent-runlab-dedicated-deploy-supervisor.service',
-  'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service',
+  'kala-dedicated-ingress.service',
+  'kala-dedicated-unit@blue.service',
+  'kala-dedicated-unit@green.service',
+  'kala-dedicated-deploy-supervisor.service',
+  'kala-dedicated-control-updater.service',
+  'kala-dedicated-migration-finalizer.service',
 ]
 const persistentServices = services.slice(0, 4)
 const unitFiles = [
-  'agent-runlab-dedicated-ingress.service',
-  'agent-runlab-dedicated-unit@.service',
-  'agent-runlab-dedicated-deploy-supervisor.service',
-  'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service',
+  'kala-dedicated-ingress.service',
+  'kala-dedicated-unit@.service',
+  'kala-dedicated-deploy-supervisor.service',
+  'kala-dedicated-control-updater.service',
+  'kala-dedicated-migration-finalizer.service',
 ]
 const terminalDeploymentPhases = new Set(['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed'])
 const lifecycleTransitions = new Map([
@@ -75,13 +75,13 @@ function help() {
   process.stdout.write(`Kala Dedicated operator
 
 Usage:
-  runlab-dedicated install --release-dir <dir> [--stage-only] [--legacy-data-root <dir>]
-  runlab-dedicated status
-  runlab-dedicated upgrade --release-dir <dir> [--operation-id <id>] [--no-wait]
-  runlab-dedicated rollback <deployment-id> [--operation-id <id>] [--no-wait]
-  runlab-dedicated backup --output <persistent-empty-dir> [--operation-id <id>]
-  runlab-dedicated restore --backup <dir> --confirm RESTORE:<backup-id> [--operation-id <id>]
-  runlab-dedicated uninstall --confirm UNINSTALL:<installation-id>
+  kala-dedicated install --release-dir <dir> [--stage-only] [--legacy-data-root <dir>]
+  kala-dedicated status
+  kala-dedicated upgrade --release-dir <dir> [--operation-id <id>] [--no-wait]
+  kala-dedicated rollback <deployment-id> [--operation-id <id>] [--no-wait]
+  kala-dedicated backup --output <persistent-empty-dir> [--operation-id <id>]
+  kala-dedicated restore --backup <dir> --confirm RESTORE:<backup-id> [--operation-id <id>]
+  kala-dedicated uninstall --confirm UNINSTALL:<installation-id>
 
 Install, backup, restore, and uninstall operate only on the bounded local Dedicated
 installation. Upgrade and rollback use the Deploy Supervisor request/receipt protocol.
@@ -102,9 +102,9 @@ async function install() {
   try {
     run(process.execPath, [installer, expandedRelease], {
       env: {
-        ...process.env, AGENT_RUNLAB_INSTALL_ROOT: installRoot, AGENT_RUNLAB_DATA_ROOT: dataRoot,
-        AGENT_RUNLAB_SYSTEMD_DIR: systemdDir, AGENT_RUNLAB_RELEASE_ID: releaseId,
-        ...(legacyDataRoot ? { AGENT_RUNLAB_LEGACY_DATA_ROOT: resolve(legacyDataRoot) } : {}),
+        ...process.env, KALA_INSTALL_ROOT: installRoot, KALA_DATA_ROOT: dataRoot,
+        KALA_SYSTEMD_DIR: systemdDir, KALA_RELEASE_ID: releaseId,
+        ...(legacyDataRoot ? { KALA_LEGACY_DATA_ROOT: resolve(legacyDataRoot) } : {}),
       },
     })
   } finally { rmSync(expandedRelease, { recursive: true, force: true }) }
@@ -119,7 +119,7 @@ async function install() {
     output({ ok: true, phase: 'installed_disabled', installationId, releaseId, releaseDigest: release.releaseDigest })
     return
   }
-  run('systemctl', ['start', '--no-block', 'agent-runlab-dedicated-migration-finalizer.service'])
+  run('systemctl', ['start', '--no-block', 'kala-dedicated-migration-finalizer.service'])
   const receipt = await waitForMigration()
   if (receipt.phase !== 'cutover_completed') throw new Error(`installation ended in ${receipt.phase}`)
   output({ ok: true, phase: receipt.phase, installationId, releaseId, releaseDigest: release.releaseDigest })
@@ -425,15 +425,15 @@ async function waitForMigration() {
   while (Date.now() < deadline) {
     const receipt = readJsonOptional(join(deployRoot, 'migration-receipt.json'))
     if (receipt && ['cutover_completed', 'rolled_back', 'rollback_failed'].includes(receipt.phase)) return receipt
-    const state = serviceState('agent-runlab-dedicated-migration-finalizer.service')
+    const state = serviceState('kala-dedicated-migration-finalizer.service')
     if (state.activeState === 'failed') throw new Error('migration finalizer failed; inspect its durable receipt and journal')
     await delay(500)
   }
   throw new Error('installation deadline exceeded')
 }
 async function waitForPublicReady() {
-  const publicOrigin = safeTestSandbox() && process.env.AGENT_RUNLAB_OPERATOR_TEST_ORIGIN
-    ? process.env.AGENT_RUNLAB_OPERATOR_TEST_ORIGIN
+  const publicOrigin = safeTestSandbox() && process.env.KALA_OPERATOR_TEST_ORIGIN
+    ? process.env.KALA_OPERATOR_TEST_ORIGIN
     : 'http://127.0.0.1:13000'
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
@@ -466,7 +466,7 @@ function assertNoLiveLifecycle() {
 function activePersistentServices() { return persistentServices.filter((service) => serviceState(service).activeState === 'active') }
 function stopServices(names, allowFailure = false) { for (const service of names) run('systemctl', ['stop', service], { allowFailure }) }
 function startServices(names, allowFailure = false) {
-  const order = ['agent-runlab-dedicated-unit@blue.service', 'agent-runlab-dedicated-unit@green.service', 'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service', 'agent-runlab-dedicated-migration-finalizer.service']
+  const order = ['kala-dedicated-unit@blue.service', 'kala-dedicated-unit@green.service', 'kala-dedicated-ingress.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-control-updater.service', 'kala-dedicated-migration-finalizer.service']
   for (const service of [...names].sort((left, right) => order.indexOf(left) - order.indexOf(right))) run('systemctl', ['start', service], { allowFailure })
 }
 function applyEnablement(states, allowFailure = false) {
@@ -565,7 +565,7 @@ function capture(command, args) { return String(run(command, args).stdout) }
 function runJson(command, args) { const result = run(command, args); try { return JSON.parse(result.stdout) } catch { throw new Error(`${command} returned invalid JSON`) } }
 function requireRoot() { if (typeof process.getuid === 'function' && process.getuid() !== 0 && !safeTestSandbox()) throw new Error('this command requires root') }
 function safeTestSandbox() {
-  if (process.env.NODE_ENV !== 'test' || process.env.AGENT_RUNLAB_OPERATOR_TEST_MODE !== '1') return false
+  if (process.env.NODE_ENV !== 'test' || process.env.KALA_OPERATOR_TEST_MODE !== '1') return false
   const temporary = resolve(tmpdir())
   return [dataRoot, installRoot, configRoot, systemdDir, operatorRoot, operatorBin].every((path) => resolve(path).startsWith(`${temporary}/`))
 }

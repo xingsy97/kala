@@ -2,8 +2,8 @@ import { resolve } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 
 const root = resolve(import.meta.dirname, '../..')
-const deploymentEnv = resolve(process.env.RUNLAB_DEPLOYMENT_ENV ?? resolve(root, 'deploy/private-cloud/.secrets/deployment.env'))
-const identityDeploymentEnv = resolve(process.env.RUNLAB_IDENTITY_ENV ?? resolve(root, 'deploy/identity/.secrets/deployment.env'))
+const deploymentEnv = resolve(process.env.KALA_DEPLOYMENT_ENV ?? resolve(root, 'deploy/private-cloud/.secrets/deployment.env'))
+const identityDeploymentEnv = resolve(process.env.KALA_IDENTITY_ENV ?? resolve(root, 'deploy/identity/.secrets/deployment.env'))
 if (existsSync(deploymentEnv)) {
   for (const line of readFileSync(deploymentEnv, 'utf8').split(/\r?\n/u)) {
     const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/u)
@@ -17,14 +17,14 @@ const profiles = {
   'local-volume': ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.dev.yaml', 'deploy/private-cloud/compose.storage-local.yaml', 'deploy/private-cloud/compose.local.yaml'],
   'external-nfs': ['deploy/private-cloud/compose.yaml', 'deploy/private-cloud/compose.dev.yaml', 'deploy/private-cloud/compose.storage-external-nfs.yaml', 'deploy/private-cloud/compose.cloudflare.yaml'],
 }
-process.env.RUNLAB_RUNTIME_IMAGE ??= 'agent-runlab-private-cloud-runtime:dev'
-process.env.RUNLAB_INGRESS_IMAGE ??= 'agent-runlab-private-cloud-ingress:dev'
-process.env.RUNLAB_DASHBOARD_IMAGE ??= 'agent-runlab-private-cloud-dashboard:dev'
+process.env.KALA_RUNTIME_IMAGE ??= 'kala-private-cloud-runtime:dev'
+process.env.KALA_INGRESS_IMAGE ??= 'kala-private-cloud-ingress:dev'
+process.env.KALA_DASHBOARD_IMAGE ??= 'kala-private-cloud-dashboard:dev'
 
-export function selectedProfile() { return process.env.RUNLAB_PROFILE ?? 'local' }
+export function selectedProfile() { return process.env.KALA_PROFILE ?? 'local' }
 export function composeFiles(profile = selectedProfile()) {
   const files = profiles[profile]
-  if (!files) throw new Error(`unknown RUNLAB_PROFILE ${profile}; expected ${Object.keys(profiles).join(', ')}`)
+  if (!files) throw new Error(`unknown KALA_PROFILE ${profile}; expected ${Object.keys(profiles).join(', ')}`)
   return files.map((file) => resolve(root, file))
 }
 export function composeArgs(profile = selectedProfile()) {

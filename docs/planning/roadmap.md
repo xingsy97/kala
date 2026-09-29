@@ -32,8 +32,8 @@ The single process with a public IP. LLM calls, event persistence, Socket.IO ser
 - `src/connection/server.ts` — Socket.IO server with two namespaces (`/dashboard`, `/executor`), per-session rooms, workspace-based `tool:call` routing.
 - `src/connection/dashboard.ts` — dashboard event handlers.
 - `src/connection/executor.ts` — executor event handlers.
-- `src/runtime-config.ts` — auto-imports providers/models from `~/.claude/settings.json` and `~/.codex/config.toml`, merged with manual model ids in `~/.config/agent-kernel/models.json`.
-- `bin/agent-kernel-host.ts` — CLI. Also serves `packages/dashboard/dist/`.
+- `src/runtime-config.ts` — auto-imports providers/models from `~/.claude/settings.json` and `~/.codex/config.toml`, merged with manual model ids in `~/.config/kala/models.json`.
+- `bin/kala-host.ts` — CLI. Also serves `packages/dashboard/dist/`.
 
 Plus `packages/shared/src/protocol.ts` — wire protocol types shared across host / executor / dashboard.
 
@@ -46,7 +46,7 @@ Node daemon that dials out to Host. No inbound port required (see [ADR 0002](../
 - `src/sandbox.ts` — workspace whitelist enforcement (symlink-aware).
 - `src/client.ts` — Socket.IO client to Host; announces `workspaceId` / `workspaceName` / `os` / `runtime` / `sandboxRoots` / tool names; handles `tool:call` / `fs:list_dirs` / cancel.
 - `src/background.ts` — per-executor background shell registry (`bash --run-in-background` → `taskId`; `bash_output`; `kill_shell`).
-- `bin/agent-kernel-executor.ts` — CLI.
+- `bin/kala-executor.ts` — CLI.
 
 The `agent` builtin is host-side, not executor-side; it does not appear in the executor tool registry.
 

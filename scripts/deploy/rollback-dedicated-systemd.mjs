@@ -4,11 +4,11 @@ import { dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { rollbackDedicatedData } from './dedicated-data-migration.mjs'
 
-const dataRoot = resolve(process.env.AGENT_RUNLAB_DATA_ROOT ?? '/var/lib/agent-runlab')
-const legacyService = process.env.AGENT_RUNLAB_LEGACY_SERVICE ?? 'agent-runlab-host.service'
+const dataRoot = resolve(process.env.KALA_DATA_ROOT ?? '/var/lib/kala')
+const legacyService = process.env.KALA_LEGACY_SERVICE ?? 'agent-runlab-host.service'
 const receiptPath = join(dataRoot, 'deploy', 'migration-receipt.json')
-const services = ['agent-runlab-dedicated-control-updater.service', 'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@blue.service', 'agent-runlab-dedicated-unit@green.service']
-const enabledServices = ['agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@blue.service', 'agent-runlab-dedicated-unit@green.service']
+const services = ['kala-dedicated-control-updater.service', 'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-unit@blue.service', 'kala-dedicated-unit@green.service']
+const enabledServices = ['kala-dedicated-deploy-supervisor.service', 'kala-dedicated-ingress.service', 'kala-dedicated-unit@blue.service', 'kala-dedicated-unit@green.service']
 const phases = ['cutover_completed', 'manual_rollback_started', 'manual_services_stopped', 'manual_data_restored', 'manually_rolled_back', 'manual_rollback_failed']
 const transitions = new Map([
   ['cutover_completed', new Set(['manual_rollback_started'])],

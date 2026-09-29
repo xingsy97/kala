@@ -13,7 +13,7 @@ Host is the only process with a public IP. It owns:
 3. **Session store** (`src/store/`) — in-memory session map + append-only JSONL log per session on disk. Recovers stuck sessions on load; `store/replay.ts` reconstructs state via `fold`.
 4. **Connection layer** (`src/connection/`) — Socket.IO server with two namespaces (`/dashboard`, `/executor`), per-session rooms, workspace-based `tool:call` routing.
 5. **Dashboard bundle server** — serves `packages/dashboard/dist/` from `/` so a single Host process is enough for a running product.
-6. **Provider/model auto-import** (`src/runtime-config.ts`) — reads `~/.claude/settings.json` and `~/.codex/config.toml`, then merges manual model ids from `~/.config/agent-kernel/models.json`.
+6. **Provider/model auto-import** (`src/runtime-config.ts`) — reads `~/.claude/settings.json` and `~/.codex/config.toml`, then merges manual model ids from `~/.config/kala/models.json`.
 7. **Agent module assembly** (`src/agent-modules/`) — renders the default `SystemPromptPlugin` plus built-in `ToolsetPlugin[]` into the kernel config, settings metadata, and session artifacts.
 
 ## Agent modules
@@ -35,9 +35,9 @@ does not require hard-coding the tool name in the loop.
 For inspection or release checks:
 
 ```bash
-agent-kernel-host --print-agent-module
-agent-kernel-host --print-system-prompt
-agent-kernel-host --print-tool-registry
+kala-host --print-agent-module
+kala-host --print-system-prompt
+kala-host --print-tool-registry
 ```
 
 ## What it does NOT do
@@ -54,15 +54,15 @@ import { startHostServer } from '@agent-kernel/host'
 const server = await startHostServer({
   port: 3000,
   llm: /* provider registry */,
-  sessionsDir: '~/.agent-kernel/sessions',
+  sessionsDir: '~/.kala/sessions',
 })
 ```
 
 Or run the Portable bundle directly:
 
 ```bash
-node packages/host/bin/agent-kernel-host.js
-# reads ANTHROPIC_API_KEY, PORT, SESSIONS_DIR from env
+node packages/host/bin/kala-host.js
+# reads ANTHROPIC_API_KEY, PORT, KALA_SESSIONS_DIR from env
 ```
 
 ## References

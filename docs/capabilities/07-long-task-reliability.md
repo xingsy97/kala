@@ -48,9 +48,9 @@ mid-stream LLM calls receive a minimal interrupted assistant response.
 Implemented offline audit command:
 
 ```bash
-agent-kernel-host enhancement reliability audit-session \
+kala-host enhancement reliability audit-session \
   --root-dir runs/reliability/session \
-  --session-log ~/.agent-kernel/sessions/<session>.jsonl
+  --session-log ~/.kala/sessions/<session>.jsonl
 ```
 
 This command folds the raw log without triggering store recovery and writes
@@ -65,7 +65,7 @@ longer show impossible active work.
 Implemented chaos replay command:
 
 ```bash
-agent-kernel-host enhancement reliability chaos-replay \
+kala-host enhancement reliability chaos-replay \
   --root-dir runs/reliability/chaos \
   --session-logs sessions/a.jsonl,sessions/b.jsonl
 ```
@@ -78,7 +78,7 @@ checkpoint concepts to the reducer protocol.
 Implemented reliability gate command:
 
 ```bash
-agent-kernel-host enhancement reliability gate \
+kala-host enhancement reliability gate \
   --root-dir runs/reliability/gate \
   --chaos-report runs/reliability/chaos/reliability-chaos.json \
   --max-dangling 0 \
@@ -104,9 +104,9 @@ inputs only and does not mutate the underlying logs or chaos report.
 Implemented crash-classify command:
 
 ```bash
-agent-kernel-host enhancement reliability classify \
+kala-host enhancement reliability classify \
   --root-dir runs/reliability/classify \
-  --session-log ~/.agent-kernel/sessions/<session>.jsonl \
+  --session-log ~/.kala/sessions/<session>.jsonl \
   --heartbeat runs/reliability/heartbeat.jsonl \
   --wedged-threshold-ms 60000
 ```
@@ -186,17 +186,17 @@ The reliability foundation is real and stays above the reducer:
 
 - Session store recovery folds append-only JSONL logs and settles stale pending
   work with recovery events rather than replaying uncertain side effects.
-- `agent-kernel-host enhancement reliability audit-session` writes
+- `kala-host enhancement reliability audit-session` writes
   `reliability-audit.json` with final status, pending calls, dangling kind,
   recovery event details, parse warnings, last event kind, and tool-call
   integrity checks.
-- `agent-kernel-host enhancement reliability chaos-replay` writes
+- `kala-host enhancement reliability chaos-replay` writes
   `reliability-chaos.json` over multiple logs with aggregate dangling/recovery
   counts.
-- `agent-kernel-host enhancement reliability gate` reads a chaos report (or
+- `kala-host enhancement reliability gate` reads a chaos report (or
   replays given session logs) and writes `reliability-gate.json` with pass/fail,
   per-threshold reason codes, and exits with code 2 on fail for CI gating.
-- `agent-kernel-host enhancement reliability classify` reads a session log and
+- `kala-host enhancement reliability classify` reads a session log and
   heartbeat file, then writes `crash-kill-report.json` with a suspected-failure
   label and recovery hint using the `reliability-supervisor.ts` primitives
   (heartbeat writer, idempotency ledger, crash-kill classifier).

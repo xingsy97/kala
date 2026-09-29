@@ -44,8 +44,8 @@ export const DEFAULT_INLINE_BYTES = 32 * 1024
 export const DEFAULT_PREVIEW_LINES = 400
 
 export function overflowConfigFromEnv(overflowDir: string): OverflowConfig {
-  const envInline = process.env.AK_OVERFLOW_INLINE_BYTES
-  const envPreview = process.env.AK_OVERFLOW_PREVIEW_LINES
+  const envInline = process.env.KALA_OVERFLOW_INLINE_BYTES
+  const envPreview = process.env.KALA_OVERFLOW_PREVIEW_LINES
   const inlineBytes = envInline ? Number(envInline) : DEFAULT_INLINE_BYTES
   const previewLines = envPreview ? Number(envPreview) : DEFAULT_PREVIEW_LINES
   return {

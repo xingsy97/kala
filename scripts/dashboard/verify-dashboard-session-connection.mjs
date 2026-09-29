@@ -74,14 +74,14 @@ try {
   page.on('pageerror', error => errors.push(String(error)))
   await page.evaluateOnNewDocument(() => {
     localStorage.setItem('i18nextLng', 'en')
-    window.__RUNLAB_DESKTOP__ = true
+    window.__KALA_DESKTOP__ = true
     const listeners = new Set()
     window.__nativeFixture = {
       info: { version: '0.0.0', focused: true, visible: true, notificationsAvailable: true, trayAvailable: true },
       activities: 0, confirmations: 0,
       emit(event) { Object.assign(this.info, event); for (const listener of listeners) listener(event) },
     }
-    window.__RUNLAB_DESKTOP_BRIDGE__ = {
+    window.__KALA_DESKTOP_BRIDGE__ = {
       version: 1, getInfo: async () => ({ ...window.__nativeFixture.info }),
       confirmConnection: async () => { window.__nativeFixture.confirmations++ },
       setActivity: async () => { window.__nativeFixture.activities++ }, notify: async () => {},

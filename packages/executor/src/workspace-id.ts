@@ -1,7 +1,7 @@
 /**
  * Workspace identity. A workspace = one local executor profile.
  *
- * Identity is a ULID persisted to `~/.agent-kernel/workspace-id` on first
+ * Identity is a ULID persisted to `~/.kala/workspace-id` on first
  * launch, then read verbatim on every subsequent launch. Sessions bind to
  * this ID in their JSONL header — renaming the workspace (via `--name`)
  * changes only the display label; routing stays intact.
@@ -17,8 +17,8 @@ import { join } from 'node:path'
 
 import { ulid } from 'ulid'
 
-export const WORKSPACE_ID_ENV = 'AGENT_KERNEL_WORKSPACE_ID_FILE'
-export const EXECUTOR_PROFILE_ENV = 'AGENT_KERNEL_EXECUTOR_PROFILE'
+export const WORKSPACE_ID_ENV = 'KALA_WORKSPACE_ID_FILE'
+export const EXECUTOR_PROFILE_ENV = 'KALA_EXECUTOR_PROFILE'
 
 export function normalizeExecutorProfile(profile: string | undefined): string | undefined {
   const value = profile?.trim()
@@ -34,8 +34,8 @@ export function normalizeExecutorProfile(profile: string | undefined): string | 
 export function executorProfileDir(profile: string | undefined): string {
   const normalized = normalizeExecutorProfile(profile)
   return normalized
-    ? join(homedir(), '.agent-kernel', 'profiles', normalized)
-    : join(homedir(), '.agent-kernel')
+    ? join(homedir(), '.kala', 'profiles', normalized)
+    : join(homedir(), '.kala')
 }
 
 export function workspaceIdPath(profile?: string): string {

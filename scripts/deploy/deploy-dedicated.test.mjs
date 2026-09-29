@@ -153,7 +153,7 @@ describe('deploy:dedicated client', () => {
     writeSums(releaseDir, [...assets, 'manifest.json'])
     writeFileSync(join(predecessorDir, 'SHA256SUMS'), `${'a'.repeat(64)}  predecessor\n`)
     writeFileSync(join(deployRoot, 'route-state.json'), JSON.stringify({ schemaVersion: 1, generation: 3, activeSlot: 'blue', slots: { blue: { origin: 'http://127.0.0.1:13001', releaseId: 'predecessor' }, green: { origin: 'http://127.0.0.1:13002', releaseId: 'predecessor' } } }))
-    const output = JSON.parse(execFileSync(process.execPath, [script, '--', 'stage', '--local', '--skip-build', '--release-dir', releaseDir, '--deploy-root', deployRoot, '--release-id', 'candidate', '--operation-id', 'operation-origin-0001', '--deployment-id', 'deployment-origin-0001'], { encoding: 'utf8', env: { ...process.env, AGENT_RUNLAB_SESSION_ID: 'session-origin-0001', AGENT_RUNLAB_CALL_ID: 'call-origin-0001' } }))
+    const output = JSON.parse(execFileSync(process.execPath, [script, '--', 'stage', '--local', '--skip-build', '--release-dir', releaseDir, '--deploy-root', deployRoot, '--release-id', 'candidate', '--operation-id', 'operation-origin-0001', '--deployment-id', 'deployment-origin-0001'], { encoding: 'utf8', env: { ...process.env, KALA_SESSION_ID: 'session-origin-0001', KALA_CALL_ID: 'call-origin-0001' } }))
     expect(output).toMatchObject({ accepted: true, operationId: 'operation-origin-0001', deploymentId: 'deployment-origin-0001' })
     const request = JSON.parse(readFileSync(join(deployRoot, 'requests', 'operation-origin-0001.json'), 'utf8'))
     expect(request.origin).toEqual({ sessionId: 'session-origin-0001', callId: 'call-origin-0001' })

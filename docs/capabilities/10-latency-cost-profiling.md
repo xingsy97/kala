@@ -55,9 +55,9 @@ reporting. Any external pricing analysis belongs outside `agent-kernel`.
 Implemented local profile command:
 
 ```bash
-agent-kernel-host enhancement profile session \
+kala-host enhancement profile session \
   --root-dir runs/profile/session \
-  --session-log ~/.agent-kernel/sessions/<session>.jsonl
+  --session-log ~/.kala/sessions/<session>.jsonl
 ```
 
 The output `profile.json` records LLM calls, tool calls, failed tool results,
@@ -102,7 +102,7 @@ Add compact profiling views:
 
 Current profiling is session/artifact based:
 
-- `agent-kernel-host enhancement profile session` reads a session log and writes
+- `kala-host enhancement profile session` reads a session log and writes
   `profile.json`.
 - Profiles record LLM calls, tool calls, failed tool results, token totals,
   missing usage count, missing provider trace count, model ids, wall time,

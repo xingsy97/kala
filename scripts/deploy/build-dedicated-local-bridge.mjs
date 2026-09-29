@@ -18,14 +18,14 @@ const controlAliases = new Map([
   ['bundle-dashboard-with-runtime.cjs', 'kala-dashboard-with-runtime.cjs'],
   ['agent-runlab-runtime.cjs', 'kala-runtime.cjs'],
   ['agent-kernel-executor.cjs', 'kala-executor.cjs'],
-  ['agent-runlab-dedicated-ingress.cjs', 'kala-dedicated-ingress.cjs'],
-  ['agent-runlab-dedicated-deploy-supervisor.cjs', 'kala-dedicated-deploy-supervisor.cjs'],
+  ['kala-dedicated-ingress.cjs', 'kala-dedicated-ingress.cjs'],
+  ['kala-dedicated-deploy-supervisor.cjs', 'kala-dedicated-deploy-supervisor.cjs'],
 ])
 const bridgeAssets = [...controlAliases.values(), DEDICATED_SUPPORT_ARCHIVE]
 const oldUnits = [
-  'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@.service',
-  'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service',
+  'kala-dedicated-ingress.service', 'kala-dedicated-unit@.service',
+  'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-control-updater.service',
+  'kala-dedicated-migration-finalizer.service',
 ]
 const oldUpdaterAssets = [...oldUnits, 'deployment.json', 'update-dedicated-control-plane.mjs', 'agent-kernel-dashboard-dist.tar.gz', 'dashboard-release.json']
 
@@ -101,7 +101,7 @@ export async function buildDedicatedLocalBridge({ legacyReleaseDir, localRelease
 
 async function verifyLegacyRelease(root) {
   const { manifest, assets, digest } = await verifyChecksummedRelease(root, true)
-  if (!assets.includes('agent-runlab-runtime.cjs') || !assets.includes('agent-runlab-dedicated-unit@.service')) throw new Error('legacy release does not have the required old-name layout')
+  if (!assets.includes('agent-runlab-runtime.cjs') || !assets.includes('kala-dedicated-unit@.service')) throw new Error('legacy release does not have the required old-name layout')
   if (manifest.fallbackAssets?.['agent-runlab-runtime'] !== 'agent-runlab-runtime.cjs') throw new Error('legacy release Runtime fallback is invalid')
   return { manifest, assets, digest }
 }

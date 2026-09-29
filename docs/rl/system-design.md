@@ -476,7 +476,7 @@ The target runtime path is:
 slime train.py
   -> slime rollout loop
   -> integrations.slime_agent_kernel.generate.generate(args, sample, sampling_params)
-  -> agent-kernel-host rl run-rollout-smoke
+  -> kala-host rl run-rollout-smoke
   -> packages/host/src/rl/rollout-runner.ts
   -> host/reducer/executor normal agent loop
   -> packages/host/src/llm/policy-gateway.ts
@@ -493,7 +493,7 @@ The current Python adapter can run in two modes:
 
 - artifact mode: read an existing trajectory and reward artifact and build a
   sample.
-- live mode: call the `agent-kernel-host rl run-rollout-smoke` CLI, then read
+- live mode: call the `kala-host rl run-rollout-smoke` CLI, then read
   the produced trajectory and reward artifacts.
 
 The expected returned slime sample fields are:
@@ -553,7 +553,7 @@ Implemented locally:
 - command verifier,
 - host-side live rollout smoke runner,
 - trajectory builder and slime sample readiness validation,
-- `agent-kernel-host rl ...` CLI commands,
+- `kala-host rl ...` CLI commands,
 - Python slime adapter,
 - Python trainer-environment preflight,
 - dashboard Agentic RL readiness panel,

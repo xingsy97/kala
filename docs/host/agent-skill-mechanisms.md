@@ -89,8 +89,8 @@ product-specific controls.
 Codex uses skills as the reusable workflow authoring format and plugins as
 the installable distribution unit.
 
-- Locations: repo `.agents/skills` from CWD up to repo root, user
-  `$HOME/.agents/skills`, admin `/etc/codex/skills`, and system bundled
+- Locations: repo `.agent/skills` from CWD up to repo root, user
+  `$HOME/.agent/skills`, admin `/etc/codex/skills`, and system bundled
   skills.
 - Invocation: explicit `$skill-name` mention / skill selector, or implicit
   model selection from the skill description.
@@ -120,7 +120,7 @@ only on slash commands or implicit file reads.
 - Locations: `.opencode/skills/<name>/SKILL.md`,
   `~/.config/opencode/skills/<name>/SKILL.md`, Claude-compatible
   `.claude/skills` / `~/.claude/skills`, and agent-compatible
-  `.agents/skills` / `~/.agents/skills`.
+  `.agent/skills` / `~/.agent/skills`.
 - Discovery: for project paths, OpenCode walks upward from CWD to the git
   worktree root and collects matching skill directories along the way.
 - Required frontmatter: `name` and `description`; optional `license`,
@@ -145,8 +145,8 @@ normal permission system.
 Pi has both a broad TypeScript extension API and a separate Agent Skills
 implementation.
 
-- Locations: global `~/.pi/agent/skills/` and `~/.agents/skills/`; project
-  `.pi/skills/` and `.agents/skills/` from CWD up to git root; package
+- Locations: global `~/.pi/agent/skills/` and `~/.agent/skills/`; project
+  `.pi/skills/` and `.agent/skills/` from CWD up to git root; package
   `skills/` directories or `pi.skills` entries in `package.json`; explicit
   settings `skills` arrays; repeatable CLI `--skill <path>`.
 - Discovery: scans at startup, extracts names and descriptions, and
@@ -187,7 +187,7 @@ tools, events, and state transitions.
 A credible skill implementation for this project should include:
 
 - Skill discovery from project and user directories, probably compatible
-  with `.agents/skills/<name>/SKILL.md` first.
+  with `.agent/skills/<name>/SKILL.md` first.
 - Frontmatter validation for `name` and `description`.
 - Progressive disclosure: inject only an available-skills summary into
   the LLM context.

@@ -4,7 +4,7 @@ import { OrganizationProvisioningService } from '../organizations/provisioning.j
 import { createPostgresControlPlaneDatabase } from '../persistence/postgres.js'
 
 async function main(): Promise<void> {
-  const connectionString = required('RUNTIME_INGRESS_DATABASE_URL')
+  const connectionString = required('KALA_INGRESS_DATABASE_URL')
   const subject = required('PROVISION_OWNER_SUBJECT')
   const email = required('PROVISION_OWNER_EMAIL')
   const now = new Date()

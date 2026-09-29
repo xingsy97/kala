@@ -11,39 +11,39 @@
       "command": "sc.exe",
       "args": [
         "create",
-        "Agent RunLab 执行器",
+        "Kala Executor",
         "binPath=",
         "\"C:\\Program Files\\星云 Corp\\执行器 Pro\\agent executor.exe\" \"--config\" \"D:\\共享 数据\\星云 Corp\\执行器 Pro\\config.json\"",
         "start=",
         "auto",
         "DisplayName=",
-        "Agent RunLab 执行器（生产）"
+        "Kala Executor"
       ]
     },
     {
       "action": "recovery",
       "command": "sc.exe",
-      "args": ["failure", "Agent RunLab 执行器", "reset=", "86400", "actions=", "restart/5000/restart/30000/none/0"]
+      "args": ["failure", "Kala Executor", "reset=", "86400", "actions=", "restart/5000/restart/30000/none/0"]
     },
     {
       "action": "start",
       "command": "sc.exe",
-      "args": ["start", "Agent RunLab 执行器"]
+      "args": ["start", "Kala Executor"]
     },
     {
       "action": "query",
       "command": "sc.exe",
-      "args": ["query", "Agent RunLab 执行器"]
+      "args": ["query", "Kala Executor"]
     },
     {
       "action": "stop",
       "command": "sc.exe",
-      "args": ["stop", "Agent RunLab 执行器"]
+      "args": ["stop", "Kala Executor"]
     },
     {
       "action": "delete",
       "command": "sc.exe",
-      "args": ["delete", "Agent RunLab 执行器"]
+      "args": ["delete", "Kala Executor"]
     }
   ]
 }

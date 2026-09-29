@@ -5,9 +5,9 @@ import { readFile, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
-const databaseUrl = process.env.RUNTIME_INGRESS_DATABASE_URL
+const databaseUrl = process.env.KALA_INGRESS_DATABASE_URL
 const dumpPath = process.argv[2] ? resolve(process.argv[2]) : undefined
-if (!databaseUrl || !dumpPath) throw new Error('usage: RUNTIME_INGRESS_DATABASE_URL=... verify-control-plane-restore.mjs BACKUP.dump')
+if (!databaseUrl || !dumpPath) throw new Error('usage: KALA_INGRESS_DATABASE_URL=... verify-control-plane-restore.mjs BACKUP.dump')
 const manifest = JSON.parse(await readFile(`${dumpPath}.json`, 'utf8'))
 if ((await stat(dumpPath)).size !== manifest.bytes || await hashFile(dumpPath) !== manifest.sha256) throw new Error('backup manifest verification failed')
 await run('pg_restore', ['--exit-on-error', '--clean', '--if-exists', '--no-owner', '--no-acl', '--dbname', databaseUrl, dumpPath])

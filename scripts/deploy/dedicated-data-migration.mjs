@@ -4,25 +4,25 @@ import { copyFile, lstat, mkdir, readFile, rename, rm, stat } from 'node:fs/prom
 import { dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
-// Mutable home configuration that is intentionally outside `.agent-kernel`.
+// Mutable home configuration that is intentionally outside `.kala`.
 // Keep this list aligned with every homedir-backed path used by the Host; the
 // state tree rename alone cannot preserve these settings after HOME changes.
 const HOME_CONFIG_FILES = [
-  '.claude/settings.json',
-  '.codex/config.toml',
-  '.codex/auth.json',
-  '.config/agent-kernel/models.json',
-  '.config/agent-kernel/agent.json',
-  '.config/agent-kernel/config.toml',
-  '.config/agent-kernel/socket-admin.json',
+  { source: '.claude/settings.json', target: '.claude/settings.json' },
+  { source: '.codex/config.toml', target: '.codex/config.toml' },
+  { source: '.codex/auth.json', target: '.codex/auth.json' },
+  { source: '.config/agent-kernel/models.json', target: '.config/kala/models.json' },
+  { source: '.config/agent-kernel/agent.json', target: '.config/kala/agent.json' },
+  { source: '.config/agent-kernel/config.toml', target: '.config/kala/config.toml' },
+  { source: '.config/agent-kernel/socket-admin.json', target: '.config/kala/socket-admin.json' },
 ]
 
 export async function planDedicatedDataMigration(options) {
   const sourceRoot = resolve(options.sourceRoot)
   const dataRoot = resolve(options.dataRoot)
-  const sourceState = sourceRoot.endsWith('/.agent-kernel') ? sourceRoot : join(sourceRoot, '.agent-kernel')
-  const legacyHome = sourceState.slice(0, -'/.agent-kernel'.length)
-  const targetState = join(dataRoot, '.agent-kernel')
+  const sourceState = legacyStatePath(sourceRoot)
+  const legacyHome = dirname(sourceState)
+  const targetState = join(dataRoot, '.kala')
   await assertDirectory(sourceState, 'legacy state')
   await assertMissing(targetState, 'target state')
   await mkdir(dataRoot, { recursive: true, mode: 0o711 })
@@ -30,17 +30,17 @@ export async function planDedicatedDataMigration(options) {
   if (sourceFs.dev !== targetFs.dev) throw new Error('legacy and target state must be on the same filesystem for atomic move migration')
   const homeConfigFiles = []
   for (const relative of HOME_CONFIG_FILES) {
-    const source = join(legacyHome, relative)
-    const target = join(dataRoot, relative)
-    const sourceFile = await regularFileOrMissing(source, `legacy home config ${relative}`)
+    const source = join(legacyHome, relative.source)
+    const target = join(dataRoot, relative.target)
+    const sourceFile = await regularFileOrMissing(source, `legacy home config ${relative.source}`)
     if (!sourceFile) continue
-    await assertMissing(target, `target home config ${relative}`)
+    await assertMissing(target, `target home config ${relative.target}`)
     homeConfigFiles.push({ source, target, sha256: sha256(await readFile(source)) })
   }
   return {
     schemaVersion: 1, mode: 'atomic-move', sourceState, targetState, legacyHome,
     legacyOwner: options.legacyOwner ?? `${sourceFs.uid}:${sourceFs.gid}`,
-    targetOwner: options.targetOwner ?? 'agent-runlab:agent-runlab',
+    targetOwner: options.targetOwner ?? 'kala:kala',
     filesystemDevice: String(sourceFs.dev), homeConfigFiles,
   }
 }
@@ -53,7 +53,7 @@ export async function planDedicatedDataMigration(options) {
 export async function probeDedicatedAtomicRename(options) {
   const sourceRoot = resolve(options.sourceRoot)
   const dataRoot = resolve(options.dataRoot)
-  const sourceState = sourceRoot.endsWith('/.agent-kernel') ? sourceRoot : join(sourceRoot, '.agent-kernel')
+  const sourceState = legacyStatePath(sourceRoot)
   const legacyHome = dirname(sourceState)
   await assertDirectory(sourceState, 'legacy state')
   await mkdir(dataRoot, { recursive: true, mode: 0o711 })
@@ -70,6 +70,13 @@ export async function probeDedicatedAtomicRename(options) {
     await rm(sourceProbe, { recursive: true, force: true })
     await rm(targetProbe, { recursive: true, force: true })
   }
+
+}
+
+function legacyStatePath(sourceRoot) {
+  return sourceRoot.endsWith('/.agent-kernel') || sourceRoot.endsWith('/.kala')
+    ? sourceRoot
+    : join(sourceRoot, '.agent-kernel')
 }
 
 export async function executeDedicatedDataMigration(migration, options = {}) {

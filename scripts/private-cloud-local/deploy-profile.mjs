@@ -15,9 +15,9 @@ if(action==='apply'){
   console.error('Rollback requires the image IDs in the supplied manifest to remain present; database rollback is intentionally separate.')
   run('docker',['compose',...composeArgs(profile),'up','-d','--wait','--no-build'])
 }else throw new Error(`unknown action ${action}`)
-function run(command,args){const x=spawnSync(command,args,{cwd:root,stdio:'inherit',env:{...process.env,RUNLAB_PROFILE:profile}});if(x.status!==0)process.exit(x.status??1)}
+function run(command,args){const x=spawnSync(command,args,{cwd:root,stdio:'inherit',env:{...process.env,KALA_PROFILE:profile}});if(x.status!==0)process.exit(x.status??1)}
 function stackExists(selected){
-  const x=spawnSync('docker',['compose',...composeArgs(selected),'ps','--all','--services'],{cwd:root,encoding:'utf8',env:{...process.env,RUNLAB_PROFILE:selected}})
+  const x=spawnSync('docker',['compose',...composeArgs(selected),'ps','--all','--services'],{cwd:root,encoding:'utf8',env:{...process.env,KALA_PROFILE:selected}})
   if(x.status!==0)throw new Error(x.stderr||'failed to inspect existing Private Cloud stack')
   return x.stdout.trim().length>0
 }

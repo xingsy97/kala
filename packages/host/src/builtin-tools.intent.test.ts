@@ -29,7 +29,7 @@ describe('built-in tool intent schema',()=>{
     const populated=createBuiltinTools([{
       name:'workspace-skill',
       description:'A workspace-specific Skill that must not enter the Tool schema.',
-      path:'/placeholder/.agents/skills/workspace-skill/SKILL.md',
+      path:'/placeholder/.agent/skills/workspace-skill/SKILL.md',
     }])
     const emptySkill=empty.find((tool)=>tool.name==='skill')!
     const populatedSkill=populated.find((tool)=>tool.name==='skill')!

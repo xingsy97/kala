@@ -1167,8 +1167,8 @@ describe('Composer', () => {
 
   it('uses the native Desktop image clipboard when WebKit exposes no file representation', async () => {
     const readClipboardImage = vi.fn(async () => 'data:image/png;base64,iVBORw0KGgo=')
-    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
-    Object.defineProperty(window, '__RUNLAB_DESKTOP_BRIDGE__', {
+    Object.defineProperty(window, '__KALA_DESKTOP__', { value: true, configurable: true })
+    Object.defineProperty(window, '__KALA_DESKTOP_BRIDGE__', {
       value: {
         version: 1,
         getInfo: async () => ({ version: 'test', focused: true, visible: true }),
@@ -1191,15 +1191,15 @@ describe('Composer', () => {
       expect((input as HTMLTextAreaElement).value).toBe('')
       expect(readClipboardImage).toHaveBeenCalledOnce()
     } finally {
-      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
-      delete (window as Window & { __RUNLAB_DESKTOP_BRIDGE__?: unknown }).__RUNLAB_DESKTOP_BRIDGE__
+      delete (window as Window & { __KALA_DESKTOP__?: boolean }).__KALA_DESKTOP__
+      delete (window as Window & { __KALA_DESKTOP_BRIDGE__?: unknown }).__KALA_DESKTOP_BRIDGE__
     }
   })
 
   it('restores plain text when the Desktop native clipboard contains no image', async () => {
     const readClipboardImage = vi.fn(async () => null)
-    Object.defineProperty(window, '__RUNLAB_DESKTOP__', { value: true, configurable: true })
-    Object.defineProperty(window, '__RUNLAB_DESKTOP_BRIDGE__', {
+    Object.defineProperty(window, '__KALA_DESKTOP__', { value: true, configurable: true })
+    Object.defineProperty(window, '__KALA_DESKTOP_BRIDGE__', {
       value: {
         version: 1,
         getInfo: async () => ({ version: 'test', focused: true, visible: true }),
@@ -1218,8 +1218,8 @@ describe('Composer', () => {
       await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe('ordinary pasted text'))
       expect(readClipboardImage).toHaveBeenCalledOnce()
     } finally {
-      delete (window as Window & { __RUNLAB_DESKTOP__?: boolean }).__RUNLAB_DESKTOP__
-      delete (window as Window & { __RUNLAB_DESKTOP_BRIDGE__?: unknown }).__RUNLAB_DESKTOP_BRIDGE__
+      delete (window as Window & { __KALA_DESKTOP__?: boolean }).__KALA_DESKTOP__
+      delete (window as Window & { __KALA_DESKTOP_BRIDGE__?: unknown }).__KALA_DESKTOP_BRIDGE__
     }
   })
 

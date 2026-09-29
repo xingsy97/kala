@@ -106,7 +106,7 @@ export type ExecutorOptions = {
   host: string
   /**
    * Stable workspace identity. If omitted, the executor loads (or on first
-   * launch mints) one from `~/.agent-kernel/workspace-id`. Passing this
+   * launch mints) one from `~/.kala/workspace-id`. Passing this
    * explicitly is the escape hatch for tests or multi-tenant deployments.
    */
   workspaceId?: string
@@ -176,11 +176,11 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   const workspaceName = options.workspaceName ?? hostname()
   const workspaceRoot = sandboxRoots[0] ?? process.cwd()
   const overflowConfig = overflowConfigFromEnv(
-    join(workspaceRoot, '.agent-kernel', 'overflow'),
+    join(workspaceRoot, '.kala', 'overflow'),
   )
   const receiptStore = options.receiptStorePath === false
     ? null
-    : new ExecutionReceiptStore(options.receiptStorePath ?? join(workspaceRoot, '.agent-kernel', 'execution-receipts.json'))
+    : new ExecutionReceiptStore(options.receiptStorePath ?? join(workspaceRoot, '.kala', 'execution-receipts.json'))
   const receiptStoreReady = receiptStore?.load() ?? Promise.resolve()
 
   const factory = options.ioFactory ?? clientIO
@@ -197,7 +197,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     reconnectionDelayMax: 60_000,   // keep recovery bounded while retaining jitter
     reconnectionAttempts: Infinity,
     randomizationFactor: 0.5,       // +/-50% jitter, avoid thundering-herd reconnect
-    ...(options.invite ? { extraHeaders: { 'x-agent-runlab-executor-invite': options.invite } } : {})
+    ...(options.invite ? { extraHeaders: { 'x-kala-executor-invite': options.invite } } : {})
   }) as Socket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>
 
   const inFlight = new Map<string, AbortController>()
@@ -478,13 +478,13 @@ function executorCapabilities(tools: ReadonlyMap<string, Tool>, sandboxRoots: re
 
 function executorBuildInfo(): BuildMetadata {
   const globalValue = (globalThis as typeof globalThis & {
-    __AGENT_KERNEL_BUILD_INFO__?: unknown
-  }).__AGENT_KERNEL_BUILD_INFO__
+    __KALA_BUILD_INFO__?: unknown
+  }).__KALA_BUILD_INFO__
   return parseBuildInfo(globalValue) ?? {
-    releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? 'local',
+    releaseTag: process.env.KALA_RELEASE_TAG ?? 'local',
     productVersion: executorReleaseVersion(),
-    gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown',
-    builtAt: process.env.AGENT_KERNEL_BUILT_AT ?? 'unknown',
+    gitCommit: process.env.KALA_GIT_COMMIT ?? 'unknown',
+    builtAt: process.env.KALA_BUILT_AT ?? 'unknown',
     artifactKind: 'source',
     dashboardMode: 'none',
   }

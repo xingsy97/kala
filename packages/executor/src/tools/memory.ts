@@ -2,11 +2,11 @@
  * Memory tools — a three-tier scratchpad the agent maintains for itself.
  *
  * Scope hierarchy (broadest → narrowest):
- *   - global    → ~/.agent-kernel/memory/<key>.md
+ *   - global    → ~/.kala/memory/<key>.md
  *                 shared across every workspace on this machine.
- *   - workspace → <firstSandboxRoot>/.agent-kernel/memory/<key>.md
+ *   - workspace → <firstSandboxRoot>/.kala/memory/<key>.md
  *                 shared across every session in this workspace.
- *                 (falls back to process.cwd()/.agent-kernel/memory when
+ *                 (falls back to process.cwd()/.kala/memory when
  *                 no sandbox roots are configured — same rule the executor
  *                 uses for its own working directory)
  *   - session   → NOT on disk; the kernel intercepts the tool_result and
@@ -74,12 +74,12 @@ function requireKey(input: Record<string, unknown>): string {
 
 function memoryDirFor(scope: Exclude<Scope, 'session'>, ctx: ToolContext): string {
   if (scope === 'global') {
-    return join(homedir(), '.agent-kernel', 'memory')
+    return join(homedir(), '.kala', 'memory')
   }
   // workspace
   const roots = ctx.sandbox.roots
   const base = roots.length > 0 ? roots[0]! : process.cwd()
-  return join(base, '.agent-kernel', 'memory')
+  return join(base, '.kala', 'memory')
 }
 
 async function ensureDir(dir: string): Promise<void> {

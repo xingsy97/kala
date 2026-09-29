@@ -57,13 +57,13 @@ try {
 
   await harness.step('start production Host and Executor with v1 Dashboard', async () => {
     const host = startProcess(bundle, [], { cwd: root, env: {
-      ...process.env, HOME: home, HOST_LISTEN_HOST: '127.0.0.1', HOST_PORT: String(port), SESSIONS_DIR: sessionsDir,
-      DASHBOARD_DIR: served, AGENT_KERNEL_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), EXECUTOR_TOKENS: JSON.stringify([{ token }]), ANTHROPIC_API_KEY: 'unused',
+      ...process.env, HOME: home, KALA_BIND_HOST: '127.0.0.1', KALA_PORT: String(port), KALA_SESSIONS_DIR: sessionsDir,
+      KALA_DASHBOARD_DIR: served, KALA_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), KALA_EXECUTOR_TOKENS: JSON.stringify([{ token }]), ANTHROPIC_API_KEY: 'unused',
     } })
     harness.registerProcess('production-host', host, hostLogs)
     await waitForHttp(`${origin}/`)
     const executor = startProcess(executorAsset, ['--host', origin, '--sandbox-root', workspace], { cwd: workspace, env: {
-      ...process.env, HOME: home, HOST_URL: origin, EXECUTOR_TOKEN: token, WORKSPACE_NAME: 'pwa-e2e-workspace', AGENT_KERNEL_WORKSPACE_ID_FILE: join(stateRoot, 'workspace-id'),
+      ...process.env, HOME: home, HOST_URL: origin, EXECUTOR_TOKEN: token, WORKSPACE_NAME: 'pwa-e2e-workspace', KALA_WORKSPACE_ID_FILE: join(stateRoot, 'workspace-id'),
     } })
     harness.registerProcess('production-executor', executor, executorLogs)
     await waitFor(() => executorLogs.some((line) => line.includes('executor announced')), { timeoutMs: 30_000, name: 'Executor announce' })

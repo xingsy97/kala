@@ -15,11 +15,13 @@ import { join } from 'node:path'
 import type {
   AttachedExecutor,
   ModelInfo,
+  PublicUrlPattern,
   ServerMessageQueueEvent,
   ServerSettingsPayload,
   SessionErrorEvent,
   SessionErrorScope,
 } from '@agent-kernel/shared'
+import { validatePublicRequest } from '@agent-kernel/shared'
 import type {
   AgentConfig,
   RequestApprovalEffect,
@@ -93,10 +95,12 @@ import { KernelAgentRuntime } from './agent-runtime/kernel-runtime.js'
 import { CopilotAgentRuntime } from './agent-runtime/copilot-runtime.js'
 import { createRuntimeToolDispatcher } from './agent-runtime/tool-dispatcher.js'
 import { AskUserChoiceBroker } from './ask-user-choice.js'
+import { attachPublicAccessGate } from './http/public-access-gate.js'
 
 export type HostServerOptions = {
   port: number
   listenHost?: string
+  publicUrls?: readonly PublicUrlPattern[]
   sessionsDir: string
   llm: LLMAdapter
   llmQuota?: LlmQuotaEnforcer
@@ -140,7 +144,7 @@ export type HostServerOptions = {
   models?: readonly ModelInfo[] | (() => readonly ModelInfo[])
   defaultModel?: string | (() => string)
   /**
-   * User-configured hooks (from `~/.config/agent-kernel/config.toml`). When
+   * User-configured hooks (from `~/.config/kala/config.toml`). When
    * present the loop invokes matching hooks around every tool dispatch;
    * session_start / session_end hooks fire from server.ts around
    * create/delete.
@@ -215,9 +219,14 @@ export async function startHostServer(
   const capabilities = options.capabilities ?? (deployment.runtimeProfile === 'full' ? FULL_RUNTIME_CAPABILITIES : AGENT_RUNTIME_CAPABILITIES)
   const audit = options.audit ?? noopAuditLogger
   const http = options.httpServer ?? createServer()
-  const allowedOrigins = parseAllowedOrigins(process.env.AGENT_KERNEL_ALLOWED_ORIGINS)
   const io = new IOServer(http, {
-    cors: allowedOrigins === null ? { origin: '*' } : { origin: allowedOrigins, credentials: true },
+    cors: { origin: true, credentials: true },
+    ...(options.publicUrls ? {
+      allowRequest: (request, callback) => {
+        const decision = validatePublicRequest(options.publicUrls!, request.headers.host, typeof request.headers.origin === 'string' ? request.headers.origin : undefined)
+        callback(null, decision.ok)
+      },
+    } : {}),
     maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_BYTES,
     pingInterval: 20_000,
     pingTimeout: 30_000,
@@ -241,9 +250,11 @@ export async function startHostServer(
   }
   let closed = false
   let agentRuntimes: AgentRuntimeRegistry | undefined
+  let detachPublicAccessGate: (() => void) | undefined
   const closeServer = async (): Promise<void> => {
     if (closed) return
     closed = true
+    detachPublicAccessGate?.()
     for (const batch of tokenDeltaBatches.values()) clearTimeout(batch.timer)
     tokenDeltaBatches.clear()
     streamingDrafts.clear()
@@ -255,6 +266,7 @@ export async function startHostServer(
     for (let attempt = 0; attempt < 100 && drainingQueues.size > 0; attempt += 1) {
       await new Promise<void>((resolve) => setTimeout(resolve, 10))
     }
+    detachPublicAccessGate = options.publicUrls ? attachPublicAccessGate(http, options.publicUrls) : undefined
     await new Promise<void>((resolve, reject) => {
       io.close((err) => (err ? reject(err) : resolve()))
     })
@@ -328,6 +340,7 @@ export async function startHostServer(
   })
   const pushRoutes = createPushRoutes({ store: pushStore, vapid, dispatcher: pushDispatcher, activity: pushActivity })
   http.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    if (res.headersSent || res.writableEnded) return
     const requestUrl = new URL(req.url ?? '/', 'http://localhost')
     if ((req.url ?? '/').split('?')[0]?.startsWith('/push/')) claimRoute(req)
     // pushRoutes returns true when it handled the request. Anything not
@@ -1223,7 +1236,7 @@ export async function startHostServer(
       },
     },
   }, {
-    enabled: options.copilot?.enabled ?? process.env.AGENT_RUNLAB_COPILOT_ENABLED === '1',
+    enabled: options.copilot?.enabled ?? process.env.KALA_COPILOT_ENABLED === '1',
     sessionsDir: options.sessionsDir,
     ...(options.copilot?.gitHubToken ?? process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
       ? { gitHubToken: options.copilot?.gitHubToken ?? process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN }
@@ -1370,7 +1383,7 @@ export async function startHostServer(
     const onError = (err: NodeJS.ErrnoException): void => {
       http.off('listening', onListening)
       const message = err.code === 'EADDRINUSE'
-        ? `Port ${options.port} is already in use. Stop the process using it or start the host with HOST_PORT=<free-port> or --port <free-port>.`
+        ? `Port ${options.port} is already in use. Stop the process using it or start the host with KALA_PORT=<free-port> or --port <free-port>.`
         : `Failed to start host on port ${options.port}: ${err.message}`
       const wrapped = new Error(message)
       wrapped.cause = err
@@ -1404,15 +1417,4 @@ export async function startHostServer(
     port,
     close: closeServer,
   }
-}
-
-/**
- * Parse AGENT_KERNEL_ALLOWED_ORIGINS ("http://a.example.test,http://b.example.test").
- * Returns null when unset/empty (means "keep permissive default"),
- * a string[] otherwise.
- */
-function parseAllowedOrigins(raw: string | undefined): string[] | null {
-  if (!raw) return null
-  const list = raw.split(',').map((s) => s.trim()).filter(Boolean)
-  return list.length > 0 ? list : null
 }

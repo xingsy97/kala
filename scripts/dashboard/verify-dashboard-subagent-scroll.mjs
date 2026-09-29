@@ -25,7 +25,7 @@ const PORT = Number(process.env.VERIFY_SUBAGENT_SCROLL_PORT ?? 3176)
 const HOST_URL = `http://localhost:${PORT}`
 const PARENT_SESSION_ID = `subagent-scroll-parent-${Date.now()}`
 const CHILD_SESSION_ID = `subagent-scroll-child-${Date.now()}`
-const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-subagent-scroll-sessions-'))
+const KALA_SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-subagent-scroll-sessions-'))
 const SCREENSHOT_PATH = join(tmpdir(), `agent-kernel-subagent-scroll-${Date.now()}.png`)
 const CHROME = process.env.CHROME_PATH ?? detectBrowser()
 
@@ -46,13 +46,13 @@ try {
     timeoutMs: 180_000,
   })
 
-  host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/agent-kernel-host.ts'], {
+  host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/kala-host.ts'], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      HOST_PORT: String(PORT),
-      SESSIONS_DIR,
-      DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
+      KALA_PORT: String(PORT),
+      KALA_SESSIONS_DIR,
+      KALA_DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
     },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -304,7 +304,7 @@ function writeSession(sessionId, { config, workspaceId, workspaceName, initialSt
     ...(parentSessionId ? { parentSessionId } : {}),
     ...(parentCursor !== undefined ? { parentCursor } : {}),
   }
-  writeFileSync(join(SESSIONS_DIR, `${Date.now()}_${sessionId}.jsonl`), `${JSON.stringify(header)}\n`)
+  writeFileSync(join(KALA_SESSIONS_DIR, `${Date.now()}_${sessionId}.jsonl`), `${JSON.stringify(header)}\n`)
 }
 
 function stateFor(sessionId, messages) {

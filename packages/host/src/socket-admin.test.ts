@@ -2,16 +2,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { loadSocketAdminConfig } from './socket-admin.js'
 
-const ORIGINAL_MODE = process.env.AGENT_KERNEL_SOCKET_ADMIN_MODE
+const ORIGINAL_MODE = process.env.KALA_SOCKET_ADMIN_MODE
 
 afterEach(() => {
-  if (ORIGINAL_MODE === undefined) delete process.env.AGENT_KERNEL_SOCKET_ADMIN_MODE
-  else process.env.AGENT_KERNEL_SOCKET_ADMIN_MODE = ORIGINAL_MODE
+  if (ORIGINAL_MODE === undefined) delete process.env.KALA_SOCKET_ADMIN_MODE
+  else process.env.KALA_SOCKET_ADMIN_MODE = ORIGINAL_MODE
 })
 
 describe('loadSocketAdminConfig', () => {
   it('defaults Socket.IO Admin UI mode to development before initialization', () => {
-    delete process.env.AGENT_KERNEL_SOCKET_ADMIN_MODE
+    delete process.env.KALA_SOCKET_ADMIN_MODE
 
     const state = loadSocketAdminConfig({
       currentModulePath: import.meta.url,
@@ -25,7 +25,7 @@ describe('loadSocketAdminConfig', () => {
   })
 
   it('defaults old initialized records without mode to development', () => {
-    delete process.env.AGENT_KERNEL_SOCKET_ADMIN_MODE
+    delete process.env.KALA_SOCKET_ADMIN_MODE
 
     const state = loadSocketAdminConfig({
       currentModulePath: import.meta.url,
@@ -44,7 +44,7 @@ describe('loadSocketAdminConfig', () => {
   })
 
   it('allows explicit production mode from the environment', () => {
-    process.env.AGENT_KERNEL_SOCKET_ADMIN_MODE = 'production'
+    process.env.KALA_SOCKET_ADMIN_MODE = 'production'
 
     const state = loadSocketAdminConfig({
       currentModulePath: import.meta.url,

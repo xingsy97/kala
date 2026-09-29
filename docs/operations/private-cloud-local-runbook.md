@@ -13,7 +13,7 @@ The stack contains:
 
 - `nfs-server`: digest-pinned NFS-Ganesha userspace NFSv4 server;
 - `nfs-session-data`: ordinary Docker Volume containing the authoritative Session bytes;
-- `tenant-data`: NFS-backed Docker Volume mounted by Runtime Host at `/var/lib/agent-runlab`.
+- `tenant-data`: NFS-backed Docker Volume mounted by Runtime Host at `/var/lib/kala`.
 
 ```mermaid
 flowchart LR
@@ -56,8 +56,8 @@ Configure a real Provider before non-acceptance use:
 ```bash
 printf %s "$PROVIDER_API_KEY" > deploy/private-cloud/.secrets/llm_api_key
 chmod 600 deploy/private-cloud/.secrets/llm_api_key
-export RUNTIME_HOST_LLM_BASE_URL=https://provider.example/v1
-export RUNTIME_HOST_LLM_MODEL=model-id
+export KALA_RUNTIME_HOST_LLM_BASE_URL=https://provider.example/v1
+export KALA_RUNTIME_HOST_LLM_MODEL=model-id
 ```
 
 For protocol acceptance, add only the mock-Provider overlay; Session storage remains identical:
@@ -73,12 +73,12 @@ node scripts/private-cloud-local/compose-with-nfs.mjs \
 ```bash
 pnpm private-cloud:validate
 
-docker inspect agent-runlab-private-cloud-nfs-server-1 \
+docker inspect kala-private-cloud-nfs-server-1 \
   --format '{{.State.Health.Status}}'
 
 docker volume inspect \
-  agent-runlab-private-cloud_tenant-data \
-  agent-runlab-private-cloud_nfs-session-data
+  kala-private-cloud_tenant-data \
+  kala-private-cloud_nfs-session-data
 ```
 
 `tenant-data` must report:
@@ -93,9 +93,9 @@ device=:/
 Validate content and POSIX operations from Runtime Host:
 
 ```bash
-docker exec agent-runlab-private-cloud-runtime-host-1 sh -lc '
-  find /var/lib/agent-runlab -type f | wc -l
-  probe=/var/lib/agent-runlab/.nfs-probe-$$
+docker exec kala-private-cloud-runtime-host-1 sh -lc '
+  find /var/lib/kala -type f | wc -l
+  probe=/var/lib/kala/.nfs-probe-$$
   printf probe > "$probe"
   sync
   mv "$probe" "$probe.renamed"

@@ -25,7 +25,7 @@ export function installManagedGeneration(
   invalidExistingExecutable?: string,
 ): ManagedGenerationInstall {
   const plan = generationLinkPlan(managedRoot, release)
-  const executable = join(plan.generation, 'runlab-executor')
+  const executable = join(plan.generation, 'kala-executor')
   mkdirSync(plan.generation, { recursive: true, mode: 0o700 })
 
   let installed = false

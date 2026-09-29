@@ -5,7 +5,7 @@ import { access } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { Socket } from 'node:net'
 
-import { schema, validateClientMessagePayload, validateInlineMessageFiles, validateInlineMessageImages } from '@agent-kernel/shared'
+import { schema, validateClientMessagePayload, validateInlineMessageFiles, validateInlineMessageImages, type PublicUrlPattern } from '@agent-kernel/shared'
 import { authenticateDashboardHandshake, type AuthConfig, type DashboardActor } from '../auth-control.js'
 import { createRuntimeUnitIngress } from './runtime-unit-ingress.js'
 import { AdmissionBackpressureError, DedicatedAdmissionLedger, type AdmissionMessage } from './dedicated-admission-ledger.js'
@@ -13,6 +13,7 @@ import { DEDICATED_RUNTIME_UNIT_ID } from './dedicated-unit.js'
 import { readDedicatedRouteState } from './dedicated-slot-state.js'
 import { readJsonFile, writeAtomicFile } from './atomic-json-file.js'
 import { isDedicatedDashboardRequest, readDashboardRouteState, serveDedicatedDashboard } from './dedicated-dashboard.js'
+import { attachPublicAccessGate } from '../http/public-access-gate.js'
 
 export type DedicatedIngress = {
   readonly http: HttpServer
@@ -37,9 +38,11 @@ export async function startDedicatedIngress(options: {
   dashboardStatePath?: string
   dashboardReleasesRoot?: string
   auth?: AuthConfig
+  publicUrls?: readonly PublicUrlPattern[]
 }): Promise<DedicatedIngress> {
   const ledger = options.admissionLedgerPath ? new DedicatedAdmissionLedger(options.admissionLedgerPath, options.admissionCapacity) : undefined
   const http = createServer((request, response) => {
+    if (response.headersSent || response.writableEnded) return
     stripUntrustedIdentityHeaders(request)
     const path = (request.url ?? '/').split('?')[0] ?? '/'
     if (path === '/healthz' && request.method === 'GET') {
@@ -193,6 +196,7 @@ export async function startDedicatedIngress(options: {
   })
   http.prependListener('upgrade', stripUntrustedIdentityHeaders)
   ingress.attach(http)
+  const detachPublicAccessGate = options.publicUrls ? attachPublicAccessGate(http, options.publicUrls) : undefined
   let reconciling = false
   let retryRequested = false
   let reconcileTimer: ReturnType<typeof setTimeout> | undefined
@@ -292,6 +296,7 @@ export async function startDedicatedIngress(options: {
     async close() {
       if (reconcileTimer) clearTimeout(reconcileTimer)
       for (const watcher of watchers) watcher.close()
+      detachPublicAccessGate?.()
       ingress.close()
       const closed = new Promise<void>((resolve, reject) => {
         http.close((error) => error ? reject(error) : resolve())

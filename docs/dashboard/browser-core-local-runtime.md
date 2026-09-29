@@ -205,7 +205,7 @@ The clean path is to introduce runtime interfaces before moving behavior:
    - `settingsStore`
 2. Implement the current Host as `NodeHostRuntime` without changing behavior.
 3. Add `BrowserRuntime` using IndexedDB, browser-safe settings, and local transports.
-4. Add executor serving mode, for example `agent-kernel-executor --serve-tools --port 0`.
+4. Add executor serving mode, for example `kala-executor --serve-tools --port 0`.
 5. Add a dashboard runtime selector with `host`, `browser-local`, and `browser-local-proxy` options.
 
 Each step should keep the contracts small enough that tests can run the same reducer scenarios against both runtimes.

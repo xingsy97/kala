@@ -17,7 +17,7 @@ import puppeteer from 'puppeteer-core'
 const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_DASHBOARD_PORT ?? 3183)
 const HOST_URL = `http://localhost:${PORT}`
-const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'ak-screenshot-sessions-'))
+const KALA_SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'ak-screenshot-sessions-'))
 const WORKSPACE = mkdtempSync(join(tmpdir(), 'ak-screenshot-workspace-'))
 const WORKSPACE_ID_FILE = join(tmpdir(), `ak-screenshot-workspace-id-${process.pid}`)
 const CHROME_DEBUG_URL = process.env.CHROME_DEBUG_URL ?? 'http://127.0.0.1:9222'
@@ -40,14 +40,14 @@ async function main() {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      HOST_PORT: String(PORT),
-      SESSIONS_DIR,
-      DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
+      KALA_PORT: String(PORT),
+      KALA_SESSIONS_DIR,
+      KALA_DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   pipe(host, hostLog, 'host')
-  await waitForLog(hostLog, `agent-kernel-host listening on port ${PORT}`, 15_000)
+  await waitForLog(hostLog, `kala-host listening on port ${PORT}`, 15_000)
 
   executor = spawn('pnpm', ['--filter', '@agent-kernel/executor', 'dev'], {
     cwd: REPO_ROOT,
@@ -56,7 +56,7 @@ async function main() {
       HOST_URL,
       WORKSPACE_NAME: 'ak-screenshot',
       SANDBOX_ROOTS: WORKSPACE,
-      AGENT_KERNEL_WORKSPACE_ID_FILE: WORKSPACE_ID_FILE,
+      KALA_WORKSPACE_ID_FILE: WORKSPACE_ID_FILE,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })

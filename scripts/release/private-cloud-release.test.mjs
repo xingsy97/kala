@@ -34,21 +34,21 @@ test('installs, upgrades Dashboard independently, and rolls back from persisted 
   build(second, { ...shared, dashboard: image('dashboard', 'd') }, '2'.repeat(40))
   const config = join(scratch, 'config'); mkdirSync(join(config, 'secrets'), { recursive: true })
   copyFileSync(join(root, 'deploy/private-cloud/local/runtime-provider-catalog.json'), join(config, 'runtime-provider-catalog.json'))
-  writeFileSync(join(config, 'deployment.env'), 'RUNLAB_PROFILE=local\nRUNLAB_STORAGE=local-volume\nCOMPOSE_PROJECT_NAME=runlab-test\n')
+  writeFileSync(join(config, 'deployment.env'), 'KALA_PROFILE=local\nKALA_STORAGE=local-volume\nCOMPOSE_PROJECT_NAME=runlab-test\n')
   const bin = join(scratch, 'bin'); mkdirSync(bin); const docker = join(bin, 'docker')
   writeFileSync(docker, `#!/usr/bin/env node
 const args=process.argv.slice(2);
 if(args.includes('ps')&&args.includes('--format')){
- const suffix=(process.env.RUNLAB_DASHBOARD_IMAGE||'').slice(-8);
+ const suffix=(process.env.KALA_DASHBOARD_IMAGE||'').slice(-8);
  for(const row of [
-  {Service:'runtime-host',ID:'runtime-fixed',Image:process.env.RUNLAB_RUNTIME_IMAGE,State:'running',Health:'healthy'},
-  {Service:'runtime-ingress',ID:'ingress-fixed',Image:process.env.RUNLAB_INGRESS_IMAGE,State:'running',Health:'healthy'},
-  {Service:'dashboard',ID:'dashboard-'+suffix,Image:process.env.RUNLAB_DASHBOARD_IMAGE,State:'running',Health:'healthy'}
+  {Service:'runtime-host',ID:'runtime-fixed',Image:process.env.KALA_RUNTIME_IMAGE,State:'running',Health:'healthy'},
+  {Service:'runtime-ingress',ID:'ingress-fixed',Image:process.env.KALA_INGRESS_IMAGE,State:'running',Health:'healthy'},
+  {Service:'dashboard',ID:'dashboard-'+suffix,Image:process.env.KALA_DASHBOARD_IMAGE,State:'running',Health:'healthy'}
  ]) console.log(JSON.stringify(row));
 }
 `)
   chmodSync(docker, 0o755)
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNLAB_PRIVATE_CLOUD_OPERATOR_ROOT: join(scratch, 'operator') }
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: join(scratch, 'operator') }
   const cli = join(first, 'kala-private-cloud.mjs')
   const installed = JSON.parse(run(process.execPath, [cli, 'install', '--bundle', first, '--config-dir', config], { env }).stdout)
   assert.equal(installed.receipt.phase, 'completed')

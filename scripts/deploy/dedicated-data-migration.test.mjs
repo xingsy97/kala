@@ -29,14 +29,14 @@ const noChown = async () => {}
 test('atomically moves the state tree without duplicating large Session data', async () => {
   const f = await fixture()
   const receipt = await moveDedicatedData({ sourceRoot: f.legacy, dataRoot: f.target, run: noChown, legacyOwner: 'old', targetOwner: 'new' })
-  assert.equal(await readFile(join(f.target, '.agent-kernel', 'sessions', 's.jsonl'), 'utf8'), 'session')
+  assert.equal(await readFile(join(f.target, '.kala', 'sessions', 's.jsonl'), 'utf8'), 'session')
   await assert.rejects(readFile(join(f.legacy, '.agent-kernel', 'sessions', 's.jsonl')))
   assert.equal(await readFile(join(f.target, '.claude', 'settings.json'), 'utf8'), '{"provider":"safe"}')
   assert.equal(await readFile(join(f.target, '.codex', 'config.toml'), 'utf8'), 'model = "safe"')
   assert.equal(await readFile(join(f.target, '.codex', 'auth.json'), 'utf8'), '{"auth":"safe"}')
-  assert.equal(await readFile(join(f.target, '.config', 'agent-kernel', 'agent.json'), 'utf8'), '{"systemPromptPreset":"codex"}')
-  assert.equal(await readFile(join(f.target, '.config', 'agent-kernel', 'config.toml'), 'utf8'), '[[hooks]]\nevent = "session_start"\ncommand = "true"')
-  assert.equal(await readFile(join(f.target, '.config', 'agent-kernel', 'socket-admin.json'), 'utf8'), '{"schemaVersion":1}')
+  assert.equal(await readFile(join(f.target, '.config', 'kala', 'agent.json'), 'utf8'), '{"systemPromptPreset":"codex"}')
+  assert.equal(await readFile(join(f.target, '.config', 'kala', 'config.toml'), 'utf8'), '[[hooks]]\nevent = "session_start"\ncommand = "true"')
+  assert.equal(await readFile(join(f.target, '.config', 'kala', 'socket-admin.json'), 'utf8'), '{"schemaVersion":1}')
   await rollbackDedicatedData(receipt, { run: noChown })
   assert.equal(await readFile(join(f.legacy, '.agent-kernel', 'sessions', 's.jsonl'), 'utf8'), 'session')
 })
@@ -45,7 +45,7 @@ test('probes atomic rename in the caller mount namespace without moving state', 
   const f = await fixture()
   await probeDedicatedAtomicRename({ sourceRoot: f.legacy, dataRoot: f.target })
   assert.equal(await readFile(join(f.legacy, '.agent-kernel', 'sessions', 's.jsonl'), 'utf8'), 'session')
-  await assert.rejects(readFile(join(f.target, '.agent-kernel', 'sessions', 's.jsonl')))
+  await assert.rejects(readFile(join(f.target, '.kala', 'sessions', 's.jsonl')))
 })
 
 test('restores the legacy state when post-move ownership fails', async () => {
@@ -53,7 +53,7 @@ test('restores the legacy state when post-move ownership fails', async () => {
   let calls = 0
   await assert.rejects(moveDedicatedData({ sourceRoot: f.legacy, dataRoot: f.target, run: async () => { if (calls++ === 0) throw new Error('injected chown failure') } }), /injected/)
   assert.equal(await readFile(join(f.legacy, '.agent-kernel', 'sessions', 's.jsonl'), 'utf8'), 'session')
-  await assert.rejects(readFile(join(f.target, '.agent-kernel', 'sessions', 's.jsonl')))
+  await assert.rejects(readFile(join(f.target, '.kala', 'sessions', 's.jsonl')))
 })
 
 test('resumes after a crash immediately following the atomic state rename', async () => {
@@ -62,7 +62,7 @@ test('resumes after a crash immediately following the atomic state rename', asyn
   await rename(migration.sourceState, migration.targetState)
   await executeDedicatedDataMigration(migration, { run: noChown })
   await executeDedicatedDataMigration(migration, { run: noChown })
-  assert.equal(await readFile(join(f.target, '.agent-kernel', 'sessions', 's.jsonl'), 'utf8'), 'session')
+  assert.equal(await readFile(join(f.target, '.kala', 'sessions', 's.jsonl'), 'utf8'), 'session')
   assert.equal(await readFile(join(f.target, '.claude', 'settings.json'), 'utf8'), '{"provider":"safe"}')
   await rollbackDedicatedData(migration, { run: noChown })
   await rollbackDedicatedData(migration, { run: noChown })

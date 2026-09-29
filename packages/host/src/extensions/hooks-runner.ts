@@ -2,7 +2,7 @@
  * Pre-/post-tool-use hook execution.
  *
  * Users configure external commands to fire around every tool call via
- * `~/.config/agent-kernel/config.toml` (see `hooks.ts` for the runner). This
+ * `~/.config/kala/config.toml` (see `hooks.ts` for the runner). This
  * module is the loop-side glue: pick the matching hooks for the current
  * event, spawn them, and turn a non-zero pre_tool_use exit into a synthetic
  * failure that blocks the actual tool dispatch.

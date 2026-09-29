@@ -371,7 +371,7 @@ runtime metadata/artifacts.
 ```
 
 Host → `{ kind: 'approval_mode_changed', mode }`. `allow_all` is refused
-unless the host was started with `AK_ALLOW_ALL_OK=1`.
+unless the host was started with `KALA_ALLOW_ALL_OK=1`.
 
 #### `client:set_cwd`
 
@@ -521,7 +521,7 @@ cap. Host resolves the session's `workspaceId`, forwards to
 ```
 
 Delete every spill file belonging to a session. Fired when the dashboard
-deletes a session so the workspace's `.agent-kernel/overflow/<sessionId>/`
+deletes a session so the workspace's `.kala/overflow/<sessionId>/`
 directory does not leak disk space. Host forwards to
 `fs:delete_overflow_session`; the ack carries `{ deleted: boolean, error? }`.
 Idempotent — deleting a session whose overflow dir does not exist returns
@@ -831,7 +831,7 @@ deleted session close their view and navigate away.
 
 Returns the host's current model registry. Models come from
 `~/.claude/settings.json`, `~/.codex/config.toml`, legacy env fallback, and
-manual entries in `~/.config/agent-kernel/models.json`.
+manual entries in `~/.config/kala/models.json`.
 
 ```ts
 type ModelInfo = {
@@ -1223,7 +1223,7 @@ Reconstructs children for a parent session when its log is reopened. Reads from 
 
 #### `agent_types:list` (Dashboard → Host, ack)
 
-Returns the currently-loaded agent-type registry (built-ins + workspace `.agent-kernel/agents/` + user `~/.config/agent-kernel/agents/`). Powers the Composer's `@agent-name` mention menu.
+Returns the currently-loaded agent-type registry (built-ins + workspace `.kala/agents/` + user `~/.config/kala/agents/`). Powers the Composer's `@agent-name` mention menu.
 
 ```ts
 // Request
@@ -1257,7 +1257,7 @@ Sent by executor immediately after the handshake succeeds. Declares the workspac
 ```ts
 {
   executorId: string          // client-generated stable id (usually a ULID)
-  workspaceId: string         // REQUIRED. Stable ULID minted on the executor's first launch and persisted (default `~/.agent-kernel/workspace-id`). Sessions bind to this in their JSONL header (see event-log.md §3); Host routes `tool:call` by matching `session.workspaceId` against a live announce. Never renamed — a lost or regenerated id detaches the machine's existing sessions, which is why the executor refuses to boot with a corrupted id file.
+  workspaceId: string         // REQUIRED. Stable ULID minted on the executor's first launch and persisted (default `~/.kala/workspace-id`). Sessions bind to this in their JSONL header (see event-log.md §3); Host routes `tool:call` by matching `session.workspaceId` against a live announce. Never renamed — a lost or regenerated id detaches the machine's existing sessions, which is why the executor refuses to boot with a corrupted id file.
   workspaceName: string       // REQUIRED. Human-readable display label. Free to change via `--name` — routing goes by workspaceId, not this. Falls back to `os.hostname()` when the operator doesn't pass a name.
   tools: string[]             // public implementation names this executor can serve
   toolImplementations?: Array<{ name: string; version?: string; schemaHash?: string }>

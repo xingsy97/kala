@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { launchDashboard } from './verify-lib.mjs'
 
-const { browser, page } = await launchDashboard({ url: process.env.AK_DASHBOARD_URL ?? 'http://localhost:3000' })
+const { browser, page } = await launchDashboard({ url: process.env.KALA_DASHBOARD_URL ?? 'http://localhost:3000' })
 try {
   await page.setViewport({ width: 1400, height: 1600 })
   await new Promise((r) => setTimeout(r, 800))

@@ -11,7 +11,7 @@
  * A fourth endpoint — overflow file read — mirrors the same shape and
  * serves spill files produced by `tools/overflow.ts` (executor caps
  * in-history tool output at 32 KB; the rest lands on disk under
- * `<workspaceRoot>/.agent-kernel/overflow/<sessionId>/<callId>.txt` and the
+ * `<workspaceRoot>/.kala/overflow/<sessionId>/<callId>.txt` and the
  * dashboard fetches it lazily via `client:read_overflow`).
  *
  * All handlers respect `sandbox.roots` if configured, falling back to
@@ -186,7 +186,7 @@ export async function readOverflowFile(
   }
   const roots = sandbox.roots.length > 0 ? sandbox.roots : [process.cwd()]
   const workspaceRoot = roots[0]!
-  const target = join(workspaceRoot, '.agent-kernel', 'overflow', sessionId, `${callId}.txt`)
+  const target = join(workspaceRoot, '.kala', 'overflow', sessionId, `${callId}.txt`)
   try {
     const resolved = await sandbox.resolve(target)
     const info = await stat(resolved)
@@ -247,5 +247,5 @@ export async function copyOverflowSession(
 async function resolveOverflowSessionDir(sandbox: Sandbox, sessionId: string): Promise<string> {
   const roots = sandbox.roots.length > 0 ? sandbox.roots : [process.cwd()]
   const workspaceRoot = roots[0]!
-  return await sandbox.resolve(join(workspaceRoot, '.agent-kernel', 'overflow', sessionId))
+  return await sandbox.resolve(join(workspaceRoot, '.kala', 'overflow', sessionId))
 }

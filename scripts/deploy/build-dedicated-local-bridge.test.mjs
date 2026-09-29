@@ -20,19 +20,19 @@ const localAssets = [
 ]
 const oldControlAssets = [
   'bundle-dashboard-with-runtime.cjs', 'agent-runlab-runtime.cjs', 'agent-kernel-executor.cjs',
-  'agent-runlab-dedicated-ingress.cjs', 'agent-runlab-dedicated-deploy-supervisor.cjs',
+  'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
 ]
 const oldUnits = [
-  'agent-runlab-dedicated-ingress.service', 'agent-runlab-dedicated-unit@.service',
-  'agent-runlab-dedicated-deploy-supervisor.service', 'agent-runlab-dedicated-control-updater.service',
-  'agent-runlab-dedicated-migration-finalizer.service',
+  'kala-dedicated-ingress.service', 'kala-dedicated-unit@.service',
+  'kala-dedicated-deploy-supervisor.service', 'kala-dedicated-control-updater.service',
+  'kala-dedicated-migration-finalizer.service',
 ]
 const aliasPairs = [
   ['bundle-dashboard-with-runtime.cjs', 'kala-dashboard-with-runtime.cjs'],
   ['agent-runlab-runtime.cjs', 'kala-runtime.cjs'],
   ['agent-kernel-executor.cjs', 'kala-executor.cjs'],
-  ['agent-runlab-dedicated-ingress.cjs', 'kala-dedicated-ingress.cjs'],
-  ['agent-runlab-dedicated-deploy-supervisor.cjs', 'kala-dedicated-deploy-supervisor.cjs'],
+  ['kala-dedicated-ingress.cjs', 'kala-dedicated-ingress.cjs'],
+  ['kala-dedicated-deploy-supervisor.cjs', 'kala-dedicated-deploy-supervisor.cjs'],
 ]
 
 const roots = []
@@ -95,8 +95,8 @@ async function createLegacy(path) {
       'agent-kernel-host': 'bundle-dashboard-with-runtime.cjs',
       'agent-runlab-runtime': 'agent-runlab-runtime.cjs',
       'agent-kernel-executor': 'agent-kernel-executor.cjs',
-      'agent-runlab-dedicated-ingress': 'agent-runlab-dedicated-ingress.cjs',
-      'agent-runlab-dedicated-deploy-supervisor': 'agent-runlab-dedicated-deploy-supervisor.cjs',
+      'kala-dedicated-ingress': 'kala-dedicated-ingress.cjs',
+      'kala-dedicated-deploy-supervisor': 'kala-dedicated-deploy-supervisor.cjs',
     },
   }
   await writeFile(join(path, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)

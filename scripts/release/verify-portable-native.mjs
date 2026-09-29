@@ -73,7 +73,7 @@ async function startPortable() {
   const logs = []
   const child = spawn(install, [], {
     cwd: scratch,
-    env: { ...process.env, HOST_LISTEN_HOST: '127.0.0.1', HOST_PORT: String(port), AGENT_KERNEL_STATE_DIR: state, SESSIONS_DIR: sessions, AGENT_KERNEL_ARTIFACTS_DIR: artifacts, ANTHROPIC_API_KEY: 'acceptance-key-not-used' },
+    env: { ...process.env, KALA_BIND_HOST: '127.0.0.1', KALA_PORT: String(port), KALA_STATE_DIR: state, KALA_SESSIONS_DIR: sessions, KALA_ARTIFACTS_DIR: artifacts, ANTHROPIC_API_KEY: 'acceptance-key-not-used' },
     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
   })
   child.stdout.on('data', (chunk) => logs.push(String(chunk)))

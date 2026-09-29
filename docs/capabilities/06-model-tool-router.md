@@ -152,7 +152,7 @@ routing system:
 Example: diffing two tool catalog snapshots.
 
 ```bash
-pnpm --filter @agent-kernel/host exec agent-kernel-host enhancement \
+pnpm --filter @agent-kernel/host exec kala-host enhancement \
   tool-catalog diff \
   --baseline runs/baseline/tool-catalog/session-A \
   --candidate runs/router/tool-catalog/session-A \

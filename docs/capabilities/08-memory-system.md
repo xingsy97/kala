@@ -42,7 +42,7 @@ time, updated time, confidence, and tombstone status.
 Implemented host-side lexical retrieval prototype:
 
 ```bash
-agent-kernel-host enhancement memory retrieve \
+kala-host enhancement memory retrieve \
   --root-dir runs/memory \
   --workspace-root /path/to/workspace \
   --include-global \
@@ -75,20 +75,20 @@ Memory writes should be visible and reversible in dashboard.
 Implemented memory index export:
 
 ```bash
-agent-kernel-host enhancement memory index \
+kala-host enhancement memory index \
   --root-dir runs/memory \
   --workspace-root /path/to/workspace \
   --include-global
 ```
 
-The command reads workspace/global `.agent-kernel/memory/*.md` files, extracts
+The command reads workspace/global `.kala/memory/*.md` files, extracts
 frontmatter such as `name`, `description`, `type`, `source`, `confidence`,
 `generatedAt`, and `sessionId`, and writes `memory-index.json`. It does not add
 memory to kernel state and does not inject memory into prompts. It is a derived
 artifact for dashboard provenance, eval reproducibility, and cleanup tooling.
 
 Workspace/global delete is implemented as a tombstone, not a hard erase. The
-executor moves the active markdown note under `.agent-kernel/memory/.tombstones/`
+executor moves the active markdown note under `.kala/memory/.tombstones/`
 and writes a JSON tombstone with `scope`, `key`, `deletedAt`, original path, and
 archive path. Normal `read`/`list` only sees active notes, while
 `memory-index.json` includes both `status: "active"` and `status: "tombstoned"`
@@ -169,11 +169,11 @@ adding another live protocol surface.
 
 The current memory implementation emphasizes provenance and auditability:
 
-- `agent-kernel-host enhancement memory index` reads workspace/global
-  `.agent-kernel/memory/*.md` files and writes `memory-index.json`.
+- `kala-host enhancement memory index` reads workspace/global
+  `.kala/memory/*.md` files and writes `memory-index.json`.
 - Frontmatter fields such as `name`, `description`, `type`, `source`,
   `confidence`, `generatedAt`, and `sessionId` are preserved in the index.
-- Deletes are represented as tombstones under `.agent-kernel/memory/.tombstones`
+- Deletes are represented as tombstones under `.kala/memory/.tombstones`
   and indexed with `status: tombstoned` rather than being silently removed.
 - Message assembly artifacts include a `memory` contribution bucket only when
   structured memory tool calls/results already exist in kernel messages.

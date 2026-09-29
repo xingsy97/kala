@@ -414,7 +414,7 @@ restart the LXD-hosted service outside the Dedicated Supervisor protocol.
 The deployed-runtime Tool matrix is repeatable with:
 
 ```bash
-RUNLAB_URL=http://host:13000 pnpm verify:agent-runtime-tools
+KALA_URL=http://host:13000 pnpm verify:agent-runtime-tools
 ```
 
 It creates disposable Kernel and Copilot Sessions, executes one Executor tool

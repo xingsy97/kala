@@ -30,7 +30,7 @@ export type LinuxServicePlan = {
   rollback: readonly Command[]
 }
 
-const SERVICE_NAME = 'runlab-executor.service'
+const SERVICE_NAME = 'kala-executor.service'
 
 function systemctl(mode: ServiceMode, ...args: string[]): Command {
   return { file: 'systemctl', args: [...(mode === 'user' ? ['--user'] : []), ...args] }
@@ -45,18 +45,18 @@ export function linuxServicePaths(mode: ServiceMode, home: string): LinuxService
     ? {
         serviceName: SERVICE_NAME,
         unit: `/etc/systemd/system/${SERVICE_NAME}`,
-        config: '/etc/runlab-executor/executor.json',
-        credential: '/etc/runlab-executor/credential',
-        updateUnit: '/etc/systemd/system/runlab-executor-update.service',
-        updateTimer: '/etc/systemd/system/runlab-executor-update.timer',
+        config: '/etc/kala/executor/config.json',
+        credential: '/etc/kala/executor/credential',
+        updateUnit: '/etc/systemd/system/kala-executor-update.service',
+        updateTimer: '/etc/systemd/system/kala-executor-update.timer',
       }
     : {
         serviceName: SERVICE_NAME,
         unit: join(home, '.config', 'systemd', 'user', SERVICE_NAME),
-        config: join(home, '.config', 'runlab-executor', 'executor.json'),
-        credential: join(home, '.config', 'runlab-executor', 'credential'),
-        updateUnit: join(home, '.config', 'systemd', 'user', 'runlab-executor-update.service'),
-        updateTimer: join(home, '.config', 'systemd', 'user', 'runlab-executor-update.timer'),
+        config: join(home, '.config', 'kala', 'executor', 'config.json'),
+        credential: join(home, '.config', 'kala', 'executor', 'credential'),
+        updateUnit: join(home, '.config', 'systemd', 'user', 'kala-executor-update.service'),
+        updateTimer: join(home, '.config', 'systemd', 'user', 'kala-executor-update.timer'),
       }
 }
 
@@ -69,6 +69,7 @@ export function renderLinuxServiceFiles(session: InstallerSession, home: string)
   updateTimer?: string
 } {
   const paths = linuxServicePaths(session.mode, home)
+  const servicePath = `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`
   const config = `${JSON.stringify({
     version: 1,
     host: session.host,
@@ -91,6 +92,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=${systemdQuote(`PATH=${servicePath}`)}
 ExecStart=${systemdQuote(session.executable)} --config ${systemdQuote(paths.config)}
 Restart=always
 RestartSec=5s
@@ -110,10 +112,11 @@ WantedBy=${session.mode === 'system' ? 'multi-user.target' : 'default.target'}
 `
   const updateUnit = session.update ? `[Unit]
 Description=Kala Executor managed update
-After=network-online.target runlab-executor.service
+After=network-online.target kala-executor.service
 
 [Service]
 Type=oneshot
+Environment=${systemdQuote(`PATH=${servicePath}`)}
 ExecStart=${systemdQuote(session.executable)} update apply --config ${systemdQuote(paths.config)}
 ` : undefined
   const updateTimer = session.update ? `[Unit]
@@ -146,7 +149,7 @@ function privateWrite(path: string, contents: string): Command {
     args: [
       '-c',
       'set -eu; target=$1; parent=${target%/*}; [ "$parent" = "$target" ] || mkdir -p -- "$parent"; umask 077; tmp="${target}.tmp.$$"; trap \'rm -f -- "$tmp"\' EXIT HUP INT TERM; cat > "$tmp"; chmod 0600 -- "$tmp"; mv -f -- "$tmp" "$target"; trap - EXIT HUP INT TERM',
-      'runlab-private-write',
+      'kala-private-write',
       path,
     ],
     stdin: contents,
@@ -170,7 +173,7 @@ export function createLinuxServicePlan(
       action, mode, paths,
       commands: [
         { ...systemctl(mode, 'disable', '--now', SERVICE_NAME), allowFailure: true },
-        { ...systemctl(mode, 'disable', '--now', 'runlab-executor-update.timer'), allowFailure: true },
+        { ...systemctl(mode, 'disable', '--now', 'kala-executor-update.timer'), allowFailure: true },
         { file: 'rm', args: ['-f', paths.unit, paths.config, paths.credential, paths.updateUnit, paths.updateTimer] },
         systemctl(mode, 'daemon-reload'),
       ],
@@ -191,11 +194,11 @@ export function createLinuxServicePlan(
       systemctl(mode, 'daemon-reload'),
       systemctl(mode, 'enable', SERVICE_NAME),
       systemctl(mode, 'restart', SERVICE_NAME),
-      ...(rendered.updateTimer ? [systemctl(mode, 'enable', '--now', 'runlab-executor-update.timer')] : []),
+      ...(rendered.updateTimer ? [systemctl(mode, 'enable', '--now', 'kala-executor-update.timer')] : []),
     ],
     rollback: [
       { ...systemctl(mode, 'disable', '--now', SERVICE_NAME), allowFailure: true },
-      { ...systemctl(mode, 'disable', '--now', 'runlab-executor-update.timer'), allowFailure: true },
+      { ...systemctl(mode, 'disable', '--now', 'kala-executor-update.timer'), allowFailure: true },
       { file: 'rm', args: ['-f', paths.unit, paths.config, paths.credential, paths.updateUnit, paths.updateTimer] },
       systemctl(mode, 'daemon-reload'),
     ],

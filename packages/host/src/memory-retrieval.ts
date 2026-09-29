@@ -1,7 +1,7 @@
 /**
  * Host-side lexical memory retrieval prototype.
  *
- * Reads workspace/global `.agent-kernel/memory/*.md` notes, scores each note
+ * Reads workspace/global `.kala/memory/*.md` notes, scores each note
  * against a query using token overlap plus small recency/confidence weights,
  * and fits the top matches into an explicit token budget. Emits a JSON
  * artifact so dashboards and eval runners can see which memories the host
@@ -196,5 +196,5 @@ function tokenize(text: string): string[] {
 }
 
 export function resolveGlobalMemoryRoot(): string {
-  return join(homedir(), '.agent-kernel', 'memory')
+  return join(homedir(), '.kala', 'memory')
 }

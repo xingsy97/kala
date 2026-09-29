@@ -1,10 +1,11 @@
-import { createServer, type Server as HttpServer } from 'node:http'
+import { createServer, request as httpRequest, type Server as HttpServer } from 'node:http'
 import { connect, type Socket } from 'node:net'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { parsePublicUrls } from '@agent-kernel/shared'
 
 import { writeJsonFile } from './atomic-json-file.js'
 import { startDedicatedIngress, type DedicatedIngress } from './dedicated-ingress.js'
@@ -49,6 +50,24 @@ async function eventually(assertion: () => Promise<void>, deadlineMs = 3000): Pr
 }
 
 describe('Stable Ingress admission', () => {
+  it('enforces public Host and Origin policy before local routes and proxying', async () => {
+    ingress = await startDedicatedIngress({
+      port: 0,
+      unitOrigin: 'http://127.0.0.1:9',
+      publicUrls: parsePublicUrls('http://localhost:13000,http://192.0.2.10:13000'),
+    })
+
+    const allowed = await ingressRequest(ingress.port, { host: '192.0.2.10:13000', origin: 'http://192.0.2.10:13000' })
+    const badHost = await ingressRequest(ingress.port, { host: 'unexpected.example:13000' })
+    const badOrigin = await ingressRequest(ingress.port, { host: 'localhost:13000', origin: 'https://evil.example' })
+
+    expect(allowed.status).toBe(200)
+    expect(badHost.status).toBe(400)
+    expect(JSON.parse(badHost.body)).toEqual({ error: 'HOST_NOT_ALLOWED' })
+    expect(badOrigin.status).toBe(403)
+    expect(JSON.parse(badOrigin.body)).toEqual({ error: 'ORIGIN_NOT_ALLOWED' })
+  })
+
   it('answers healthz locally without proxying to the Runtime Unit', async () => {
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: 'http://127.0.0.1:9' })
 
@@ -57,6 +76,18 @@ describe('Stable Ingress admission', () => {
     await expect(response.json()).resolves.toEqual({ ok: true })
     expect(response.status).toBe(200)
   })
+
+  function ingressRequest(port: number, headers: Record<string, string>): Promise<{ status: number | undefined; body: string }> {
+    return new Promise((resolve, reject) => {
+      const request = httpRequest({ host: '127.0.0.1', port, path: '/healthz', headers }, (response) => {
+        let body = ''
+        response.on('data', (chunk) => { body += String(chunk) })
+        response.on('end', () => resolve({ status: response.statusCode, body }))
+      })
+      request.once('error', reject)
+      request.end()
+    })
+  }
 
   it('proxies the authenticated raw attachment upload endpoint to the active Host', async () => {
     let received: { url?: string; authorization?: string; name?: string; principal?: string; role?: string; body?: string } = {}

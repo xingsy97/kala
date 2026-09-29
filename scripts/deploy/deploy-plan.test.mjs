@@ -93,7 +93,7 @@ describe('deploy plan', () => {
     expect(plan.sshTarget).toBe('deploy-target')
     expect(plan.hostUrl).toBe('http://127.0.0.1:3000')
     expect(plan.remoteBinShell).toBe('"$HOME"/\'bin\'')
-    expect(plan.uploadDir).toBe('~/bin/.agent-kernel-upload-20260722101112')
+    expect(plan.uploadDir).toBe('~/bin/.kala-upload-20260722101112')
     expect(plan.restartMode).toBe('checkpoint')
     expect(plan.restartTimeoutMs).toBe(600000)
     expect(plan.statusTimeoutMs).toBe(660000)
@@ -136,7 +136,7 @@ describe('deploy plan', () => {
 
   it('builds an install script that backs up and chmods executable assets', () => {
     const script = installScript('~/bin', '~/bin/.upload', ['kala-executor.cjs', 'kala-model-catalog-seed.json', 'manifest.json', 'run.sh'])
-    expect(script).toContain('BACKUP_DIR="$REMOTE_BIN/.agent-kernel-backup-$(date +%Y%m%d%H%M%S)"')
+    expect(script).toContain('BACKUP_DIR="$REMOTE_BIN/.kala-backup-$(date +%Y%m%d%H%M%S)"')
     expect(script).toContain('cp -p "$REMOTE_BIN/manifest.json" "$BACKUP_DIR/manifest.json"')
     expect(script).toContain('chmod +x "$REMOTE_BIN/kala-executor.cjs"')
     expect(script).toContain('chmod +x "$REMOTE_BIN/run.sh"')
@@ -144,7 +144,7 @@ describe('deploy plan', () => {
     expect(script).toContain('cp -p "$REMOTE_BIN/kala-model-catalog-seed.json" "$MODEL_CATALOG_DIR/models-dev-seed.json"')
     expect(script).toContain('sha256sum -c SHA256SUMS --ignore-missing')
     expect(script).toContain('>> "$BACKUP_DIR/.deployed-files"')
-    expect(script.indexOf('.agent-kernel-backup-current')).toBeLessThan(script.indexOf('mv "$UPLOAD_DIR/kala-executor.cjs"'))
+    expect(script.indexOf('.kala-backup-current')).toBeLessThan(script.indexOf('mv "$UPLOAD_DIR/kala-executor.cjs"'))
     for (const retired of RETIRED_RELEASE_ASSETS) {
       expect(script).toContain(`cp -p "$REMOTE_BIN/${retired}" "$BACKUP_DIR/${retired}"`)
       expect(script).toContain(`rm -f "$REMOTE_BIN/${retired}"`)
@@ -153,7 +153,7 @@ describe('deploy plan', () => {
 
   it('builds a rollback script that restores the last backup and restarts the service', () => {
     const script = rollbackScript('~/bin', 'agent-runlab-host')
-    expect(script).toContain('.agent-kernel-backup-current')
+    expect(script).toContain('.kala-backup-current')
     expect(script).toContain('while IFS= read -r name')
     expect(script).toContain('rm -f "$REMOTE_BIN/$name"')
     expect(script).toContain('cp -p "$BACKUP_DIR/$name" "$REMOTE_BIN/$name"')

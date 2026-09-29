@@ -20,7 +20,7 @@ describe('overflow filesystem lifecycle handlers', () => {
   })
 
   it('copies overflow files between session directories', async () => {
-    const source = join(root, '.agent-kernel', 'overflow', 'sess-a')
+    const source = join(root, '.kala', 'overflow', 'sess-a')
     mkdirSync(source, { recursive: true })
     writeFileSync(join(source, 'call-1.txt'), 'full output', 'utf8')
 
@@ -30,11 +30,11 @@ describe('overflow filesystem lifecycle handlers', () => {
     )
 
     expect(result).toMatchObject({ copied: true })
-    expect(readFileSync(join(root, '.agent-kernel', 'overflow', 'sess-b', 'call-1.txt'), 'utf8')).toBe('full output')
+    expect(readFileSync(join(root, '.kala', 'overflow', 'sess-b', 'call-1.txt'), 'utf8')).toBe('full output')
   })
 
   it('deletes an overflow session directory', async () => {
-    const target = join(root, '.agent-kernel', 'overflow', 'sess-a')
+    const target = join(root, '.kala', 'overflow', 'sess-a')
     mkdirSync(target, { recursive: true })
     writeFileSync(join(target, 'call-1.txt'), 'full output', 'utf8')
 

@@ -146,7 +146,7 @@ function activeConflict(dir: string, profile: string): MigrationConflict | undef
 export function discoverLegacyIdentityMigration(
   options: DiscoverLegacyIdentityOptions,
 ): MigrationPlan {
-  const root = options.legacyRoot ?? join(homedir(), '.agent-kernel')
+  const root = options.legacyRoot ?? join(homedir(), '.kala')
   const profile = normalizedProfile(options.profile)
   const dir = profileDir(root, profile)
   const workspaceIdPath = join(dir, 'workspace-id')
@@ -265,7 +265,7 @@ export function applyLegacyIdentityMigration(plan: MigrationPlan): void {
 }
 
 /** Enumerates profiles which currently contain a workspace identity. */
-export function discoverLegacyExecutorProfiles(legacyRoot = join(homedir(), '.agent-kernel')): string[] {
+export function discoverLegacyExecutorProfiles(legacyRoot = join(homedir(), '.kala')): string[] {
   const profiles: string[] = []
   if (existsSync(join(legacyRoot, 'workspace-id'))) profiles.push('default')
   const namedRoot = join(legacyRoot, 'profiles')

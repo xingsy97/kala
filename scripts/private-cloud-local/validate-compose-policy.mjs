@@ -8,7 +8,7 @@ const validationEnv={
  ...process.env,
  OIDC_ISSUER: process.env.OIDC_ISSUER ?? 'https://identity.invalid',
  OIDC_DISCOVERY_ORIGIN: process.env.OIDC_DISCOVERY_ORIGIN ?? 'https://identity.invalid',
- RUNLAB_PUBLIC_ORIGIN: process.env.RUNLAB_PUBLIC_ORIGIN ?? 'http://localhost:13001',
+ KALA_PUBLIC_URLS: process.env.KALA_PUBLIC_URLS ?? 'http://localhost:13001',
 }
 const rendered=spawnSync('docker',['compose',...composeArgs(profile),'config'],{cwd:root,encoding:'utf8',env:validationEnv})
 if(rendered.status!==0)failures.push(`compose config failed: ${rendered.stderr.trim()}`)
@@ -16,7 +16,7 @@ const text=rendered.stdout
 const production=await readFile('deploy/private-cloud/compose.yaml','utf8')
 if(/^\s+build:/mu.test(production))failures.push('Production Compose must not build application source')
 for(const match of production.matchAll(/^\s+image:\s+([^$\s][^\s]*)/gmu))if(!/@sha256:[0-9a-f]{64}$/u.test(match[1]))failures.push(`Production image is not digest pinned: ${match[1]}`)
-for(const variable of ['RUNLAB_RUNTIME_IMAGE','RUNLAB_INGRESS_IMAGE','RUNLAB_DASHBOARD_IMAGE'])if(!production.includes(variable))failures.push(`Production Compose is missing ${variable}`)
+for(const variable of ['KALA_RUNTIME_IMAGE','KALA_INGRESS_IMAGE','KALA_DASHBOARD_IMAGE'])if(!production.includes(variable))failures.push(`Production Compose is missing ${variable}`)
 const development=await readFile('deploy/private-cloud/compose.dev.yaml','utf8')
 for(const service of ['runtime-host','runtime-ingress','dashboard'])if(!new RegExp(String.raw`^  ${service}:\n(?:(?!^  [a-z]).)*?^    build:`,'msu').test(development))failures.push(`Development Compose is missing ${service} source build`)
 for(const forbidden of ['privileged: true','network_mode: host','/var/run/docker.sock','0.0.0.0:13001'])if(text.includes(forbidden))failures.push(`forbidden compose setting: ${forbidden}`)
@@ -28,12 +28,12 @@ for(const service of ['init-volumes','init-app-secrets','control-postgres','cont
 }
 if(!/networks:\n  control:[\s\S]*?internal: true/u.test(text)||!/networks:[\s\S]*?\n  runtime:[\s\S]*?internal: true/u.test(text))failures.push('control/runtime networks must be internal')
 const runtimeHost=text.match(/^  runtime-host:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:|^networks:|^volumes:)/mu)?.[1]??''
-if(!runtimeHost.includes('AGENT_RUNLAB_DEPLOYMENT_CONFIG: /etc/agent-runlab/deployment.json'))failures.push('Runtime Host must declare the authoritative deployment config')
-if(runtimeHost.includes('RUNTIME_HOST_DASHBOARD_DIR'))failures.push('Private Cloud Runtime Host must not serve Dashboard assets')
-if(!runtimeHost.includes('target: /etc/agent-runlab/deployment.json')||!runtimeHost.includes('source: ')||!runtimeHost.includes('read_only: true'))failures.push('Runtime Host must mount deployment.json read-only')
+if(!runtimeHost.includes('KALA_DEPLOYMENT_CONFIG: /etc/kala/deployment.json'))failures.push('Runtime Host must declare the authoritative deployment config')
+if(runtimeHost.includes('KALA_RUNTIME_HOST_DASHBOARD_DIR'))failures.push('Private Cloud Runtime Host must not serve Dashboard assets')
+if(!runtimeHost.includes('target: /etc/kala/deployment.json')||!runtimeHost.includes('source: ')||!runtimeHost.includes('read_only: true'))failures.push('Runtime Host must mount deployment.json read-only')
 const ingress=text.match(/^  runtime-ingress:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:|^networks:|^volumes:)/mu)?.[1]??''
-if(!ingress.includes('RUNTIME_DASHBOARD_ORIGIN: http://dashboard:8080'))failures.push('Private Cloud Ingress must route to the independent Dashboard service')
-if(profile==='cloudflare'&&!/^\s+INGRESS_PUBLIC_ORIGIN: https:\/\//mu.test(text))failures.push('Cloudflare profile requires an HTTPS public origin')
+if(!ingress.includes('KALA_INGRESS_DASHBOARD_ORIGIN: http://dashboard:8080'))failures.push('Private Cloud Ingress must route to the independent Dashboard service')
+if(profile==='cloudflare'&&!/^\s+KALA_PUBLIC_URLS: https:\/\//mu.test(text))failures.push('Cloudflare profile requires an HTTPS public URL')
 if(profile==='cloudflare'&&!/^\s+OIDC_ISSUER: https:\/\//mu.test(text))failures.push('Cloudflare profile requires an HTTPS issuer')
 if(profile!=='local-volume'){
  const storage=await readFile('deploy/private-cloud/compose.storage-nfs.yaml','utf8')

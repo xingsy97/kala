@@ -42,7 +42,7 @@ export async function startLoopbackHostRuntimeUnit(
     sandboxRoots: [workspaceDir],
     // Platform loopback execution still performs real filesystem mutations. Keep
     // durable scoped receipts so Unit/Host restart cannot execute them twice.
-    receiptStorePath: join(workspaceDir, '.agent-kernel', 'execution-receipts.json'),
+    receiptStorePath: join(workspaceDir, '.kala', 'execution-receipts.json'),
     ...(executorToken ? { token: executorToken } : {}),
   }) : undefined
   if (executor) {

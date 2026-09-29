@@ -4,9 +4,9 @@ import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
-const databaseUrl = process.env.RUNTIME_INGRESS_DATABASE_URL
-if (!databaseUrl) throw new Error('RUNTIME_INGRESS_DATABASE_URL is required')
-const outputDir = resolve(process.env.RUNLAB_BACKUP_DIR ?? 'backups/control-plane')
+const databaseUrl = process.env.KALA_INGRESS_DATABASE_URL
+if (!databaseUrl) throw new Error('KALA_INGRESS_DATABASE_URL is required')
+const outputDir = resolve(process.env.KALA_BACKUP_DIR ?? 'backups/control-plane')
 await mkdir(outputDir, { recursive: true, mode: 0o700 })
 const stamp = new Date().toISOString().replaceAll(/[:.]/gu, '-')
 const dumpPath = resolve(outputDir, `control-plane-${stamp}.dump`)

@@ -12,7 +12,7 @@ if (target !== expected || !['linux-x64', 'linux-arm64'].includes(target)) throw
 const workspace = join(dirname(output), `.private-cloud-operator-${target}`)
 rmSync(workspace, { recursive: true, force: true }); mkdirSync(workspace, { recursive: true })
 const cjs = join(workspace, 'kala-private-cloud.cjs'); const blob = join(workspace, 'kala-private-cloud.blob'); const config = join(workspace, 'sea-config.json')
-await build({ entryPoints: [join(root, 'scripts/deploy/runlab-private-cloud.mjs')], outfile: cjs, bundle: true, platform: 'node', target: 'node22', format: 'cjs', legalComments: 'none', logLevel: 'silent' })
+await build({ entryPoints: [join(root, 'scripts/deploy/kala-private-cloud.mjs')], outfile: cjs, bundle: true, platform: 'node', target: 'node22', format: 'cjs', legalComments: 'none', logLevel: 'silent' })
 writeFileSync(cjs, readFileSync(cjs, 'utf8').replace('#!/usr/bin/env node\n', ''))
 writeFileSync(config, `${JSON.stringify({ main: cjs, output: blob, disableExperimentalSEAWarning: true }, null, 2)}\n`)
 run(process.execPath, ['--experimental-sea-config', config]); copyFileSync(process.execPath, output)

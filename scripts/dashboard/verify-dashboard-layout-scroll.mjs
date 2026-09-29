@@ -24,7 +24,7 @@ const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_LAYOUT_PORT ?? 3174)
 const HOST_URL = `http://localhost:${PORT}`
 const SESSION_ID = `layout-scroll-${Date.now()}`
-const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-layout-sessions-'))
+const KALA_SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-layout-sessions-'))
 const SHOTS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-layout-shots-'))
 const CHROME = process.env.CHROME_PATH ?? detectBrowser()
 const LAYOUT_STORAGE_PREFIX = 'react-resizable-panels:ak-outer-cols-'
@@ -53,13 +53,13 @@ try {
     timeoutMs: 60_000,
   })
 
-  host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/agent-kernel-host.ts'], {
+  host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/kala-host.ts'], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      HOST_PORT: String(PORT),
-      SESSIONS_DIR,
-      DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
+      KALA_PORT: String(PORT),
+      KALA_SESSIONS_DIR,
+      KALA_DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
     },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -788,7 +788,7 @@ function writeLargeSessionFixture() {
     })
   }
 
-  const path = join(SESSIONS_DIR, `${Date.now()}_${SESSION_ID}.jsonl`)
+  const path = join(KALA_SESSIONS_DIR, `${Date.now()}_${SESSION_ID}.jsonl`)
   writeFileSync(path, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`)
 }
 

@@ -45,7 +45,7 @@ The loop exposes a fixed set of seams. Each extension plugs into one or more:
 | **afterCallTool** | after a tool settles | hooks (post) | `runPostToolHooks` ← `loop.ts:320` |
 | **onTurnDone** | after a turn completes | compaction (auto) | `maybeAutoCompact` ← `loop.ts:88` |
 | **manualTrigger** | operator command | compaction (`/compact`), memory | `runCompact` ← `loop.ts:97`, `consolidateMemory` ← `connection/dashboard-ns.ts:457` |
-| **discovery** | host startup | skills, hooks | `discoverSkills` / `createHookRunner` ← `bin/agent-kernel-host.ts` |
+| **discovery** | host startup | skills, hooks | `discoverSkills` / `createHookRunner` ← `bin/kala-host.ts` |
 
 ## The files
 

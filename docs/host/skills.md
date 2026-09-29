@@ -240,8 +240,8 @@ enough to claim skill support.
 The baseline package format is:
 
 ```text
-.agents/skills/<name>/SKILL.md
-~/.agents/skills/<name>/SKILL.md
+.agent/skills/<name>/SKILL.md
+~/.agent/skills/<name>/SKILL.md
 ```
 
 `SKILL.md` must start with YAML-like frontmatter followed by markdown
@@ -273,8 +273,8 @@ the meaning of `name` or `description`.
 For each session, the host discovers skills from roots derived from the
 session's current working directory:
 
-1. Project-local: `<session cwd>/.agents/skills/*/SKILL.md`.
-2. User-global: `~/.agents/skills/*/SKILL.md`.
+1. Project-local: `<session cwd>/.agent/skills/*/SKILL.md`.
+2. User-global: `~/.agent/skills/*/SKILL.md`.
 
 Discovery scans only direct child directories of each root. For sessions bound
 to a workspace Executor, the project root and selected `SKILL.md` bodies are
@@ -291,7 +291,7 @@ The host maintains a refreshable session/workspace-scoped skill manager. It
 refreshes the registry immediately before executing a `skill` Tool call but
 never rewrites the model-facing Tool schema. This preserves provider prompt/KV
 cache stability across Skill changes and workspaces. If the agent writes a new
-`<session cwd>/.agents/skills/<name>/SKILL.md`, the same session can discover it
+`<session cwd>/.agent/skills/<name>/SKILL.md`, the same session can discover it
 with `skill({ action: "list" })` and load it without restarting the host.
 
 This is narrower than Codex, Pi, and OpenClaw. Parent-directory walking,
@@ -374,7 +374,7 @@ The baseline security contract is limited but explicit:
 
 Session registries are scoped by session cwd, so two sessions in different
 workspaces do not see each other's project-local skills. User-global skills are
-intentionally shared through `~/.agents/skills`. This is still a local-host
+intentionally shared through `~/.agent/skills`. This is still a local-host
 trust model; remote/plugin skill sources require per-skill permission before
 they can be enabled safely.
 
@@ -382,7 +382,7 @@ they can be enabled safely.
 
 | Design requirement | Implementation | Tests | Status |
 |---|---|---|---|
-| Session-level discovery from cwd and user `.agents/skills` roots | `packages/host/src/extensions/skills.ts` `skillRootsForCwd()`, `discoverSkills()`, `createSkillManager()` | `packages/host/src/extensions/skills.test.ts` | Implemented baseline |
+| Session-level discovery from cwd and user `.agent/skills` roots | `packages/host/src/extensions/skills.ts` `skillRootsForCwd()`, `discoverSkills()`, `createSkillManager()` | `packages/host/src/extensions/skills.test.ts` | Implemented baseline |
 | Required `name` and `description` frontmatter | `parseSkillHeader()` / `extractFrontmatter()` | invalid/missing tests in `skills.test.ts` | Implemented baseline |
 | Strict name pattern and directory/name match | `SKILL_NAME_PATTERN`, `basename(dirName)` check | invalid/name mismatch test | Implemented baseline |
 | Description trim and 1024 character cap | `MAX_DESCRIPTION_LENGTH` | invalid/missing test covers missing; cap is code-covered but not directly asserted | Partial test gap |
@@ -398,7 +398,7 @@ they can be enabled safely.
 | Trust-boundary warning before Skill body | `runSkillTool()` | ordering assertion in `skills.test.ts` | Implemented |
 | Workspace-scoped project skills | `createSkillManager()` derives roots from `record.state.cwd` | workspace isolation test in `skills.test.ts` | Implemented baseline |
 | Diagnostics for skipped roots/skills/collisions | `SkillRegistry.diagnostics`; `/settings.skills` summary | diagnostics tests and schema typecheck | Implemented baseline |
-| Host CLI delegates skill discovery to session manager | `agent-kernel-host.ts` uses `createBuiltinTools()` with empty initial index; `server.ts` installs manager | indirectly covered | Implemented with test gap |
+| Host CLI delegates skill discovery to session manager | `kala-host.ts` uses `createBuiltinTools()` with empty initial index; `server.ts` installs manager | indirectly covered | Implemented with test gap |
 | Per-skill approval/permission | none | none | Future work |
 | Parent walking, admin/system/plugin roots, explicit paths | none | none | Future work |
 | Supporting-file list/sampling | only path guidance is returned | none | Future work |

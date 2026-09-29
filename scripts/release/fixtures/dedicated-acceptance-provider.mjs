@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http'
 
-const command = process.env.RUNLAB_ACCEPTANCE_DEPLOY_COMMAND
-if (!command) throw new Error('RUNLAB_ACCEPTANCE_DEPLOY_COMMAND is required')
+const command = process.env.KALA_ACCEPTANCE_DEPLOY_COMMAND
+if (!command) throw new Error('KALA_ACCEPTANCE_DEPLOY_COMMAND is required')
 
 createServer(async (request, response) => {
   if (request.method !== 'POST') { response.writeHead(404).end(); return }

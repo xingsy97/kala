@@ -31,7 +31,7 @@ describe('executor token persistence', () => {
   })
 
   it('uses an isolated token path for a named profile', () => {
-    expect(executorTokenPath('dev')).toMatch(/\.agent-kernel\/profiles\/dev\/executor-token$/)
-    expect(executorTokenPath('default')).toMatch(/\.agent-kernel\/executor-token$/)
+    expect(executorTokenPath('dev')).toMatch(/\.kala\/profiles\/dev\/executor-token$/)
+    expect(executorTokenPath('default')).toMatch(/\.kala\/executor-token$/)
   })
 })

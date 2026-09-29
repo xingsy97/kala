@@ -10,13 +10,13 @@
 ## Procedure
 
 ```bash
-export RUNTIME_INGRESS_DATABASE_URL='postgresql://...'
-export RUNTIME_INGRESS_MIGRATIONS_DIR=packages/runtime-ingress-gateway/migrations
+export KALA_INGRESS_DATABASE_URL='postgresql://...'
+export KALA_INGRESS_MIGRATIONS_DIR=packages/runtime-ingress-gateway/migrations
 pnpm --filter @agent-kernel/runtime-ingress-gateway build
 pnpm --filter @agent-kernel/runtime-ingress-gateway migrate
 
-export RUNTIME_INGRESS_JSON_DIRECTORY=/path/tenant-directory.json
-export RUNTIME_INGRESS_JSON_SESSIONS=/path/login-states.json.sessions
+export KALA_INGRESS_JSON_DIRECTORY=/path/tenant-directory.json
+export KALA_INGRESS_JSON_SESSIONS=/path/login-states.json.sessions
 pnpm --filter @agent-kernel/runtime-ingress-gateway import:json -- --dry-run
 pnpm --filter @agent-kernel/runtime-ingress-gateway import:json
 ```
@@ -34,10 +34,10 @@ SELECT count(*) FROM browser_sessions;
 SELECT source_checksum, summary FROM control_plane_imports;
 ```
 
-Then start one Gateway with `RUNTIME_INGRESS_DATABASE_URL`, verify existing user login/session listing, Organization membership, Runtime Unit routing and logout-all. Keep all other Gateway replicas stopped until this succeeds.
+Then start one Gateway with `KALA_INGRESS_DATABASE_URL`, verify existing user login/session listing, Organization membership, Runtime Unit routing and logout-all. Keep all other Gateway replicas stopped until this succeeds.
 
 ## Rollback
 
-Stop PostgreSQL-backed Gateway, unset `RUNTIME_INGRESS_DATABASE_URL`, and restart the prior binary against the unchanged JSON files. The importer never mutates source files. Browser sessions created only after cutover do not exist in the JSON rollback point, so rollback intentionally signs those users out.
+Stop PostgreSQL-backed Gateway, unset `KALA_INGRESS_DATABASE_URL`, and restart the prior binary against the unchanged JSON files. The importer never mutates source files. Browser sessions created only after cutover do not exist in the JSON rollback point, so rollback intentionally signs those users out.
 
 Do not dual-write indefinitely. The compatibility read window exists only for controlled rollback; PostgreSQL becomes sole authority after acceptance.

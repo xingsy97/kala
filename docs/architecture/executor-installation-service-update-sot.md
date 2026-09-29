@@ -1,12 +1,12 @@
 # Executor Installation, Service Lifecycle, and Updates — Source of Truth
 
 **Status:** normative implementation contract
-**Applies to:** `runlab-executor`, Host installation APIs, release assets, and Dashboard **Connect a new workspace**
+**Applies to:** `kala-executor`, Host installation APIs, release assets, and Dashboard **Connect a new workspace**
 **Supersedes:** ad-hoc `.cjs` download commands, long-lived Invite URLs, and in-place self-update behavior
 
 ## 1. Product contract
 
-Agent RunLab distributes one Executor program named `runlab-executor`. The same executable supports:
+Kala distributes one Executor program named `kala-executor`. The same executable supports:
 
 1. **Temporary mode** — foreground execution; it stops when the terminal closes or the user sends Ctrl+C.
 2. **Service mode** — OS-managed process; it starts at boot/login as configured, restarts after failure, and participates in managed updates.
@@ -28,7 +28,7 @@ The copied command is exactly one physical line and contains no newline.
 ### Linux and macOS
 
 ```bash
-curl -fsSL 'https://HOST/install' | RUNLAB_SETUP_CODE='ONE_TIME_CODE' sh
+curl -fsSL 'https://HOST/install' | KALA_SETUP_CODE='ONE_TIME_CODE' sh
 ```
 
 ### Windows PowerShell
@@ -158,10 +158,10 @@ The shell installer performs the following transaction:
 
 1. require HTTPS outside explicit loopback development;
 2. detect exact OS and architecture and reject Windows before downloading assets;
-3. download the matching native `runlab-executor` asset and `SHA256SUMS`;
+3. download the matching native `kala-executor` asset and `SHA256SUMS`;
 4. enforce response size and timeout limits;
 5. require a valid SHA-256 entry and reject a hash mismatch;
-6. execute `runlab-executor install continue --session-file <protected-file>`;
+6. execute `kala-executor install continue --session-file <protected-file>`;
 7. report safe progress to the installation session;
 8. remove bootstrap material on completion or failure.
 
@@ -184,17 +184,17 @@ The installer must never automatically terminate an unknown running Executor. A 
 Public binary:
 
 ```text
-runlab-executor run
-runlab-executor service install
-runlab-executor service status
-runlab-executor service logs [--follow] [--tail N]
-runlab-executor service restart
-runlab-executor service uninstall [--purge]
-runlab-executor update check
-runlab-executor update apply
-runlab-executor update rollback
-runlab-executor doctor
-runlab-executor version
+kala-executor run
+kala-executor service install
+kala-executor service status
+kala-executor service logs [--follow] [--tail N]
+kala-executor service restart
+kala-executor service uninstall [--purge]
+kala-executor update check
+kala-executor update apply
+kala-executor update rollback
+kala-executor doctor
+kala-executor version
 ```
 
 These commands exist for diagnostics and automation, but the default Dashboard flow invokes them inside the installer and does not expose their flags.
@@ -288,7 +288,7 @@ flowchart TD
   J -->|no| L[Switch previous and restart]
 ```
 
-The updater never overwrites the running executable. It keeps current and previous generations. Update/restart ownership belongs to a separate OS-managed updater job, not the main Executor process. On Linux, `runlab-executor-update.timer` activates a oneshot updater which coordinates with the main service through a local mode-`0600` control socket, waits for Tool and PTY quiescence, switches `current`, restarts `runlab-executor.service`, and verifies that the expected release and Workspace identity reconnect. A missed drain deadline resumes admission and postpones the update. Failed post-activation health switches `current` back to `previous`, restarts again, and verifies recovery. This avoids single-instance lock conflicts and prevents the update coordinator from disappearing with the process it restarts.
+The updater never overwrites the running executable. It keeps current and previous generations. Update/restart ownership belongs to a separate OS-managed updater job, not the main Executor process. On Linux, `kala-executor-update.timer` activates a oneshot updater which coordinates with the main service through a local mode-`0600` control socket, waits for Tool and PTY quiescence, switches `current`, restarts `kala-executor.service`, and verifies that the expected release and Workspace identity reconnect. A missed drain deadline resumes admission and postpones the update. Failed post-activation health switches `current` back to `previous`, restarts again, and verifies recovery. This avoids single-instance lock conflicts and prevents the update coordinator from disappearing with the process it restarts.
 
 ### 9.4 Release identity
 

@@ -72,7 +72,7 @@ export type SpansToOtlpInput = {
 const NANO_PER_MS = 1_000_000n
 
 export function spansToOtlp(input: SpansToOtlpInput): OtlpTraceBundle {
-  const serviceName = input.serviceName ?? 'agent-kernel-host'
+  const serviceName = input.serviceName ?? 'kala-host'
   const scopeName = input.scopeName ?? '@agent-kernel/host'
   const scopeVersion = input.scopeVersion ?? '0.0.0'
   const resourceAttributes: OtlpAttribute[] = [

@@ -66,7 +66,7 @@ Then execute the runbook in topology order:
 5. Create private target environment files outside Git. Do not expose domains, IPs, tokens, keys, passwords, provider endpoints, real paths, Session logs, receipts, or screenshots with private data.
 6. Stage the generated release disabled using `install-dedicated-systemd.mjs`; verify all new services remain inactive and disabled, run `systemd-analyze verify`, and inspect the `installed_disabled` receipt.
 7. Re-run the final go/no-go gate. If exact active-Session continuation was not proven in Shadow, require every Session to be resting, all queues empty, and no required child active.
-8. Start `agent-runlab-dedicated-migration-finalizer.service` with `--no-block` from the independent control channel. Poll systemd, logs, and receipts externally. Never force the old Host down because waiting is slow.
+8. Start `kala-dedicated-migration-finalizer.service` with `--no-block` from the independent control channel. Poll systemd, logs, and receipts externally. Never force the old Host down because waiting is slow.
 9. Perform full production acceptance, not only HTTP 200:
    - separate Ingress/Unit/Supervisor PIDs and cgroups;
    - route state and active slot;

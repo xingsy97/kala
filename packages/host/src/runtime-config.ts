@@ -81,7 +81,7 @@ export function loadRuntimeConfig(
   const codexAuthPath =
     opts.codexAuthPath ?? join(home, '.codex', 'auth.json')
   const manualPath =
-    opts.manualModelsPath ?? join(home, '.config', 'agent-kernel', 'models.json')
+    opts.manualModelsPath ?? join(home, '.config', 'kala', 'models.json')
 
   const providers: ProviderSpec[] = []
   const claude = loadClaudeSettings(claudePath)
@@ -174,7 +174,7 @@ export function loadAnthropicCliDefaults(path = join(homedir(), '.claude', 'sett
   }
 
   const baseUrl = process.env.ANTHROPIC_BASE_URL ?? settingsEnv.ANTHROPIC_BASE_URL
-  const envSource = process.env.AGENT_KERNEL_ENV_SOURCE_ANTHROPIC_BASE_URL === 'env-file' ? 'env-file' : 'env'
+  const envSource = process.env.KALA_ENV_SOURCE_ANTHROPIC_BASE_URL === 'env-file' ? 'env-file' : 'env'
   return {
     ...(baseUrl ? { baseUrl } : {}),
     ...(baseUrl ? { baseUrlSource: process.env.ANTHROPIC_BASE_URL ? envSource : 'claude-settings' } : {}),
@@ -221,7 +221,7 @@ export function loadEnvFile(path: string, opts: { override?: boolean; sourceName
     parsed[key] = value
     if (opts.override || process.env[key] === undefined) {
       process.env[key] = value
-      if (opts.sourceName) process.env[`AGENT_KERNEL_ENV_SOURCE_${key}`] = opts.sourceName
+      if (opts.sourceName) process.env[`KALA_ENV_SOURCE_${key}`] = opts.sourceName
     }
   }
   return parsed
@@ -329,7 +329,7 @@ function loadCodexProviders(path: string, authPath: string): CodexParsed {
 }
 
 // ============================================================================
-// Manual models (`~/.config/agent-kernel/models.json`)
+// Manual models (`~/.config/kala/models.json`)
 // ============================================================================
 
 export type ManualModelsFile = {
@@ -408,7 +408,7 @@ function providerSpecFromManual(input: ManualProviderInput): ProviderSpec {
 }
 
 export function defaultAgentSettingsPath(home = homedir()): string {
-  return join(home, '.config', 'agent-kernel', 'agent.json')
+  return join(home, '.config', 'kala', 'agent.json')
 }
 
 export function loadAgentRuntimeSettings(path = defaultAgentSettingsPath()): AgentRuntimeSettings {
@@ -619,7 +619,7 @@ function tryReadFile(path: string): string | undefined {
 }
 
 // ============================================================================
-// Hooks config (`~/.config/agent-kernel/config.toml`)
+// Hooks config (`~/.config/kala/config.toml`)
 // ============================================================================
 
 const KNOWN_HOOK_EVENTS: readonly HookEvent[] = [
@@ -633,7 +633,7 @@ export function loadHookConfigs(
   path?: string,
 ): readonly HookConfig[] {
   const home = homedir()
-  const target = path ?? join(home, '.config', 'agent-kernel', 'config.toml')
+  const target = path ?? join(home, '.config', 'kala', 'config.toml')
   const raw = tryReadFile(target)
   if (raw === undefined) return []
   return parseHookConfigToml(raw)

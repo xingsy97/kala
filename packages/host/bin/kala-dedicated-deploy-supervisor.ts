@@ -19,24 +19,24 @@ import { readDedicatedProcessReadiness, readDedicatedRuntimeReadiness, dedicated
 const sleep = (ms: number): Promise<void> => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
 async function main(): Promise<void> {
-  const root = resolve(process.env.AGENT_RUNLAB_DEPLOY_ROOT ?? '/var/lib/agent-runlab/deploy')
-  const routeStatePath = resolve(process.env.AGENT_RUNLAB_ROUTE_STATE_PERSISTENT ?? join(root, 'route-state.json'))
-  const unitService = (slot: DedicatedSlot): string => `agent-runlab-dedicated-unit@${slot}.service`
+  const root = resolve(process.env.KALA_DEPLOY_ROOT ?? '/var/lib/kala/deploy')
+  const routeStatePath = resolve(process.env.KALA_ROUTE_STATE_PERSISTENT ?? join(root, 'route-state.json'))
+  const unitService = (slot: DedicatedSlot): string => `kala-dedicated-unit@${slot}.service`
   const slotOrigin = async (slot: DedicatedSlot): Promise<string> => (await readDedicatedRouteState(routeStatePath)).slots[slot].origin
-  const activeDelayMs = positive(process.env.AGENT_RUNLAB_DEPLOY_ACTIVE_DELAY_MS ?? process.env.AGENT_RUNLAB_DEPLOY_POLL_MS, 1000)
-  const idleFallbackMs = positive(process.env.AGENT_RUNLAB_DEPLOY_IDLE_FALLBACK_MS, 600_000)
-  const admission = new DedicatedAdmissionLedger(resolve(process.env.AGENT_RUNLAB_ADMISSION_LEDGER ?? '/var/lib/agent-runlab/admission/ledger.json'))
+  const activeDelayMs = positive(process.env.KALA_DEPLOY_ACTIVE_DELAY_MS ?? process.env.KALA_DEPLOY_POLL_MS, 1000)
+  const idleFallbackMs = positive(process.env.KALA_DEPLOY_IDLE_FALLBACK_MS, 600_000)
+  const admission = new DedicatedAdmissionLedger(resolve(process.env.KALA_ADMISSION_LEDGER ?? '/var/lib/kala/admission/ledger.json'))
   const handoffHeaders = (): Record<string, string> => {
-    const secret = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET?.trim()
-    if (!secret) throw new Error('Supervisor runtime control requires AGENT_RUNLAB_INGRESS_HANDOFF_SECRET')
+    const secret = process.env.KALA_INGRESS_HANDOFF_SECRET?.trim()
+    if (!secret) throw new Error('Supervisor runtime control requires KALA_INGRESS_HANDOFF_SECRET')
     return { 'x-agent-runlab-ingress-handoff': secret }
   }
   const supervisor = new DedicatedDeploySupervisor(root, {
     routeState: async () => await readDedicatedRouteState(routeStatePath),
     inspectQuiescence: async (slot) => await fetchJson<UnitQuiescence>(`${await slotOrigin(slot)}/internal/runtime/quiescence`),
     originToolResultPersisted: async (slot, origin) => {
-      const secret = process.env.AGENT_RUNLAB_INGRESS_HANDOFF_SECRET?.trim()
-      if (!secret) throw new Error('origin result barrier requires AGENT_RUNLAB_INGRESS_HANDOFF_SECRET')
+      const secret = process.env.KALA_INGRESS_HANDOFF_SECRET?.trim()
+      if (!secret) throw new Error('origin result barrier requires KALA_INGRESS_HANDOFF_SECRET')
       const result = await fetchJson<{ persisted: boolean }>(
         `${await slotOrigin(slot)}/internal/runtime/tool-result/${encodeURIComponent(origin.sessionId)}/${encodeURIComponent(origin.callId)}`,
         { 'x-agent-runlab-ingress-handoff': secret },
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
       // the checkpoint deadline and aborts its drain before the Supervisor
       // performs a safe pre-handoff rollback, so no deployment can leave
       // message queues globally paused without a terminal receipt.
-      timeoutMs: positive(process.env.AGENT_RUNLAB_RESTART_CHECKPOINT_TIMEOUT_MS, 10 * 60_000),
+      timeoutMs: positive(process.env.KALA_RESTART_CHECKPOINT_TIMEOUT_MS, 10 * 60_000),
     }, handoffHeaders()),
     restartStatus: async (slot) => await fetchJson<HostRestartStatus>(`${await slotOrigin(slot)}/internal/runtime/restart/status`, handoffHeaders()),
     commitPlannedRestart: async (slot, attemptId) => await postJson<HostRestartAttempt>(`${await slotOrigin(slot)}/internal/runtime/restart/commit`, { attemptId }, handoffHeaders()),
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     writeRuntimeFence: async (ownership) => {
       const path = join(root, 'runtime.env')
       if (!ownership) { await rm(path, { force: true }); return }
-      await writeTextFile(path, `AGENT_RUNLAB_EXPECTED_DEPLOYMENT=${JSON.stringify(JSON.stringify(ownership))}\n`)
+      await writeTextFile(path, `KALA_EXPECTED_DEPLOYMENT=${JSON.stringify(JSON.stringify(ownership))}\n`)
     },
     writeCandidateState: async (state) => {
       const path = join(root, 'candidate-state.json')
@@ -154,7 +154,7 @@ async function main(): Promise<void> {
     stopSlot: async (slot) => await systemctl('disable', '--now', unitService(slot)),
     verifySlot: async (slot, expected) => {
       const origin = await slotOrigin(slot)
-      const deadline = Date.now() + positive(process.env.AGENT_RUNLAB_SLOT_VERIFY_TIMEOUT_MS, 5 * 60_000)
+      const deadline = Date.now() + positive(process.env.KALA_SLOT_VERIFY_TIMEOUT_MS, 5 * 60_000)
       let lastError: unknown
       while (Date.now() < deadline) {
         try {
@@ -176,13 +176,13 @@ async function main(): Promise<void> {
           }
           const pid = Number((await systemctlOutput('show', '--property=MainPID', '--value', unitService(slot))).trim())
           if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('slot has no live pid')
-          const processReadiness = await readDedicatedProcessReadiness(`/run/agent-runlab/unit-${slot}-process-ready.json`)
-          const readiness = await readDedicatedRuntimeReadiness(`/run/agent-runlab/unit-${slot}-readiness.json`)
-          const stateRoot = await dedicatedRuntimeStateIdentity('/var/lib/agent-runlab/.agent-kernel/sessions')
+          const processReadiness = await readDedicatedProcessReadiness(`/run/kala/unit-${slot}-process-ready.json`)
+          const readiness = await readDedicatedRuntimeReadiness(`/run/kala/unit-${slot}-readiness.json`)
+          const stateRoot = await dedicatedRuntimeStateIdentity('/var/lib/kala/.kala/sessions')
           if (processReadiness.pid !== pid || readiness.pid !== pid) throw new Error('process or runtime readiness pid mismatch')
           if (expected.deployment && !sameDeploymentFence(processReadiness.deployment, expected.deployment)) throw new Error('process readiness deployment fence mismatch')
           if (JSON.stringify(readiness.stateRoot) !== JSON.stringify(stateRoot)) throw new Error('runtime state root mismatch')
-          const ownedLease = await processOwnsPath(pid, '/var/lib/agent-runlab/units/local/write.lock')
+          const ownedLease = await processOwnsPath(pid, '/var/lib/kala/units/local/write.lock')
           if (!ownedLease || readiness.writeLease.pathDigest !== createHash('sha256').update(ownedLease).digest('hex')) throw new Error('runtime write lease mismatch')
           if (!Object.values(readiness.capabilities).every(Boolean)) throw new Error('runtime readiness capability mismatch')
           if (readiness.continuation.failed > 0 || readiness.continuation.completed !== readiness.continuation.participants) throw new Error('planned continuation is incomplete')
@@ -197,7 +197,7 @@ async function main(): Promise<void> {
     // Deliberately process-local configuration: operators opt in on this machine
     // with a persistent systemd Environment= override, which is read again after
     // a control-plane update restarts the Supervisor.
-    allowLocalDevelopment: process.env.AGENT_RUNLAB_ALLOW_LOCAL_DEVELOPMENT_DEPLOY === '1',
+    allowLocalDevelopment: process.env.KALA_ALLOW_LOCAL_DEVELOPMENT_DEPLOY === '1',
   })
   let stopping = false
   process.stdout.write(`${JSON.stringify({ event: 'deploy_supervisor_ready' })}\n`)
@@ -345,18 +345,23 @@ async function activateDashboardRequest(root: string, request: ReturnType<typeof
   const generation = current.generation + 1
   await writeDashboardRouteState(statePath, { schemaVersion: 1, generation, releaseId: request.releaseId, releaseDigest: request.releaseDigest, assetDigest: manifest.assetDigest, version: manifest.version, protocol: manifest.protocol, activatedAt: now })
   try {
-    await verifyDashboardPublicRoute(process.env.AGENT_RUNLAB_PUBLIC_ORIGIN ?? 'http://127.0.0.1:13000', { releaseId: request.releaseId, generation })
+    await verifyDashboardPublicRoute(publicVerificationOrigin(), { releaseId: request.releaseId, generation })
   } catch (error) {
     // Route state is monotonic even when activation fails. Restore the known
     // predecessor at a newer generation so Ingress never remains pinned to a
     // release it could not actually serve.
     await writeDashboardRouteState(statePath, { ...current, generation: generation + 1, activatedAt: new Date().toISOString() })
-    await verifyDashboardPublicRoute(process.env.AGENT_RUNLAB_PUBLIC_ORIGIN ?? 'http://127.0.0.1:13000', { releaseId: current.releaseId, generation: generation + 1 })
+    await verifyDashboardPublicRoute(publicVerificationOrigin(), { releaseId: current.releaseId, generation: generation + 1 })
     throw error
   }
   const completed: DashboardDeploymentReceipt = { ...receipt, receiptRevision: receipt.receiptRevision + 1, phase: 'completed', updatedAt: now, observedGeneration: generation, previousReleaseId: current.releaseId }
   await writeDashboardReceipt(join(root, 'receipts', `${request.deploymentId}.json`), completed)
   return completed
+}
+
+function publicVerificationOrigin(): string {
+  const exact = (process.env.KALA_PUBLIC_URLS ?? '').split(',').map((value) => value.trim()).find((value) => value && !value.includes('*'))
+  return exact ? new URL(exact).origin : 'http://127.0.0.1:13000'
 }
 
 async function verifyDashboardFiles(root: string, manifest: ReturnType<typeof parseDashboardManifest>): Promise<void> {
@@ -429,7 +434,7 @@ async function writeOperatorStatus(
   let writeLeaseOwnerPid = 0
   for (const slot of ['blue', 'green'] as const) {
     const pid = slots[slot].pid
-    if (pid > 0 && await processOwnsPath(pid, '/var/lib/agent-runlab/units/local/write.lock')) { writeLeaseOwnerPid = pid; break }
+    if (pid > 0 && await processOwnsPath(pid, '/var/lib/kala/units/local/write.lock')) { writeLeaseOwnerPid = pid; break }
   }
   const safeDeployment = deployment ? {
     deploymentId: deployment.deploymentId, operationId: deployment.operationId, phase: deployment.phase,
@@ -549,7 +554,7 @@ async function systemctl(...args: string[]): Promise<void> {
 
 async function startControlUpdater(): Promise<void> {
   try {
-    await systemctl('start', '--no-block', 'agent-runlab-dedicated-control-updater.service')
+    await systemctl('start', '--no-block', 'kala-dedicated-control-updater.service')
   } catch (error) {
     // The updater intentionally restarts this Supervisor. systemd can kill the
     // still-running systemctl child with its parent cgroup after the durable
@@ -597,7 +602,7 @@ async function runtimeAssetName(releaseDir: string): Promise<string> {
   if (manifest.assets.includes('kala-runtime.cjs')) return 'kala-runtime.cjs'
   if (manifest.assets.includes('agent-runlab-runtime.cjs')
     && manifest.fallbackAssets?.['agent-runlab-runtime'] === 'agent-runlab-runtime.cjs'
-    && manifest.assets.includes('agent-runlab-dedicated-unit@.service')) return 'agent-runlab-runtime.cjs'
+    && manifest.assets.includes('kala-dedicated-unit@.service')) return 'agent-runlab-runtime.cjs'
   throw new Error('release has no supported Runtime asset')
 }
 

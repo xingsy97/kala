@@ -272,10 +272,10 @@ function nativePage(url = 'https://dashboard.example/') {
 
 test('desktop marker and public v1 bridge cannot be replaced; blank links remain unprivileged', () => {
   const { window, Element, click } = nativePage()
-  assert.equal(window.__RUNLAB_DESKTOP__, true)
-  assert.equal(Object.getOwnPropertyDescriptor(window, '__RUNLAB_DESKTOP__').writable, false)
-  assert.equal(Object.getOwnPropertyDescriptor(window, '__RUNLAB_DESKTOP_BRIDGE__').writable, false)
-  assert.equal(Object.isFrozen(window.__RUNLAB_DESKTOP_BRIDGE__), true)
+  assert.equal(window.__KALA_DESKTOP__, true)
+  assert.equal(Object.getOwnPropertyDescriptor(window, '__KALA_DESKTOP__').writable, false)
+  assert.equal(Object.getOwnPropertyDescriptor(window, '__KALA_DESKTOP_BRIDGE__').writable, false)
+  assert.equal(Object.isFrozen(window.__KALA_DESKTOP_BRIDGE__), true)
   const link = new Element()
   click({ target: link })
   assert.equal(link.target, '_self')
@@ -283,15 +283,15 @@ test('desktop marker and public v1 bridge cannot be replaced; blank links remain
 
 test('remote HTTP exposes confirmation and window controls without the privileged desktop bridge', async () => {
   const { window, calls } = nativePage('http://remote.example/')
-  assert.equal(window.__RUNLAB_DESKTOP_BRIDGE__, undefined)
-  assert.equal(Object.isFrozen(window.__RUNLAB_DESKTOP_CONNECTION__), true)
-  await window.__RUNLAB_DESKTOP_CONNECTION__.confirmConnection()
+  assert.equal(window.__KALA_DESKTOP_BRIDGE__, undefined)
+  assert.equal(Object.isFrozen(window.__KALA_DESKTOP_CONNECTION__), true)
+  await window.__KALA_DESKTOP_CONNECTION__.confirmConnection()
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ command: 'desktop_connection_ready' }])
 })
 
 test('public v1 methods preserve exact payloads and promise errors', async () => {
   const { window, calls } = nativePage()
-  const bridge = window.__RUNLAB_DESKTOP_BRIDGE__
+  const bridge = window.__KALA_DESKTOP_BRIDGE__
   assert.equal(bridge.version, 1)
   assert.deepEqual(Object.keys(bridge).sort(), ['confirmConnection', 'getInfo', 'notify', 'readClipboardImage', 'setActivity', 'subscribe', 'version'])
   assert.equal((await bridge.getInfo()).version, '0.2.0-rc.5')
@@ -315,7 +315,7 @@ test('public v1 methods preserve exact payloads and promise errors', async () =>
 test('cold native link is queued until subscription and current-window events never reload', () => {
   const page = nativePage('https://dashboard.example/?desktopSession=cold:session.1#/docs')
   const events = []
-  const unsubscribe = page.window.__RUNLAB_DESKTOP_BRIDGE__.subscribe(event => events.push(JSON.parse(JSON.stringify(event))))
+  const unsubscribe = page.window.__KALA_DESKTOP_BRIDGE__.subscribe(event => events.push(JSON.parse(JSON.stringify(event))))
   assert.deepEqual(events, [{ type: 'open-session', sessionId: 'cold:session.1' }])
   assert.equal(page.location.href, 'https://dashboard.example/#/docs')
   page.handlers.get('runlab:window-state')({ detail: { focused: false, visible: false } })

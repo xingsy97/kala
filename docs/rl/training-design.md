@@ -633,7 +633,7 @@ rollout; builder refuses to mark retokenized text as trainable.
 Goal: make `agent-kernel` call a training policy server while capturing
 tokens.
 
-- Add a provider adapter mode such as `AGENT_KERNEL_PROVIDER=policy-gateway`.
+- Add a provider adapter mode such as `KALA_PROVIDER=policy-gateway`.
 - For slime, call SGLang `/generate` and request logprobs.
 - Pass stable session route keys for prefix-cache affinity.
 - Store request id, model, tokenizer, and weight version on every LLM trace.
@@ -734,7 +734,7 @@ Invocation options:
 - Option A: run host/executor as long-lived services and call an HTTP action
   to create/run a session for each sample. Preferred for throughput and
   observability.
-- Option B: per-sample `agent-kernel-host run-task` subprocess. Simpler for
+- Option B: per-sample `kala-host run-task` subprocess. Simpler for
   first smoke tests.
 
 Required `Sample` fields on return:
@@ -751,9 +751,9 @@ cd references/slime
 export HF_CHECKPOINT=/models/Qwen2.5-0.5B-Instruct
 export REF_MODEL_PATH=/models/Qwen2.5-0.5B-Instruct_torch_dist
 export PROMPT_DATA=/data/swebench_agent_kernel_train.jsonl
-export AGENT_KERNEL_HOST_URL=http://127.0.0.1:13000
-export AGENT_KERNEL_EXECUTOR_URL=http://127.0.0.1:13002
-export AGENT_KERNEL_ARTIFACT_ROOT=/runs/agent-kernel-rollouts
+export KALA_HOST_URL=http://127.0.0.1:13000
+export KALA_EXECUTOR_URL=http://127.0.0.1:13002
+export KALA_ARTIFACT_ROOT=/runs/agent-kernel-rollouts
 export ADAPTER_PUBLIC_HOST=<routable-host-ip>
 export ADAPTER_PORT=18001
 
@@ -817,20 +817,20 @@ Goal: expose real training readiness without hiding missing pieces.
 CLI additions:
 
 ```bash
-agent-kernel-host rl prepare-swebench-dataset \
+kala-host rl prepare-swebench-dataset \
   --source swebench_verified \
   --output data/swebench_agent_kernel.jsonl \
   --limit 20
 
-agent-kernel-host rl run-rollout-smoke \
+kala-host rl run-rollout-smoke \
   --task data/swebench_agent_kernel.jsonl \
   --provider policy-gateway \
   --artifact-root runs/rollouts-smoke
 
-agent-kernel-host rl export-slime-plugin \
+kala-host rl export-slime-plugin \
   --output integrations/slime_agent_kernel
 
-agent-kernel-host rl inspect-rollout \
+kala-host rl inspect-rollout \
   --rollout runs/rollouts/<rollout_id>.json
 ```
 

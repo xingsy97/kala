@@ -54,11 +54,11 @@ function startHost(label) {
     env: {
       ...process.env,
       HOME: home,
-      HOST_LISTEN_HOST: '127.0.0.1',
-      HOST_PORT: String(port),
-      SESSIONS_DIR: sessionsDir,
-      AGENT_KERNEL_ARTIFACTS_DIR: join(stateRoot, 'artifacts'),
-      EXECUTOR_TOKENS: JSON.stringify([{ token }]),
+      KALA_BIND_HOST: '127.0.0.1',
+      KALA_PORT: String(port),
+      KALA_SESSIONS_DIR: sessionsDir,
+      KALA_ARTIFACTS_DIR: join(stateRoot, 'artifacts'),
+      KALA_EXECUTOR_TOKENS: JSON.stringify([{ token }]),
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? 'e2e-unused',
     },
   })
@@ -82,7 +82,7 @@ try {
         HOST_URL: origin,
         EXECUTOR_TOKEN: token,
         WORKSPACE_NAME: 'core-e2e-workspace',
-        AGENT_KERNEL_WORKSPACE_ID_FILE: workspaceIdFile,
+        KALA_WORKSPACE_ID_FILE: workspaceIdFile,
       },
     })
     harness.registerProcess('production-executor', executor, executorLogs)
