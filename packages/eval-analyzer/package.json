@@ -16,7 +16,7 @@
     "@agent-kernel/eval-protocol": "workspace:*",
     "@agent-kernel/eval-sdk": "workspace:*"
   },
-  "devDependencies": { "@agent-kernel/eval-orchestrator": "workspace:*", "@types/node": "^22.9.0", "typescript": "^5.6.3", "vitest": "4.1.11" },
+  "devDependencies": { "@agent-kernel/eval-orchestrator": "workspace:*", "@types/node": "22.9.0", "typescript": "5.6.3", "vitest": "4.1.11" },
   "sideEffects": false,
   "license": "MIT"
 }

@@ -7,6 +7,6 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["src/**/*", "bin/**/*"],
+  "include": ["src/**/*", "bin/**/*", "../../types/node-zlib-zstd/**/*.d.ts"],
   "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
 }

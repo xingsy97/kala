@@ -1055,7 +1055,7 @@ function classifyReadBinaryResult(
   return { requestId, workspaceId, path, kind: 'binary', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, fileVersion: res.fileVersion, ...(truncated ? { truncated: true } : {}) }
 }
 
-function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64)
   const out = new Uint8Array(new ArrayBuffer(binary.length))
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)

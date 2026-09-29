@@ -6,6 +6,26 @@ const required = ['release/SHA256SUMS', 'release/manifest.json', 'pnpm-lock.yaml
 const failures = required.filter((path) => !existsSync(path)).map((path) => `missing ${path}`)
 const lock = readFileSync('pnpm-lock.yaml', 'utf8')
 if (!lock.includes('lockfileVersion:')) failures.push('invalid pnpm lockfile')
+const workspace = readFileSync('pnpm-workspace.yaml', 'utf8')
+if (!/^minimumReleaseAge:\s+1440$/mu.test(workspace)) failures.push('pnpm minimumReleaseAge must be fixed at 1440 minutes')
+if (!/^saveExact:\s+true$/mu.test(workspace)) failures.push('pnpm saveExact must be enabled')
+const manifests = spawnSync('git', ['ls-files', '-z', '--', 'package.json', '**/package.json'], { encoding: 'utf8' })
+if (manifests.status !== 0) {
+  failures.push('unable to enumerate tracked package manifests')
+} else {
+  const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
+  const localReference = /^(?:workspace:|file:|link:)/u
+  for (const path of manifests.stdout.split('\0').filter(Boolean)) {
+    const manifest = JSON.parse(readFileSync(path, 'utf8'))
+    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+      for (const [name, version] of Object.entries(manifest[field] ?? {})) {
+        if (typeof version !== 'string' || (!exactVersion.test(version) && !localReference.test(version))) {
+          failures.push(`${path} ${field}.${name} must use an exact version or local workspace reference`)
+        }
+      }
+    }
+  }
+}
 const strict = process.argv.includes('--strict')
 for (const binary of ['syft', 'grype', 'trivy', 'cosign']) {
   const available = spawnSync('sh', ['-lc', `command -v ${binary}`]).status === 0

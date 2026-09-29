@@ -32,6 +32,11 @@ const REDACT_PATHS = [
 ]
 
 export type RuntimeLogger = Logger
+type RuntimeLoggerEnvironment = {
+  readonly [name: string]: string | undefined
+  readonly LOG_FORMAT?: string
+  readonly LOG_LEVEL?: string
+}
 
 export function createRuntimeLogger(name: string): RuntimeLogger {
   const policy = resolveRuntimeLoggerPolicy(process.env)
@@ -69,7 +74,7 @@ export function createRuntimeLogger(name: string): RuntimeLogger {
   return logger
 }
 
-export function resolveRuntimeLoggerPolicy(env: { LOG_FORMAT?: string; LOG_LEVEL?: string }): RuntimeLoggerPolicy {
+export function resolveRuntimeLoggerPolicy(env: RuntimeLoggerEnvironment): RuntimeLoggerPolicy {
   const requestedFormat = env.LOG_FORMAT
   const normalizedFormat = (requestedFormat ?? 'pretty').toLowerCase()
   const format: RuntimeLogFormat = normalizedFormat === 'json' ? 'json' : 'pretty'

@@ -11,6 +11,6 @@
   "files": ["dist", "README.md"],
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": { "@agent-kernel/eval-protocol": "workspace:*", "@agent-kernel/eval-sdk": "workspace:*" },
-  "devDependencies": { "@types/node": "^22.9.0", "typescript": "^5.6.3", "vitest": "4.1.11" },
+  "devDependencies": { "@types/node": "22.9.0", "typescript": "5.6.3", "vitest": "4.1.11" },
   "sideEffects": false
 }

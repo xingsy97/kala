@@ -49,8 +49,8 @@ async function runProcessInternal(input: RunProcessInput, stdoutFile?: string): 
   if (!Number.isInteger(input.timeoutMs) || input.timeoutMs <= 0) throw new Error('process timeout must be a positive integer')
   const started = new Date()
   const child = spawn(input.command, input.args, { stdio: ['pipe', 'pipe', 'pipe'], env: input.environment ?? process.env })
-  let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0)
-  let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0)
+  let stdout: Buffer = Buffer.alloc(0)
+  let stderr: Buffer = Buffer.alloc(0)
   let outputExceeded = false
   let timedOut = false
   let cancelled = false
@@ -58,7 +58,7 @@ async function runProcessInternal(input: RunProcessInput, stdoutFile?: string): 
   let aborting: Promise<void> | undefined
   const stdoutDecoder = new StringDecoder('utf8')
   const stderrDecoder = new StringDecoder('utf8')
-  const append = (current: Buffer<ArrayBufferLike>, chunk: Buffer<ArrayBufferLike>): Buffer<ArrayBufferLike> => {
+  const append = (current: Buffer, chunk: Buffer): Buffer => {
     if (current.byteLength + chunk.byteLength > MAX_OUTPUT_BYTES) {
       outputExceeded = true
       void abort('cancelled')
@@ -77,9 +77,9 @@ async function runProcessInternal(input: RunProcessInput, stdoutFile?: string): 
       void abort('cancelled')
     })
   } else {
-    child.stdout.on('data', (chunk: Buffer<ArrayBufferLike>) => { stdout = append(stdout, chunk); observe(input.onStdout, stdoutDecoder.write(chunk)) })
+    child.stdout.on('data', (chunk: Buffer) => { stdout = append(stdout, chunk); observe(input.onStdout, stdoutDecoder.write(chunk)) })
   }
-  child.stderr.on('data', (chunk: Buffer<ArrayBufferLike>) => { stderr = append(stderr, chunk); observe(input.onStderr, stderrDecoder.write(chunk)) })
+  child.stderr.on('data', (chunk: Buffer) => { stderr = append(stderr, chunk); observe(input.onStderr, stderrDecoder.write(chunk)) })
   const abort = async (reason: 'timeout' | 'cancelled'): Promise<void> => {
     if (aborting) return await aborting
     timedOut = reason === 'timeout'
