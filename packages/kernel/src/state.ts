@@ -47,7 +47,7 @@ export function createConfig(params: {
   return {
     tools: params.tools,
     ...(params.toolDisclosureMode !== undefined ? { toolDisclosureMode: params.toolDisclosureMode } : {}),
-    systemPrompt: params.systemPrompt,
+    ...(params.systemPrompt !== undefined ? { systemPrompt: params.systemPrompt } : {}),
     ...(params.agentModule !== undefined
       ? { agentModule: params.agentModule }
       : {}),

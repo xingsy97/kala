@@ -159,14 +159,14 @@ export class DashboardErrorBoundary extends Component<
   { children: ReactNode },
   { failed: boolean }
 > {
-  state = { failed: false };
+  override state = { failed: false };
   static getDerivedStateFromError(): { failed: true } {
     return { failed: true };
   }
-  componentDidCatch(_error: Error, _info: ErrorInfo): void {
+  override componentDidCatch(_error: Error, _info: ErrorInfo): void {
     /* Avoid rendering or persisting sensitive error detail. */
   }
-  render(): ReactNode {
+  override render(): ReactNode {
     if (!this.state.failed) return this.props.children;
     return (
       <main className="fatal-recovery" role="alert">
@@ -4160,6 +4160,8 @@ function OperatorCommandForm({
 }
 
 type Option = { value: string; label: string };
+type CommandOptionGroup = "runs" | "detectors" | "entries" | "jobs" | "clusters" | "findings" | "agents" | "packs";
+type CommandOptions = Record<CommandOptionGroup, Option[]>;
 const DEFECT_CATEGORIES: Option[] = ["instruction_drift", "context_forgetting", "test_gaming", "tool_recovery", "planning_execution", "trace_divergence"].map((value) => ({ value, label: humanize(value) }));
 const SEVERITIES: Option[] = ["low", "medium", "high", "critical"].map((value) => ({ value, label: humanize(value) }));
 const SUSPECTED_LAYERS: Option[] = ["model", "prompt", "tool", "runtime", "environment", "verifier"].map((value) => ({ value, label: humanize(value) }));
@@ -4172,8 +4174,11 @@ function MultiChoice({ label, name, values, options, onChange }: { label: string
 function TextField({ label, name, value = "", onChange }: { label: string; name: string; value?: string; onChange(name: string, value: string): void }): JSX.Element { return <label>{label}<input value={value} onChange={(event) => onChange(name, event.target.value)} /></label>; }
 function NumberField(props: Parameters<typeof TextField>[0]): JSX.Element { return <label>{props.label}<input type="number" min="0" step="any" value={props.value} onChange={(event) => props.onChange(props.name, event.target.value)} /></label>; }
 function CheckField({ label, name, values, setValues }: { label: string; name: string; values: Record<string,string>; setValues: React.Dispatch<React.SetStateAction<Record<string,string>>> }): JSX.Element { return <label className="check-field"><input type="checkbox" checked={values[name] === "true"} onChange={(event) => setValues((current) => ({ ...current, [name]: String(event.target.checked) }))} />{label}</label>; }
-function commandOptions(context: unknown): Record<string, Option[]> {
-  const found: Record<string, Map<string,string>> = Object.fromEntries(["runs","detectors","entries","jobs","clusters","findings","agents","packs"].map((key) => [key, new Map()]));
+function commandOptions(context: unknown): CommandOptions {
+  const found: Record<CommandOptionGroup, Map<string,string>> = {
+    runs: new Map(), detectors: new Map(), entries: new Map(), jobs: new Map(),
+    clusters: new Map(), findings: new Map(), agents: new Map(), packs: new Map(),
+  };
   const visit = (value: unknown) => { if (Array.isArray(value)) return value.forEach(visit); if (!value || typeof value !== "object") return; const item = value as Record<string,unknown>;
     add("runs", field(item,"accepted.spec.runId") || field(item,"runId"), field(item,"accepted.spec.taskPack.id") || field(item,"taskPackId"));
     add("detectors", field(item,"detectorId") || (field(item,"id").includes("detector") ? field(item,"id") : ""), field(item,"name"));
@@ -4182,8 +4187,20 @@ function commandOptions(context: unknown): Record<string, Option[]> {
     add("findings", field(item,"findingId"), field(item,"category")); add("agents", field(item,"agentVariantId") || field(item,"variantId"), field(item,"name"));
     add("packs", field(item,"packId") || field(item,"regressionPackId"), field(item,"owner")); Object.values(item).forEach(visit);
   };
-  const add = (group: string, value: string, hint: string) => { if (value) found[group]!.set(value, hint ? `${humanize(hint)} · ${humanize(value.replace(/^fresh-/, ""))}` : humanize(value.replace(/^fresh-/, ""))); };
-  visit(context); return Object.fromEntries(Object.entries(found).map(([key,map]) => [key,[...map].map(([value,label]) => ({value,label}))]));
+  const add = (group: CommandOptionGroup, value: string, hint: string) => { if (value) found[group].set(value, hint ? `${humanize(hint)} · ${humanize(value.replace(/^fresh-/, ""))}` : humanize(value.replace(/^fresh-/, ""))); };
+  visit(context);
+  const options = (group: CommandOptionGroup): Option[] =>
+    [...found[group]].map(([value, label]) => ({ value, label }));
+  return {
+    runs: options("runs"),
+    detectors: options("detectors"),
+    entries: options("entries"),
+    jobs: options("jobs"),
+    clusters: options("clusters"),
+    findings: options("findings"),
+    agents: options("agents"),
+    packs: options("packs"),
+  };
 }
 function humanCommand(type: EvaluationCommand["type"], values: Record<string,string>, multi: Record<string,string[]>): unknown {
   const envelope = operatorCommandEnvelope(operatorSession()); const id = (value: string | undefined, fallback: string) => (value?.trim() || `${fallback}-${Date.now()}`).toLowerCase().replace(/[^a-z0-9._-]+/g,"-");
@@ -4191,10 +4208,10 @@ function humanCommand(type: EvaluationCommand["type"], values: Record<string,str
   if (type === "run.analyze") return { ...envelope, type, runId: values.runId, detectorIds: multi.detectorIds };
   if (type === "leaderboard.invalidate") return { ...envelope, type, entryId: values.entryId, reason: values.reason };
   if (type === "failure-cluster.promote") return { ...envelope, type, runId: values.runId, sourceJobId: values.sourceJobId, clusterId: values.clusterId, humanName: values.humanName, promotedCategory: values.promotedCategory, promotedBy: { actorId: operatorSession().sessionId, authority: "operator" } };
-  if (type === "regression.evaluate") return { ...envelope, type, gateId: id(values.gateId,"release-check"), baseline: { runId: values.baselineRunId, agentVariantId: values.baselineAgentVariantId }, candidate: { runId: values.candidateRunId, agentVariantId: values.candidateAgentVariantId }, rules: { maxSuccessRateDropPp: +values.maxSuccessRateDropPp, maxNewCriticalDefects: +values.maxNewCriticalDefects, maxTestGamingRate: +values.maxTestGamingRate, maxP95CostIncreasePct: +values.maxP95CostIncreasePct, allowedFlakeRate: +values.allowedFlakeRate, confidenceLevel: +values.confidenceLevel } };
+  if (type === "regression.evaluate") return { ...envelope, type, gateId: id(values.gateId,"release-check"), baseline: { runId: values.baselineRunId, agentVariantId: values.baselineAgentVariantId }, candidate: { runId: values.candidateRunId, agentVariantId: values.candidateAgentVariantId }, rules: { maxSuccessRateDropPp: Number(values.maxSuccessRateDropPp), maxNewCriticalDefects: Number(values.maxNewCriticalDefects), maxTestGamingRate: Number(values.maxTestGamingRate), maxP95CostIncreasePct: Number(values.maxP95CostIncreasePct), allowedFlakeRate: Number(values.allowedFlakeRate), confidenceLevel: Number(values.confidenceLevel) } };
   if (type === "report.generate") return { ...envelope, type, reportId: id(values.reportId,"report"), runIds: multi.runIds, methodologyVersion: values.methodologyVersion };
-  if (type === "retention.set") return { ...envelope, type, policy: { schemaVersion: 1, policyId: id(values.policyId,"retention"), retainDays: +values.retainDays, protectPublishedLeaderboardEvidence: values.protectLeaderboard === "true", protectRegressionEvidence: values.protectRegression === "true", derivedArtifactDeletion: "transitive", requireConfirmation: true } };
-  if (type === "insight.record") return { ...envelope, type, insight: { schemaVersion:1, insightId:id(values.insightId,"insight"), evidenceRefs:[values.failureCluster], failureCluster:values.failureCluster, affectedTaskRate:+values.affectedTaskRate, severity:values.severity, suspectedLayer:values.suspectedLayer, confidence:+values.confidence, recommendation:values.recommendation, expectedMetric:values.expectedMetric, regressionPackId:values.regressionPackId, owner:values.owner, status:values.status, postFixValidationRefs:[] } };
+  if (type === "retention.set") return { ...envelope, type, policy: { schemaVersion: 1, policyId: id(values.policyId,"retention"), retainDays: Number(values.retainDays), protectPublishedLeaderboardEvidence: values.protectLeaderboard === "true", protectRegressionEvidence: values.protectRegression === "true", derivedArtifactDeletion: "transitive", requireConfirmation: true } };
+  if (type === "insight.record") return { ...envelope, type, insight: { schemaVersion:1, insightId:id(values.insightId,"insight"), evidenceRefs:[values.failureCluster], failureCluster:values.failureCluster, affectedTaskRate:Number(values.affectedTaskRate), severity:values.severity, suspectedLayer:values.suspectedLayer, confidence:Number(values.confidence), recommendation:values.recommendation, expectedMetric:values.expectedMetric, regressionPackId:values.regressionPackId, owner:values.owner, status:values.status, postFixValidationRefs:[] } };
   return { ...envelope, type };
 }
 function formReady(type: string, values: Record<string,string>, multi: Record<string,string[]>): boolean {

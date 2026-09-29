@@ -724,12 +724,14 @@ describe("standalone evaluation dashboard", () => {
     const templateSpec = structuredClone(canonicalRunSpec) as EvaluationRunSpec;
     templateSpec.runId = "template-run";
     templateSpec.taskPack.id = "custom-task-pack";
-    templateSpec.agents[0].backendId = "custom-command";
-    templateSpec.agents[0].variantId = "guided-agent";
-    templateSpec.agents[0].credentialRefs = [];
-    templateSpec.agents[0].config = { argv: ["true"] };
-    templateSpec.agents[0].configHash = await sha256Hex(
-      canonicalJson(templateSpec.agents[0].config),
+    const templateAgent = templateSpec.agents[0];
+    if (!templateAgent) throw new Error("canonical run spec must contain an agent");
+    templateAgent.backendId = "custom-command";
+    templateAgent.variantId = "guided-agent";
+    templateAgent.credentialRefs = [];
+    templateAgent.config = { argv: ["true"] };
+    templateAgent.configHash = await sha256Hex(
+      canonicalJson(templateAgent.config),
     );
     templateSpec.execution.repeats = 2;
     templateSpec.execution.timeoutMs = 30_000;
