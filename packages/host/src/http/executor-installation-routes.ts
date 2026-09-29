@@ -216,6 +216,7 @@ function bootstrapEnvironment(origin: string, snapshot: { id: string; mode: stri
     EXECUTOR_INSTALL_PLATFORM: snapshot.platform,
     EXECUTOR_INSTALL_ROOT: snapshot.workspaceRoot,
     AGENT_KERNEL_RELEASE_BASE_URL: `${origin}/install/assets`,
+    AGENT_KERNEL_RELEASE_TRUST: 'host',
     RUNLAB_RELEASE_ASSETS_URL: `${origin}/install/assets`,
     ...(snapshot.label ? { EXECUTOR_INSTALL_LABEL: snapshot.label } : {}),
   }

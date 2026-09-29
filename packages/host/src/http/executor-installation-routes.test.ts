@@ -102,10 +102,11 @@ describe('executor installation routes', () => {
     expect(installerScript).not.toContain('curl -fSL')
     const claimed = await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })
     expect(claimed.status).toBe(200)
-    const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string; AGENT_KERNEL_RELEASE_BASE_URL: string; RUNLAB_RELEASE_ASSETS_URL: string; RUNLAB_INSTALLER_ALLOW_UNSIGNED?: string } }
+    const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string; AGENT_KERNEL_RELEASE_BASE_URL: string; AGENT_KERNEL_RELEASE_TRUST: string; RUNLAB_RELEASE_ASSETS_URL: string; RUNLAB_INSTALLER_ALLOW_UNSIGNED?: string } }
     const bootstrap = claim.env.EXECUTOR_INSTALL_BOOTSTRAP
     expect(bootstrap).toMatch(/^ak_install_/u)
     expect(claim.env.AGENT_KERNEL_RELEASE_BASE_URL).toBe(`${url}/install/assets`)
+    expect(claim.env.AGENT_KERNEL_RELEASE_TRUST).toBe('host')
     expect(claim.env.RUNLAB_RELEASE_ASSETS_URL).toBe(`${url}/install/assets`)
     expect(claim.env.RUNLAB_INSTALLER_ALLOW_UNSIGNED).toBeUndefined()
     expect((await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })).status).toBe(401)

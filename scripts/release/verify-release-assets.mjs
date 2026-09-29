@@ -173,6 +173,9 @@ for (const asset of manifest.assets) {
     if (text.includes('curl')) fail(`${asset} must be wget-only and must not mention curl`)
     if (text.includes('copilot-cli') || text.includes('COPILOT_CLI_PATH')) fail(`${asset} must not download a standalone Copilot CLI`)
     if (!text.includes('Release downloads require HTTPS except for loopback URLs') || !text.includes('cosign verify-blob')) fail(`${asset} must reject public unsigned installs`)
+    if (!text.includes('AGENT_KERNEL_RELEASE_TRUST') || !text.includes('Host-mediated release trust requires a valid internal installation session') || !text.includes('"$BASE_URL" != "$host_asset_base"')) {
+      fail(`${asset} must narrowly bind Host-mediated trust to an internal installation session`)
+    }
     if (/wget\s+-qO-.*\|.*bash/.test(text)) {
       fail(`${asset} must not suggest quiet wget pipe-to-bash bootstrap commands`)
     }

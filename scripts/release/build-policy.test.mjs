@@ -97,6 +97,11 @@ test('release scripts enforce Linux and macOS assets and reject Windows offers',
   assert.doesNotMatch(builder, /generateExecutorInstallerSh|COPILOT_CLI_PATH/)
   assert.match(builder, /Release downloads require HTTPS except for loopback URLs/)
   assert.match(builder, /cosign verify-blob/)
+  assert.match(builder, /AGENT_KERNEL_RELEASE_TRUST/)
+  assert.match(builder, /Host-mediated release trust requires a valid internal installation session/)
+  assert.match(builder, /\$\{1:-\}" != "--internal-installer"/)
+  assert.match(builder, /\[ "\$BASE_URL" != "\$host_asset_base" \]/)
+  assert.match(builder, /if \[ "\$VERIFY_SIGSTORE" = "1" \]; then require_cmd cosign; fi/)
   for (const section of ['Improvements', 'Fixes', 'Known issues', 'Installation', 'Supported platforms', 'Verification', 'Full changelog']) {
     assert.match(builder, new RegExp(section))
   }
