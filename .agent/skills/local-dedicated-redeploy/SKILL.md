@@ -21,6 +21,8 @@ discovered non-secret values.
 - `<PUBLIC_LISTENERS>`: comma-separated host IP literals and ports.
 - `<PUBLIC_URLS>`: comma-separated exact or wildcard public URLs accepted by
   Kala.
+- `<DEPLOY_TARGET>`: exactly `host`, `dashboard`, or `both`, selected from the
+  requested change scope.
 
 Do not print environment files, credentials, message contents, or complete
 session records. Redact secrets from diagnostics and restrict inspection to
@@ -28,7 +30,8 @@ service state, release metadata, receipt phases, counts, and bounded errors.
 
 ## Procedure
 
-1. Confirm the worktree and target without modifying unrelated changes:
+1. Confirm the worktree and inspect both independently versioned components
+   without modifying unrelated changes:
 
    ```bash
    cd <REPOSITORY_ROOT>
@@ -36,16 +39,32 @@ service state, release metadata, receipt phases, counts, and bounded errors.
    lxc exec <LXD_CONTAINER> -- systemctl --no-pager --full status \
      kala-dedicated-ingress.service \
      kala-dedicated-deploy-supervisor.service
+   node scripts/deploy/deploy-dedicated.mjs inspect --lxd <LXD_CONTAINER>
+   node scripts/deploy/deploy-dashboard.mjs inspect --lxd <LXD_CONTAINER>
    ```
 
-2. Install the frozen dependency graph in the build environment:
+2. Select one deployment target before building:
+
+   - `host`: backend, Runtime, API, deployment, or shared server behavior
+     changed. Do not deploy Dashboard.
+   - `dashboard`: only Dashboard UI, styles, assets, or copy changed. Do not
+     stage a Host release or switch Runtime slots.
+   - `both`: both surfaces changed, or a shared protocol change requires both.
+     Deploy Host first and Dashboard second.
+
+   If the change scope cannot be established reliably, select `both`. Do not
+   invent additional deployment categories.
+
+3. Install the frozen dependency graph in the build environment:
 
    ```bash
    lxc exec <LXD_CONTAINER> -- sh -lc \
      'cd <CONTAINER_REPOSITORY_ROOT> && pnpm install --frozen-lockfile'
    ```
 
-3. Build a CJS release and verify its closed asset inventory:
+4. Build once and verify the closed asset inventory. Every selected component
+   must use this exact release directory with `--skip-build`; never rebuild
+   between Host and Dashboard deployment:
 
    ```bash
    lxc exec <LXD_CONTAINER> -- sh -lc \
@@ -57,7 +76,8 @@ service state, release metadata, receipt phases, counts, and bounded errors.
       node scripts/release/verify-release-install.mjs'
    ```
 
-4. Stage the verified local-development Runtime release:
+5. If `<DEPLOY_TARGET>` is `host` or `both`, stage the verified
+   local-development Host/Runtime release:
 
    ```bash
    cd <REPOSITORY_ROOT>
@@ -70,7 +90,7 @@ service state, release metadata, receipt phases, counts, and bounded errors.
    Capture the returned `<OPERATION_ID>`, `<DEPLOYMENT_ID>`, and
    `<RELEASE_ID>`. Do not invent or reuse identifiers.
 
-5. Wait for the authoritative receipt:
+6. Wait for the Host receipt when Host was staged:
 
    ```bash
    node scripts/deploy/deploy-dedicated.mjs wait <OPERATION_ID> \
@@ -81,7 +101,8 @@ service state, release metadata, receipt phases, counts, and bounded errors.
    Completion requires `phase: completed`, a new route generation, successful
    public-route health, and zero failed continuation sessions.
 
-6. Deploy the independently versioned Dashboard release:
+7. If `<DEPLOY_TARGET>` is `dashboard` or `both`, stage the independently
+   versioned Dashboard release:
 
    ```bash
    cd <REPOSITORY_ROOT>
@@ -90,8 +111,15 @@ service state, release metadata, receipt phases, counts, and bounded errors.
      --skip-build
    ```
 
-   Capture the returned `<DASHBOARD_OPERATION_ID>` and wait for its separate
-   authoritative receipt:
+   The command performs these immutable-release checks:
+
+   - same release id and same digest: return `noop: true`; do not wait;
+   - same release id and different digest: stop with an immutable release
+     conflict;
+   - different release id: stage normally.
+
+   For a non-noop response, capture `<DASHBOARD_OPERATION_ID>` and wait for its
+   separate authoritative receipt:
 
    ```bash
    node scripts/deploy/deploy-dashboard.mjs wait <DASHBOARD_OPERATION_ID> \
@@ -100,11 +128,11 @@ service state, release metadata, receipt phases, counts, and bounded errors.
    ```
 
    Dedicated Runtime and Dashboard releases use independent route generations.
-   A successful Runtime deployment does not update the Dashboard served by
-   Ingress. Always complete this step when the requested redeploy includes UI
-   changes.
+   A successful Host deployment does not update Dashboard, and a Dashboard-only
+   deployment must not restart Runtime, Sessions, or Executors.
 
-7. Configure the public URL policy inside the container and the host-side LXD
+8. When the requested Host deployment explicitly includes public URL policy
+   changes, configure the policy inside the container and host-side LXD
    listeners. This manages only `kala-public-*` proxy devices and must not
    modify an independently managed reverse proxy, VPN, or tunnel:
 
@@ -119,7 +147,8 @@ service state, release metadata, receipt phases, counts, and bounded errors.
        --lxd <LXD_CONTAINER>
    ```
 
-8. Verify every configured route and bounded service logs:
+9. Verify only the selected component receipts and routes, plus bounded service
+   logs:
 
    ```bash
    lxc exec <LXD_CONTAINER> -- sh -lc \
