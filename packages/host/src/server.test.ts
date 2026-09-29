@@ -38,6 +38,7 @@ import { startHostServer, type HostServer } from './server.js'
 import { appendRuntimeMetadataEntry, readSessionLog } from './store/log.js'
 import { persistMessageQueueSnapshot } from './message-queue-store.js'
 import { ExecutorIdentityStore } from './store/executor-identity.js'
+import { UnitResourceGovernor } from './tenant-runtime/resource-governor.js'
 
 type HostCopilotTool = {
   name: string
@@ -770,6 +771,48 @@ describe('wire protocol', () => {
       bytes: 7,
     })])
     await expect(readFile(join(dir, '..', 'message-attachments', 'registry.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('enforces Runtime Unit artifact limits on the HTTP storage path', async () => {
+    await server.close()
+    const governor = new UnitResourceGovernor({
+      maxConcurrentTurns: 1,
+      maxQueuedMessages: 1,
+      maxArtifactBytes: 4,
+    })
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      resourceGovernor: governor,
+      resourceUnitId: 'unit-a',
+      resourceArtifactUsage: async () => 0,
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({
+      sessionId: 'unit-artifact-quota-denied',
+      config,
+      organizationId: 'org_storage',
+      principal: 'storage@example.test',
+      organizationRole: 'member',
+    })
+
+    const response = await fetch(`${url}/runtime/attachments?sessionId=unit-artifact-quota-denied`, {
+      method: 'POST',
+      headers: {
+        'x-agent-runlab-principal': 'storage@example.test',
+        'x-agent-runlab-organization-id': 'org_storage',
+        'x-agent-runlab-organization-role': 'member',
+        'content-type': 'text/plain',
+        'x-agent-runlab-attachment-name': encodeURIComponent('note.txt'),
+      },
+      body: 'blocked',
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('artifact quota exceeded') })
+    expect(governor.snapshot('unit-a').artifactBytes).toBe(0)
   })
 
   it('enforces tenant storage quota before registering session artifacts', async () => {
@@ -5383,12 +5426,19 @@ describe('wire protocol', () => {
     const firstRelease = new Promise<void>((resolve) => {
       releaseFirst = resolve
     })
+    const governor = new UnitResourceGovernor({
+      maxConcurrentTurns: 1,
+      maxQueuedMessages: 1,
+      maxArtifactBytes: 1024,
+    })
     server = await startHostServer({
       port,
       sessionsDir: dir,
       defaultConfig: config,
       httpServer: http,
       toolTimeoutMs: 2000,
+      resourceGovernor: governor,
+      resourceUnitId: 'unit-a',
       models: [
         { ref: 'provider:model-a', id: 'model-a', label: 'Model A', provider: 'provider' },
         { ref: 'provider:model-b', id: 'model-b', label: 'Model B', provider: 'provider' },
@@ -5487,6 +5537,14 @@ describe('wire protocol', () => {
       operationId: 'queued-second',
     })
     expect(retryQueuedAck).toEqual({ ok: true })
+    const rejectedAck = await dashboard.timeout(500).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'third',
+      mode: 'queue',
+      operationId: 'queued-third',
+    })
+    expect(rejectedAck).toMatchObject({ ok: false, error: expect.stringContaining('queue limit exceeded') })
+    expect(governor.snapshot('unit-a')).toMatchObject({ concurrentTurns: 1, queuedMessages: 1 })
     const deadline = Date.now() + 2000
     while (Date.now() < deadline && !queueEvents.some((e) => e.pending === 1 && e.text === 'second')) {
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -5508,6 +5566,7 @@ describe('wire protocol', () => {
     expect(seenPrompts).toEqual(['first', 'first|second'])
     expect(seenModels).toEqual(['provider:model-a', 'provider:model-a'])
     expect(server.store.get(sessionId)?.preferences.selectedModel).toBe('provider:model-b')
+    expect(governor.snapshot('unit-a')).toMatchObject({ concurrentTurns: 0, queuedMessages: 0 })
 
     dashboard.close()
   })
@@ -5997,12 +6056,19 @@ describe('wire protocol', () => {
     const firstRelease = new Promise<void>((resolve) => {
       releaseFirst = resolve
     })
+    const firstGovernor = new UnitResourceGovernor({
+      maxConcurrentTurns: 1,
+      maxQueuedMessages: 4,
+      maxArtifactBytes: 1024,
+    })
     server = await startHostServer({
       port,
       sessionsDir: dir,
       defaultConfig: config,
       httpServer: http,
       toolTimeoutMs: 2000,
+      resourceGovernor: firstGovernor,
+      resourceUnitId: 'unit-a',
       llm: {
         name: 'queue-restart-test-1',
         async call(p) {
@@ -6049,6 +6115,7 @@ describe('wire protocol', () => {
     })
     dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
     expect((await waitForQueue(1)).items[0]?.text).toBe('second')
+    expect(firstGovernor.snapshot('unit-a')).toMatchObject({ concurrentTurns: 1, queuedMessages: 1 })
     dashboard.close()
     await server.close()
     releaseFirst()
@@ -6056,12 +6123,19 @@ describe('wire protocol', () => {
     http = createServer()
     await new Promise<void>((resolve) => http.listen(0, resolve))
     port = (http.address() as AddressInfo).port
+    const restoredGovernor = new UnitResourceGovernor({
+      maxConcurrentTurns: 1,
+      maxQueuedMessages: 4,
+      maxArtifactBytes: 1024,
+    })
     server = await startHostServer({
       port,
       sessionsDir: dir,
       defaultConfig: config,
       httpServer: http,
       toolTimeoutMs: 2000,
+      resourceGovernor: restoredGovernor,
+      resourceUnitId: 'unit-a',
       llm: {
         name: 'queue-restart-test-2',
         async call(p) {
@@ -6087,6 +6161,7 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
     const restoredSnapshot = latestQueue
     expect(restoredSnapshot?.items[0]?.text ?? 'second').toBe('second')
+    expect(restoredGovernor.snapshot('unit-a').queuedMessages).toBe(1)
     const deadline = Date.now() + 4000
     while (Date.now() < deadline && seenPrompts.length < 2) {
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -6097,6 +6172,7 @@ describe('wire protocol', () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     expect(latestQueue?.pending).toBe(0)
+    expect(restoredGovernor.snapshot('unit-a')).toMatchObject({ concurrentTurns: 0, queuedMessages: 0 })
 
     const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
     expect(parsed.runtimeMetadata.some((entry) => entry.action === 'message_queue_snapshot')).toBe(true)
