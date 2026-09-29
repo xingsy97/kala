@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HelpHint } from '../../components/ui/help-hint.js'
-import type { AgentRuntimeDescriptor, AgentRuntimeId, AttachedExecutor } from '@agent-kernel/shared'
+import type { AgentRuntimeDescriptor, AgentRuntimeId, AttachedExecutor, SessionExecutionMode } from '@agent-kernel/shared'
 import { KERNEL_AGENT_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 
 import { Bot, Check, Info, X } from 'lucide-react'
@@ -35,6 +35,7 @@ type Props = {
   submitting?: boolean
   onCreate(input: {
     agentRuntime: AgentRuntimeId
+    executionMode: SessionExecutionMode
     workspaceId: string
     workspaceName: string | undefined
     cwd: string
@@ -65,6 +66,7 @@ export function NewSessionDialog({
   const { t } = useTranslation()
   const [workspaceId, setWorkspaceId] = useState('')
   const [agentRuntime, setAgentRuntime] = useState<AgentRuntimeId>('kernel')
+  const [executionMode, setExecutionMode] = useState<SessionExecutionMode>('chat')
   const [cwd, setCwd] = useState('')
   const [missingWorkspaceId, setMissingWorkspaceId] = useState<string | null>(null)
   const initializedOpenRef = useRef(false)
@@ -80,6 +82,7 @@ export function NewSessionDialog({
     }
     if (initializedOpenRef.current) return
     initializedOpenRef.current = true
+    setExecutionMode('chat')
     const rememberedRuntime = readStringPref(PREF_AGENT_RUNTIME, 'kernel')
     const preferredRuntime = agentRuntimes.find((runtime) => runtime.id === rememberedRuntime && runtime.available)
       ?? agentRuntimes.find((runtime) => runtime.id === 'kernel' && runtime.available)
@@ -124,6 +127,7 @@ export function NewSessionDialog({
     if (submitting || !selectedWorkspace || cwd.trim().length === 0) return
     onCreate({
       agentRuntime,
+      executionMode,
       workspaceId: selectedWorkspace.workspaceId,
       workspaceName: selectedWorkspace.workspaceName,
       cwd: cwd.trim(),
@@ -189,6 +193,36 @@ export function NewSessionDialog({
                 </button>
               )
             })}
+          </div>
+          <div className="mt-2 border-t border-border/40 pt-2">
+            <div id="new-session-mode-label" className="mb-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('dialogs.chooseExecutionMode')}
+            </div>
+            <div className="grid min-w-0 grid-cols-2 gap-1.5" role="radiogroup" aria-labelledby="new-session-mode-label">
+              {(['chat', 'dag'] as const).map((mode) => {
+                const selected = executionMode === mode
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={submitting}
+                    onClick={() => setExecutionMode(mode)}
+                    data-testid={`new-session-mode-${mode}`}
+                    className={cn(
+                      'min-w-0 rounded-md border px-2 py-1.5 text-left transition-colors',
+                      selected
+                        ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
+                        : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50',
+                    )}
+                  >
+                    <span className="block text-sm font-semibold">{t(`dialogs.executionMode.${mode}.label`)}</span>
+                    <span className="mt-0.5 block text-caption text-muted-foreground">{t(`dialogs.executionMode.${mode}.description`)}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </section>
         <div className={cn(

@@ -65,6 +65,7 @@ Emitted once per client, right after handshake succeeds.
 {
   sessionId: string
   agentRuntime: 'kernel' | 'copilot'
+  executionMode: 'chat' | 'dag'
   agentRuntimeCapabilities: {
     queue: boolean
     fork: boolean
@@ -439,6 +440,7 @@ navigate away or open a new session.
 {
   sessionId: string           // Dashboard-generated id for the new session
   agentRuntime?: 'kernel' | 'copilot' // defaults to kernel
+  executionMode?: 'chat' | 'dag' // defaults to chat; immutable after creation
   workspaceId: string         // executor workspace to bind to
   workspaceName?: string      // display label snapshot
   cwd?: string                // initial working directory
@@ -454,6 +456,27 @@ newSessionId)` after receiving the reply.
 The Host rejects unavailable runtimes. Copilot Sessions are owned by the
 official GitHub Copilot SDK runtime; their RunLab logs contain authoritative
 projection snapshots and runtime metadata rather than synthetic Kernel events.
+
+#### DAG-First lifecycle
+
+`executionMode: 'dag'` creates a Session whose durable task graph is stored by
+the Host. These request/response events are operation-id protected:
+
+```ts
+client:get_dag_run          { sessionId, operationId } -> DagRun | null
+client:initialize_dag       { sessionId, objective, nodes, edges, operationId } -> DagRun
+client:answer_dag_decision  { sessionId, runId, decisionId, answer, operationId } -> DagRun
+```
+
+The Host broadcasts every authoritative graph change to subscribed dashboards:
+
+```ts
+server:dag_run { sessionId, run: DagRun }
+```
+
+`DagRun` contains versioned nodes and edges, durable node state, child Session
+links, decisions, and an append-only event projection. Standard Chat Sessions
+reject DAG initialization and never receive DAG workspace UI.
 
 #### `client:list_dirs`
 
@@ -1420,6 +1443,9 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Dashboard | `client:rename_session` | Host (storage) |
 | Dashboard | `client:delete_session` | Host (storage) |
 | Dashboard | `client:create_session` | Host (storage) |
+| Dashboard | `client:get_dag_run` | Host (DAG state) |
+| Dashboard | `client:initialize_dag` | Host (DAG state) |
+| Dashboard | `client:answer_dag_decision` | Host (DAG state) |
 | Dashboard | `client:fork` | Host (kernel + storage) |
 | Dashboard | `client:list_executors` | Host (routing) |
 | Dashboard | `client:list_sessions` | Host (storage) |
@@ -1454,6 +1480,7 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Host | `server:executor_changed` | Dashboard only (broadcast) |
 | Host | `server:sessions` | Dashboard only (response + broadcast) |
 | Host | `server:session_deleted` | Dashboard only (broadcast) |
+| Host | `server:dag_run` | Dashboard only (response + broadcast) |
 | Host | `server:history` | Dashboard only (response) |
 | Host | `server:dir_list` | Dashboard only (response) |
 | Host | `server:file_list` | Dashboard only (response) |

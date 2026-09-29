@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import type { MemoDocument } from '../memo-store.js'
+import { DagStore } from '../dag/store.js'
 
 const KEY_BYTES = 32
 const NONCE_BYTES = 12
@@ -107,6 +108,10 @@ export class KalaStateStore {
     this.open().prepare("DELETE FROM credentials WHERE scope = 'unit' AND provider = ?").run(provider)
   }
 
+  dagStore(): DagStore {
+    return new DagStore(this.open())
+  }
+
   close(): void {
     this.database?.close()
     this.database = undefined
@@ -119,6 +124,8 @@ export class KalaStateStore {
     chmodSync(this.stateRoot, 0o700)
     const path = join(this.stateRoot, 'state.sqlite')
     const database = new DatabaseSync(path)
+    const version = Number((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+    if (version > 4) throw new Error(`unsupported state database version: ${version}`)
     database.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
@@ -139,8 +146,119 @@ export class KalaStateStore {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (scope, provider)
       );
-      PRAGMA user_version = 1;
+      CREATE TABLE IF NOT EXISTS dag_runs (
+        id TEXT PRIMARY KEY,
+        parent_session_id TEXT NOT NULL,
+        objective TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('planning', 'running', 'paused', 'completed', 'failed', 'cancelled')),
+        graph_version INTEGER NOT NULL CHECK (graph_version >= 0),
+        result_node_id TEXT,
+        result TEXT,
+        error TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS dag_nodes (
+        id TEXT NOT NULL,
+        run_id TEXT NOT NULL REFERENCES dag_runs(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'running', 'waiting_user', 'succeeded', 'failed', 'cancelled', 'replaced')),
+        depth INTEGER NOT NULL CHECK (depth >= 0),
+        write_scopes TEXT NOT NULL,
+        estimated_duration_minutes INTEGER CHECK (estimated_duration_minutes IS NULL OR estimated_duration_minutes >= 0),
+        attempt INTEGER NOT NULL CHECK (attempt >= 0),
+        child_session_id TEXT,
+        progress TEXT,
+        result TEXT,
+        error TEXT,
+        replaced_by TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        tool_activity TEXT NOT NULL DEFAULT '[]',
+        PRIMARY KEY (run_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS dag_edges (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES dag_runs(id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        target TEXT NOT NULL,
+        UNIQUE (run_id, source, target),
+        FOREIGN KEY (run_id, source) REFERENCES dag_nodes(run_id, id) ON DELETE CASCADE,
+        FOREIGN KEY (run_id, target) REFERENCES dag_nodes(run_id, id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS dag_decisions (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES dag_runs(id) ON DELETE CASCADE,
+        node_id TEXT NOT NULL,
+        question TEXT NOT NULL,
+        context TEXT NOT NULL,
+        choices TEXT NOT NULL,
+        allow_freeform INTEGER NOT NULL CHECK (allow_freeform IN (0, 1)),
+        recommendation TEXT,
+        reason TEXT,
+        risk_level TEXT CHECK (risk_level IS NULL OR risk_level IN ('low', 'medium', 'high')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'cancelled')),
+        answer TEXT,
+        created_at TEXT NOT NULL,
+        answered_at TEXT,
+        FOREIGN KEY (run_id, node_id) REFERENCES dag_nodes(run_id, id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS dag_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL REFERENCES dag_runs(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (type IN ('run', 'node', 'decision', 'graph', 'lease')),
+        message TEXT NOT NULL,
+        node_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS dag_leases (
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        owner TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        acquired_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, node_id),
+        FOREIGN KEY (run_id, node_id) REFERENCES dag_nodes(run_id, id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS dag_operations (
+        operation_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES dag_runs(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS dag_graph_versions (
+        run_id TEXT NOT NULL REFERENCES dag_runs(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL CHECK (version > 0),
+        result_node_id TEXT,
+        nodes TEXT NOT NULL,
+        edges TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, version)
+      );
+      CREATE TABLE IF NOT EXISTS dag_node_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL CHECK (attempt > 0),
+        worker_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled', 'interrupted', 'waiting_user', 'replaced')),
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        result TEXT,
+        error TEXT,
+        UNIQUE (run_id, node_id, attempt),
+        FOREIGN KEY (run_id, node_id) REFERENCES dag_nodes(run_id, id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS dag_runs_parent_created_idx ON dag_runs(parent_session_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS dag_nodes_run_status_idx ON dag_nodes(run_id, status);
+      CREATE INDEX IF NOT EXISTS dag_events_run_id_idx ON dag_events(run_id, id);
+      CREATE INDEX IF NOT EXISTS dag_leases_expiry_idx ON dag_leases(expires_at);
+      CREATE INDEX IF NOT EXISTS dag_attempts_run_node_idx ON dag_node_attempts(run_id, node_id, attempt);
     `)
+    migrateDagSchema(database, version)
+    backfillDagGraphVersions(database)
     chmodSync(path, 0o600)
     this.database = database
     return database
@@ -231,6 +349,177 @@ export class KalaStateStore {
     ]).toString('utf8')
     const metadata = input.metadata(record)
     this.setCredential(input.provider, secret, metadata, requiredString(record.updatedAt, 'updatedAt'))
+  }
+}
+
+function migrateDagSchema(database: DatabaseSync, version: number): void {
+  if (version === 0) {
+    database.exec('PRAGMA user_version = 4')
+    return
+  }
+  if (version === 1 || version === 2) {
+    database.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE')
+    try {
+      const nodeColumns = database.prepare('PRAGMA table_info(dag_nodes)').all() as Array<{ name: string }>
+      if (!nodeColumns.some((column) => column.name === 'estimated_duration_minutes')) {
+        database.exec(`
+          ALTER TABLE dag_nodes ADD COLUMN estimated_duration_minutes INTEGER
+            CHECK (estimated_duration_minutes IS NULL OR estimated_duration_minutes >= 0)
+        `)
+      }
+      const decisionColumns = database.prepare('PRAGMA table_info(dag_decisions)').all() as Array<{ name: string }>
+      if (!decisionColumns.some((column) => column.name === 'reason')) {
+        database.exec('ALTER TABLE dag_decisions ADD COLUMN reason TEXT')
+      }
+      if (!decisionColumns.some((column) => column.name === 'risk_level')) {
+        database.exec(`
+          ALTER TABLE dag_decisions ADD COLUMN risk_level TEXT
+            CHECK (risk_level IS NULL OR risk_level IN ('low', 'medium', 'high'))
+        `)
+      }
+      database.exec(`
+        CREATE TABLE dag_runs_without_session_unique (
+          id TEXT PRIMARY KEY,
+          parent_session_id TEXT NOT NULL,
+          objective TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('planning', 'running', 'paused', 'completed', 'failed', 'cancelled')),
+          graph_version INTEGER NOT NULL CHECK (graph_version >= 0),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO dag_runs_without_session_unique
+          SELECT id, parent_session_id, objective, status, graph_version, created_at, updated_at FROM dag_runs;
+        DROP TABLE dag_runs;
+        ALTER TABLE dag_runs_without_session_unique RENAME TO dag_runs;
+        CREATE INDEX dag_runs_parent_created_idx ON dag_runs(parent_session_id, created_at DESC);
+      `)
+      const violations = database.prepare('PRAGMA foreign_key_check').all()
+      if (violations.length > 0) throw new Error('state database migration produced foreign key violations')
+      database.exec('PRAGMA user_version = 3; COMMIT; PRAGMA foreign_keys = ON')
+    } catch (error) {
+      database.exec('ROLLBACK')
+      database.exec('PRAGMA foreign_keys = ON')
+      throw error
+    }
+  }
+  const currentVersion = Number((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+  if (currentVersion === 3) {
+    database.exec('BEGIN IMMEDIATE')
+    try {
+      const runColumns = new Set((database.prepare('PRAGMA table_info(dag_runs)').all() as Array<{ name: string }>).map((column) => column.name))
+      if (!runColumns.has('result_node_id')) database.exec('ALTER TABLE dag_runs ADD COLUMN result_node_id TEXT')
+      if (!runColumns.has('result')) database.exec('ALTER TABLE dag_runs ADD COLUMN result TEXT')
+      if (!runColumns.has('error')) database.exec('ALTER TABLE dag_runs ADD COLUMN error TEXT')
+      if (!runColumns.has('completed_at')) database.exec('ALTER TABLE dag_runs ADD COLUMN completed_at TEXT')
+      const nodeColumns = new Set((database.prepare('PRAGMA table_info(dag_nodes)').all() as Array<{ name: string }>).map((column) => column.name))
+      if (!nodeColumns.has('tool_activity')) database.exec("ALTER TABLE dag_nodes ADD COLUMN tool_activity TEXT NOT NULL DEFAULT '[]'")
+      const graphVersionColumns = new Set((database.prepare('PRAGMA table_info(dag_graph_versions)').all() as Array<{ name: string }>).map((column) => column.name))
+      if (!graphVersionColumns.has('result_node_id')) database.exec('ALTER TABLE dag_graph_versions ADD COLUMN result_node_id TEXT')
+      const runs = database.prepare('SELECT id, status, updated_at FROM dag_runs').all() as Array<{
+        id: string
+        status: string
+        updated_at: string
+      }>
+      for (const run of runs) {
+        const sink = database.prepare(`
+          SELECT node.id, node.result, node.error
+          FROM dag_nodes node
+          WHERE node.run_id = ? AND node.status != 'replaced'
+            AND NOT EXISTS (
+              SELECT 1 FROM dag_edges edge WHERE edge.run_id = node.run_id AND edge.source = node.id
+            )
+          ORDER BY node.rowid DESC LIMIT 1
+        `).get(run.id) as { id: string; result: string | null; error: string | null } | undefined
+        if (!sink) continue
+        database.prepare(`
+          UPDATE dag_runs
+          SET result_node_id = ?, result = ?, error = ?,
+              completed_at = CASE WHEN status IN ('completed', 'failed', 'cancelled') THEN ? ELSE NULL END
+          WHERE id = ?
+        `).run(sink.id, run.status === 'completed' ? sink.result : null, run.status === 'completed' ? null : sink.error, run.updated_at, run.id)
+        const graphVersions = database.prepare(`
+          SELECT version, nodes, edges
+          FROM dag_graph_versions
+          WHERE run_id = ? AND result_node_id IS NULL
+          ORDER BY version
+        `).all(run.id) as Array<{ version: number; nodes: string; edges: string }>
+        for (const graphVersion of graphVersions) {
+          const resultNodeId = legacyGraphResultNodeId(graphVersion.nodes, graphVersion.edges)
+          database.prepare(`
+            UPDATE dag_graph_versions
+            SET result_node_id = ?
+            WHERE run_id = ? AND version = ?
+          `).run(resultNodeId, run.id, graphVersion.version)
+        }
+      }
+      database.exec('PRAGMA user_version = 4; COMMIT')
+    } catch (error) {
+      database.exec('ROLLBACK')
+      throw error
+    }
+  }
+}
+
+function legacyGraphResultNodeId(nodesJson: string, edgesJson: string): string {
+  const nodes = JSON.parse(nodesJson) as unknown
+  const edges = JSON.parse(edgesJson) as unknown
+  if (!Array.isArray(nodes) || !Array.isArray(edges)) throw new Error('legacy DAG graph snapshot is malformed')
+  const nodeIds = nodes.flatMap((node) => (
+    node && typeof node === 'object' && typeof (node as { id?: unknown }).id === 'string'
+      ? [(node as { id: string }).id]
+      : []
+  ))
+  const sources = new Set(edges.flatMap((edge) => (
+    edge && typeof edge === 'object' && typeof (edge as { source?: unknown }).source === 'string'
+      ? [(edge as { source: string }).source]
+      : []
+  )))
+  const resultNodeId = nodeIds.filter((id) => !sources.has(id)).at(-1)
+  if (!resultNodeId) throw new Error('legacy DAG graph snapshot has no result node')
+  return resultNodeId
+}
+
+function backfillDagGraphVersions(database: DatabaseSync): void {
+  const runs = database.prepare(`
+    SELECT id, graph_version AS graphVersion, result_node_id AS resultNodeId, updated_at AS updatedAt
+    FROM dag_runs
+    WHERE graph_version > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM dag_graph_versions version
+        WHERE version.run_id = dag_runs.id AND version.version = dag_runs.graph_version
+      )
+  `).all() as Array<{ id: string; graphVersion: number; resultNodeId: string | null; updatedAt: string }>
+  const nodesStatement = database.prepare(`
+    SELECT id, title, instructions, depth, write_scopes AS writeScopes,
+           estimated_duration_minutes AS estimatedDurationMinutes
+    FROM dag_nodes WHERE run_id = ? AND status != 'replaced' ORDER BY rowid
+  `)
+  const edgesStatement = database.prepare(`
+    SELECT source, target FROM dag_edges WHERE run_id = ? ORDER BY rowid
+  `)
+  const insert = database.prepare(`
+    INSERT INTO dag_graph_versions (run_id, version, result_node_id, nodes, edges, created_at) VALUES (?, ?, ?, ?, ?, ?)
+  `)
+  for (const run of runs) {
+    const rows = nodesStatement.all(run.id) as Array<{
+      id: string
+      title: string
+      instructions: string
+      depth: number
+      writeScopes: string
+      estimatedDurationMinutes: number | null
+    }>
+    const nodes = rows.map((node) => ({
+      id: node.id,
+      title: node.title,
+      instructions: node.instructions,
+      depth: node.depth,
+      writeScopes: JSON.parse(node.writeScopes) as unknown,
+      ...(node.estimatedDurationMinutes === null ? {} : { estimatedDurationMinutes: node.estimatedDurationMinutes }),
+    }))
+    const resultNodeId = run.resultNodeId ?? nodes.at(-1)?.id
+    if (!resultNodeId) continue
+    insert.run(run.id, run.graphVersion, resultNodeId, JSON.stringify(nodes), JSON.stringify(edgesStatement.all(run.id)), run.updatedAt)
   }
 }
 

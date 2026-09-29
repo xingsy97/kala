@@ -186,6 +186,7 @@ describe('NewSessionDialog', () => {
     fireEvent.click(screen.getByTestId('new-session-create'))
     expect(onCreate).toHaveBeenCalledWith({
       agentRuntime: 'kernel',
+      executionMode: 'chat',
       workspaceId: 'ws-a',
       workspaceName: 'mbp',
       cwd: '/tmp/root/project',
@@ -257,6 +258,7 @@ describe('NewSessionDialog', () => {
 
     expect(onCreate).toHaveBeenCalledWith({
       agentRuntime: 'kernel',
+      executionMode: 'chat',
       workspaceId: 'ws-a',
       workspaceName: 'mbp',
       cwd: '/tmp/root/manual',
@@ -312,6 +314,29 @@ describe('NewSessionDialog', () => {
     fireEvent.click(screen.getByTestId('new-session-create'))
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       agentRuntime: 'copilot',
+    }))
+  })
+
+  it('creates a DAG-First Session when that execution mode is selected', () => {
+    const onCreate = vi.fn()
+    const harness = makeSocket()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        socket={harness.socket as never}
+        onCreate={onCreate}
+        onCreateSimpleChat={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByText('DAG-First'))
+    fireEvent.click(screen.getByTestId('new-session-create'))
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      agentRuntime: 'kernel',
+      executionMode: 'dag',
     }))
   })
 

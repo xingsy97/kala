@@ -79,4 +79,53 @@ describe('KalaStateStore', () => {
     writeFileSync(join(credentials, 'web-search.json'), '{broken')
     expect(state.getCredential('serper')?.secret).toBe('legacy-secret')
   })
+
+  it('backfills each legacy graph version with a result node present in that snapshot', () => {
+    const directory = root()
+    const state = new KalaStateStore(directory)
+    state.dagStore()
+    state.close()
+
+    const database = new DatabaseSync(join(directory, 'state.sqlite'))
+    const timestamp = '2026-09-30T00:00:00.000Z'
+    database.prepare(`
+      INSERT INTO dag_runs (
+        id, parent_session_id, objective, status, graph_version,
+        result_node_id, result, error, completed_at, created_at, updated_at
+      ) VALUES ('run', 'session', 'objective', 'completed', 2, NULL, NULL, NULL, NULL, ?, ?)
+    `).run(timestamp, timestamp)
+    const insertNode = database.prepare(`
+      INSERT INTO dag_nodes (
+        id, run_id, title, instructions, status, depth, write_scopes,
+        estimated_duration_minutes, attempt, child_session_id, progress, result,
+        error, replaced_by, started_at, completed_at, tool_activity
+      ) VALUES (?, 'run', ?, 'instructions', ?, 0, '[]', NULL, 1, NULL, NULL, ?, NULL, ?, ?, ?, '[]')
+    `)
+    insertNode.run('target', 'target', 'replaced', 'old result', 'part-a', timestamp, timestamp)
+    insertNode.run('part-a', 'part-a', 'succeeded', 'part result', null, timestamp, timestamp)
+    insertNode.run('part-b', 'part-b', 'succeeded', 'final result', null, timestamp, timestamp)
+    database.prepare("INSERT INTO dag_edges (id, run_id, source, target) VALUES ('edge', 'run', 'part-a', 'part-b')").run()
+    const insertVersion = database.prepare(`
+      INSERT INTO dag_graph_versions (run_id, version, result_node_id, nodes, edges, created_at)
+      VALUES ('run', ?, NULL, ?, ?, ?)
+    `)
+    insertVersion.run(1, JSON.stringify([{ id: 'target' }]), '[]', timestamp)
+    insertVersion.run(2, JSON.stringify([{ id: 'part-a' }, { id: 'part-b' }]), JSON.stringify([{ source: 'part-a', target: 'part-b' }]), timestamp)
+    database.exec('PRAGMA user_version = 3')
+    database.close()
+
+    const migrated = new KalaStateStore(directory)
+    migrated.dagStore()
+    migrated.close()
+    const verified = new DatabaseSync(join(directory, 'state.sqlite'))
+    expect(verified.prepare('SELECT version, result_node_id FROM dag_graph_versions ORDER BY version').all()).toEqual([
+      { version: 1, result_node_id: 'target' },
+      { version: 2, result_node_id: 'part-b' },
+    ])
+    expect(verified.prepare("SELECT result_node_id, result FROM dag_runs WHERE id = 'run'").get()).toEqual({
+      result_node_id: 'part-b',
+      result: 'final result',
+    })
+    verified.close()
+  })
 })

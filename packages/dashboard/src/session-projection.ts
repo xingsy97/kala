@@ -5,6 +5,7 @@ import type {
   CompactStatusEvent, CompactionMetadata, ContextUsageSnapshot, EventAppendedEvent,
   LLMTrace, QueuedMessagePreview, SessionErrorEvent, SessionReadyEvent, StateChangedEvent,
 } from '@agent-kernel/shared'
+import type { SessionExecutionMode } from '@agent-kernel/shared'
 import { estimateMessageTokens, estimateToolSchemaTokens } from '@agent-kernel/shared'
 
 import type { CachedSessionView } from './session-view-cache.js'
@@ -28,6 +29,7 @@ export type SessionProjection = {
   generation: number
   sessionId: string | null
   agentRuntime: AgentRuntimeId
+  executionMode: SessionExecutionMode
   status: ConnectionStatus
   state: AgentState | null
   config: AgentConfig | null
@@ -62,7 +64,7 @@ export type SessionProjectionEvent =
   | ({ kind: 'reset_timeline' } & Scoped)
 
 export const EMPTY_SESSION_PROJECTION: SessionProjection = {
-  generation: 0, sessionId: null, agentRuntime: 'kernel', status: 'idle', state: null, config: null,
+  generation: 0, sessionId: null, agentRuntime: 'kernel', executionMode: 'chat', status: 'idle', state: null, config: null,
   contextSnapshot: null, turnStartedAt: null, turnStartedAtCursor: null,
   compactStatus: null, timeline: [], queuedMessages: [],
   lastError: null, parentSessionId: null, parentCursor: null, selectedModel: null,
@@ -98,7 +100,7 @@ export function reduceSessionProjection(
     case 'ready': {
       const p = event.payload
       return {
-        ...current, status: 'ready', agentRuntime: p.agentRuntime ?? 'kernel', state: p.state, config: p.config,
+        ...current, status: 'ready', agentRuntime: p.agentRuntime ?? 'kernel', executionMode: p.executionMode ?? 'chat', state: p.state, config: p.config,
         contextSnapshot: p.contextSnapshot ?? null,
         // Ready is the authoritative baseline and may deliberately clear a stale cached value.
         turnStartedAt: p.turnStartedAt ?? null, turnStartedAtCursor: p.turnStartedAt ? p.cursor : null,
@@ -156,6 +158,7 @@ export function reduceSessionProjection(
 function projectionFromCache(cached: CachedSessionView): Partial<SessionProjection> {
   return {
     agentRuntime: cached.agentRuntime ?? 'kernel',
+    executionMode: cached.executionMode ?? 'chat',
     state: cached.state, config: cached.config, contextSnapshot: cached.contextSnapshot,
     turnStartedAt: cached.turnStartedAt ?? null, turnStartedAtCursor: cached.turnStartedAtCursor ?? null,
     timeline: cached.timeline, queuedMessages: cached.queuedMessages, lastError: cached.lastError,

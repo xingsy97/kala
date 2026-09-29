@@ -31,7 +31,7 @@ import { instrument } from '@socket.io/admin-ui'
 import { ulid } from 'ulid'
 
 import type { LLMAdapter } from './llm/adapter.js'
-import type { LlmQuotaEnforcer, LoopBroadcast, LoopHandle, TenantModelPolicyEnforcer } from './loop.js'
+import type { HostLoopDeps, LlmQuotaEnforcer, LoopBroadcast, LoopHandle, TenantModelPolicyEnforcer } from './loop.js'
 import { runHostLoop } from './loop.js'
 import type { HookConfig, HookRunner } from './extensions/hooks.js'
 import { createBuiltinExtensionRegistry } from './extensions/builtin-registry.js'
@@ -98,6 +98,9 @@ import { createRuntimeToolDispatcher } from './agent-runtime/tool-dispatcher.js'
 import { AskUserChoiceBroker } from './ask-user-choice.js'
 import { attachPublicAccessGate } from './http/public-access-gate.js'
 import { KalaStateStore } from './store/state-store.js'
+import { DagOrchestrator } from './dag/orchestrator.js'
+import { DAG_WORKER_TOOLS } from './dag/worker-tool.js'
+import type { SubAgentRuntimeController } from './extensions/agent-tool.js'
 
 export type HostServerOptions = {
   port: number
@@ -255,6 +258,7 @@ export async function startHostServer(
   }
   let closed = false
   let agentRuntimes: AgentRuntimeRegistry | undefined
+  let dagOrchestrator: DagOrchestrator | undefined
   let detachPublicAccessGate: (() => void) | undefined
   const closeServer = async (): Promise<void> => {
     if (closed) return
@@ -268,6 +272,8 @@ export async function startHostServer(
     // Session directory (tests) or replace storage (shutdown/deploy).
     await Promise.allSettled([...queueLoads.values(), ...queueMutations.values()])
     await agentRuntimes?.close()
+    await dagOrchestrator?.close()
+    if (ownsStateStore) stateStore.close()
     for (let attempt = 0; attempt < 100 && drainingQueues.size > 0; attempt += 1) {
       await new Promise<void>((resolve) => setTimeout(resolve, 10))
     }
@@ -306,7 +312,7 @@ export async function startHostServer(
   const messageAttachments = new MessageAttachmentStore(join(options.sessionsDir, '..', 'message-attachments'))
   await messageAttachments.load()
   const store = new SessionStore(options.sessionsDir, {
-    runtimeConfig: getDefaultConfig,
+    runtimeConfig: ({ executionMode }) => deriveSessionConfig(getDefaultConfig(), undefined, executionMode),
     artifactRootDir: options.artifactRootDir,
     deleteRegisteredArtifacts: async (sessionId) => {
       await Promise.all([
@@ -315,7 +321,12 @@ export async function startHostServer(
       ])
     },
   })
-  const memoStore = new MemoStore(options.stateStore ?? join(options.sessionsDir, '..', 'memos'))
+  const ownsStateStore = options.stateStore === undefined
+  const stateStore = options.stateStore ?? new KalaStateStore(join(options.sessionsDir, '..', 'memos'), {
+    legacyMemoDirectory: join(options.sessionsDir, '..', 'memos'),
+  })
+  const memoStore = new MemoStore(stateStore)
+  const dagStore = stateStore.dagStore()
   const defaultSkillRootsList = defaultSkillRoots()
   const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
   const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
@@ -1157,7 +1168,7 @@ export async function startHostServer(
   })
 
   const extensions = createBuiltinExtensionRegistry(options.extensions)
-  const loopDeps = {
+  const loopDeps: HostLoopDeps = {
     store,
     llm: options.llm,
     ...(options.llmQuota !== undefined ? { llmQuota: options.llmQuota } : {}),
@@ -1176,13 +1187,33 @@ export async function startHostServer(
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
     messageAttachments,
     askUserChoice,
+    dagStore,
+    dagWorkerConfig: () => {
+      const config = getDefaultConfig()
+      return {
+        ...config,
+        tools: [
+          ...config.tools.filter((tool) => tool.name !== 'agent' && tool.name !== 'dag_plan' && !tool.name.startsWith('dag_')),
+          ...DAG_WORKER_TOOLS,
+        ],
+      }
+    },
+    dagScheduler: {
+      schedule: (parentSessionId) => dagOrchestrator?.schedule(parentSessionId),
+    },
+    publishDagRun: (parentSessionId) => {
+      dashboardNs.to(sessionRoom(parentSessionId)).emit('server:dag_run', {
+        sessionId: parentSessionId,
+        run: dagStore.runForSession(parentSessionId) ?? null,
+      })
+    },
     publishLocalImages,
     extensions,
   }
   loop = runHostLoop(loopDeps)
   agentRuntimes = new AgentRuntimeRegistry()
   agentRuntimes.register(new KernelAgentRuntime(loop))
-  const copilotTools = createRuntimeToolDispatcher(loopDeps, executors, loop, {
+  const runtimeController: SubAgentRuntimeController = {
     async send(record, text, model) {
       await agentRuntimes!.require(record.agentRuntime).send(record, {
         text,
@@ -1192,7 +1223,8 @@ export async function startHostServer(
     async cancel(record) {
       await agentRuntimes!.require(record.agentRuntime).cancel(record)
     },
-  })
+  }
+  const copilotTools = createRuntimeToolDispatcher(loopDeps, executors, loop, runtimeController)
   const copilotRuntime = new CopilotAgentRuntime({
     store,
     tools: copilotTools,
@@ -1251,6 +1283,8 @@ export async function startHostServer(
   })
   await copilotRuntime.start()
   agentRuntimes.register(copilotRuntime)
+  dagOrchestrator = new DagOrchestrator(dagStore, loopDeps, loop, runtimeController)
+  for (const sessionId of dagStore.activeParentSessionIds()) dagOrchestrator.schedule(sessionId)
   restart = new RestartCoordinator({
     store,
     loop,
@@ -1310,6 +1344,7 @@ export async function startHostServer(
     messageQueues,
     agentRuntimes,
     askUserChoice,
+    dagStore,
     executorSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     renameWorkspace: async (workspaceId, workspaceName) => {
       const applied = await workspaceAliases.rename(workspaceId, workspaceName)

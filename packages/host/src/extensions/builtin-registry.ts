@@ -7,6 +7,8 @@ import { isSkillManager, runSkillTool } from './skills.js'
 import { runTodoGraphTool } from './todo-graph.js'
 import { consolidateMemory } from './memory-consolidation.js'
 import { runToolCatalogTool } from './tool-catalog.js'
+import { runDagPlanTool } from '../dag/tool.js'
+import { runDagWorkerTool } from '../dag/worker-tool.js'
 import { createExtensionRegistry, type HostExtension, type SessionLifecycleContext } from './registry.js'
 
 export const BUILTIN_HOST_TOOL_HANDLERS = [
@@ -17,6 +19,10 @@ export const BUILTIN_HOST_TOOL_HANDLERS = [
   'tool_search',
   'tool_describe',
   'skill',
+  'dag_plan',
+  'dag_report_progress',
+  'dag_request_decision',
+  'dag_replace_self',
 ] as const
 
 export function createBuiltinExtensionRegistry(additional: readonly HostExtension[] = []) {
@@ -28,7 +34,16 @@ export function createBuiltinExtensionRegistry(additional: readonly HostExtensio
         id: 'chat',
         label: 'Standard Chat',
         description: 'A conversational Kala Session driven one turn at a time.',
+      }, {
+        id: 'dag',
+        label: 'DAG-First',
+        description: 'A durable dependency graph whose nodes run as child Kala Sessions.',
       }],
+      lifecycle: {
+        onSessionLoaded({ deps, record }) {
+          if (record.executionMode === 'dag') deps.dagScheduler?.schedule(record.sessionId)
+        },
+      },
     },
     {
       id: 'kala.builtin.host-tools',
@@ -71,6 +86,18 @@ export function createBuiltinExtensionRegistry(additional: readonly HostExtensio
               : deps.skills,
             effect.input,
           )
+        },
+        async dag_plan(context) {
+          return await runDagPlanTool(context)
+        },
+        async dag_report_progress(context) {
+          return await runDagWorkerTool(context)
+        },
+        async dag_request_decision(context) {
+          return await runDagWorkerTool(context)
+        },
+        async dag_replace_self(context) {
+          return await runDagWorkerTool(context)
         },
       },
     },

@@ -1,10 +1,33 @@
 import { describe, expect, it, vi } from 'vitest'
 import { COPILOT_AGENT_RUNTIME_CAPABILITIES, KERNEL_AGENT_RUNTIME_CAPABILITIES, type ClientUserMessage, type RuntimeMetadataEntry } from '@agent-kernel/shared'
-import { createInitialState } from '@agent-kernel/kernel'
+import { createConfig, createInitialState } from '@agent-kernel/kernel'
 
-import { buildCompactionMetadataIndex, consumeCompactionMetadata, handleUserMessage, loadDashboardSession, recoverSubAgentOutcome, type DashboardDeps } from './dashboard-ns.js'
+import { buildCompactionMetadataIndex, consumeCompactionMetadata, deriveSessionConfig, handleUserMessage, loadDashboardSession, recoverSubAgentOutcome, type DashboardDeps } from './dashboard-ns.js'
 import { terminalOwnerSessionId, terminalSessionRoom } from './rooms.js'
 import type { SessionStore } from '../store/session.js'
+
+describe('DAG parent runtime configuration', () => {
+  it('exposes planner authority only, plus Host-local clarification', () => {
+    const tool = (name: string, executionHandler?: string) => ({
+      name,
+      description: name,
+      inputSchema: { type: 'object' as const },
+      requiresApproval: false,
+      ...(executionHandler ? { executionKind: 'host' as const, executionHandler } : {}),
+    })
+    const config = deriveSessionConfig(createConfig({
+      tools: [
+        tool('read_file'),
+        tool('bash'),
+        tool('websearch', 'websearch'),
+        tool('agent', 'agent'),
+        tool('ask_user_choice', 'ask_user_choice'),
+      ],
+    }), undefined, 'dag')
+    expect(config.tools.map((candidate) => candidate.name)).toEqual(['ask_user_choice', 'dag_plan'])
+    expect(config.systemPrompt).toContain('planner/controller only')
+  })
+})
 
 function makeMeta(
   action: string,
@@ -318,7 +341,7 @@ describe('history compaction-metadata correlator', () => {
 
   describe('Dashboard Session hydration', () => {
     it('runs external Runtime recovery even when an unrecovered record is cached', async () => {
-      const cached = { sessionId: 'copilot-session', agentRuntime: 'copilot' as const, state: { status: 'idle' as const, cursor: 0 } }
+      const cached = { sessionId: 'copilot-session', agentRuntime: 'copilot' as const, executionMode: 'chat' as const, state: { status: 'idle' as const, cursor: 0 } }
       const recovered = { ...cached, state: { status: 'error' as const, cursor: 2 } }
       const store = {
         get: vi.fn(() => cached),
@@ -327,6 +350,29 @@ describe('history compaction-metadata correlator', () => {
 
       await expect(loadDashboardSession(store, cached.sessionId)).resolves.toBe(recovered)
       expect(store.load).toHaveBeenCalledWith(cached.sessionId, undefined)
+    })
+
+    it('restores DAG runtime instructions when hydrating an external Runtime Session', async () => {
+      const cached = {
+        sessionId: 'copilot-dag',
+        agentRuntime: 'copilot' as const,
+        executionMode: 'dag' as const,
+        state: { status: 'idle' as const, cursor: 0 },
+      }
+      const store = {
+        get: vi.fn(() => cached),
+        load: vi.fn(async () => cached),
+      } as unknown as SessionStore
+      const runtimeConfig = createConfig({ systemPrompt: 'current', tools: [] })
+
+      await loadDashboardSession(store, cached.sessionId, runtimeConfig)
+
+      expect(store.load).toHaveBeenCalledWith(cached.sessionId, {
+        runtimeConfig: expect.objectContaining({
+          systemPrompt: expect.stringContaining('DAG-First Kala Session'),
+          tools: expect.arrayContaining([expect.objectContaining({ name: 'dag_plan' })]),
+        }),
+      })
     })
 
     it('does not eagerly recover a cached Kernel Session during hydration', async () => {

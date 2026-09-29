@@ -53,6 +53,11 @@ export type SubAgentRuntimeController = {
   cancel(record: SessionRecord): Promise<void>
 }
 
+export type RunAgentToolOptions = {
+  configOverride?: AgentConfig
+  onChildCreated?: (child: SessionRecord) => void | Promise<void>
+}
+
 type TimeoutReason = 'ordinary-idle' | 'tool-idle' | 'absolute-deadline' | 'turn-limit'
 type TimeoutObservation = { cursor: number; status: AgentState['status']; requestedToolTimeoutMs?: number }
 type TimeoutMonitor = { last: TimeoutObservation; lastActivityAt: number; graceStartedAt?: number; reason?: TimeoutReason }
@@ -239,7 +244,11 @@ export async function runAgentTool(
   aborts: Map<string, AbortController>,
   loop?: LoopHandle,
   runtimeController?: SubAgentRuntimeController,
+  optionsOrOnChildCreated?: RunAgentToolOptions | ((child: SessionRecord) => void | Promise<void>),
 ): Promise<{ ok: boolean; content: string }> {
+  const options: RunAgentToolOptions = typeof optionsOrOnChildCreated === 'function'
+    ? { onChildCreated: optionsOrOnChildCreated }
+    : optionsOrOnChildCreated ?? {}
   const parent = deps.store.get(parentSessionId)
   if (!parent) return { ok: false, content: 'parent session not found' }
   const prompt = effect.input.prompt
@@ -257,7 +266,7 @@ export async function runAgentTool(
   const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
   const policy = resolveSubAgentPolicy({
     input: policyInput,
-    parentTools: parent.config.tools.map((tool) => tool.name),
+    parentTools: (options.configOverride ?? parent.config).tools.map((tool) => tool.name),
     parentDepth: depth,
     maxDepth,
     concurrentSiblingCount,
@@ -321,7 +330,7 @@ export async function runAgentTool(
     const childSessionId = ulid()
     child = await deps.store.create({
       sessionId: childSessionId,
-      config: filteredAgentConfig(parent.config, effectiveTools),
+      config: filteredAgentConfig(options.configOverride ?? parent.config, effectiveTools),
       agentRuntime: parent.agentRuntime,
       ...(parent.agentRuntimeVersion ? { agentRuntimeVersion: parent.agentRuntimeVersion } : {}),
       ...(parent.agentRuntime !== 'kernel' ? { externalSessionId: childSessionId } : {}),
@@ -338,6 +347,7 @@ export async function runAgentTool(
       // of the parent's mode. See docs/meta/adr/0014-subagent-approval-mode.md.
       initialApprovalMode: 'allow_all',
     })
+    await options.onChildCreated?.(child)
 
     await persistSubAgentPolicyArtifact(deps, parent, child.sessionId, effect.callId, policy)
 

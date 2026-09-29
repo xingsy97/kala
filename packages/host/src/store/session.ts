@@ -24,6 +24,7 @@ import type {
   LLMTrace,
   MetadataEntry,
   SessionMemoryPolicy,
+  SessionExecutionMode,
   SessionPreferences,
   SnapshotEntry,
 } from '@agent-kernel/shared'
@@ -53,6 +54,7 @@ import { writeJsonFile } from '../tenant-runtime/atomic-json-file.js'
 export type SessionRecord = {
   readonly sessionId: string
   readonly agentRuntime: AgentRuntimeId
+  readonly executionMode: SessionExecutionMode
   readonly agentRuntimeVersion?: string
   readonly externalSessionId?: string
   readonly logPath: string
@@ -335,6 +337,7 @@ export type CreateSessionParams = {
   systemPrompt?: string
   config: AgentConfig
   agentRuntime?: AgentRuntimeId
+  executionMode?: SessionExecutionMode
   agentRuntimeVersion?: string
   externalSessionId?: string
   parentSessionId?: string
@@ -356,7 +359,7 @@ export type CreateSessionParams = {
 }
 
 export type SessionStoreOptions = {
-  runtimeConfig?: AgentConfig | (() => AgentConfig)
+  runtimeConfig?: AgentConfig | ((context: { executionMode: SessionExecutionMode }) => AgentConfig)
   /** Root used by Host-side artifacts that partition data by Session ID. */
   artifactRootDir?: string | false
   /** Removes registry-backed Session artifacts that live outside artifactRootDir. */
@@ -437,6 +440,7 @@ export class SessionStore {
       path: logPath,
       sessionId,
       agentRuntime: params.agentRuntime ?? 'kernel',
+      executionMode: params.executionMode ?? 'chat',
       ...(params.agentRuntimeVersion ? { agentRuntimeVersion: params.agentRuntimeVersion } : {}),
       ...(params.externalSessionId ? { externalSessionId: params.externalSessionId } : {}),
       config: params.config,
@@ -478,6 +482,7 @@ export class SessionStore {
     const record: SessionRecord = {
       sessionId,
       agentRuntime: params.agentRuntime ?? 'kernel',
+      executionMode: params.executionMode ?? 'chat',
       ...(params.agentRuntimeVersion ? { agentRuntimeVersion: params.agentRuntimeVersion } : {}),
       ...(params.externalSessionId ? { externalSessionId: params.externalSessionId } : {}),
       logPath,
@@ -594,16 +599,16 @@ export class SessionStore {
     const cached = this.records.get(sessionId)
     if (cached) {
       if (recoverDangling) await this.recoverCachedExternalRuntime(cached)
-      this.applyRuntimeConfig(cached, this.resolveRuntimeConfig(options.runtimeConfig))
+      this.applyRuntimeConfig(cached, this.resolveRuntimeConfig(options.runtimeConfig, cached.executionMode))
       return cached
     }
     const inflight = recoverDangling ? this.inFlight.get(sessionId) : undefined
     if (inflight) {
       const record = await inflight
-      this.applyRuntimeConfig(record, this.resolveRuntimeConfig(options.runtimeConfig))
+      this.applyRuntimeConfig(record, this.resolveRuntimeConfig(options.runtimeConfig, record.executionMode))
       return record
     }
-    const promise = this.loadInner(sessionId, { recoverDangling, runtimeConfig: this.resolveRuntimeConfig(options.runtimeConfig) }).finally(() => {
+    const promise = this.loadInner(sessionId, { recoverDangling, runtimeConfig: options.runtimeConfig }).finally(() => {
       this.inFlight.delete(sessionId)
     })
     if (recoverDangling) this.inFlight.set(sessionId, promise)
@@ -689,6 +694,7 @@ export class SessionStore {
   async ensure(params: {
     sessionId: string
     agentRuntime?: AgentRuntimeId
+    executionMode?: SessionExecutionMode
     agentRuntimeVersion?: string
     externalSessionId?: string
     defaultConfig: AgentConfig
@@ -703,14 +709,14 @@ export class SessionStore {
   }): Promise<{ record: SessionRecord; created: boolean }> {
     const cached = this.records.get(params.sessionId)
     if (cached) {
-      this.applyRuntimeConfig(cached, this.resolveRuntimeConfig(params.runtimeConfig ?? params.defaultConfig))
+      this.applyRuntimeConfig(cached, this.resolveRuntimeConfig(params.runtimeConfig ?? params.defaultConfig, cached.executionMode))
       await this.applyMissingCreateMetadata(cached, params)
       return { record: cached, created: false }
     }
     const inflight = this.inFlight.get(params.sessionId)
     if (inflight) {
       const record = await inflight
-      this.applyRuntimeConfig(record, this.resolveRuntimeConfig(params.runtimeConfig ?? params.defaultConfig))
+      this.applyRuntimeConfig(record, this.resolveRuntimeConfig(params.runtimeConfig ?? params.defaultConfig, record.executionMode))
       await this.applyMissingCreateMetadata(record, params)
       return { record, created: false }
     }
@@ -726,9 +732,10 @@ export class SessionStore {
       params.initialCwd,
       params.preferences,
       params.agentRuntime,
+      params.executionMode,
       params.agentRuntimeVersion,
       params.externalSessionId,
-      this.resolveRuntimeConfig(params.runtimeConfig) ?? params.defaultConfig,
+      this.resolveRuntimeConfig(params.runtimeConfig, params.executionMode ?? 'chat') ?? params.defaultConfig,
       () => { created = true },
     ).finally(() => {
       this.inFlight.delete(params.sessionId)
@@ -749,6 +756,7 @@ export class SessionStore {
     initialCwd: string | undefined,
     preferences: SessionPreferences | undefined,
     agentRuntime: AgentRuntimeId | undefined,
+    executionMode: SessionExecutionMode | undefined,
     agentRuntimeVersion: string | undefined,
     externalSessionId: string | undefined,
     runtimeConfig: AgentConfig,
@@ -778,6 +786,7 @@ export class SessionStore {
         sessionId,
         config: defaultConfig,
         ...(agentRuntime ? { agentRuntime } : {}),
+        executionMode: executionMode ?? 'chat',
         ...(agentRuntimeVersion ? { agentRuntimeVersion } : {}),
         ...(externalSessionId ? { externalSessionId } : {}),
         ...(workspaceId !== undefined ? { workspaceId } : {}),
@@ -796,11 +805,14 @@ export class SessionStore {
     ;(record as { config: AgentConfig }).config = runtimeConfig
   }
 
-  private resolveRuntimeConfig(override?: AgentConfig): AgentConfig | undefined {
+  private resolveRuntimeConfig(
+    override: AgentConfig | undefined,
+    executionMode: SessionExecutionMode,
+  ): AgentConfig | undefined {
     if (override) return override
     const configured = this.options.runtimeConfig
     if (!configured) return undefined
-    return typeof configured === 'function' ? configured() : configured
+    return typeof configured === 'function' ? configured({ executionMode }) : configured
   }
 
   private async applyMissingCreateMetadata(
@@ -1484,11 +1496,14 @@ export class SessionStore {
     const record: SessionRecord = {
       sessionId,
       agentRuntime,
+      executionMode: parsed.header.executionMode ?? 'chat',
       ...(parsed.header.agentRuntimeVersion ? { agentRuntimeVersion: parsed.header.agentRuntimeVersion } : {}),
       ...(parsed.header.externalSessionId ? { externalSessionId: parsed.header.externalSessionId } : {}),
       logPath: path,
       createdAt: parsed.header.ts,
-      config: options.runtimeConfig ?? parsed.header.config,
+      config: options.runtimeConfig
+        ?? this.resolveRuntimeConfig(undefined, parsed.header.executionMode ?? 'chat')
+        ?? parsed.header.config,
       toolLock: toolLockFor(parsed.header.config),
       preferences,
       ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),
@@ -1670,6 +1685,7 @@ function summarizeRecord(record: SessionRecord): SessionSummary {
   return {
     sessionId: record.sessionId,
     agentRuntime: record.agentRuntime,
+    executionMode: record.executionMode,
     ...(record.agentRuntimeVersion ? { agentRuntimeVersion: record.agentRuntimeVersion } : {}),
     createdAt: record.createdAt,
     eventCount: record.state.cursor,
@@ -1802,6 +1818,7 @@ function summarizeLog(
   return {
     sessionId: header.sessionId,
     agentRuntime,
+    executionMode: header.executionMode ?? 'chat',
     createdAt: header.ts,
     eventCount: agentRuntime === 'kernel' ? events.length : (lastSnapshot?.seq ?? 0),
     ...((lastSnapshot?.ts ?? lastEvent?.ts) ? { lastEventAt: lastSnapshot?.ts ?? lastEvent?.ts } : {}),

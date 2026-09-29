@@ -18,8 +18,10 @@ import type {
 } from '@agent-kernel/kernel'
 import type { ContextUsageSnapshot } from './context-usage/types.js'
 import type { LLMTrace } from './log.js'
+import type { DagGraphPatch, DagRun } from './dag.js'
 
 export type AgentRuntimeId = 'kernel' | 'copilot'
+export type SessionExecutionMode = 'chat' | 'dag'
 
 export type AgentRuntimeCapabilities = {
   readonly queue: boolean
@@ -108,6 +110,7 @@ export type HandshakeAuth = {
 export type SessionReadyEvent = {
   sessionId: string
   agentRuntime: AgentRuntimeId
+  executionMode: SessionExecutionMode
   agentRuntimeCapabilities: AgentRuntimeCapabilities
   cursor: number
   state: AgentState
@@ -565,6 +568,8 @@ export type ClientCreateSession = {
   operationId?: string
   sessionId: string
   agentRuntime?: AgentRuntimeId
+  /** Session-level execution semantics. Missing means Standard Chat for legacy clients. */
+  executionMode?: SessionExecutionMode
   /**
    * Bind the session to a workspace. Optional — when omitted, the session
    * is unbound and any online executor may run its tools (legacy fallback).
@@ -581,6 +586,36 @@ export type ClientCreateSession = {
    */
   tools?: readonly string[]
   selectedModel?: string
+}
+
+export type ClientGetDagRun = {
+  operationId?: string
+  sessionId: string
+}
+
+export type ClientListDagRuns = {
+  operationId?: string
+  sessionId: string
+}
+
+export type ClientInitializeDag = {
+  sessionId: string
+  operationId: string
+  objective: string
+  graph: DagGraphPatch
+}
+
+export type ClientAnswerDagDecision = {
+  operationId: string
+  sessionId: string
+  runId: string
+  decisionId: string
+  answer: string
+}
+
+export type ServerDagRunEvent = {
+  sessionId: string
+  run: DagRun | null
 }
 
 export type ClientListDirs = {
@@ -1334,6 +1369,7 @@ export type ClientListSessions = Record<string, never>
 export type SessionSummary = {
   sessionId: string
   agentRuntime: AgentRuntimeId
+  executionMode: SessionExecutionMode
   agentRuntimeVersion?: string
   createdAt: string
   lastEventAt?: string
@@ -1743,6 +1779,10 @@ export type DashboardClientToServerEvents = {
   'client:set_approval_mode': (payload: ClientSetApprovalMode, ack?: (result: RpcAck) => void) => void
   'client:fork': (payload: ClientFork) => void
   'client:create_session': (payload: ClientCreateSession, ack?: (result: RpcAck) => void) => void
+  'client:get_dag_run': (payload: ClientGetDagRun, ack: (result: RpcAck<DagRun | null>) => void) => void
+  'client:list_dag_runs': (payload: ClientListDagRuns, ack: (result: RpcAck<readonly DagRun[]>) => void) => void
+  'client:initialize_dag': (payload: ClientInitializeDag, ack: (result: RpcAck<DagRun>) => void) => void
+  'client:answer_dag_decision': (payload: ClientAnswerDagDecision, ack: (result: RpcAck<DagRun>) => void) => void
   'client:list_dirs': (payload: ClientListDirs, ack?: (result: DirListResult) => void) => void
   'client:create_directory': (payload: ClientCreateDirectory, ack?: (result: CreateDirectoryResult) => void) => void
   'client:list_files': (payload: ClientListFiles) => void
@@ -1835,6 +1875,7 @@ export type DashboardServerToClientEvents = {
   'server:control_update': (payload: ControlUpdate) => void
   'server:agent_runtimes': (payload: { runtimes: readonly AgentRuntimeDescriptor[] }) => void
   'server:compact_status': (payload: CompactStatusEvent) => void
+  'server:dag_run': (payload: ServerDagRunEvent) => void
 }
 
 export type ServerMessageQueueEvent = {
@@ -1941,7 +1982,7 @@ export type ExecutorInviteCreated = {
  * backwards-incompatible way. Bump minor for additive changes (new events,
  * new optional fields). Bump patch for doc-only corrections.
  */
-export const PROTOCOL_VERSION = '1.0.0' as const
+export const PROTOCOL_VERSION = '1.1.0' as const
 
 export function parseMajor(version: string): number | null {
   const first = version.split('.')[0]

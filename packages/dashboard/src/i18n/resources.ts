@@ -1388,6 +1388,17 @@ export const resources = {
         newSession: 'Start a conversation',
         agentRuntime: 'Agent',
         chooseAgentRuntime: 'Choose agent runtime',
+        chooseExecutionMode: 'Execution mode',
+        executionMode: {
+          chat: {
+            label: 'Standard Chat',
+            description: 'Work conversationally, one turn at a time.',
+          },
+          dag: {
+            label: 'DAG-First',
+            description: 'Plan dependent work as a durable graph of child Sessions.',
+          },
+        },
         runtime: {
           recommended: 'Recommended',
           kalaKernel: {
@@ -3186,6 +3197,17 @@ export const resources = {
         newSession: '开始对话',
         agentRuntime: 'Agent 运行时',
         chooseAgentRuntime: '选择 Agent 运行时',
+        chooseExecutionMode: '执行模式',
+        executionMode: {
+          chat: {
+            label: '标准对话',
+            description: '以对话方式逐轮完成工作。',
+          },
+          dag: {
+            label: 'DAG-First',
+            description: '将依赖任务规划为由子会话执行的持久化任务图。',
+          },
+        },
         runtime: {
           recommended: '推荐',
           kalaKernel: {

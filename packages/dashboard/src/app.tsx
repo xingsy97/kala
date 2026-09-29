@@ -79,6 +79,7 @@ import { ExecutorPairingPrompt } from './features/explorer/ExecutorPairingPrompt
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
 import { taskGraphFromMessages, taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
 import { TaskGraphButton } from './features/chat/TaskGraphButton.js'
+import { DagRunPanel } from './features/dag/DagRunPanel.js'
 import { Explorer, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
 import type { WorkspaceNode } from './features/explorer/tree-model.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
@@ -967,6 +968,7 @@ export function App(): JSX.Element {
   },[config.sessionId,newSession,selectSession,sessionTabs])
   const pickWorkspaceForNew = async (
     agentRuntime: import('@agent-kernel/shared').AgentRuntimeId,
+    executionMode: import('@agent-kernel/shared').SessionExecutionMode,
     workspaceId: string,
     workspaceName: string | undefined,
     cwd: string,
@@ -983,6 +985,7 @@ export function App(): JSX.Element {
       await createSessionWithAck(controlSocket, {
         sessionId,
         agentRuntime,
+        executionMode,
         workspaceId,
         ...(workspaceName !== undefined ? { workspaceName } : {}),
         cwd,
@@ -1294,6 +1297,7 @@ export function App(): JSX.Element {
       await createSessionWithAck(controlSocket, {
         sessionId,
         agentRuntime,
+        executionMode: currentSession.executionMode ?? 'chat',
         ...(currentSession.workspaceId ? { workspaceId: currentSession.workspaceId } : {}),
         ...(currentSession.workspaceName ? { workspaceName: currentSession.workspaceName } : {}),
         ...(currentCwd ? { cwd: currentCwd } : {}),
@@ -2031,9 +2035,16 @@ export function App(): JSX.Element {
                     <div
                       key={activeSessionId ?? 'no-session'}
                       className="ak-motion-session-swap flex min-h-0 min-w-0 flex-col bg-background overflow-hidden"
-                      data-testid="chat-panel"
+                      data-testid={session.executionMode === 'dag' ? 'dag-workspace-panel' : 'chat-panel'}
                     >
-                      <ChatPanel
+                      {session.executionMode === 'dag' ? (
+                        <DagRunPanel
+                          socket={session.socket}
+                          sessionId={activeSessionId}
+                          onOpenSession={selectSession}
+                        />
+                      ) : (
+                        <ChatPanel
                         sessionId={activeSessionId}
                         attachmentHost={hostEndpoint.url}
                         attachmentToken={config.token}
@@ -2137,7 +2148,8 @@ export function App(): JSX.Element {
                             ) : null}
                           </>
                         }
-                      />
+                        />
+                      )}
                     </div>
                     <div className="min-h-0">
                       <BannerStack>
@@ -2684,8 +2696,8 @@ export function App(): JSX.Element {
         socket={session.socket}
         error={workspacePickError}
         submitting={workspacePickSubmitting}
-        onCreate={({ agentRuntime, workspaceId, workspaceName, cwd }) =>
-          void pickWorkspaceForNew(agentRuntime, workspaceId, workspaceName, cwd)
+        onCreate={({ agentRuntime, executionMode, workspaceId, workspaceName, cwd }) =>
+          void pickWorkspaceForNew(agentRuntime, executionMode, workspaceId, workspaceName, cwd)
         }
         onCreateSimpleChat={(agentRuntime) => void startSimpleChat(agentRuntime)}
         onCancel={() => {

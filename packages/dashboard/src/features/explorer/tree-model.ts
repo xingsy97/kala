@@ -158,6 +158,7 @@ export function toStructuralSessionSummary(session: SessionSummary): SessionSumm
   return {
     sessionId: session.sessionId,
     agentRuntime: session.agentRuntime,
+    executionMode: session.executionMode,
     createdAt: session.createdAt,
     eventCount: 0,
     ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),

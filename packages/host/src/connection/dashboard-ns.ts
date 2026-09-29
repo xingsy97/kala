@@ -52,6 +52,10 @@ import type {
   ChannelSubscriptionResult,
   DashboardChannel,
   ClientAskUserChoice,
+  ClientAnswerDagDecision,
+  ClientGetDagRun,
+  ClientListDagRuns,
+  ClientInitializeDag,
   ClientUserApprove,
   ClientUserMessage,
   ClientUserReject,
@@ -119,6 +123,8 @@ import { OperationDeduper } from './operation-deduper.js'
 import type { AgentRuntimeRegistry } from '../agent-runtime/types.js'
 import { validateMessageAttachmentReferences } from '../message-attachment-resolver.js'
 import { askUserChoiceRequestFromPendingCall, type AskUserChoiceBroker } from '../ask-user-choice.js'
+import type { DagStore } from '../dag/store.js'
+import { DAG_PLANNER_INSTRUCTION, DAG_PLAN_TOOL } from '../dag/tool.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -220,6 +226,7 @@ export type DashboardDeps = {
   streamingDraftSnapshot?(sessionId: string): { text: string; afterSeq: number; messageCount: number } | undefined
   agentRuntimes: AgentRuntimeRegistry
   askUserChoice?: AskUserChoiceBroker
+  dagStore?: DagStore
   executorSnapshot?(): readonly AttachedExecutor[]
   onSessionCreated?(record: SessionRecord): void | Promise<void>
   onSessionDeleted?(record: SessionRecord): void | Promise<void>
@@ -260,7 +267,7 @@ const READ_ONLY_DASHBOARD_EVENTS = new Set([
   'client:connection_ping', 'client:executor_ping', 'client:list_executors', 'client:list_sessions',
   'client:load_history', 'client:load_log_artifact', 'client:subscribe_channels', 'client:refresh_channels', 'client:restore_subscriptions',
   'client:unsubscribe_channels', 'subscribe', 'unsubscribe', 'client:list_dirs', 'client:list_files',
-  'workspace:read_binary', 'client:read_overflow', 'bg:list', 'bg:output', 'sub_agent:list', 'agent_types:list',
+  'workspace:read_binary', 'client:read_overflow', 'client:get_dag_run', 'client:list_dag_runs', 'bg:list', 'bg:output', 'sub_agent:list', 'agent_types:list',
 ])
 
 export function recoverSubAgentOutcome(
@@ -445,6 +452,7 @@ export function configureDashboardNamespace(
         'client:create_session', 'client:delete_session', 'client:update_preferences', 'client:set_cwd',
         'client:reorder_queued_message', 'client:update_queued_message', 'client:delete_queued_message',
         'client:rename_session', 'client:rename_workspace', 'client:consolidate_memory', 'bg:kill',
+        'client:initialize_dag', 'client:answer_dag_decision',
         'terminal:create', 'terminal:input', 'terminal:resize', 'terminal:kill', 'workspace:exec',
       ] as const
       socket.use(([event, ...args], next) => {
@@ -1358,12 +1366,89 @@ export function configureDashboardNamespace(
       }
       socket.emit('server:memory_consolidated', payload)
     })
+    socket.on('client:get_dag_run', (raw: ClientGetDagRun, ack) => {
+      const p = vparse(schema.ClientGetDagRunSchema, raw, 'client:get_dag_run', (raw as ClientGetDagRun | undefined)?.sessionId)
+      if (!p) {
+        ack({ ok: false, error: 'invalid payload' })
+        return
+      }
+      const record = deps.store.get(p.sessionId)
+      const accessError = validateIngressSessionAccess(socket, record)
+      if (accessError) {
+        ack({ ok: false, error: accessError })
+        return
+      }
+      ack({ ok: true, value: deps.dagStore?.runForSession(p.sessionId) ?? null })
+    })
+    socket.on('client:list_dag_runs', (raw: ClientListDagRuns, ack) => {
+      const p = vparse(schema.ClientListDagRunsSchema, raw, 'client:list_dag_runs', (raw as ClientListDagRuns | undefined)?.sessionId)
+      if (!p) {
+        ack({ ok: false, error: 'invalid payload' })
+        return
+      }
+      const record = deps.store.get(p.sessionId)
+      const accessError = validateIngressSessionAccess(socket, record)
+      if (accessError) {
+        ack({ ok: false, error: accessError })
+        return
+      }
+      ack({ ok: true, value: deps.dagStore?.runsForSession(p.sessionId) ?? [] })
+    })
+    socket.on('client:initialize_dag', (raw: ClientInitializeDag, ack) => {
+      const p = vparse(schema.ClientInitializeDagSchema, raw, 'client:initialize_dag', (raw as ClientInitializeDag | undefined)?.sessionId)
+      if (!p) {
+        ack({ ok: false, error: 'invalid payload' })
+        return
+      }
+      try {
+        if (!deps.dagStore) throw new Error('DAG store is unavailable')
+        const record = deps.store.get(p.sessionId)
+        if (!record) throw new Error('Session is unavailable')
+        const accessError = validateIngressSessionAccess(socket, record)
+        if (accessError) throw new Error(accessError)
+        if (record.executionMode !== 'dag') throw new Error('Session is not in DAG-First mode')
+        const run = deps.dagStore.createRun(p.sessionId, p.objective, `${p.operationId}:run`)
+        const updated = deps.dagStore.installGraph(run.id, p.graph, `${p.operationId}:graph`)
+        deps.dashboardNs.to(sessionRoom(p.sessionId)).emit('server:dag_run', { sessionId: p.sessionId, run: updated })
+        ack({ ok: true, value: updated })
+      } catch (error) {
+        ack({ ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    })
+    socket.on('client:answer_dag_decision', (raw: ClientAnswerDagDecision, ack) => {
+      const p = vparse(schema.ClientAnswerDagDecisionSchema, raw, 'client:answer_dag_decision', (raw as ClientAnswerDagDecision | undefined)?.sessionId)
+      if (!p) {
+        ack({ ok: false, error: 'invalid payload' })
+        return
+      }
+      try {
+        if (!deps.dagStore) throw new Error('DAG store is unavailable')
+        const record = deps.store.get(p.sessionId)
+        if (!record) throw new Error('Session is unavailable')
+        const accessError = validateIngressSessionAccess(socket, record)
+        if (accessError) throw new Error(accessError)
+        const run = deps.dagStore.runForSession(p.sessionId)
+        if (!run || run.id !== p.runId) throw new Error('DAG run is unavailable')
+        const updated = deps.dagStore.answerDecision(p.runId, p.decisionId, p.answer, p.operationId)
+        deps.dashboardNs.to(sessionRoom(p.sessionId)).emit('server:dag_run', { sessionId: p.sessionId, run: updated })
+        deps.loopDeps.dagScheduler?.schedule(p.sessionId)
+        ack({ ok: true, value: updated })
+      } catch (error) {
+        ack({ ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    })
     socket.on('client:create_session', async (raw: ClientCreateSession, ack) => {
       const parsed = vparse(schema.ClientCreateSessionSchema, raw, 'client:create_session', (raw as ClientCreateSession | undefined)?.sessionId)
       if (!parsed) { ack?.({ ok: false, error: 'invalid payload' }); return }
       let p: ClientCreateSession = parsed
       try {
         const agentRuntime = p.agentRuntime ?? 'kernel'
+        const executionMode = p.executionMode ?? 'chat'
+        const registeredMode = deps.loopDeps.extensions?.getSessionMode(executionMode)
+        if (!registeredMode) {
+          ack?.({ ok: false, error: `unsupported session execution mode: ${executionMode}` })
+          return
+        }
         const runtime = deps.agentRuntimes.require(agentRuntime)
         const selectedModel = p.selectedModel?.trim()
         const normalizedSelectedModel = agentRuntime === 'kernel' && selectedModel
@@ -1408,10 +1493,11 @@ export function configureDashboardNamespace(
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
           agentRuntime,
+          executionMode,
           ...(runtime.descriptor().version ? { agentRuntimeVersion: runtime.descriptor().version } : {}),
           ...(agentRuntime === 'copilot' ? { externalSessionId: p.sessionId } : {}),
-          defaultConfig: deriveSessionConfig(getDefaultConfig(), p.tools),
-          runtimeConfig: deriveSessionConfig(getDefaultConfig(), p.tools),
+          defaultConfig: deriveSessionConfig(getDefaultConfig(), p.tools, executionMode),
+          runtimeConfig: deriveSessionConfig(getDefaultConfig(), p.tools, executionMode),
           ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }
@@ -1455,6 +1541,9 @@ export function configureDashboardNamespace(
       if (!p) return
       try {
         const source = await deps.store.load(p.sourceSessionId)
+        if (source.executionMode === 'dag') {
+          throw new Error('DAG-First Sessions cannot be forked; create a new DAG-First Session instead')
+        }
         if (!deps.agentRuntimes.require(source.agentRuntime).descriptor().capabilities.fork) {
           throw new Error(`${source.agentRuntime} sessions do not support fork`)
         }
@@ -1471,6 +1560,7 @@ export function configureDashboardNamespace(
         const record = await deps.store.create({
           sessionId: newId,
           config: source.config,
+          executionMode: source.executionMode,
           parentSessionId: p.sourceSessionId,
           parentCursor: p.cursor,
           initialState: forkedState,
@@ -1498,6 +1588,7 @@ export function configureDashboardNamespace(
         const forked: SessionReadyEvent = {
           sessionId: record.sessionId,
           agentRuntime: 'kernel',
+          executionMode: record.executionMode,
           agentRuntimeCapabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
           reason: 'forked',
           parentSessionId: p.sourceSessionId,
@@ -1600,10 +1691,18 @@ function executorSnapshotFor(deps: DashboardDeps): readonly AttachedExecutor[] {
 function deriveSessionConfig(
   base: AgentConfig,
   toolAllowlist: readonly string[] | undefined,
+  executionMode: import('@agent-kernel/shared').SessionExecutionMode = 'chat',
 ): AgentConfig {
-  if (!toolAllowlist) return base
-  const allowed = new Set(toolAllowlist)
-  return { ...base, tools: base.tools.filter((t) => allowed.has(t.name)) }
+  const tools = toolAllowlist
+    ? base.tools.filter((tool) => toolAllowlist.includes(tool.name))
+    : [...base.tools]
+  if (executionMode === 'chat') return { ...base, tools }
+  const plannerTools = tools.filter((tool) => tool.name === 'ask_user_choice' || tool.name === DAG_PLAN_TOOL.name)
+  return {
+    ...base,
+    systemPrompt: `${base.systemPrompt}\n\n${DAG_PLANNER_INSTRUCTION}`,
+    tools: plannerTools.some((tool) => tool.name === DAG_PLAN_TOOL.name) ? plannerTools : [...plannerTools, DAG_PLAN_TOOL],
+  }
 }
 
 async function refreshSessionSkillsIfNeeded(
@@ -1917,14 +2016,17 @@ async function loadRecordForDashboard(
 ): Promise<SessionRecord | undefined> {
   let record: SessionRecord | undefined = deps.store.get(sessionId)
   if (record?.agentRuntime !== undefined && record.agentRuntime !== 'kernel') {
-    record = await deps.store.load(sessionId)
+    const defaultConfig = typeof deps.defaultConfig === 'function'
+      ? deps.defaultConfig()
+      : deps.defaultConfig
+    record = await loadDashboardSession(deps.store, sessionId, defaultConfig)
   }
   if (!record) {
     try {
       const defaultConfig = typeof deps.defaultConfig === 'function'
         ? deps.defaultConfig()
         : deps.defaultConfig
-      record = await deps.store.load(sessionId, { runtimeConfig: defaultConfig })
+      record = await loadDashboardSession(deps.store, sessionId, defaultConfig)
     } catch {
       record = undefined
     }
@@ -1945,7 +2047,9 @@ export async function loadDashboardSession(
     })
   }
   if (record.agentRuntime !== 'kernel') {
-    record = await store.load(sessionId, runtimeConfig ? { runtimeConfig } : undefined)
+    record = await store.load(sessionId, runtimeConfig
+      ? { runtimeConfig: deriveSessionConfig(runtimeConfig, undefined, record.executionMode) }
+      : undefined)
   }
   return record
 }
@@ -2078,6 +2182,7 @@ export function readyEventFor(
   return {
     sessionId: record.sessionId,
     agentRuntime: record.agentRuntime,
+    executionMode: record.executionMode,
     agentRuntimeCapabilities: record.agentRuntime === 'copilot'
       ? COPILOT_AGENT_RUNTIME_CAPABILITIES
       : KERNEL_AGENT_RUNTIME_CAPABILITIES,
@@ -2133,6 +2238,7 @@ export function ephemeralReadyEventFor(
   return {
     sessionId,
     agentRuntime: 'kernel',
+    executionMode: 'chat',
     agentRuntimeCapabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
     cursor: state.cursor,
     state,

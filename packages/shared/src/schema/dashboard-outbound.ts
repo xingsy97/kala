@@ -55,6 +55,7 @@ import type {
   ServerExecutorInviteRevokedPayload,
   ServerExecutorInvitesPayload,
   ServerExecutorsPayload,
+  ServerDagRunEvent,
   ServerHistoryPayload,
   ServerLogArtifactPayload,
   ServerMessageQueueEvent,
@@ -79,6 +80,7 @@ import type {
   ToolProgressPayload,
   WorkspaceMetaChanged,
 } from '../protocol.js'
+import type { DagDecision, DagEdge, DagEvent, DagNode, DagRun } from '../dag.js'
 import { SESSION_ERROR_SCOPES } from '../protocol.js'
 import type { EventEntry, HeaderEntry, LLMTrace, LogEntry, MetadataEntry, RuntimeMetadataEntry, SnapshotEntry } from '../log.js'
 import {
@@ -181,6 +183,7 @@ export const ContextUsageSnapshotSchema = z.object({
 export const SessionReadyEventSchema = z.object({
   sessionId: z.string(),
   agentRuntime: z.enum(['kernel', 'copilot']),
+  executionMode: z.enum(['chat', 'dag']),
   agentRuntimeCapabilities: z.object({
     queue: z.boolean(),
     fork: z.boolean(),
@@ -462,6 +465,7 @@ export const ServerMessageQueueEventSchema = z.object({
 export const SessionSummarySchema = z.object({
   sessionId: z.string(),
   agentRuntime: z.enum(['kernel', 'copilot']),
+  executionMode: z.enum(['chat', 'dag']),
   agentRuntimeVersion: z.string().optional(),
   createdAt: z.string(),
   lastEventAt: z.string().optional(),
@@ -475,6 +479,121 @@ export const SessionSummarySchema = z.object({
   label: z.string().optional(),
   preferences: SessionPreferencesSchema.optional(),
 }) satisfies z.ZodType<SessionSummary>
+
+export const DagNodeSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  title: z.string(),
+  instructions: z.string(),
+  status: z.enum(['pending', 'ready', 'running', 'waiting_user', 'succeeded', 'failed', 'cancelled', 'replaced']),
+  depth: z.number().int().nonnegative(),
+  writeScopes: z.array(z.string()).readonly(),
+  estimatedDurationMinutes: z.number().positive().optional(),
+  attempt: z.number().int().nonnegative(),
+  childSessionId: z.string().optional(),
+  progress: z.string().optional(),
+  result: z.string().optional(),
+  error: z.string().optional(),
+  replacedBy: z.string().optional(),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+  toolActivity: z.array(z.object({
+    callId: z.string(),
+    name: z.string(),
+    category: z.enum(['read', 'shell', 'write', 'network', 'install', 'system', 'other']),
+    status: z.enum(['succeeded', 'failed', 'unknown']),
+    summary: z.string(),
+  })).readonly(),
+}) satisfies z.ZodType<DagNode>
+
+export const DagEdgeSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  source: z.string(),
+  target: z.string(),
+}) satisfies z.ZodType<DagEdge>
+
+export const DagDecisionSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  nodeId: z.string(),
+  question: z.string(),
+  context: z.string(),
+  choices: z.array(z.string()).readonly(),
+  allowFreeform: z.boolean(),
+  recommendation: z.string().optional(),
+  reason: z.string().optional(),
+  riskLevel: z.enum(['low', 'medium', 'high']).optional(),
+  status: z.enum(['pending', 'answered', 'cancelled']),
+  answer: z.string().optional(),
+  createdAt: z.string(),
+  answeredAt: z.string().optional(),
+}) satisfies z.ZodType<DagDecision>
+
+export const DagEventSchema = z.object({
+  id: z.number().int().nonnegative(),
+  runId: z.string(),
+  type: z.enum(['run', 'node', 'decision', 'graph', 'lease']),
+  message: z.string(),
+  nodeId: z.string().optional(),
+  createdAt: z.string(),
+}) satisfies z.ZodType<DagEvent>
+
+const DagNodeAttemptSchema = z.object({
+  id: z.number().int().nonnegative(),
+  runId: z.string(),
+  nodeId: z.string(),
+  attempt: z.number().int().positive(),
+  workerId: z.string(),
+  status: z.enum(['running', 'succeeded', 'failed', 'cancelled', 'interrupted', 'waiting_user', 'replaced']),
+  startedAt: z.string(),
+  completedAt: z.string().optional(),
+  result: z.string().optional(),
+  error: z.string().optional(),
+})
+
+const DagGraphVersionNodeSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  instructions: z.string(),
+  depth: z.number().int().nonnegative(),
+  writeScopes: z.array(z.string()).readonly(),
+  estimatedDurationMinutes: z.number().positive().optional(),
+})
+
+const DagGraphVersionSchema = z.object({
+  runId: z.string(),
+  version: z.number().int().nonnegative(),
+  resultNodeId: z.string(),
+  nodes: z.array(DagGraphVersionNodeSchema).readonly(),
+  edges: z.array(z.object({ source: z.string(), target: z.string() })).readonly(),
+  createdAt: z.string(),
+})
+
+export const DagRunSchema = z.object({
+  id: z.string(),
+  parentSessionId: z.string(),
+  objective: z.string(),
+  status: z.enum(['planning', 'running', 'paused', 'completed', 'failed', 'cancelled']),
+  graphVersion: z.number().int().nonnegative(),
+  resultNodeId: z.string().optional(),
+  result: z.string().optional(),
+  error: z.string().optional(),
+  completedAt: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  nodes: z.array(DagNodeSchema).readonly(),
+  edges: z.array(DagEdgeSchema).readonly(),
+  decisions: z.array(DagDecisionSchema).readonly(),
+  events: z.array(DagEventSchema).readonly(),
+  attempts: z.array(DagNodeAttemptSchema).readonly().optional(),
+  graphHistory: z.array(DagGraphVersionSchema).readonly().optional(),
+}) satisfies z.ZodType<DagRun>
+
+export const ServerDagRunEventSchema = z.object({
+  sessionId: z.string(),
+  run: DagRunSchema.nullable(),
+}) satisfies z.ZodType<ServerDagRunEvent>
 
 export const ServerSessionsPayloadSchema = z.object({
   sessions: z.array(SessionSummarySchema),
@@ -924,6 +1043,7 @@ export const HeaderEntrySchema = z.object({
   ts: z.string(),
   sessionId: z.string(),
   agentRuntime: z.enum(['kernel', 'copilot']).optional(),
+  executionMode: z.enum(['chat', 'dag']).optional(),
   agentRuntimeVersion: z.string().optional(),
   externalSessionId: z.string().optional(),
   parentSessionId: z.string().optional(),

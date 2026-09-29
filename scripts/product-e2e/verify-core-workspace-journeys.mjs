@@ -96,6 +96,7 @@ try {
     await actor.page.waitForSelector('[data-testid="workspace-row"][data-online="true"]')
     await hoverAncestorAndClickFirst(actor.page, '[data-testid^="workspace-new-session-"]', '[data-testid="workspace-row"]', { description: 'New Session for online Workspace' })
     await actor.page.waitForSelector('[data-testid="new-session-dialog"]')
+    await clickByTestId(actor.page, 'new-session-mode-dag')
     await clickByTestId(actor.page, 'new-session-create')
     await actor.page.waitForFunction(() => new URL(location.href).searchParams.has('sessionId'))
     sessionId = new URL(actor.page.url()).searchParams.get('sessionId')
@@ -103,15 +104,25 @@ try {
     const rowSelector = `[data-testid="session-row"][data-session-id="${sessionId}"]`
     await actor.page.waitForSelector(rowSelector)
     await actor.page.waitForSelector('[data-testid="composer-input"]')
+    await actor.page.waitForSelector('[data-testid="dag-run-canvas"]')
+    const dagSurface = await actor.page.$eval('[data-testid="dag-run-panel"]', (element) => ({
+      height: element.getBoundingClientRect().height,
+      text: element.textContent ?? '',
+    }))
+    if (dagSurface.height < 190 || !dagSurface.text.includes('Waiting for DAG plan')) {
+      throw new Error(`DAG-First surface is not prominent: ${JSON.stringify(dagSurface)}`)
+    }
     const selected = await actor.page.$eval(rowSelector, (element) => element.classList.contains('bg-accent'))
     if (!selected) throw new Error(`created Session ${sessionId} row is not selected`)
-    return { sessionId, url: actor.page.url(), selected }
+    return { sessionId, url: actor.page.url(), selected, dagSurface }
   })
 
   await harness.step('reload and restore the same Session', async () => {
     await actor.page.reload({ waitUntil: 'networkidle2' })
     await actor.page.waitForFunction((expected) => new URL(location.href).searchParams.get('sessionId') === expected, {}, sessionId)
     await actor.page.waitForSelector('[data-testid="composer-input"]')
+    await actor.page.waitForSelector('[data-testid="dag-run-canvas"]')
+    await sleep(1_000)
     const selectedRow = await actor.page.$(`[data-testid="session-row"][data-session-id="${sessionId}"]`)
     if (!selectedRow || !(await selectedRow.evaluate((element) => element.classList.contains('bg-accent')))) throw new Error('selected Session row missing after reload')
     return { sessionId, restored: true }

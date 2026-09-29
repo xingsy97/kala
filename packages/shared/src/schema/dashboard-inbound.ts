@@ -17,6 +17,9 @@ import type {
   ClientCompact,
   ClientConsolidateMemory,
   ClientCreateSession,
+  ClientGetDagRun,
+  ClientListDagRuns,
+  ClientInitializeDag,
   ClientCreateDirectory,
   ClientDeleteQueuedMessage,
   ClientDeleteSession,
@@ -58,6 +61,7 @@ import type {
   ClientAddManualModel,
   ClientAddManualProvider,
   ClientAskUserChoice,
+  ClientAnswerDagDecision,
   ClientUpdateAgentPromptSettings,
   ClientDeleteManualModel,
   ClientDeleteManualProvider,
@@ -175,12 +179,56 @@ export const ClientCreateSessionSchema = z.object({
   operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   agentRuntime: z.enum(['kernel', 'copilot']).optional(),
+  executionMode: z.enum(['chat', 'dag']).optional(),
   workspaceId: WorkspaceIdSchema.optional(),
   workspaceName: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).readonly().optional(),
   selectedModel: z.string().optional(),
 }) satisfies z.ZodType<ClientCreateSession>
+
+const DagPlanNodeInputSchema = z.object({
+  id: NonEmptyStringSchema.max(128),
+  title: NonEmptyStringSchema.max(240),
+  instructions: NonEmptyStringSchema.max(20_000),
+  writeScopes: z.array(z.string().max(1024)).max(64).readonly().optional(),
+  estimatedDurationMinutes: z.number().positive().max(100_000).optional(),
+}).strict()
+
+const DagPlanEdgeInputSchema = z.object({
+  source: NonEmptyStringSchema.max(128),
+  target: NonEmptyStringSchema.max(128),
+}).strict()
+
+export const ClientGetDagRunSchema = z.object({
+  operationId: z.string().min(1).max(128).optional(),
+  sessionId: SessionIdSchema,
+}).strict() satisfies z.ZodType<ClientGetDagRun>
+
+export const ClientListDagRunsSchema = z.object({
+  operationId: z.string().min(1).max(128).optional(),
+  sessionId: SessionIdSchema,
+}).strict() satisfies z.ZodType<ClientListDagRuns>
+
+export const ClientInitializeDagSchema = z.object({
+  sessionId: SessionIdSchema,
+  operationId: z.string().min(1).max(128),
+  objective: NonEmptyStringSchema.max(20_000),
+  graph: z.object({
+    expectedGraphVersion: z.number().int().nonnegative(),
+    resultNodeId: NonEmptyStringSchema.max(128),
+    nodes: z.array(DagPlanNodeInputSchema).min(1).max(100).readonly(),
+    edges: z.array(DagPlanEdgeInputSchema).max(500).readonly(),
+  }).strict(),
+}).strict() satisfies z.ZodType<ClientInitializeDag>
+
+export const ClientAnswerDagDecisionSchema = z.object({
+  operationId: z.string().min(1).max(128),
+  sessionId: SessionIdSchema,
+  runId: NonEmptyStringSchema,
+  decisionId: NonEmptyStringSchema,
+  answer: NonEmptyStringSchema.max(20_000),
+}).strict() satisfies z.ZodType<ClientAnswerDagDecision>
 
 export const ClientSubscribeSchema = z.object({
   sessionId: SessionIdSchema,

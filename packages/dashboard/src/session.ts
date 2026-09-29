@@ -66,6 +66,7 @@ export type DashboardSocket = Socket<
 export type SessionView = {
   status: ConnectionStatus
   agentRuntime: import('@agent-kernel/shared').AgentRuntimeId
+  executionMode: import('@agent-kernel/shared').SessionExecutionMode
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
@@ -181,7 +182,7 @@ export function useSession({
   useEffect(() => {
     if (!cache || !projection.sessionId || projection.hydratedSessionId !== projection.sessionId) return
     const checkpoint = {
-      sessionId: projection.sessionId, status: projection.status, state: projection.state,
+      sessionId: projection.sessionId, status: projection.status, executionMode: projection.executionMode, state: projection.state,
       config: projection.config, contextSnapshot: projection.contextSnapshot,
       turnStartedAt: projection.turnStartedAt, turnStartedAtCursor: projection.turnStartedAtCursor,
       timeline: projection.timeline,
@@ -764,7 +765,7 @@ export function useSession({
       }
 
   const {
-    status, agentRuntime, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
+    status, agentRuntime, executionMode, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
     queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, turnStartedAt,
     hydratedSessionId, historyLoadedSessionId,
   } = selectedProjection
@@ -819,6 +820,7 @@ export function useSession({
     () => ({
       status,
       agentRuntime,
+      executionMode,
       state,
       config,
       contextSnapshot,
@@ -845,6 +847,7 @@ export function useSession({
     [
       status,
       agentRuntime,
+      executionMode,
       state,
       config,
       contextSnapshot,
@@ -1051,6 +1054,7 @@ export function createSession(
   input: {
     sessionId: string
     agentRuntime?: import('@agent-kernel/shared').AgentRuntimeId
+    executionMode?: import('@agent-kernel/shared').SessionExecutionMode
     workspaceId?: string
     workspaceName?: string
     cwd?: string
@@ -1061,6 +1065,7 @@ export function createSession(
   socket.emit('client:create_session', {
     sessionId: input.sessionId,
     ...(input.agentRuntime ? { agentRuntime: input.agentRuntime } : {}),
+    ...(input.executionMode ? { executionMode: input.executionMode } : {}),
     ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
     ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
     ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),
@@ -1074,6 +1079,7 @@ export function createSessionWithAck(
   input: {
     sessionId: string
     agentRuntime?: import('@agent-kernel/shared').AgentRuntimeId
+    executionMode?: import('@agent-kernel/shared').SessionExecutionMode
     workspaceId?: string
     workspaceName?: string
     cwd?: string
@@ -1085,6 +1091,7 @@ export function createSessionWithAck(
   return emitRpc(socket, 'client:create_session', {
     sessionId: input.sessionId,
     ...(input.agentRuntime ? { agentRuntime: input.agentRuntime } : {}),
+    ...(input.executionMode ? { executionMode: input.executionMode } : {}),
     ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
     ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
     ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),

@@ -15,6 +15,7 @@
  */
 
 import type {
+  AgentConfig,
   AgentEvent,
   AgentState,
   CallToolEffect,
@@ -32,6 +33,7 @@ import type { WebSearchCredentialStore } from './web-search/index.js'
 import type { MessageAttachmentStore } from './message-attachment-store.js'
 import type { AskUserChoiceBroker } from './ask-user-choice.js'
 import type { ExtensionRegistry } from './extensions/registry.js'
+import type { DagStore } from './dag/store.js'
 
 export type LoopBroadcast = {
   onEvent(
@@ -201,6 +203,12 @@ export type HostLoopDeps = {
   publishLocalImages?: (sessionId: string, record: import('./store/session.js').SessionRecord, message: import('@agent-kernel/kernel').Message) => Promise<import('@agent-kernel/kernel').Message>
   askUserChoice?: AskUserChoiceBroker
   extensions?: ExtensionRegistry
+  dagStore?: DagStore
+  dagWorkerConfig?: () => AgentConfig
+  dagScheduler?: {
+    schedule(parentSessionId: string): void
+  }
+  publishDagRun?(parentSessionId: string): void
 }
 
 export type LoopHandle = {

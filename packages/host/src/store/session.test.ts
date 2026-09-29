@@ -40,6 +40,44 @@ describe('SessionStore.ensure', () => {
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
+  it('persists DAG-First execution mode and defaults legacy Sessions to chat', async () => {
+    const store = new SessionStore(dir)
+    const dag = await store.create({ sessionId: 'dag-session', config, executionMode: 'dag' })
+    expect(dag.executionMode).toBe('dag')
+    expect((await new SessionStore(dir).load(dag.sessionId)).executionMode).toBe('dag')
+    expect((await store.listSummaries()).find((summary) => summary.sessionId === dag.sessionId)?.executionMode).toBe('dag')
+
+    const legacy = await store.create({ sessionId: 'chat-session', config })
+    expect(legacy.executionMode).toBe('chat')
+    expect(readyEventFor(legacy).executionMode).toBe('chat')
+  })
+
+  it('refreshes runtime config with the persisted Session execution mode', async () => {
+    const writer = new SessionStore(dir)
+    await writer.create({
+      sessionId: 'dag-runtime-config',
+      config,
+      executionMode: 'dag',
+      agentRuntime: 'copilot',
+    })
+    const reader = new SessionStore(dir, {
+      runtimeConfig: ({ executionMode }) => createConfig({
+        systemPrompt: `mode:${executionMode}`,
+        tools: executionMode === 'dag'
+          ? [{ name: 'dag_plan', description: 'plan', inputSchema: { type: 'object' }, requiresApproval: false }]
+          : [],
+      }),
+    })
+
+    const loaded = await reader.load('dag-runtime-config')
+
+    expect(loaded.executionMode).toBe('dag')
+    expect(loaded.config.systemPrompt).toBe('mode:dag')
+    expect(loaded.config.tools.map((tool) => tool.name)).toEqual(['dag_plan'])
+    await reader.load('dag-runtime-config')
+    expect(loaded.config.systemPrompt).toBe('mode:dag')
+  })
+
   it('locks observable tool versions and schema hashes at session creation', async () => {
     const store = new SessionStore(dir)
     const versioned = createConfig({ tools: [{ name: 'read', description: 'read', inputSchema: { type: 'object' }, requiresApproval: false, version: '2.1.0', schemaHash: 'sha256:test' }] })
