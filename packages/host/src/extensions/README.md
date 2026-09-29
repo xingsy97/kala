@@ -34,31 +34,40 @@ Extensions with **no** core dependency at all (`hooks.ts`, `skills.ts` — pure
 functions over child processes / the filesystem) don't even import
 `loop-types.ts`.
 
-## Integration phases
+## Registered contributions
 
-The loop exposes a fixed set of seams. Each extension plugs into one or more:
+The sealed registry owns capability discovery and deterministic lifecycle
+ordering. Extensions can contribute Session modes, Host tool handlers,
+maintenance operations, and lifecycle callbacks:
 
-| Phase | When | Extension | Entry point → call site |
-|---|---|---|---|
-| **beforeCallLlm** | before each LLM call | compaction (preflight) | `maybeAutoCompact`-adjacent `compact()` ← `loop.ts` `messagesForLlmCall` |
-| **beforeCallTool** | before a tool dispatches | registered lifecycle contributors, including command hooks | `ExtensionRegistry.beforeToolDispatch` |
-| **provideTool** | tool dispatch itself | registered Host handlers, including agent, skills, web search, todo graph, and catalog tools | `dispatchConfiguredTool` resolves `ToolSchema.executionHandler` through `ExtensionRegistry` |
-| **afterCallTool** | after a tool settles | registered lifecycle contributors, including command hooks | `ExtensionRegistry.afterToolDispatch` |
-| **onTurnDone** | after a turn completes | compaction (auto) | `maybeAutoCompact` ← `loop.ts:88` |
-| **manualTrigger** | operator command | compaction (`/compact`), memory | `runCompact` ← `loop.ts:97`, `consolidateMemory` ← `connection/dashboard-ns.ts:457` |
-| **discovery** | host startup | skills, hooks | `discoverSkills` / `createHookRunner` ← `bin/kala-host.ts` |
+| Contribution | Registry surface | Built-in owners |
+|---|---|---|
+| Session lifecycle | `sessionCreated`, `sessionLoaded`, `sessionDeleted` | command hooks, skills |
+| State and turn lifecycle | `beforeStateTransition`, `beforeTurn`, `afterTurn` | skills, auto-compaction, durable-work recovery |
+| Model lifecycle | `beforeModelCall`, `afterModelCall` | preflight compaction |
+| Tool lifecycle | `beforeToolDispatch`, `dispatchHostTool`, `afterToolDispatch` | command hooks and Host tools |
+| Cancellation | `cancel` | subagent cleanup |
+| Recovery | `recoverSession` | extension-owned recovery contributors |
+| Maintenance | `compact`, `consolidateMemory` | compaction and memory |
+| Session modes | `listSessionModes`, `getSessionMode` | Standard Chat; orchestration modes register separately |
+
+Each single-owner contribution is validated during registration. Duplicate
+Session mode IDs, Host handler names, compaction owners, and memory
+consolidation owners fail startup. Multi-contributor lifecycle callbacks run in
+registration order and propagate errors unless the contribution explicitly
+defines advisory behavior, as command session hooks do.
 
 ## The files
 
 | File | Phase(s) | Depends on core? |
 |---|---|---|
-| `compaction.ts` | beforeCallLlm, onTurnDone, manualTrigger | types + `dispatchOne` |
+| `compaction.ts` | beforeModelCall, afterTurn, maintenance | types + `dispatchOne` |
 | `agent-tool.ts` | provideTool | types + `dispatchOne` + `SessionStore` |
 | `hooks-runner.ts` | beforeCallTool, afterCallTool | types only |
 | `hooks.ts` | discovery (runner) | no — pure, `node:child_process` |
 | `skills.ts` | provideTool, discovery | no — pure, kernel `ToolSchema` only |
-| `memory-consolidation.ts` | manualTrigger | types only |
-| `registry.ts` | provideTool, beforeCallTool, afterCallTool | host-loop contract types |
+| `memory-consolidation.ts` | maintenance | types only |
+| `registry.ts` | Session, turn, model, tool, cancellation, recovery, maintenance, and mode contracts | host-loop contract types |
 | `builtin-registry.ts` | startup composition | concrete extension entry points |
 
 ## Agent modules and toolsets

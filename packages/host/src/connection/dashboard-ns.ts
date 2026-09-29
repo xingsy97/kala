@@ -98,7 +98,8 @@ import type { Namespace } from 'socket.io'
 import { ulid } from 'ulid'
 
 import type { HostLoopDeps, LoopHandle } from '../loop.js'
-import { consolidateMemory, type ConsolidationOutcome } from '../extensions/memory-consolidation.js'
+import { createBuiltinExtensionRegistry } from '../extensions/builtin-registry.js'
+import type { ConsolidationOutcome } from '../extensions/memory-consolidation.js'
 import { activeSubAgentFor, interruptSubAgentAfterRuntimeCancel, markSubAgentInterrupted } from '../extensions/agent-tool.js'
 import { resetCompactRuntime } from '../extensions/compaction.js'
 import { readSessionHistory, readSessionLog } from '../store/log.js'
@@ -111,7 +112,6 @@ import { authenticateDashboardHandshake } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
 import type { DashboardActor } from '../auth-control.js'
 import { parseWire, type WireValidationContext } from '../wire-validation.js'
-import { isSkillManager } from '../extensions/skills.js'
 import { contextSnapshot, snapshotFromConfig, type ContextWindowOverride } from '../context/manager.js'
 import { sessionRoom, terminalOwnerSessionId } from './rooms.js'
 import { dashboardConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
@@ -1340,7 +1340,8 @@ export function configureDashboardNamespace(
         return
       }
 
-      const outcome = await consolidateMemory(deps.loopDeps, p.sessionId).catch(
+      const extensions = deps.loopDeps.extensions ?? createBuiltinExtensionRegistry()
+      const outcome = await extensions.consolidateMemory(deps.loopDeps, p.sessionId).catch(
         (err: unknown): ConsolidationOutcome => ({
           saved: [],
           skipped: 0,
@@ -1609,8 +1610,8 @@ async function refreshSessionSkillsIfNeeded(
   deps: DashboardDeps,
   record: SessionRecord,
 ): Promise<void> {
-  if (!isSkillManager(deps.loopDeps.skills)) return
-  await deps.loopDeps.skills.refreshConfig(record)
+  await (deps.loopDeps.extensions ?? createBuiltinExtensionRegistry())
+    .sessionLoaded({ deps: deps.loopDeps, record })
 }
 
 function auditActor(socket: { data: Record<string, unknown> }): AuditActor {

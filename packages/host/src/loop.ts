@@ -44,10 +44,9 @@ import {
   type MessageAssemblyStage,
 } from '@agent-kernel/shared/enhancement'
 import type { SessionRecord } from './store/session.js'
-import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
-import { interruptSubAgentsForParent, isCancelledSubAgentChild, type SubAgentRuntimeController } from './extensions/agent-tool.js'
+import { maybeAutoCompact } from './extensions/compaction.js'
+import { isCancelledSubAgentChild, type SubAgentRuntimeController } from './extensions/agent-tool.js'
 import { createBuiltinExtensionRegistry } from './extensions/builtin-registry.js'
-import { isSkillManager } from './extensions/skills.js'
 import { todoGraphContinuationState } from './extensions/todo-graph.js'
 import { dispatchConfiguredTool, type ToolExecutionResult } from './agent-modules/execution.js'
 import { resolveKernelMessageAttachments } from './message-attachment-resolver.js'
@@ -239,6 +238,19 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       const next = prior
         .catch(() => {})
         .then(async () => {
+          const lifecycleContext = {
+            deps,
+            sessionId,
+            event,
+            loop: handle,
+            autoCompact: async () => {
+              if (drainMode === 'none') await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
+            },
+            resumeDurableWork: async () => {
+              if (drainMode === 'none') await maybeResumeDurableGraphWork(sessionId, event)
+            },
+          }
+          await (deps.extensions ?? createBuiltinExtensionRegistry()).beforeTurn(lifecycleContext)
           await dispatchOne(deps, sessionId, event, inFlightAborts, undefined, undefined, {
             handle,
             loopGuard,
@@ -250,10 +262,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             toolStarted: markToolStarted,
             toolSettled: markToolSettled,
           }, notifyCheckpoint)
-          if (drainMode === 'none') {
-            await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
-            await maybeResumeDurableGraphWork(sessionId, event)
-          }
+          await (deps.extensions ?? createBuiltinExtensionRegistry()).afterTurn(lifecycleContext)
         })
         .finally(() => {
           if (sessionTails.get(sessionId) === next) sessionTails.delete(sessionId)
@@ -264,7 +273,8 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
     },
     async compact(sessionId, request) {
       if (drainMode !== 'none') return false
-      const replaced = await runCompact(deps, sessionId, request, compactionInFlight, inFlightAborts)
+      const replaced = await (deps.extensions ?? createBuiltinExtensionRegistry())
+        .compact(deps, sessionId, request, compactionInFlight, inFlightAborts)
       notifyCheckpoint(sessionId)
       if (replaced && request.trigger !== 'tool_result') {
         loopGuard.set(sessionId, {
@@ -317,7 +327,9 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
           }, notifyCheckpoint)
           return true
         }
-        if (record.state.status !== 'executing_tools' || record.state.pendingCalls.length === 0) return false
+        if (record.state.status !== 'executing_tools' || record.state.pendingCalls.length === 0) {
+          return await (deps.extensions ?? createBuiltinExtensionRegistry()).recoverSession({ deps, sessionId, loop: handle })
+        }
         const effects = record.state.pendingCalls
           .filter((call) => call.status === 'approved' || call.status === 'dispatched')
           .map((call) => ({
@@ -327,7 +339,9 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             input: call.input,
             ...(record.state.cwd !== undefined ? { cwd: record.state.cwd } : {}),
           }))
-        if (effects.length === 0) return false
+        if (effects.length === 0) {
+          return await (deps.extensions ?? createBuiltinExtensionRegistry()).recoverSession({ deps, sessionId, loop: handle })
+        }
         const resultQueue = createSerialQueue()
         await Promise.all(effects.map((eff) => performCallTool(
           deps, sessionId, eff, inFlightAborts,
@@ -508,7 +522,7 @@ async function commitTransition(
     if (record.agentRuntime !== 'kernel') {
       throw new Error(`Kernel Loop cannot mutate ${record.agentRuntime} session: ${sessionId}`)
     }
-    if (event.kind !== 'cancel' && isSkillManager(deps.skills)) await deps.skills.refreshConfig(record)
+    await (deps.extensions ?? createBuiltinExtensionRegistry()).beforeStateTransition({ deps, record, event })
     const prior = record.state
     const preparedEvent: AgentEvent = event.kind === 'llm_response' && deps.publishLocalImages
       ? { ...event, message: await deps.publishLocalImages(sessionId, record, event.message) }
@@ -575,7 +589,7 @@ export async function dispatchOne(
   // even if a stray call_llm/call_tool effect appeared it wouldn't race
   // against a still-live executor.
   if (event.kind === 'cancel') {
-    await interruptSubAgentsForParent(deps, aborts, sessionId)
+    await (deps.extensions ?? createBuiltinExtensionRegistry()).cancel({ deps, aborts, sessionId })
     deps.askUserChoice?.cancelSession(sessionId)
     await deps.tools.cancelPending(sessionId)
     const inFlight = aborts.get(sessionId)
@@ -691,7 +705,7 @@ async function performCallLlm(
   const llmStartedAt = new Date().toISOString()
   const llmStartedMono = performance.now()
   aborts.set(sessionId, controller)
-  const assembledMessages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
+  const assembledMessages = await messagesForLlmCall(deps, sessionId, config, effect, runtime)
   const persistedMessages = withCurrentToolIntentionInstruction(assembledMessages)
   await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, persistedMessages, effect)
   const live = deps.store.get(sessionId)
@@ -766,6 +780,17 @@ async function performCallLlm(
         // response. The finishReason still records that it was truncated.
       }
     }
+    await (deps.extensions ?? createBuiltinExtensionRegistry()).afterModelCall({
+      deps,
+      sessionId,
+      config,
+      effect,
+      ...(model !== undefined ? { model } : {}),
+      messages: persistedMessages,
+      requiresCompaction: false,
+      compact: async () => await runtime?.handle.compact(sessionId, { trigger: 'preflight', continuation: 'current_turn' }) ?? false,
+      messagesAfterCompaction: () => deps.store.get(sessionId)?.state.messages ?? persistedMessages,
+    }, res)
     await dispatchOne(
       deps,
       sessionId,
@@ -1264,19 +1289,25 @@ async function messagesForLlmCall(
   deps: HostLoopDeps,
   sessionId: string,
   config: AgentConfig,
-  messages: readonly import('@agent-kernel/kernel').Message[],
+  effect: CallLlmEffect,
   runtime?: LoopRuntime,
 ): Promise<readonly import('@agent-kernel/kernel').Message[]> {
+  const messages = effect.messages
   const contextLimit = contextLimitForSession(deps, sessionId)
-  if (!runtime || !shouldPreflightCompact(config, messages, contextLimit)) return messages
-  let applied = false
-  try {
-    applied = await runtime.handle.compact(sessionId, { trigger: 'preflight', continuation: 'current_turn' })
-  } catch {
-    // Fall through to deterministic local recovery below.
-  }
-  const after = deps.store.get(sessionId)?.state.messages ?? messages
-  if (applied && !shouldPreflightCompact(config, after, contextLimit)) return after
+  const requiresCompaction = Boolean(runtime && shouldPreflightCompact(config, messages, contextLimit))
+  const after = await (deps.extensions ?? createBuiltinExtensionRegistry()).beforeModelCall({
+    deps,
+    sessionId,
+    config,
+    effect,
+    ...(runtime?.model !== undefined ? { model: runtime.model } : {}),
+    messages,
+    requiresCompaction,
+    compact: async () => await runtime?.handle.compact(sessionId, { trigger: 'preflight', continuation: 'current_turn' }) ?? false,
+    messagesAfterCompaction: () => deps.store.get(sessionId)?.state.messages ?? messages,
+  })
+  if (!requiresCompaction) return after
+  if (!shouldPreflightCompact(config, after, contextLimit)) return after
   // Skipped, circuit-open, failed, or no-progress compaction must still make
   // progress. Enforce a hard request budget, including one-message cases.
   return emergencyTruncate(after, config, contextLimit)

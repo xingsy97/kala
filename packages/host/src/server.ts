@@ -33,9 +33,9 @@ import { ulid } from 'ulid'
 import type { LLMAdapter } from './llm/adapter.js'
 import type { LlmQuotaEnforcer, LoopBroadcast, LoopHandle, TenantModelPolicyEnforcer } from './loop.js'
 import { runHostLoop } from './loop.js'
-import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
+import type { HookConfig, HookRunner } from './extensions/hooks.js'
 import { createBuiltinExtensionRegistry } from './extensions/builtin-registry.js'
-import { selectHooks } from './extensions/hooks.js'
+import type { HostExtension } from './extensions/registry.js'
 import { createSkillManager, defaultSkillRoots, discoverSkills, type SkillManager, type SkillRegistry } from './extensions/skills.js'
 import { SessionNotFoundError, SessionStore, type SessionRecord } from './store/session.js'
 import { findSessionOperation, slimEffect } from './store/log.js'
@@ -153,6 +153,8 @@ export type HostServerOptions = {
    */
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
+  /** Additional startup-composed Runtime extensions. The registry seals before the first Session runs. */
+  extensions?: readonly HostExtension[]
   skills?: SkillRegistry | SkillManager
   webSearchCredentials?: WebSearchCredentialStore
   webSearchCredentialStatus?: () => Promise<WebSearchCredentialStatus> | WebSearchCredentialStatus
@@ -1154,7 +1156,7 @@ export async function startHostServer(
     } : {}),
   })
 
-  const extensions = createBuiltinExtensionRegistry()
+  const extensions = createBuiltinExtensionRegistry(options.extensions)
   const loopDeps = {
     store,
     llm: options.llm,
@@ -1281,32 +1283,6 @@ export async function startHostServer(
     },
   })
 
-  const fireLifecycleHook = async (
-    event: 'session_start' | 'session_end',
-    record: SessionRecord,
-  ): Promise<void> => {
-    const hooks = options.hooks
-    const runner = options.hookRunner
-    if (!hooks || !runner || hooks.length === 0) return
-    const matching = selectHooks(hooks, event)
-    if (matching.length === 0) return
-    const payload: HookPayload = {
-      event,
-      sessionId: record.sessionId,
-      ...(record.workspaceId !== undefined
-        ? { workspaceId: record.workspaceId }
-        : {}),
-    }
-    for (const hook of matching) {
-      try {
-        await runner.run(hook, payload)
-      } catch {
-        // Lifecycle hooks are advisory — one failing hook must not block
-        // session creation or deletion.
-      }
-    }
-  }
-
   configureDashboardNamespace(dashboardNs, {
     store,
     loop,
@@ -1342,8 +1318,8 @@ export async function startHostServer(
       return applied
     },
     ...(options.mutableReady ? { mutableReady: options.mutableReady } : {}),
-    onSessionCreated: (record) => fireLifecycleHook('session_start', record),
-    onSessionDeleted: (record) => fireLifecycleHook('session_end', record),
+    onSessionCreated: (record) => extensions.sessionCreated({ deps: loopDeps, record }),
+    onSessionDeleted: (record) => extensions.sessionDeleted({ deps: loopDeps, record }),
   })
   configureExecutorNamespace(executorNs, {
     store,

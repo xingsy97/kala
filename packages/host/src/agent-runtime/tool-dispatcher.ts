@@ -1,6 +1,7 @@
 import type { HostLoopDeps, LoopHandle, ToolDispatcher } from '../loop-types.js'
 import { dispatchRuntimeTool } from '../loop.js'
-import { interruptSubAgentsForParent, type SubAgentRuntimeController } from '../extensions/agent-tool.js'
+import type { SubAgentRuntimeController } from '../extensions/agent-tool.js'
+import { createBuiltinExtensionRegistry } from '../extensions/builtin-registry.js'
 
 export function createRuntimeToolDispatcher(
   deps: HostLoopDeps,
@@ -31,7 +32,7 @@ export function createRuntimeToolDispatcher(
       for (const callId of callsBySession.get(sessionId) ?? []) {
         aborts.get(callId)?.abort()
       }
-      await interruptSubAgentsForParent(deps, aborts, sessionId, 'parent session cancelled')
+      await (deps.extensions ?? createBuiltinExtensionRegistry()).cancel({ deps, aborts, sessionId })
     },
   }
 }
