@@ -1,4 +1,18 @@
 {
+  "v0.2.0-rc.20": {
+    "previousTag": "v0.2.0-rc.19",
+    "improvements": [
+      "Private Cloud images now contain only the Node.js runtime libraries and package inventory required by the shipped services.",
+      "The reduced runtime remains non-root and preserves CA certificates, time-zone data, DNS resolution, and writable temporary storage."
+    ],
+    "fixes": [
+      "Private Cloud release scans no longer fail on an unused OpenSSL package inherited from the upstream distroless image."
+    ],
+    "knownIssues": [
+      "Dedicated and Private Cloud lifecycle certification remains preview-only as described in the release support policy."
+    ],
+    "desktopViaDashboard": true
+  },
   "v0.2.0-rc.19": {
     "previousTag": "v0.2.0-rc.18",
     "improvements": [
