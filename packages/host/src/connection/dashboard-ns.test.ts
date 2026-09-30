@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { COPILOT_AGENT_RUNTIME_CAPABILITIES, KERNEL_AGENT_RUNTIME_CAPABILITIES, type ClientUserMessage, type RuntimeMetadataEntry } from '@agent-kernel/shared'
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
 
-import { buildCompactionMetadataIndex, consumeCompactionMetadata, deriveSessionConfig, handleUserMessage, loadDashboardSession, recoverSubAgentOutcome, sessionTreeTokenUsage, type DashboardDeps } from './dashboard-ns.js'
+import { buildCompactionMetadataIndex, consumeCompactionMetadata, deriveSessionConfig, handleUserMessage, loadDashboardSession, loadRecordForCleanup, recoverSubAgentOutcome, sessionTreeTokenUsage, type DashboardDeps } from './dashboard-ns.js'
 import { terminalOwnerSessionId, terminalSessionRoom } from './rooms.js'
 import type { SessionStore } from '../store/session.js'
 import type { SessionRecord } from '../store/session.js'
@@ -435,6 +435,21 @@ describe('history compaction-metadata correlator', () => {
 
       await expect(loadDashboardSession(store, cached.sessionId)).resolves.toBe(cached)
       expect(store.load).not.toHaveBeenCalled()
+    })
+
+    it('loads cleanup records without recovering interrupted external Runtime state', async () => {
+      const interrupted = {
+        sessionId: 'copilot-cleanup',
+        agentRuntime: 'copilot' as const,
+        state: { status: 'thinking' as const, cursor: 4 },
+      }
+      const store = {
+        get: vi.fn(() => undefined),
+        load: vi.fn(async () => interrupted),
+      } as unknown as SessionStore
+
+      await expect(loadRecordForCleanup(store, interrupted.sessionId)).resolves.toBe(interrupted)
+      expect(store.load).toHaveBeenCalledWith(interrupted.sessionId, { recoverDangling: false })
     })
   })
 })

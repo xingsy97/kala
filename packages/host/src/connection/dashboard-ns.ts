@@ -600,7 +600,7 @@ export function configureDashboardNamespace(
         const plan = await deps.safeCleanup.prepare(p.operation, p.targetId, activeStorageSessions(deps))
         if (actor.kind === 'ingress') {
           for (const sessionId of plan.sessionIds) {
-            const target = await loadRecordForDashboard(deps, sessionId)
+            const target = await loadRecordForCleanup(deps.store, sessionId)
             const accessError = validateIngressSessionAccess(socket, target)
             if (!target || accessError) throw new Error(accessError ?? 'cleanup plan crosses tenant boundary')
           }
@@ -647,7 +647,7 @@ export function configureDashboardNamespace(
         const principal = operationPrincipal(socket.data.dashboardActor as DashboardActor | undefined)
         const prepared = cleanupPlans.get(p.planId)
         if (!prepared || prepared.principal !== principal) throw new Error('cleanup plan is not owned by this principal')
-        const records = (await Promise.all(prepared.sessionIds.map(async (sessionId) => await loadRecordForDashboard(deps, sessionId))))
+        const records = (await Promise.all(prepared.sessionIds.map(async (sessionId) => await loadRecordForCleanup(deps.store, sessionId))))
           .filter((record): record is SessionRecord => record !== undefined)
         const result = await deps.safeCleanup.execute(p.planId, () => activeStorageSessions(deps))
         cleanupPlans.delete(p.planId)
@@ -2349,6 +2349,19 @@ export async function loadDashboardSession(
       : undefined)
   }
   return record
+}
+
+export async function loadRecordForCleanup(
+  store: SessionStore,
+  sessionId: string,
+): Promise<SessionRecord | undefined> {
+  const cached = store.get(sessionId)
+  if (cached) return cached
+  try {
+    return await store.load(sessionId, { recoverDangling: false })
+  } catch {
+    return undefined
+  }
 }
 
 async function validateSessionCwd(

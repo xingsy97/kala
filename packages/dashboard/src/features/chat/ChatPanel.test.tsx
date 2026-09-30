@@ -76,6 +76,31 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('turn-timing-details-turn-minimal')).toBeNull()
   })
 
+  it('renders failed turn timing on the user message when no assistant message exists', () => {
+    const summary = {
+      turnId: 'turn-failed', status: 'failed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:04Z', wallDurationMs: 4000, estimated: false,
+      queueDurationMs: 0, activeDurationMs: 4000, approvalWaitMs: 0,
+      llm: { wallDurationMs: 4000, requestCount: 1, firstTokenMs: 0 },
+      tools: { wallDurationMs: 0, aggregateDurationMs: 0, callCount: 0, peakConcurrency: 0, partial: false },
+      compactionDurationMs: 0, retryDurationMs: 0, recoveryDurationMs: 0,
+    }
+    render(
+      <DashboardChatPanel
+        items={[{
+          kind: 'message',
+          seq: 1,
+          message: { role: 'user', content: [{ type: 'text', text: 'Fail before replying.' }] },
+          turnTiming: summary,
+        }]}
+        messages={[]}
+      />,
+    )
+
+    const timing = screen.getByTestId('turn-timing-turn-failed')
+    expect(timing.textContent).toContain('Failed · 4s')
+    expect(timing.closest('[data-testid="user-message-surface"]')).toBeNull()
+  })
+
   it('shows a readable placeholder for legacy local markdown images instead of a broken browser image', () => {
     render(<AssistantMarkdown text={'Design: ![activity card](/tmp/activity-card.png)'} />)
     expect(screen.getByTestId('local-image-unavailable').textContent).toContain('Image unavailable: activity card')

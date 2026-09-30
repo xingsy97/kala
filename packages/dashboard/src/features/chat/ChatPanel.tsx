@@ -2021,6 +2021,7 @@ function MessageRow({
               } : undefined}
             />
             <InlineTimestamp ts={ts} />
+            {turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
           </div>
         </div>
       </div>
