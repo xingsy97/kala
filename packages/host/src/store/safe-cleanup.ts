@@ -393,7 +393,13 @@ export class SafeCleanupEngine {
       const file = await lstat(logPath)
       assertSupported(file, logPath)
       if (!file.isFile()) throw new SafeCleanupError('unsupported-file', `${logPath} is not a regular file`)
-      const parsed = await readHeader(logPath)
+      let parsed: Awaited<ReturnType<typeof readHeader>>
+      try {
+        parsed = await readHeader(logPath)
+      } catch (error) {
+        if (error instanceof SafeCleanupError && error.code === 'corrupt-header') continue
+        throw error
+      }
       if (sessionIds.has(parsed.sessionId)) {
         throw new SafeCleanupError('corrupt-header', `duplicate session id ${parsed.sessionId}`)
       }

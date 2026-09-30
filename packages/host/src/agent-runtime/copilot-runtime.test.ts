@@ -541,7 +541,6 @@ describe('Copilot runtime custom tools', () => {
         type: 'blob',
         data: 'iVBORw0KGgo=',
         mimeType: 'image/png',
-        displayName: 'pasted-image.png',
       }],
     }))
     expect(store.get(record.sessionId)?.state.messages[0]).toMatchObject({
@@ -550,6 +549,53 @@ describe('Copilot runtime custom tools', () => {
         expect.objectContaining({ type: 'image' }),
       ]),
     })
+    await runtime.close()
+  })
+
+  it('forwards stored WebP images as inline SDK blobs without filesystem-like names', async () => {
+    const messageAttachments = new MessageAttachmentStore(join(dir, 'message-attachments'))
+    const imageData = Buffer.from('RIFF\\x04\\x00\\x00\\x00WEBP', 'binary')
+    const reference = await messageAttachments.register({
+      sessionId: 'copilot-reference-image',
+      name: 'pasted-image-1.webp',
+      mediaType: 'image/webp',
+      data: imageData,
+    })
+    const runtime = new CopilotAgentRuntime({
+      store,
+      messageAttachments,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-reference-image',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    await runtime.start()
+    sdk.responses.push({
+      type: 'assistant.message',
+      data: { content: 'Reviewed.', messageId: 'message-reference-image' },
+      id: 'event-reference-image',
+      timestamp: new Date().toISOString(),
+    })
+
+    await runtime.send(record, {
+      text: 'Review this screenshot.',
+      content: [{ type: 'text', text: 'Review this screenshot.' }, reference],
+    })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+
+    expect(sdk.sentMessages.at(-1)?.attachments).toEqual([{
+      type: 'blob',
+      data: imageData.toString('base64'),
+      mimeType: 'image/webp',
+    }])
     await runtime.close()
   })
 

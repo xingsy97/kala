@@ -14,7 +14,16 @@ export function toolCatalogRevision(tools: readonly ToolSchema[]): string {
 }
 
 export function visibleTools(tools: readonly ToolSchema[], mode: ToolDisclosureMode, active: ReadonlySet<string>): readonly ToolSchema[] {
-  const visible = mode === 'legacy_full' ? tools : tools.filter((tool) => DISCOVERY.has(tool.name) || DEFAULT_CORE.has(tool.name) || active.has(tool.name))
+  const hasHiddenTools = tools.some((tool) =>
+    !DISCOVERY.has(tool.name)
+    && !DEFAULT_CORE.has(tool.name)
+    && !active.has(tool.name))
+  const visible = mode === 'legacy_full'
+    ? tools
+    : tools.filter((tool) =>
+        DEFAULT_CORE.has(tool.name)
+        || active.has(tool.name)
+        || (hasHiddenTools && DISCOVERY.has(tool.name)))
   return visible.map(withRequiredToolIntent)
 }
 

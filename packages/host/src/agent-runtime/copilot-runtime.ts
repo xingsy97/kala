@@ -1394,7 +1394,7 @@ async function copilotMessageOptions(
         type: 'blob',
         data: block.data,
         mimeType: block.mediaType,
-        displayName: block.name,
+        ...(!block.mediaType.startsWith('image/') ? { displayName: block.name } : {}),
       })
     } else if (block.type === 'file') {
       if (!context.messageAttachments) {
@@ -1405,14 +1405,13 @@ async function copilotMessageOptions(
         type: 'blob',
         data: data.toString('base64'),
         mimeType: block.mediaType,
-        displayName: block.name,
+        ...(!block.mediaType.startsWith('image/') ? { displayName: block.name } : {}),
       })
     } else if (block.type === 'image' && block.source.kind === 'base64') {
       attachments.push({
         type: 'blob',
         data: block.source.data,
         mimeType: block.source.mediaType,
-        displayName: `pasted-image.${imageExtension(block.source.mediaType)}`,
       })
     } else if (block.type === 'image' && block.source.kind === 'file_ref') {
       attachments.push({

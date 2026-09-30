@@ -85,6 +85,36 @@ describe('SafeCleanupEngine', () => {
       .rejects.toMatchObject({ code: 'root-session' })
   })
 
+  it('does not let an unrelated corrupt log block subagent cleanup', async () => {
+    const { sessionsDir, engine } = fixture()
+    session(sessionsDir, 'root-slug', 'root')
+    session(sessionsDir, 'child-slug', 'child', 'root')
+    const corruptPath = join(sessionsDir, 'unrelated-corrupt.jsonl')
+    writeFileSync(corruptPath, '{"kind":"header","sessionId":"unterminated')
+
+    const plan = await engine.prepare('subagent-details', 'child', [])
+    expect(plan.sessionIds).toEqual(['child'])
+    await expect(engine.execute(plan.planId, [])).resolves.toMatchObject({
+      logicalDeletion: true,
+    })
+    expect(existsSync(corruptPath)).toBe(true)
+  })
+
+  it('leaves an unreadable possible descendant untouched during tree cleanup', async () => {
+    const { sessionsDir, engine } = fixture()
+    session(sessionsDir, 'root-slug', 'root')
+    session(sessionsDir, 'child-slug', 'child', 'root')
+    const corruptPath = join(sessionsDir, 'unknown-descendant.jsonl')
+    writeFileSync(corruptPath, '{"kind":"header","sessionId":"unknown","parentSessionId":"root')
+
+    const plan = await engine.prepare('session-tree', 'root', [])
+    expect(plan.sessionIds).toEqual(['child', 'root'])
+    await expect(engine.execute(plan.planId, [])).resolves.toMatchObject({
+      logicalDeletion: true,
+    })
+    expect(existsSync(corruptPath)).toBe(true)
+  })
+
   it('refuses mutation after prepare without renaming anything', async () => {
     const { sessionsDir, quarantineDir, engine } = fixture()
     session(sessionsDir, 'child-slug', 'child', 'root')
