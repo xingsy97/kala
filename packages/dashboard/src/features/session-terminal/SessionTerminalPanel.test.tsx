@@ -8,7 +8,10 @@ import type { DashboardSocket } from '../../session.js'
 const writeMock = vi.fn()
 const clearMock = vi.fn()
 const focusMock = vi.fn()
+const fitMock = vi.fn()
 const inputListeners: Array<(data: string) => void> = []
+let fitCols = 100
+let fitRows = 12
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class TerminalMock {
@@ -19,13 +22,25 @@ vi.mock('@xterm/xterm', () => ({
     writeln = vi.fn()
     clear = clearMock
     focus = focusMock
-    loadAddon(): void {}
+    loadAddon(addon: { activate?(terminal: TerminalMock): void }): void { addon.activate?.(this) }
     open(): void {}
     dispose(): void {}
     onData(listener: (data: string) => void): { dispose(): void } { inputListeners.push(listener); return { dispose() {} } }
   },
 }))
-vi.mock('@xterm/addon-fit', () => ({ FitAddon: class FitAddonMock { fit(): void {} } }))
+vi.mock('@xterm/addon-fit', () => ({
+  FitAddon: class FitAddonMock {
+    private terminal?: { cols: number; rows: number }
+    activate(terminal: { cols: number; rows: number }): void { this.terminal = terminal }
+    fit(): void {
+      fitMock()
+      if (this.terminal) {
+        this.terminal.cols = fitCols
+        this.terminal.rows = fitRows
+      }
+    }
+  },
+}))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class SearchAddonMock {} }))
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class WebLinksAddonMock {} }))
 
@@ -51,7 +66,9 @@ describe('SessionTerminalPanel', () => {
   let height: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
-    writeMock.mockClear(); clearMock.mockClear(); focusMock.mockClear(); inputListeners.length = 0
+    writeMock.mockClear(); clearMock.mockClear(); focusMock.mockClear(); fitMock.mockClear(); inputListeners.length = 0
+    fitCols = 100
+    fitRows = 12
     vi.stubGlobal('ResizeObserver', class ResizeObserverMock {
       constructor(private readonly callback: ResizeObserverCallback) {}
       observe(): void { this.callback([], this as unknown as ResizeObserver) }
@@ -97,6 +114,31 @@ describe('SessionTerminalPanel', () => {
     expect(clearMock).toHaveBeenCalledOnce()
     unmount()
     expect(mock.emit.mock.calls.filter(([event]) => event === 'terminal:kill')).toHaveLength(0)
+  })
+
+  it('refits and resizes a preserved PTY when its tab becomes visible', async () => {
+    const mock = makeSocket()
+    const { rerender } = render(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" visible={false} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    await screen.findByText('Running')
+    await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:resize', expect.objectContaining({
+      terminalId: 'term-1',
+      cols: 100,
+      rows: 12,
+    })))
+
+    fitCols = 148
+    fitRows = 46
+    rerender(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" visible />)
+
+    await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:resize', expect.objectContaining({
+      terminalId: 'term-1',
+      cols: 148,
+      rows: 46,
+    })))
+    expect(screen.getByTestId('terminal-viewport').getAttribute('data-terminal-cols')).toBe('148')
+    expect(screen.getByTestId('terminal-viewport').getAttribute('data-terminal-rows')).toBe('46')
+    expect(fitMock).toHaveBeenCalled()
   })
 
   it('shows offline guidance and disables start', () => {

@@ -23,6 +23,7 @@ export function SessionTerminalPanel({
   online = true,
   autoStart = false,
   destroyOnUnmount = false,
+  visible = true,
 }: {
   socket: DashboardSocket | null
   workspaceId?: string
@@ -31,6 +32,7 @@ export function SessionTerminalPanel({
   online?: boolean
   autoStart?: boolean
   destroyOnUnmount?: boolean
+  visible?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const interfaceScale = useInterfaceScale()
@@ -65,6 +67,8 @@ export function SessionTerminalPanel({
         const fit = fitRef.current
         if (!host || !term || !fit || host.clientWidth <= 0 || host.clientHeight <= 0) return
         fit.fit()
+        host.dataset.terminalCols = String(term.cols)
+        host.dataset.terminalRows = String(term.rows)
         const id = terminalIdOverride ?? terminalIdRef.current
         if (!socket || !workspaceId || !id || term.cols <= 0 || term.rows <= 0) return
         const previous = lastSizeRef.current
@@ -115,6 +119,10 @@ export function SessionTerminalPanel({
   }, [interfaceScale, scheduleFitAndResize])
 
   useEffect(() => {
+    if (visible) scheduleFitAndResize()
+  }, [scheduleFitAndResize, visible])
+
+  useEffect(() => {
     const identity = `${workspaceId ?? ''}:${sessionId}`
     if (identityRef.current === identity) return
     identityRef.current = identity
@@ -145,8 +153,8 @@ export function SessionTerminalPanel({
   }, [sessionId, socket, t, workspaceId])
 
   useEffect(() => {
-    if (status === 'running' && terminalId) terminalRef.current?.focus()
-  }, [status, terminalId])
+    if (visible && status === 'running' && terminalId) terminalRef.current?.focus()
+  }, [status, terminalId, visible])
 
   useEffect(() => {
     const host = hostRef.current

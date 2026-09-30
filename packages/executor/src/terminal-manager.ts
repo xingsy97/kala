@@ -1,5 +1,8 @@
 import process from 'node:process'
 import { spawn as spawnChild } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ulid } from 'ulid'
 
 import type {
@@ -51,6 +54,8 @@ async function tryLoadNodePty(): Promise<NodePtyModule | undefined> {
 function createFallbackTerminal(input: {
   shell: string
   cwd: string
+  cols: number
+  rows: number
   env: NodeJS.ProcessEnv
 }): TerminalProcess {
   // Release executors are shipped as a single CJS/SEA artifact. Native
@@ -58,17 +63,43 @@ function createFallbackTerminal(input: {
   // ubiquitous `script` utility as a real PTY bridge instead of launching the
   // shell over plain pipes. A pipe-backed shell does not echo keystrokes and
   // made the dashboard look completely unable to accept input.
+  const resizeDir = process.platform === 'win32' ? undefined : mkdtempSync(join(tmpdir(), 'kala-terminal-'))
+  const resizePath = resizeDir ? join(resizeDir, 'size') : undefined
+  if (resizePath) writeFileSync(resizePath, `${input.cols} ${input.rows}\n`, { mode: 0o600 })
+  const shellCommand = resizePath
+    ? [
+        `control=${quoteShell(resizePath)};`,
+        `(last=''; while sleep 0.05; do current=$(cat "$control" 2>/dev/null) || continue; [ "$current" = "$last" ] && continue; set -- $current; stty cols "$1" rows "$2" < /dev/tty 2>/dev/null || true; last=$current; done) &`,
+        'watcher=$!',
+        `${quoteShell(input.shell)}; status=$?`,
+        'kill "$watcher" 2>/dev/null || true',
+        'wait "$watcher" 2>/dev/null || true',
+        'exit "$status"',
+      ].join(' ')
+    : input.shell
   const command = process.platform === 'win32' ? input.shell : 'script'
   const args = process.platform === 'darwin'
-    ? ['-q', '/dev/null', input.shell]
+    ? ['-q', '/dev/null', shellCommand]
     : process.platform === 'win32'
       ? []
-      : ['-qfec', input.shell, '/dev/null']
-  const child = spawnChild(command, args, {
-    cwd: input.cwd,
-    env: input.env,
-    stdio: 'pipe',
-  })
+      : ['-qfec', shellCommand, '/dev/null']
+  let cleaned = false
+  const cleanup = () => {
+    if (cleaned || !resizeDir) return
+    cleaned = true
+    rmSync(resizeDir, { recursive: true, force: true })
+  }
+  let child
+  try {
+    child = spawnChild(command, args, {
+      cwd: input.cwd,
+      env: input.env,
+      stdio: 'pipe',
+    })
+  } catch (error) {
+    cleanup()
+    throw error
+  }
 
   return {
     write(data) {
@@ -78,21 +109,28 @@ function createFallbackTerminal(input: {
       // execute commands even before an older Executor is upgraded to PTY.
       child.stdin.write(data.replaceAll('\r', '\n'))
     },
-    resize() {
-      // Plain pipes do not expose terminal dimensions. The dashboard still
-      // receives output, but full-screen TUI programs require node-pty.
+    resize(cols, rows) {
+      if (resizePath && !cleaned) writeFileSync(resizePath, `${cols} ${rows}\n`, { mode: 0o600 })
     },
     kill(signal = 'SIGTERM') {
       child.kill(signal)
+      cleanup()
     },
     onData(cb) {
       child.stdout.on('data', (chunk) => cb(String(chunk)))
       child.stderr.on('data', (chunk) => cb(String(chunk)))
     },
     onExit(cb) {
-      child.on('exit', (exitCode, signal) => cb({ exitCode: exitCode ?? 0, signal }))
+      child.on('exit', (exitCode, signal) => {
+        cleanup()
+        cb({ exitCode: exitCode ?? 0, signal })
+      })
     },
   }
+}
+
+function quoteShell(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
 }
 
 async function spawnTerminal(input: {

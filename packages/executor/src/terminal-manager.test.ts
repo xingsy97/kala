@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { existsSync, readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const ptySpawn = vi.fn()
@@ -66,6 +67,13 @@ describe('TerminalManager', () => {
           : ['-qfec', expect.any(String), '/dev/null'],
       expect.objectContaining({ cwd: '/tmp', stdio: 'pipe' }),
     )
+    const fallbackArgs = vi.mocked(spawn).mock.calls[0]![1] as string[]
+    const resizePath = fallbackArgs.join(' ').match(/control='([^']+)'/)?.[1]
+    if (process.platform !== 'win32') {
+      expect(resizePath).toBeTruthy()
+      manager.resize({ ...base, terminalId: first.terminalId!, cols: 148, rows: 46 })
+      expect(readFileSync(resizePath!, 'utf8')).toBe('148 46\n')
+    }
     const child = vi.mocked(spawn).mock.results[0]!.value as { stdin: { write: ReturnType<typeof vi.fn> }; stdout: EventEmitter; kill: ReturnType<typeof vi.fn> }
     manager.input({ ...base, terminalId: first.terminalId!, data: 'echo works\r' })
     expect(child.stdin.write).toHaveBeenCalledWith('echo works\n')
@@ -80,6 +88,7 @@ describe('TerminalManager', () => {
     const killed = manager.kill({ ...base, requestId: 'kill-1', terminalId: first.terminalId! })
     expect(killed.killed).toBe(true)
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    if (resizePath) expect(existsSync(resizePath)).toBe(false)
 
     const restarted = await manager.create({ ...base, requestId: 'r3', cwd: '/tmp' })
     expect(restarted.terminalId).not.toBe(first.terminalId)
