@@ -13,10 +13,12 @@ import {
   validateClientMessagePayload,
   validateInlineMessageImages,
   type ContextUsageSnapshot,
+  type CompactStatusEvent,
   type FileListEntry,
   type HumanAttentionTimeline,
   type ModelInfo,
   type QueuedMessagePreview,
+  type RuntimeCompactionPolicy,
 } from '@agent-kernel/shared'
 import type {
   AgentConfig,
@@ -78,6 +80,8 @@ type Props = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  runtimeCompactionPolicy?: RuntimeCompactionPolicy
+  runtimeCompactStatus?: CompactStatusEvent | null
   humanAttention: HumanAttentionTimeline
   queuedMessages: readonly QueuedMessagePreview[]
   timeline?: readonly TimelineEntry[]
@@ -232,6 +236,8 @@ export function Composer({
   state,
   config,
   contextSnapshot,
+  runtimeCompactionPolicy,
+  runtimeCompactStatus,
   humanAttention,
   queuedMessages,
   timeline,
@@ -828,6 +834,8 @@ export function Composer({
       state={state}
       config={config}
       contextSnapshot={contextSnapshot}
+      runtimeCompactionPolicy={runtimeCompactionPolicy}
+      compactStatus={runtimeCompactStatus}
       modelInfo={modelInfoFor(models, model)}
       queuedMessages={queuedMessages.length}
       timeline={timeline}

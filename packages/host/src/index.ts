@@ -20,6 +20,32 @@ export type { PolicyGatewayOptions } from './llm/policy-gateway.js'
 export { SessionStore } from './store/session.js'
 export type { SessionRecord } from './store/session.js'
 export { readSessionLog, appendEventEntry, writeHeader } from './store/log.js'
+export {
+  STORAGE_CATEGORIES,
+  STORAGE_INVENTORY_PERSISTENCE_INTERVAL_MS,
+  StorageInventory,
+} from './store/storage-inventory.js'
+export type {
+  CachedGlobalStorage,
+  CachedSessionStorage,
+  CachedSessionTreeStorage,
+  StorageCategory,
+  StorageCategoryStats,
+  StorageInventoryOptions,
+  StorageInventoryScanState,
+  StorageInventoryState,
+  StorageOrphanCandidate,
+} from './store/storage-inventory.js'
+export { SAFE_CLEANUP_OPERATIONS, SafeCleanupEngine, SafeCleanupError } from './store/safe-cleanup.js'
+export type {
+  SafeCleanupEntryType,
+  SafeCleanupManifestEntry,
+  SafeCleanupOperation,
+  SafeCleanupOptions,
+  SafeCleanupPlan,
+  SafeCleanupRecoveryResult,
+  SafeCleanupResult,
+} from './store/safe-cleanup.js'
 
 export { runHostLoop } from './loop.js'
 export type { HostLoopDeps, LoopHandle } from './loop.js'

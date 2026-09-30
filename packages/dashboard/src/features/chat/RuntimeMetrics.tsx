@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
-import type { ModelInfo } from '@agent-kernel/shared'
+import type { CompactStatusEvent, ModelInfo, RuntimeCompactionPolicy } from '@agent-kernel/shared'
 import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
 
 import { formatTokens } from '../../lib/format.js'
@@ -14,6 +14,8 @@ type Props = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  runtimeCompactionPolicy?: RuntimeCompactionPolicy
+  compactStatus?: CompactStatusEvent | null
   modelInfo: ModelInfo | null
   queuedMessages: number
   timeline?: readonly TimelineEntry[]
@@ -37,6 +39,8 @@ export function RuntimeMetrics({
   state,
   config,
   contextSnapshot,
+  runtimeCompactionPolicy,
+  compactStatus,
   modelInfo,
   queuedMessages: _queuedMessages,
   timeline = [],
@@ -79,6 +83,7 @@ export function RuntimeMetrics({
   const evaluation = evaluateDashboardContextPressure({
     snapshot: contextSnapshot,
     config,
+    compactionPolicy: runtimeCompactionPolicy,
     fallbackModelContextWindow: modelInfo?.contextWindow ?? null,
   })
   const totalContextWindow = contextSnapshot ? contextSnapshot.contextWindow.tokens : modelInfo?.contextWindow ?? config?.contextLimit ?? null
@@ -108,7 +113,11 @@ export function RuntimeMetrics({
       totalWindow: totalContextWindow ? formatTokens(totalContextWindow) : t('chat.runtimeMetrics.unknown'),
     })
     : t('chat.runtimeMetrics.unavailableTitle', { input: formatTokens(contextTokens) })
-  const reservedRatio = Math.max(0, Math.min(1, 1 - (config?.hardThreshold ?? 0.92)))
+  const blockingThreshold = runtimeCompactionPolicy?.automatic.blockingThreshold
+    ?? runtimeCompactionPolicy?.automatic.startThreshold
+    ?? config?.hardThreshold
+    ?? 0.92
+  const reservedRatio = Math.max(0, Math.min(1, 1 - blockingThreshold))
   const ringRadius = 7
   const ringCircumference = 2 * Math.PI * ringRadius
   const ringOffset = ringCircumference * (1 - visualRatio)
@@ -244,6 +253,61 @@ export function RuntimeMetrics({
               <MetricRow label={t('chat.runtimeMetrics.used')} value={formatTokens(contextTokens)} />
               <MetricRow label={t('chat.runtimeMetrics.limit')} value={formatTokens(userContextWindow, { thousands: 'compact' })} />
               <MetricRow label={t('chat.runtimeMetrics.remaining')} value={formatTokens(Math.max(0, userContextWindow - contextTokens))} />
+            </div>
+          ) : null}
+          {runtimeCompactionPolicy ? (
+            <div className="mt-3 space-y-0.5" data-testid="context-compaction-policy">
+              <MetricRow
+                label={t('chat.runtimeMetrics.compactionAuthority')}
+                value={runtimeCompactionPolicy.authority === 'host'
+                  ? t('chat.runtimeMetrics.hostManaged')
+                  : t('chat.runtimeMetrics.runtimeManaged')}
+              />
+              <MetricRow
+                label={runtimeCompactionPolicy.automatic.mode === 'background'
+                  ? t('chat.runtimeMetrics.backgroundStarts')
+                  : t('chat.runtimeMetrics.automaticStarts')}
+                value={`${Math.round(runtimeCompactionPolicy.automatic.startThreshold * 100)}%`}
+              />
+              {runtimeCompactionPolicy.automatic.blockingThreshold !== undefined ? (
+                <MetricRow
+                  label={t('chat.runtimeMetrics.processingBlocks')}
+                  value={`${Math.round(runtimeCompactionPolicy.automatic.blockingThreshold * 100)}%`}
+                />
+              ) : null}
+              {compactStatus?.kind === 'running' && compactStatus.scope?.kind !== 'subagent' ? (
+                <div className="mt-3 space-y-0.5" data-testid="context-active-compaction">
+                  <MetricRow
+                    label={t('chat.runtimeMetrics.compactionStatus')}
+                    value={runtimeCompactionPolicy?.automatic.mode === 'background'
+                      ? t('chat.runtimeMetrics.runningInBackground')
+                      : t('chat.runtimeMetrics.running')}
+                  />
+                  <MetricRow
+                    label={t('chat.runtimeMetrics.startedContext')}
+                    value={formatContextPoint(
+                      compactStatus.startSnapshot?.usage.inputTokens ?? compactStatus.tokensBefore,
+                      compactStatus.startSnapshot?.contextWindow.tokens ?? userContextWindow,
+                    )}
+                  />
+                  <MetricRow
+                    label={t('chat.runtimeMetrics.currentSnapshot')}
+                    value={formatContextPoint(contextTokens, userContextWindow)}
+                  />
+                </div>
+              ) : null}
+              <MetricRow
+                label={t('chat.runtimeMetrics.concurrentWork')}
+                value={runtimeCompactionPolicy.automatic.concurrentWorkAllowed
+                  ? t('chat.runtimeMetrics.allowed')
+                  : t('chat.runtimeMetrics.safeBoundary')}
+              />
+              <MetricRow
+                label={t('chat.runtimeMetrics.summaryValidation')}
+                value={runtimeCompactionPolicy.summary.validation === 'host_gate'
+                  ? t('chat.runtimeMetrics.hostValidated')
+                  : t('chat.runtimeMetrics.runtimeReported')}
+              />
             </div>
           ) : null}
           <div className="relative mt-3 h-2 overflow-hidden rounded-full border border-border bg-muted">
@@ -389,4 +453,9 @@ function MetricRow({ label, value, muted }: { label: string; value: string; mute
       <span className="flex-none font-mono text-muted-foreground">{value}</span>
     </div>
   )
+}
+
+function formatContextPoint(tokens: number, limit: number | null | undefined): string {
+  if (!limit || limit <= 0) return formatTokens(tokens)
+  return `${formatTokens(tokens)} / ${formatTokens(limit)} (${Math.round((tokens / limit) * 100)}%)`
 }

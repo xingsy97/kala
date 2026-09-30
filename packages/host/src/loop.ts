@@ -1257,24 +1257,9 @@ async function dispatchToolResult(
       undefined,
       timingSpan ? { timingSpan } : undefined,
     )
-    await maybeCompactAfterToolResult(deps, sessionId, runtime)
   }
   if (resultQueue) await resultQueue(write)
   else await write()
-}
-
-async function maybeCompactAfterToolResult(
-  deps: HostLoopDeps,
-  sessionId: string,
-  runtime?: LoopRuntime,
-): Promise<void> {
-  if (!runtime) return
-  const record = deps.store.get(sessionId)
-  if (!record) return
-  if (record.state.status !== 'executing_tools') return
-  if (record.state.pendingCalls.length === 0) return
-  if (!shouldPreflightCompact(record.config, record.state.messages, contextLimitForSession(deps, sessionId, record))) return
-  await runtime.handle.compact(sessionId, { trigger: 'tool_result', continuation: 'current_turn' })
 }
 
 const PREFLIGHT_RESERVE_FLOOR_TOKENS = 8_000

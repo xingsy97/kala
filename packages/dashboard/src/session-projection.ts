@@ -3,10 +3,15 @@ import { step } from '@agent-kernel/kernel'
 import type {
   AgentRuntimeId,
   CompactStatusEvent, CompactionMetadata, ContextUsageSnapshot, EventAppendedEvent,
-  LLMTrace, QueuedMessagePreview, SessionErrorEvent, SessionReadyEvent, StateChangedEvent,
+  LLMTrace, QueuedMessagePreview, RuntimeCompactionPolicy, SessionErrorEvent, SessionReadyEvent, StateChangedEvent,
 } from '@agent-kernel/shared'
 import type { SessionExecutionMode } from '@agent-kernel/shared'
-import { estimateMessageTokens, estimateToolSchemaTokens } from '@agent-kernel/shared'
+import {
+  COPILOT_RUNTIME_COMPACTION_POLICY,
+  estimateMessageTokens,
+  estimateToolSchemaTokens,
+  kernelRuntimeCompactionPolicy,
+} from '@agent-kernel/shared'
 
 import type { CachedSessionView } from './session-view-cache.js'
 
@@ -34,6 +39,7 @@ export type SessionProjection = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  runtimeCompactionPolicy: RuntimeCompactionPolicy
   turnStartedAt: string | null
   /** Cursor of the authoritative payload that supplied turnStartedAt. */
   turnStartedAtCursor: number | null
@@ -65,7 +71,7 @@ export type SessionProjectionEvent =
 
 export const EMPTY_SESSION_PROJECTION: SessionProjection = {
   generation: 0, sessionId: null, agentRuntime: 'kernel', executionMode: 'chat', status: 'idle', state: null, config: null,
-  contextSnapshot: null, turnStartedAt: null, turnStartedAtCursor: null,
+  contextSnapshot: null, runtimeCompactionPolicy: kernelRuntimeCompactionPolicy(), turnStartedAt: null, turnStartedAtCursor: null,
   compactStatus: null, timeline: [], queuedMessages: [],
   lastError: null, parentSessionId: null, parentCursor: null, selectedModel: null,
   hydratedSessionId: null, historyLoadedSessionId: null,
@@ -102,6 +108,11 @@ export function reduceSessionProjection(
       return {
         ...current, status: 'ready', agentRuntime: p.agentRuntime ?? 'kernel', executionMode: p.executionMode ?? 'chat', state: p.state, config: p.config,
         contextSnapshot: p.contextSnapshot ?? null,
+        runtimeCompactionPolicy: p.runtimeCompactionPolicy
+          ?? (p.agentRuntime === 'copilot'
+            ? COPILOT_RUNTIME_COMPACTION_POLICY
+            : kernelRuntimeCompactionPolicy(p.config.softThreshold, p.config.hardThreshold)),
+        compactStatus: p.compactStatus?.scope?.kind === 'subagent' ? null : (p.compactStatus ?? null),
         // Ready is the authoritative baseline and may deliberately clear a stale cached value.
         turnStartedAt: p.turnStartedAt ?? null, turnStartedAtCursor: p.turnStartedAt ? p.cursor : null,
         parentSessionId: p.parentSessionId ?? null,
@@ -149,7 +160,9 @@ export function reduceSessionProjection(
     case 'queue': return { ...current, queuedMessages: event.items }
     case 'error': return { ...current, lastError: event.error }
     case 'status': return { ...current, status: event.status }
-    case 'compact': return { ...current, compactStatus: event.compactStatus }
+    case 'compact':
+      if (event.compactStatus.scope?.kind === 'subagent') return current
+      return { ...current, compactStatus: event.compactStatus }
     case 'model': return { ...current, selectedModel: event.selectedModel }
     case 'reset_timeline': return { ...current, timeline: [], historyLoadedSessionId: null }
   }
@@ -160,6 +173,10 @@ function projectionFromCache(cached: CachedSessionView): Partial<SessionProjecti
     agentRuntime: cached.agentRuntime ?? 'kernel',
     executionMode: cached.executionMode ?? 'chat',
     state: cached.state, config: cached.config, contextSnapshot: cached.contextSnapshot,
+    runtimeCompactionPolicy: cached.runtimeCompactionPolicy ?? kernelRuntimeCompactionPolicy(
+      cached.config?.softThreshold,
+      cached.config?.hardThreshold,
+    ),
     turnStartedAt: cached.turnStartedAt ?? null, turnStartedAtCursor: cached.turnStartedAtCursor ?? null,
     timeline: cached.timeline, queuedMessages: cached.queuedMessages, lastError: cached.lastError,
     parentSessionId: cached.parentSessionId, parentCursor: cached.parentCursor,

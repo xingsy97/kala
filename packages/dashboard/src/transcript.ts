@@ -1,5 +1,5 @@
 import type { AgentStatus, Message, MessageContent } from '@agent-kernel/kernel'
-import type { AgentRuntimeId, QueuedMessagePreview } from '@agent-kernel/shared'
+import type { AgentRuntimeId, QueuedMessagePreview, TurnTimingSummary } from '@agent-kernel/shared'
 
 import type { TimelineEntry } from './session.js'
 
@@ -222,18 +222,32 @@ export function transcriptBaseItems(
       })
     } else if (event.kind === 'messages_replaced' && event.reason === 'compaction') {
       const meta = entry.compactionMetadata
+      const marker = event.replacementMessages.find((message) => message.metadata?.kind === 'context_compaction')
+      const markerSummary = marker?.metadata?.kind === 'context_compaction'
+        ? marker.metadata.summary
+        : undefined
       out.push({
         kind: 'compact_boundary',
         seq: entry.seq,
+        ...(meta?.attemptId ? { attemptId: meta.attemptId } : {}),
         trigger: meta?.trigger ?? 'unknown',
         replacedCount: meta?.replacedCount ?? Math.max(0, event.replaceRange.end - event.replaceRange.start),
         tokensBefore: meta?.tokensBefore ?? null,
         tokensAfter: meta?.tokensAfter ?? null,
-        summary: event.replacementMessages.map((message) => message.content.map((content) => content.type === 'text' ? content.text : '').join('')).join('\n'),
+        summary: markerSummary
+          ?? event.replacementMessages.map((message) => message.content.map((content) => content.type === 'text' ? content.text : '').join('')).join('\n'),
       })
     }
   }
-  return out
+  const knownAttempts = new Set(out.flatMap((item) =>
+    item.kind === 'compact_boundary' && item.attemptId ? [item.attemptId] : []
+  ))
+  const durableBoundaries = stateTranscriptItems(stateMessages).filter((item): item is CompactBoundary =>
+    item.kind === 'compact_boundary'
+      && item.attemptId !== undefined
+      && !knownAttempts.has(item.attemptId)
+  )
+  return durableBoundaries.length > 0 ? [...durableBoundaries, ...out] : out
 }
 
 /** Append-only fast path. Returns null when history was replaced or reordered. */
@@ -370,8 +384,38 @@ function stateTranscriptItems(stateMessages: readonly Message[]): TranscriptItem
         ...(message.metadata.error ? { error: message.metadata.error } : {}),
       }]
     }
-    return message.role === 'system' ? [] : [{ kind: 'message', message }]
+    if (message.role === 'system') return []
+    const temporal = message.metadata?.kind === 'temporal' ? message.metadata : undefined
+    return [{
+      kind: 'message',
+      message,
+      ...(temporal ? { ts: temporal.createdAt } : {}),
+      ...(temporal?.turnDurationMs !== undefined && temporal.turnStatus
+        ? { turnTiming: basicTurnTiming(temporal) }
+        : {}),
+    }]
   })
+}
+
+function basicTurnTiming(
+  temporal: Extract<NonNullable<Message['metadata']>, { kind: 'temporal' }>,
+): TurnTimingSummary {
+  return {
+    turnId: temporal.turnId,
+    status: temporal.turnStatus ?? 'completed',
+    startedAt: temporal.turnStartedAt,
+    ...(temporal.turnCompletedAt ? { completedAt: temporal.turnCompletedAt } : {}),
+    wallDurationMs: temporal.turnDurationMs ?? 0,
+    estimated: true,
+    queueDurationMs: 0,
+    activeDurationMs: 0,
+    approvalWaitMs: 0,
+    llm: { wallDurationMs: 0, requestCount: 0 },
+    tools: { wallDurationMs: 0, aggregateDurationMs: 0, callCount: 0, peakConcurrency: 0, partial: true },
+    compactionDurationMs: 0,
+    retryDurationMs: 0,
+    recoveryDurationMs: 0,
+  }
 }
 
 function isOptimisticQueuedMessage(message: QueuedMessagePreview): boolean {

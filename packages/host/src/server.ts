@@ -108,6 +108,8 @@ import type { SubAgentRuntimeController } from './extensions/agent-tool.js'
 import type { UnitResourceGovernor } from './tenant-runtime/resource-governor.js'
 import { createPublicApiHandler, type PublicApiActor } from './http/public-api.js'
 import { resetCompactRuntime } from './extensions/compaction.js'
+import { StorageInventory } from './store/storage-inventory.js'
+import { SafeCleanupEngine } from './store/safe-cleanup.js'
 
 export type HostServerOptions = {
   port: number
@@ -127,6 +129,8 @@ export type HostServerOptions = {
   copilot?: {
     enabled?: boolean
     gitHubToken?: string
+    backgroundCompactionThreshold?: number
+    bufferExhaustionThreshold?: number
   }
   /** Test synchronization seam: runs after a queue head is claimed, before dispatch I/O. */
   queueDispatchBarrier?: (claimed: { sessionId: string; operationId: string; runtime: string }) => Promise<void>
@@ -269,6 +273,8 @@ export async function startHostServer(
   let closed = false
   let agentRuntimes: AgentRuntimeRegistry | undefined
   let dagOrchestrator: DagOrchestrator | undefined
+  let storageInventory: StorageInventory | undefined
+  let safeCleanup: SafeCleanupEngine | undefined
   let detachPublicAccessGate: (() => void) | undefined
   const closeServer = async (): Promise<void> => {
     if (closed) return
@@ -283,10 +289,10 @@ export async function startHostServer(
     await Promise.allSettled([...queueLoads.values(), ...queueMutations.values()])
     await agentRuntimes?.close()
     await dagOrchestrator?.close()
-    if (ownsStateStore) stateStore.close()
     for (let attempt = 0; attempt < 100 && drainingQueues.size > 0; attempt += 1) {
       await new Promise<void>((resolve) => setTimeout(resolve, 10))
     }
+    await Promise.allSettled([...queueLoads.values(), ...queueMutations.values()])
     detachPublicAccessGate = options.publicUrls ? attachPublicAccessGate(http, options.publicUrls) : undefined
     await new Promise<void>((resolve, reject) => {
       io.close((err) => (err ? reject(err) : resolve()))
@@ -298,6 +304,12 @@ export async function startHostServer(
       }
       http.close(() => resolve())
     })
+    await Promise.allSettled([...queueLoads.values(), ...queueMutations.values()])
+    for (let attempt = 0; attempt < 100 && drainingQueues.size > 0; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10))
+    }
+    storageInventory?.close()
+    if (ownsStateStore) stateStore.close()
   }
   let activeSocketAdmin: SocketAdminConfig | undefined
   const activateSocketAdmin = (config: SocketAdminConfig): void => {
@@ -354,7 +366,18 @@ export async function startHostServer(
         messageAttachments.deleteSession(sessionId),
       ])
     },
+    onStorageChanged: () => storageInventory?.invalidate(),
   })
+  storageInventory = new StorageInventory(options.sessionsDir)
+  safeCleanup = new SafeCleanupEngine({
+    sessionsDir: options.sessionsDir,
+    quarantineDir: join(options.sessionsDir, '..', 'storage-quarantine'),
+    metadataDir: join(options.sessionsDir, '..', 'storage-cleanup'),
+    withMutationLease: async (sessionIds, action) => await store.withStorageMutationLease(sessionIds, action),
+    onSessionsQuarantined: (sessionIds) => store.evictQuarantinedSessions(sessionIds),
+  })
+  await safeCleanup.recover(new Set())
+  store.installStorageTombstones(await safeCleanup.listTombstonedSessionIds())
   const ownsStateStore = options.stateStore === undefined
   const stateStore = options.stateStore ?? new KalaStateStore(join(options.sessionsDir, '..', 'memos'), {
     legacyMemoDirectory: join(options.sessionsDir, '..', 'memos'),
@@ -1396,6 +1419,12 @@ export async function startHostServer(
     ...(options.copilot?.gitHubToken ?? process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
       ? { gitHubToken: options.copilot?.gitHubToken ?? process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN }
       : {}),
+    ...(options.copilot?.backgroundCompactionThreshold !== undefined
+      ? { backgroundCompactionThreshold: options.copilot.backgroundCompactionThreshold }
+      : {}),
+    ...(options.copilot?.bufferExhaustionThreshold !== undefined
+      ? { bufferExhaustionThreshold: options.copilot.bufferExhaustionThreshold }
+      : {}),
   })
   await copilotRuntime.start()
   agentRuntimes.register(copilotRuntime)
@@ -1660,6 +1689,8 @@ export async function startHostServer(
     agentRuntimes,
     askUserChoice,
     dagStore,
+    storageInventory,
+    safeCleanup,
     executorSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     renameWorkspace: async (workspaceId, workspaceName) => {
       const applied = await workspaceAliases.rename(workspaceId, workspaceName)

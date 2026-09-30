@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
+import type { RuntimeCompactionPolicy } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import { cn } from '../../lib/utils.js'
@@ -25,6 +26,7 @@ import { BannerSlot } from './BannerStack.js'
 type Props = {
   state: AgentState | null
   contextSnapshot: ContextUsageSnapshot | null
+  runtimeCompactionPolicy?: RuntimeCompactionPolicy
   compactRunning: boolean
   suppressed?: boolean
   onCompactNow: () => void
@@ -33,12 +35,16 @@ type Props = {
 export function ContextPressureBanner({
   state,
   contextSnapshot,
+  runtimeCompactionPolicy,
   compactRunning,
   suppressed,
   onCompactNow,
 }: Props): JSX.Element | null {
   const { t } = useTranslation()
-  const pressure = evaluateDashboardContextPressure({ snapshot: contextSnapshot })
+  const pressure = evaluateDashboardContextPressure({
+    snapshot: contextSnapshot,
+    compactionPolicy: runtimeCompactionPolicy,
+  })
   const active = isActiveTurn(state?.status)
   const shouldShow = !suppressed && pressure.level === 'high' && !active
   // Re-emerge after dismissal if the pressure level shifts (e.g. compact

@@ -54,6 +54,10 @@ import type {
   ClientAskUserChoice,
   ClientAnswerDagDecision,
   ClientGetDagRun,
+  ClientGetGlobalStorage,
+  ClientGetSessionStorage,
+  ClientPrepareStorageCleanup,
+  ClientExecuteStorageCleanup,
   ClientListDagRuns,
   ClientInitializeDag,
   ClientUserApprove,
@@ -66,6 +70,7 @@ import type {
   RpcAck,
   EventAppendedEvent,
   CompactionMetadata,
+  CompactStatusEvent,
   HandshakeAuth,
   AttachedExecutor,
   ServerHistoryPayload,
@@ -74,11 +79,20 @@ import type {
   SessionReadyEvent,
   SubAgentSummary,
   AgentRuntimeCapabilities,
+  RuntimeCompactionPolicy,
+  GlobalStorageSnapshot,
+  SessionStorageEntry,
+  SessionStorageSnapshot,
+  SessionTokenUsage,
+  StorageCleanupPlanPreview,
+  StorageCleanupResult,
 } from '@agent-kernel/shared'
 import {
+  COPILOT_RUNTIME_COMPACTION_POLICY,
   COPILOT_AGENT_RUNTIME_CAPABILITIES,
   KERNEL_AGENT_RUNTIME_CAPABILITIES,
   isCompatibleVersion,
+  kernelRuntimeCompactionPolicy,
   schema,
   validateClientMessagePayload,
   validateInlineMessageFiles,
@@ -124,6 +138,8 @@ import type { AgentRuntimeRegistry } from '../agent-runtime/types.js'
 import { validateMessageAttachmentReferences } from '../message-attachment-resolver.js'
 import { askUserChoiceRequestFromPendingCall, type AskUserChoiceBroker } from '../ask-user-choice.js'
 import type { DagStore } from '../dag/store.js'
+import type { StorageInventory } from '../store/storage-inventory.js'
+import type { SafeCleanupEngine } from '../store/safe-cleanup.js'
 import { DAG_PLANNER_INSTRUCTION, DAG_PLAN_TOOL } from '../dag/tool.js'
 
 export type QueuedUserMessage = {
@@ -227,6 +243,8 @@ export type DashboardDeps = {
   agentRuntimes: AgentRuntimeRegistry
   askUserChoice?: AskUserChoiceBroker
   dagStore?: DagStore
+  storageInventory?: StorageInventory
+  safeCleanup?: SafeCleanupEngine
   executorSnapshot?(): readonly AttachedExecutor[]
   onSessionCreated?(record: SessionRecord): void | Promise<void>
   onSessionDeleted?(record: SessionRecord): void | Promise<void>
@@ -265,7 +283,7 @@ export type TenantModelPolicyEnforcer = {
 
 const READ_ONLY_DASHBOARD_EVENTS = new Set([
   'client:connection_ping', 'client:executor_ping', 'client:list_executors', 'client:list_sessions',
-  'client:load_history', 'client:load_log_artifact', 'client:subscribe_channels', 'client:refresh_channels', 'client:restore_subscriptions',
+  'client:load_history', 'client:load_log_artifact', 'client:get_session_storage', 'client:get_global_storage', 'client:subscribe_channels', 'client:refresh_channels', 'client:restore_subscriptions',
   'client:unsubscribe_channels', 'subscribe', 'unsubscribe', 'client:list_dirs', 'client:list_files',
   'workspace:read_binary', 'client:read_overflow', 'client:get_dag_run', 'client:list_dag_runs', 'bg:list', 'bg:output', 'sub_agent:list', 'agent_types:list',
 ])
@@ -323,6 +341,7 @@ export function configureDashboardNamespace(
   deps: DashboardDeps,
 ): void {
   const operations = new OperationDeduper()
+  const cleanupPlans = new Map<string, { principal: string; sessionIds: readonly string[] }>()
   const getDefaultConfig = (): AgentConfig => typeof deps.defaultConfig === 'function'
     ? deps.defaultConfig()
     : deps.defaultConfig
@@ -449,7 +468,7 @@ export function configureDashboardNamespace(
       const writeEvents = [
         'client:user_message', 'client:user_approve', 'client:user_reject', 'client:ask_user_choice', 'client:cancel', 'client:interrupt_sub_agent',
         'client:clear', 'client:compact', 'client:cancel_stream', 'client:set_approval_mode', 'client:fork',
-        'client:create_session', 'client:delete_session', 'client:update_preferences', 'client:set_cwd',
+        'client:create_session', 'client:delete_session', 'client:prepare_storage_cleanup', 'client:execute_storage_cleanup', 'client:update_preferences', 'client:set_cwd',
         'client:reorder_queued_message', 'client:update_queued_message', 'client:delete_queued_message',
         'client:rename_session', 'client:rename_workspace', 'client:consolidate_memory', 'bg:kill',
         'client:initialize_dag', 'client:answer_dag_decision',
@@ -478,6 +497,201 @@ export function configureDashboardNamespace(
       const sessions = withQueuedCounts(deps, await deps.store.listSummaries())
       socket.emit('server:sessions', { sessions })
       socket.emit('server:agent_runtimes', { runtimes: deps.agentRuntimes.catalog() })
+    })
+
+    socket.on('client:get_session_storage', async (
+      raw: ClientGetSessionStorage,
+      ack: (result: RpcAck<SessionStorageSnapshot>) => void,
+    ) => {
+      const p = vparse(
+        schema.ClientGetSessionStorageSchema,
+        raw,
+        'client:get_session_storage',
+        (raw as ClientGetSessionStorage | undefined)?.sessionId,
+      )
+      if (!p) {
+        ack({ ok: false, error: 'invalid request' })
+        return
+      }
+      try {
+        if (!deps.storageInventory) throw new Error('storage inventory unavailable')
+        const record = await loadRecordForDashboard(deps, p.sessionId)
+        const accessError = validateIngressSessionAccess(socket, record)
+        if (!record || accessError) throw new Error(accessError ?? 'unknown session')
+        if (p.refresh) await deps.storageInventory.reconcile()
+        const session = deps.storageInventory.getCachedTree(p.sessionId)
+        if (!session) throw new Error('storage inventory has not measured this session yet')
+        let descendants = deps.storageInventory.getCachedDescendants(p.sessionId)
+        if (auditActor(socket).kind === 'ingress') {
+          const allowed = new Set<string>()
+          for (const descendant of descendants) {
+            const child = await loadRecordForDashboard(deps, descendant.sessionId)
+            if (!validateIngressSessionAccess(socket, child)) allowed.add(descendant.sessionId)
+          }
+          descendants = descendants.filter((descendant) => allowed.has(descendant.sessionId))
+        }
+        const descendantRecords = await Promise.all(descendants.map(async (descendant) => {
+          const child = await loadRecordForDashboard(deps, descendant.sessionId)
+          if (!child) throw new Error(`unknown descendant session: ${descendant.sessionId}`)
+          return child
+        }))
+        ack({
+          ok: true,
+          value: {
+            session: storageEntry(session),
+            descendants: descendants.map(storageEntry),
+            tokenUsage: sessionTreeTokenUsage(record, descendantRecords),
+            state: deps.storageInventory.getCachedGlobal().state,
+          },
+        })
+      } catch (error) {
+        ack({ ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    })
+
+    socket.on('client:get_global_storage', async (
+      raw: ClientGetGlobalStorage,
+      ack: (result: RpcAck<GlobalStorageSnapshot>) => void,
+    ) => {
+      const p = vparse(schema.ClientGetGlobalStorageSchema, raw, 'client:get_global_storage')
+      if (!p) {
+        ack({ ok: false, error: 'invalid request' })
+        return
+      }
+      try {
+        if (auditActor(socket).kind === 'ingress') throw new Error('global storage inventory is host-administrator only')
+        if (!deps.storageInventory) throw new Error('storage inventory unavailable')
+        if (p.refresh) await deps.storageInventory.reconcile()
+        const global = deps.storageInventory.getCachedGlobal()
+        ack({
+          ok: true,
+          value: {
+            ...global,
+            largestSessionTrees: deps.storageInventory.getCachedLargestTrees().map(storageEntry),
+          },
+        })
+      } catch (error) {
+        ack({ ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    })
+
+    socket.on('client:prepare_storage_cleanup', async (
+      raw: ClientPrepareStorageCleanup,
+      ack: (result: RpcAck<StorageCleanupPlanPreview>) => void,
+    ) => {
+      const p = vparse(schema.ClientPrepareStorageCleanupSchema, raw, 'client:prepare_storage_cleanup')
+      if (!p) {
+        ack({ ok: false, error: 'invalid request' })
+        return
+      }
+      try {
+        if (!deps.safeCleanup) throw new Error('safe cleanup unavailable')
+        const actor = auditActor(socket)
+        if (actor.kind === 'ingress' && (p.operation === 'orphan-artifacts' || p.operation === 'derived-artifacts')) {
+          throw new Error('host-wide cleanup is host-administrator only')
+        }
+        if (p.operation === 'subagent-details' || p.operation === 'session-tree') {
+          const target = await loadRecordForDashboard(deps, p.targetId)
+          const accessError = validateIngressSessionAccess(socket, target)
+          if (!target || accessError) throw new Error(accessError ?? 'unknown session')
+        }
+        const plan = await deps.safeCleanup.prepare(p.operation, p.targetId, activeStorageSessions(deps))
+        if (actor.kind === 'ingress') {
+          for (const sessionId of plan.sessionIds) {
+            const target = await loadRecordForDashboard(deps, sessionId)
+            const accessError = validateIngressSessionAccess(socket, target)
+            if (!target || accessError) throw new Error(accessError ?? 'cleanup plan crosses tenant boundary')
+          }
+        }
+        cleanupPlans.set(plan.planId, {
+          principal: operationPrincipal(socket.data.dashboardActor as DashboardActor | undefined),
+          sessionIds: plan.sessionIds,
+        })
+        deps.audit?.log({
+          action: 'dashboard.prepare_storage_cleanup',
+          actor,
+          target: { sessionId: p.targetId },
+          outcome: 'ok',
+          metadata: { planId: plan.planId, operation: plan.operation, estimatedBytes: plan.estimatedBytes },
+        })
+        ack({
+          ok: true,
+          value: {
+            planId: plan.planId,
+            operation: plan.operation,
+            targetId: plan.targetId,
+            sessionIds: plan.sessionIds,
+            estimatedBytes: plan.estimatedBytes,
+            itemCount: plan.manifest.length,
+            expiresAt: plan.expiresAt,
+          },
+        })
+      } catch (error) {
+        ack({ ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    })
+
+    socket.on('client:execute_storage_cleanup', async (
+      raw: ClientExecuteStorageCleanup,
+      ack: (result: RpcAck<StorageCleanupResult>) => void,
+    ) => {
+      const p = vparse(schema.ClientExecuteStorageCleanupSchema, raw, 'client:execute_storage_cleanup')
+      if (!p) {
+        ack({ ok: false, error: 'invalid request' })
+        return
+      }
+      try {
+        if (!deps.safeCleanup) throw new Error('safe cleanup unavailable')
+        const principal = operationPrincipal(socket.data.dashboardActor as DashboardActor | undefined)
+        const prepared = cleanupPlans.get(p.planId)
+        if (!prepared || prepared.principal !== principal) throw new Error('cleanup plan is not owned by this principal')
+        const records = (await Promise.all(prepared.sessionIds.map(async (sessionId) => await loadRecordForDashboard(deps, sessionId))))
+          .filter((record): record is SessionRecord => record !== undefined)
+        const result = await deps.safeCleanup.execute(p.planId, () => activeStorageSessions(deps))
+        cleanupPlans.delete(p.planId)
+        for (const record of records) {
+          try {
+            await deps.agentRuntimes.get(record.agentRuntime)?.delete?.(record)
+          } catch (error) {
+            emitPostCleanupWarning('runtime cleanup', record.sessionId, error)
+          }
+          if (deps.onSessionDeleted) {
+            try {
+              await deps.onSessionDeleted(record)
+            } catch (error) {
+              emitPostCleanupWarning('session deletion hook', record.sessionId, error)
+            }
+          }
+          if (record.workspaceId) {
+            deps.executors.closeSessionTerminals({ workspaceId: record.workspaceId, sessionId: record.sessionId })
+            try {
+              await deps.executors.deleteOverflowSession(record.workspaceId, record.sessionId)
+            } catch (error) {
+              emitPostCleanupWarning('overflow cleanup', record.sessionId, error)
+            }
+          }
+          resetCompactRuntime(record.sessionId)
+          ns.emit('server:session_deleted', { sessionId: record.sessionId })
+        }
+        try {
+          await deps.storageInventory?.reconcile()
+        } catch (error) {
+          emitPostCleanupWarning('storage inventory reconcile', result.targetId, error)
+        }
+        ack({
+          ok: true,
+          value: {
+            planId: result.planId,
+            operation: result.operation,
+            targetId: result.targetId,
+            logicalDeletion: true,
+            bytesQuarantined: result.bytesQuarantined,
+            completedAt: result.completedAt,
+          },
+        })
+      } catch (error) {
+        ack({ ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
     })
 
     socket.on('client:load_history', async (raw: ClientLoadHistory) => {
@@ -609,7 +823,7 @@ export function configureDashboardNamespace(
       await deps.messageQueues.hydrate(targetSessionId)
       const defaultModel = effectiveDefaultModel(deps)
       const payload: SessionReadyEvent = target
-        ? readyEventFor(target, effectiveModelForRecord(deps, target), 'load', contextWindowForSession(deps, target))
+        ? readyEventFor(target, effectiveModelForRecord(deps, target), 'load', contextWindowForSession(deps, target), runtimeCompactionPolicyFor(deps, target), runtimeCompactStatusFor(deps, target))
         : ephemeralReadyEventFor(targetSessionId, getDefaultConfig(), defaultModel, contextWindowForModelRef(deps, defaultModel))
       emitSessionReady(payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(targetSessionId))
@@ -703,7 +917,7 @@ export function configureDashboardNamespace(
     await deps.messageQueues.hydrate(sessionId)
     const defaultModel = effectiveDefaultModel(deps)
     const ready: SessionReadyEvent = record
-      ? readyEventFor(record, effectiveModelForRecord(deps, record), 'load', contextWindowForSession(deps, record))
+      ? readyEventFor(record, effectiveModelForRecord(deps, record), 'load', contextWindowForSession(deps, record), runtimeCompactionPolicyFor(deps, record), runtimeCompactStatusFor(deps, record))
         : ephemeralReadyEventFor(
           sessionId,
           getDefaultConfig(),
@@ -742,7 +956,7 @@ export function configureDashboardNamespace(
       await deps.messageQueues.hydrate(sessionId)
       const defaultModel = effectiveDefaultModel(deps)
       const payload: SessionReadyEvent = target
-        ? readyEventFor(target, effectiveModelForRecord(deps, target), 'load', contextWindowForSession(deps, target))
+        ? readyEventFor(target, effectiveModelForRecord(deps, target), 'load', contextWindowForSession(deps, target), runtimeCompactionPolicyFor(deps, target), runtimeCompactStatusFor(deps, target))
         : ephemeralReadyEventFor(
             sessionId,
             getDefaultConfig(),
@@ -918,17 +1132,12 @@ export function configureDashboardNamespace(
         if (!runtime.descriptor().capabilities.compact) {
           throw new Error(`${record.agentRuntime} sessions do not support compaction`)
         }
-        if (runtime.compact) {
-          await runtime.compact(record)
-          return
-        }
-        // Manual compaction is transcript maintenance. Persist the handoff but
-        // leave the Session resting; only a later user message starts work.
-        await deps.loop.compact(p.sessionId, { trigger: 'manual', continuation: 'stay_resting' })
+        deps.store.assertStorageWritable(record.sessionId)
+        await runtime.compact(record)
       } catch (err) {
         deps.broadcastError(
           p.sessionId,
-          'kernel',
+          deps.store.get(p.sessionId)?.agentRuntime === 'kernel' ? 'kernel' : 'host',
           err instanceof Error ? err.message : String(err),
         )
       }
@@ -1520,7 +1729,7 @@ export function configureDashboardNamespace(
           try {
             await refreshSessionSkillsIfNeeded(deps, record)
             await socket.join(sessionRoom(record.sessionId))
-            emitSessionReady(readyEventFor(record, effectiveModelForRecord(deps, record), created ? 'created' : 'load', contextWindowForSession(deps, record)))
+            emitSessionReady(readyEventFor(record, effectiveModelForRecord(deps, record), created ? 'created' : 'load', contextWindowForSession(deps, record), runtimeCompactionPolicyFor(deps, record), runtimeCompactStatusFor(deps, record)))
             if (!created) return
             deps.audit?.log({ action: 'dashboard.session_create', actor: auditActor(socket), target: { sessionId: record.sessionId, workspaceId: record.workspaceId }, outcome: 'ok', metadata: { cwd: record.state.cwd } })
             await broadcastSessionList(deps)
@@ -1590,6 +1799,10 @@ export function configureDashboardNamespace(
           agentRuntime: 'kernel',
           executionMode: record.executionMode,
           agentRuntimeCapabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
+          runtimeCompactionPolicy: kernelRuntimeCompactionPolicy(
+            record.config.softThreshold,
+            record.config.hardThreshold,
+          ),
           reason: 'forked',
           parentSessionId: p.sourceSessionId,
           parentCursor: p.cursor,
@@ -1711,6 +1924,84 @@ async function refreshSessionSkillsIfNeeded(
 ): Promise<void> {
   await (deps.loopDeps.extensions ?? createBuiltinExtensionRegistry())
     .sessionLoaded({ deps: deps.loopDeps, record })
+}
+
+function storageEntry(entry: {
+  sessionId: string
+  parentSessionId?: string
+  runtime?: string
+  directBytes: number
+  treeBytes: number
+  descendantCount: number
+  categories: SessionStorageEntry['categories']
+  treeCategories: SessionStorageEntry['treeCategories']
+}): SessionStorageEntry {
+  return {
+    sessionId: entry.sessionId,
+    ...(entry.parentSessionId ? { parentSessionId: entry.parentSessionId } : {}),
+    ...(entry.runtime ? { runtime: entry.runtime } : {}),
+    directBytes: entry.directBytes,
+    treeBytes: entry.treeBytes,
+    descendantCount: entry.descendantCount,
+    categories: entry.categories,
+    treeCategories: entry.treeCategories,
+  }
+}
+
+export function sessionTreeTokenUsage(
+  record: SessionRecord,
+  descendants: readonly SessionRecord[],
+): NonNullable<SessionStorageSnapshot['tokenUsage']> {
+  const direct = sessionTokenUsage(record)
+  const tree = descendants.reduce<SessionTokenUsage>(
+    (total, descendant) => addSessionTokenUsage(total, sessionTokenUsage(descendant)),
+    direct,
+  )
+  return { direct, tree }
+}
+
+function sessionTokenUsage(record: SessionRecord): SessionTokenUsage {
+  const usage = record.state.usage
+  const currentContextTokens = (
+    record.runtimeContextSnapshot ?? contextSnapshot(record)
+  ).usage.totalTokens
+  return {
+    currentContextTokens,
+    cumulativeInputTokens: usage.inputTokens,
+    cumulativeOutputTokens: usage.outputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    sessionCount: 1,
+  }
+}
+
+function addSessionTokenUsage(left: SessionTokenUsage, right: SessionTokenUsage): SessionTokenUsage {
+  return {
+    currentContextTokens: left.currentContextTokens + right.currentContextTokens,
+    cumulativeInputTokens: left.cumulativeInputTokens + right.cumulativeInputTokens,
+    cumulativeOutputTokens: left.cumulativeOutputTokens + right.cumulativeOutputTokens,
+    cacheCreationTokens: left.cacheCreationTokens + right.cacheCreationTokens,
+    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
+    sessionCount: left.sessionCount + right.sessionCount,
+  }
+}
+
+function activeStorageSessions(deps: DashboardDeps): ReadonlySet<string> {
+  return new Set(
+    deps.store.list()
+      .filter((record) => (
+        !isRestingStatus(record.state.status)
+        || deps.agentRuntimes.get(record.agentRuntime)?.currentCompactStatus?.(record.sessionId)?.kind === 'running'
+      ))
+      .map((record) => record.sessionId),
+  )
+}
+
+function emitPostCleanupWarning(action: string, sessionId: string, error: unknown): void {
+  process.emitWarning(
+    `${action} failed after storage cleanup committed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+    { code: 'KALA_POST_CLEANUP' },
+  )
 }
 
 function auditActor(socket: { data: Record<string, unknown> }): AuditActor {
@@ -2178,6 +2469,8 @@ export function readyEventFor(
   selectedModel?: string,
   reason: SessionReadyEvent['reason'] = 'load',
   contextOverride?: ContextWindowOverride,
+  runtimeCompactionPolicy?: RuntimeCompactionPolicy,
+  compactStatus?: CompactStatusEvent,
 ): SessionReadyEvent {
   return {
     sessionId: record.sessionId,
@@ -2186,6 +2479,10 @@ export function readyEventFor(
     agentRuntimeCapabilities: record.agentRuntime === 'copilot'
       ? COPILOT_AGENT_RUNTIME_CAPABILITIES
       : KERNEL_AGENT_RUNTIME_CAPABILITIES,
+    runtimeCompactionPolicy: runtimeCompactionPolicy ?? (record.agentRuntime === 'copilot'
+      ? COPILOT_RUNTIME_COMPACTION_POLICY
+      : kernelRuntimeCompactionPolicy(record.config.softThreshold, record.config.hardThreshold)),
+    ...(compactStatus ? { compactStatus } : {}),
     reason,
     cursor: record.state.cursor,
     state: record.state,
@@ -2216,6 +2513,20 @@ export function readyEventFor(
       : {}),
     ...(selectedModel ? { selectedModel } : {}),
   }
+
+}
+
+function runtimeCompactionPolicyFor(deps: DashboardDeps, record: SessionRecord): RuntimeCompactionPolicy {
+  if (record.agentRuntime === 'kernel') {
+    return kernelRuntimeCompactionPolicy(record.config.softThreshold, record.config.hardThreshold)
+  }
+
+  return deps.agentRuntimes.get(record.agentRuntime)?.descriptor().compactionPolicy
+    ?? COPILOT_RUNTIME_COMPACTION_POLICY
+}
+
+function runtimeCompactStatusFor(deps: DashboardDeps, record: SessionRecord): CompactStatusEvent | undefined {
+  return deps.agentRuntimes.get(record.agentRuntime)?.currentCompactStatus?.(record.sessionId)
 }
 
 // Session-not-yet-on-disk fallback. Returns a plausible `session:ready`
@@ -2240,6 +2551,10 @@ export function ephemeralReadyEventFor(
     agentRuntime: 'kernel',
     executionMode: 'chat',
     agentRuntimeCapabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
+    runtimeCompactionPolicy: kernelRuntimeCompactionPolicy(
+      defaultConfig.softThreshold,
+      defaultConfig.hardThreshold,
+    ),
     cursor: state.cursor,
     state,
     config: defaultConfig,

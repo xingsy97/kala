@@ -6,7 +6,7 @@ import { createInitialState } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
-import { AssistantMarkdown, ChatPanel as DashboardChatPanel } from './ChatPanel.js'
+import { AssistantMarkdown, ChatPanel as DashboardChatPanel, turnTimingPopoverPosition } from './ChatPanel.js'
 import { InlineStatusRow, useElapsedSeconds } from './InlineStatusRow.js'
 
 function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Element {
@@ -52,6 +52,54 @@ describe('ChatPanel', () => {
     expect(technical.hasAttribute('open')).toBe(false)
     expect(technical.textContent).toContain('Aggregate tool time1m 27s')
     expect(technical.textContent).toContain('Peak concurrency4')
+  })
+
+  it('opens timing details outside the transcript and omits empty activity', () => {
+    const summary = {
+      turnId: 'turn-minimal', status: 'completed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:07Z', wallDurationMs: 7000, estimated: false,
+      queueDurationMs: 0, activeDurationMs: 0, approvalWaitMs: 0,
+      llm: { wallDurationMs: 0, requestCount: 0, firstTokenMs: 0 },
+      tools: { wallDurationMs: 0, aggregateDurationMs: 0, callCount: 0, peakConcurrency: 0, partial: false },
+      compactionDurationMs: 0, retryDurationMs: 0, recoveryDurationMs: 0,
+    }
+    const items = [
+      { kind: 'message' as const, seq: 1, message: { role: 'user' as const, content: [{ type: 'text' as const, text: 'Do it.' }] } },
+      { kind: 'message' as const, seq: 2, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Done.' }] }, turnTiming: summary },
+    ]
+    render(<DashboardChatPanel items={items} messages={[]} />)
+    fireEvent.click(screen.getByTestId('turn-timing-turn-minimal').querySelector('button')!)
+    const details = screen.getByTestId('turn-timing-details-turn-minimal')
+    expect(details.parentElement).toBe(document.body)
+    expect(details.textContent).toContain('Started')
+    expect(details.textContent).toContain('Completed at')
+    expect(details.textContent).toContain('Total7s')
+    expect(details.textContent).not.toContain('Activity')
+    expect(details.textContent).not.toContain('Calls')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByTestId('turn-timing-details-turn-minimal')).toBeNull()
+  })
+
+  it('positions timing details beside desktop triggers and within mobile viewports', () => {
+    expect(turnTimingPopoverPosition({
+      anchor: { left: 100, right: 220, top: 300, bottom: 328 },
+      contentHeight: 180,
+      viewportWidth: 1200,
+      viewportHeight: 800,
+    })).toMatchObject({ left: 228, placement: 'right', mobile: false })
+    expect(turnTimingPopoverPosition({
+      anchor: { left: 900, right: 1020, top: 300, bottom: 328 },
+      contentHeight: 180,
+      viewportWidth: 1100,
+      viewportHeight: 800,
+    })).toMatchObject({ left: 508, placement: 'left', mobile: false })
+    const mobile = turnTimingPopoverPosition({
+      anchor: { left: 12, right: 180, top: 680, bottom: 708 },
+      contentHeight: 220,
+      viewportWidth: 390,
+      viewportHeight: 740,
+    })
+    expect(mobile).toMatchObject({ left: 8, width: 374, placement: 'above', mobile: true })
+    expect(mobile.top).toBeGreaterThanOrEqual(8)
   })
 
   it('shows a readable placeholder for legacy local markdown images instead of a broken browser image', () => {
@@ -1706,15 +1754,23 @@ describe('ChatPanel', () => {
   })
 
   it('renders compact operation feedback as a transcript tail item', () => {
-    render(
-      <ChatPanel
-        items={[{ kind: 'message', message: { role: 'user', content: [{ type: 'text', text: 'before compact' }] } }]}
-        compactStatus={{ kind: 'running', startedAt: Date.now(), tokensBefore: 1200 }}
-      />,
-    )
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-30T06:02:00.000Z'))
+    try {
+      render(
+        <ChatPanel
+          items={[{ kind: 'message', message: { role: 'user', content: [{ type: 'text', text: 'before compact' }] } }]}
+          compactStatus={{ kind: 'running', startedAt: Date.now() - 115_000, tokensBefore: 220_200 }}
+        />,
+      )
 
-    expect(screen.getByTestId('compact-feedback-transcript-row')).toBeTruthy()
-    expect(screen.getByTestId('inline-compact-running')).toBeTruthy()
+      expect(screen.getByTestId('compact-feedback-transcript-row')).toBeTruthy()
+      const running = screen.getByTestId('inline-compact-running')
+      expect(running.textContent).toContain('1m 55s')
+      expect(running.textContent).toContain('context 220.2k tokens')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renders Copilot compact completion as a persistent neutral result with inspectable summary', () => {
@@ -1761,8 +1817,11 @@ describe('ChatPanel', () => {
     const progress = screen.getByTestId('compact-feedback-transcript-row')
     const laterOutput = screen.getByText('Output after compact cutoff')
     expect(progress.compareDocumentPosition(laterOutput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByTestId('inline-compact-running').className).toContain('rounded-full')
-    expect(screen.getByTestId('inline-compact-progress-label').className).toContain('font-bold')
+    const running = screen.getByTestId('inline-compact-running')
+    expect(running.className).not.toContain('rounded')
+    expect(running.className).not.toContain('bg-')
+    expect(running.querySelector('svg')).toBeNull()
+    expect(screen.getByTestId('inline-compact-progress-label').className).toContain('font-semibold')
   })
 
   it('renders compact empty feedback as a transcript tail item', () => {

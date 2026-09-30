@@ -320,9 +320,10 @@ describe('compaction extension', () => {
     // message, and raw recent user turns survive verbatim.
     let rec = store.get(sessionId)!
     expect(rec.state.messages.map((m) => m.role)).toEqual(['system', 'user', 'user'])
-    expect(rec.state.messages[1]?.content).toEqual([
-      { type: 'text', text: `${SUMMARY_PREFIX}\n\n${OK_SUMMARY}\n\nFirst pass.` },
-    ])
+    expect((rec.state.messages[1]?.content[0] as { text: string }).text)
+      .toContain(`${SUMMARY_PREFIX}\n\n${OK_SUMMARY}\n\nFirst pass.`)
+    expect((rec.state.messages[1]?.content[0] as { text: string }).text)
+      .toContain(`"sessionId": "${sessionId}"`)
     expect(rec.state.messages[2]?.content).toEqual([{ type: 'text', text: 'hi' }])
 
     await loop.compact(sessionId, { trigger: 'manual', continuation: 'stay_resting' })
@@ -331,9 +332,10 @@ describe('compaction extension', () => {
     // are unchanged; only the summary body changes.
     rec = store.get(sessionId)!
     expect(rec.state.messages.map((m) => m.role)).toEqual(['system', 'user', 'user'])
-    expect(rec.state.messages[1]?.content).toEqual([
-      { type: 'text', text: `${SUMMARY_PREFIX}\n\n${OK_SUMMARY}\n\nSecond pass.` },
-    ])
+    expect((rec.state.messages[1]?.content[0] as { text: string }).text)
+      .toContain(`${SUMMARY_PREFIX}\n\n${OK_SUMMARY}\n\nSecond pass.`)
+    expect((rec.state.messages[1]?.content[0] as { text: string }).text)
+      .toContain(`"sessionId": "${sessionId}"`)
     expect(rec.state.messages[2]?.content).toEqual([{ type: 'text', text: 'hi' }])
     const replaced = await readReplacedEvents(rec.logPath)
     expect(replaced).toHaveLength(2)

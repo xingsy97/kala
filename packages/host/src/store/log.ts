@@ -164,7 +164,11 @@ export async function appendEventEntry(
   const artifactRoot = artifactRootForLog(params.path)
   const fullEffects = params.effects
   const slimEffects = params.effects.map(slimEffect)
-  const effectsArtifact = hasLargeEffectPayload(fullEffects)
+  const safeLlmTrace = params.llmTrace ? redactLlmTrace(params.llmTrace) : undefined
+  // A full LLM trace already carries the provider request/response payload.
+  // Persisting the call_llm effect beside it duplicates the dominant message
+  // history bytes. Keep effects as the fallback authority when no trace exists.
+  const effectsArtifact = hasLargeEffectPayload(fullEffects) && !safeLlmTrace
     ? await writeJsonArtifact({
         logPath: params.path,
         artifactRoot,
@@ -173,7 +177,6 @@ export async function appendEventEntry(
         value: fullEffects,
       })
     : undefined
-  const safeLlmTrace = params.llmTrace ? redactLlmTrace(params.llmTrace) : undefined
   const llmTraceArtifact = safeLlmTrace
     ? await writeJsonArtifact({
         logPath: params.path,

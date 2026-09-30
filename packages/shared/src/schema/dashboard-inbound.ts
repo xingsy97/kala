@@ -18,6 +18,10 @@ import type {
   ClientConsolidateMemory,
   ClientCreateSession,
   ClientGetDagRun,
+  ClientGetGlobalStorage,
+  ClientGetSessionStorage,
+  ClientPrepareStorageCleanup,
+  ClientExecuteStorageCleanup,
   ClientListDagRuns,
   ClientInitializeDag,
   ClientCreateDirectory,
@@ -268,6 +272,24 @@ export const ClientDeleteSessionSchema = z.object({
   operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
 }).strict() satisfies z.ZodType<ClientDeleteSession>
+
+export const ClientGetSessionStorageSchema = z.object({
+  sessionId: SessionIdSchema,
+  refresh: z.boolean().optional(),
+}).strict() satisfies z.ZodType<ClientGetSessionStorage>
+
+export const ClientGetGlobalStorageSchema = z.object({
+  refresh: z.boolean().optional(),
+}).strict() satisfies z.ZodType<ClientGetGlobalStorage>
+
+export const ClientPrepareStorageCleanupSchema = z.object({
+  operation: z.enum(['subagent-details', 'session-tree', 'orphan-artifacts', 'derived-artifacts']),
+  targetId: SessionIdSchema,
+}).strict() satisfies z.ZodType<ClientPrepareStorageCleanup>
+
+export const ClientExecuteStorageCleanupSchema = z.object({
+  planId: z.string().uuid(),
+}).strict() satisfies z.ZodType<ClientExecuteStorageCleanup>
 
 // The wire form of a `Record<string, never>` payload is `undefined` or `{}` —
 // socket.io emits `undefined` when the client calls `socket.emit(evt)` with no

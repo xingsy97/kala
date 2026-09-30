@@ -279,6 +279,34 @@ describe('readSessionLog', () => {
     expect(trace.request.headers['content-type']).toBe('application/json')
   })
 
+  it('does not duplicate call_llm history when a full redacted trace is retained', async () => {
+    const path = join(dir, 'single-llm-authority.jsonl')
+    await writeHeader({ path, sessionId: 's-single-llm-authority', config, initialState })
+    const entry = await appendEventEntry({
+      path,
+      seq: 1,
+      event: { kind: 'user_message', text: 'hello' },
+      effects: [{
+        kind: 'call_llm',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'large request history' }] }],
+        tools: [],
+      }],
+      llmTrace: {
+        provider: 'openai',
+        model: 'gpt-test',
+        request: {
+          url: 'https://gateway.example.com/v1/chat/completions',
+          headers: {},
+          body: { messages: [{ role: 'user', content: 'large request history' }] },
+        },
+      },
+    })
+
+    expect(entry.llmTraceArtifact).toBeDefined()
+    expect(entry.effectsArtifact).toBeUndefined()
+    expect(entry.effects).toEqual([{ kind: 'call_llm', messages: [], tools: [] }])
+  })
+
   it('recovers from a truncated final line (crash mid-append)', async () => {
     // Simulate the exact failure: valid header + valid event, then a partial
     // JSON blob with no trailing newline. This is what a SIGKILL between the

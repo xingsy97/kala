@@ -10,11 +10,20 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HelpHint } from '../../components/ui/help-hint.js'
-import { Link2, X } from 'lucide-react'
+import { Link2, RefreshCw, X } from 'lucide-react'
+import type { Socket } from 'socket.io-client'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ApprovalMode } from '@agent-kernel/kernel'
-import type { ContextUsageSnapshot, SessionSummary, ToolCardMode } from '@agent-kernel/shared'
+import type {
+  ContextUsageSnapshot,
+  DashboardClientToServerEvents,
+  DashboardServerToClientEvents,
+  SessionStorageSnapshot,
+  StorageCleanupPlanPreview,
+  SessionSummary,
+  ToolCardMode,
+} from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -60,6 +69,7 @@ type Props = {
   onChangeToolCardMode(mode: ToolCardMode): void
   canChangeCwd?: boolean
   canChangeApprovalMode?: boolean
+  storageSocket?: Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 }
 
 const APPROVAL_MODE_ITEMS: ReadonlyArray<{ value: ApprovalMode; labelKey: string }> = [
@@ -85,6 +95,7 @@ export function SessionMetadataDialog({
   onChangeToolCardMode,
   canChangeCwd = true,
   canChangeApprovalMode = true,
+  storageSocket,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const initialLabel = summary?.label ?? ''
@@ -96,20 +107,69 @@ export function SessionMetadataDialog({
     ? 'GitHub Copilot SDK'
     : 'Agent Kernel'
   const agentRuntimeDisplay = `${agentRuntimeLabel} (${agentRuntime})${summary?.agentRuntimeVersion ? ` · v${summary.agentRuntimeVersion}` : ''}`
-  const inputTokens = contextSnapshot?.usage.inputTokens ?? state?.usage.inputTokens
-  const outputTokens = contextSnapshot?.usage.outputTokens ?? state?.usage.outputTokens
+  const directContextTokens = contextSnapshot?.usage.totalTokens
+  const directInputTokens = state?.usage.inputTokens
+  const directOutputTokens = state?.usage.outputTokens
 
   const [labelDraft, setLabelDraft] = useState(initialLabel)
   const [approvalDraft, setApprovalDraft] = useState<ApprovalMode>(approvalMode)
   const [toolCardModeDraft, setToolCardModeDraft] = useState<ToolCardMode>(toolCardMode)
+  const [storage, setStorage] = useState<SessionStorageSnapshot | null>(null)
+  const [storageError, setStorageError] = useState<string | null>(null)
+  const [storageLoading, setStorageLoading] = useState(false)
+  const [cleanupPlan, setCleanupPlan] = useState<StorageCleanupPlanPreview | null>(null)
+  const [cleanupConfirmationStep, setCleanupConfirmationStep] = useState<'review' | 'final'>('review')
+  const [cleanupBusy, setCleanupBusy] = useState(false)
+
+  const loadStorage = (refresh: boolean): void => {
+    if (!storageSocket || !sessionId) return
+    setStorageLoading(true)
+    setStorageError(null)
+    storageSocket.emit('client:get_session_storage', { sessionId, ...(refresh ? { refresh: true } : {}) }, (result) => {
+      setStorageLoading(false)
+      if (result.ok) setStorage(result.value)
+      else setStorageError(result.error)
+    })
+  }
+
+  const prepareSubagentCleanup = (targetId: string): void => {
+    if (!storageSocket) return
+    setCleanupBusy(true)
+    setStorageError(null)
+    storageSocket.emit('client:prepare_storage_cleanup', { operation: 'subagent-details', targetId }, (result) => {
+      setCleanupBusy(false)
+      if (result.ok) {
+        setCleanupPlan(result.value)
+        setCleanupConfirmationStep('review')
+      }
+      else setStorageError(result.error)
+    })
+  }
+
+  const executeCleanup = (): void => {
+    if (!storageSocket || !cleanupPlan) return
+    setCleanupBusy(true)
+    setStorageError(null)
+    storageSocket.emit('client:execute_storage_cleanup', { planId: cleanupPlan.planId }, (result) => {
+      setCleanupBusy(false)
+      if (!result.ok) {
+        setStorageError(result.error)
+        return
+      }
+      setCleanupPlan(null)
+      setCleanupConfirmationStep('review')
+      loadStorage(true)
+    })
+  }
 
   useEffect(() => {
     if (open) {
       setLabelDraft(initialLabel)
       setApprovalDraft(approvalMode)
       setToolCardModeDraft(toolCardMode)
+      loadStorage(false)
     }
-  }, [open, initialLabel, approvalMode, toolCardMode])
+  }, [open, initialLabel, approvalMode, toolCardMode, sessionId, storageSocket])
 
   const labelChanged = labelDraft.trim() !== (summary?.label ?? '').trim()
   const approvalChanged = approvalDraft !== approvalMode
@@ -200,14 +260,134 @@ export function SessionMetadataDialog({
             label={t('dialogs.events')}
             value={String(summary?.eventCount ?? state?.messages.length ?? 0)}
           />
-          {inputTokens !== undefined || outputTokens !== undefined ? (
-            <ReadOnlyRow
-              label={t('dialogs.tokensInOut')}
-              value={`${(inputTokens ?? 0).toLocaleString()} / ${(outputTokens ?? 0).toLocaleString()}`}
-            />
-          ) : null}
+          {storage?.tokenUsage ? (
+            <>
+              <ReadOnlyRow
+                label="Context tokens (tree / direct)"
+                value={`${storage.tokenUsage.tree.currentContextTokens.toLocaleString()} / ${storage.tokenUsage.direct.currentContextTokens.toLocaleString()}`}
+              />
+              <ReadOnlyRow
+                label={`${t('dialogs.tokensInOut')} (tree)`}
+                value={`${storage.tokenUsage.tree.cumulativeInputTokens.toLocaleString()} / ${storage.tokenUsage.tree.cumulativeOutputTokens.toLocaleString()}`}
+              />
+              <ReadOnlyRow
+                label={`${t('dialogs.tokensInOut')} (direct)`}
+                value={`${storage.tokenUsage.direct.cumulativeInputTokens.toLocaleString()} / ${storage.tokenUsage.direct.cumulativeOutputTokens.toLocaleString()}`}
+              />
+            </>
+          ) : (
+            <>
+              {directContextTokens !== undefined ? (
+                <ReadOnlyRow
+                  label="Context tokens (direct)"
+                  value={directContextTokens.toLocaleString()}
+                />
+              ) : null}
+              {directInputTokens !== undefined || directOutputTokens !== undefined ? (
+                <ReadOnlyRow
+                  label={`${t('dialogs.tokensInOut')} (direct)`}
+                  value={`${(directInputTokens ?? 0).toLocaleString()} / ${(directOutputTokens ?? 0).toLocaleString()}`}
+                />
+              ) : null}
+            </>
+          )}
           <ReadOnlyRow label={t('dialogs.sessionCost')} value="—" />
         </div>
+
+        <div className="border-t border-border/50 pt-3" />
+
+        <section className="grid gap-2 text-sm" aria-label="Storage" data-testid="session-storage">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">Storage</span>
+            <Button type="button" variant="ghost" size="sm" disabled={storageLoading || !storageSocket} onClick={() => loadStorage(true)}>
+              <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', storageLoading && 'animate-spin')} aria-hidden />
+              Refresh
+            </Button>
+          </div>
+          {storageError ? <p className="text-xs text-destructive">{storageError}</p> : storage ? (
+            <>
+              <div className="grid grid-cols-2 gap-2 rounded-md border border-border/50 bg-muted/20 p-3">
+                <StorageMetric label="This session" bytes={storage.session.directBytes} />
+                <StorageMetric label={`Tree (${storage.session.descendantCount} sub-agents)`} bytes={storage.session.treeBytes} />
+              </div>
+              {storage.descendants.length > 0 ? (
+                <div className="divide-y divide-border/40 rounded-md border border-border/50">
+                  {storage.descendants.map((entry) => (
+                    <div key={entry.sessionId} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-xs" title={entry.sessionId}>{entry.sessionId}</div>
+                        <div className="text-caption text-muted-foreground">
+                          {formatBytes(entry.directBytes)} direct · {formatBytes(entry.treeBytes)} subtree
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={cleanupBusy}
+                        onClick={() => prepareSubagentCleanup(entry.sessionId)}
+                      >
+                        Delete details…
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {cleanupPlan ? (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3" data-testid="storage-cleanup-confirmation">
+                  <div className="font-medium">
+                    {cleanupConfirmationStep === 'review' ? 'Review sub-agent cleanup' : 'Final confirmation required'}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    This moves {cleanupPlan.itemCount} exact files ({formatBytes(cleanupPlan.estimatedBytes)}) out of the active session store.
+                    The graph result and a tombstone remain. The operation is revalidated before any file is moved.
+                  </p>
+                  {cleanupConfirmationStep === 'final' ? (
+                    <p className="mt-2 font-medium text-destructive">
+                      Confirm again to quarantine these details. This is the second and final confirmation.
+                    </p>
+                  ) : null}
+                  <div className="mt-3 flex gap-2">
+                    {cleanupConfirmationStep === 'review' ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        disabled={cleanupBusy}
+                        data-testid="storage-cleanup-first-confirm"
+                        onClick={() => setCleanupConfirmationStep('final')}
+                      >
+                        Continue
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        disabled={cleanupBusy}
+                        data-testid="storage-cleanup-final-confirm"
+                        onClick={executeCleanup}
+                      >
+                        Confirm quarantine
+                      </Button>
+                    )}
+                    <Button type="button" size="sm" variant="outline" disabled={cleanupBusy} onClick={() => {
+                      setCleanupPlan(null)
+                      setCleanupConfirmationStep('review')
+                    }}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              <p className="text-caption text-muted-foreground">
+                Measured {storage.state.measuredAt ? formatTs(storage.state.measuredAt) : 'not yet'}; refresh performs a background metadata scan.
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">{storageLoading ? 'Measuring storage…' : 'Storage has not been measured yet.'}</p>
+          )}
+        </section>
 
         <div className="border-t border-border/50 pt-3" />
 
@@ -382,4 +562,20 @@ function formatTs(iso: string | undefined): string {
   } catch {
     return iso
   }
+}
+
+function StorageMetric({ label, bytes }: { label: string; bytes: number }): JSX.Element {
+  return <div><div className="text-caption text-muted-foreground">{label}</div><div className="font-medium">{formatBytes(bytes)}</div></div>
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KiB', 'MiB', 'GiB', 'TiB']
+  let value = bytes / 1024
+  let unit = units[0]!
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024
+    unit = units[index]!
+  }
+  return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${unit}`
 }

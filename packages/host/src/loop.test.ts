@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
@@ -1307,9 +1307,17 @@ describe('host loop', () => {
     expect(rec.state.messages[0]!.role).toBe('system')
     const anchored = rec.state.messages[1]!
     expect(anchored.role).toBe('user')
-    expect(anchored.content[0]).toEqual({
-      type: 'text',
-      text: `${SUMMARY_PREFIX}\n\n${OK_SUMMARY_BODY}`,
+    expect(anchored.content[0]).toMatchObject({ type: 'text' })
+    const anchoredText = (anchored.content[0] as { type: 'text'; text: string }).text
+    expect(anchoredText).toContain(`${SUMMARY_PREFIX}\n\n${OK_SUMMARY_BODY}`)
+    expect(anchoredText).toContain('<runtime-checkpoint>')
+    expect(anchoredText).toContain(`"sessionId": "${sessionId}"`)
+    expect(anchoredText).toContain('"status": "done"')
+    expect(anchored.metadata).toMatchObject({
+      kind: 'context_compaction',
+      phase: 'done',
+      trigger: 'manual',
+      summary: OK_SUMMARY_BODY,
     })
     expect(rec.state.messages[2]!.content[0]).toEqual({ type: 'text', text: 'hi' })
     // Summarizer call carried the new compaction prompt.
@@ -1318,7 +1326,10 @@ describe('host loop', () => {
     // Summarizer sees the transcript as ONE user message wrapping <transcript>.
     expect(llmCalls[1]!.messages).toHaveLength(1)
     expect(llmCalls[1]!.messages[0]!.role).toBe('user')
-    expect((llmCalls[1]!.messages[0]!.content[0] as { text: string }).text).toContain('<transcript>')
+    const summarizerInput = (llmCalls[1]!.messages[0]!.content[0] as { text: string }).text
+    expect(summarizerInput).toContain('<transcript>')
+    expect(summarizerInput).toContain('<runtime-checkpoint>')
+    expect(summarizerInput).toContain(`"sessionId": "${sessionId}"`)
     // Cumulative usage is preserved; current-window context is compacted.
     expect(rec.state.usage.inputTokens).toBe(10)
     expect(rec.state.status).toBe('done')
@@ -1329,6 +1340,12 @@ describe('host loop', () => {
     expect(metadata?.payload.trigger).toBe('manual')
     expect(metadata?.payload.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
     expect(parsed.events.some((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toBe(false)
+    const reloaded = await new SessionStore(dir).load(sessionId)
+    expect(reloaded.state.messages[1]?.metadata).toMatchObject({
+      kind: 'context_compaction',
+      phase: 'done',
+      attemptId: expect.stringMatching(/^cmp_/),
+    })
     expect(llmCalls).toHaveLength(2)
   })
 
@@ -1704,7 +1721,7 @@ describe('host loop', () => {
     expect(store.get(rec.sessionId)!.state.status).toBe('done')
   })
 
-  it('compacts between sibling tool results when the first result exhausts context headroom', async () => {
+  it('compacts after sibling tool results settle and before the continuation LLM call', async () => {
     const tightConfig = createConfig({
       tools: [READ],
       systemPrompt: 'sys',
@@ -1756,17 +1773,37 @@ describe('host loop', () => {
       c1: `${'A'.repeat(60_000)}TAIL-OF-HUGE-RESULT`,
       c2: 'small result',
     }
+    let releaseSecondTool: (() => void) | undefined
+    const secondToolGate = new Promise<void>((resolve) => {
+      releaseSecondTool = resolve
+    })
     const loop = runHostLoop({
       store,
       llm,
-      tools: nullTools({ callTool: async (_sessionId, eff) => ({ ok: true, content: toolOutputs[eff.callId] ?? 'missing' }) }),
+      tools: nullTools({
+        callTool: async (_sessionId, eff) => {
+          if (eff.callId === 'c2') await secondToolGate
+          return { ok: true, content: toolOutputs[eff.callId] ?? 'missing' }
+        },
+      }),
       broadcast: silentBroadcast(),
     })
 
     await loop.dispatch(sid, { kind: 'user_message', text: 'old context '.repeat(7_000) })
     calls.length = 0
 
-    await loop.dispatch(sid, { kind: 'user_message', text: 'read both files' })
+    const dispatch = loop.dispatch(sid, { kind: 'user_message', text: 'read both files' })
+    await vi.waitFor(() => {
+      const state = store.get(sid)!.state
+      const settledResults = state.messages
+        .flatMap((message) => message.content)
+        .filter((content) => content.type === 'tool_result')
+      expect(settledResults).toHaveLength(1)
+      expect(state.pendingCalls.map((call) => call.callId)).toEqual(['c2'])
+    })
+    expect(calls.some((call) => call.kind === 'compact')).toBe(false)
+    releaseSecondTool?.()
+    await dispatch
 
     expect(calls[0]?.kind).toBe('normal')
     expect(calls.some((call) => call.kind === 'compact')).toBe(true)
@@ -1788,7 +1825,7 @@ describe('host loop', () => {
     expect(JSON.stringify(toolResults[0])).toContain('TAIL-OF-HUGE-RESULT')
 
     const parsed = await readSessionLog(store.get(sid)!.logPath)
-    expect(parsed.runtimeMetadata.some((e) => e.action === 'compaction_applied' && e.payload.trigger === 'tool_result')).toBe(true)
+    expect(parsed.runtimeMetadata.some((e) => e.action === 'compaction_applied' && e.payload.trigger === 'preflight')).toBe(true)
     expect(store.get(sid)!.state.status).toBe('done')
   })
 

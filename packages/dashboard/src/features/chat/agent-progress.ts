@@ -1,4 +1,5 @@
 import type { AgentState } from '@agent-kernel/kernel'
+import type { AgentRuntimeId } from '@agent-kernel/shared'
 
 import type { TimelineEntry } from '../../session.js'
 
@@ -18,6 +19,7 @@ export function deriveAgentProgress(
   state: AgentState | null,
   timeline: readonly TimelineEntry[],
   turnStartedAt?: string | null,
+  agentRuntime: AgentRuntimeId = 'kernel',
 ): AgentProgress {
   const status = state?.status
   const calls = persistedToolIntentions(timeline)
@@ -48,8 +50,14 @@ export function deriveAgentProgress(
         ...(previous.durationMs !== undefined ? { durationMs: previous.durationMs } : {}),
       }
     }
-    const startedAt = parsedTimestamp(turnStartedAt) ?? currentTurnStartedAt(timeline)
-    return { phase: 'thinking', label: 'Thinking', ...(startedAt !== undefined ? { startedAt } : {}) }
+    const startedAt = agentRuntime === 'kernel'
+      ? currentThinkingStartedAt(timeline, turnStartedAt)
+      : parsedTimestamp(turnStartedAt)
+    return {
+      phase: 'thinking',
+      label: agentRuntime === 'kernel' ? 'Thinking' : 'Working',
+      ...(startedAt !== undefined ? { startedAt } : {}),
+    }
   }
 
   if (status === 'error') return { phase: 'error', label: 'The turn needs attention' }
@@ -136,6 +144,20 @@ function currentTurnStartedAt(timeline: readonly TimelineEntry[]): number | unde
     return Number.isFinite(parsed) ? parsed : undefined
   }
   return undefined
+}
+
+function currentThinkingStartedAt(
+  timeline: readonly TimelineEntry[],
+  turnStartedAt?: string | null,
+): number | undefined {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const entry = timeline[index]
+    if (entry?.event.kind === 'user_message') break
+    if (entry?.event.kind !== 'tool_result') continue
+    const parsed = Date.parse(entry.ts)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return parsedTimestamp(turnStartedAt) ?? currentTurnStartedAt(timeline)
 }
 
 function durationBetween(startedAt: number | undefined, completedAt: number): number | undefined {

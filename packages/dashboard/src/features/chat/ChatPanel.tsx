@@ -20,6 +20,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   ChevronsDown,
@@ -80,7 +81,7 @@ import { Textarea } from '../../components/ui/textarea.js'
 import { Typewriter } from '../../components/Typewriter.js'
 import { MarkdownTable } from '../../components/MarkdownTable.js'
 import { formatTokens } from '../../lib/format.js'
-import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, PREF_SMOOTH_STREAMING_TEXT, PREF_TOOL_ACTIVITY_ICON_SCALE, useBooleanPref, useNumberPref } from '../../lib/prefs.js'
+import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, PREF_MESSAGE_TIMESTAMPS, PREF_SMOOTH_STREAMING_TEXT, PREF_TOOL_ACTIVITY_ICON_SCALE, useBooleanPref, useNumberPref, useStringPref } from '../../lib/prefs.js'
 import { useInterfaceScale } from '../../lib/interface-scale.js'
 import { cn } from '../../lib/utils.js'
 import { writeTextToClipboard } from '../../lib/clipboard.js'
@@ -88,7 +89,7 @@ import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview, hasDiffPreviewForTool } from './DiffPreview.js'
 import { CodeBlock } from './CodeBlock.js'
 import { MermaidBlock } from './MermaidBlock.js'
-import { CompactFeedbackRow, useElapsedSeconds, type CompactStatus } from './InlineStatusRow.js'
+import { CompactFeedbackRow, formatElapsedDuration, useElapsedSeconds, type CompactStatus } from './InlineStatusRow.js'
 import {
   type GroupedContentItem,
   type ToolCallGroup,
@@ -170,6 +171,8 @@ export type WorkspaceFileTarget = {
 const WorkspaceFileLinkContext = createContext<((target: WorkspaceFileTarget) => void) | null>(null)
 const ArtifactSessionContext = createContext<string | null>(null)
 const AttachmentAccessContext = createContext<{ host?: string; token?: string }>({})
+type MessageTimestampVisibility = 'auto' | 'always' | 'hidden'
+const MessageTimestampContext = createContext<MessageTimestampVisibility>('auto')
 
 type RenderTranscriptItem = TranscriptItem | {
   kind: 'compact_feedback'
@@ -253,6 +256,11 @@ export function ChatPanel({
   onSearchOpenChange,
 }: Props): JSX.Element {
   const { t } = useTranslation()
+  const [storedTimestampVisibility] = useStringPref(PREF_MESSAGE_TIMESTAMPS, 'auto')
+  const timestampVisibility: MessageTimestampVisibility =
+    storedTimestampVisibility === 'always' || storedTimestampVisibility === 'hidden'
+      ? storedTimestampVisibility
+      : 'auto'
   const fallbackItems = useMemo<TranscriptItem[]>(() => (messages ?? [])
     .filter((message) => message.role !== 'system')
     .map((message) => ({ kind: 'message', message })), [messages])
@@ -630,6 +638,7 @@ export function ChatPanel({
   const displayStyle = chatDisplayStyle(displayPrefs)
 
   return (
+    <MessageTimestampContext.Provider value={timestampVisibility}>
     <ArtifactSessionContext.Provider value={sessionId ?? parentSessionId ?? null}>
     <AttachmentAccessContext.Provider value={{ ...(attachmentHost ? { host: attachmentHost } : {}), ...(attachmentToken ? { token: attachmentToken } : {}) }}>
     <WorkspaceFileLinkContext.Provider value={onOpenWorkspaceFile ?? null}>
@@ -716,6 +725,7 @@ export function ChatPanel({
     </WorkspaceFileLinkContext.Provider>
     </AttachmentAccessContext.Provider>
     </ArtifactSessionContext.Provider>
+    </MessageTimestampContext.Provider>
   )
 }
 
@@ -943,16 +953,15 @@ function CompactProgressRow({
     <div className="flex items-center gap-3 py-2" data-testid="compact-feedback-transcript-row">
       <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
       <div
-        className="flex min-w-0 items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-meta text-muted-foreground"
+        className="inline-flex min-w-0 items-center gap-2 px-1 py-1 text-ui text-muted-foreground"
         data-testid="inline-compact-running"
         role="status"
       >
-        <Archive className="h-3 w-3 flex-none" aria-hidden="true" />
-        <span className="ak-thinking-text truncate font-bold" data-testid="inline-compact-progress-label">
+        <span className="ak-thinking-text truncate font-semibold leading-5" data-testid="inline-compact-progress-label">
           {t('chatStatus.compacting')}
         </span>
         <span className="flex-none tabular-nums text-muted-foreground/75">
-          {elapsed === undefined ? null : `${elapsed.toFixed(1)}s · `}
+          {elapsed === undefined ? null : `${formatElapsedDuration(elapsed)} · `}
           context {formatCompactTokens(tokensBefore)} tokens
         </span>
       </div>
@@ -1460,16 +1469,19 @@ function InlineTimestamp({
   ts: string | undefined
   className?: string
 }): JSX.Element | null {
+  const visibility = useContext(MessageTimestampContext)
+  if (visibility === 'hidden') return null
   if (!ts) return null
   const parsed = Date.parse(ts)
   if (!Number.isFinite(parsed)) return null
   const date = new Date(parsed)
   const label = date.toLocaleString()
-  const short = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const short = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   return (
     <span
       className={cn(
-        'pointer-events-none select-none whitespace-nowrap font-mono text-[0.75rem] leading-none opacity-0 transition-opacity group-hover:opacity-70',
+        'pointer-events-none select-none whitespace-nowrap font-mono text-[0.75rem] leading-none transition-opacity',
+        visibility === 'always' ? 'opacity-70' : 'opacity-0 group-hover:opacity-70 group-focus-within:opacity-70',
         className,
       )}
       title={label}
@@ -1995,7 +2007,7 @@ function MessageRow({
               />
             )
           })}
-          {message.role === 'assistant' && !streaming && (turnTiming || assistantActions) ? (
+          {!streaming && (turnTiming || (message.role === 'assistant' && assistantActions)) ? (
             <div className="flex min-w-0 flex-wrap items-start gap-1" data-testid="assistant-message-footer">
               {assistantActions ? <MessageActions
                 align="start"
@@ -2018,6 +2030,9 @@ function MessageRow({
 function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared').TurnTimingSummary }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const detailsRef = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState<TurnTimingPopoverPosition | null>(null)
   const statusLabel = t(`chatCommon.turnTiming.status.${summary.status === 'completed' || summary.status === 'failed' || summary.status === 'cancelled' || summary.status === 'interrupted' ? summary.status : 'running'}`)
   const activityRows = [
     [t('chatCommon.turnTiming.activeWork'), summary.activeDurationMs],
@@ -2028,53 +2043,209 @@ function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared')
     [t('chatCommon.turnTiming.retry'), summary.retryDurationMs],
     [t('chatCommon.turnTiming.recovery'), summary.recoveryDurationMs],
   ].filter(([, value]) => Number(value) > 0)
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current
+    if (!trigger || typeof window === 'undefined') return
+    const rect = trigger.getBoundingClientRect()
+    const detailsHeight = detailsRef.current?.getBoundingClientRect().height ?? 240
+    setPosition(turnTimingPopoverPosition({
+      anchor: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+      contentHeight: detailsHeight,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    }))
+  }, [])
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null)
+      return
+    }
+    updatePosition()
+    const details = detailsRef.current
+    if (!details || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updatePosition)
+    observer.observe(details)
+    return () => observer.disconnect()
+  }, [open, updatePosition])
+  useEffect(() => {
+    if (!open) return
+    const closeOnOutsideClick = (event: MouseEvent): void => {
+      const target = event.target as Node
+      if (!triggerRef.current?.contains(target) && !detailsRef.current?.contains(target)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      triggerRef.current?.focus()
+    }
+    const reposition = (): void => updatePosition()
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('resize', reposition)
+    window.addEventListener('orientationchange', reposition)
+    document.addEventListener('scroll', reposition, true)
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('orientationchange', reposition)
+      document.removeEventListener('scroll', reposition, true)
+    }
+  }, [open, updatePosition])
+  const detailsId = `turn-timing-details-${summary.turnId}`
   return (
-    <div className="min-w-0 flex-1 basis-72" data-testid={`turn-timing-${summary.turnId}`}>
-      <button type="button" className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-meta text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+    <div className="min-w-0 flex-none" data-testid={`turn-timing-${summary.turnId}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={cn('flex h-7 max-w-full items-center gap-2 rounded-md px-2 text-left text-meta text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground', open && 'bg-muted/60 text-foreground')}
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls={detailsId}
+        aria-haspopup="dialog"
+      >
         <span aria-hidden="true">{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
-        <span>{statusLabel} · {formatTurnDuration(summary.wallDurationMs)}</span>
-        <span className="ml-auto" />
-        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span className="truncate">{statusLabel} · {formatTurnDuration(summary.wallDurationMs)}</span>
+        {open ? <ChevronLeft className="h-3.5 w-3.5 flex-none" /> : <ChevronRight className="h-3.5 w-3.5 flex-none" />}
       </button>
-      {open ? (
-        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-meta" data-testid={`turn-timing-details-${summary.turnId}`}>
-          <section aria-labelledby={`turn-activity-${summary.turnId}`}>
-            <h4 id={`turn-activity-${summary.turnId}`} className="mb-1.5 text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">{t('chatCommon.turnTiming.activity')}</h4>
-            <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
-              {activityRows.map(([label, value]) => <div key={String(label)} className="flex justify-between gap-4"><span className="text-muted-foreground">{label}</span><span className="font-medium tabular-nums text-foreground">{formatTurnDuration(Number(value))}</span></div>)}
-            </div>
-          </section>
+      {open && typeof document !== 'undefined' ? createPortal(
+        <div
+          ref={detailsRef}
+          id={detailsId}
+          role="dialog"
+          aria-label={`${statusLabel} · ${formatTurnDuration(summary.wallDurationMs)}`}
+          className="fixed z-[100] overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-popover p-3 text-meta text-popover-foreground shadow-2xl"
+          style={position
+            ? { left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight }
+            : { left: 8, top: 8, width: Math.max(0, Math.min(384, window.innerWidth - 16)), visibility: 'hidden' }}
+          data-placement={position?.placement}
+          data-mobile={position?.mobile ? 'true' : 'false'}
+          data-testid={detailsId}
+        >
+          <div className="grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
+            <TurnTimingValue label={t('chatCommon.turnTiming.startedAt')} value={formatTimestamp(summary.startedAt)} />
+            {summary.completedAt ? <TurnTimingValue label={t('chatCommon.turnTiming.completedAt')} value={formatTimestamp(summary.completedAt)} /> : null}
+            <TurnTimingValue label={t('chatCommon.turnTiming.total')} value={formatTurnDuration(summary.wallDurationMs)} />
+          </div>
+          {activityRows.length > 0 ? (
+            <section className="mt-2.5 border-t border-border/40 pt-2.5" aria-labelledby={`turn-activity-${summary.turnId}`}>
+              <h4 id={`turn-activity-${summary.turnId}`} className="mb-1.5 text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">{t('chatCommon.turnTiming.activity')}</h4>
+              <div className="grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
+                {activityRows.map(([label, value]) => <TurnTimingValue key={String(label)} label={String(label)} value={formatTurnDuration(Number(value))} />)}
+              </div>
+            </section>
+          ) : null}
           {(summary.tools.callCount > 0 || summary.llm.requestCount > 0) ? (
-            <section className="mt-3 border-t border-border/40 pt-2.5" aria-labelledby={`turn-calls-${summary.turnId}`}>
+            <section className="mt-2.5 border-t border-border/40 pt-2.5" aria-labelledby={`turn-calls-${summary.turnId}`}>
               <h4 id={`turn-calls-${summary.turnId}`} className="mb-1.5 text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">{t('chatCommon.turnTiming.calls')}</h4>
-              <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
-                {summary.llm.requestCount > 0 ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.modelCallsLabel')}</span><span className="font-medium tabular-nums text-foreground">{summary.llm.requestCount}</span></div> : null}
-                {summary.tools.callCount > 0 ? <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.toolCallsLabel')}</span><span className="font-medium tabular-nums text-foreground">{summary.tools.callCount}</span></div> : null}
+              <div className="grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
+                {summary.llm.requestCount > 0 ? <TurnTimingValue label={t('chatCommon.turnTiming.modelCallsLabel')} value={String(summary.llm.requestCount)} /> : null}
+                {summary.tools.callCount > 0 ? <TurnTimingValue label={t('chatCommon.turnTiming.toolCallsLabel')} value={String(summary.tools.callCount)} /> : null}
               </div>
             </section>
           ) : null}
           {summary.tools.callCount > 0 ? (
-            <details className="mt-3 border-t border-border/40 pt-2.5" data-testid={`turn-timing-technical-${summary.turnId}`}>
+            <details className="mt-2.5 border-t border-border/40 pt-2.5" data-testid={`turn-timing-technical-${summary.turnId}`}>
               <summary className="cursor-pointer select-none text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">{t('chatCommon.technicalDetails')}</summary>
-              <div className="mt-2 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
-                <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.aggregateToolTime')}</span><span className="font-medium tabular-nums text-foreground">{formatTurnDuration(summary.tools.aggregateDurationMs)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-muted-foreground">{t('chatCommon.turnTiming.peakConcurrency')}</span><span className="font-medium tabular-nums text-foreground">{summary.tools.peakConcurrency}</span></div>
-                {summary.tools.partial ? <p className="sm:col-span-2 text-muted-foreground">{t('chatCommon.turnTiming.partialExecutor')}</p> : null}
+              <div className="mt-2 grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
+                <TurnTimingValue label={t('chatCommon.turnTiming.aggregateToolTime')} value={formatTurnDuration(summary.tools.aggregateDurationMs)} />
+                <TurnTimingValue label={t('chatCommon.turnTiming.peakConcurrency')} value={String(summary.tools.peakConcurrency)} />
+                {summary.tools.partial ? <p className="text-muted-foreground sm:col-span-2">{t('chatCommon.turnTiming.partialExecutor')}</p> : null}
               </div>
             </details>
           ) : null}
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   )
+}
+
+function TurnTimingValue({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="flex min-w-0 items-baseline justify-between gap-3">
+      <span className="min-w-0 text-muted-foreground">{label}</span>
+      <span className="flex-none font-medium tabular-nums text-foreground">{value}</span>
+    </div>
+  )
+}
+
+type TurnTimingPopoverPosition = {
+  left: number
+  top: number
+  width: number
+  maxHeight: number
+  placement: 'right' | 'left' | 'above' | 'below'
+  mobile: boolean
+}
+
+export function turnTimingPopoverPosition({
+  anchor,
+  contentHeight,
+  viewportWidth,
+  viewportHeight,
+}: {
+  anchor: { left: number; right: number; top: number; bottom: number }
+  contentHeight: number
+  viewportWidth: number
+  viewportHeight: number
+}): TurnTimingPopoverPosition {
+  const inset = 8
+  const gap = 8
+  const mobile = viewportWidth < 640
+  const width = Math.max(0, Math.min(384, viewportWidth - inset * 2))
+  const maxHeight = Math.max(0, viewportHeight - inset * 2)
+  const visibleHeight = Math.min(contentHeight, maxHeight)
+  if (mobile) {
+    const roomBelow = viewportHeight - anchor.bottom - gap - inset
+    const placeBelow = roomBelow >= visibleHeight || roomBelow >= anchor.top - gap - inset
+    return {
+      left: inset,
+      top: placeBelow
+        ? Math.min(anchor.bottom + gap, viewportHeight - visibleHeight - inset)
+        : Math.max(inset, anchor.top - gap - visibleHeight),
+      width,
+      maxHeight,
+      placement: placeBelow ? 'below' : 'above',
+      mobile,
+    }
+  }
+  const roomRight = viewportWidth - anchor.right - gap - inset
+  const roomLeft = anchor.left - gap - inset
+  const placeRight = roomRight >= width || roomRight >= roomLeft
+  return {
+    left: placeRight
+      ? Math.min(anchor.right + gap, viewportWidth - width - inset)
+      : Math.max(inset, anchor.left - gap - width),
+    top: Math.max(inset, Math.min(anchor.top + (anchor.bottom - anchor.top - visibleHeight) / 2, viewportHeight - visibleHeight - inset)),
+    width,
+    maxHeight,
+    placement: placeRight ? 'right' : 'left',
+    mobile,
+  }
 }
 
 function formatTurnDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000))
   if (ms > 0 && seconds === 0) return '<1s'
   if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
+  const days = Math.floor(seconds / 86_400)
+  const hours = Math.floor((seconds % 86_400) / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  const remainder = seconds % 60
+  if (days > 0) return `${days}d ${hours}h ${minutes}m ${remainder}s`
+  if (hours > 0) return `${hours}h ${minutes}m ${remainder}s`
+  return `${minutes}m ${String(remainder).padStart(2, '0')}s`
+}
+
+function formatTimestamp(value: string): string {
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return value
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 function assistantMessageActions(

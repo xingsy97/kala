@@ -68,6 +68,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   appBadgeEnabled: { key: 'ak-app-badge-enabled', type: 'boolean', defaultValue: true },
   keepScreenAwake: { key: 'ak-keep-screen-awake', type: 'boolean', defaultValue: false },
   smoothStreamingText: { key: 'ak-smooth-streaming-text', type: 'boolean', defaultValue: true },
+  messageTimestamps: { key: 'ak-message-timestamps', type: 'string', defaultValue: 'auto' },
   desktopNotificationsEnabled: { key: 'ak-desktop-notifications-enabled', type: 'boolean', defaultValue: false },
   desktopNotificationApproval: { key: 'ak-desktop-notification-approval-required', type: 'boolean', defaultValue: true },
   desktopNotificationWaiting: { key: 'ak-desktop-notification-waiting-for-user', type: 'boolean', defaultValue: true },
@@ -206,6 +207,7 @@ export function useNumberPref(
     const max = options.max ?? Number.POSITIVE_INFINITY
     return Math.min(max, Math.max(min, rounded))
   }
+
   const parse = (raw: string | null): number => {
     if (raw === null) return defaultValue
     return normalize(Number(raw))
@@ -239,6 +241,33 @@ export function useNumberPref(
   return [value, set]
 }
 
+export function useStringPref(
+  key: string,
+  defaultValue: string,
+): [string, (next: string) => void] {
+  const [value, setValue] = useState(() => readStringPref(key, defaultValue))
+  useEffect(() => {
+    const onCustom = (event: Event): void => {
+      const detail = (event as CustomEvent<PrefChangeDetail>).detail
+      if (detail.key === key) setValue(detail.value ?? defaultValue)
+    }
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === key) setValue(event.newValue ?? defaultValue)
+    }
+    window.addEventListener(CHANGE_EVENT, onCustom)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(CHANGE_EVENT, onCustom)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [defaultValue, key])
+  const set = (next: string): void => {
+    writeRaw(key, next)
+    setValue(next)
+  }
+  return [value, set]
+}
+
 export const PREF_SHOW_TOOL_CALL_TAB = DASHBOARD_PREFERENCES.showToolCallTab.key
 export const PREF_SHOW_PINNED_MESSAGE = DASHBOARD_PREFERENCES.showPinnedMessage.key
 export const PREF_INTERFACE_SCALE = DASHBOARD_PREFERENCES.interfaceScale.key
@@ -263,6 +292,7 @@ export const PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES = DASHBOARD_PREFERENCES.se
 export const PREF_APP_BADGE_ENABLED = DASHBOARD_PREFERENCES.appBadgeEnabled.key
 export const PREF_KEEP_SCREEN_AWAKE = DASHBOARD_PREFERENCES.keepScreenAwake.key
 export const PREF_SMOOTH_STREAMING_TEXT = DASHBOARD_PREFERENCES.smoothStreamingText.key
+export const PREF_MESSAGE_TIMESTAMPS = DASHBOARD_PREFERENCES.messageTimestamps.key
 export const PREF_MODEL = DASHBOARD_PREFERENCES.model.key
 export const PREF_AGENT_RUNTIME = DASHBOARD_PREFERENCES.agentRuntime.key
 export const PREF_HOST_ENDPOINT = DASHBOARD_PREFERENCES.hostEndpoint.key

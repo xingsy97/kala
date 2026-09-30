@@ -83,8 +83,12 @@ windows are not dominated by the default reserve.
 - `auto`: host checks `ContextSnapshot.pressureLevel === 'hard'` when a session
   is at rest.
 - `preflight`: host checks before sending another LLM request.
-- `tool_result`: host checks after individual tool results, so one large tool
-  output cannot consume all remaining room before the batch finishes.
+- Tool results are bounded before entering model-visible history. The Host
+  waits for the complete parallel Tool batch to settle and persist, then the
+  ordinary `preflight` check runs before the continuation LLM request.
+- `tool_result` remains a historical metadata/protocol discriminator for old
+  logs, but the active Host loop no longer starts compaction between sibling
+  Tool results.
 
 The host may skip an attempt when the session has no compactable content, a
 runtime guard is active, the summarizer would be unsafe to call, or a circuit
@@ -102,7 +106,6 @@ override this decision with a boolean `resume` flag.
 | `manual` | `idle`, `done`, or `error` | unchanged/resting | Never starts an Agent turn |
 | `auto` | resting, while the Host is closing an existing dispatch | unchanged/resting | Does not independently start a turn; the enclosing dispatch state machine may continue work that was already active |
 | `preflight` | `thinking` | `thinking` | The existing call stack retries/continues the same LLM turn exactly once |
-| `tool_result` | `executing_tools` | `executing_tools` | The existing tool batch continues; it does not create a second LLM turn |
 
 The valid transition set is therefore represented as a discriminated request,
 not independent trigger and resume switches:
@@ -110,8 +113,11 @@ not independent trigger and resume switches:
 ```ts
 type CompactRequest =
   | { trigger: 'manual' | 'auto'; continuation: 'stay_resting' }
-  | { trigger: 'preflight' | 'tool_result'; continuation: 'current_turn' }
+  | { trigger: 'preflight'; continuation: 'current_turn' }
 ```
+
+The TypeScript wire discriminator still accepts `tool_result` for historical
+log compatibility. New runtime requests use the two combinations above.
 
 `manual` is a maintenance action. Once its `messages_replaced` event is
 durable, the Session remains in its prior resting state even if a durable todo
@@ -119,7 +125,8 @@ graph still contains unfinished nodes. The user must send a new message to
 start more Agent work. In particular, the Dashboard must not translate a
 manual Compact click into a recovery event.
 
-`preflight` and `tool_result` happen inside an already-running turn. They do
+`preflight` happens inside an already-running turn after any Tool batch has
+settled. It does
 not persist a synthetic no-op recovery event: the existing Host call stack is
 the continuation checkpoint and proceeds after the replacement. This prevents
 both a stranded turn and a duplicate model call/tool side effect. An `auto`
@@ -214,6 +221,13 @@ Compaction changes the model-visible messages. Therefore the successful
 replacement must be in the event log. Replay/fold sees `messages_replaced` and
 reconstructs the same compacted message list without calling a summarizer.
 
+The anchored Kernel summary also carries `context_compaction` message metadata
+with the attempt ID, trigger, token delta, summary, and lifecycle timestamps.
+This is a durable Dashboard projection fallback: if paged history no longer
+contains the original `messages_replaced` event, `session:ready.state` can
+still reconstruct the latest completed compaction boundary. When both sources
+are present, clients deduplicate them by attempt ID.
+
 `runtime_metadata` entries are not folded into kernel state. They exist for
 debugging, dashboard timelines, and audit trails.
 
@@ -226,6 +240,22 @@ Dashboard context UI reads `contextSnapshot` from host payloads:
 
 The dashboard must not infer pressure from `AgentState`, because context
 pressure is no longer reducer state.
+
+The Dashboard also reads `session:ready.runtimeCompactionPolicy`. Kernel
+Sessions use the configured warning/automatic thresholds. Copilot Sessions
+currently use SDK-managed Infinite Sessions with configurable background and
+blocking thresholds (80% and 95% by default). Those values must never be
+replaced by Kernel defaults in the UI.
+
+Compaction lifecycle snapshots have distinct meanings:
+
+- `startSnapshot`: immutable usage when the attempt started;
+- `contextSnapshot`: latest current usage, which may arrive while background
+  compaction is still running;
+- `completionSnapshot`: usage reported after successful replacement.
+
+Root and subagent lifecycle events are scoped independently. A subagent event
+must not overwrite the root Session's usage or compaction state.
 
 Timeline compaction markers are derived from
 `messages_replaced(reason='compaction')`. Summarizer request/response evidence

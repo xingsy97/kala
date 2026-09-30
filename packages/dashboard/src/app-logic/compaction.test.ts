@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { COPILOT_RUNTIME_COMPACTION_POLICY, kernelRuntimeCompactionPolicy } from '@agent-kernel/shared'
 
 import {
   compactFailureMessage,
@@ -29,11 +30,12 @@ describe('compaction event predicates', () => {
   })
 
   describe('auto-compaction queue visibility', () => {
-    it('only predicts queued compaction for the Kernel runtime', () => {
-      expect(shouldShowQueuedAutoCompact('kernel', true, true)).toBe(true)
-      expect(shouldShowQueuedAutoCompact('copilot', true, true)).toBe(false)
-      expect(shouldShowQueuedAutoCompact('kernel', false, true)).toBe(false)
-      expect(shouldShowQueuedAutoCompact('kernel', true, false)).toBe(false)
+    it('only predicts queued compaction for safe-boundary policies', () => {
+      const kernel = kernelRuntimeCompactionPolicy()
+      expect(shouldShowQueuedAutoCompact(kernel, true, true)).toBe(true)
+      expect(shouldShowQueuedAutoCompact(COPILOT_RUNTIME_COMPACTION_POLICY, true, true)).toBe(false)
+      expect(shouldShowQueuedAutoCompact(kernel, false, true)).toBe(false)
+      expect(shouldShowQueuedAutoCompact(kernel, true, false)).toBe(false)
     })
   })
 })

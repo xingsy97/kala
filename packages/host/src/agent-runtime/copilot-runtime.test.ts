@@ -193,6 +193,76 @@ describe('Copilot runtime custom tools', () => {
     store = new SessionStore(dir)
   })
 
+  it('publishes and configures effective low thresholds for inexpensive compaction tests', async () => {
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, {
+      enabled: true,
+      sessionsDir: dir,
+      backgroundCompactionThreshold: 0.1,
+      bufferExhaustionThreshold: 0.2,
+    })
+
+    expect(runtime.descriptor().compactionPolicy).toMatchObject({
+      authority: 'runtime',
+      automatic: {
+        mode: 'background',
+        startThreshold: 0.1,
+        blockingThreshold: 0.2,
+      },
+    })
+
+    const record = await store.create({
+      sessionId: 'copilot-low-compaction-thresholds',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [] }),
+    })
+    sdk.responses.push({
+      type: 'assistant.message',
+      id: 'low-threshold-response',
+      timestamp: '2026-08-30T00:00:00.000Z',
+      data: { content: 'done', messageId: 'low-threshold-message' },
+    })
+    await runtime.start()
+    await runtime.send(record, { text: 'Use a small synthetic context.' })
+    expect(sdk.configs.at(-1)?.infiniteSessions).toEqual({
+      enabled: true,
+      backgroundCompactionThreshold: 0.1,
+      bufferExhaustionThreshold: 0.2,
+    })
+    await runtime.close()
+  })
+
+  it.each([
+    [0, 0.2],
+    [0.2, 0.2],
+    [0.3, 0.2],
+    [0.1, 1.1],
+  ])('rejects invalid compaction thresholds %s/%s', (background, blocking) => {
+    expect(() => new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: 'unused' } }, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, {
+      enabled: false,
+      sessionsDir: dir,
+      backgroundCompactionThreshold: background,
+      bufferExhaustionThreshold: blocking,
+    })).toThrow(/compaction thresholds/i)
+  })
+
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
   })
@@ -681,6 +751,9 @@ describe('Copilot runtime custom tools', () => {
         apiCallId: 'api-usage-1',
       },
     })
+    await vi.waitFor(() => expect(onState.mock.calls.some((call) =>
+      (call[2] as ContextUsageSnapshot | undefined)?.usage.inputTokens === 100_000
+    )).toBe(true))
     await waitForUsage(record.sessionId, 91_000)
     expect(store.get(record.sessionId)?.state.usage).toMatchObject({
       inputTokens: 91_000,
@@ -698,6 +771,14 @@ describe('Copilot runtime custom tools', () => {
     await vi.waitFor(() => expect(record.state.messages.some((message) =>
       message.metadata?.kind === 'context_compaction' && message.metadata.phase === 'running'
     )).toBe(true))
+    emit({
+      type: 'session.compaction_start',
+      id: 'subagent-compact-start',
+      parentId: null,
+      timestamp: '2026-08-30T00:00:01.500Z',
+      agentId: 'research-agent',
+      data: { currentTokens: 90_000, tokenLimit: 128_000, trigger: 'threshold' },
+    })
     await store.recordRuntimeProjection(record.sessionId, {
       ...record.state,
       cursor: record.state.cursor + 1,
@@ -717,13 +798,12 @@ describe('Copilot runtime custom tools', () => {
         postCompactionTokens: 32_000,
         systemTokens: 2_000,
         conversationTokens: 32_000,
-        toolDefinitionsTokens: 4_000,
         tokenLimit: 128_000,
         messagesRemoved: 30,
         summaryContent: '# Compacted Context\n\nPreserve the current task.',
       },
     })
-    await vi.waitFor(() => expect(onCompactStatus).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(onCompactStatus).toHaveBeenCalledTimes(3))
 
     expect(onState).toHaveBeenCalledWith(expect.objectContaining({ sessionId: record.sessionId }), expect.any(Object), expect.objectContaining({
       contextWindow: { tokens: 128_000, source: 'api_reported' },
@@ -736,15 +816,18 @@ describe('Copilot runtime custom tools', () => {
       contextWindow: { tokens: 128_000, source: 'api_reported' },
       usage: { inputTokens: 104_000, totalTokens: 104_000 },
     }))
-    expect(onCompactStatus).toHaveBeenNthCalledWith(1, {
+    expect(onCompactStatus).toHaveBeenNthCalledWith(1, expect.objectContaining({
       sessionId: record.sessionId,
       kind: 'running',
       trigger: 'auto',
       tokensBefore: 104_000,
       attemptId: 'compact-start-1',
       startedAt: '2026-08-30T00:00:01.000Z',
-    })
-    expect(onCompactStatus).toHaveBeenNthCalledWith(2, {
+      authority: 'runtime',
+      scope: { kind: 'root' },
+      startSnapshot: expect.objectContaining({ usage: { inputTokens: 104_000, totalTokens: 104_000 } }),
+    }))
+    expect(onCompactStatus).toHaveBeenNthCalledWith(3, expect.objectContaining({
       sessionId: record.sessionId,
       kind: 'done',
       attemptId: 'compact-start-1',
@@ -754,7 +837,11 @@ describe('Copilot runtime custom tools', () => {
       replacedCount: 30,
       summary: '# Compacted Context\n\nPreserve the current task.',
       endedAt: '2026-08-30T00:00:02.000Z',
-    })
+      authority: 'runtime',
+      scope: { kind: 'root' },
+      summaryValidation: 'runtime_reported',
+      completionSnapshot: expect.objectContaining({ usage: { inputTokens: 32_000, totalTokens: 32_000 } }),
+    }))
     const compactMarkerIndex = record.state.messages.findIndex((message) =>
       message.metadata?.kind === 'context_compaction'
     )
@@ -769,12 +856,50 @@ describe('Copilot runtime custom tools', () => {
       summary: '# Compacted Context\n\nPreserve the current task.',
     })
     expect(onState).toHaveBeenCalledWith(expect.objectContaining({ sessionId: record.sessionId }), expect.any(Object), expect.objectContaining({
-      usage: { inputTokens: 38_000, totalTokens: 38_000 },
+      usage: { inputTokens: 32_000, totalTokens: 32_000 },
     }))
+
+    const rootMessageCount = record.state.messages.length
+    emit({
+      type: 'session.usage_info',
+      id: 'subagent-usage',
+      parentId: null,
+      timestamp: '2026-08-30T00:00:02.500Z',
+      ephemeral: true,
+      agentId: 'research-agent',
+      data: { currentTokens: 90_000, tokenLimit: 128_000, messagesLength: 12 },
+    })
+    expect(onState.mock.calls.some((call) =>
+      (call[2] as ContextUsageSnapshot | undefined)?.usage.inputTokens === 90_000
+    )).toBe(false)
+    emit({
+      type: 'session.compaction_complete',
+      id: 'subagent-compact-complete',
+      parentId: 'subagent-compact-start',
+      timestamp: '2026-08-30T00:00:04.000Z',
+      agentId: 'research-agent',
+      data: {
+        success: true,
+        preCompactionTokens: 90_000,
+        postCompactionTokens: 20_000,
+        tokenLimit: 128_000,
+        trigger: 'threshold',
+      },
+    })
+    await vi.waitFor(() => expect(onCompactStatus).toHaveBeenCalledTimes(4))
+    expect(onCompactStatus).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      kind: 'running',
+      scope: { kind: 'subagent', agentId: 'research-agent' },
+    }))
+    expect(onCompactStatus).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      kind: 'done',
+      scope: { kind: 'subagent', agentId: 'research-agent' },
+    }))
+    expect(record.state.messages).toHaveLength(rootMessageCount)
     await runtime.close()
   })
 
-  it('updates provider context after autonomous tool iterations and ignores stale snapshots', async () => {
+  it('keeps per-call usage separate from current context and ignores stale snapshots', async () => {
     const snapshots: ContextUsageSnapshot[] = []
     const runtime = new CopilotAgentRuntime({
       store,
@@ -834,19 +959,37 @@ describe('Copilot runtime custom tools', () => {
       timestamp: '2026-09-26T14:00:03.000Z',
       data: { model: 'gpt-5.4-mini', inputTokens: 80_000, outputTokens: 100, apiCallId: 'api-tool-2' },
     })
-    await vi.waitFor(() => expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(80_000))
+    await vi.waitFor(() => expect(record.state.usage.inputTokens).toBe(155_000))
     expect(record.runtimeContextSnapshot).toMatchObject({
       contextWindow: { tokens: 272_000, source: 'api_reported' },
-      usage: { inputTokens: 80_000, totalTokens: 80_000 },
+      usage: { inputTokens: 70_000, totalTokens: 70_000 },
       estimator: { total: { kind: 'provider_reported', confidence: 'exact' } },
     })
 
+    emit({
+      type: 'session.usage_info', id: 'current-context', parentId: null,
+      timestamp: '2026-09-26T14:00:03.500Z', ephemeral: true,
+      data: { currentTokens: 80_000, tokenLimit: 272_000, messagesLength: 14 },
+    })
+    await vi.waitFor(() => expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(80_000))
     emit({
       type: 'session.usage_info', id: 'late-stale-context', parentId: null,
       timestamp: '2026-09-26T14:00:01.500Z', ephemeral: true,
       data: { currentTokens: 71_000, tokenLimit: 272_000, messagesLength: 11 },
     })
     expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(80_000)
+    const warning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {})
+    emit({
+      type: 'session.usage_info', id: 'unexplained-regression', parentId: null,
+      timestamp: '2026-09-26T14:00:03.750Z', ephemeral: true,
+      data: { currentTokens: 60_000, tokenLimit: 272_000, messagesLength: 13 },
+    })
+    expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(80_000)
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining('80000 -> 60000'),
+      { code: 'KALA_CONTEXT_USAGE_REGRESSION' },
+    )
+    warning.mockRestore()
 
     sdk.responses.push({
       type: 'assistant.message', id: 'second-response', timestamp: '2026-09-26T14:00:04.000Z',
@@ -858,12 +1001,13 @@ describe('Copilot runtime custom tools', () => {
       timestamp: '2026-09-26T14:00:05.000Z',
       data: { model: 'gpt-5.4-mini', inputTokens: 30_000, outputTokens: 50, apiCallId: 'api-next-turn' },
     })
-    await vi.waitFor(() => expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(30_000))
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.usage.inputTokens).toBe(185_000))
+    expect(record.runtimeContextSnapshot?.usage.inputTokens).toBe(80_000)
     expect(store.get(record.sessionId)?.state.usage.inputTokens).toBe(185_000)
-    expect(snapshots.at(-1)?.estimator.version).toBe('copilot-sdk-assistant-usage-v1')
+    expect(snapshots.at(-1)?.estimator.version).toBe('copilot-sdk-usage-info-v1')
     await vi.waitFor(async () => {
       const reloaded = await new SessionStore(dir).load(record.sessionId)
-      expect(reloaded.runtimeContextSnapshot?.usage.inputTokens).toBe(30_000)
+      expect(reloaded.runtimeContextSnapshot?.usage.inputTokens).toBe(80_000)
     })
     await runtime.close()
   })
@@ -910,6 +1054,15 @@ describe('Copilot runtime custom tools', () => {
     const oldRequestId = (sdk.sentMessages[0] as { requestHeaders: Record<string, string> }).requestHeaders['x-request-id']
     await runtime.cancel(record)
     expect(record.state.status).toBe('done')
+    expect(record.state.messages.at(-1)).toMatchObject({
+      role: 'user',
+      metadata: {
+        kind: 'temporal',
+        turnStatus: 'cancelled',
+        turnCompletedAt: expect.any(String),
+        turnDurationMs: expect.any(Number),
+      },
+    })
 
     emit({
       type: 'assistant.message', id: 'late-before-new', parentId: null,
@@ -1508,9 +1661,17 @@ describe('Copilot runtime custom tools', () => {
     await runtime.send(record, { text: 'Reply with OK.' })
     await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
 
-    expect(store.get(record.sessionId)?.state.messages.at(-1)).toEqual({
+    expect(store.get(record.sessionId)?.state.messages.at(-1)).toMatchObject({
       role: 'assistant',
       content: [{ type: 'text', text: 'OK' }],
+      metadata: {
+        kind: 'temporal',
+        turnStatus: 'completed',
+        createdAt: expect.any(String),
+        turnStartedAt: expect.any(String),
+        turnCompletedAt: expect.any(String),
+        turnDurationMs: expect.any(Number),
+      },
     })
     await runtime.close()
   })
@@ -1550,9 +1711,10 @@ describe('Copilot runtime custom tools', () => {
     await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
 
     expect(publishLocalImages).toHaveBeenCalledOnce()
-    expect(store.get(record.sessionId)?.state.messages.at(-1)).toEqual({
+    expect(store.get(record.sessionId)?.state.messages.at(-1)).toMatchObject({
       role: 'assistant',
       content: [{ type: 'text', text: '![Design](artifact://published-image?mediaType=image%2Fpng)' }],
+      metadata: { kind: 'temporal', turnStatus: 'completed' },
     })
     await runtime.close()
   })

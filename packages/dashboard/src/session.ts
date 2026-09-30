@@ -70,6 +70,7 @@ export type SessionView = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  runtimeCompactionPolicy: import('@agent-kernel/shared').RuntimeCompactionPolicy
   /** Host-authoritative start of the current/latest committed user turn. */
   turnStartedAt: string | null
   /**
@@ -183,7 +184,7 @@ export function useSession({
     if (!cache || !projection.sessionId || projection.hydratedSessionId !== projection.sessionId) return
     const checkpoint = {
       sessionId: projection.sessionId, status: projection.status, executionMode: projection.executionMode, state: projection.state,
-      config: projection.config, contextSnapshot: projection.contextSnapshot,
+      config: projection.config, contextSnapshot: projection.contextSnapshot, runtimeCompactionPolicy: projection.runtimeCompactionPolicy,
       turnStartedAt: projection.turnStartedAt, turnStartedAtCursor: projection.turnStartedAtCursor,
       timeline: projection.timeline,
       queuedMessages: projection.queuedMessages, lastError: projection.lastError,
@@ -765,7 +766,7 @@ export function useSession({
       }
 
   const {
-    status, agentRuntime, executionMode, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
+    status, agentRuntime, executionMode, state, config, contextSnapshot, runtimeCompactionPolicy, compactStatus: remoteCompactStatus, timeline,
     queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, turnStartedAt,
     hydratedSessionId, historyLoadedSessionId,
   } = selectedProjection
@@ -824,6 +825,7 @@ export function useSession({
       state,
       config,
       contextSnapshot,
+      runtimeCompactionPolicy,
       turnStartedAt,
       compactStatus: remoteCompactStatus,
       timeline,
@@ -851,6 +853,7 @@ export function useSession({
       state,
       config,
       contextSnapshot,
+      runtimeCompactionPolicy,
       turnStartedAt,
       remoteCompactStatus,
       timeline,

@@ -1,5 +1,5 @@
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
-import type { AgentRuntimeId, ContextUsageSnapshot, QueuedMessagePreview, SessionErrorEvent, SessionExecutionMode } from '@agent-kernel/shared'
+import type { AgentRuntimeId, ContextUsageSnapshot, QueuedMessagePreview, RuntimeCompactionPolicy, SessionErrorEvent, SessionExecutionMode } from '@agent-kernel/shared'
 
 import { DASHBOARD_PREFERENCES } from './lib/prefs.js'
 import type { ConnectionStatus, TimelineEntry } from './session-projection.js'
@@ -18,6 +18,7 @@ export type CachedSessionView = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  runtimeCompactionPolicy?: RuntimeCompactionPolicy
   /** Optional for durable entries written by older Dashboard versions. */
   turnStartedAt?: string | null
   turnStartedAtCursor?: number | null

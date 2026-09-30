@@ -80,6 +80,26 @@ Emitted once per client, right after handshake succeeds.
     customTools: boolean
     nativeReasoning: boolean
   }
+  runtimeCompactionPolicy: {
+    authority: 'host' | 'runtime'
+    automatic: {
+      enabled: boolean
+      mode: 'safe_boundary' | 'background'
+      warningThreshold: number
+      startThreshold: number
+      blockingThreshold?: number
+      concurrentWorkAllowed: boolean
+    }
+    manual: {
+      supported: boolean
+      whileActive: 'reject' | 'queue' | 'runtime_managed'
+    }
+    summary: {
+      authority: 'host' | 'runtime'
+      validation: 'host_gate' | 'runtime_reported'
+    }
+  }
+  compactStatus?: CompactStatusEvent // active root attempt at hydration time
   cursor: number              // current event cursor of the session
   state: AgentState           // current snapshot (see SPEC §1.4)
   config: AgentConfig         // (see SPEC §1.3)
@@ -92,6 +112,23 @@ Emitted once per client, right after handshake succeeds.
   selectedModel?: string      // per-session model override, if one has been set
 }
 ```
+
+`runtimeCompactionPolicy` is the effective policy for this Session, not a
+Dashboard default. Kernel Sessions publish their configured soft/hard
+thresholds and Host authority. Copilot Sessions publish the thresholds passed
+to the SDK, runtime authority, and whether background work may continue.
+Clients must not infer these semantics from `agentRuntime`.
+
+`compactStatus` restores an active root attempt for a Dashboard that attaches
+or reconnects after the `server:compact_status` running broadcast. Terminal
+attempts remain represented by the transcript/runtime metadata and are not
+replayed as active.
+
+`server:compact_status` lifecycle payloads may additionally carry `authority`,
+root/subagent `scope`, and immutable `startSnapshot` /
+`completionSnapshot` values. The current `state:changed.contextSnapshot` is a
+separate, later measurement; clients must not present it as the trigger
+snapshot.
 
 ### 3.2 `state:changed`
 
@@ -769,6 +806,40 @@ Host derives these fields by reading each session's JSONL header + scanning even
 #### `server:history`
 
 Response to `client:load_history`.
+
+#### Storage inventory and cleanup
+
+Storage inventory is lazy. Cached queries do not scan the filesystem; callers
+set `refresh: true` when they explicitly want a metadata-only reconciliation.
+The Host reads only session headers and file metadata, never complete JSONL
+transcripts.
+
+```text
+client:get_session_storage { sessionId, refresh? }
+  -> ACK RpcAck<SessionStorageSnapshot>
+
+client:get_global_storage { refresh? }
+  -> ACK RpcAck<GlobalStorageSnapshot>
+```
+
+Destructive cleanup uses a two-phase protocol:
+
+```text
+client:prepare_storage_cleanup { operation, targetId }
+  -> ACK RpcAck<StorageCleanupPlanPreview>
+
+client:execute_storage_cleanup { planId }
+  -> ACK RpcAck<StorageCleanupResult>
+```
+
+Preparation returns only a sanitized preview, never absolute Host paths. The
+Host records an exact inode manifest and expiry internally. Execution
+revalidates ownership, active Session state, path boundaries, symlinks, file
+identity and the complete manifest before any move. Successful execution
+atomically quarantines data on the same filesystem; it does not permanently
+unlink quarantine contents. Sub-agent detail cleanup preserves a tombstone and
+the parent Session's durable result. Dashboard deletion surfaces require two
+explicit operator confirmations between preparation and execution.
 
 ```ts
 {
@@ -1449,6 +1520,10 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Dashboard | `client:fork` | Host (kernel + storage) |
 | Dashboard | `client:list_executors` | Host (routing) |
 | Dashboard | `client:list_sessions` | Host (storage) |
+| Dashboard | `client:get_session_storage` | Host (storage inventory) |
+| Dashboard | `client:get_global_storage` | Host (storage inventory) |
+| Dashboard | `client:prepare_storage_cleanup` | Host (safe cleanup) |
+| Dashboard | `client:execute_storage_cleanup` | Host (safe cleanup) |
 | Dashboard | `client:list_dirs` | Host → Executor (`fs:list_dirs`) |
 | Dashboard | `client:list_files` | Host → Executor (`fs:list_files`) |
 | Dashboard | `client:read_file` | Host → Executor (`fs:read_file`) |

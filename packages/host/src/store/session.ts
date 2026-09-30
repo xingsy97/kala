@@ -364,6 +364,8 @@ export type SessionStoreOptions = {
   artifactRootDir?: string | false
   /** Removes registry-backed Session artifacts that live outside artifactRootDir. */
   deleteRegisteredArtifacts?(sessionId: string): Promise<void>
+  /** Marks lazily cached storage measurements stale without doing filesystem I/O. */
+  onStorageChanged?(sessionId: string): void
 }
 
 export class SessionNotFoundError extends Error {
@@ -398,6 +400,8 @@ export class SessionStore {
    */
   private readonly inFlight = new Map<string, Promise<SessionRecord>>()
   private readonly runtimeRecoveries = new Map<string, Promise<void>>()
+  private readonly sessionLoadTails = new Map<string, Promise<SessionRecord>>()
+  private readonly storageTombstones = new Set<string>()
   private readonly locallyProjectedExternalSessions = new Set<string>()
   /**
    * Last-resort per-Session commit lock. HostLoop normally serializes turns, but
@@ -408,6 +412,9 @@ export class SessionStore {
   private readonly recordTails = new Map<string, Promise<void>>()
   /** Serializes the sidecar write because onState intentionally does not await it. */
   private readonly runtimeContextSnapshotTails = new Map<string, Promise<void>>()
+  private readonly auxiliaryStorageWriteTails = new Map<string, Promise<unknown>>()
+  private readonly storageCleanupLeases = new Set<string>()
+  private readonly pendingStorageMutations = new Map<string, Set<Promise<void>>>()
 
   constructor(private readonly sessionsDir: string, private readonly options: SessionStoreOptions = {}) {
     mkdirSync(this.sessionsDir, { recursive: true })
@@ -417,8 +424,74 @@ export class SessionStore {
     return this.sessionsDir
   }
 
+  assertStorageWritable(sessionId: string): void {
+    if (this.storageTombstones.has(sessionId)) {
+      throw new Error(`Session ${sessionId} details were quarantined`)
+    }
+    if (this.storageCleanupLeases.has(sessionId)) {
+      throw new Error(`Session ${sessionId} is locked for storage cleanup`)
+    }
+  }
+
+  async withStorageMutationLease<T>(
+    sessionIds: readonly string[],
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const ids = [...new Set(sessionIds)].sort()
+    for (const sessionId of ids) this.assertStorageWritable(sessionId)
+    for (const sessionId of ids) this.storageCleanupLeases.add(sessionId)
+    try {
+      await Promise.all(ids.flatMap((sessionId) => [
+        this.recordTails.get(sessionId) ?? Promise.resolve(),
+        this.runtimeContextSnapshotTails.get(sessionId) ?? Promise.resolve(),
+        this.auxiliaryStorageWriteTails.get(sessionId) ?? Promise.resolve(),
+        this.sessionLoadTails.get(sessionId) ?? Promise.resolve(),
+        this.inFlight.get(sessionId) ?? Promise.resolve(),
+        ...(this.pendingStorageMutations.get(sessionId) ?? []),
+      ]))
+      return await action()
+    } finally {
+      for (const sessionId of ids) this.storageCleanupLeases.delete(sessionId)
+    }
+  }
+
+  installStorageTombstones(sessionIds: readonly string[]): void {
+    this.evictQuarantinedSessions(sessionIds)
+  }
+
+  evictQuarantinedSessions(sessionIds: readonly string[]): void {
+    for (const sessionId of sessionIds) {
+      this.storageTombstones.add(sessionId)
+      const record = this.records.get(sessionId)
+      if (record) {
+        this.summaryCache.delete(record.logPath)
+        this.summaryLoads.delete(record.logPath)
+      }
+      this.records.delete(sessionId)
+      this.inFlight.delete(sessionId)
+      this.runtimeRecoveries.delete(sessionId)
+      this.locallyProjectedExternalSessions.delete(sessionId)
+      this.recordTails.delete(sessionId)
+      this.runtimeContextSnapshotTails.delete(sessionId)
+      this.auxiliaryStorageWriteTails.delete(sessionId)
+    }
+  }
+
   async create(params: CreateSessionParams): Promise<SessionRecord> {
     const sessionId = params.sessionId ?? ulid()
+    const mutationIds = [
+      sessionId,
+      ...(params.parentSessionId ? [params.parentSessionId] : []),
+    ]
+    const releaseMutation = this.beginStorageMutation(mutationIds)
+    try {
+      return await this.createRecord(params, sessionId)
+    } finally {
+      releaseMutation()
+    }
+  }
+
+  private async createRecord(params: CreateSessionParams, sessionId: string): Promise<SessionRecord> {
     const initialState =
       params.initialState ??
       createInitialState({
@@ -539,7 +612,28 @@ export class SessionStore {
     }
     this.records.set(sessionId, record)
     this.summaryCache.delete(logPath)
+    this.notifyStorageChanged(sessionId)
     return record
+  }
+
+  private beginStorageMutation(sessionIds: readonly string[]): () => void {
+    const ids = [...new Set(sessionIds)].sort()
+    for (const sessionId of ids) this.assertStorageWritable(sessionId)
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    for (const sessionId of ids) {
+      const mutations = this.pendingStorageMutations.get(sessionId) ?? new Set<Promise<void>>()
+      mutations.add(pending)
+      this.pendingStorageMutations.set(sessionId, mutations)
+    }
+    return () => {
+      for (const sessionId of ids) {
+        const mutations = this.pendingStorageMutations.get(sessionId)
+        mutations?.delete(pending)
+        if (mutations?.size === 0) this.pendingStorageMutations.delete(sessionId)
+      }
+      release()
+    }
   }
 
   get(sessionId: string): SessionRecord | undefined {
@@ -558,6 +652,7 @@ export class SessionStore {
 
   async updatePreferences(sessionId: string, patch: SessionPreferences): Promise<SessionPreferences> {
     const rec = this.records.get(sessionId) ?? (await this.load(sessionId))
+    this.assertStorageWritable(sessionId)
     const next: SessionPreferences = { ...rec.preferences }
     let changed = false
     if ('selectedModel' in patch) {
@@ -582,19 +677,34 @@ export class SessionStore {
       changed = true
     }
     if (changed) {
-      rec.preferences = next
-      await appendMetadataEntry(rec.logPath, {
-        ...('selectedModel' in patch ? { selectedModel: next.selectedModel ?? '' } : {}),
-        ...('toolCardMode' in patch && next.toolCardMode ? { toolCardMode: next.toolCardMode } : {}),
-        ...('transcriptViewStart' in patch && next.transcriptViewStart !== undefined ? { transcriptViewStart: next.transcriptViewStart } : {}),
-        ...('rightPanelTab' in patch && next.rightPanelTab ? { rightPanelTab: next.rightPanelTab } : {}),
+      await this.runAuxiliaryStorageWrite(sessionId, async () => {
+        rec.preferences = next
+        await appendMetadataEntry(rec.logPath, {
+          ...('selectedModel' in patch ? { selectedModel: next.selectedModel ?? '' } : {}),
+          ...('toolCardMode' in patch && next.toolCardMode ? { toolCardMode: next.toolCardMode } : {}),
+          ...('transcriptViewStart' in patch && next.transcriptViewStart !== undefined ? { transcriptViewStart: next.transcriptViewStart } : {}),
+          ...('rightPanelTab' in patch && next.rightPanelTab ? { rightPanelTab: next.rightPanelTab } : {}),
+        })
       })
       this.summaryCache.delete(rec.logPath)
+      this.notifyStorageChanged(sessionId)
     }
     return next
   }
 
   async load(sessionId: string, options: { recoverDangling?: boolean; runtimeConfig?: AgentConfig } = {}): Promise<SessionRecord> {
+    this.assertStorageWritable(sessionId)
+    const previous = this.sessionLoadTails.get(sessionId) ?? Promise.resolve()
+    const load = previous.catch(() => undefined).then(async () => await this.loadUnlocked(sessionId, options))
+    this.sessionLoadTails.set(sessionId, load)
+    try {
+      return await load
+    } finally {
+      if (this.sessionLoadTails.get(sessionId) === load) this.sessionLoadTails.delete(sessionId)
+    }
+  }
+
+  private async loadUnlocked(sessionId: string, options: { recoverDangling?: boolean; runtimeConfig?: AgentConfig }): Promise<SessionRecord> {
     const recoverDangling = options.recoverDangling !== false
     const cached = this.records.get(sessionId)
     if (cached) {
@@ -707,6 +817,7 @@ export class SessionStore {
     preferences?: SessionPreferences
     runtimeConfig?: AgentConfig
   }): Promise<{ record: SessionRecord; created: boolean }> {
+    this.assertStorageWritable(params.sessionId)
     const cached = this.records.get(params.sessionId)
     if (cached) {
       this.applyRuntimeConfig(cached, this.resolveRuntimeConfig(params.runtimeConfig ?? params.defaultConfig, cached.executionMode))
@@ -829,6 +940,7 @@ export class SessionStore {
     },
   ): Promise<void> {
     if (record.sessionId !== params.sessionId) return
+    this.assertStorageWritable(record.sessionId)
     let metadataChanged = false
     if (record.workspaceId === undefined && params.workspaceId !== undefined) {
       ;(record as { workspaceId?: string }).workspaceId = params.workspaceId
@@ -851,12 +963,14 @@ export class SessionStore {
       metadataChanged = true
     }
     if (metadataChanged) {
-      await appendMetadataEntry(record.logPath, {
-        ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
-        ...(record.workspaceName !== undefined ? { workspaceName: record.workspaceName } : {}),
-        ...(record.organizationId !== undefined ? { organizationId: record.organizationId } : {}),
-        ...(record.principal !== undefined ? { principal: record.principal } : {}),
-        ...(record.organizationRole !== undefined ? { organizationRole: record.organizationRole } : {}),
+      await this.runAuxiliaryStorageWrite(record.sessionId, async () => {
+        await appendMetadataEntry(record.logPath, {
+          ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
+          ...(record.workspaceName !== undefined ? { workspaceName: record.workspaceName } : {}),
+          ...(record.organizationId !== undefined ? { organizationId: record.organizationId } : {}),
+          ...(record.principal !== undefined ? { principal: record.principal } : {}),
+          ...(record.organizationRole !== undefined ? { organizationRole: record.organizationRole } : {}),
+        })
       })
       this.summaryCache.delete(record.logPath)
     }
@@ -885,6 +999,7 @@ export class SessionStore {
     model?: string,
     timing?: import('@agent-kernel/shared').EventTimingMetadata,
   ): Promise<void> {
+    this.assertStorageWritable(sessionId)
     const previous = this.recordTails.get(sessionId) ?? Promise.resolve()
     const commit = previous.catch(() => undefined).then(async () => {
       const rec = this.records.get(sessionId)
@@ -916,6 +1031,7 @@ export class SessionStore {
         rec.firstUserMessage = event.text
       }
       this.summaryCache.delete(rec.logPath)
+      this.notifyStorageChanged(sessionId)
     })
     this.recordTails.set(sessionId, commit)
     try {
@@ -931,6 +1047,7 @@ export class SessionStore {
     action: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
+    this.assertStorageWritable(sessionId)
     const previous = this.recordTails.get(sessionId) ?? Promise.resolve()
     const commit = previous.catch(() => undefined).then(async () => {
       const rec = this.records.get(sessionId)
@@ -956,6 +1073,7 @@ export class SessionStore {
       this.locallyProjectedExternalSessions.add(sessionId)
       if (!rec.firstUserMessage) rec.firstUserMessage = firstUserMessageFromState(nextState)
       this.summaryCache.delete(rec.logPath)
+      this.notifyStorageChanged(sessionId)
     })
     this.recordTails.set(sessionId, commit)
     try {
@@ -1010,12 +1128,16 @@ export class SessionStore {
    * broadcast it without re-reading the record.
    */
   async rename(sessionId: string, label: string): Promise<string> {
+    this.assertStorageWritable(sessionId)
     const rec = this.records.get(sessionId) ?? (await this.load(sessionId))
     const trimmed = label.trim()
-    await appendMetadataEntry(rec.logPath, { label: trimmed })
-    if (trimmed.length === 0) delete rec.label
-    else rec.label = trimmed
+    await this.runAuxiliaryStorageWrite(sessionId, async () => {
+      await appendMetadataEntry(rec.logPath, { label: trimmed })
+      if (trimmed.length === 0) delete rec.label
+      else rec.label = trimmed
+    })
     this.summaryCache.delete(rec.logPath)
+    this.notifyStorageChanged(sessionId)
     return trimmed
   }
 
@@ -1028,15 +1150,22 @@ export class SessionStore {
     for (const summary of summaries) {
       if (summary.workspaceId !== workspaceId) continue
       const rec = this.records.get(summary.sessionId) ?? (await this.load(summary.sessionId))
-      await appendMetadataEntry(rec.logPath, { workspaceName: trimmed })
-      ;(rec as { workspaceName?: string }).workspaceName = trimmed
+      await this.runAuxiliaryStorageWrite(rec.sessionId, async () => {
+        await appendMetadataEntry(rec.logPath, { workspaceName: trimmed })
+        ;(rec as { workspaceName?: string }).workspaceName = trimmed
+      })
       this.summaryCache.delete(rec.logPath)
+      this.notifyStorageChanged(rec.sessionId)
       count += 1
     }
     return count
   }
 
   async delete(sessionId: string): Promise<void> {
+    await this.runAuxiliaryStorageWrite(sessionId, async () => await this.deleteUnlocked(sessionId))
+  }
+
+  private async deleteUnlocked(sessionId: string): Promise<void> {
     const paths = this.findLogsBySessionId(sessionId)
     const artifactSlugs = new Set(paths.map((path) => basename(path, '.jsonl')))
     const logArtifactRoot = join(this.sessionsDir, 'artifacts')
@@ -1068,6 +1197,35 @@ export class SessionStore {
       }
     }
     await this.options.deleteRegisteredArtifacts?.(sessionId)
+    this.notifyStorageChanged(sessionId)
+  }
+
+  private notifyStorageChanged(sessionId: string): void {
+    try {
+      this.options.onStorageChanged?.(sessionId)
+    } catch (error) {
+      process.emitWarning(
+        `Session storage inventory invalidation failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+        { code: 'KALA_STORAGE_INVENTORY_INVALIDATION' },
+      )
+    }
+  }
+
+  private async runAuxiliaryStorageWrite<T>(sessionId: string, action: () => Promise<T>): Promise<T> {
+    this.assertStorageWritable(sessionId)
+    const previous = this.auxiliaryStorageWriteTails.get(sessionId) ?? Promise.resolve()
+    const write = previous.catch(() => undefined).then(async () => {
+      this.assertStorageWritable(sessionId)
+      return await action()
+    })
+    this.auxiliaryStorageWriteTails.set(sessionId, write)
+    try {
+      return await write
+    } finally {
+      if (this.auxiliaryStorageWriteTails.get(sessionId) === write) {
+        this.auxiliaryStorageWriteTails.delete(sessionId)
+      }
+    }
   }
 
   async purgeOrganizationSessions(params: {
@@ -1111,6 +1269,7 @@ export class SessionStore {
     record: SessionRecord,
     contextSnapshot: ContextUsageSnapshot,
   ): Promise<void> {
+    this.assertStorageWritable(record.sessionId)
     const previous = this.runtimeContextSnapshotTails.get(record.sessionId) ?? Promise.resolve()
     const update = previous.catch(() => undefined).then(async () => {
       const latest = record.runtimeContextSnapshot
@@ -1122,6 +1281,7 @@ export class SessionStore {
         sessionId: record.sessionId,
         contextSnapshot,
       })
+      this.notifyStorageChanged(record.sessionId)
       record.runtimeContextSnapshot = contextSnapshot
     })
     this.runtimeContextSnapshotTails.set(record.sessionId, update)
@@ -1204,12 +1364,15 @@ export class SessionStore {
       if (latest.mtimeMs === stat.mtimeMs && latest.size === stat.size) {
         const cachedSummary = { mtimeMs: stat.mtimeMs, size: stat.size, summary }
         this.summaryCache.set(path, cachedSummary)
-        await writeJsonFile(summaryCachePath(path), {
-          schemaVersion: 2,
-          ...cachedSummary,
-          hasEvents: false,
-          externalRuntimeAlreadyQuarantined: persisted?.externalRuntimeAlreadyQuarantined ?? false,
+        await this.runAuxiliaryStorageWrite(header.sessionId, async () => {
+          await writeJsonFile(summaryCachePath(path), {
+            schemaVersion: 2,
+            ...cachedSummary,
+            hasEvents: false,
+            externalRuntimeAlreadyQuarantined: persisted?.externalRuntimeAlreadyQuarantined ?? false,
+          })
         })
+        this.notifyStorageChanged(header.sessionId)
       }
       return summary
     }
@@ -1227,14 +1390,17 @@ export class SessionStore {
           summary,
         }
         this.summaryCache.set(path, cachedSummary)
-        await writeJsonFile(summaryCachePath(path), {
-          schemaVersion: 2,
-          ...cachedSummary,
-          hasEvents: parsed.events.length > 0,
-          externalRuntimeAlreadyQuarantined: parsed.runtimeMetadata.some((entry) =>
-            entry.action === 'runtime.quarantined_kernel_events'
-          ),
+        await this.runAuxiliaryStorageWrite(parsed.header.sessionId, async () => {
+          await writeJsonFile(summaryCachePath(path), {
+            schemaVersion: 2,
+            ...cachedSummary,
+            hasEvents: parsed.events.length > 0,
+            externalRuntimeAlreadyQuarantined: parsed.runtimeMetadata.some((entry) =>
+              entry.action === 'runtime.quarantined_kernel_events'
+            ),
+          })
         })
+        this.notifyStorageChanged(parsed.header.sessionId)
       }
       return summary
     })

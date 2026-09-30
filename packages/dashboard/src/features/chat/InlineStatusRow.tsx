@@ -143,7 +143,7 @@ export function CompactFeedbackRow({
           {t('chatStatus.compacting')}
         </span>
         <span className="flex-none tabular-nums text-muted-foreground/75">
-          {(elapsedMs / 1000).toFixed(1)}s
+          {formatElapsedDuration(elapsedMs / 1000)}
           {typeof tokensBefore === 'number' ? ` · context ${formatTokensShort(tokensBefore)}` : ''}
         </span>
       </div>
@@ -254,9 +254,9 @@ export function useElapsedSeconds(active: boolean, startedAt?: number | null, fi
     let t: number | undefined
     const tick = (): void => {
       setNow(Date.now())
-      t = window.setTimeout(tick, 100)
+      t = window.setTimeout(tick, delayToNextSecond())
     }
-    t = window.setTimeout(tick, 100)
+    t = window.setTimeout(tick, delayToNextSecond())
     return () => { if (t !== undefined) window.clearTimeout(t) }
   }, [active, startedAt])
   if (fixedDurationMs !== undefined) return Math.max(0, fixedDurationMs / 1000)
@@ -275,11 +275,15 @@ function useElapsedMs(active: boolean, startedAt?: number): number {
     let t: number | undefined
     const tick = (): void => {
       setNow(Date.now())
-      t = window.setTimeout(tick, 100)
+      t = window.setTimeout(tick, delayToNextSecond())
     }
-    t = window.setTimeout(tick, 100)
+    t = window.setTimeout(tick, delayToNextSecond())
     return () => { if (t !== undefined) window.clearTimeout(t) }
   }, [active])
   if (!startedAt) return 0
   return Math.max(0, now - startedAt)
+}
+
+function delayToNextSecond(): number {
+  return 1_010 - (Date.now() % 1_000)
 }

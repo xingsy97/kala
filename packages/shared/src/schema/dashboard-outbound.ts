@@ -23,6 +23,7 @@ import type {
   ContextUsageSnapshot,
   ControlUpdate,
   CompactionMetadata,
+  CompactStatusEvent,
   CopyOverflowSessionResult,
   DeleteOverflowSessionResult,
   DirListEntry,
@@ -180,6 +181,80 @@ export const ContextUsageSnapshotSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
 }) satisfies z.ZodType<ContextUsageSnapshot>
 
+const RuntimeCompactionPolicySchema = z.object({
+  authority: z.enum(['host', 'runtime']),
+  automatic: z.object({
+    enabled: z.boolean(),
+    mode: z.enum(['safe_boundary', 'background']),
+    warningThreshold: z.number().min(0).max(1),
+    startThreshold: z.number().min(0).max(1),
+    blockingThreshold: z.number().min(0).max(1).optional(),
+    concurrentWorkAllowed: z.boolean(),
+  }),
+  manual: z.object({
+    supported: z.boolean(),
+    whileActive: z.enum(['reject', 'queue', 'runtime_managed']),
+  }),
+  summary: z.object({
+    authority: z.enum(['host', 'runtime']),
+    validation: z.enum(['host_gate', 'runtime_reported']),
+  }),
+})
+
+const CompactScopeSchema = z.object({
+  kind: z.enum(['root', 'subagent']),
+  agentId: z.string().optional(),
+})
+
+const CompactStatusEventSchema = z.discriminatedUnion('kind', [
+  z.object({
+    sessionId: z.string(),
+    kind: z.literal('running'),
+    trigger: z.enum(['manual', 'auto', 'preflight', 'tool_result']),
+    tokensBefore: z.number().nonnegative(),
+    attemptId: z.string(),
+    startedAt: z.string(),
+    authority: z.enum(['host', 'runtime']).optional(),
+    scope: CompactScopeSchema.optional(),
+    startSnapshot: ContextUsageSnapshotSchema.optional(),
+  }),
+  z.object({
+    sessionId: z.string(),
+    kind: z.literal('done'),
+    attemptId: z.string(),
+    tokensBefore: z.number().nonnegative(),
+    tokensAfter: z.number().nonnegative(),
+    trigger: z.enum(['manual', 'auto', 'preflight', 'tool_result']).optional(),
+    replacedCount: z.number().int().nonnegative().optional(),
+    summary: z.string().optional(),
+    endedAt: z.string(),
+    authority: z.enum(['host', 'runtime']).optional(),
+    scope: CompactScopeSchema.optional(),
+    startSnapshot: ContextUsageSnapshotSchema.optional(),
+    completionSnapshot: ContextUsageSnapshotSchema.optional(),
+    summaryValidation: z.enum(['host_gate', 'runtime_reported']).optional(),
+  }),
+  z.object({
+    sessionId: z.string(),
+    kind: z.literal('skipped'),
+    attemptId: z.string(),
+    reason: z.string(),
+    message: z.string().optional(),
+    endedAt: z.string(),
+    authority: z.enum(['host', 'runtime']).optional(),
+    scope: CompactScopeSchema.optional(),
+  }),
+  z.object({
+    sessionId: z.string(),
+    kind: z.literal('error'),
+    attemptId: z.string(),
+    message: z.string(),
+    endedAt: z.string(),
+    authority: z.enum(['host', 'runtime']).optional(),
+    scope: CompactScopeSchema.optional(),
+  }),
+]) satisfies z.ZodType<CompactStatusEvent>
+
 export const SessionReadyEventSchema = z.object({
   sessionId: z.string(),
   agentRuntime: z.enum(['kernel', 'copilot']),
@@ -198,6 +273,8 @@ export const SessionReadyEventSchema = z.object({
     customTools: z.boolean(),
     nativeReasoning: z.boolean(),
   }),
+  runtimeCompactionPolicy: RuntimeCompactionPolicySchema.optional(),
+  compactStatus: CompactStatusEventSchema.optional(),
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
   config: AgentConfigSchema,

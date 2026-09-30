@@ -43,7 +43,8 @@ export interface AgentRuntime {
   reject(record: SessionRecord, callId: string, reason?: string): Promise<void>
   setApprovalMode(record: SessionRecord, mode: ApprovalMode): Promise<void>
   setModel?(record: SessionRecord, model: string): Promise<void>
-  compact?(record: SessionRecord): Promise<void>
+  compact(record: SessionRecord): Promise<void>
+  currentCompactStatus?(sessionId: string): CompactStatusEvent | undefined
   confirmModelChange?(record: SessionRecord, from: string | undefined, to: string): Promise<void>
   delete?(record: SessionRecord): Promise<void>
   close(): Promise<void>

@@ -164,7 +164,7 @@ describe('SessionMetadataDialog', () => {
     expect(screen.getByTestId('session-metadata-label').className).toContain('text-base')
   })
 
-  it('uses provider context usage when Copilot state usage has not been populated', () => {
+  it('does not mislabel provider context occupancy as cumulative API input usage', () => {
     render(
       <SessionMetadataDialog
         open
@@ -192,7 +192,10 @@ describe('SessionMetadataDialog', () => {
       />,
     )
 
-    expect(screen.getByTestId('session-metadata-dialog').textContent).toContain('137,141 / 0')
+    const dialog = screen.getByTestId('session-metadata-dialog')
+    expect(dialog.textContent).toContain('Context tokens (direct)137,141')
+    expect(dialog.textContent).toContain('Tokens (in / out) (direct)0 / 0')
+    expect(dialog.textContent).not.toContain('137,141 / 0')
   })
 
   it('shows the persisted agent runtime identity and version', () => {
@@ -354,5 +357,102 @@ describe('SessionMetadataDialog', () => {
     expect(onChangeToolCardMode).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId('session-metadata-save'))
     expect(onChangeToolCardMode).toHaveBeenCalledWith('standard')
+  })
+
+  it('requires two confirmations before executing sub-agent detail cleanup', async () => {
+    const emit = vi.fn((event: string, _payload: unknown, ack: (result: unknown) => void) => {
+      if (event === 'client:get_session_storage') {
+        ack({
+          ok: true,
+          value: {
+            session: {
+              sessionId: baseSummary.sessionId,
+              directBytes: 100,
+              treeBytes: 200,
+              descendantCount: 1,
+              categories: {},
+              treeCategories: {},
+            },
+            descendants: [{
+              sessionId: 'child-session',
+              parentSessionId: baseSummary.sessionId,
+              directBytes: 100,
+              treeBytes: 100,
+              descendantCount: 0,
+              categories: {},
+              treeCategories: {},
+            }],
+            tokenUsage: {
+              direct: {
+                currentContextTokens: 500,
+                cumulativeInputTokens: 1_200,
+                cumulativeOutputTokens: 340,
+                cacheCreationTokens: 0,
+                cacheReadTokens: 0,
+                sessionCount: 1,
+              },
+              tree: {
+                currentContextTokens: 800,
+                cumulativeInputTokens: 1_900,
+                cumulativeOutputTokens: 510,
+                cacheCreationTokens: 0,
+                cacheReadTokens: 0,
+                sessionCount: 2,
+              },
+            },
+            state: { measuredAt: '2026-09-30T00:00:00.000Z', generation: 1, stale: false, scan: { status: 'idle' } },
+          },
+        })
+      } else if (event === 'client:prepare_storage_cleanup') {
+        ack({
+          ok: true,
+          value: {
+            planId: '00000000-0000-4000-8000-000000000001',
+            operation: 'subagent-details',
+            targetId: 'child-session',
+            sessionIds: ['child-session'],
+            estimatedBytes: 100,
+            itemCount: 4,
+            expiresAt: '2026-09-30T00:05:00.000Z',
+          },
+        })
+      } else if (event === 'client:execute_storage_cleanup') {
+        ack({
+          ok: true,
+          value: {
+            planId: '00000000-0000-4000-8000-000000000001',
+            operation: 'subagent-details',
+            targetId: 'child-session',
+            logicalDeletion: true,
+            bytesQuarantined: 100,
+            completedAt: '2026-09-30T00:01:00.000Z',
+          },
+        })
+      }
+    })
+    render(
+      <SessionMetadataDialog
+        open
+        onOpenChange={() => {}}
+        sessionId={baseSummary.sessionId}
+        summary={baseSummary}
+        state={baseState}
+        selectedModel={null}
+        storageSocket={{ emit } as never}
+        onRename={() => {}}
+        onOpenChangeCwdDialog={() => {}}
+        onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={() => {}}
+      />,
+    )
+
+    expect(await screen.findByText('800 / 500')).toBeTruthy()
+    expect(screen.getByText('1,900 / 510')).toBeTruthy()
+    expect(screen.getByText('1,200 / 340')).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete details…' }))
+    fireEvent.click(await screen.findByTestId('storage-cleanup-first-confirm'))
+    expect(emit.mock.calls.some(([event]) => event === 'client:execute_storage_cleanup')).toBe(false)
+    fireEvent.click(screen.getByTestId('storage-cleanup-final-confirm'))
+    expect(emit.mock.calls.some(([event]) => event === 'client:execute_storage_cleanup')).toBe(true)
   })
 })

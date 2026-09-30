@@ -47,6 +47,7 @@ import {
 import type { CompactRequest, CompactStatusPayload, CompactTrigger, HostLoopDeps, LoopHandle } from '../loop-types.js'
 import { dispatchOne } from '../loop.js'
 import { appendRuntimeMetadataEntry } from '../store/log.js'
+import type { SessionRecord } from '../store/session.js'
 import { contextSnapshot, shouldAutoCompact } from '../context/manager.js'
 
 /**
@@ -73,7 +74,7 @@ import { contextSnapshot, shouldAutoCompact } from '../context/manager.js'
  */
 const SUMMARIZER_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION for an agent-kernel coding session. Another LLM will resume the session using ONLY your output plus the recent messages preserved verbatim after it.
 
-You will be given the conversation history to compact inside <transcript>…</transcript>. If the input also contains <previous-summary>…</previous-summary>, treat it as the current handoff summary and update it: preserve still-true facts, remove stale facts, merge in new facts from the transcript. Otherwise, write a fresh summary.
+You will be given the conversation history to compact inside <transcript>…</transcript> and an authoritative Host-generated <runtime-checkpoint>…</runtime-checkpoint>. If the input also contains <previous-summary>…</previous-summary>, treat it as the current handoff summary and update it: preserve still-true facts, remove stale facts, merge in new facts from the transcript. Otherwise, write a fresh summary. Do not contradict the runtime checkpoint.
 
 Output exactly the Markdown structure inside <template>, in this order, keeping every section even when the body is "(none)". Do not include the <template> tags in your response.
 
@@ -186,6 +187,7 @@ type CompactSessionRuntime = {
 }
 
 const sessionRuntime = new Map<string, CompactSessionRuntime>()
+const latestCompactStatus = new Map<string, CompactStatusPayload>()
 
 function getRuntime(sessionId: string): CompactSessionRuntime {
   let rt = sessionRuntime.get(sessionId)
@@ -198,6 +200,12 @@ function getRuntime(sessionId: string): CompactSessionRuntime {
 
 export function resetCompactRuntime(sessionId: string): void {
   sessionRuntime.delete(sessionId)
+  latestCompactStatus.delete(sessionId)
+}
+
+export function currentKernelCompactStatus(sessionId: string): CompactStatusPayload | undefined {
+  const status = latestCompactStatus.get(sessionId)
+  return status?.kind === 'running' ? status : undefined
 }
 
 export async function maybeAutoCompact(
@@ -271,6 +279,7 @@ export async function runCompact(
     const contextLimit = deps.models?.contextWindow?.(sessionId) ?? record.config.contextLimit
     const beforeSnapshot = contextSnapshot(record, record.state.messages, contextWindowOverrideForSession(deps, sessionId))
     const tokensBefore = beforeSnapshot.usage.inputTokens
+    const startedAt = new Date().toISOString()
     const replacedCount = record.state.messages.length
     const preserveFrom = choosePreserveFrom(record.state, trigger, contextLimit)
     const preservedTail = record.state.messages.slice(preserveFrom)
@@ -280,7 +289,15 @@ export async function runCompact(
     // Broadcast the running state so every attached dashboard (not just
     // the one that clicked /compact) can render "Compacting…".
     broadcastCompactStatus(deps, {
-      sessionId, kind: 'running', trigger, tokensBefore, attemptId, startedAt: new Date().toISOString(),
+      sessionId,
+      kind: 'running',
+      trigger,
+      tokensBefore,
+      attemptId,
+      startedAt,
+      authority: 'host',
+      scope: { kind: 'root' },
+      startSnapshot: beforeSnapshot,
     })
 
     // Codex-style anchored summary: if the previous compaction wrote a summary
@@ -358,9 +375,13 @@ export async function runCompact(
     // recent raw user messages preserved verbatim. This differs from the
     // previous implementation which wrote the summary as a `system` message
     // and dropped every raw user quote from the compacted region.
+    const runtimeCheckpoint = renderRuntimeCheckpoint(record, deps.models?.get(sessionId))
     const summaryUserMessage: Message = {
       role: 'user',
-      content: [{ type: 'text', text: `${SUMMARY_PREFIX}\n\n${compact.summary}` }],
+      content: [{
+        type: 'text',
+        text: `${SUMMARY_PREFIX}\n\n${compact.summary}\n\n<runtime-checkpoint>\n${runtimeCheckpoint}\n</runtime-checkpoint>`,
+      }],
     }
     const recentRawUserTokenBudget = recentRawUserTokenCap(contextLimit)
     const recentRawUsers = pickRecentRawUserMessages(head.slice(leadingSystemCount), recentRawUserTokenBudget)
@@ -396,6 +417,19 @@ export async function runCompact(
       if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
       if (trigger === 'manual') throw new Error(`compact rejected before dispatch: ${budgetReason}`)
       return false
+    }
+    const endedAt = new Date().toISOString()
+    summaryUserMessage.metadata = {
+      kind: 'context_compaction',
+      attemptId,
+      phase: 'done',
+      trigger,
+      tokensBefore,
+      tokensAfter,
+      replacedCount,
+      summary: compact.summary,
+      startedAt,
+      endedAt,
     }
 
     await dispatchOne(
@@ -439,8 +473,29 @@ export async function runCompact(
       ...(compact.usage ? { responseUsage: compact.usage } : {}),
     })
 
+    const completedRecord = deps.store.get(sessionId)
+    const completionSnapshot = completedRecord
+      ? contextSnapshot(
+          completedRecord,
+          completedRecord.state.messages,
+          contextWindowOverrideForSession(deps, sessionId),
+        )
+      : undefined
     broadcastCompactStatus(deps, {
-      sessionId, kind: 'done', attemptId, tokensBefore, tokensAfter, endedAt: new Date().toISOString(),
+      sessionId,
+      kind: 'done',
+      attemptId,
+      trigger,
+      tokensBefore,
+      tokensAfter,
+      replacedCount,
+      summary: compact.summary,
+      endedAt,
+      authority: 'host',
+      scope: { kind: 'root' },
+      startSnapshot: beforeSnapshot,
+      ...(completionSnapshot ? { completionSnapshot } : {}),
+      summaryValidation: 'host_gate',
     })
 
     // Success: reset counters and back-off.
@@ -538,6 +593,8 @@ async function dispatchSkip(
     sessionId, kind: 'skipped', attemptId, reason,
     ...(errorMessageText ? { message: errorMessageText } : {}),
     endedAt: new Date().toISOString(),
+    authority: 'host',
+    scope: { kind: 'root' },
   })
 }
 
@@ -556,11 +613,18 @@ async function dispatchRejected(
     ...extra,
   })
   broadcastCompactStatus(deps, {
-    sessionId, kind: 'skipped', attemptId, reason, endedAt: new Date().toISOString(),
+    sessionId,
+    kind: 'skipped',
+    attemptId,
+    reason,
+    endedAt: new Date().toISOString(),
+    authority: 'host',
+    scope: { kind: 'root' },
   })
 }
 
 function broadcastCompactStatus(deps: HostLoopDeps, payload: CompactStatusPayload): void {
+  latestCompactStatus.set(payload.sessionId, payload)
   try {
     deps.broadcast.onCompactStatus?.(payload)
   } catch {
@@ -674,10 +738,14 @@ async function summarize(
 ): Promise<SummarizeOk> {
   const model = deps.models?.get(sessionId)
   const transcript = renderTranscriptForSummarizer(messages)
+  const record = deps.store.get(sessionId)
+  if (!record) throw new Error(`Unknown session: ${sessionId}`)
+  const runtimeCheckpoint = renderRuntimeCheckpoint(record, model)
   const userText =
     (previousSummary
       ? `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`
       : '')
+    + `<runtime-checkpoint>\n${runtimeCheckpoint}\n</runtime-checkpoint>\n\n`
     + `<transcript>\n${transcript}\n</transcript>\n\n`
     + 'Produce the handoff summary per the system instructions. Fill every section; use "(none)" for sections with no content. Do not address the user, do not ask questions.'
   // Codex-style: hand the transcript to the summarizer as ONE user message so
@@ -694,6 +762,7 @@ async function summarize(
     ],
     tools: [],
   }
+
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), COMPACT_TIMEOUT_MS)
   let res: Awaited<ReturnType<HostLoopDeps['llm']['call']>>
@@ -720,6 +789,22 @@ async function summarize(
     ...(res.trace ? { trace: res.trace } : {}),
     ...(res.trace?.model ?? model ? { model: res.trace?.model ?? model } : {}),
   }
+}
+
+function renderRuntimeCheckpoint(
+  record: SessionRecord,
+  model: string | undefined,
+): string {
+  return JSON.stringify({
+    sessionId: record.sessionId,
+    sourceCursor: record.state.cursor,
+    status: record.state.status,
+    cwd: record.state.cwd ?? null,
+    workspaceId: record.workspaceId ?? null,
+    executionMode: record.executionMode,
+    model: model ?? null,
+    pendingCalls: record.state.pendingCalls.map(({ callId, name, status }) => ({ callId, name, status })),
+  }, null, 2)
 }
 
 /**
@@ -963,8 +1048,7 @@ function isPreflightCompactable(
 }
 
 function isBusyCompactable(trigger: CompactTrigger, state: AgentState): boolean {
-  if (isPreflightCompactable(trigger, state)) return true
-  return trigger === 'tool_result' && state.status === 'executing_tools' && state.pendingCalls.length > 0 && findActiveToolBatchIndex(state) !== undefined
+  return isPreflightCompactable(trigger, state)
 }
 
 function prepareCompactionInputWithLimit(

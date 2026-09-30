@@ -148,9 +148,13 @@ try {
   })
 
   await harness.step('expose the authoritative Copilot Runtime in Session Info', async () => {
-    const row = await sessionRow(actor.page, sessionId)
-    await row.hover()
-    await clickElement(await row.$('[data-testid="session-info-button"]'), 'Session info')
+    const rowSelector = `[data-testid="session-row"][data-session-id="${sessionId}"]`
+    await hoverAncestorAndClickFirst(
+      actor.page,
+      `${rowSelector} [data-testid="session-info-button"]`,
+      rowSelector,
+      { description: 'Session info', timeoutMs: 30_000 },
+    )
     await actor.page.waitForSelector('[data-testid="session-metadata-dialog"]')
     const runtimeText = await actor.page.$eval('[data-testid="session-metadata-agent-runtime"]', (element) => element.textContent ?? '')
     if (!runtimeText.includes('GitHub Copilot SDK') || !runtimeText.includes('(copilot)')) {
@@ -317,11 +321,17 @@ try {
   })
 
   await harness.step('delete the Copilot Session through UI and verify authoritative cleanup', async () => {
-    const row = await sessionRow(actor.page, sessionId)
-    await row.hover()
-    await clickElement(await row.$('[data-testid="session-delete-button"]'), 'Delete Session')
+    const rowSelector = `[data-testid="session-row"][data-session-id="${sessionId}"]`
+    await hoverAncestorAndClickFirst(
+      actor.page,
+      `${rowSelector} [data-testid="session-delete-button"]`,
+      rowSelector,
+      { description: 'Delete Session', timeoutMs: 30_000 },
+    )
     await actor.page.waitForSelector('[data-testid="confirm-delete-button"]', { visible: true })
     await clickByTestId(actor.page, 'confirm-delete-button')
+    await actor.page.waitForSelector('[data-testid="confirm-delete-final-button"]', { visible: true })
+    await clickByTestId(actor.page, 'confirm-delete-final-button')
     await actor.page.waitForFunction((expected) => !document.querySelector(`[data-testid="session-row"][data-session-id="${expected}"]`), { timeout: 30_000 }, sessionId)
     await waitFor(async () => {
       const sessions = await responseEvent(socket, 'client:list_sessions', 'server:sessions', {})
@@ -386,7 +396,15 @@ async function setApprovalMode(page, mode) {
 
 async function sendMessage(page, text) {
   await page.waitForSelector('[data-testid="composer-input"]')
-  await page.$eval('[data-testid="composer-input"]', (input) => input.focus())
+  await page.waitForFunction(() => {
+    const input = document.querySelector('[data-testid="composer-input"]')
+    return input instanceof HTMLTextAreaElement && !input.disabled && !input.readOnly
+  }, { timeout: 60_000 })
+  await page.click('[data-testid="composer-input"]')
+  await page.keyboard.down('Control')
+  await page.keyboard.press('KeyA')
+  await page.keyboard.up('Control')
+  await page.keyboard.press('Backspace')
   await page.keyboard.type(text)
   await page.waitForFunction((expected) => document.querySelector('[data-testid="composer-input"]')?.value === expected, {}, text)
   await clickByTestId(page, 'composer-send')

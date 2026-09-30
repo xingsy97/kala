@@ -1,4 +1,5 @@
 import type { AgentConfig } from '@agent-kernel/kernel'
+import type { RuntimeCompactionPolicy } from '@agent-kernel/shared'
 import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
 import {
   evaluateContextPressure,
@@ -15,6 +16,7 @@ export type DashboardContextPressure = ContextPressureEvaluation & {
 export function evaluateDashboardContextPressure(input: {
   snapshot: ContextUsageSnapshot | null | undefined
   config?: Pick<AgentConfig, 'contextLimit' | 'softThreshold' | 'hardThreshold'> | null
+  compactionPolicy?: RuntimeCompactionPolicy | null
   fallbackModelContextWindow?: number | null
 }): DashboardContextPressure {
   const fallbackTokens = input.snapshot ? undefined : input.fallbackModelContextWindow ?? input.config?.contextLimit
@@ -23,8 +25,11 @@ export function evaluateDashboardContextPressure(input: {
     fallbackTokens ? { unknownModelFallbackTokens: fallbackTokens } : {},
     {
       mediumRatio: 0.6,
-      highRatio: input.config?.softThreshold ?? 0.75,
-      criticalRatio: input.config?.hardThreshold ?? 0.92,
+      highRatio: input.compactionPolicy?.automatic.warningThreshold ?? input.config?.softThreshold ?? 0.75,
+      criticalRatio: input.compactionPolicy?.automatic.blockingThreshold
+        ?? input.compactionPolicy?.automatic.startThreshold
+        ?? input.config?.hardThreshold
+        ?? 0.92,
     },
   )
   return {

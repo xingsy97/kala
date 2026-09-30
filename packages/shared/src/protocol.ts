@@ -38,6 +38,77 @@ export type AgentRuntimeCapabilities = {
   readonly nativeReasoning: boolean
 }
 
+export type RuntimeCompactionPolicy = {
+  readonly authority: 'host' | 'runtime'
+  readonly automatic: {
+    readonly enabled: boolean
+    readonly mode: 'safe_boundary' | 'background'
+    readonly warningThreshold: number
+    readonly startThreshold: number
+    readonly blockingThreshold?: number
+    readonly concurrentWorkAllowed: boolean
+  }
+  readonly manual: {
+    readonly supported: boolean
+    readonly whileActive: 'reject' | 'queue' | 'runtime_managed'
+  }
+  readonly summary: {
+    readonly authority: 'host' | 'runtime'
+    readonly validation: 'host_gate' | 'runtime_reported'
+  }
+}
+
+export function kernelRuntimeCompactionPolicy(
+  softThreshold = 0.75,
+  hardThreshold = 0.92,
+): RuntimeCompactionPolicy {
+  return {
+    authority: 'host',
+    automatic: {
+      enabled: true,
+      mode: 'safe_boundary',
+      warningThreshold: softThreshold,
+      startThreshold: hardThreshold,
+      concurrentWorkAllowed: false,
+    },
+    manual: {
+      supported: true,
+      whileActive: 'reject',
+    },
+    summary: {
+      authority: 'host',
+      validation: 'host_gate',
+    },
+  }
+}
+
+export function copilotRuntimeCompactionPolicy(
+  backgroundCompactionThreshold = 0.8,
+  bufferExhaustionThreshold = 0.95,
+): RuntimeCompactionPolicy {
+  return {
+    authority: 'runtime',
+    automatic: {
+      enabled: true,
+      mode: 'background',
+      warningThreshold: backgroundCompactionThreshold,
+      startThreshold: backgroundCompactionThreshold,
+      blockingThreshold: bufferExhaustionThreshold,
+      concurrentWorkAllowed: true,
+    },
+    manual: {
+      supported: true,
+      whileActive: 'reject',
+    },
+    summary: {
+      authority: 'runtime',
+      validation: 'runtime_reported',
+    },
+  }
+}
+
+export const COPILOT_RUNTIME_COMPACTION_POLICY = copilotRuntimeCompactionPolicy()
+
 export type AgentRuntimeDescriptor = {
   readonly id: AgentRuntimeId
   readonly label: string
@@ -47,6 +118,7 @@ export type AgentRuntimeDescriptor = {
   readonly reason?: string
   readonly version?: string
   readonly capabilities: AgentRuntimeCapabilities
+  readonly compactionPolicy?: RuntimeCompactionPolicy
   readonly models?: readonly ModelInfo[]
 }
 
@@ -112,6 +184,10 @@ export type SessionReadyEvent = {
   agentRuntime: AgentRuntimeId
   executionMode: SessionExecutionMode
   agentRuntimeCapabilities: AgentRuntimeCapabilities
+  /** Added in protocol 1.1; older same-major Hosts may omit it. */
+  runtimeCompactionPolicy?: RuntimeCompactionPolicy
+  /** Latest root compaction lifecycle state, when an attempt is active during hydration. */
+  compactStatus?: CompactStatusEvent
   cursor: number
   state: AgentState
   config: AgentConfig
@@ -419,6 +495,9 @@ export type CompactStatusEvent =
       tokensBefore: number
       attemptId: string
       startedAt: string
+      authority?: RuntimeCompactionPolicy['authority']
+      scope?: { kind: 'root' | 'subagent'; agentId?: string }
+      startSnapshot?: ContextUsageSnapshot
     }
   | {
       sessionId: string
@@ -431,6 +510,11 @@ export type CompactStatusEvent =
       /** LLM-generated compacted context, when the Runtime exposes it. */
       summary?: string
       endedAt: string
+      authority?: RuntimeCompactionPolicy['authority']
+      scope?: { kind: 'root' | 'subagent'; agentId?: string }
+      startSnapshot?: ContextUsageSnapshot
+      completionSnapshot?: ContextUsageSnapshot
+      summaryValidation?: RuntimeCompactionPolicy['summary']['validation']
     }
   | {
       sessionId: string
@@ -440,6 +524,8 @@ export type CompactStatusEvent =
       reason: string
       message?: string
       endedAt: string
+      authority?: RuntimeCompactionPolicy['authority']
+      scope?: { kind: 'root' | 'subagent'; agentId?: string }
     }
   | {
       sessionId: string
@@ -447,6 +533,8 @@ export type CompactStatusEvent =
       attemptId: string
       message: string
       endedAt: string
+      authority?: RuntimeCompactionPolicy['authority']
+      scope?: { kind: 'root' | 'subagent'; agentId?: string }
     }
 
 // ============================================================================
@@ -1422,6 +1510,122 @@ export type ClientDeleteSession = {
   sessionId: string
 }
 
+export const STORAGE_CATEGORIES = [
+  'jsonl',
+  'snapshot',
+  'summary',
+  'context',
+  'session-artifacts',
+  'orphan-artifacts',
+  'backup',
+  'corrupt',
+  'other',
+] as const
+
+export type StorageCategory = typeof STORAGE_CATEGORIES[number]
+
+export type StorageCategoryStats = {
+  bytes: number
+  files: number
+}
+
+export type StorageInventoryState = {
+  measuredAt: string | null
+  generation: number
+  stale: boolean
+  scan:
+    | { status: 'idle' }
+    | { status: 'scanning'; startedAt: string }
+    | { status: 'failed'; startedAt: string; failedAt: string; error: string }
+}
+
+export type SessionStorageEntry = {
+  sessionId: string
+  parentSessionId?: string
+  runtime?: string
+  directBytes: number
+  treeBytes: number
+  descendantCount: number
+  categories: Partial<Record<StorageCategory, StorageCategoryStats>>
+  treeCategories: Partial<Record<StorageCategory, StorageCategoryStats>>
+}
+
+export type SessionTokenUsage = {
+  currentContextTokens: number
+  cumulativeInputTokens: number
+  cumulativeOutputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  sessionCount: number
+}
+
+export type SessionStorageSnapshot = {
+  session: SessionStorageEntry
+  descendants: readonly SessionStorageEntry[]
+  tokenUsage?: {
+    direct: SessionTokenUsage
+    tree: SessionTokenUsage
+  }
+  state: StorageInventoryState
+}
+
+export type GlobalStorageSnapshot = {
+  totalBytes: number
+  totalFiles: number
+  categories: Record<StorageCategory, StorageCategoryStats>
+  largestSessionTrees: readonly SessionStorageEntry[]
+  orphanCandidates: readonly {
+    id: string
+    category: 'orphan-artifacts' | 'snapshot' | 'summary' | 'context' | 'corrupt'
+    bytes: number
+    files: number
+  }[]
+  state: StorageInventoryState
+}
+
+export type ClientGetSessionStorage = {
+  sessionId: string
+  refresh?: boolean
+}
+
+export type ClientGetGlobalStorage = {
+  refresh?: boolean
+}
+
+export type StorageCleanupOperation =
+  | 'subagent-details'
+  | 'session-tree'
+  | 'orphan-artifacts'
+  | 'derived-artifacts'
+
+export type StorageCleanupPlanPreview = {
+  planId: string
+  operation: StorageCleanupOperation
+  targetId: string
+  sessionIds: readonly string[]
+  estimatedBytes: number
+  itemCount: number
+  expiresAt: string
+}
+
+export type StorageCleanupResult = {
+  planId: string
+  operation: StorageCleanupOperation
+  targetId: string
+  logicalDeletion: true
+  bytesQuarantined: number
+  completedAt: string
+}
+
+export type ClientPrepareStorageCleanup = {
+  operation: StorageCleanupOperation
+  targetId: string
+}
+
+export type ClientExecuteStorageCleanup = {
+  planId: string
+}
+
 export type ServerSessionDeletedPayload = {
   sessionId: string
 }
@@ -1791,6 +1995,10 @@ export type DashboardClientToServerEvents = {
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
   'client:load_log_artifact': (payload: ClientLoadLogArtifact) => void
+  'client:get_session_storage': (payload: ClientGetSessionStorage, ack: (result: RpcAck<SessionStorageSnapshot>) => void) => void
+  'client:get_global_storage': (payload: ClientGetGlobalStorage, ack: (result: RpcAck<GlobalStorageSnapshot>) => void) => void
+  'client:prepare_storage_cleanup': (payload: ClientPrepareStorageCleanup, ack: (result: RpcAck<StorageCleanupPlanPreview>) => void) => void
+  'client:execute_storage_cleanup': (payload: ClientExecuteStorageCleanup, ack: (result: RpcAck<StorageCleanupResult>) => void) => void
   'client:delete_session': (payload: ClientDeleteSession, ack?: (result: RpcAck) => void) => void
   'client:update_preferences': (payload: ClientUpdatePreferences, ack?: (result: RpcAck) => void) => void
   'client:set_cwd': (payload: ClientSetCwd, ack?: (result: RpcAck) => void) => void

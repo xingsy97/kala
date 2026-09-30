@@ -38,7 +38,10 @@ describe('SessionStore.ensure', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'ak-store-'))
   })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  afterEach(() => {
+    contextWriteTest.beforeWrite = undefined
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   it('persists DAG-First execution mode and defaults legacy Sessions to chat', async () => {
     const store = new SessionStore(dir)
@@ -166,6 +169,7 @@ describe('SessionStore.ensure', () => {
       agentRuntime: 'copilot',
       config,
     })
+
     const initialLogBytes = statSync(record.logPath).size
     let projected = record.state
     for (let index = 0; index < 8; index += 1) {
@@ -195,6 +199,114 @@ describe('SessionStore.ensure', () => {
     expect(reloaded.state.cursor).toBe(8)
     expect(reloaded.state.messages.at(-1)?.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('7:') })
     expect(reloaded.firstUserMessage).toBe('stable title')
+  })
+
+  it('blocks new durable transitions while a storage cleanup lease is held', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'cleanup-lease', config })
+    let release!: () => void
+    let entered!: () => void
+    const enteredLease = new Promise<void>((resolve) => { entered = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const lease = store.withStorageMutationLease([record.sessionId], async () => {
+      entered()
+      await gate
+    })
+    await enteredLease
+    const event = { kind: 'user_message' as const, text: 'must not start' }
+    const transition = step(record.state, event, record.config)
+
+    await expect(store.record(record.sessionId, event, transition.effects, transition.next))
+      .rejects.toThrow(/locked for storage cleanup/)
+    expect(record.state.cursor).toBe(0)
+
+    release()
+    await lease
+    await store.record(record.sessionId, event, transition.effects, transition.next)
+    expect(record.state.cursor).toBe(1)
+  })
+
+  it('blocks loads and ensures while a storage cleanup lease is held', async () => {
+    const writer = new SessionStore(dir)
+    const record = await writer.create({ sessionId: 'cleanup-load-admission', config })
+    const reader = new SessionStore(dir)
+    let release!: () => void
+    let entered!: () => void
+    const enteredLease = new Promise<void>((resolve) => { entered = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const lease = reader.withStorageMutationLease([record.sessionId], async () => {
+      entered()
+      await gate
+    })
+    await enteredLease
+
+    await expect(reader.load(record.sessionId)).rejects.toThrow(/locked for storage cleanup/)
+    await expect(reader.ensure({ sessionId: record.sessionId, config })).rejects.toThrow(/locked for storage cleanup/)
+    release()
+    await lease
+  })
+
+  it('blocks creating descendants while their parent is leased for cleanup', async () => {
+    const store = new SessionStore(dir)
+    const parent = await store.create({ sessionId: 'cleanup-parent-admission', config })
+    let release!: () => void
+    let entered!: () => void
+    const enteredLease = new Promise<void>((resolve) => { entered = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const lease = store.withStorageMutationLease([parent.sessionId], async () => {
+      entered()
+      await gate
+    })
+    await enteredLease
+
+    await expect(store.create({
+      sessionId: 'cleanup-late-child',
+      parentSessionId: parent.sessionId,
+      config,
+    })).rejects.toThrow(/locked for storage cleanup/)
+    release()
+    await lease
+  })
+
+  it('waits for an admitted recovery load before entering a storage cleanup lease', async () => {
+    const writer = new SessionStore(dir)
+    const record = await writer.create({
+      sessionId: 'cleanup-waits-recovery',
+      agentRuntime: 'copilot',
+      config,
+    })
+    await writer.recordRuntimeProjection(record.sessionId, {
+      ...record.state,
+      cursor: 1,
+      status: 'thinking',
+      messages: [...record.state.messages, {
+        role: 'user' as const,
+        content: [{ type: 'text' as const, text: 'interrupted' }],
+      }],
+    }, 'copilot.user_message', { text: 'interrupted' })
+
+    const reader = new SessionStore(dir)
+    const load = reader.load(record.sessionId)
+    let leaseEntered = false
+    const lease = reader.withStorageMutationLease([record.sessionId], async () => {
+      leaseEntered = true
+      expect(reader.get(record.sessionId)?.state.status).toBe('error')
+    })
+
+    await expect(load).resolves.toMatchObject({ sessionId: record.sessionId })
+    await lease
+    expect(leaseEntered).toBe(true)
+  })
+
+  it('evicts quarantined records and permanently rejects automatic recreation', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'quarantined-session', config })
+    store.evictQuarantinedSessions([record.sessionId])
+
+    expect(store.get(record.sessionId)).toBeUndefined()
+    await expect(store.load(record.sessionId)).rejects.toThrow(/details were quarantined/)
+    await expect(store.ensure({ sessionId: record.sessionId, config })).rejects.toThrow(/details were quarantined/)
+    await expect(store.create({ sessionId: record.sessionId, config })).rejects.toThrow(/details were quarantined/)
   })
 
   it('compacts large Copilot projection snapshots without mutating live state', async () => {
@@ -898,6 +1010,7 @@ describe('SessionStore runtime context snapshots', () => {
       agentRuntime: 'copilot',
       config,
     })
+
     const contextSnapshot = {
       model: { ref: 'gpt-5.4-mini', provider: 'github-copilot', id: 'gpt-5.4-mini' },
       contextWindow: { tokens: 272_000, source: 'api_reported' as const },
@@ -922,6 +1035,27 @@ describe('SessionStore runtime context snapshots', () => {
     const reloaded = await new SessionStore(dir).load(record.sessionId)
 
     expect(reloaded.runtimeContextSnapshot).toEqual(contextSnapshot)
+  })
+
+  it('invalidates storage measurements after writing a runtime context sidecar', async () => {
+    const changed = vi.fn()
+    const store = new SessionStore(dir, { onStorageChanged: changed })
+    const record = await store.create({
+      sessionId: 'copilot-context-inventory',
+      agentRuntime: 'copilot',
+      config,
+    })
+    changed.mockClear()
+
+    await store.updateRuntimeContextSnapshot(record, {
+      model: { ref: 'gpt-5.4-mini' },
+      contextWindow: { tokens: 272_000, source: 'api_reported' },
+      usage: { inputTokens: 1, totalTokens: 1 },
+      estimator: { total: { kind: 'provider_reported', confidence: 'exact' }, version: 'test' },
+      updatedAt: 1,
+    })
+
+    expect(changed).toHaveBeenCalledWith(record.sessionId)
   })
 
   it('orders concurrent writes and never restores an older snapshot', async () => {

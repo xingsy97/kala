@@ -14,6 +14,7 @@ import {
   Rocket,
   ServerCog,
   Shield,
+  Database,
   SlidersHorizontal,
   TerminalSquare,
   X,
@@ -21,7 +22,8 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AttachedExecutor, ServerSettingsPayload } from '@agent-kernel/shared'
+import type { AttachedExecutor, DashboardClientToServerEvents, DashboardServerToClientEvents, ServerSettingsPayload } from '@agent-kernel/shared'
+import type { Socket } from 'socket.io-client'
 
 import {
   Dialog,
@@ -55,6 +57,7 @@ import { SecuritySection } from './sections/SecuritySection.js'
 import { SocketAdminSection } from './sections/SocketAdminSection.js'
 import { WebSearchSection } from './sections/WebSearchSection.js'
 import { SpeechSection } from './sections/SpeechSection.js'
+import { StorageSection } from './sections/StorageSection.js'
 
 
 type Props = {
@@ -66,9 +69,10 @@ type Props = {
   host?: string
   token?: string
   initialSection?: SectionKey
+  storageSocket?: Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 }
 
-type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'speech' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
+type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'speech' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications' | 'storage'
 
 type SectionGroup = 'personal' | 'workspace' | 'agent' | 'administration'
 const SECTION_GROUPS: readonly SectionGroup[] = ['personal', 'workspace', 'agent', 'administration']
@@ -86,11 +90,12 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'socketAdmin', label: 'settings.sections.socketAdmin.label', hint: 'settings.sections.socketAdmin.hint', icon: ServerCog, group: 'administration' },
   { key: 'hooks', label: 'settings.sections.hooks.label', hint: 'settings.sections.hooks.hint', icon: PlugZap, group: 'administration' },
   { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint', icon: SlidersHorizontal, group: 'administration' },
+  { key: 'storage', label: 'Storage', hint: 'Session and artifact disk usage, measured lazily.', icon: Database, group: 'administration' },
   { key: 'deployment', label: 'settings.sections.deployment.label', hint: 'settings.sections.deployment.hint', icon: Rocket, group: 'administration' },
   { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint', icon: Blocks, group: 'administration' },
 ]
 
-export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token, initialSection = 'connection' }: Props): JSX.Element {
+export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token, initialSection = 'connection', storageSocket }: Props): JSX.Element {
   const { t } = useTranslation()
   const desktopLayout = useMinWidth(768)
   const queryClient = useQueryClient()
@@ -181,6 +186,8 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
                 <ProductState kind="loading" title={t('settings.loadingTitle')} description={t('settings.loadingDescription')} />
               ) : section === 'runtime' ? (
                 <RuntimeSection payload={payload} />
+              ) : section === 'storage' ? (
+                <StorageSection socket={storageSocket} />
               ) : section === 'connection' ? (
                 <ConnectionSection />
               ) : section === 'agent' ? (

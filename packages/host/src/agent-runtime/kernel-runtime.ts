@@ -1,12 +1,15 @@
 import type { AgentEvent, ApprovalMode } from '@agent-kernel/kernel'
 import {
   KERNEL_AGENT_RUNTIME_CAPABILITIES,
+  kernelRuntimeCompactionPolicy,
   type AgentRuntimeDescriptor,
+  type CompactStatusEvent,
 } from '@agent-kernel/shared'
 
 import type { LoopHandle } from '../loop-types.js'
 import type { SessionRecord } from '../store/session.js'
 import type { AgentRuntime, AgentRuntimeSendInput } from './types.js'
+import { currentKernelCompactStatus } from '../extensions/compaction.js'
 
 export class KernelAgentRuntime implements AgentRuntime {
   readonly id = 'kernel' as const
@@ -21,7 +24,12 @@ export class KernelAgentRuntime implements AgentRuntime {
       available: true,
       status: 'ready',
       capabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
+      compactionPolicy: kernelRuntimeCompactionPolicy(),
     }
+  }
+
+  currentCompactStatus(sessionId: string): CompactStatusEvent | undefined {
+    return currentKernelCompactStatus(sessionId)
   }
 
   async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {
@@ -48,6 +56,13 @@ export class KernelAgentRuntime implements AgentRuntime {
 
   async setApprovalMode(record: SessionRecord, mode: ApprovalMode): Promise<void> {
     await this.dispatch(record, { kind: 'approval_mode_changed', mode })
+  }
+
+  async compact(record: SessionRecord): Promise<void> {
+    await this.loop.compact(record.sessionId, {
+      trigger: 'manual',
+      continuation: 'stay_resting',
+    })
   }
 
   async close(): Promise<void> {}

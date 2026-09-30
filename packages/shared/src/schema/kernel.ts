@@ -170,6 +170,16 @@ export const MessageSchema: z.ZodType<Message> = z.object({
       endedAt: z.string().optional(),
       error: z.string().optional(),
     }),
+    z.object({
+      kind: z.literal('temporal'),
+      messageId: z.string().min(1),
+      turnId: z.string().min(1),
+      createdAt: z.string(),
+      turnStartedAt: z.string(),
+      turnCompletedAt: z.string().optional(),
+      turnDurationMs: z.number().int().nonnegative().optional(),
+      turnStatus: z.enum(['completed', 'failed', 'cancelled', 'interrupted']).optional(),
+    }),
   ]).optional(),
 })
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
+import { COPILOT_RUNTIME_COMPACTION_POLICY } from '@agent-kernel/shared'
 
 import { contextPressureLabel, evaluateDashboardContextPressure, toneForContextPressure } from './context-pressure.js'
 
@@ -41,6 +42,21 @@ describe('dashboard context pressure policy', () => {
     expect(pressure.limitTokens).toBe(null)
     expect(pressure.limitSource).toBe('unknown')
     expect(pressure.sourceLabel).toBe('unknown')
+  })
+
+  it('uses Copilot background and blocking thresholds instead of Kernel defaults', () => {
+    expect(evaluateDashboardContextPressure({
+      snapshot: snapshot(800),
+      compactionPolicy: COPILOT_RUNTIME_COMPACTION_POLICY,
+    }).level).toBe('high')
+    expect(evaluateDashboardContextPressure({
+      snapshot: snapshot(940),
+      compactionPolicy: COPILOT_RUNTIME_COMPACTION_POLICY,
+    }).level).toBe('high')
+    expect(evaluateDashboardContextPressure({
+      snapshot: snapshot(950),
+      compactionPolicy: COPILOT_RUNTIME_COMPACTION_POLICY,
+    }).level).toBe('critical')
   })
 
   it('labels the client fallback source when no host snapshot exists yet', () => {

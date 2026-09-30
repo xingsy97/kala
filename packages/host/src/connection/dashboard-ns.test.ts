@@ -2,9 +2,60 @@ import { describe, expect, it, vi } from 'vitest'
 import { COPILOT_AGENT_RUNTIME_CAPABILITIES, KERNEL_AGENT_RUNTIME_CAPABILITIES, type ClientUserMessage, type RuntimeMetadataEntry } from '@agent-kernel/shared'
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
 
-import { buildCompactionMetadataIndex, consumeCompactionMetadata, deriveSessionConfig, handleUserMessage, loadDashboardSession, recoverSubAgentOutcome, type DashboardDeps } from './dashboard-ns.js'
+import { buildCompactionMetadataIndex, consumeCompactionMetadata, deriveSessionConfig, handleUserMessage, loadDashboardSession, recoverSubAgentOutcome, sessionTreeTokenUsage, type DashboardDeps } from './dashboard-ns.js'
 import { terminalOwnerSessionId, terminalSessionRoom } from './rooms.js'
 import type { SessionStore } from '../store/session.js'
+import type { SessionRecord } from '../store/session.js'
+
+describe('session tree token usage', () => {
+  const record = (
+    sessionId: string,
+    contextTokens: number,
+    inputTokens: number,
+    outputTokens: number,
+  ): SessionRecord => ({
+    sessionId,
+    config: createConfig({ tools: [] }),
+    preferences: {},
+    state: {
+      ...createInitialState({ sessionId }),
+      usage: { inputTokens, outputTokens, cacheCreationTokens: 3, cacheReadTokens: 4 },
+    },
+    runtimeContextSnapshot: {
+      model: { ref: 'test:model' },
+      contextWindow: { tokens: 100_000, source: 'api_reported' },
+      usage: { inputTokens: contextTokens, totalTokens: contextTokens },
+      breakdown: { system: 0, transcript: contextTokens, tools: 0, memory: 0, attachments: 0, pendingUserInput: 0 },
+      estimator: {
+        total: { kind: 'provider_reported', confidence: 'exact' },
+        breakdown: { kind: 'heuristic', confidence: 'rough' },
+        version: 'test',
+      },
+      updatedAt: 1,
+    },
+  } as unknown as SessionRecord)
+
+  it('separates current context occupancy from cumulative API usage across all descendants', () => {
+    const usage = sessionTreeTokenUsage(
+      record('root', 100, 1_000, 100),
+      [record('child', 40, 400, 40), record('grandchild', 20, 200, 20)],
+    )
+    expect(usage.direct).toMatchObject({
+      currentContextTokens: 100,
+      cumulativeInputTokens: 1_000,
+      cumulativeOutputTokens: 100,
+      sessionCount: 1,
+    })
+    expect(usage.tree).toEqual({
+      currentContextTokens: 160,
+      cumulativeInputTokens: 1_600,
+      cumulativeOutputTokens: 160,
+      cacheCreationTokens: 9,
+      cacheReadTokens: 12,
+      sessionCount: 3,
+    })
+  })
+})
 
 describe('DAG parent runtime configuration', () => {
   it('exposes planner authority only, plus Host-local clarification', () => {

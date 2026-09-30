@@ -141,9 +141,13 @@ describe('deriveAgentProgress', () => {
     })
   })
 
-  it('ignores a result that has no persisted model-authored Intention', () => {
+  it('uses a result without persisted Intention only as the next thinking phase boundary', () => {
     const timeline = [toolResult(1, 'legacy', true)]
-    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({ phase: 'thinking', label: 'Thinking' })
+    expect(deriveAgentProgress(state('thinking'), timeline)).toEqual({
+      phase: 'thinking',
+      label: 'Thinking',
+      startedAt: Date.parse(new Date(1).toISOString()),
+    })
   })
 
   it.each(['idle', 'done', 'error'] as const)('does not project stale Tool Intention in %s state', (status) => {

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
-import type { ContextUsageSnapshot } from '@agent-kernel/shared'
+import { COPILOT_RUNTIME_COMPACTION_POLICY, type ContextUsageSnapshot } from '@agent-kernel/shared'
 
 import { RuntimeMetrics } from './RuntimeMetrics.js'
 
@@ -139,6 +139,44 @@ describe('RuntimeMetrics', () => {
     expect(popover.textContent ?? '').toContain('Model context')
     expect(popover.textContent ?? '').toContain('1.0M')
     expect(popover.textContent ?? '').toContain('model_registry')
+  })
+
+  it('shows the effective runtime compaction authority and thresholds', () => {
+    const current = contextSnapshot(207_200, 272_000, 'api_reported', 'gpt-5.6-sol')
+    const started = contextSnapshot(217_800, 272_000, 'api_reported', 'gpt-5.6-sol')
+    render(
+      <RuntimeMetrics
+        state={createInitialState({ sessionId: 'sess-copilot-policy' })}
+        config={{ contextLimit: 272_000, hardThreshold: 0.92 }}
+        contextSnapshot={current}
+        runtimeCompactionPolicy={COPILOT_RUNTIME_COMPACTION_POLICY}
+        compactStatus={{
+          sessionId: 'sess-copilot-policy',
+          kind: 'running',
+          trigger: 'auto',
+          tokensBefore: 217_800,
+          attemptId: 'compact-1',
+          startedAt: '2026-09-30T06:12:34.000Z',
+          authority: 'runtime',
+          scope: { kind: 'root' },
+          startSnapshot: started,
+        }}
+        modelInfo={{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', provider: 'GitHub Copilot', contextWindow: 272_000 }}
+        queuedMessages={0}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('context-usage-indicator'))
+    const policy = screen.getByTestId('context-compaction-policy')
+    expect(policy.textContent ?? '').toContain('Agent runtime')
+    expect(policy.textContent ?? '').toContain('Background compaction starts80%')
+    expect(policy.textContent ?? '').toContain('Processing blocks at95%')
+    expect(policy.textContent ?? '').toContain('Allowed')
+    expect(policy.textContent ?? '').toContain('Runtime reported')
+    const active = screen.getByTestId('context-active-compaction')
+    expect(active.textContent ?? '').toContain('Running in background')
+    expect(active.textContent ?? '').toContain('Started at217.8k / 272.0k (80%)')
+    expect(active.textContent ?? '').toContain('Current snapshot207.2k / 272.0k (76%)')
   })
 
   it('does not fill an unknown host context window from client model info', () => {

@@ -140,6 +140,35 @@ runtimes implement identical internal semantics. Runtime-specific information
 may be retained as redacted artifacts and exposed only through capability-gated
 debug views.
 
+### 4.1 Context-management contract
+
+Both adapters publish one normalized, effective compaction policy. The policy
+states:
+
+- whether the Host or runtime owns context replacement;
+- whether automatic compaction runs at a safe boundary or in the background;
+- warning, start, and optional blocking thresholds;
+- whether work may continue while compaction runs;
+- manual-compaction behavior while a turn is active;
+- whether the summary is Host-gated or merely runtime-reported.
+
+This policy normalizes observability, not implementation. Kernel compaction
+remains Host-owned and replayable through `messages_replaced`. Copilot
+compaction remains SDK-owned and is projected from native lifecycle events.
+The Dashboard must use the policy rather than branching on the runtime ID.
+
+Lifecycle events distinguish immutable start/completion snapshots from the
+latest current usage snapshot and carry a root/subagent scope. Copilot events
+with an `agentId` must never update root context state or root compaction
+markers.
+
+Manual compaction enters the selected adapter in all cases:
+
+- `KernelAgentRuntime` delegates to the Host loop;
+- `CopilotAgentRuntime` delegates to `history.compact`.
+
+The Dashboard namespace must not fall through to a runtime-specific loop.
+
 ## 5. Session persistence and authority
 
 Every Session header stores:

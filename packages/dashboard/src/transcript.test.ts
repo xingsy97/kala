@@ -92,6 +92,76 @@ describe('transcriptTimelineForRuntime', () => {
       { kind: 'message', message: messages[2] },
     ])
   })
+
+  it('restores a durable Kernel compaction boundary when paged history no longer contains its event', () => {
+    const marker: Message = {
+      role: 'user',
+      content: [{ type: 'text', text: 'durable handoff' }],
+      metadata: {
+        kind: 'context_compaction',
+        attemptId: 'compact-kernel-1',
+        phase: 'done',
+        trigger: 'preflight',
+        tokensBefore: 220_200,
+        tokensAfter: 58_000,
+        replacedCount: 42,
+        summary: 'Persist the active implementation.',
+        startedAt: '2026-09-30T06:00:00.000Z',
+        endedAt: '2026-09-30T06:00:02.000Z',
+      },
+    }
+    const timeline: TimelineEntry[] = [{
+      seq: 101,
+      ts: '2026-09-30T06:00:03.000Z',
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'Output after compaction.' }] } },
+      effects: [],
+    }]
+
+    const items = transcriptBaseItems([marker], timeline)
+    expect(items[0]).toMatchObject({ kind: 'compact_boundary', attemptId: 'compact-kernel-1' })
+    expect(items[1]).toMatchObject({ kind: 'message', seq: 101 })
+  })
+
+  it('deduplicates the same durable compaction boundary from state and history', () => {
+    const marker: Message = {
+      role: 'user',
+      content: [{ type: 'text', text: 'durable handoff' }],
+      metadata: {
+        kind: 'context_compaction',
+        attemptId: 'compact-kernel-2',
+        phase: 'done',
+        trigger: 'manual',
+        tokensBefore: 12_000,
+        tokensAfter: 4_000,
+        replacedCount: 8,
+        summary: 'Keep the result.',
+        startedAt: '2026-09-30T06:00:00.000Z',
+        endedAt: '2026-09-30T06:00:01.000Z',
+      },
+    }
+    const timeline: TimelineEntry[] = [{
+      seq: 8,
+      ts: '2026-09-30T06:00:01.000Z',
+      event: {
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 9 },
+        replacementMessages: [marker],
+      },
+      effects: [],
+      compactionMetadata: {
+        attemptId: 'compact-kernel-2',
+        trigger: 'manual',
+        tokensBefore: 12_000,
+        tokensAfter: 4_000,
+        replacedCount: 8,
+      },
+    }]
+
+    const boundaries = transcriptBaseItems([marker], timeline).filter((item) => item.kind === 'compact_boundary')
+    expect(boundaries).toHaveLength(1)
+    expect(boundaries[0]).toMatchObject({ attemptId: 'compact-kernel-2', summary: 'Keep the result.' })
+  })
 })
 
 describe('Turn timing transcript projection', () => {

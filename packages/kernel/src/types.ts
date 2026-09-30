@@ -156,6 +156,16 @@ export type Message = {
         endedAt?: string
         error?: string
       }
+    | {
+        kind: 'temporal'
+        messageId: string
+        turnId: string
+        createdAt: string
+        turnStartedAt: string
+        turnCompletedAt?: string
+        turnDurationMs?: number
+        turnStatus?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
+      }
 }
 
 // ============================================================================

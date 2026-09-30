@@ -35,6 +35,7 @@ import {
   PREF_HIDE_SUB_AGENT_SESSIONS,
   PREF_KEEP_SCREEN_AWAKE,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  PREF_MESSAGE_TIMESTAMPS,
   PREF_TOOL_ACTIVITY_ICON_SCALE,
   PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES,
@@ -44,6 +45,7 @@ import {
   PREF_TOPBAR_OPEN,
   useBooleanPref,
   useNumberPref,
+  useStringPref,
 } from '../../../lib/prefs.js'
 import { DEFAULT_SESSION_VIEW_CACHE_MAX_MB, PREF_SESSION_VIEW_CACHE_MAX_MB } from '../../../session-view-cache.js'
 import {
@@ -115,6 +117,7 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
   const [durableCacheEnabled, setDurableCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
   const [keepScreenAwake, setKeepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
   const [smoothStreamingText, setSmoothStreamingText] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
+  const [messageTimestamps, setMessageTimestamps] = useStringPref(PREF_MESSAGE_TIMESTAMPS, 'auto')
   const [theme, , setTheme, effectiveTheme] = useTheme()
   const [, setStoredVSCodeTheme] = useState<StoredVSCodeTheme | null>(() => readStoredVSCodeTheme())
   const activeVSCodeTheme = currentVSCodeTheme(effectiveTheme)
@@ -370,6 +373,17 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
           onChange={setHideSubAgentSessions}
           testId="settings-toggle-hide-sub-agent-sessions"
         />
+        <li className="flex items-center justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+          <div className="min-w-0">
+            <div className="font-medium">{t('settings.interface.messageTimestamps')}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.interface.messageTimestampsDesc')}</div>
+          </div>
+          <select value={messageTimestamps} onChange={(event) => setMessageTimestamps(event.currentTarget.value)} className="h-8 w-28 flex-none rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.messageTimestamps')} data-testid="settings-message-timestamps">
+            <option value="auto">{t('settings.interface.messageTimestampsAuto')}</option>
+            <option value="always">{t('settings.interface.messageTimestampsAlways')}</option>
+            <option value="hidden">{t('settings.interface.messageTimestampsHidden')}</option>
+          </select>
+        </li>
         <li className="flex items-center justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
             <div className="flex items-center gap-1 font-medium">{t('settings.interface.liveToolActivityTail')}<HelpHint label={t('settings.interface.liveToolActivityTail')}>{t('settings.interface.liveToolActivityTailDesc')}</HelpHint></div>

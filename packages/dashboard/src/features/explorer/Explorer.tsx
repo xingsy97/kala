@@ -159,6 +159,7 @@ function ExplorerImpl({
     fontSizePx * 1.4 + 9 * interfaceScale,
   )), [fontSizePx, interfaceScale])
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
+  const [deleteConfirmationStep, setDeleteConfirmationStep] = useState<'review' | 'final'>('review')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -325,7 +326,10 @@ function ExplorerImpl({
       style={style}
       dragHandle={dragHandle}
       editingSessionId={editingSessionId}
-      onDeleteRequest={(sess) => setPendingDelete(sess)}
+      onDeleteRequest={(sess) => {
+        setPendingDelete(sess)
+        setDeleteConfirmationStep('review')
+      }}
       onStartEdit={(sess) => {
         if (!isSessionWorkspaceOnline(sess, onlineWorkspaceIds)) return
         setEditingSessionId(sess.sessionId)
@@ -470,12 +474,17 @@ function ExplorerImpl({
       <AlertDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingDelete(null)
+          if (!open) {
+            setPendingDelete(null)
+            setDeleteConfirmationStep('review')
+          }
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('explorer.deleteTitle')}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleteConfirmationStep === 'review' ? t('explorer.deleteTitle') : 'Final deletion confirmation'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               <span className="font-mono text-foreground">
                 {pendingDelete?.label ?? ''}
@@ -490,19 +499,40 @@ function ExplorerImpl({
                   </span>
                 </>
               ) : null}
+              {deleteConfirmationStep === 'final' ? (
+                <>
+                  <br />
+                  <span className="mt-2 block font-medium text-destructive">
+                    Confirm again to permanently delete this Session tree.
+                  </span>
+                </>
+              ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              data-testid="confirm-delete-button"
-              onClick={() => {
-                if (pendingDelete) onDelete(pendingDelete.sessionId)
-                setPendingDelete(null)
-              }}
-            >
-              {t('explorer.delete')}
-            </AlertDialogAction>
+            {deleteConfirmationStep === 'review' ? (
+              <AlertDialogAction
+                data-testid="confirm-delete-button"
+                onClick={(event) => {
+                  event.preventDefault()
+                  setDeleteConfirmationStep('final')
+                }}
+              >
+                Continue
+              </AlertDialogAction>
+            ) : (
+              <AlertDialogAction
+                data-testid="confirm-delete-final-button"
+                onClick={() => {
+                  if (pendingDelete) onDelete(pendingDelete.sessionId)
+                  setPendingDelete(null)
+                  setDeleteConfirmationStep('review')
+                }}
+              >
+                {t('explorer.delete')}
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1355,7 +1385,7 @@ function SessionRow({
         </div>
       )}
       {editing ? null : (
-        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none col-start-3 row-start-1 flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none col-start-2 col-end-4 row-start-1 flex min-w-0 items-center justify-end gap-0.5 bg-gradient-to-l from-muted via-muted/95 to-transparent pl-3 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
           <Button
             variant="ghost"
             size="icon"

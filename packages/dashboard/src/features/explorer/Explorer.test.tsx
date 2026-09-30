@@ -1012,6 +1012,8 @@ describe('Explorer', () => {
     )
     fireEvent.click(screen.getByTestId('session-delete-button'))
     fireEvent.click(screen.getByTestId('confirm-delete-button'))
+    expect(onDelete).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('confirm-delete-final-button'))
     expect(onDelete).toHaveBeenCalledWith(sessionSummary.sessionId)
   })
 
@@ -1047,6 +1049,8 @@ describe('Explorer', () => {
     fireEvent.click(parentRow!.querySelector('[data-testid="session-delete-button"]')!)
     expect(screen.getByText(/2 descendant sessions/i)).toBeTruthy()
     fireEvent.click(screen.getByTestId('confirm-delete-button'))
+    expect(onDelete).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('confirm-delete-final-button'))
     expect(onDelete).toHaveBeenCalledWith(sessionSummary.sessionId)
   })
 

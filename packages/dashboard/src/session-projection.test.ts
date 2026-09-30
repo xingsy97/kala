@@ -1,5 +1,5 @@
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
-import type { ContextUsageSnapshot, EventAppendedEvent, SessionReadyEvent } from '@agent-kernel/shared'
+import { COPILOT_RUNTIME_COMPACTION_POLICY, KERNEL_AGENT_RUNTIME_CAPABILITIES, kernelRuntimeCompactionPolicy, type ContextUsageSnapshot, type EventAppendedEvent, type SessionReadyEvent } from '@agent-kernel/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import { EMPTY_SESSION_PROJECTION, reduceSessionProjection, reduceSessionProjectionBatch } from './session-projection.js'
@@ -7,7 +7,7 @@ import { EMPTY_SESSION_PROJECTION, reduceSessionProjection, reduceSessionProject
 const config = createConfig({ systemPrompt: 'system', tools: [] })
 const contextSnapshot: ContextUsageSnapshot = {
   model: { ref: 'provider/model' },
-  contextWindow: { tokens: 200_000, source: 'model_catalog' },
+  contextWindow: { tokens: 200_000, source: 'model_registry' },
   usage: { inputTokens: 10, totalTokens: 10 },
   breakdown: { system: 1, transcript: 9, tools: 0, memory: 0, attachments: 0, pendingUserInput: 0 },
   estimator: { total: { kind: 'heuristic', confidence: 'rough' }, breakdown: { kind: 'heuristic', confidence: 'rough' }, version: 'test' },
@@ -16,7 +16,17 @@ const contextSnapshot: ContextUsageSnapshot = {
 
 function ready(sessionId: string): SessionReadyEvent {
   const state = createInitialState({ sessionId, systemPrompt: 'system' })
-  return { sessionId, cursor: state.cursor, state, config, contextSnapshot }
+  return {
+    sessionId,
+    agentRuntime: 'kernel',
+    executionMode: 'chat',
+    agentRuntimeCapabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
+    runtimeCompactionPolicy: kernelRuntimeCompactionPolicy(),
+    cursor: state.cursor,
+    state,
+    config,
+    contextSnapshot,
+  }
 }
 
 function appended(sessionId: string, seq: number, text: string): EventAppendedEvent {
@@ -32,6 +42,88 @@ function selected(sessionId: string, generation = 1) {
 }
 
 describe('session projection reducer', () => {
+  it('derives a compatible compaction policy when an older Host omits it', () => {
+    const payload = ready('legacy-ready')
+    delete payload.runtimeCompactionPolicy
+    payload.agentRuntime = 'copilot'
+    const selected = reduceSessionProjection(EMPTY_SESSION_PROJECTION, {
+      kind: 'select',
+      generation: 1,
+      sessionId: payload.sessionId,
+    })
+
+    const hydrated = reduceSessionProjection(selected, {
+      kind: 'ready',
+      generation: 1,
+      sessionId: payload.sessionId,
+      payload,
+    })
+
+    expect(hydrated.runtimeCompactionPolicy).toEqual(COPILOT_RUNTIME_COMPACTION_POLICY)
+  })
+
+  it('hydrates an active root compaction from the authoritative ready baseline', () => {
+    const sessionId = 'session-active-compact'
+    const current = reduceSessionProjection(EMPTY_SESSION_PROJECTION, {
+      kind: 'select',
+      generation: 1,
+      sessionId,
+    })
+    const hydrated = reduceSessionProjection(current, {
+      kind: 'ready',
+      generation: 1,
+      sessionId,
+      payload: {
+        ...ready(sessionId),
+        compactStatus: {
+          sessionId,
+          kind: 'running',
+          trigger: 'auto',
+          tokensBefore: 800,
+          attemptId: 'active-root',
+          startedAt: '2026-07-24T00:00:00.000Z',
+          scope: { kind: 'root' },
+        },
+      },
+    })
+
+    expect(hydrated.compactStatus?.attemptId).toBe('active-root')
+  })
+
+  it('does not replace root compaction state with a subagent lifecycle event', () => {
+    const current = selected('session-a')
+    const root = reduceSessionProjection(current, {
+      kind: 'compact',
+      generation: 1,
+      sessionId: 'session-a',
+      compactStatus: {
+        sessionId: 'session-a',
+        kind: 'running',
+        trigger: 'auto',
+        tokensBefore: 800,
+        attemptId: 'root',
+        startedAt: '2026-07-24T00:00:00.000Z',
+        scope: { kind: 'root' },
+      },
+    })
+    const afterSubagent = reduceSessionProjection(root, {
+      kind: 'compact',
+      generation: 1,
+      sessionId: 'session-a',
+      compactStatus: {
+        sessionId: 'session-a',
+        kind: 'running',
+        trigger: 'auto',
+        tokensBefore: 900,
+        attemptId: 'child',
+        startedAt: '2026-07-24T00:00:01.000Z',
+        scope: { kind: 'subagent', agentId: 'child-a' },
+      },
+    })
+
+    expect(afterSubagent.compactStatus?.attemptId).toBe('root')
+  })
+
   it('reduces a queued frame in exactly the same order as individual events', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-24T00:00:10.000Z'))

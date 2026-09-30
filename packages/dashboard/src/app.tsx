@@ -285,6 +285,7 @@ export function App(): JSX.Element {
   const [metadataSessionId, setMetadataSessionId] = useState<string | null>(null)
   const [slashDelete, setSlashDelete] = useState<SlashDeleteState | null>(null)
   const [slashDeletePhrase, setSlashDeletePhrase] = useState('')
+  const [slashDeleteConfirmationStep, setSlashDeleteConfirmationStep] = useState<'phrase' | 'final'>('phrase')
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false)
   const [userMessageNavigationPortalTarget, setUserMessageNavigationPortalTarget] = useState<HTMLDivElement | null>(null)
@@ -742,6 +743,7 @@ export function App(): JSX.Element {
   const remoteCompact = session.compactStatus
   useEffect(() => {
     if (!remoteCompact) return
+    if (remoteCompact.scope?.kind === 'subagent') return
     if (remoteCompact.kind === 'running') {
       setCompactStatus({
         kind: 'running',
@@ -783,15 +785,17 @@ export function App(): JSX.Element {
   // Live transitions: hard + resting → queued; hard clears / turn starts /
   // compact runs → back to idle (or whatever the running-observer set).
   useEffect(() => {
-    const shouldQueueCompact = shouldCompactContext(session.contextSnapshot, {}, { triggerRatio: session.config?.hardThreshold ?? 0.92 }).shouldCompact
+    const shouldQueueCompact = shouldCompactContext(session.contextSnapshot, {}, {
+      triggerRatio: session.runtimeCompactionPolicy.automatic.startThreshold,
+    }).shouldCompact
     const status = session.state?.status
     const resting = status === 'idle' || status === 'done' || status === 'error'
-    if (shouldShowQueuedAutoCompact(session.agentRuntime, shouldQueueCompact, resting)) {
+    if (shouldShowQueuedAutoCompact(session.runtimeCompactionPolicy, shouldQueueCompact, resting)) {
       if (compactStatus.kind === 'idle') setCompactStatus({ kind: 'queued' })
       return
     }
     if (compactStatus.kind === 'queued') setCompactStatus({ kind: 'idle' })
-  }, [session.contextSnapshot, session.config?.hardThreshold, session.state?.status, compactStatus.kind])
+  }, [session.contextSnapshot, session.runtimeCompactionPolicy, session.state?.status, compactStatus.kind])
 
   const onModelChange = (model: string): void => {
     if (!currentAgentRuntimeCapabilities.modelSelection) return
@@ -1056,10 +1060,12 @@ export function App(): JSX.Element {
     if (activeSessionId === null) return
     setSlashDelete({ sessionId: activeSessionId })
     setSlashDeletePhrase('')
+    setSlashDeleteConfirmationStep('phrase')
   }, [activeSessionId])
   const resetSlashDelete = useCallback((): void => {
     setSlashDelete(null)
     setSlashDeletePhrase('')
+    setSlashDeleteConfirmationStep('phrase')
   }, [])
   const openExplorerDrawerSessionInfo = useCallback((sessionId: string): void => {
     setExplorerDrawerOpen(false)
@@ -1319,8 +1325,8 @@ export function App(): JSX.Element {
     [session.timeline],
   )
   const agentProgress = useMemo(
-    () => deriveAgentProgress(session.state, session.timeline, session.turnStartedAt),
-    [session.state, session.timeline, session.turnStartedAt],
+    () => deriveAgentProgress(session.state, session.timeline, session.turnStartedAt, session.agentRuntime),
+    [session.state, session.timeline, session.turnStartedAt, session.agentRuntime],
   )
   const taskGraph = useMemo(
     () => taskGraphFromMessages(session.state?.messages ?? [], taskGraphFromTimeline(session.timeline)),
@@ -2199,6 +2205,7 @@ export function App(): JSX.Element {
                         {currentAgentRuntimeCapabilities.compact ? <ContextPressureBanner
                           state={session.state}
                           contextSnapshot={session.contextSnapshot}
+                          runtimeCompactionPolicy={session.runtimeCompactionPolicy}
                           compactRunning={compactStatus.kind === 'running'}
                           suppressed={awaitingAck || compactStatus.kind === 'running'}
                           onCompactNow={runCompactNow}
@@ -2229,6 +2236,8 @@ export function App(): JSX.Element {
                           state={session.state}
                           config={session.config}
                           contextSnapshot={session.contextSnapshot}
+                          runtimeCompactionPolicy={session.runtimeCompactionPolicy}
+                          runtimeCompactStatus={session.compactStatus}
                           humanAttention={session.humanAttention}
                           queuedMessages={visibleQueuedMessages}
                           timeline={session.timeline}
@@ -2599,7 +2608,9 @@ export function App(): JSX.Element {
       >
         <AlertDialogContent className="max-w-[min(92vw,34rem)]">
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('app.slashDelete.confirmTitle')}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {slashDeleteConfirmationStep === 'phrase' ? t('app.slashDelete.confirmTitle') : 'Final deletion confirmation'}
+            </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
                 <p>{t('app.slashDelete.description')}</p>
@@ -2614,22 +2625,40 @@ export function App(): JSX.Element {
                   {t('app.slashDelete.phraseLabel')}
                   <input className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground" value={slashDeletePhrase} onChange={(event) => setSlashDeletePhrase(event.target.value)} placeholder={slashDeleteRequiredPhrase} data-testid="slash-delete-confirm-input" />
                 </label>
+                {slashDeleteConfirmationStep === 'final' ? (
+                  <p className="font-medium text-destructive">
+                    Confirm again to permanently delete this Session tree. This is the second and final confirmation.
+                  </p>
+                ) : null}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!slashDeleteConfirmed}
-              onClick={(event) => {
-                if (!slashDelete || !slashDeleteConfirmed) { event.preventDefault(); return }
-                deleteSessionAt(slashDelete.sessionId)
-                resetSlashDelete()
-              }}
-              data-testid="slash-delete-confirm-button"
-            >
-              {t('app.slashDelete.confirmDelete')}
-            </AlertDialogAction>
+            {slashDeleteConfirmationStep === 'phrase' ? (
+              <AlertDialogAction
+                disabled={!slashDeleteConfirmed}
+                onClick={(event) => {
+                  event.preventDefault()
+                  if (!slashDelete || !slashDeleteConfirmed) return
+                  setSlashDeleteConfirmationStep('final')
+                }}
+                data-testid="slash-delete-confirm-button"
+              >
+                Continue
+              </AlertDialogAction>
+            ) : (
+              <AlertDialogAction
+                onClick={() => {
+                  if (!slashDelete || !slashDeleteConfirmed) return
+                  deleteSessionAt(slashDelete.sessionId)
+                  resetSlashDelete()
+                }}
+                data-testid="slash-delete-final-confirm-button"
+              >
+                {t('app.slashDelete.confirmDelete')}
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2654,6 +2683,7 @@ export function App(): JSX.Element {
             executors={control.executors}
             sessionCache={sessionViewCache}
             host={hostEndpoint.url}
+            storageSocket={controlSocket ?? session.socket ?? undefined}
             {...(config.token ? { token: config.token } : {})}
           />
         </Suspense>
@@ -2672,6 +2702,7 @@ export function App(): JSX.Element {
         selectedModel={metadataIsCurrentSession ? session.selectedModel : metadataSession?.preferences?.selectedModel ?? null}
         canChangeCwd={metadataIsCurrentSession && currentAgentRuntimeCapabilities.cwdMutation}
         canChangeApprovalMode={metadataIsCurrentSession && currentAgentRuntimeCapabilities.approvalMode}
+        storageSocket={controlSocket ?? session.socket ?? undefined}
         {...(metadataIsCurrentSession && executorHost !== undefined ? { executorHost } : {})}
         onRename={(label) => {
           if (metadataTargetSessionId !== null) renameSessionAt(metadataTargetSessionId, label)

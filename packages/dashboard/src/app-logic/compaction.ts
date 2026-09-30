@@ -1,5 +1,5 @@
 import type { AgentState } from '@agent-kernel/kernel'
-import type { AgentRuntimeId } from '@agent-kernel/shared'
+import type { RuntimeCompactionPolicy } from '@agent-kernel/shared'
 
 /**
  * Pure helpers for reasoning about context compaction events/state. Extracted
@@ -12,11 +12,14 @@ export function hasCompactableContent(state: AgentState | null): boolean {
 }
 
 export function shouldShowQueuedAutoCompact(
-  agentRuntime: AgentRuntimeId,
+  policy: RuntimeCompactionPolicy,
   shouldCompact: boolean,
   resting: boolean,
 ): boolean {
-  return agentRuntime === 'kernel' && shouldCompact && resting
+  return policy.automatic.enabled
+    && policy.automatic.mode === 'safe_boundary'
+    && shouldCompact
+    && resting
 }
 
 /** A projection event kind that terminates a compaction attempt. */
