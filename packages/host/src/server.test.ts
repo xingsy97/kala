@@ -6167,8 +6167,10 @@ describe('wire protocol', () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     expect(seenPrompts).toEqual(['first', 'first|second'])
-    const emptyDeadline = Date.now() + 2000
-    while (Date.now() < emptyDeadline && latestQueue?.pending !== 0) {
+    const quiescentDeadline = Date.now() + 2000
+    while (Date.now() < quiescentDeadline) {
+      const snapshot = restoredGovernor.snapshot('unit-a')
+      if (latestQueue?.pending === 0 && snapshot.concurrentTurns === 0 && snapshot.queuedMessages === 0) break
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     expect(latestQueue?.pending).toBe(0)
