@@ -19,13 +19,21 @@ test('gitless Private Cloud runtime context includes tracked release bootstrap i
   assert.match(dockerfile, /docs\/\.tracked-release-docs/u)
 })
 
-test('Private Cloud images pin a patched multi-platform Node base and exclude build tooling at runtime', () => {
+test('Private Cloud images derive a minimal Node runtime and exclude unused OpenSSL and build tooling', () => {
   const builderDigest = 'sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c'
   const runtimeDigest = 'sha256:5ef534d3db0ac0c43bee379af4ae49cfbfc0ef38a46c94c52d87c68f32f34d8a'
   for (const name of ['runtime-service', 'runtime-ingress-gateway', 'dashboard']) {
     const dockerfile = readFileSync(join(import.meta.dirname, `../../deploy/private-cloud/images/Dockerfile.${name}`), 'utf8')
     assert.equal(dockerfile.match(new RegExp(`FROM node@${builderDigest}`, 'gu'))?.length, 1)
     assert.equal(dockerfile.match(new RegExp(`FROM gcr\\.io/distroless/nodejs22-debian13@${runtimeDigest}`, 'gu'))?.length, 1)
+    assert.equal(dockerfile.match(/^FROM scratch AS node-runtime$/gmu)?.length, 1)
+    assert.equal(dockerfile.match(/^FROM node-runtime AS runtime$/gmu)?.length, 1)
+    assert.match(dockerfile, /^COPY --from=node-runtime-source \/nodejs\/bin\/node \/nodejs\/bin\/node$/mu)
+    assert.match(dockerfile, /^COPY --from=node-runtime-source --chmod=1777 \/tmp \/tmp$/mu)
+    assert.match(dockerfile, /^ENTRYPOINT \["\/nodejs\/bin\/node"\]$/mu)
+    assert.doesNotMatch(dockerfile, /^COPY --from=node-runtime-source \/ \/$/mu)
+    assert.doesNotMatch(dockerfile, /^COPY --from=node-runtime-source .*libssl/mu)
+    assert.doesNotMatch(dockerfile, /^COPY --from=node-runtime-source .*status\.d\/libssl/mu)
     assert.match(dockerfile, /^USER 65532:65532$/mu)
     const runtimeStage = dockerfile.slice(dockerfile.indexOf('FROM gcr.io/distroless/'))
     assert.doesNotMatch(runtimeStage, /\b(?:groupadd|useradd|apt-get|corepack|pnpm)\b/u)

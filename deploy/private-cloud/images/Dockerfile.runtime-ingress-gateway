@@ -13,7 +13,39 @@ RUN pnpm --filter @agent-kernel/kernel build && pnpm --filter @agent-kernel/shar
 RUN pnpm deploy --legacy --filter @agent-kernel/runtime-ingress-gateway --prod /out/ingress \
  && rm -rf /out/ingress/src
 
-FROM gcr.io/distroless/nodejs22-debian13@sha256:5ef534d3db0ac0c43bee379af4ae49cfbfc0ef38a46c94c52d87c68f32f34d8a AS runtime
+FROM gcr.io/distroless/nodejs22-debian13@sha256:5ef534d3db0ac0c43bee379af4ae49cfbfc0ef38a46c94c52d87c68f32f34d8a AS node-runtime-source
+
+FROM scratch AS node-runtime
+COPY --from=node-runtime-source /nodejs/bin/node /nodejs/bin/node
+COPY --from=node-runtime-source /etc/os-release /etc/os-release
+COPY --from=node-runtime-source /etc/debian_version /etc/debian_version
+COPY --from=node-runtime-source /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=node-runtime-source /etc/passwd /etc/passwd
+COPY --from=node-runtime-source /etc/group /etc/group
+COPY --from=node-runtime-source /etc/nsswitch.conf /etc/nsswitch.conf
+COPY --from=node-runtime-source /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=node-runtime-source /usr/lib/x86_64-linux-gnu/libdl.so.2 /usr/lib/x86_64-linux-gnu/libdl.so.2
+COPY --from=node-runtime-source /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+COPY --from=node-runtime-source /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33 /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33
+COPY --from=node-runtime-source /usr/lib/x86_64-linux-gnu/libm.so.6 /usr/lib/x86_64-linux-gnu/libm.so.6
+COPY --from=node-runtime-source /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+COPY --from=node-runtime-source /usr/lib/x86_64-linux-gnu/libpthread.so.0 /usr/lib/x86_64-linux-gnu/libpthread.so.0
+COPY --from=node-runtime-source /usr/lib/x86_64-linux-gnu/libc.so.6 /usr/lib/x86_64-linux-gnu/libc.so.6
+COPY --from=node-runtime-source /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+COPY --from=node-runtime-source /usr/lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+COPY --from=node-runtime-source /var/lib/dpkg/status.d/base-files* /var/lib/dpkg/status.d/
+COPY --from=node-runtime-source /var/lib/dpkg/status.d/ca-certificates* /var/lib/dpkg/status.d/
+COPY --from=node-runtime-source /var/lib/dpkg/status.d/gcc-14-base* /var/lib/dpkg/status.d/
+COPY --from=node-runtime-source /var/lib/dpkg/status.d/libc6* /var/lib/dpkg/status.d/
+COPY --from=node-runtime-source /var/lib/dpkg/status.d/libgcc-s1* /var/lib/dpkg/status.d/
+COPY --from=node-runtime-source /var/lib/dpkg/status.d/libstdc++6* /var/lib/dpkg/status.d/
+COPY --from=node-runtime-source /var/lib/dpkg/status.d/tzdata* /var/lib/dpkg/status.d/
+COPY --from=node-runtime-source --chmod=1777 /tmp /tmp
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENTRYPOINT ["/nodejs/bin/node"]
+
+FROM node-runtime AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=65532:65532 /out/ingress/ /app/packages/runtime-ingress-gateway/
