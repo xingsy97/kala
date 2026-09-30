@@ -20,7 +20,7 @@
     "@agent-kernel/executor": "workspace:*",
     "@agent-kernel/host": "workspace:*",
     "@agent-kernel/shared": "workspace:*",
-    "socket.io-client": "4.8.1"
+    "socket.io-client": "4.8.4"
   },
   "devDependencies": {
     "puppeteer-core": "25.3.0",

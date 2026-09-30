@@ -15,7 +15,7 @@
     "@agent-kernel/eval-protocol": "workspace:*",
     "@agent-kernel/eval-sdk": "workspace:*",
     "@agent-kernel/shared": "workspace:*",
-    "socket.io-client": "4.8.1"
+    "socket.io-client": "4.8.4"
   },
   "devDependencies": { "@types/node": "22.9.0", "typescript": "5.6.3", "vitest": "4.1.11" },
   "sideEffects": false
