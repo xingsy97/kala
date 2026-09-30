@@ -249,6 +249,55 @@ describe('Stable Ingress admission', () => {
     })
   })
 
+  it('waits for the active reconciliation when another trigger overlaps shutdown', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dedicated-ingress-close-reconcile-'))
+    roots.push(root)
+    let releaseCommit: (() => void) | undefined
+    const commitReleased = new Promise<void>((resolve) => { releaseCommit = resolve })
+    let markCommitStarted: (() => void) | undefined
+    const commitStarted = new Promise<void>((resolve) => { markCommitStarted = resolve })
+    const upstream = createServer(async (request, response) => {
+      if (request.url !== '/internal/runtime/admission/commit') {
+        response.writeHead(404).end()
+        return
+      }
+      for await (const _chunk of request) {
+        // Drain the request before blocking its response.
+      }
+      markCommitStarted?.()
+      await commitReleased
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ committed: true, cursor: 1 }))
+    })
+    servers.push(upstream)
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    ingress = await startDedicatedIngress({
+      port: 0,
+      unitOrigin: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`,
+      admissionLedgerPath: join(root, 'admission.json'),
+      ingressHandoffSecret: 'handoff-secret',
+    })
+    const admit = async (operationId: string): Promise<Response> => await fetch(`http://127.0.0.1:${ingress!.port}/runtime/admission/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'session-1', operationId, text: operationId, mode: 'queue' }),
+    })
+
+    expect((await admit('operation-first')).status).toBe(202)
+    await commitStarted
+    expect((await admit('operation-overlap')).status).toBe(202)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    let closed = false
+    const closing = ingress.close().then(() => { closed = true })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(closed).toBe(false)
+    releaseCommit?.()
+    await closing
+    ingress = undefined
+  })
+
   it('closes long-lived transports without waiting for the service stop timeout', async () => {
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: 'http://127.0.0.1:9' })
     const client = connect(ingress.port, '127.0.0.1')

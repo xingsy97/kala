@@ -211,6 +211,10 @@ export async function startDedicatedIngress(options: {
     reconcileDue = due
     reconcileTimer = setTimeout(() => {
       reconcileTimer = undefined
+      if (reconcilePromise) {
+        retryRequested = true
+        return
+      }
       const run = reconcileAdmission()
       reconcilePromise = run
       void run.catch(() => undefined).finally(() => {
