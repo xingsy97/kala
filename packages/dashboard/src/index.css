@@ -1020,11 +1020,7 @@ body {
   .ak-touch-hide {
     display: none !important;
   }
-  /* Keep the persistent split sidebar, but collapse its four desktop hover
-     actions into one touch-sized menu trigger on coarse-pointer devices. */
-  .ak-session-row-actions > button:not(.ak-session-more-button) {
-    display: none;
-  }
+  /* Keep the persistent split sidebar's single action menu touch-sized. */
   .ak-session-row-actions > .ak-session-more-button {
     display: inline-flex;
     width: 2.25rem;

@@ -1385,7 +1385,7 @@ function SessionRow({
         </div>
       )}
       {editing ? null : (
-        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none col-start-2 col-end-4 row-start-1 flex min-w-0 items-center justify-end gap-0.5 bg-gradient-to-l from-muted via-muted/95 to-transparent pl-3 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none col-start-3 row-start-1 flex min-w-0 items-center justify-end opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
           <Button
             variant="ghost"
             size="icon"
@@ -1393,7 +1393,7 @@ function SessionRow({
             title={t('common.more')}
             aria-label={t('common.more')}
             aria-expanded={touchMenuPosition !== null}
-            className="ak-session-more-button hidden h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
+            className="ak-session-more-button h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -1415,10 +1415,10 @@ function SessionRow({
                 data-testid="session-action-menu"
                 onClick={(e) => e.stopPropagation()}
               >
-                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); if (!renameDisabled) onStartEdit(s) }}><Pencil className="h-4 w-4" />{t('explorer.renameSession')}</button>
-                {onOpenSessionInfo ? <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onOpenSessionInfo(s.sessionId) }}><Info className="h-4 w-4" />{t('explorer.sessionInfoTitle')}</button> : null}
-                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onHideSession(s.sessionId) }}><EyeOff className="h-4 w-4" />{t('explorer.hideSession')}</button>
-                <button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10" onClick={() => { setTouchMenuPosition(null); onDeleteRequest(s) }}><Trash2 className="h-4 w-4" />{t('explorer.deleteSessionTitle')}</button>
+                <button type="button" data-testid="session-menu-rename" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); if (!renameDisabled) onStartEdit(s) }}><Pencil className="h-4 w-4" />{t('explorer.renameSession')}</button>
+                {onOpenSessionInfo ? <button type="button" data-testid="session-menu-info" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onOpenSessionInfo(s.sessionId) }}><Info className="h-4 w-4" />{t('explorer.sessionInfoTitle')}</button> : null}
+                <button type="button" data-testid="session-menu-hide" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onHideSession(s.sessionId) }}><EyeOff className="h-4 w-4" />{t('explorer.hideSession')}</button>
+                <button type="button" data-testid="session-menu-delete" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10" onClick={() => { setTouchMenuPosition(null); onDeleteRequest(s) }}><Trash2 className="h-4 w-4" />{t('explorer.deleteSessionTitle')}</button>
               </div>
             </>,
             document.body,
@@ -1438,7 +1438,7 @@ function SessionRow({
             title={t('explorer.renameSession')}
             aria-label={t('explorer.renameSessionAria', { sessionId: s.sessionId })}
             disabled={renameDisabled}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
+            className="hidden"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -1456,7 +1456,7 @@ function SessionRow({
               data-testid="session-info-button"
               title={t('explorer.sessionInfoTitle')}
               aria-label={t('explorer.sessionInfoAria', { sessionId: s.sessionId })}
-              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
+              className="hidden"
             >
               <Info className="h-3.5 w-3.5" strokeWidth={2.2} />
             </Button>
@@ -1474,7 +1474,7 @@ function SessionRow({
             data-testid="session-hide-button"
             title={t('explorer.hideSession')}
             aria-label={t('explorer.hideSessionAria', { sessionId: s.sessionId })}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-6 sm:w-6"
+            className="hidden"
           >
             <EyeOff className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -1491,7 +1491,7 @@ function SessionRow({
             data-testid="session-delete-button"
             title={t('explorer.deleteSessionTitle')}
             aria-label={t('explorer.deleteSessionAria', { sessionId: s.sessionId })}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground sm:h-6 sm:w-6"
+            className="hidden"
           >
             <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>

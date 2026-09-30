@@ -151,10 +151,11 @@ try {
     const rowSelector = `[data-testid="session-row"][data-session-id="${sessionId}"]`
     await hoverAncestorAndClickFirst(
       actor.page,
-      `${rowSelector} [data-testid="session-info-button"]`,
+      `${rowSelector} [data-testid="session-more-button"]`,
       rowSelector,
-      { description: 'Session info', timeoutMs: 30_000 },
+      { description: 'Session actions', timeoutMs: 30_000 },
     )
+    await clickByTestId(actor.page, 'session-menu-info')
     await actor.page.waitForSelector('[data-testid="session-metadata-dialog"]')
     const runtimeText = await actor.page.$eval('[data-testid="session-metadata-agent-runtime"]', (element) => element.textContent ?? '')
     if (!runtimeText.includes('GitHub Copilot SDK') || !runtimeText.includes('(copilot)')) {
@@ -324,10 +325,11 @@ try {
     const rowSelector = `[data-testid="session-row"][data-session-id="${sessionId}"]`
     await hoverAncestorAndClickFirst(
       actor.page,
-      `${rowSelector} [data-testid="session-delete-button"]`,
+      `${rowSelector} [data-testid="session-more-button"]`,
       rowSelector,
-      { description: 'Delete Session', timeoutMs: 30_000 },
+      { description: 'Session actions', timeoutMs: 30_000 },
     )
+    await clickByTestId(actor.page, 'session-menu-delete')
     await actor.page.waitForSelector('[data-testid="confirm-delete-button"]', { visible: true })
     await clickByTestId(actor.page, 'confirm-delete-button')
     await actor.page.waitForSelector('[data-testid="confirm-delete-final-button"]', { visible: true })

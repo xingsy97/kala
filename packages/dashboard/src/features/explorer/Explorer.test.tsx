@@ -1253,7 +1253,7 @@ describe('Explorer', () => {
 
   it('does not let the hidden date layer intercept clicks over the action buttons', () => {
     // Regression: the date layer and the action-button overlay share the same
-    // grid cell (col-start-4 row-start-1). When the date layer stays clickable
+    // grid cell. When the date layer stays clickable
     // while faded out on hover, it sits on top of the buttons and swallows the
     // click, so pressing rename/hide/delete only switched sessions. The hidden
     // layer must be pointer-events:none and the action overlay must re-enable
@@ -1278,6 +1278,10 @@ describe('Explorer', () => {
       .closest('[data-row-action]') as HTMLElement
     expect(actionOverlay.className).toContain('pointer-events-none')
     expect(actionOverlay.className).toContain('group-hover:pointer-events-auto')
+    expect(actionOverlay.className).toContain('col-start-3')
+    expect(actionOverlay.className).not.toContain('col-start-2')
+    expect(screen.getByTestId('session-more-button').className).not.toContain('hidden')
+    expect(screen.getByTestId('session-info-button').className).toContain('hidden')
 
     const dateLayer = screen
       .getByTestId('session-row')
