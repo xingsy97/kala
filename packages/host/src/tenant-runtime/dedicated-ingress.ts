@@ -201,14 +201,21 @@ export async function startDedicatedIngress(options: {
   let retryRequested = false
   let reconcileTimer: ReturnType<typeof setTimeout> | undefined
   let reconcileDue = 0
+  let reconcilePromise: Promise<void> | undefined
+  let closing = false
   const scheduleReconcile = (delayMs = 0): void => {
+    if (closing) return
     const due = Date.now() + delayMs
     if (reconcileTimer && due >= reconcileDue) return
     if (reconcileTimer) clearTimeout(reconcileTimer)
     reconcileDue = due
     reconcileTimer = setTimeout(() => {
       reconcileTimer = undefined
-      void reconcileAdmission()
+      const run = reconcileAdmission()
+      reconcilePromise = run
+      void run.catch(() => undefined).finally(() => {
+        if (reconcilePromise === run) reconcilePromise = undefined
+      })
     }, delayMs)
     reconcileTimer.unref()
   }
@@ -294,6 +301,7 @@ export async function startDedicatedIngress(options: {
     unitId: DEDICATED_RUNTIME_UNIT_ID,
     origin: options.unitOrigin,
     async close() {
+      closing = true
       if (reconcileTimer) clearTimeout(reconcileTimer)
       for (const watcher of watchers) watcher.close()
       detachPublicAccessGate?.()
@@ -302,7 +310,7 @@ export async function startDedicatedIngress(options: {
         http.close((error) => error ? reject(error) : resolve())
       })
       for (const transport of transports) transport.destroy()
-      await closed
+      await Promise.all([closed, reconcilePromise?.catch(() => undefined)])
       http.off('connection', trackTransport)
     },
   }
