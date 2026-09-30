@@ -5243,8 +5243,6 @@ describe('wire protocol', () => {
       workspaceId: 'ws-running',
       workspaceName: 'running-box',
     })
-    server.store.get(runningSessionId)!.state.status = 'thinking'
-
     const dashboard: ClientSocket<
       DashboardServerToClientEvents,
       DashboardClientToServerEvents
@@ -5256,6 +5254,7 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) =>
       dashboard.on('session:ready', resolve),
     )
+    server.store.get(runningSessionId)!.state.status = 'thinking'
 
     const runningErr = new Promise<{ scope: string; message: string }>((resolve) => {
       dashboard.once('session:error', resolve)
