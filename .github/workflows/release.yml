@@ -124,6 +124,8 @@ jobs:
           corepack prepare pnpm@11.3.0 --activate
 
       - run: pnpm install --frozen-lockfile
+      - name: Configure test workers
+        run: node scripts/testing/configure-test-workers.mjs
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
       - run: pnpm run build
       - run: pnpm run typecheck

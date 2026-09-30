@@ -14,6 +14,10 @@ function argValue(argv: readonly string[], name: string): string | undefined {
 
 const dashboardPort = Number(argValue(process.argv, '--port') ?? 5288)
 const HOST_URL = process.env.HOST_URL ?? (dashboardPort === 3000 ? 'http://localhost:3001' : 'http://localhost:3000')
+const requestedTestWorkers = Number(process.env.KALA_TEST_WORKERS ?? 1)
+const testWorkers = Number.isSafeInteger(requestedTestWorkers) && requestedTestWorkers > 0
+  ? requestedTestWorkers
+  : 1
 const HOST_HTTP_ROUTES = [
   '/auth',
   '/models',
@@ -111,8 +115,9 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     globals: false,
     setupFiles: ['src/test/setup.ts'],
-    fileParallelism: false,
+    fileParallelism: testWorkers > 1,
     pool: 'forks',
-    singleFork: true,
+    singleFork: testWorkers === 1,
+    maxWorkers: testWorkers,
   },
 })

@@ -35,6 +35,7 @@
     "test": "pnpm run test:fast",
     "test:fast": "pnpm run test:workspace && pnpm run test:scripts",
     "test:extended": "pnpm run test:fast && pnpm run test:task-packs && pnpm run test:python",
+    "test:local": "node scripts/testing/run-local-tests.mjs",
     "test:workspace": "pnpm -r --workspace-concurrency=1 run test",
     "test:scripts": "node scripts/testing/run-script-tests.mjs",
     "test:task-packs": "node scripts/testing/run-task-pack-tests.mjs",
