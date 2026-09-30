@@ -338,6 +338,38 @@ describe('SafeCleanupEngine', () => {
     expect(orphanPlan.manifest.map((entry) => entry.path)).toContain('artifacts/orphan-id/one.json')
   })
 
+  it('prepares an orphan plan without parsing unrelated corrupt session logs', async () => {
+    const { sessionsDir, engine } = fixture()
+    writeFileSync(join(sessionsDir, 'unrelated-corrupt.jsonl'), '{"kind":"header","sessionId":"unterminated')
+    const orphan = join(sessionsDir, 'artifacts', 'orphan-id')
+    mkdirSync(orphan, { recursive: true })
+    writeFileSync(join(orphan, 'one.json'), 'one')
+
+    const plan = await engine.prepare('orphan-artifacts', 'orphan-id', [])
+
+    expect(plan.targetId).toBe('orphan-id')
+    expect(plan.manifest.map((entry) => entry.path)).toContain('artifacts/orphan-id/one.json')
+  })
+
+  it('refuses orphan cleanup when a matching session log exists before or after prepare', async () => {
+    const before = fixture()
+    mkdirSync(join(before.sessionsDir, 'artifacts', 'claimed'), { recursive: true })
+    writeFileSync(join(before.sessionsDir, 'artifacts', 'claimed', 'one.json'), 'one')
+    writeFileSync(join(before.sessionsDir, 'claimed.jsonl'), '{"kind":"header","sessionId":"unterminated')
+    await expect(before.engine.prepare('orphan-artifacts', 'claimed', []))
+      .rejects.toMatchObject({ code: 'invalid-target' })
+
+    const after = fixture()
+    mkdirSync(join(after.sessionsDir, 'artifacts', 'late-claim'), { recursive: true })
+    writeFileSync(join(after.sessionsDir, 'artifacts', 'late-claim', 'one.json'), 'one')
+    const plan = await after.engine.prepare('orphan-artifacts', 'late-claim', [])
+    writeFileSync(join(after.sessionsDir, 'late-claim.jsonl'), '{"kind":"header","sessionId":"unterminated')
+
+    await expect(after.engine.execute(plan.planId, [])).rejects.toMatchObject({ code: 'invalid-target' })
+    expect(existsSync(join(after.sessionsDir, 'artifacts', 'late-claim', 'one.json'))).toBe(true)
+    expect(readdirSync(after.quarantineDir)).toEqual([])
+  })
+
   it('does not tombstone or evict live sessions after derived artifact cleanup', async () => {
     const { sessionsDir, quarantineDir, metadataDir } = fixture()
     session(sessionsDir, 'root-slug', 'root')

@@ -166,7 +166,7 @@ export class SafeCleanupEngine {
     await this.assertSameDevice()
 
     const active = new Set(activeSessionIds)
-    const headers = await this.readSessionHeaders()
+    const headers = operation === 'orphan-artifacts' ? [] : await this.readSessionHeaders()
     const resolved = await this.resolveTargets(operation, targetId, headers)
     for (const sessionId of resolved.sessionIds) {
       if (active.has(sessionId)) {
@@ -352,9 +352,7 @@ export class SafeCleanupEngine {
         throw new SafeCleanupError('missing-target', `artifact target does not exist: ${artifactPath}`)
       }
       await requireDirectory(artifactPath)
-      if (headers.some((header) => header.slug === targetId)) {
-        throw new SafeCleanupError('invalid-target', `artifact ${targetId} belongs to a session`)
-      }
+      await this.assertOrphanArtifactUnowned(targetId)
       return { sessionIds: [], paths: [artifactPath] }
     }
 
@@ -431,6 +429,9 @@ export class SafeCleanupEngine {
   }
 
   private async revalidate(plan: SafeCleanupPlan): Promise<void> {
+    if (plan.operation === 'orphan-artifacts') {
+      await this.assertOrphanArtifactUnowned(plan.targetId)
+    }
     if (removesSessionDetails(plan.operation)) {
       const headers = await this.readSessionHeaders()
       const currentSessionIds = descendantsOf(plan.targetId, headers)
@@ -458,7 +459,17 @@ export class SafeCleanupEngine {
     }
   }
 
+  private async assertOrphanArtifactUnowned(targetId: string): Promise<void> {
+    const sessionLog = this.internalPath(`${targetId}.jsonl`)
+    if (await this.internalExists(sessionLog)) {
+      throw new SafeCleanupError('invalid-target', `artifact ${targetId} belongs to a session`)
+    }
+  }
+
   private async revalidateTopLevel(plan: SafeCleanupPlan, path: string): Promise<void> {
+    if (plan.operation === 'orphan-artifacts') {
+      await this.assertOrphanArtifactUnowned(plan.targetId)
+    }
     const expected = plan.manifest.find((entry) => entry.path === relative(this.sessionsDir, path))
     if (!expected) throw new SafeCleanupError('manifest-changed', `cleanup target ${path} is absent from the manifest`)
     const current = toManifestEntry(this.sessionsDir, path, await lstat(path))

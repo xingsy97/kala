@@ -193,8 +193,10 @@ describe('SessionMetadataDialog', () => {
     )
 
     const dialog = screen.getByTestId('session-metadata-dialog')
-    expect(dialog.textContent).toContain('Context tokens (direct)137,141')
-    expect(dialog.textContent).toContain('Tokens (in / out) (direct)0 / 0')
+    expect(dialog.textContent).toContain('Current context')
+    expect(dialog.textContent).toContain('137,141')
+    expect(dialog.textContent).toContain('Cumulative API usage')
+    expect(dialog.textContent).toContain('0 in / 0 out')
     expect(dialog.textContent).not.toContain('137,141 / 0')
   })
 
@@ -377,7 +379,23 @@ describe('SessionMetadataDialog', () => {
               sessionId: 'child-session',
               parentSessionId: baseSummary.sessionId,
               directBytes: 100,
-              treeBytes: 100,
+              treeBytes: 150,
+              descendantCount: 1,
+              categories: {},
+              treeCategories: {},
+            }, {
+              sessionId: 'second-child-session',
+              parentSessionId: 'child-session',
+              directBytes: 50,
+              treeBytes: 50,
+              descendantCount: 0,
+              categories: {},
+              treeCategories: {},
+            }, {
+              sessionId: 'sibling-session',
+              parentSessionId: baseSummary.sessionId,
+              directBytes: 25,
+              treeBytes: 25,
               descendantCount: 0,
               categories: {},
               treeCategories: {},
@@ -409,8 +427,8 @@ describe('SessionMetadataDialog', () => {
           value: {
             planId: '00000000-0000-4000-8000-000000000001',
             operation: 'subagent-details',
-            targetId: 'child-session',
-            sessionIds: ['child-session'],
+            targetId: (_payload as { targetId: string }).targetId,
+            sessionIds: [(_payload as { targetId: string }).targetId],
             estimatedBytes: 100,
             itemCount: 4,
             expiresAt: '2026-09-30T00:05:00.000Z',
@@ -446,13 +464,20 @@ describe('SessionMetadataDialog', () => {
       />,
     )
 
-    expect(await screen.findByText('800 / 500')).toBeTruthy()
-    expect(screen.getByText('1,900 / 510')).toBeTruthy()
-    expect(screen.getByText('1,200 / 340')).toBeTruthy()
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete details…' }))
+    const dialog = await screen.findByTestId('session-metadata-dialog')
+    expect(dialog.textContent).toContain('Current contextAll sessions800This session500')
+    expect(dialog.textContent).toContain('Cumulative API usageAll sessions1,900 in / 510 outThis session1,200 in / 340 out')
+    fireEvent.click(screen.getByTestId('session-info-storage-tab'))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select all sub-agents' }))
+    expect(screen.getByTestId('storage-selection-bar').textContent).toContain('3 selected')
+    fireEvent.click(screen.getByRole('button', { name: 'Review cleanup…' }))
+    await screen.findByTestId('storage-cleanup-confirmation')
+    const prepareCalls = emit.mock.calls.filter(([event]) => event === 'client:prepare_storage_cleanup')
+    expect(prepareCalls).toHaveLength(2)
+    expect(prepareCalls.map(([, payload]) => (payload as { targetId: string }).targetId)).toEqual(['child-session', 'sibling-session'])
     fireEvent.click(await screen.findByTestId('storage-cleanup-first-confirm'))
     expect(emit.mock.calls.some(([event]) => event === 'client:execute_storage_cleanup')).toBe(false)
     fireEvent.click(screen.getByTestId('storage-cleanup-final-confirm'))
-    expect(emit.mock.calls.some(([event]) => event === 'client:execute_storage_cleanup')).toBe(true)
+    await waitFor(() => expect(emit.mock.calls.filter(([event]) => event === 'client:execute_storage_cleanup')).toHaveLength(2))
   })
 })

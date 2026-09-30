@@ -122,6 +122,8 @@ describe('SettingsDialog', () => {
 
     await waitForSettingsLoaded()
     expect(screen.getByText('Override host endpoint')).toBeTruthy()
+    expect(screen.getByTestId('settings-tab-storage').textContent).toContain('Storage')
+    expect(screen.getByTestId('settings-tab-storage').textContent).not.toContain('settings.sections.storage')
   })
 
   it('keeps connection help hidden but cross-origin requirements and failures visible', async () => {

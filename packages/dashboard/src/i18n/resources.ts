@@ -431,6 +431,7 @@ export const resources = {
         groups: { personal: 'Personal', workspace: 'Workspace', agent: 'Agent', administration: 'Administration' },
         sections: {
           runtime: { label: 'Runtime', hint: 'Service paths and sessions' },
+          storage: { label: 'Storage', hint: 'Session disk usage and safe cleanup' },
           connection: { label: 'Connection', hint: 'Service endpoint override' },
           agent: { label: 'Agent', hint: 'System prompt preset' },
           models: { label: 'Models', hint: 'Providers and default' },
@@ -2245,6 +2246,7 @@ export const resources = {
         groups: { personal: '个人', workspace: '工作区', agent: 'Agent', administration: '管理' },
         sections: {
           runtime: { label: '运行时', hint: 'Service 路径和会话' },
+          storage: { label: '存储空间', hint: '会话磁盘占用与安全清理' },
           connection: { label: '连接', hint: 'Service endpoint 覆盖' },
           agent: { label: 'Agent', hint: 'System prompt preset' },
           models: { label: '模型', hint: 'Provider 和默认值' },

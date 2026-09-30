@@ -1543,6 +1543,9 @@ export type SessionStorageEntry = {
   sessionId: string
   parentSessionId?: string
   runtime?: string
+  sessionLabel?: string
+  workspaceId?: string
+  workspaceName?: string
   directBytes: number
   treeBytes: number
   descendantCount: number

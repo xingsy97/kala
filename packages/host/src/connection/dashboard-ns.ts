@@ -539,7 +539,7 @@ export function configureDashboardNamespace(
           ok: true,
           value: {
             session: storageEntry(session),
-            descendants: descendants.map(storageEntry),
+            descendants: descendants.map((entry) => storageEntry(entry)),
             tokenUsage: sessionTreeTokenUsage(record, descendantRecords),
             state: deps.storageInventory.getCachedGlobal().state,
           },
@@ -563,11 +563,13 @@ export function configureDashboardNamespace(
         if (!deps.storageInventory) throw new Error('storage inventory unavailable')
         if (p.refresh) await deps.storageInventory.reconcile()
         const global = deps.storageInventory.getCachedGlobal()
+        const largestTrees = deps.storageInventory.getCachedLargestTrees()
+        const summaries = new Map((await deps.store.listSummaries()).map((summary) => [summary.sessionId, summary]))
         ack({
           ok: true,
           value: {
             ...global,
-            largestSessionTrees: deps.storageInventory.getCachedLargestTrees().map(storageEntry),
+            largestSessionTrees: largestTrees.map((entry) => storageEntry(entry, summaries.get(entry.sessionId))),
           },
         })
       } catch (error) {
@@ -1935,11 +1937,15 @@ function storageEntry(entry: {
   descendantCount: number
   categories: SessionStorageEntry['categories']
   treeCategories: SessionStorageEntry['treeCategories']
-}): SessionStorageEntry {
+}, summary?: Pick<SessionSummary, 'label' | 'firstUserMessage' | 'workspaceId' | 'workspaceName'>): SessionStorageEntry {
+  const sessionLabel = summary?.label?.trim() || summary?.firstUserMessage?.trim()
   return {
     sessionId: entry.sessionId,
     ...(entry.parentSessionId ? { parentSessionId: entry.parentSessionId } : {}),
     ...(entry.runtime ? { runtime: entry.runtime } : {}),
+    ...(sessionLabel ? { sessionLabel } : {}),
+    ...(summary?.workspaceId ? { workspaceId: summary.workspaceId } : {}),
+    ...(summary?.workspaceName ? { workspaceName: summary.workspaceName } : {}),
     directBytes: entry.directBytes,
     treeBytes: entry.treeBytes,
     descendantCount: entry.descendantCount,

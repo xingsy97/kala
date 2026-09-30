@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HelpHint } from '../../components/ui/help-hint.js'
-import { Link2, RefreshCw, X } from 'lucide-react'
+import { Link2, RefreshCw, Trash2, X } from 'lucide-react'
 import type { Socket } from 'socket.io-client'
 
 import type { AgentState } from '@agent-kernel/kernel'
@@ -114,10 +114,12 @@ export function SessionMetadataDialog({
   const [labelDraft, setLabelDraft] = useState(initialLabel)
   const [approvalDraft, setApprovalDraft] = useState<ApprovalMode>(approvalMode)
   const [toolCardModeDraft, setToolCardModeDraft] = useState<ToolCardMode>(toolCardMode)
+  const [activeTab, setActiveTab] = useState<'overview' | 'storage'>('overview')
   const [storage, setStorage] = useState<SessionStorageSnapshot | null>(null)
   const [storageError, setStorageError] = useState<string | null>(null)
   const [storageLoading, setStorageLoading] = useState(false)
-  const [cleanupPlan, setCleanupPlan] = useState<StorageCleanupPlanPreview | null>(null)
+  const [selectedStorageIds, setSelectedStorageIds] = useState<ReadonlySet<string>>(new Set())
+  const [cleanupPlans, setCleanupPlans] = useState<readonly StorageCleanupPlanPreview[]>([])
   const [cleanupConfirmationStep, setCleanupConfirmationStep] = useState<'review' | 'final'>('review')
   const [cleanupBusy, setCleanupBusy] = useState(false)
 
@@ -132,34 +134,58 @@ export function SessionMetadataDialog({
     })
   }
 
-  const prepareSubagentCleanup = (targetId: string): void => {
-    if (!storageSocket) return
+  const prepareSubagentCleanup = async (): Promise<void> => {
+    if (!storageSocket || !storage || selectedStorageIds.size === 0) return
+    const targetIds = topLevelSelectedSessionIds(selectedStorageIds, storage.descendants)
     setCleanupBusy(true)
     setStorageError(null)
-    storageSocket.emit('client:prepare_storage_cleanup', { operation: 'subagent-details', targetId }, (result) => {
+    try {
+      const plans = await Promise.all(targetIds.map((targetId) => new Promise<StorageCleanupPlanPreview>((resolve, reject) => {
+        storageSocket.emit('client:prepare_storage_cleanup', { operation: 'subagent-details', targetId }, (result) => {
+          if (result.ok) resolve(result.value)
+          else reject(new Error(result.error))
+        })
+      })))
+      setCleanupPlans(plans)
+      setCleanupConfirmationStep('review')
+    } catch (error) {
+      setStorageError(error instanceof Error ? error.message : String(error))
+    } finally {
       setCleanupBusy(false)
-      if (result.ok) {
-        setCleanupPlan(result.value)
-        setCleanupConfirmationStep('review')
-      }
-      else setStorageError(result.error)
-    })
+    }
   }
 
-  const executeCleanup = (): void => {
-    if (!storageSocket || !cleanupPlan) return
+  const executeCleanup = async (): Promise<void> => {
+    if (!storageSocket || cleanupPlans.length === 0) return
     setCleanupBusy(true)
     setStorageError(null)
-    storageSocket.emit('client:execute_storage_cleanup', { planId: cleanupPlan.planId }, (result) => {
-      setCleanupBusy(false)
+    let completed = 0
+    for (const plan of cleanupPlans) {
+      const result = await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
+        storageSocket.emit('client:execute_storage_cleanup', { planId: plan.planId }, (value) => {
+          resolve(value.ok ? { ok: true } : value)
+        })
+      })
       if (!result.ok) {
-        setStorageError(result.error)
+        setStorageError(
+          completed > 0
+            ? `${completed} cleanup ${completed === 1 ? 'plan completed' : 'plans completed'} before the remaining operation failed: ${result.error}`
+            : result.error,
+        )
+        setCleanupPlans([])
+        setCleanupConfirmationStep('review')
+        setCleanupBusy(false)
+        setSelectedStorageIds(new Set())
+        loadStorage(true)
         return
       }
-      setCleanupPlan(null)
-      setCleanupConfirmationStep('review')
-      loadStorage(true)
-    })
+      completed += 1
+    }
+    setCleanupPlans([])
+    setCleanupConfirmationStep('review')
+    setCleanupBusy(false)
+    setSelectedStorageIds(new Set())
+    loadStorage(true)
   }
 
   useEffect(() => {
@@ -167,6 +193,10 @@ export function SessionMetadataDialog({
       setLabelDraft(initialLabel)
       setApprovalDraft(approvalMode)
       setToolCardModeDraft(toolCardMode)
+      setActiveTab('overview')
+      setSelectedStorageIds(new Set())
+      setCleanupPlans([])
+      setCleanupConfirmationStep('review')
       loadStorage(false)
     }
   }, [open, initialLabel, approvalMode, toolCardMode, sessionId, storageSocket])
@@ -175,6 +205,15 @@ export function SessionMetadataDialog({
   const approvalChanged = approvalDraft !== approvalMode
   const toolCardModeChanged = toolCardModeDraft !== toolCardMode
   const canSave = labelChanged || approvalChanged || toolCardModeChanged
+  const selectedBytes = storage?.descendants
+    .filter((entry) => selectedStorageIds.has(entry.sessionId))
+    .reduce((total, entry) => total + entry.directBytes, 0) ?? 0
+  const allStorageSelected = Boolean(storage?.descendants.length)
+    && storage!.descendants.every((entry) => selectedStorageIds.has(entry.sessionId))
+  const someStorageSelected = selectedStorageIds.size > 0 && !allStorageSelected
+  const plannedBytes = cleanupPlans.reduce((total, plan) => total + plan.estimatedBytes, 0)
+  const plannedItems = cleanupPlans.reduce((total, plan) => total + plan.itemCount, 0)
+  const plannedSessions = new Set(cleanupPlans.flatMap((plan) => plan.sessionIds)).size
   const evaluationReference = typeof window === 'undefined' ? undefined : explicitEvaluationReference(window.location, sessionId)
   const desktopSessionLink = getDesktopBridge() && validDesktopSessionId(sessionId) ? `agent-runlab://session/${sessionId}` : null
   const copyDesktopSessionLink = async (): Promise<void> => {
@@ -211,12 +250,22 @@ export function SessionMetadataDialog({
         <DialogHeader className="relative border-b border-border/60 px-4 py-3 pr-14 sm:px-6 sm:py-4 sm:pr-14">
           <DialogTitle className="flex items-center gap-1 text-lg">{t('dialogs.sessionInfo')}<HelpHint label={t('dialogs.sessionInfo')}>{t('dialogs.sessionInfoDescription')}</HelpHint></DialogTitle>
           <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
+          <div className="mt-3 flex gap-1" role="tablist" aria-label="Session information">
+            <MetadataTab active={activeTab === 'overview'} testId="session-info-overview-tab" onClick={() => setActiveTab('overview')}>
+              Overview
+            </MetadataTab>
+            <MetadataTab active={activeTab === 'storage'} testId="session-info-storage-tab" onClick={() => setActiveTab('storage')}>
+              Storage
+            </MetadataTab>
+          </div>
           <DialogClose className={dialogTouchCloseClassName} aria-label={t('common.close')}>
             <X className="h-5 w-5" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
 
         <DialogBody className="px-4 py-4 sm:px-6" data-testid="session-metadata-body">
+        {activeTab === 'overview' ? (
+        <>
         <div className="grid gap-3 text-sm">
           <ReadOnlyRow label={t('dialogs.sessionId')} value={sessionId} mono action={desktopSessionLink ? (
             <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" data-testid="copy-desktop-session-link" aria-label={t('desktopNative.copySessionLink')} title={t('desktopNative.copySessionLink')} onClick={() => void copyDesktopSessionLink()}>
@@ -262,132 +311,39 @@ export function SessionMetadataDialog({
           />
           {storage?.tokenUsage ? (
             <>
-              <ReadOnlyRow
-                label="Context tokens (tree / direct)"
-                value={`${storage.tokenUsage.tree.currentContextTokens.toLocaleString()} / ${storage.tokenUsage.direct.currentContextTokens.toLocaleString()}`}
+              <UsageRow
+                label="Current context"
+                help="Tokens currently retained in the model context. All sessions includes this session and every descendant sub-agent; this session excludes descendants. Context can decrease after compaction."
+                allSessions={storage.tokenUsage.tree.currentContextTokens.toLocaleString()}
+                thisSession={storage.tokenUsage.direct.currentContextTokens.toLocaleString()}
               />
-              <ReadOnlyRow
-                label={`${t('dialogs.tokensInOut')} (tree)`}
-                value={`${storage.tokenUsage.tree.cumulativeInputTokens.toLocaleString()} / ${storage.tokenUsage.tree.cumulativeOutputTokens.toLocaleString()}`}
-              />
-              <ReadOnlyRow
-                label={`${t('dialogs.tokensInOut')} (direct)`}
-                value={`${storage.tokenUsage.direct.cumulativeInputTokens.toLocaleString()} / ${storage.tokenUsage.direct.cumulativeOutputTokens.toLocaleString()}`}
+              <UsageRow
+                label="Cumulative API usage"
+                help="Historical input and output tokens sent through model API calls. Unlike current context, these totals do not decrease after compaction."
+                allSessions={formatTokenPair(storage.tokenUsage.tree.cumulativeInputTokens, storage.tokenUsage.tree.cumulativeOutputTokens)}
+                thisSession={formatTokenPair(storage.tokenUsage.direct.cumulativeInputTokens, storage.tokenUsage.direct.cumulativeOutputTokens)}
               />
             </>
           ) : (
             <>
               {directContextTokens !== undefined ? (
-                <ReadOnlyRow
-                  label="Context tokens (direct)"
-                  value={directContextTokens.toLocaleString()}
+                <UsageRow
+                  label="Current context"
+                  help="Tokens currently retained in the model context for this session. Context can decrease after compaction."
+                  thisSession={directContextTokens.toLocaleString()}
                 />
               ) : null}
               {directInputTokens !== undefined || directOutputTokens !== undefined ? (
-                <ReadOnlyRow
-                  label={`${t('dialogs.tokensInOut')} (direct)`}
-                  value={`${(directInputTokens ?? 0).toLocaleString()} / ${(directOutputTokens ?? 0).toLocaleString()}`}
+                <UsageRow
+                  label="Cumulative API usage"
+                  help="Historical input and output tokens sent through model API calls for this session."
+                  thisSession={formatTokenPair(directInputTokens ?? 0, directOutputTokens ?? 0)}
                 />
               ) : null}
             </>
           )}
           <ReadOnlyRow label={t('dialogs.sessionCost')} value="—" />
         </div>
-
-        <div className="border-t border-border/50 pt-3" />
-
-        <section className="grid gap-2 text-sm" aria-label="Storage" data-testid="session-storage">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs uppercase tracking-wider text-muted-foreground">Storage</span>
-            <Button type="button" variant="ghost" size="sm" disabled={storageLoading || !storageSocket} onClick={() => loadStorage(true)}>
-              <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', storageLoading && 'animate-spin')} aria-hidden />
-              Refresh
-            </Button>
-          </div>
-          {storageError ? <p className="text-xs text-destructive">{storageError}</p> : storage ? (
-            <>
-              <div className="grid grid-cols-2 gap-2 rounded-md border border-border/50 bg-muted/20 p-3">
-                <StorageMetric label="This session" bytes={storage.session.directBytes} />
-                <StorageMetric label={`Tree (${storage.session.descendantCount} sub-agents)`} bytes={storage.session.treeBytes} />
-              </div>
-              {storage.descendants.length > 0 ? (
-                <div className="divide-y divide-border/40 rounded-md border border-border/50">
-                  {storage.descendants.map((entry) => (
-                    <div key={entry.sessionId} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2">
-                      <div className="min-w-0">
-                        <div className="truncate font-mono text-xs" title={entry.sessionId}>{entry.sessionId}</div>
-                        <div className="text-caption text-muted-foreground">
-                          {formatBytes(entry.directBytes)} direct · {formatBytes(entry.treeBytes)} subtree
-                        </div>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={cleanupBusy}
-                        onClick={() => prepareSubagentCleanup(entry.sessionId)}
-                      >
-                        Delete details…
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {cleanupPlan ? (
-                <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3" data-testid="storage-cleanup-confirmation">
-                  <div className="font-medium">
-                    {cleanupConfirmationStep === 'review' ? 'Review sub-agent cleanup' : 'Final confirmation required'}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    This moves {cleanupPlan.itemCount} exact files ({formatBytes(cleanupPlan.estimatedBytes)}) out of the active session store.
-                    The graph result and a tombstone remain. The operation is revalidated before any file is moved.
-                  </p>
-                  {cleanupConfirmationStep === 'final' ? (
-                    <p className="mt-2 font-medium text-destructive">
-                      Confirm again to quarantine these details. This is the second and final confirmation.
-                    </p>
-                  ) : null}
-                  <div className="mt-3 flex gap-2">
-                    {cleanupConfirmationStep === 'review' ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="destructive"
-                        disabled={cleanupBusy}
-                        data-testid="storage-cleanup-first-confirm"
-                        onClick={() => setCleanupConfirmationStep('final')}
-                      >
-                        Continue
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="destructive"
-                        disabled={cleanupBusy}
-                        data-testid="storage-cleanup-final-confirm"
-                        onClick={executeCleanup}
-                      >
-                        Confirm quarantine
-                      </Button>
-                    )}
-                    <Button type="button" size="sm" variant="outline" disabled={cleanupBusy} onClick={() => {
-                      setCleanupPlan(null)
-                      setCleanupConfirmationStep('review')
-                    }}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-              <p className="text-caption text-muted-foreground">
-                Measured {storage.state.measuredAt ? formatTs(storage.state.measuredAt) : 'not yet'}; refresh performs a background metadata scan.
-              </p>
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">{storageLoading ? 'Measuring storage…' : 'Storage has not been measured yet.'}</p>
-          )}
-        </section>
 
         <div className="border-t border-border/50 pt-3" />
 
@@ -476,18 +432,135 @@ export function SessionMetadataDialog({
             </Select>
           </FieldRow>
         </div>
-
+        </>
+        ) : (
+        <section className="grid gap-4 text-sm" aria-label="Storage" data-testid="session-storage">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1">
+              <h3 className="font-medium">Stored session data</h3>
+              <HelpHint label="Stored session data" testId="session-storage-help">
+                Stored data includes transcripts, runtime events, tool records, snapshots, summaries, context sidecars, and artifacts. Cleaning a sub-agent removes its detailed records and descendants while retaining the graph result and a tombstone.
+              </HelpHint>
+            </div>
+            <Button type="button" variant="ghost" size="sm" disabled={storageLoading || !storageSocket || cleanupBusy} onClick={() => loadStorage(true)}>
+              <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', storageLoading && 'animate-spin')} aria-hidden />
+              Refresh
+            </Button>
+          </div>
+          {storageError ? <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">{storageError}</p> : null}
+          {storage ? (
+            <>
+              <div className="grid grid-cols-3 gap-2 rounded-md border border-border/50 bg-muted/20 p-3">
+                <StorageMetric label="Total" bytes={storage.session.treeBytes} />
+                <StorageMetric label="This session" bytes={storage.session.directBytes} />
+                <StorageMetric label={`${storage.session.descendantCount} sub-agents`} bytes={Math.max(0, storage.session.treeBytes - storage.session.directBytes)} />
+              </div>
+              {storage.descendants.length > 0 ? (
+                <div className="overflow-hidden rounded-md border border-border/50">
+                  <label className="grid min-h-10 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/50 bg-muted/20 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all sub-agents"
+                      checked={allStorageSelected}
+                      ref={(input) => { if (input) input.indeterminate = someStorageSelected }}
+                      disabled={cleanupBusy || cleanupPlans.length > 0}
+                      onChange={(event) => {
+                        setSelectedStorageIds(event.target.checked ? new Set(storage.descendants.map((entry) => entry.sessionId)) : new Set())
+                      }}
+                    />
+                    <span className="font-medium">Sub-agent records</span>
+                    <span className="text-xs text-muted-foreground">Stored size</span>
+                  </label>
+                  <div className="divide-y divide-border/40">
+                    {storage.descendants.map((entry) => (
+                      <label key={entry.sessionId} className="grid min-h-12 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 hover:bg-muted/20">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${entry.sessionId}`}
+                          checked={selectedStorageIds.has(entry.sessionId)}
+                          disabled={cleanupBusy || cleanupPlans.length > 0}
+                          onChange={(event) => {
+                            setSelectedStorageIds((current) => {
+                              const next = new Set(current)
+                              if (event.target.checked) next.add(entry.sessionId)
+                              else next.delete(entry.sessionId)
+                              return next
+                            })
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-xs" title={entry.sessionId}>{entry.sessionId}</div>
+                          <div className="text-caption text-muted-foreground">
+                            {entry.descendantCount > 0 ? `Sub-agent with ${entry.descendantCount} descendants` : 'Sub-agent'} · {formatBytes(entry.treeBytes)} including descendants
+                          </div>
+                        </div>
+                        <span className="shrink-0 text-xs">{formatBytes(entry.directBytes)}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {selectedStorageIds.size > 0 && cleanupPlans.length === 0 ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-muted/20 px-3 py-2" data-testid="storage-selection-bar">
+                      <span className="text-xs">{selectedStorageIds.size} selected · {formatBytes(selectedBytes)}</span>
+                      <Button type="button" size="sm" variant="destructive" disabled={cleanupBusy} onClick={() => void prepareSubagentCleanup()}>
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                        Review cleanup…
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="rounded-md border border-border/50 p-4 text-center text-xs text-muted-foreground">This session has no stored sub-agent records.</div>
+              )}
+              {cleanupPlans.length > 0 ? (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3" data-testid="storage-cleanup-confirmation">
+                  <div className="font-medium">
+                    {cleanupConfirmationStep === 'review' ? 'Review selected cleanup' : 'Final confirmation required'}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {plannedSessions} sub-agent {plannedSessions === 1 ? 'session' : 'sessions'}, {plannedItems} exact filesystem {plannedItems === 1 ? 'entry' : 'entries'}, and approximately {formatBytes(plannedBytes)} will be quarantined.
+                    Graph results and tombstones remain. Every plan is revalidated by the Host immediately before its files are moved.
+                  </p>
+                  {cleanupConfirmationStep === 'final' ? (
+                    <p className="mt-2 font-medium text-destructive">
+                      Confirm again. Detailed records cannot be restored from the Kala UI after cleanup.
+                    </p>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {cleanupConfirmationStep === 'review' ? (
+                      <Button type="button" size="sm" variant="destructive" disabled={cleanupBusy} data-testid="storage-cleanup-first-confirm" onClick={() => setCleanupConfirmationStep('final')}>
+                        Continue
+                      </Button>
+                    ) : (
+                      <Button type="button" size="sm" variant="destructive" disabled={cleanupBusy} data-testid="storage-cleanup-final-confirm" onClick={() => void executeCleanup()}>
+                        Confirm cleanup
+                      </Button>
+                    )}
+                    <Button type="button" size="sm" variant="outline" disabled={cleanupBusy} onClick={() => {
+                      setCleanupPlans([])
+                      setCleanupConfirmationStep('review')
+                    }}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              <p className="text-caption text-muted-foreground">
+                Last measured {storage.state.measuredAt ? formatTs(storage.state.measuredAt) : 'not yet'}. Refresh performs a lazy metadata scan rather than reading complete session logs.
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">{storageLoading ? 'Measuring storage…' : 'Storage has not been measured yet.'}</p>
+          )}
+        </section>
+        )}
         </DialogBody>
 
         <DialogFooter className="border-t border-border/60 bg-card px-4 py-3 sm:px-6" data-testid="session-metadata-footer">
-          <Button
-            type="button"
-            onClick={save}
-            disabled={!canSave}
-            data-testid="session-metadata-save"
-          >
-            {t('common.save')}
-          </Button>
+          {activeTab === 'overview' ? (
+            <Button type="button" onClick={save} disabled={!canSave} data-testid="session-metadata-save">
+              {t('common.save')}
+            </Button>
+          ) : null}
           <DialogClose asChild>
             <Button type="button" variant="outline">
               {t('common.close')}
@@ -501,12 +574,14 @@ export function SessionMetadataDialog({
 
 function ReadOnlyRow({
   label,
+  labelHelp,
   value,
   mono = false,
   testId,
   action,
 }: {
   label: string
+  labelHelp?: string
   value: string
   mono?: boolean
   testId?: string
@@ -516,6 +591,7 @@ function ReadOnlyRow({
     <div className="flex items-baseline justify-between gap-4">
       <span className="flex items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
         {label}
+        {labelHelp ? <HelpHint label={label}>{labelHelp}</HelpHint> : null}
         {action}
       </span>
       <span
@@ -529,6 +605,68 @@ function ReadOnlyRow({
       >
         {value}
       </span>
+    </div>
+  )
+}
+
+function MetadataTab({
+  active,
+  children,
+  testId,
+  onClick,
+}: {
+  active: boolean
+  children: React.ReactNode
+  testId: string
+  onClick(): void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      data-testid={testId}
+      className={cn(
+        'min-h-9 rounded-md px-3 text-sm font-medium transition-colors',
+        active ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+function UsageRow({
+  label,
+  help,
+  allSessions,
+  thisSession,
+}: {
+  label: string
+  help: string
+  allSessions?: string
+  thisSession: string
+}): JSX.Element {
+  return (
+    <div className="grid gap-1 rounded-md border border-border/40 bg-muted/15 px-3 py-2">
+      <div className="flex items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
+        {label}
+        <HelpHint label={label}>{help}</HelpHint>
+      </div>
+      <div className={cn('grid gap-3', allSessions && 'grid-cols-2')}>
+        {allSessions ? <UsageValue label="All sessions" value={allSessions} /> : null}
+        <UsageValue label="This session" value={thisSession} />
+      </div>
+    </div>
+  )
+}
+
+function UsageValue({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <div className="text-caption text-muted-foreground">{label}</div>
+      <div className="truncate font-medium" title={value}>{value}</div>
     </div>
   )
 }
@@ -566,6 +704,27 @@ function formatTs(iso: string | undefined): string {
 
 function StorageMetric({ label, bytes }: { label: string; bytes: number }): JSX.Element {
   return <div><div className="text-caption text-muted-foreground">{label}</div><div className="font-medium">{formatBytes(bytes)}</div></div>
+}
+
+function formatTokenPair(input: number, output: number): string {
+  return `${input.toLocaleString()} in / ${output.toLocaleString()} out`
+}
+
+function topLevelSelectedSessionIds(
+  selected: ReadonlySet<string>,
+  entries: SessionStorageSnapshot['descendants'],
+): string[] {
+  const byId = new Map(entries.map((entry) => [entry.sessionId, entry]))
+  return [...selected].filter((sessionId) => {
+    let parentId = byId.get(sessionId)?.parentSessionId
+    const visited = new Set<string>()
+    while (parentId && !visited.has(parentId)) {
+      if (selected.has(parentId)) return false
+      visited.add(parentId)
+      parentId = byId.get(parentId)?.parentSessionId
+    }
+    return true
+  })
 }
 
 function formatBytes(bytes: number): string {
