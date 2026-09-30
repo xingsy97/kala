@@ -2,7 +2,7 @@
 
 Kala is pre-1.0 software. The supported public channel is the newest
 GitHub Release candidate identified by one product tag, currently
-`v0.2.0-rc.18`. A release candidate remains a draft until the three-platform
+`v0.2.0-rc.19`. A release candidate remains a draft until the three-platform
 Portable install/reinstall matrix and the release asset and image security gates
 in `public-release-readiness.md` have attached evidence. Source from
 an arbitrary commit, nightly artifacts, mutable container tags, and development

@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-worker",
-  "version": "0.2.0-rc.18",
+  "version": "0.2.0-rc.19",
   "description": "Independent Worker process for isolated Agent evaluation trials.",
   "repository": { "type": "git", "url": "git+https://github.com/xingsy97/kala.git" },
   "homepage": "https://github.com/xingsy97/kala#readme",

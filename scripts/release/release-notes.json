@@ -1,4 +1,23 @@
 {
+  "v0.2.0-rc.19": {
+    "previousTag": "v0.2.0-rc.18",
+    "improvements": [
+      "Adjacent Thinking updates now appear as one compact visual group with navigation in the header.",
+      "Per-turn timing expands inline, and failed turns without an assistant reply retain their timing details.",
+      "Session storage review now provides safer cleanup planning, corruption isolation, and clearer retained-data accounting.",
+      "The workspace browser, sidebar Session cards, full-screen terminal behavior, and responsive Dashboard layouts are more consistent."
+    ],
+    "fixes": [
+      "Copilot CLI discovery and queued message delivery remain available across local redeployments.",
+      "Cleanup plans no longer invalidate themselves while inspecting interrupted external-runtime Sessions.",
+      "Socket.IO now uses a patched Engine.IO dependency chain.",
+      "Dedicated Ingress shutdown waits for active admission reconciliation before releasing its storage."
+    ],
+    "knownIssues": [
+      "Dedicated and Private Cloud lifecycle certification remains preview-only as described in the release support policy."
+    ],
+    "desktopViaDashboard": true
+  },
   "v0.2.0-rc.18": {
     "previousTag": "v0.2.0-rc.17",
     "improvements": [

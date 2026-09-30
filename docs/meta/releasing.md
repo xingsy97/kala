@@ -13,7 +13,7 @@ must declare MIT and cannot depend on private workspace packages. Verify before
 cutting a tag:
 
 ```bash
-pnpm run verify:version -- --tag v0.2.0-rc.18
+pnpm run verify:version -- --tag v0.2.0-rc.19
 ```
 
 The release asset verifier repeats the check against `release/manifest.json`.

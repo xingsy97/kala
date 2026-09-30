@@ -2,7 +2,7 @@
 
 **Status:** normative; implementation in progress
 
-**Target:** `v0.2.0-rc.18`
+**Target:** `v0.2.0-rc.19`
 
 **Scope:** public source repository, supported Portable artifacts, preview
 Dedicated bundles and Private Cloud images/bundles, and release evidence
@@ -10,7 +10,7 @@ Dedicated bundles and Private Cloud images/bundles, and release evidence
 ## 1. Release contract
 
 One product release uses one SemVer version and one tag, such as
-`v0.2.0-rc.18`. The root package, workspace packages, manifests,
+`v0.2.0-rc.19`. The root package, workspace packages, manifests,
 Dashboard metadata, container labels, and release notes must agree.
 Protocol and persisted-schema versions are independent compatibility contracts and
 must not be changed merely to match the product version. Component-specific tags
