@@ -184,6 +184,15 @@ type RenderTranscriptItem = TranscriptItem | {
   lastMessageIndex: number
   seq?: number
   ts?: string
+} | {
+  kind: 'thinking_cluster'
+  updates: ReasoningContent[]
+  firstMessageIndex: number
+  lastMessageIndex: number
+  streaming: boolean
+  seq?: number
+  ts?: string
+  turnTiming?: import('@agent-kernel/shared').TurnTimingSummary
 }
 
 type MessageRerunTarget = {
@@ -265,7 +274,7 @@ export function ChatPanel({
     .filter((message) => message.role !== 'system')
     .map((message) => ({ kind: 'message', message })), [messages])
   const rawItems = items ?? fallbackItems
-  const displayItems = useMemo(() => mergeAdjacentThinkingMessages(rawItems), [rawItems])
+  const displayItems = rawItems
   const [searchQuery, setSearchQuery] = useState('')
   const [searchCategory, setSearchCategory] = useState<TranscriptSearchCategory>('all')
   const [activeSearchIndex, setActiveSearchIndex] = useState(-1)
@@ -399,7 +408,13 @@ export function ChatPanel({
       mapping.push(-1)
       hideHeader.push(false)
     }
-    return { transcriptItems: kept, messageIndexByItem: mapping, hideHeaderByItem: hideHeader, groupedCallIds: groupedIds }
+    const clustered = clusterVisibleThinkingItems(kept, mapping, hideHeader, groupedIds)
+    return {
+      transcriptItems: clustered.items,
+      messageIndexByItem: clustered.messageIndexes,
+      hideHeaderByItem: clustered.hideHeaders,
+      groupedCallIds: groupedIds,
+    }
   }, [displayItems, intraMessageGroupedCallIds, resultsByCallId, compactStatus, effectiveParentSessionId, toolCardMode])
 
   // Translate message-index highlight into item-index so VirtualTranscript
@@ -410,9 +425,9 @@ export function ChatPanel({
       if (messageIndexByItem[i] === highlightIndex) return i
       const item = transcriptItems[i]
       if (
-        item?.kind === 'tool_activity' &&
-        highlightIndex >= item.firstMessageIndex &&
-        highlightIndex <= item.lastMessageIndex
+        (item?.kind === 'tool_activity' || item?.kind === 'thinking_cluster')
+        && highlightIndex >= item.firstMessageIndex
+        && highlightIndex <= item.lastMessageIndex
       ) {
         return i
       }
@@ -428,7 +443,11 @@ export function ChatPanel({
       for (let index = 0; index < messageIndexByItem.length; index += 1) {
         if (messageIndexByItem[index] === match.messageIndex) return index
         const item = transcriptItems[index]
-        if (item?.kind === 'tool_activity' && match.messageIndex >= item.firstMessageIndex && match.messageIndex <= item.lastMessageIndex) return index
+        if (
+          (item?.kind === 'tool_activity' || item?.kind === 'thinking_cluster')
+          && match.messageIndex >= item.firstMessageIndex
+          && match.messageIndex <= item.lastMessageIndex
+        ) return index
       }
     }
     const raw = displayItems[match.rawItemIndex]
@@ -476,6 +495,37 @@ export function ChatPanel({
             badgeIntentionCallId={badgeIntentionCallId}
             parentSessionId={effectiveParentSessionId}
             socket={socket ?? null}
+          />
+        )
+      }
+      if (item.kind === 'thinking_cluster') {
+        return (
+          <MessageRow
+            index={item.firstMessageIndex}
+            message={{ role: 'assistant', content: item.updates }}
+            streaming={item.streaming}
+            highlighted={
+              (highlightIndex != null
+                && highlightIndex >= item.firstMessageIndex
+                && highlightIndex <= item.lastMessageIndex)
+              || searchItemIndex === itemIndex
+            }
+            toolNameByCallId={toolNameByCallId}
+            approvalByCallId={approvalByCallId}
+            onApprovalDecision={onApprovalDecision}
+            resultsByCallId={resultsByCallId}
+            groupedCallIds={groupedCallIds}
+            seq={item.seq}
+            ts={item.ts}
+            hideHeader={hideHeader}
+            parentSessionId={effectiveParentSessionId}
+            socket={socket ?? null}
+            liveToolActivityTailCount={liveToolActivityTailCount}
+            toolExecutionStartedAt={toolExecutionStartedAt}
+            toolCardMode={toolCardMode}
+            activeToolCallIds={activeToolCallIdSet}
+            badgeIntentionCallId={badgeIntentionCallId}
+            turnTiming={item.turnTiming}
           />
         )
       }
@@ -556,6 +606,8 @@ export function ChatPanel({
           ? `compact-feedback-${item.status.kind}`
         : item.kind === 'tool_activity'
           ? `tool-activity-${item.group.firstCallId}`
+        : item.kind === 'thinking_cluster'
+          ? `thinking-cluster-${item.firstMessageIndex}`
         : transcriptItemKey(item, itemIndex),
     [],
   )
@@ -1476,15 +1528,25 @@ function InlineTimestamp({
   if (!Number.isFinite(parsed)) return null
   const date = new Date(parsed)
   const label = date.toLocaleString()
-  const short = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const today = new Date()
+  const sameDay =
+    date.getFullYear() === today.getFullYear()
+    && date.getMonth() === today.getMonth()
+    && date.getDate() === today.getDate()
+  const short = sameDay
+    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   return (
     <span
       className={cn(
-        'pointer-events-none select-none whitespace-nowrap font-mono text-[0.75rem] leading-none transition-opacity',
-        visibility === 'always' ? 'opacity-70' : 'opacity-0 group-hover:opacity-70 group-focus-within:opacity-70',
+        'pointer-events-none select-none whitespace-nowrap text-meta tabular-nums text-muted-foreground transition-opacity',
+        visibility === 'always'
+          ? 'opacity-65'
+          : 'opacity-55 sm:opacity-0 sm:group-hover:opacity-65 sm:group-focus-within:opacity-65',
         className,
       )}
       title={label}
+      aria-label={label}
     >
       {short}
     </span>
@@ -1743,30 +1805,74 @@ function isRenderableMessageContent(content: MessageContent): boolean {
   return true
 }
 
-function mergeAdjacentThinkingMessages(items: readonly TranscriptItem[]): TranscriptItem[] {
-  const merged: TranscriptItem[] = []
-  for (const item of items) {
-    const previous = merged.at(-1)
-    if (
-      item.kind === 'message'
-      && item.message.role === 'assistant'
-      && item.message.content.every((content) => content.type === 'thinking')
-      && previous?.kind === 'message'
-      && previous.message.role === 'assistant'
-      && previous.message.content.every((content) => content.type === 'thinking')
-    ) {
-      merged[merged.length - 1] = {
-        ...previous,
-        message: {
-          ...previous.message,
-          content: [...previous.message.content, ...item.message.content],
-        },
+function clusterVisibleThinkingItems(
+  items: readonly RenderTranscriptItem[],
+  messageIndexes: readonly number[],
+  hideHeaders: readonly boolean[],
+  groupedCallIds: ReadonlySet<string>,
+): {
+  items: RenderTranscriptItem[]
+  messageIndexes: number[]
+  hideHeaders: boolean[]
+} {
+  const clusteredItems: RenderTranscriptItem[] = []
+  const clusteredIndexes: number[] = []
+  const clusteredHeaders: boolean[] = []
+
+  for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+    const item = items[itemIndex]!
+    const messageIndex = messageIndexes[itemIndex] ?? -1
+    const thinkingUpdates = visibleThinkingUpdates(item, groupedCallIds)
+    const previous = clusteredItems.at(-1)
+
+    if (thinkingUpdates && item.kind === 'message') {
+      if (previous?.kind === 'thinking_cluster') {
+        previous.updates.push(...thinkingUpdates)
+        previous.lastMessageIndex = messageIndex
+        previous.streaming ||= item.streaming === true
+        if (item.seq !== undefined) previous.seq = item.seq
+        if (item.ts !== undefined) previous.ts = item.ts
+        if (item.turnTiming !== undefined) previous.turnTiming = item.turnTiming
+      } else {
+        clusteredItems.push({
+          kind: 'thinking_cluster',
+          updates: [...thinkingUpdates],
+          firstMessageIndex: messageIndex,
+          lastMessageIndex: messageIndex,
+          streaming: item.streaming === true,
+          seq: item.seq,
+          ts: item.ts,
+          turnTiming: item.turnTiming,
+        })
+        clusteredIndexes.push(messageIndex)
+        clusteredHeaders.push(hideHeaders[itemIndex] ?? false)
       }
       continue
     }
-    merged.push(item)
+
+    clusteredItems.push(item)
+    clusteredIndexes.push(messageIndex)
+    clusteredHeaders.push(hideHeaders[itemIndex] ?? false)
   }
-  return merged
+
+  return {
+    items: clusteredItems,
+    messageIndexes: clusteredIndexes,
+    hideHeaders: clusteredHeaders,
+  }
+}
+
+function visibleThinkingUpdates(
+  item: RenderTranscriptItem,
+  groupedCallIds: ReadonlySet<string>,
+): ReasoningContent[] | null {
+  if (item.kind !== 'message' || item.message.role !== 'assistant') return null
+  const visibleContent = messageContentAfterGroupedResults(item.message, groupedCallIds)
+    .filter(isRenderableMessageContent)
+  if (visibleContent.length === 0 || !visibleContent.every((content) => content.type === 'thinking')) {
+    return null
+  }
+  return visibleContent as ReasoningContent[]
 }
 
 function MessageRow({
@@ -1887,10 +1993,6 @@ function MessageRow({
       >
         <div className="flex min-w-0 max-w-[92%] flex-col items-end gap-1.5 sm:max-w-[85%]">
           <div className="relative max-w-full overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm" data-testid="user-message-surface">
-            <InlineTimestamp
-              ts={ts}
-              className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
-            />
             <div className="flex min-w-0 flex-col gap-2">
               {message.content.map((c, i) => (
                 <ContentBlock
@@ -1905,18 +2007,21 @@ function MessageRow({
               ))}
             </div>
           </div>
-          <MessageActions
-            align="end"
-            copyText={messageText}
-            editAction={editable ? {
-              label: t('chat.transcript.editMessage'),
-              onClick: () => {
-                setDraft(initialText)
-                setEditing(true)
-              },
-              testId: `edit-message-${index}`,
-            } : undefined}
-          />
+          <div className="flex min-h-7 max-w-full items-center justify-end gap-1.5">
+            <MessageActions
+              align="end"
+              copyText={messageText}
+              editAction={editable ? {
+                label: t('chat.transcript.editMessage'),
+                onClick: () => {
+                  setDraft(initialText)
+                  setEditing(true)
+                },
+                testId: `edit-message-${index}`,
+              } : undefined}
+            />
+            <InlineTimestamp ts={ts} />
+          </div>
         </div>
       </div>
     )
@@ -1961,7 +2066,6 @@ function MessageRow({
             {label}
           </div>
         )}
-        <InlineTimestamp ts={ts} className="absolute right-0 top-0 text-muted-foreground" />
         <div className="flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">
           {groupedItems.map((item, i) => {
             if (item.kind === 'tool_call_group') {
@@ -2007,8 +2111,8 @@ function MessageRow({
               />
             )
           })}
-          {!streaming && (turnTiming || (message.role === 'assistant' && assistantActions)) ? (
-            <div className="flex min-w-0 flex-wrap items-start gap-1" data-testid="assistant-message-footer">
+          {!streaming && (ts || turnTiming || (message.role === 'assistant' && assistantActions)) ? (
+            <div className="message-metadata-row flex min-h-7 min-w-0 max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain" data-testid="assistant-message-footer">
               {assistantActions ? <MessageActions
                 align="start"
                 copyText={assistantActions.copyText}
@@ -2018,6 +2122,7 @@ function MessageRow({
                   testId: `try-again-message-${index}`,
                 } : undefined}
               /> : null}
+              <InlineTimestamp ts={ts} />
               {turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
             </div>
           ) : null}
@@ -2030,199 +2135,74 @@ function MessageRow({
 function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared').TurnTimingSummary }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const detailsRef = useRef<HTMLDivElement | null>(null)
-  const [position, setPosition] = useState<TurnTimingPopoverPosition | null>(null)
   const statusLabel = t(`chatCommon.turnTiming.status.${summary.status === 'completed' || summary.status === 'failed' || summary.status === 'cancelled' || summary.status === 'interrupted' ? summary.status : 'running'}`)
-  const activityRows = [
-    [t('chatCommon.turnTiming.activeWork'), summary.activeDurationMs],
-    [t('chatCommon.turnTiming.modelTime'), summary.llm.wallDurationMs],
-    [t('chatCommon.turnTiming.toolTime'), summary.tools.wallDurationMs],
-    [t('chatCommon.turnTiming.approvalWait'), summary.approvalWaitMs],
-    [t('chatCommon.turnTiming.compaction'), summary.compactionDurationMs],
-    [t('chatCommon.turnTiming.retry'), summary.retryDurationMs],
-    [t('chatCommon.turnTiming.recovery'), summary.recoveryDurationMs],
-  ].filter(([, value]) => Number(value) > 0)
-  const updatePosition = useCallback(() => {
-    const trigger = triggerRef.current
-    if (!trigger || typeof window === 'undefined') return
-    const rect = trigger.getBoundingClientRect()
-    const detailsHeight = detailsRef.current?.getBoundingClientRect().height ?? 240
-    setPosition(turnTimingPopoverPosition({
-      anchor: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
-      contentHeight: detailsHeight,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-    }))
-  }, [])
-  useLayoutEffect(() => {
-    if (!open) {
-      setPosition(null)
-      return
-    }
-    updatePosition()
-    const details = detailsRef.current
-    if (!details || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(updatePosition)
-    observer.observe(details)
-    return () => observer.disconnect()
-  }, [open, updatePosition])
   useEffect(() => {
     if (!open) return
     const closeOnOutsideClick = (event: MouseEvent): void => {
       const target = event.target as Node
-      if (!triggerRef.current?.contains(target) && !detailsRef.current?.contains(target)) setOpen(false)
+      if (!rootRef.current?.contains(target)) setOpen(false)
     }
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
       setOpen(false)
       triggerRef.current?.focus()
     }
-    const reposition = (): void => updatePosition()
     document.addEventListener('mousedown', closeOnOutsideClick)
     document.addEventListener('keydown', closeOnEscape)
-    window.addEventListener('resize', reposition)
-    window.addEventListener('orientationchange', reposition)
-    document.addEventListener('scroll', reposition, true)
     return () => {
       document.removeEventListener('mousedown', closeOnOutsideClick)
       document.removeEventListener('keydown', closeOnEscape)
-      window.removeEventListener('resize', reposition)
-      window.removeEventListener('orientationchange', reposition)
-      document.removeEventListener('scroll', reposition, true)
     }
-  }, [open, updatePosition])
+  }, [open])
   const detailsId = `turn-timing-details-${summary.turnId}`
+  const totalCalls = summary.llm.requestCount + summary.tools.callCount
   return (
-    <div className="min-w-0 flex-none" data-testid={`turn-timing-${summary.turnId}`}>
+    <div
+      ref={rootRef}
+      className="flex flex-none items-center whitespace-nowrap"
+      data-testid={`turn-timing-${summary.turnId}`}
+    >
       <button
         ref={triggerRef}
         type="button"
-        className={cn('flex h-7 max-w-full items-center gap-2 rounded-md px-2 text-left text-meta text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground', open && 'bg-muted/60 text-foreground')}
+        className={cn(
+          'flex h-7 flex-none items-center gap-1.5 rounded-md px-2 text-left text-meta text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground',
+          open && 'bg-muted/60 text-foreground',
+        )}
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-controls={detailsId}
-        aria-haspopup="dialog"
       >
         <span aria-hidden="true">{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
-        <span className="truncate">{statusLabel} · {formatTurnDuration(summary.wallDurationMs)}</span>
+        <span>{statusLabel} · <span className="tabular-nums">{formatTurnDuration(summary.wallDurationMs)}</span></span>
         {open ? <ChevronLeft className="h-3.5 w-3.5 flex-none" /> : <ChevronRight className="h-3.5 w-3.5 flex-none" />}
       </button>
-      {open && typeof document !== 'undefined' ? createPortal(
+      {open ? (
         <div
-          ref={detailsRef}
           id={detailsId}
-          role="dialog"
+          role="group"
           aria-label={`${statusLabel} · ${formatTurnDuration(summary.wallDurationMs)}`}
-          className="fixed z-[100] overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-popover p-3 text-meta text-popover-foreground shadow-2xl"
-          style={position
-            ? { left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight }
-            : { left: 8, top: 8, width: Math.max(0, Math.min(384, window.innerWidth - 16)), visibility: 'hidden' }}
-          data-placement={position?.placement}
-          data-mobile={position?.mobile ? 'true' : 'false'}
+          className="flex h-7 flex-none animate-in items-center whitespace-nowrap text-meta text-muted-foreground fade-in slide-in-from-left-1"
           data-testid={detailsId}
         >
-          <div className="grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
-            <TurnTimingValue label={t('chatCommon.turnTiming.startedAt')} value={formatTimestamp(summary.startedAt)} />
-            {summary.completedAt ? <TurnTimingValue label={t('chatCommon.turnTiming.completedAt')} value={formatTimestamp(summary.completedAt)} /> : null}
-            <TurnTimingValue label={t('chatCommon.turnTiming.total')} value={formatTurnDuration(summary.wallDurationMs)} />
-          </div>
-          {activityRows.length > 0 ? (
-            <section className="mt-2.5 border-t border-border/40 pt-2.5" aria-labelledby={`turn-activity-${summary.turnId}`}>
-              <h4 id={`turn-activity-${summary.turnId}`} className="mb-1.5 text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">{t('chatCommon.turnTiming.activity')}</h4>
-              <div className="grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
-                {activityRows.map(([label, value]) => <TurnTimingValue key={String(label)} label={String(label)} value={formatTurnDuration(Number(value))} />)}
-              </div>
-            </section>
+          <span className="px-1.5 text-border" aria-hidden="true">·</span>
+          <span className="tabular-nums">
+            {formatTimestamp(summary.startedAt)}
+            <span className="px-1 text-muted-foreground/60" aria-hidden="true">→</span>
+            {summary.completedAt ? formatTimestamp(summary.completedAt) : '…'}
+          </span>
+          {totalCalls > 0 ? (
+            <>
+              <span className="px-1.5 text-border" aria-hidden="true">·</span>
+              <span className="tabular-nums">{t('chatCommon.turnTiming.calls')} {totalCalls}</span>
+            </>
           ) : null}
-          {(summary.tools.callCount > 0 || summary.llm.requestCount > 0) ? (
-            <section className="mt-2.5 border-t border-border/40 pt-2.5" aria-labelledby={`turn-calls-${summary.turnId}`}>
-              <h4 id={`turn-calls-${summary.turnId}`} className="mb-1.5 text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">{t('chatCommon.turnTiming.calls')}</h4>
-              <div className="grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
-                {summary.llm.requestCount > 0 ? <TurnTimingValue label={t('chatCommon.turnTiming.modelCallsLabel')} value={String(summary.llm.requestCount)} /> : null}
-                {summary.tools.callCount > 0 ? <TurnTimingValue label={t('chatCommon.turnTiming.toolCallsLabel')} value={String(summary.tools.callCount)} /> : null}
-              </div>
-            </section>
-          ) : null}
-          {summary.tools.callCount > 0 ? (
-            <details className="mt-2.5 border-t border-border/40 pt-2.5" data-testid={`turn-timing-technical-${summary.turnId}`}>
-              <summary className="cursor-pointer select-none text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">{t('chatCommon.technicalDetails')}</summary>
-              <div className="mt-2 grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
-                <TurnTimingValue label={t('chatCommon.turnTiming.aggregateToolTime')} value={formatTurnDuration(summary.tools.aggregateDurationMs)} />
-                <TurnTimingValue label={t('chatCommon.turnTiming.peakConcurrency')} value={String(summary.tools.peakConcurrency)} />
-                {summary.tools.partial ? <p className="text-muted-foreground sm:col-span-2">{t('chatCommon.turnTiming.partialExecutor')}</p> : null}
-              </div>
-            </details>
-          ) : null}
-        </div>,
-        document.body,
+        </div>
       ) : null}
     </div>
   )
-}
-
-function TurnTimingValue({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <div className="flex min-w-0 items-baseline justify-between gap-3">
-      <span className="min-w-0 text-muted-foreground">{label}</span>
-      <span className="flex-none font-medium tabular-nums text-foreground">{value}</span>
-    </div>
-  )
-}
-
-type TurnTimingPopoverPosition = {
-  left: number
-  top: number
-  width: number
-  maxHeight: number
-  placement: 'right' | 'left' | 'above' | 'below'
-  mobile: boolean
-}
-
-export function turnTimingPopoverPosition({
-  anchor,
-  contentHeight,
-  viewportWidth,
-  viewportHeight,
-}: {
-  anchor: { left: number; right: number; top: number; bottom: number }
-  contentHeight: number
-  viewportWidth: number
-  viewportHeight: number
-}): TurnTimingPopoverPosition {
-  const inset = 8
-  const gap = 8
-  const mobile = viewportWidth < 640
-  const width = Math.max(0, Math.min(384, viewportWidth - inset * 2))
-  const maxHeight = Math.max(0, viewportHeight - inset * 2)
-  const visibleHeight = Math.min(contentHeight, maxHeight)
-  if (mobile) {
-    const roomBelow = viewportHeight - anchor.bottom - gap - inset
-    const placeBelow = roomBelow >= visibleHeight || roomBelow >= anchor.top - gap - inset
-    return {
-      left: inset,
-      top: placeBelow
-        ? Math.min(anchor.bottom + gap, viewportHeight - visibleHeight - inset)
-        : Math.max(inset, anchor.top - gap - visibleHeight),
-      width,
-      maxHeight,
-      placement: placeBelow ? 'below' : 'above',
-      mobile,
-    }
-  }
-  const roomRight = viewportWidth - anchor.right - gap - inset
-  const roomLeft = anchor.left - gap - inset
-  const placeRight = roomRight >= width || roomRight >= roomLeft
-  return {
-    left: placeRight
-      ? Math.min(anchor.right + gap, viewportWidth - width - inset)
-      : Math.max(inset, anchor.left - gap - width),
-    top: Math.max(inset, Math.min(anchor.top + (anchor.bottom - anchor.top - visibleHeight) / 2, viewportHeight - visibleHeight - inset)),
-    width,
-    maxHeight,
-    placement: placeRight ? 'right' : 'left',
-    mobile,
-  }
 }
 
 function formatTurnDuration(ms: number): string {
@@ -2559,56 +2539,122 @@ function ThinkingBlock({
   const { t } = useTranslation()
   const [open, setOpen] = useState(true)
   const count = updates.length
+  const [activeIndex, setActiveIndex] = useState(() => Math.max(0, count - 1))
+  const previousCountRef = useRef(count)
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  useEffect(() => {
+    setActiveIndex((currentIndex) => {
+      const wasFollowingLatest = currentIndex >= previousCountRef.current - 1
+      previousCountRef.current = count
+      return wasFollowingLatest
+        ? Math.max(0, count - 1)
+        : Math.min(currentIndex, Math.max(0, count - 1))
+    })
+  }, [count])
   const presentations = updates.map((update) => thinkingPresentation(update.text))
-  let titledUpdateIndex = -1
-  for (let index = presentations.length - 1; index >= 0; index -= 1) {
-    if (!presentations[index]!.title) continue
-    titledUpdateIndex = index
-    break
-  }
-  const title = titledUpdateIndex >= 0 ? presentations[titledUpdateIndex]!.title : undefined
+  const selectedUpdate = updates[activeIndex] ?? updates.at(-1)
+  const selectedPresentation = presentations[activeIndex] ?? presentations.at(-1)
+  const title = selectedPresentation?.title
+  const selectPrevious = () => setActiveIndex((index) => Math.max(0, index - 1))
+  const selectNext = () => setActiveIndex((index) => Math.min(count - 1, index + 1))
   return (
     <div
       className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/35 bg-muted/[0.18]"
       data-testid="thinking-block"
+      onKeyDown={(event) => {
+        if (count <= 1) return
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault()
+          selectPrevious()
+        } else if (event.key === 'ArrowRight') {
+          event.preventDefault()
+          selectNext()
+        }
+      }}
     >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-meta text-muted-foreground transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        aria-expanded={open}
-      >
-        <Sparkles className="h-3 w-3 flex-none" />
-        <span className="flex min-w-0 items-baseline gap-1.5">
-          <span className="flex-none font-medium">
-            {count > 1
-              ? t('chat.transcript.thinkingUpdates', { count })
-              : t('chat.transcript.thinking')}
-          </span>
-          {title ? (
-            <span className="min-w-0 truncate text-foreground/80" data-testid="thinking-title">
-              <span className="mr-1.5 text-muted-foreground/70" aria-hidden="true">·</span>
-              {title}
+      <div className="flex min-w-0 items-center px-2 py-1.5 text-meta text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={open}
+        >
+          <Sparkles className="h-3 w-3 flex-none" />
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="flex-none font-medium">
+              {count > 1
+                ? t('chat.transcript.thinkingUpdates', { count })
+                : t('chat.transcript.thinking')}
             </span>
-          ) : null}
-        </span>
-        {open ? (
-          <ChevronDown className="ml-auto h-3 w-3 flex-none" />
-        ) : (
-          <ChevronRight className="ml-auto h-3 w-3 flex-none" />
-        )}
-      </button>
+            {title ? (
+              <span className="hidden min-w-0 truncate text-foreground/80 sm:block" data-testid="thinking-title">
+                <span className="mr-1.5 text-muted-foreground/70" aria-hidden="true">·</span>
+                {title}
+              </span>
+            ) : null}
+          </span>
+        </button>
+        {count > 1 ? (
+          <div className="ml-1 flex flex-none items-center gap-0.5" data-testid="thinking-navigation">
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted/70 disabled:pointer-events-none disabled:opacity-35"
+              onClick={selectPrevious}
+              disabled={activeIndex === 0}
+              aria-label={t('chat.transcript.previousThinking')}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <span className="min-w-9 text-center tabular-nums" aria-live="polite">
+              {activeIndex + 1} / {count}
+            </span>
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted/70 disabled:pointer-events-none disabled:opacity-35"
+              onClick={selectNext}
+              disabled={activeIndex >= count - 1}
+              aria-label={t('chat.transcript.nextThinking')}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="ml-0.5 inline-flex h-7 w-7 flex-none items-center justify-center rounded-md hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => setOpen((value) => !value)}
+          aria-label={open ? t('chat.transcript.collapseThinking') : t('chat.transcript.expandThinking')}
+          aria-expanded={open}
+        >
+          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </button>
+      </div>
       {open ? (
-        <div className="ak-expand-in border-t border-border/25 px-3 py-2 text-muted-foreground">
-          {updates.map((update, index) => (
+        <div
+          className="ak-expand-in border-t border-border/25 px-3 py-2 text-muted-foreground"
+          onTouchStart={(event) => {
+            const touch = event.changedTouches[0]
+            if (touch) touchStartRef.current = { x: touch.clientX, y: touch.clientY }
+          }}
+          onTouchEnd={(event) => {
+            const start = touchStartRef.current
+            const touch = event.changedTouches[0]
+            touchStartRef.current = null
+            if (!start || !touch) return
+            const deltaX = touch.clientX - start.x
+            const deltaY = touch.clientY - start.y
+            if (Math.abs(deltaX) < 40 || Math.abs(deltaX) <= Math.abs(deltaY)) return
+            if (deltaX > 0) selectPrevious()
+            else selectNext()
+          }}
+        >
+          {selectedUpdate ? (
             <div
-              key={`${index}:${update.text}`}
-              className={cn(index > 0 && 'mt-2 border-t border-border/25 pt-2')}
               data-testid="thinking-update"
             >
-              <AssistantMarkdown text={index === titledUpdateIndex ? presentations[index]!.body : update.text} />
+              <AssistantMarkdown text={selectedPresentation?.title ? selectedPresentation.body : selectedUpdate.text} />
             </div>
-          ))}
+          ) : null}
         </div>
       ) : null}
     </div>

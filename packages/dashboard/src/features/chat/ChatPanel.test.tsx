@@ -6,7 +6,7 @@ import { createInitialState } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
-import { AssistantMarkdown, ChatPanel as DashboardChatPanel, turnTimingPopoverPosition } from './ChatPanel.js'
+import { AssistantMarkdown, ChatPanel as DashboardChatPanel } from './ChatPanel.js'
 import { InlineStatusRow, useElapsedSeconds } from './InlineStatusRow.js'
 
 function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Element {
@@ -14,7 +14,7 @@ function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Elemen
 }
 
 describe('ChatPanel', () => {
-  it('orders message actions before timing and keeps call counts in expanded details', () => {
+  it('expands timing details inline after message actions and timestamp', () => {
     const summary = {
       turnId: 'turn-1', status: 'completed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:01:42Z', wallDurationMs: 102000, estimated: false,
       queueDurationMs: 2000, activeDurationMs: 76000, approvalWaitMs: 24000,
@@ -24,7 +24,7 @@ describe('ChatPanel', () => {
     }
     const items = [
       { kind: 'message' as const, seq: 1, message: { role: 'user' as const, content: [{ type: 'text' as const, text: 'Do it.' }] } },
-      { kind: 'message' as const, seq: 2, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Done.' }] }, turnTiming: summary },
+      { kind: 'message' as const, seq: 2, ts: '2026-01-01T00:01:42Z', message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Done.' }] }, turnTiming: summary },
     ]
     render(<DashboardChatPanel items={items} messages={[]} onEditAndRerun={vi.fn()} />)
     const footer = screen.getByTestId('turn-timing-turn-1')
@@ -33,28 +33,27 @@ describe('ChatPanel', () => {
     expect(footer.textContent).not.toContain('12 Tools')
     expect(footer.textContent).not.toContain('3 model calls')
     const messageFooter = screen.getByTestId('assistant-message-footer')
-    expect(Array.from(messageFooter.children)).toEqual([screen.getByTestId('message-actions-start'), footer])
+    expect(Array.from(messageFooter.children)).toEqual([
+      screen.getByTestId('message-actions-start'),
+      messageFooter.querySelector('span[aria-label]'),
+      footer,
+    ])
     expect(Array.from(screen.getByTestId('message-actions-start').children)).toEqual([
       screen.getAllByTestId('copy-message')[1],
       screen.getByTestId('try-again-message-1'),
     ])
     fireEvent.click(footer.querySelector('button')!)
     const details = screen.getByTestId('turn-timing-details-turn-1')
-    expect(details.textContent).toContain('Activity')
-    expect(details.textContent).toContain('Model time31s')
-    expect(details.textContent).toContain('Tool time45s')
-    expect(details.textContent).toContain('Calls')
-    expect(details.textContent).toContain('Model calls3')
-    expect(details.textContent).toContain('Tool calls12')
-    expect(details.textContent).not.toContain('12 Tools')
-    expect(details.textContent).not.toContain('Tool wall')
-    const technical = screen.getByTestId('turn-timing-technical-turn-1')
-    expect(technical.hasAttribute('open')).toBe(false)
-    expect(technical.textContent).toContain('Aggregate tool time1m 27s')
-    expect(technical.textContent).toContain('Peak concurrency4')
+    expect(details.parentElement).toBe(footer)
+    expect(details.textContent).toContain('→')
+    expect(details.textContent).toContain('Calls 15')
+    expect(details.textContent).not.toContain('Activity')
+    expect(details.textContent).not.toContain('Model time')
+    expect(details.textContent).not.toContain('Tool time')
+    expect(screen.queryByTestId('turn-timing-technical-turn-1')).toBeNull()
   })
 
-  it('opens timing details outside the transcript and omits empty activity', () => {
+  it('keeps minimal timing details on the same row and closes them with Escape', () => {
     const summary = {
       turnId: 'turn-minimal', status: 'completed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:07Z', wallDurationMs: 7000, estimated: false,
       queueDurationMs: 0, activeDurationMs: 0, approvalWaitMs: 0,
@@ -69,37 +68,12 @@ describe('ChatPanel', () => {
     render(<DashboardChatPanel items={items} messages={[]} />)
     fireEvent.click(screen.getByTestId('turn-timing-turn-minimal').querySelector('button')!)
     const details = screen.getByTestId('turn-timing-details-turn-minimal')
-    expect(details.parentElement).toBe(document.body)
-    expect(details.textContent).toContain('Started')
-    expect(details.textContent).toContain('Completed at')
-    expect(details.textContent).toContain('Total7s')
+    expect(details.parentElement).toBe(screen.getByTestId('turn-timing-turn-minimal'))
+    expect(details.textContent).toContain('→')
     expect(details.textContent).not.toContain('Activity')
     expect(details.textContent).not.toContain('Calls')
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByTestId('turn-timing-details-turn-minimal')).toBeNull()
-  })
-
-  it('positions timing details beside desktop triggers and within mobile viewports', () => {
-    expect(turnTimingPopoverPosition({
-      anchor: { left: 100, right: 220, top: 300, bottom: 328 },
-      contentHeight: 180,
-      viewportWidth: 1200,
-      viewportHeight: 800,
-    })).toMatchObject({ left: 228, placement: 'right', mobile: false })
-    expect(turnTimingPopoverPosition({
-      anchor: { left: 900, right: 1020, top: 300, bottom: 328 },
-      contentHeight: 180,
-      viewportWidth: 1100,
-      viewportHeight: 800,
-    })).toMatchObject({ left: 508, placement: 'left', mobile: false })
-    const mobile = turnTimingPopoverPosition({
-      anchor: { left: 12, right: 180, top: 680, bottom: 708 },
-      contentHeight: 220,
-      viewportWidth: 390,
-      viewportHeight: 740,
-    })
-    expect(mobile).toMatchObject({ left: 8, width: 374, placement: 'above', mobile: true })
-    expect(mobile.top).toBeGreaterThanOrEqual(8)
   })
 
   it('shows a readable placeholder for legacy local markdown images instead of a broken browser image', () => {
@@ -237,7 +211,7 @@ describe('ChatPanel', () => {
     expect(screen.queryByText('inspect the implementation')).toBeNull()
   })
 
-  it('merges adjacent thinking updates into one shallow block', () => {
+  it('merges visually adjacent thinking updates into one paged block', () => {
     render(
       <ChatPanel
         messages={[
@@ -249,10 +223,85 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getAllByTestId('thinking-block')).toHaveLength(1)
-    expect(screen.getAllByTestId('thinking-update')).toHaveLength(3)
-    expect(screen.getByRole('button', { name: /Thinking · 3 updates.*Final checks/ })).toBeTruthy()
-    expect(screen.getByText('Inspecting')).toBeTruthy()
+    expect(screen.getAllByTestId('thinking-update')).toHaveLength(1)
+    const headerToggle = screen.getByRole('button', { name: /3 Thinkings.*Final checks/ })
+    expect(screen.getByTestId('thinking-navigation').parentElement).toBe(headerToggle.parentElement)
+    expect(screen.getByText('3 / 3')).toBeTruthy()
+    expect(screen.queryByText('Inspecting')).toBeNull()
+    expect(screen.queryByText('Tests')).toBeNull()
+    expect(screen.getByText('Preparing the final answer.')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous Thinking' }))
+    expect(screen.getByText('2 / 3')).toBeTruthy()
     expect(screen.getByText('Tests')).toBeTruthy()
+    fireEvent.keyDown(screen.getByTestId('thinking-block'), { key: 'ArrowLeft' })
+    expect(screen.getByText('1 / 3')).toBeTruthy()
+    expect(screen.getByText('Inspecting')).toBeTruthy()
+  })
+
+  it('merges thinking updates across messages that render no visible content', () => {
+    render(
+      <ChatPanel
+        messages={[
+          { role: 'assistant', content: [{ type: 'thinking', text: 'First visible thought.' }] },
+          { role: 'assistant', content: [{ type: 'text', text: '   ' }] },
+          { role: 'assistant', content: [{ type: 'thinking', text: 'Second visible thought.' }] },
+        ]}
+      />,
+    )
+
+    expect(screen.getAllByTestId('thinking-block')).toHaveLength(1)
+    expect(screen.getByText('2 Thinkings')).toBeTruthy()
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+  })
+
+  it('keeps thinking updates separate across visible assistant text', () => {
+    render(
+      <ChatPanel
+        messages={[
+          { role: 'assistant', content: [{ type: 'thinking', text: 'Before visible text.' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'Visible answer.' }] },
+          { role: 'assistant', content: [{ type: 'thinking', text: 'After visible text.' }] },
+        ]}
+      />,
+    )
+
+    expect(screen.getAllByTestId('thinking-block')).toHaveLength(2)
+  })
+
+  it('follows streamed thinking while on the latest page and preserves manual history review', () => {
+    const makeMessages = (texts: string[]) => texts.map((text) => ({
+      role: 'assistant' as const,
+      content: [{ type: 'thinking' as const, text }],
+    }))
+    const { rerender } = render(<ChatPanel messages={makeMessages(['First.', 'Second.'])} />)
+
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+    rerender(<ChatPanel messages={makeMessages(['First.', 'Second.', 'Third.'])} />)
+    expect(screen.getByText('3 / 3')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous Thinking' }))
+    expect(screen.getByText('2 / 3')).toBeTruthy()
+    rerender(<ChatPanel messages={makeMessages(['First.', 'Second.', 'Third.', 'Fourth.'])} />)
+    expect(screen.getByText('2 / 4')).toBeTruthy()
+    expect(screen.getByText('Second.')).toBeTruthy()
+  })
+
+  it('switches Thinking pages with a horizontal touch gesture', () => {
+    render(
+      <ChatPanel
+        messages={[
+          { role: 'assistant', content: [{ type: 'thinking', text: 'First.' }] },
+          { role: 'assistant', content: [{ type: 'thinking', text: 'Second.' }] },
+        ]}
+      />,
+    )
+
+    const body = screen.getByTestId('thinking-update').parentElement!
+    fireEvent.touchStart(body, { changedTouches: [{ clientX: 120, clientY: 20 }] })
+    fireEvent.touchEnd(body, { changedTouches: [{ clientX: 180, clientY: 22 }] })
+    expect(screen.getByText('1 / 2')).toBeTruthy()
+    expect(screen.getByText('First.')).toBeTruthy()
   })
 
   it('does not merge thinking updates across a tool call', () => {
@@ -2702,7 +2751,8 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-card-dot-count-reason-dot-1').textContent).toBe('×2')
     expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
     expect(screen.queryByText('Tool activity')).toBeNull()
-    expect(screen.getAllByText('Thinking')).toHaveLength(2)
+    expect(screen.getByText('2 Thinkings')).toBeTruthy()
+    expect(screen.getAllByTestId('thinking-block')).toHaveLength(1)
 
     rerender(<DashboardChatPanel messages={messages} toolCardMode="standard" />)
 
@@ -2752,8 +2802,8 @@ describe('ChatPanel', () => {
     expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
     expect(screen.getByTestId('tool-card-dot-count-rail-1').textContent).toBe('×2')
     expect(screen.getByTestId('tool-card-dot-rail-3')).toBeTruthy()
-    expect(screen.getAllByText('Thinking')).toHaveLength(2)
-    const lastThinking = screen.getAllByTestId('thinking-block').at(-1)!
+    expect(screen.getByText('2 Thinkings')).toBeTruthy()
+    const lastThinking = screen.getByTestId('thinking-block')
     const rail = screen.getByTestId('tool-card-dots-rail-1')
     expect(Boolean(lastThinking.compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   })

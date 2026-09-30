@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+.message-metadata-row {
+  scrollbar-width: none;
+}
+
+.message-metadata-row::-webkit-scrollbar {
+  display: none;
+}
+
 @layer components {
   .ak-explorer-surface {
     container-type: inline-size;
