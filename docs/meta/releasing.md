@@ -13,7 +13,7 @@ must declare MIT and cannot depend on private workspace packages. Verify before
 cutting a tag:
 
 ```bash
-pnpm run verify:version -- --tag v0.2.0-rc.20
+pnpm run verify:version -- --tag v0.2.0
 ```
 
 The release asset verifier repeats the check against `release/manifest.json`.
@@ -30,7 +30,7 @@ validation tools remain available for a separately approved future npm release.
 ## GitHub Release assets
 
 The `GitHub Release Assets` workflow also accepts only the unified `v*` tag. Its
-current RC native matrix builds matching-runner Node SEA assets for Linux x64
+current release matrix builds matching-runner Node SEA assets for Linux x64
 and macOS x64/arm64. Linux arm64 and Windows are paused; SEA binaries are never
 cross-compiled or relabeled. The CJS job builds portable fallbacks, the Dashboard
 archive, Dedicated support archive, release metadata archive, manifest, and

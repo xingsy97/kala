@@ -1,4 +1,4 @@
-name: Promote Verified RC
+name: Promote Verified Release
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: Draft release tag to promote
         required: true
       acceptance_run_id:
-        description: Successful RC Clean-environment Acceptance workflow run ID
+        description: Successful Release Clean-environment Acceptance workflow run ID
         required: true
 
 permissions:
@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           REVISION=$(git rev-parse HEAD)
-          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .name)" = 'RC Clean-environment Acceptance'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .name)" = 'Release Clean-environment Acceptance'
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .path)" = '.github/workflows/rc-acceptance.yml'
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .conclusion)" = success
           test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq .head_sha)" = "$REVISION"
@@ -74,7 +74,7 @@ jobs:
           node scripts/release/verify-promotion-candidate.mjs \
             --directory "$CANDIDATE" --evidence acceptance/evidence \
             --aggregate release-evidence/rc-evidence.json --tag "$TAG" --revision "$REVISION"
-          # Paused for the current RC: kala-host-linux-arm64
+          # Paused for the current release: kala-host-linux-arm64
           for asset in manifest.json SHA256SUMS \
             kala-host-linux-x64 \
             kala-host-darwin-x64 kala-host-darwin-arm64; do

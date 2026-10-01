@@ -50,7 +50,7 @@ jobs:
         with:
           context: .
           file: deploy/private-cloud/images/Dockerfile.runtime-service
-          # platforms: linux/amd64,linux/arm64 # Linux arm64 is paused for the current RC.
+          # platforms: linux/amd64,linux/arm64 # Linux arm64 is paused for the current release.
           platforms: linux/amd64
           build-args: SOURCE_REVISION=${{ github.sha }}
           push: true
@@ -85,7 +85,7 @@ jobs:
         with:
           context: .
           file: deploy/private-cloud/images/Dockerfile.runtime-ingress-gateway
-          # platforms: linux/amd64,linux/arm64 # Linux arm64 is paused for the current RC.
+          # platforms: linux/amd64,linux/arm64 # Linux arm64 is paused for the current release.
           platforms: linux/amd64
           push: true
           tags: ghcr.io/${{ github.repository }}-private-cloud-ingress:${{ needs.resolve.outputs.version }}
@@ -119,7 +119,7 @@ jobs:
         with:
           context: .
           file: deploy/private-cloud/images/Dockerfile.dashboard
-          # platforms: linux/amd64,linux/arm64 # Linux arm64 is paused for the current RC.
+          # platforms: linux/amd64,linux/arm64 # Linux arm64 is paused for the current release.
           platforms: linux/amd64
           push: true
           tags: ghcr.io/${{ github.repository }}-private-cloud-dashboard:${{ needs.resolve.outputs.version }}
@@ -191,7 +191,7 @@ jobs:
       matrix:
         include:
           - { runner: ubuntu-24.04, target: linux-x64 }
-          # - { runner: ubuntu-24.04-arm, target: linux-arm64 } # Paused for the current RC.
+          # - { runner: ubuntu-24.04-arm, target: linux-arm64 } # Paused for the current release.
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -210,7 +210,7 @@ jobs:
     needs: [resolve, runtime-image, ingress-image, dashboard-image, image-vulnerability-scan, operator]
     strategy:
       matrix:
-        # target: [linux-x64, linux-arm64] # Linux arm64 is paused for the current RC.
+        # target: [linux-x64, linux-arm64] # Linux arm64 is paused for the current release.
         target: [linux-x64]
     runs-on: ubuntu-latest
     permissions:
@@ -242,7 +242,7 @@ jobs:
         env: { GH_TOKEN: '${{ github.token }}', TAG: '${{ needs.resolve.outputs.tag }}' }
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "$TAG" --notes "Release candidate assets are still being assembled." || gh release view "$TAG" >/dev/null
+            gh release create "$TAG" --draft --title "$TAG" --notes "Release assets are still being assembled." || gh release view "$TAG" >/dev/null
           fi
           gh release upload "$TAG" \
             "release/kala-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz" \

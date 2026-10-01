@@ -1,8 +1,8 @@
-# Release evidence and RC promotion contract
+# Release evidence and promotion contract
 
 **Status:** normative
 
-This bootstrap RC remains a draft until matching-runner clean-install evidence
+The release remains a draft until matching-runner clean-install evidence
 for every supported Portable target is complete and both source-free asset and
 GHCR image workflows succeed for the exact tag and revision. Builds alone do
 not substitute for Portable runtime evidence. Dedicated and Private Cloud
@@ -29,10 +29,10 @@ The required promotion matrix is:
 
 | Category | Target | Required proof |
 |---|---|---|
-| Portable | Linux x64 and macOS x64/arm64 (exactly three records; Linux arm64 paused for this RC) | exact attested asset, clean install, boot, capabilities, embedded Dashboard, persisted Session state, graceful stop, same-version reinstall |
+| Portable | Linux x64 and macOS x64/arm64 (exactly three records; Linux arm64 paused for this release) | exact attested asset, clean install, boot, capabilities, embedded Dashboard, persisted Session state, graceful stop, same-version reinstall |
 
 Optional Dedicated and Private Cloud lifecycle evidence still has a strict schema
-if independently produced, but is not claimed as proven for this bootstrap RC.
+if independently produced, but is not claimed as proven for this release.
 The old `v0.1.10` release lacks equivalent cross-platform predecessor assets;
 no cross-version upgrade, systemd rollback, or Compose tenant isolation is
 asserted by a same-version Portable reinstall.
@@ -46,7 +46,7 @@ multi-architecture images and bundles; those artifacts remain preview-only
 until real clean Compose lifecycle evidence is available.
 
 `promote-rc.yml` accepts an explicit acceptance run ID. Before changing release
-state it verifies that the run used the RC workflow, concluded successfully, and
+state it verifies that the run used the release acceptance workflow, concluded successfully, and
 has the same source revision as the tag, and confirms the GitHub Release and
 GHCR tag workflows also succeeded for that revision. It downloads all evidence and executes
 `verify-rc-evidence.mjs`, which rejects missing, duplicate, or extra targets, false or

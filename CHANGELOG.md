@@ -5,6 +5,8 @@ Versioning while pre-1.0 and uses one product version across release artifacts.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-02
+
 ### Added
 
 - Near-full-screen views for the workspace terminal and task graph.
@@ -16,6 +18,8 @@ Versioning while pre-1.0 and uses one product version across release artifacts.
   bundles, independent Dashboard upgrades, and state-machine lifecycle receipts.
 - Release asset integrity checks, explicit vulnerability policy, and managed
   Windows Executor service install/uninstall lifecycle.
+- A production-component Dashboard prototype harness with transport-boundary
+  mock data and a browser interaction matrix.
 
 ### Changed
 
@@ -28,8 +32,21 @@ Versioning while pre-1.0 and uses one product version across release artifacts.
 - Dashboard navigation, title, Composer, Operations, Product Outputs, Pipeline,
   Memo, Settings, responsive states, and Chinese localization use the shared
   product UI system.
+- Session and Workspace information, cumulative usage, storage inventory,
+  sub-agent activity, message timing, pinned prompts, hidden items, and
+  responsive sidebars use denser production layouts.
+- Ask User Choice supports single-choice, multiple-choice, and custom responses
+  through one shared Dashboard and Host protocol.
 
-### Release target
+### Fixed
 
-- `v0.2.0-rc.20` after every gate in the public release readiness runbook passes.
+- Pending Ask User Choice requests remain visible when Copilot emits an
+  intermediate idle state before the user responds.
+- Context progress animation, message metadata spacing, compact Choice cards,
+  storage sorting, sidebar truncation, and narrow right-panel tabs retain their
+  intended geometry.
+
+### Release
+
+- `v0.2.0`, after every gate in the public release readiness runbook passes.
 - Kala branding and safer installation documentation; no automatic npm publishing.

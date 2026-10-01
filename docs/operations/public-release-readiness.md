@@ -2,7 +2,7 @@
 
 **Status:** normative; implementation in progress
 
-**Target:** `v0.2.0-rc.20`
+**Target:** `v0.2.0`
 
 **Scope:** public source repository, supported Portable artifacts, preview
 Dedicated bundles and Private Cloud images/bundles, and release evidence
@@ -10,14 +10,14 @@ Dedicated bundles and Private Cloud images/bundles, and release evidence
 ## 1. Release contract
 
 One product release uses one SemVer version and one tag, such as
-`v0.2.0-rc.20`. The root package, workspace packages, manifests,
+`v0.2.0`. The root package, workspace packages, manifests,
 Dashboard metadata, container labels, and release notes must agree.
 Protocol and persisted-schema versions are independent compatibility contracts and
 must not be changed merely to match the product version. Component-specific tags
 are not part of the target release model.
 
 The release is built from a clean, signed or protected Git revision. Generated
-assets record the exact revision and content digest. This bootstrap RC may be
+assets record the exact revision and content digest. This stable pre-1.0 release may be
 published only after privacy, license, build, test, signed-asset verification,
 GHCR image vulnerability scanning, and the six-target hosted Portable clean
 install/reinstall matrix pass. Upgrade, rollback, backup/restore, and
@@ -50,7 +50,7 @@ Cloud is the same Platform architecture with `multi-tenant`.
 
 - [x] One product version is enforced across packages and artifacts.
 - [x] Linux and macOS x64/arm64 Portable build jobs exist on matching runners.
-- [ ] Windows native Executor ConPTY/installer lifecycle has not passed; this RC
+- [ ] Windows native Executor ConPTY/installer lifecycle has not passed; this release
   excludes Windows release assets, UI installation paths, and acceptance claims.
 - [x] GitHub release assets have a keyless checksum signature and GitHub build
   provenance; container digests have keyless signatures, OCI provenance, and SBOMs.
@@ -80,7 +80,7 @@ The normative Private Cloud bundle and lifecycle contract is
   backup/restore, Browser, Executor, and self-deployment checks.
 - [ ] Private Cloud passes clean Compose install, tenant isolation, image upgrade,
   Dashboard-only update, rollback, backup/restore, and Executor checks.
-- [x] Release candidates remain drafts until the Portable matrix and both
+- [x] Releases remain drafts until the Portable matrix and both
   artifact and image workflows succeed at the exact tag and revision. The
   promotion workflow fails closed on those checks before clearing the draft.
 
@@ -96,7 +96,7 @@ The normative machine-readable contract and promotion sequence are documented in
 [`release-evidence-contract.md`](release-evidence-contract.md). Workflow existence
 is not acceptance evidence. The first three acceptance boxes remain open until the matching runners have
 produced successful evidence for the exact draft revision. Only the Portable
-box gates promotion of this bootstrap RC; the other two are explicitly
+box gates promotion of this release; the other two are explicitly
 unsupported preview variants until independent acceptance exists.
 
 ## 5. Stop conditions

@@ -84,7 +84,7 @@ test('security and release workflows fail closed without automatic npm publishin
   assert.match(release, /verify:public-packages/u)
   assert.match(release, /default: 'linux-x64,darwin-x64,darwin-arm64'/u)
   assert.match(release, /if \[ "\$NATIVE_TARGETS" != "\$REQUIRED_NATIVE_TARGETS" \]/u)
-  assert.match(release, /partial three-platform RC releases are not supported/u)
+  assert.match(release, /partial three-platform releases are not supported/u)
   assert.doesNotMatch(release, /startsWith\(matrix\.target, 'win32-'/u)
   assert.doesNotMatch(release, /verify-windows-terminal\.mjs/u)
   assert.equal((release.match(/reconcile-github-release-assets\.mjs/gu) ?? []).length, 2)
@@ -117,7 +117,7 @@ test('Private Cloud release builds signed Linux x64 images and native bundles', 
   assert.doesNotMatch(release, /--draft=false/u)
 })
 
-test('bootstrap RC requires exactly three real hosted Portable installs and successful signed GHCR/asset workflows', async () => {
+test('release requires exactly three real hosted Portable installs and successful signed GHCR/asset workflows', async () => {
   const acceptance = await workflow('rc-acceptance.yml')
   for (const target of ['linux-x64', 'darwin-x64', 'darwin-arm64']) assert.match(acceptance, new RegExp('^\\s+- \\{[^\\n]*target: ' + target, 'mu'))
   assert.doesNotMatch(acceptance, /^\s+- \{[^\n]*target: linux-arm64/mu)
@@ -133,7 +133,7 @@ test('bootstrap RC requires exactly three real hosted Portable installs and succ
   assert.match(acceptance, /same-version reinstall/u)
 
   const promotion = await workflow('promote-rc.yml')
-  assert.match(promotion, /RC Clean-environment Acceptance/u)
+  assert.match(promotion, /Release Clean-environment Acceptance/u)
   assert.match(promotion, /\.github\/workflows\/rc-acceptance\.yml/u)
   assert.match(promotion, /verify-rc-evidence\.mjs/u)
   assert.match(promotion, /\.head_sha/u)

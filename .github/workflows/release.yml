@@ -7,12 +7,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Product release tag, for example v0.2.0-rc.1'
+        description: 'Product release tag, for example v0.2.0'
         required: true
       native_targets:
         description: 'Comma-separated native targets. Empty builds Linux x64 and macOS x64/arm64.'
         required: false
-        # Linux arm64 is paused for the current RC: linux-x64,linux-arm64,darwin-x64,darwin-arm64
+        # Linux arm64 is paused for the current release: linux-x64,linux-arm64,darwin-x64,darwin-arm64
         default: 'linux-x64,darwin-x64,darwin-arm64'
 
 jobs:
@@ -40,20 +40,20 @@ jobs:
           node scripts/release/version-policy.mjs --tag "$TAG"
 
           if [ -z "$NATIVE_TARGETS" ]; then
-            # Linux arm64 is paused for the current RC: linux-x64,linux-arm64,darwin-x64,darwin-arm64
+            # Linux arm64 is paused for the current release: linux-x64,linux-arm64,darwin-x64,darwin-arm64
             NATIVE_TARGETS="linux-x64,darwin-x64,darwin-arm64"
           fi
-          # Linux arm64 is paused for the current RC: REQUIRED_NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64"
+          # Linux arm64 is paused for the current release: REQUIRED_NATIVE_TARGETS="linux-x64,linux-arm64,darwin-x64,darwin-arm64"
           REQUIRED_NATIVE_TARGETS="linux-x64,darwin-x64,darwin-arm64"
           if [ "$NATIVE_TARGETS" != "$REQUIRED_NATIVE_TARGETS" ]; then
-            echo "native_targets must be exactly $REQUIRED_NATIVE_TARGETS; partial three-platform RC releases are not supported" >&2
+            echo "native_targets must be exactly $REQUIRED_NATIVE_TARGETS; partial three-platform releases are not supported" >&2
             exit 1
           fi
           MATRIX_ENTRIES=""
           for t in $(echo "$NATIVE_TARGETS" | tr ',' ' '); do
             case "$t" in
               linux-x64) OS="ubuntu-24.04" ;;
-              # linux-arm64) OS="ubuntu-24.04-arm" ;; # Paused for the current RC.
+              # linux-arm64) OS="ubuntu-24.04-arm" ;; # Paused for the current release.
               darwin-x64) OS="macos-15-intel" ;;
               darwin-arm64) OS="macos-15" ;;
               *) echo "Unsupported native target: $t" >&2; exit 1 ;;
@@ -206,7 +206,7 @@ jobs:
       - name: Require installable desktop Executor assets
         run: |
           test -f release/kala-executor-linux-x64
-          # test -f release/kala-executor-linux-arm64 # Paused for the current RC.
+          # test -f release/kala-executor-linux-arm64 # Paused for the current release.
           test -f release/kala-executor-darwin-x64
           test -f release/kala-executor-darwin-arm64
           test "$(find release -maxdepth 1 -type f -name 'kala-executor-*' | wc -l)" -eq 3

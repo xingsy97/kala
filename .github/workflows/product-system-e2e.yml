@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   windows-terminal-e2e:
-    name: Windows Executor / ConPTY Terminal (not supported in this RC)
+    name: Windows Executor / ConPTY Terminal (not supported in this release)
     # This RC ships no Windows assets. Keep the real ConPTY journey intact for
     # the next Windows-enabled release, but do not report it as accepted here.
     if: false

@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/runtime-ingress-gateway",
-  "version": "0.2.0-rc.20",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",

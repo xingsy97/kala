@@ -1,4 +1,21 @@
 {
+  "v0.2.0": {
+    "previousTag": "v0.2.0-rc.20",
+    "improvements": [
+      "The production Dashboard now presents denser Session context, usage, storage, workspace, sub-agent, and message metadata without reducing text readability.",
+      "Ask User Choice supports compact single-choice, multiple-choice, and custom-response workflows across the Dashboard, shared protocol, and Host runtime.",
+      "A production-component browser prototype harness now exercises representative Dashboard states without connecting to real Session data."
+    ],
+    "fixes": [
+      "Pending Ask User Choice requests remain visible when Copilot reports an intermediate idle state before the user responds.",
+      "Sidebar, pinned-message, progress, timing, hidden-item, and responsive tab layouts now preserve their intended geometry across supported viewport sizes."
+    ],
+    "knownIssues": [
+      "Dedicated and Private Cloud lifecycle certification remains preview-only as described in the release support policy.",
+      "Windows and Linux arm64 native Portable assets remain outside the supported v0.2.0 release matrix."
+    ],
+    "desktopViaDashboard": true
+  },
   "v0.2.0-rc.20": {
     "previousTag": "v0.2.0-rc.19",
     "improvements": [
