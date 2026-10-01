@@ -133,10 +133,11 @@ export const ClientAskUserChoiceSchema = z.object({
   sessionId: SessionIdSchema,
   callId: WireIdSchema,
   value: z.string().min(1).max(500).optional(),
+  values: z.array(z.string().min(1).max(500)).min(1).max(20).optional(),
   customText: z.string().min(1).max(4000).optional(),
 }).strict().refine(
-  (payload) => (payload.value !== undefined) !== (payload.customText !== undefined),
-  { message: 'Exactly one of value or customText is required' },
+  (payload) => [payload.value, payload.values, payload.customText].filter((value) => value !== undefined).length === 1,
+  { message: 'Exactly one of value, values, or customText is required' },
 ) satisfies z.ZodType<ClientAskUserChoice>
 
 export const ClientCancelSchema = z.object({

@@ -579,6 +579,8 @@ export type AskUserChoiceRequest = {
   message: string
   choices: readonly AskUserChoiceOption[]
   defaultValue?: string
+  defaultValues?: readonly string[]
+  multiple?: boolean
   intent?: string
 }
 
@@ -587,6 +589,7 @@ export type ClientAskUserChoice = {
   sessionId: string
   callId: string
   value?: string
+  values?: readonly string[]
   customText?: string
 }
 

@@ -241,6 +241,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
       pendingCalls: [],
       error: undefined,
     }))
+    this.activeTurnTimings.delete(record.sessionId)
   }
 
   async approve(record: SessionRecord, callId: string): Promise<void> {
@@ -775,14 +776,21 @@ export class CopilotAgentRuntime implements AgentRuntime {
       }
       return
     }
-    if (event.type === 'assistant.reasoning_delta' || event.type === 'session.idle') return
+    if (event.type === 'assistant.reasoning_delta') return
+    if (event.type === 'session.idle') {
+      if (this.turnCaptures.has(record.sessionId)) return
+      void this.projectSessionIdle(record, nativeEventPayload(event)).catch((error) => {
+        this.context.broadcast.onError(record.sessionId, error instanceof Error ? error.message : String(error))
+      })
+      return
+    }
     if (event.type === 'session.error') {
       void this.project(record, 'copilot.session_error', nativeEventPayload(event), (state) => ({
         ...state,
         status: 'error',
         pendingCalls: [],
         error: event.data.message,
-      }))
+      })).finally(() => this.activeTurnTimings.delete(record.sessionId))
       this.context.broadcast.onError(record.sessionId, event.data.message)
     }
   }
@@ -892,13 +900,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
           error: undefined,
         }))
       }
-      await this.project(record, 'copilot.session_idle', response ? nativeEventPayload(response) : {}, (state) => ({
-        ...state,
-        messages: timing ? completeTemporalTurn(state.messages, timing, 'completed') : state.messages,
-        status: 'done',
-        pendingCalls: [],
-        error: undefined,
-      }))
+      await this.projectSessionIdle(record, response ? nativeEventPayload(response) : {})
     } catch (error) {
       if (!this.isCurrentTurn(record.sessionId, generation)) return
       const message = error instanceof Error ? error.message : String(error)
@@ -920,7 +922,32 @@ export class CopilotAgentRuntime implements AgentRuntime {
       this.context.broadcast.onError(record.sessionId, message)
     } finally {
       if (this.turnCaptures.get(record.sessionId) === capture) this.turnCaptures.delete(record.sessionId)
-      if (this.turnGenerations.get(record.sessionId) === generation) this.activeTurnTimings.delete(record.sessionId)
+      if (
+        this.turnGenerations.get(record.sessionId) === generation
+        && (this.context.store.get(record.sessionId) ?? record).state.pendingCalls.length === 0
+      ) {
+        this.activeTurnTimings.delete(record.sessionId)
+      }
+    }
+  }
+
+  private async projectSessionIdle(
+    record: SessionRecord,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const timing = this.activeTurnTimings.get(record.sessionId)
+    await this.project(record, 'copilot.session_idle', payload, (state) => {
+      if (state.pendingCalls.length > 0) return state
+      return {
+        ...state,
+        messages: timing ? completeTemporalTurn(state.messages, timing, 'completed') : state.messages,
+        status: 'done',
+        pendingCalls: [],
+        error: undefined,
+      }
+    })
+    if ((this.context.store.get(record.sessionId) ?? record).state.pendingCalls.length === 0) {
+      this.activeTurnTimings.delete(record.sessionId)
     }
   }
 

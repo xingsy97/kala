@@ -168,7 +168,7 @@ const humanInputToolset: ToolsetPlugin = {
   provideTools() {
     return [
       tool('ask_user_choice', 'host', 'read', false, 'ask_user_choice', {
-        purpose: 'Ask the user to choose one option when progress depends on a product, design, or implementation decision. The UI also lets the user reject all options and stop, or provide a custom text response.',
+        purpose: 'Ask the user to choose one or more options when progress depends on a product, design, or implementation decision. The UI also lets the user reject all options and stop, or provide a custom text response.',
         whenToUse: ['Use when multiple reasonable choices exist and guessing would materially affect the outcome.', 'Use for a concise single-question choice prompt.'],
         constraints: ['Ask only one question per call.', 'Provide clear, mutually distinct choices.', 'Treat a custom text response as the user\'s chosen instruction even if it does not match one of the listed values.', 'Do not use for tool approvals or confirmations that are already handled by the approval system.'],
       }, {
@@ -195,6 +195,13 @@ const humanInputToolset: ToolsetPlugin = {
                 },
               ],
             },
+          },
+          multiple: { type: 'boolean', description: 'Allow selecting more than one listed choice.' },
+          defaultValues: {
+            type: 'array',
+            maxItems: 20,
+            items: { type: 'string', minLength: 1, maxLength: 200 },
+            description: 'Optional values to preselect when multiple is true. Every value must match a choice.',
           },
           defaultValue: { type: 'string', description: 'Optional value to preselect. Must match one of the choices.' },
         },

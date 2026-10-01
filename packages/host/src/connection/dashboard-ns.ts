@@ -1016,7 +1016,9 @@ export function configureDashboardNamespace(
         if (!deps.askUserChoice) throw new Error('ask_user_choice is not configured on this host')
         const response = p.customText !== undefined
           ? { kind: 'custom' as const, text: p.customText }
-          : { kind: 'choice' as const, value: p.value ?? '' }
+          : p.values !== undefined
+            ? { kind: 'choices' as const, values: p.values }
+            : { kind: 'choice' as const, value: p.value ?? '' }
         const resolved = deps.askUserChoice.respond(p.sessionId, p.callId, response)
         if (!resolved.ok && resolved.error === 'ask_user_choice request is not pending') {
           const record = await loadRecordForDashboard(deps, p.sessionId)
@@ -1042,7 +1044,21 @@ export function configureDashboardNamespace(
       // This ACK confirms broker acceptance only. Resolving the broker wakes the
       // agent continuation, but the continuation intentionally runs independently.
       ack?.(result)
-      deps.audit?.log({ action: 'dashboard.ask_user_choice', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: result.ok ? 'ok' : 'error', metadata: { responseType: p.customText !== undefined ? 'custom_text' : 'choice', ...(p.value !== undefined ? { value: p.value } : { customTextBytes: Buffer.byteLength(p.customText ?? '', 'utf8') }) }, ...(!result.ok ? { error: result.error } : {}) })
+      deps.audit?.log({
+        action: 'dashboard.ask_user_choice',
+        actor: auditActor(socket),
+        target: { sessionId: p.sessionId, callId: p.callId },
+        outcome: result.ok ? 'ok' : 'error',
+        metadata: {
+          responseType: p.customText !== undefined ? 'custom_text' : p.values !== undefined ? 'choices' : 'choice',
+          ...(p.value !== undefined
+            ? { value: p.value }
+            : p.values !== undefined
+              ? { valueCount: p.values.length }
+              : { customTextBytes: Buffer.byteLength(p.customText ?? '', 'utf8') }),
+        },
+        ...(!result.ok ? { error: result.error } : {}),
+      })
     })
     socket.on('client:cancel', async (raw: ClientCancel, ack?: (result: RpcAck) => void) => {
       const p = vparse(schema.ClientCancelSchema, raw, 'client:cancel', (raw as ClientCancel | undefined)?.sessionId)

@@ -963,12 +963,21 @@ function pendingCallToAskUserChoice(sessionId: string, call: PendingToolCall): A
   const defaultValue = typeof call.input.defaultValue === 'string' && values.has(call.input.defaultValue.trim())
     ? call.input.defaultValue.trim()
     : undefined
+  const multiple = call.input.multiple === true
+  const defaultValues = multiple && Array.isArray(call.input.defaultValues)
+    ? [...new Set(call.input.defaultValues
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter((value) => values.has(value)))]
+    : undefined
   return {
     sessionId,
     callId: call.callId,
     message,
     choices,
     ...(defaultValue ? { defaultValue } : {}),
+    ...(defaultValues && defaultValues.length > 0 ? { defaultValues } : {}),
+    ...(multiple ? { multiple: true } : {}),
     ...(call.intent ? { intent: call.intent } : {}),
   }
 }
@@ -1013,7 +1022,7 @@ export function respondAskUserChoice(
   socket: DashboardSocket,
   sessionId: string,
   callId: string,
-  response: { value: string } | { customText: string },
+  response: { value: string } | { values: readonly string[] } | { customText: string },
 ): Promise<void> {
   return emitRpc(socket, 'client:ask_user_choice', { sessionId, callId, ...response })
 }

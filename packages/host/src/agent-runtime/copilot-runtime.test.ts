@@ -1681,6 +1681,78 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
+  it('keeps a human-input tool visible when Copilot reports idle before its result', async () => {
+    let resolveResponse!: (value: unknown) => void
+    let releaseChoice!: (result: { ok: boolean; content: string }) => void
+    const callTool: ToolDispatcher['callTool'] = async () =>
+      await new Promise<{ ok: boolean; content: string }>((resolve) => {
+        releaseChoice = resolve
+      })
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { callTool, cancelPending() {} },
+      broadcast: {
+        onState() {},
+        onTokenDelta() {},
+        onApprovalRequired() {},
+        onError() {},
+      },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-idle-during-human-input',
+      agentRuntime: 'copilot',
+      config: createConfig({
+        tools: [{
+          name: 'ask_user_choice',
+          description: 'Ask the user to choose.',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          executionKind: 'host',
+          executionHandler: 'ask_user_choice',
+        }],
+      }),
+    })
+
+    sdk.responses.push(new Promise((resolve) => { resolveResponse = resolve }))
+    await runtime.start()
+    await runtime.send(record, { text: 'Ask me to choose.' })
+    const tool = sdk.configs.at(-1)?.tools.find((candidate) => candidate.name === 'ask_user_choice')
+    const result = tool!.handler({
+      message: 'Choose one.',
+      choices: [{ value: 'safe', label: 'Safe' }],
+    }, { toolCallId: 'call-choice' })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.pendingCalls).toHaveLength(1))
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('executing_tools'))
+
+    const cursorBeforeIdle = store.get(record.sessionId)!.state.cursor
+    resolveResponse({
+      type: 'assistant.message',
+      data: { content: '', messageId: 'message-before-choice' },
+      id: 'event-before-choice',
+      timestamp: new Date().toISOString(),
+    })
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.cursor).toBeGreaterThan(cursorBeforeIdle))
+    expect(store.get(record.sessionId)?.state).toMatchObject({
+      status: 'executing_tools',
+      pendingCalls: [{ callId: 'call-choice', name: 'ask_user_choice' }],
+    })
+
+    releaseChoice({ ok: true, content: 'safe' })
+    await expect(result).resolves.toMatchObject({ resultType: 'success' })
+    for (const listener of [...sdk.listeners]) {
+      listener({
+        type: 'session.idle',
+        id: 'final-idle',
+        timestamp: new Date().toISOString(),
+        parentId: null,
+        data: {},
+      })
+    }
+    await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+    expect(store.get(record.sessionId)?.state.pendingCalls).toEqual([])
+    await runtime.close()
+  })
+
   it('persists the final assistant response before marking the Session done', async () => {
     const runtime = new CopilotAgentRuntime({
       store,

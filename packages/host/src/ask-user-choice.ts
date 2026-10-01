@@ -11,6 +11,7 @@ type PendingChoice = {
 
 type AskUserChoiceResponse =
   | { kind: 'choice'; value: string }
+  | { kind: 'choices'; values: readonly string[] }
   | { kind: 'custom'; text: string }
 
 export class AskUserChoiceBroker {
@@ -101,6 +102,13 @@ function validateResponse(
   if (normalized.kind === 'choice' && !request.choices.some((choice) => choice.value === normalized.value)) {
     return { ok: false, error: 'selected value is not one of the available choices' }
   }
+  if (normalized.kind === 'choices') {
+    if (!request.multiple) return { ok: false, error: 'multiple values are not allowed for this request' }
+    const available = new Set(request.choices.map((choice) => choice.value))
+    if (normalized.values.some((value) => !available.has(value))) {
+      return { ok: false, error: 'one or more selected values are not available choices' }
+    }
+  }
   return { ok: true, response: normalized }
 }
 
@@ -112,6 +120,17 @@ function selectedChoiceResult(request: AskUserChoiceRequest, response: AskUserCh
         type: 'custom_text',
         text: response.text,
       }),
+    }
+  }
+  if (response.kind === 'choices') {
+    const selected = response.values.map((value) => {
+      const option = request.choices.find((choice) => choice.value === value)
+      return option ? { value: option.value, label: option.label ?? option.value } : null
+    })
+    if (selected.some((option) => option === null)) return { ok: false, content: 'invalid multiple choice response' }
+    return {
+      ok: true,
+      content: JSON.stringify({ values: selected }),
     }
   }
   const option = request.choices.find((choice) => choice.value === response.value)
@@ -133,6 +152,10 @@ function normalizeResponse(response: string | AskUserChoiceResponse): AskUserCho
   if (response.kind === 'choice') {
     const value = response.value.trim()
     return value.length > 0 ? { kind: 'choice', value } : null
+  }
+  if (response.kind === 'choices') {
+    const values = [...new Set(response.values.map((value) => value.trim()).filter(Boolean))]
+    return values.length > 0 ? { kind: 'choices', values } : null
   }
   const text = response.text.trim()
   return text.length > 0 ? { kind: 'custom', text } : null
@@ -185,6 +208,19 @@ function parseAskUserChoicePayload(
   if (defaultValue !== undefined && !values.has(defaultValue)) {
     return { ok: false, error: 'ask_user_choice.defaultValue must match one of the choices' }
   }
+  const multiple = input.multiple === true
+  const defaultValues = Array.isArray(input.defaultValues)
+    ? [...new Set(input.defaultValues
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter(Boolean))]
+    : []
+  if (!multiple && defaultValues.length > 0) {
+    return { ok: false, error: 'ask_user_choice.defaultValues requires multiple to be true' }
+  }
+  if (defaultValues.some((value) => !values.has(value))) {
+    return { ok: false, error: 'ask_user_choice.defaultValues must match available choices' }
+  }
   return {
     ok: true,
     request: {
@@ -193,6 +229,8 @@ function parseAskUserChoicePayload(
       message,
       choices,
       ...(defaultValue !== undefined ? { defaultValue } : {}),
+      ...(defaultValues.length > 0 ? { defaultValues } : {}),
+      ...(multiple ? { multiple: true } : {}),
       ...(intent ? { intent } : {}),
     },
   }

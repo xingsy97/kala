@@ -193,6 +193,41 @@ describe('configured tool execution', () => {
     await expect(pending).resolves.toEqual({ ok: true, content: JSON.stringify({ type: 'custom_text', text: 'Use a safer hybrid plan.' }) })
   })
 
+  it('returns multiple ask_user_choice selections as one host-side result', async () => {
+    const broker = new AskUserChoiceBroker()
+    const call = effect('ask_user_choice', {
+      message: 'Pick validation layers',
+      choices: [{ value: 'unit', label: 'Unit' }, { value: 'browser', label: 'Browser' }],
+      multiple: true,
+      defaultValues: ['unit'],
+    })
+    const pending = broker.ask('session', call)
+
+    expect(broker.respond('session', call.callId, { kind: 'choices', values: ['unit', 'browser'] })).toEqual({ ok: true })
+    await expect(pending).resolves.toEqual({
+      ok: true,
+      content: JSON.stringify({
+        values: [
+          { value: 'unit', label: 'Unit' },
+          { value: 'browser', label: 'Browser' },
+        ],
+      }),
+    })
+  })
+
+  it('rejects multiple selections for a single-choice request without consuming it', async () => {
+    const broker = new AskUserChoiceBroker()
+    const call = effect('ask_user_choice', { message: 'Pick', choices: ['one', 'two'] })
+    const pending = broker.ask('session', call)
+
+    expect(broker.respond('session', call.callId, { kind: 'choices', values: ['one', 'two'] })).toEqual({
+      ok: false,
+      error: 'multiple values are not allowed for this request',
+    })
+    expect(broker.respond('session', call.callId, { kind: 'choice', value: 'one' })).toEqual({ ok: true })
+    await expect(pending).resolves.toMatchObject({ ok: true })
+  })
+
   it('rejects invalid choices without consuming the pending broker request', async () => {
     const broker = new AskUserChoiceBroker()
     const call = effect('ask_user_choice', { message: 'Pick', choices: ['one', 'two'] })

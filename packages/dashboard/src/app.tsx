@@ -2457,7 +2457,11 @@ export function App(): JSX.Element {
                                   session.socket,
                                   activeSessionId,
                                   callId,
-                                  draft.kind === 'choice' ? { value: draft.value } : { customText: draft.text },
+                                  draft.kind === 'choice'
+                                    ? { value: draft.value }
+                                    : draft.kind === 'choices'
+                                      ? { values: draft.values }
+                                      : { customText: draft.text },
                                 )
                               }}
                               onReject={() => {
