@@ -8,6 +8,7 @@ import { cn } from '../lib/utils.js'
 import type { AccountProfile } from '../auth-session.js'
 import type { AppSection } from './section.js'
 import { isDesktopClient } from '../lib/desktop.js'
+import { staticAssetUrl } from '../lib/static-asset-url.js'
 import { DesktopDownloadDialog } from './DesktopDownloadDialog.js'
 import { DesktopUpdateEntry } from './DesktopUpdate.js'
 
@@ -111,7 +112,7 @@ export function ProductSwitcher({
 export function SidebarBrand({ connectionStatus }: { connectionStatus?: ReactNode }): JSX.Element {
   return (
     <span aria-label="Kala" className="ak-sidebar-brand flex min-w-0 flex-1 items-center gap-3 text-foreground">
-      {connectionStatus ?? <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="h-6 w-6 flex-none" aria-hidden />}
+      {connectionStatus ?? <img src={staticAssetUrl(isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg')} alt="" className="h-6 w-6 flex-none" aria-hidden />}
       <KalaWordmark className="h-5" />
     </span>
   )
@@ -120,8 +121,8 @@ export function SidebarBrand({ connectionStatus }: { connectionStatus?: ReactNod
 function KalaWordmark({ className }: { className?: string }): JSX.Element {
   return (
     <span className={cn('ak-sidebar-wordmark relative block flex-none', className)} aria-hidden="true">
-      <img src="/brand/kala-wordmark.svg" alt="" className="h-full w-auto dark:hidden" />
-      <img src="/brand/kala-wordmark-light.svg" alt="" className="hidden h-full w-auto dark:block" />
+      <img src={staticAssetUrl('/brand/kala-wordmark.svg')} alt="" className="h-full w-auto dark:hidden" />
+      <img src={staticAssetUrl('/brand/kala-wordmark-light.svg')} alt="" className="hidden h-full w-auto dark:block" />
     </span>
   )
 }
@@ -144,10 +145,10 @@ export function DesktopSessionRail({
   globalActions: ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
-  const actionClass = 'h-10 w-10 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
+  const actionClass = 'h-10 w-10 rounded-xl border border-transparent text-muted-foreground hover:border-border/35 hover:bg-muted hover:text-foreground'
   return (
     <aside
-      className={cn('flex h-full w-14 flex-none flex-col items-center border-r border-border/35 bg-card/80 py-2 text-foreground', onExpand && 'cursor-pointer')}
+      className={cn('flex h-full w-16 flex-none flex-col items-center border-r border-border/45 bg-card/90 py-3 text-foreground shadow-[1px_0_0_hsl(var(--border)/0.12)]', onExpand && 'cursor-pointer')}
       data-testid="desktop-session-rail"
       aria-label={t('appShell.nav.aria')}
       onClick={(event) => {
@@ -158,7 +159,7 @@ export function DesktopSessionRail({
       }}
     >
       <div className="mb-2 grid h-10 w-10 place-items-center" data-testid="desktop-rail-brand">
-        {connectionStatus ?? <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="h-6 w-6" aria-hidden />}
+        {connectionStatus ?? <img src={staticAssetUrl(isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg')} alt="" className="h-6 w-6" aria-hidden />}
       </div>
       <ProductSwitcher section={section} onSelect={onSelectSection} compact />
       {section === 'agent' ? (
@@ -264,7 +265,7 @@ export function AppShellNav({
         {collapsedContent ?? (
           <span aria-label="Kala" className="group flex min-w-0 items-center gap-2.5 text-foreground">
             <img
-              src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
+              src={staticAssetUrl(isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg')}
               alt=""
               className="h-5 w-5 text-foreground/90"
               aria-hidden
@@ -304,7 +305,7 @@ export function AppShellNav({
         className="group mr-5 hidden items-center gap-2.5 text-foreground sm:flex"
       >
         <img
-          src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'}
+          src={staticAssetUrl(isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg')}
           alt=""
           className="h-5 w-5 text-foreground/90 transition-transform duration-200 ease-out group-hover:rotate-[2deg] group-hover:scale-[1.04] motion-reduce:transition-none"
           aria-hidden
@@ -390,12 +391,12 @@ export function SidebarGlobalActions({
   const vertical = orientation === 'vertical'
   const expandedFooter = accountPlacement === 'footer' && !legacyTopbar
   const actionClass = cn(
-    vertical ? 'h-10 w-10 rounded-xl' : expandedFooter ? 'h-9 min-w-0 flex-1 gap-2 rounded-lg border border-border/40 bg-background/30 px-3' : 'h-8 w-8',
+    vertical ? 'h-10 w-10 rounded-xl' : expandedFooter ? 'h-8 min-w-0 flex-1 gap-2 rounded-md px-2.5' : 'h-8 w-8',
     'text-muted-foreground hover:text-foreground',
   )
   const iconActionClass = cn(vertical ? 'h-10 w-10 rounded-xl' : 'h-8 w-8', 'text-muted-foreground hover:text-foreground')
   return (
-    <div className={cn('flex flex-none gap-1', vertical ? 'flex-col items-center' : expandedFooter ? 'w-full items-center' : 'ml-auto items-center')} data-testid={vertical ? 'sidebar-global-actions' : 'app-shell-global-actions'} data-orientation={orientation} data-presentation={expandedFooter ? 'expanded-footer' : undefined}>
+    <div className={cn('flex flex-none gap-1', vertical ? 'flex-col items-center' : expandedFooter ? 'w-full items-center rounded-lg border border-border/35 bg-muted/25 p-1' : 'ml-auto items-center')} data-testid={vertical ? 'sidebar-global-actions' : 'app-shell-global-actions'} data-orientation={orientation} data-presentation={expandedFooter ? 'expanded-footer' : undefined}>
       {!isDesktopClient() ? legacyTopbar ? <DesktopDownloadDialog /> : <DesktopDownloadDialog trigger={<Button variant="ghost" size={expandedFooter ? 'sm' : 'icon'} className={actionClass} data-testid="app-shell-download-desktop" title={t('desktopDownload.title')} aria-label={t('desktopDownload.open')}><Download className="h-4 w-4 flex-none" aria-hidden />{expandedFooter ? <span className="truncate">{t('desktopDownload.action')}</span> : null}</Button>} /> : <DesktopUpdateEntry />}
       {evaluationUrl ? (
         <Button variant="ghost" size="icon" asChild className={iconActionClass}>

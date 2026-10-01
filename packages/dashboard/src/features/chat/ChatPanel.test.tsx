@@ -35,9 +35,11 @@ describe('ChatPanel', () => {
     const messageFooter = screen.getByTestId('assistant-message-footer')
     expect(Array.from(messageFooter.children)).toEqual([
       screen.getByTestId('message-actions-start'),
-      messageFooter.querySelector('span[aria-label]'),
       footer,
+      messageFooter.querySelector('span[aria-label]'),
     ])
+    expect(messageFooter.className).toContain('relative')
+    expect(messageFooter.querySelector('span[aria-label]')?.className).toContain('absolute')
     expect(Array.from(screen.getByTestId('message-actions-start').children)).toEqual([
       screen.getAllByTestId('copy-message')[1],
       screen.getByTestId('try-again-message-1'),
@@ -99,6 +101,29 @@ describe('ChatPanel', () => {
     const timing = screen.getByTestId('turn-timing-turn-failed')
     expect(timing.textContent).toContain('Failed · 4s')
     expect(timing.closest('[data-testid="user-message-surface"]')).toBeNull()
+    const metadata = screen.getByTestId('user-message-metadata')
+    expect(metadata.className).toContain('absolute')
+    expect(metadata.className).toContain('sm:right-full')
+    expect(metadata.className).toContain('pointer-events-auto')
+    expect(within(metadata).getByTestId('copy-message').tabIndex).toBe(0)
+  })
+
+  it('keeps auto timestamps out of message action layout slots', () => {
+    render(
+      <DashboardChatPanel
+        items={[
+          { kind: 'message', seq: 1, ts: '2026-10-01T08:00:00.000Z', message: { role: 'user', content: [{ type: 'text', text: 'Keep actions stable.' }] } },
+          { kind: 'message', seq: 2, ts: '2026-10-01T08:00:05.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } },
+        ]}
+        messages={[]}
+      />,
+    )
+    const timestamps = screen.getAllByTestId('message-timestamp')
+    expect(timestamps).toHaveLength(2)
+    expect(timestamps.every((timestamp) => timestamp.className.includes('absolute'))).toBe(true)
+    expect(screen.getByTestId('user-message-metadata').className).toContain('absolute')
+    expect(screen.getByTestId('assistant-message-footer').className).toContain('min-h-7')
+    expect(screen.getByTestId('assistant-message-footer').querySelector('[data-testid="message-timestamp"]')?.className).toContain('absolute')
   })
 
   it('shows a readable placeholder for legacy local markdown images instead of a broken browser image', () => {
@@ -262,6 +287,7 @@ describe('ChatPanel', () => {
     fireEvent.keyDown(screen.getByTestId('thinking-block'), { key: 'ArrowLeft' })
     expect(screen.getByText('1 / 3')).toBeTruthy()
     expect(screen.getByText('Inspecting')).toBeTruthy()
+    expect(screen.getByTestId('thinking-block').closest('[data-testid="assistant-content-column"]')).toBeTruthy()
   })
 
   it('merges thinking updates across messages that render no visible content', () => {
@@ -1330,6 +1356,9 @@ describe('ChatPanel', () => {
     expect(buttonClass).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
     expect(buttonClass).toContain('items-center')
     expect(buttonClass).toContain('py-1.5')
+    expect(buttonClass).toContain('bg-card/88')
+    expect(buttonClass).toContain('shadow-sm')
+    expect(buttonClass).not.toContain('shadow-[0_10px')
     expect(buttonClass).not.toContain('py-2.5')
     expect(sticky.querySelector('.text-\\[0\\.9375rem\\]')).toBeTruthy()
     expect(sticky.querySelector('.lucide-user-round')).toBeTruthy()

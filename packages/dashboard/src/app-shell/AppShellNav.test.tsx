@@ -68,6 +68,8 @@ describe('sidebar shell controls', () => {
 
     expect(actions.getAttribute('data-presentation')).toBe('expanded-footer')
     expect(actions.className).toContain('w-full')
+    expect(actions.className).toContain('bg-muted/25')
+    expect(download.className).not.toContain('border-border')
     expect(download.textContent).toBe('Download')
     expect(settings.textContent).toBe('Settings')
     expect(download.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

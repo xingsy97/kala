@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Circle,
+  Eye,
   EyeOff,
   GripVertical,
   GitFork,
@@ -31,7 +32,6 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
-  RotateCcw,
   Search,
   SquarePen,
   SquareTerminal,
@@ -63,6 +63,7 @@ import {
   useBooleanPref,
 } from '../../lib/prefs.js'
 import { cn } from '../../lib/utils.js'
+import { staticAssetUrl } from '../../lib/static-asset-url.js'
 import { useMinuteClock } from '../../lib/minute-clock.js'
 import {
   applyManualSessionOrder,
@@ -120,11 +121,11 @@ type Props = {
   subscribeCachedSessionView?: (sessionId: string, listener: () => void) => () => void
 }
 
-const SESSION_ROW_HEIGHT = 38
-const WORKSPACE_ROW_HEIGHT = 38
-const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_minmax(0,3.5rem)] items-center gap-x-2'
-const WORKSPACE_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-2'
-const EXPLORER_RAIL_CELL = 'flex h-4 w-4 flex-none items-center justify-center'
+const SESSION_ROW_HEIGHT = 40
+const WORKSPACE_ROW_HEIGHT = 42
+const EXPLORER_ROW_GRID = 'ak-session-row grid items-center gap-x-2.5'
+const WORKSPACE_ROW_GRID = 'grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-2.5'
+const EXPLORER_RAIL_CELL = 'flex h-5 w-5 flex-none items-center justify-center'
 
 export type SessionActivityStatus = SessionSummary['status'] | 'loading'
 
@@ -457,17 +458,13 @@ function ExplorerImpl({
           onHoverChange={preview.hoverPreview}
         />
       </div>
-      {hiddenWorkspaces.count > 0 ? (
-        <HiddenWorkspacesBar
+      {hiddenWorkspaces.count > 0 || hiddenSessions.count > 0 ? (
+        <HiddenItemsBar
           workspaces={hiddenWorkspaceRows}
           hiddenIds={hiddenWorkspaces.hiddenIds}
-          onUnhide={hiddenWorkspaces.unhide}
-        />
-      ) : null}
-      {hiddenSessions.count > 0 ? (
-        <HiddenSessionsBar
-          entries={hiddenSessionEntries}
-          onUnhide={hiddenSessions.unhide}
+          sessions={hiddenSessionEntries}
+          onUnhideWorkspace={hiddenWorkspaces.unhide}
+          onUnhideSession={hiddenSessions.unhide}
         />
       ) : null}
 
@@ -619,53 +616,55 @@ function ExplorerLoading(): JSX.Element {
   )
 }
 
-function HiddenWorkspacesBar({
+function HiddenItemsBar({
   workspaces,
   hiddenIds,
-  onUnhide,
+  sessions,
+  onUnhideWorkspace,
+  onUnhideSession,
 }: {
   workspaces: readonly WorkspaceNode[]
   hiddenIds: ReadonlySet<string>
-  onUnhide(workspaceId: string): void
+  sessions: readonly { sessionId: string; label: string }[]
+  onUnhideWorkspace(workspaceId: string): void
+  onUnhideSession(sessionId: string): void
 }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const restoredIds = new Set(workspaces.map((workspace) => workspace.workspaceId).filter((id): id is string => typeof id === 'string' && id.length > 0))
   const missingIds = Array.from(hiddenIds).filter((id) => !restoredIds.has(id))
-  const hiddenCount = workspaces.length + missingIds.length
+  const workspaceCount = workspaces.length + missingIds.length
+  const hiddenCount = workspaceCount + sessions.length
   return (
-    <div className="flex-none border-t border-border/35 bg-card/35 px-1.5 py-1" data-testid="hidden-workspaces-bar">
+    <div className="flex-none border-t border-border/35 bg-card/35 px-1.5 py-1" data-testid="hidden-items-bar">
       <button
         type="button"
         className="flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-caption text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => setOpen((value) => !value)}
-        data-testid="hidden-workspaces-toggle"
+        data-testid="hidden-items-toggle"
         aria-expanded={open}
       >
         {open ? <ChevronDown className="h-3 w-3 flex-none" aria-hidden="true" /> : <ChevronRight className="h-3 w-3 flex-none" aria-hidden="true" />}
         <EyeOff className="h-3 w-3 flex-none" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate">
-          {t('explorer.hiddenWorkspaces', { count: hiddenCount })}
+          {t('explorer.hiddenItems', { count: hiddenCount })}
         </span>
       </button>
       {open ? (
-        <div className="mt-0.5 space-y-px" data-testid="hidden-workspaces-list">
-          {workspaces.map((workspace) => workspace.workspaceId === null ? null : (
-            <HiddenWorkspaceItem
-              key={workspace.workspaceId}
-              workspaceId={workspace.workspaceId}
-              label={workspace.name}
-              onUnhide={onUnhide}
-            />
-          ))}
-          {missingIds.map((workspaceId) => (
-            <HiddenWorkspaceItem
-              key={workspaceId}
-              workspaceId={workspaceId}
-              label={workspaceId}
-              onUnhide={onUnhide}
-            />
-          ))}
+        <div className="mt-1 space-y-2 px-1 pb-1" data-testid="hidden-items-list">
+          {workspaceCount > 0 ? <section data-testid="hidden-workspaces-group">
+            <div className="px-1 pb-0.5 text-meta font-semibold uppercase tracking-wider text-muted-foreground">{t('explorer.hiddenWorkspacesGroup', { count: workspaceCount })}</div>
+            {workspaces.map((workspace) => workspace.workspaceId === null ? null : (
+              <HiddenWorkspaceItem key={workspace.workspaceId} workspaceId={workspace.workspaceId} label={workspace.name} onUnhide={onUnhideWorkspace} />
+            ))}
+            {missingIds.map((workspaceId) => (
+              <HiddenWorkspaceItem key={workspaceId} workspaceId={workspaceId} label={workspaceId} onUnhide={onUnhideWorkspace} />
+            ))}
+          </section> : null}
+          {sessions.length > 0 ? <section data-testid="hidden-sessions-group">
+            <div className="px-1 pb-0.5 text-meta font-semibold uppercase tracking-wider text-muted-foreground">{t('explorer.hiddenSessionsGroup', { count: sessions.length })}</div>
+            {sessions.map((entry) => <HiddenSessionItem key={entry.sessionId} sessionId={entry.sessionId} label={entry.label} onUnhide={onUnhideSession} />)}
+          </section> : null}
         </div>
       ) : null}
     </div>
@@ -683,8 +682,8 @@ function HiddenWorkspaceItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-caption text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-workspace-item">
-      <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
+    <div className="flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 text-caption text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-workspace-item">
+      <span className="min-w-0 max-w-[14rem] flex-1 truncate" title={label} data-testid="hidden-workspace-label">{label}</span>
       <button
         type="button"
         className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -693,48 +692,8 @@ function HiddenWorkspaceItem({
         title={t('explorer.unhideWorkspace')}
         aria-label={t('explorer.unhideWorkspaceAria', { workspaceId })}
       >
-        <RotateCcw className="h-3 w-3" aria-hidden="true" />
+        <Eye className="h-3 w-3" aria-hidden="true" data-testid="workspace-unhide-icon" />
       </button>
-    </div>
-  )
-}
-
-function HiddenSessionsBar({
-  entries,
-  onUnhide,
-}: {
-  entries: readonly { sessionId: string; label: string }[]
-  onUnhide(sessionId: string): void
-}): JSX.Element {
-  const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="flex-none border-t border-border/35 bg-card/35 px-1.5 py-1" data-testid="hidden-sessions-bar">
-      <button
-        type="button"
-        className="flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-1 text-left text-caption text-muted-foreground hover:bg-muted hover:text-foreground"
-        onClick={() => setOpen((value) => !value)}
-        data-testid="hidden-sessions-toggle"
-        aria-expanded={open}
-      >
-        {open ? <ChevronDown className="h-3 w-3 flex-none" aria-hidden="true" /> : <ChevronRight className="h-3 w-3 flex-none" aria-hidden="true" />}
-        <EyeOff className="h-3 w-3 flex-none" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate">
-          {t('explorer.hiddenSessions', { count: entries.length })}
-        </span>
-      </button>
-      {open ? (
-        <div className="mt-0.5 space-y-px" data-testid="hidden-sessions-list">
-          {entries.map((entry) => (
-            <HiddenSessionItem
-              key={entry.sessionId}
-              sessionId={entry.sessionId}
-              label={entry.label}
-              onUnhide={onUnhide}
-            />
-          ))}
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -750,8 +709,8 @@ function HiddenSessionItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-caption text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-session-item">
-      <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
+    <div className="flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 text-caption text-muted-foreground hover:bg-muted hover:text-foreground" data-testid="hidden-session-item">
+      <span className="min-w-0 max-w-[14rem] flex-1 truncate" title={label} data-testid="hidden-session-label">{label}</span>
       <button
         type="button"
         className="flex-none rounded-md p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -760,7 +719,7 @@ function HiddenSessionItem({
         title={t('explorer.unhideSession')}
         aria-label={t('explorer.unhideSessionAria', { sessionId })}
       >
-        <RotateCcw className="h-3 w-3" aria-hidden="true" />
+        <Eye className="h-3 w-3" aria-hidden="true" data-testid="session-unhide-icon" />
       </button>
     </div>
   )
@@ -815,9 +774,9 @@ function Header({
 
   return (
     <div className={cn(
-      'relative z-30 flex flex-none items-center border-b px-3',
+      'relative z-30 flex flex-none items-center border-b px-3.5',
       embedded
-        ? 'h-12 border-border/25 bg-card/20'
+        ? 'h-14 border-border/30 bg-card/35'
         : 'border-border/35 bg-card/30 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-card/25',
     )}>
       {searchOpen ? (
@@ -845,8 +804,8 @@ function Header({
           </button>
         </label>
       ) : (
-        <div className="flex w-full min-w-0 flex-nowrap items-center gap-1.5" data-testid="explorer-header-actions">
-          <div className="ak-primary-action-group flex min-w-0 flex-1 flex-nowrap items-center rounded-xl bg-muted/55" data-testid="explorer-primary-action-group">
+        <div className="flex w-full min-w-0 flex-nowrap items-center gap-2" data-testid="explorer-header-actions">
+          <div className="ak-primary-action-group flex min-w-0 flex-1 flex-nowrap items-center rounded-xl border border-border/35 bg-background/45 shadow-sm" data-testid="explorer-primary-action-group">
             {leading ? <div className="flex flex-none items-center border-r border-border/35" data-testid="explorer-header-leading">{leading}</div> : null}
             <NewChatButton onNewChat={onNewSession} className={cn('min-w-0 flex-1 bg-transparent hover:bg-muted/80', leading && 'rounded-l-none')} />
           </div>
@@ -1054,7 +1013,7 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws relative min-w-0 cursor-pointer select-none rounded-xl px-2.5 py-1.5 transition-colors hover:bg-muted/45',
+        'group/ws relative min-w-0 cursor-pointer select-none rounded-lg px-3 py-1.5 transition-colors hover:bg-muted/55',
         WORKSPACE_ROW_GRID,
       )}
     >
@@ -1192,7 +1151,7 @@ function WorkspaceOsIcon({ os }: { os: WorkspaceNode['os'] }): JSX.Element {
   // Local OS artwork; shipped with the Dashboard and never loaded from a CDN.
   const icon = os === 'linux' ? 'linux' : os === 'darwin' ? 'macos' : os === 'win32' ? 'windows' : null
   if (icon) {
-    return <img src={`/icons/${icon}.svg`} alt="" className="h-4 w-4 object-contain" data-testid="workspace-os-icon" data-os-icon={icon} aria-hidden="true" />
+    return <img src={staticAssetUrl(`/icons/${icon}.svg`)} alt="" className="h-4 w-4 object-contain" data-testid="workspace-os-icon" data-os-icon={icon} aria-hidden="true" />
   }
   return <Monitor className="h-4 w-4" data-testid="workspace-os-icon" data-os-icon="generic" aria-hidden="true" />
 }
@@ -1261,9 +1220,9 @@ function SessionRow({
       data-selected={selected ? 'true' : 'false'}
       aria-current={selected ? 'page' : undefined}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden rounded-xl py-1.5 pl-6 pr-3 transition-[background-color,box-shadow,color]',
+        'group relative min-w-0 cursor-pointer overflow-hidden rounded-lg py-1.5 pl-6 pr-3 transition-[background-color,box-shadow,color]',
         'hover:bg-muted/45',
-        selected && 'bg-muted/60',
+        selected && 'bg-muted/45',
         EXPLORER_ROW_GRID,
       )}
       onClick={() => {
@@ -1311,6 +1270,7 @@ function SessionRow({
         onPreviewLeave(s.sessionId)
       }}
     >
+      {selected ? <span className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r bg-primary/80" data-testid="session-selected-marker" aria-hidden="true" /> : null}
       <div className={EXPLORER_RAIL_CELL}>
         {s.children.length > 0 ? (
           <button
@@ -1361,7 +1321,7 @@ function SessionRow({
       ) : (
         <div
           className={cn(
-            'flex min-w-0 items-center gap-1.5 truncate font-medium leading-5',
+            'ak-session-title-cell flex min-w-0 items-center gap-1.5 truncate font-medium leading-5',
             selected ? 'text-foreground' : 'text-foreground/88',
           )}
           style={{ fontSize: fontSizePx, lineHeight: 1.35 }}
@@ -1372,7 +1332,7 @@ function SessionRow({
             : null}
           <span
             className={cn(
-              'ak-session-label min-w-0 truncate font-extrabold',
+              'ak-session-label min-w-0 truncate font-semibold',
               isRunningSessionStatus(status) && 'ak-thinking-text ak-session-running-label',
             )}
             data-testid={isRunningSessionStatus(status) ? 'running-session-label' : undefined}
@@ -1385,7 +1345,7 @@ function SessionRow({
         </div>
       )}
       {editing ? null : (
-        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none col-start-3 row-start-1 flex min-w-0 items-center justify-end opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+        <div data-row-action className="ak-session-row-actions ak-touch-reveal pointer-events-none z-10 flex min-w-0 items-center justify-end opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
           <Button
             variant="ghost"
             size="icon"

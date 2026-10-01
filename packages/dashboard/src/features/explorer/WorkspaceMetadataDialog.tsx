@@ -43,8 +43,12 @@ export function WorkspaceMetadataDialog({
   const queryClient = useQueryClient()
   const displayName = workspaceName ?? executor?.workspaceName ?? ''
   const [draft, setDraft] = useState(displayName)
+  const [activeTab, setActiveTab] = useState<'overview' | 'sessions' | 'runtime'>('overview')
   useEffect(() => {
-    if (open) setDraft(displayName)
+    if (open) {
+      setDraft(displayName)
+      setActiveTab('overview')
+    }
   }, [displayName, open])
 
   const identitiesQuery = useQuery({
@@ -103,13 +107,10 @@ export function WorkspaceMetadataDialog({
     revokeMutation.mutate()
   }
   const rows: Array<[string, string]> = [
-    [t('workspaceMetadata.workspaceId'), workspaceId],
     [t('workspaceMetadata.hostVersion'), settingsQuery.data?.versions?.host ?? '—'],
     [t('workspaceMetadata.executorVersion'), executor?.executorVersion ?? '—'],
     [t('workspaceMetadata.protocolVersion'), executor?.clientVersion ?? settingsQuery.data?.versions?.protocol ?? '—'],
     [t('workspaceMetadata.runtime'), executor ? `${executor.runtime} ${executor.runtimeVersion}` : '—'],
-    [t('workspaceMetadata.os'), executor?.os ?? '—'],
-    [t('workspaceMetadata.hostname'), executor?.hostname ?? '—'],
     [
       t('workspaceMetadata.sandboxRoots'),
       executor?.sandboxRoots && executor.sandboxRoots.length > 0
@@ -122,8 +123,8 @@ export function WorkspaceMetadataDialog({
       executor?.startedAt ? new Date(executor.startedAt).toLocaleString() : '—',
     ],
     [t('workspaceMetadata.pid'), executor?.pid ? String(executor.pid) : '—'],
-    [t('workspaceMetadata.sessionsInWorkspace'), String(sessions.length)],
   ]
+  const activeSessions = sessions.filter((session) => session.status === 'thinking' || session.status === 'executing_tools').length
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -136,38 +137,30 @@ export function WorkspaceMetadataDialog({
         <DialogHeader className="border-b border-border/50 px-5 py-4">
           <DialogTitle className="flex items-center gap-1">{displayName || t('workspaceMetadata.workspace')}<HelpHint label={t('workspaceMetadata.workspace')}>{t('workspaceMetadata.description')}</HelpHint></DialogTitle>
           <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
+          <div className="mt-3 flex max-w-full gap-1 overflow-x-auto" role="tablist" aria-label={t('workspaceMetadata.tabs.label')} data-testid="workspace-metadata-tabs">
+            {(['overview', 'sessions', 'runtime'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab}
+                className={cn('min-h-9 flex-none rounded-md px-3 text-sm font-medium transition-colors', activeTab === tab ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground')}
+                data-testid={`workspace-metadata-${tab}-tab`}
+                onClick={() => setActiveTab(tab)}
+              >
+                {t(`workspaceMetadata.tabs.${tab}`)}
+              </button>
+            ))}
+          </div>
         </DialogHeader>
         <DialogBody className="min-w-0 space-y-4 px-3 py-3 sm:px-5 sm:py-4" data-testid="workspace-metadata-body">
+          {activeTab === 'overview' ? (
+          <>
           <section className="grid gap-3 sm:grid-cols-3" data-testid="workspace-home-summary">
             <WorkspaceHomeMetric label={t('workspaceMetadata.home.status')} value={executor ? t('workspaceMetadata.home.online') : t('workspaceMetadata.home.offline')} tone={executor ? 'good' : 'neutral'} />
             <WorkspaceHomeMetric label={t('workspaceMetadata.home.sessions')} value={String(sessions.length)} tone={sessions.length ? 'info' : 'neutral'} />
             <WorkspaceHomeMetric label={t('workspaceMetadata.home.sandboxRoots')} value={String(executor?.sandboxRoots?.length ?? 0)} tone={executor?.sandboxRoots?.length ? 'good' : 'neutral'} />
           </section>
-          {recentSessions.length ? (
-            <section className="rounded-2xl border border-border/50 bg-card/80 p-3" data-testid="workspace-home-recent-sessions">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-medium">{t('workspaceMetadata.home.recentSessions')}</h3>
-                <span className="text-caption text-muted-foreground">{t('workspaceMetadata.home.recentSessionsHint')}</span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {recentSessions.map((session) => (
-                  <button
-                    key={session.sessionId}
-                    type="button"
-                    onClick={() => {
-                      onOpenChange(false)
-                      onOpenSession?.(session.sessionId)
-                    }}
-                    className="min-w-0 rounded-xl border border-border/35 bg-background/50 px-3 py-2 text-left transition-colors hover:bg-muted/35"
-                    data-testid="workspace-home-session"
-                  >
-                    <span className="block truncate text-xs font-medium">{session.label ?? session.firstUserMessage ?? session.sessionId}</span>
-                    <span className="mt-1 block truncate text-caption text-muted-foreground">{session.status} · {session.eventCount} events</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
           <form onSubmit={submit} className="rounded-md border border-border/50 bg-card p-3" data-testid="workspace-metadata-rename-form">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="workspace-display-name">
               {t('workspaceMetadata.displayName')}
@@ -213,8 +206,43 @@ export function WorkspaceMetadataDialog({
               </Button>
             </div>
           </section>
-          <details className="overflow-hidden rounded-md border border-border/50 bg-card" data-testid="workspace-technical-details">
-            <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/30">{t('workspaceMetadata.technicalDetails')}</summary>
+          <section className="overflow-hidden rounded-md border border-border/50 bg-card" data-testid="workspace-overview-details">
+            <dl className="divide-y divide-border/50">
+              <WorkspaceOverviewRow label={t('workspaceMetadata.overview.identity')} value={workspaceId} mono />
+              <WorkspaceOverviewRow label={t('workspaceMetadata.overview.location')} value={executor?.defaultCwd ?? executor?.sandboxRoots?.[0] ?? '—'} mono />
+              <WorkspaceOverviewRow label={t('workspaceMetadata.overview.connection')} value={executor ? t('workspaceMetadata.home.online') : t('workspaceMetadata.home.offline')} />
+              <WorkspaceOverviewRow label={t('workspaceMetadata.os')} value={executor?.os ?? '—'} />
+              <WorkspaceOverviewRow label={t('workspaceMetadata.hostname')} value={executor?.hostname ?? '—'} mono />
+            </dl>
+          </section>
+          </>
+          ) : activeTab === 'sessions' ? (
+          <section className="grid gap-3" data-testid="workspace-session-list">
+            <div className="flex items-end justify-between gap-3">
+              <div><h3 className="font-medium">{t('workspaceMetadata.sessionList')}</h3><p className="text-xs text-muted-foreground">{t('workspaceMetadata.sessionListDescription')}</p></div>
+              <span className="text-xs text-muted-foreground">{t('workspaceMetadata.activeSessions', { count: activeSessions })}</span>
+            </div>
+            {recentSessions.length ? (
+              <div className="grid gap-2">
+                {recentSessions.map((session) => {
+                  const content = (
+                    <>
+                      <span className="block truncate text-sm font-medium">{session.label ?? session.firstUserMessage ?? session.sessionId}</span>
+                      <span className="mt-1 block truncate text-caption text-muted-foreground">{session.status ?? 'idle'} · {session.eventCount} events · {new Date(session.lastEventAt ?? session.createdAt).toLocaleString()}</span>
+                    </>
+                  )
+                  return onOpenSession ? (
+                    <button key={session.sessionId} type="button" onClick={() => { onOpenChange(false); onOpenSession(session.sessionId) }} className="min-w-0 rounded-lg border border-border/45 bg-card px-3 py-2 text-left hover:bg-muted/30" data-testid="workspace-session-item">{content}</button>
+                  ) : (
+                    <div key={session.sessionId} className="min-w-0 rounded-lg border border-border/45 bg-card px-3 py-2" data-testid="workspace-session-item">{content}</div>
+                  )
+                })}
+              </div>
+            ) : <div className="rounded-md border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">{t('workspaceMetadata.noSessions')}</div>}
+            {!onOpenSession ? <p className="text-caption text-muted-foreground">{t('workspaceMetadata.readOnlySessions')}</p> : null}
+          </section>
+          ) : (
+          <section className="overflow-hidden rounded-md border border-border/50 bg-card" data-testid="workspace-technical-details">
             <div className="bg-muted/10">
               <dl className="divide-y divide-border/50 sm:hidden" data-testid="workspace-metadata-mobile-values">
                 {rows.map(([label, value]) => (
@@ -235,11 +263,16 @@ export function WorkspaceMetadataDialog({
                 </tbody>
               </table>
             </div>
-          </details>
+          </section>
+          )}
         </DialogBody>
       </DialogContent>
     </Dialog>
   )
+}
+
+function WorkspaceOverviewRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }): JSX.Element {
+  return <div className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:items-baseline"><dt className="text-xs font-medium text-muted-foreground">{label}</dt><dd className={cn('min-w-0 break-all text-sm', mono && 'font-mono text-xs')}>{value}</dd></div>
 }
 
 function WorkspaceHomeMetric({ label, value, tone }: { label: string; value: string; tone: 'neutral' | 'good' | 'info' }): JSX.Element {

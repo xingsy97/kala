@@ -38,7 +38,7 @@ vi.mock('../../components/ui/select.js', async () => {
   }
 })
 
-import { SessionMetadataDialog } from './SessionMetadataDialog.js'
+import { SessionMetadataDialog, formatCompactNumber } from './SessionMetadataDialog.js'
 import { governedSessionTaskCandidate } from '../../evaluation-integration.js'
 import { saveFile } from '../../lib/save-file.js'
 import * as desktop from '../../lib/desktop-bridge.js'
@@ -156,12 +156,14 @@ describe('SessionMetadataDialog', () => {
     expect(dlg.textContent).toContain(baseSummary.sessionId)
     expect(dlg.textContent).toContain('my-mbp')
     expect(dlg.textContent).toContain('claude-opus-4-7')
-    expect(dlg.textContent).toContain('1,200')
+    expect(dlg.textContent).not.toContain('Current context')
+    expect(screen.getByTestId('session-metadata-label').className).toContain('text-base')
+    fireEvent.click(screen.getByTestId('session-info-statistics-tab'))
+    expect(screen.getByTestId('session-statistics').textContent).toContain('1.2 K')
     expect(dlg.className).toContain('!bottom-0')
     expect(dlg.className).toContain('grid-rows-[auto_minmax(0,1fr)_auto]')
     expect(screen.getByTestId('session-metadata-body').className).toContain('overflow-y-auto')
     expect(screen.getByTestId('session-metadata-footer').className).toContain('border-t')
-    expect(screen.getByTestId('session-metadata-label').className).toContain('text-base')
   })
 
   it('does not mislabel provider context occupancy as cumulative API input usage', () => {
@@ -192,11 +194,12 @@ describe('SessionMetadataDialog', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('session-info-statistics-tab'))
     const dialog = screen.getByTestId('session-metadata-dialog')
     expect(dialog.textContent).toContain('Current context')
-    expect(dialog.textContent).toContain('137,141')
+    expect(dialog.textContent).toContain('137.14 K')
     expect(dialog.textContent).toContain('Cumulative API usage')
-    expect(dialog.textContent).toContain('0 in / 0 out')
+    expect(dialog.textContent).toContain('IN0OUT0')
     expect(dialog.textContent).not.toContain('137,141 / 0')
   })
 
@@ -465,8 +468,9 @@ describe('SessionMetadataDialog', () => {
     )
 
     const dialog = await screen.findByTestId('session-metadata-dialog')
-    expect(dialog.textContent).toContain('Current contextAll sessions800This session500')
-    expect(dialog.textContent).toContain('Cumulative API usageAll sessions1,900 in / 510 outThis session1,200 in / 340 out')
+    fireEvent.click(screen.getByTestId('session-info-statistics-tab'))
+    expect(dialog.textContent).toContain('All sessionsThis sessionCurrent context800500')
+    expect(dialog.textContent).toContain('Cumulative API usageIN1.9 KOUT510IN1.2 KOUT340')
     fireEvent.click(screen.getByTestId('session-info-storage-tab'))
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select all sub-agents' }))
     expect(screen.getByTestId('storage-selection-bar').textContent).toContain('3 selected')
@@ -479,5 +483,29 @@ describe('SessionMetadataDialog', () => {
     expect(emit.mock.calls.some(([event]) => event === 'client:execute_storage_cleanup')).toBe(false)
     fireEvent.click(screen.getByTestId('storage-cleanup-final-confirm'))
     await waitFor(() => expect(emit.mock.calls.filter(([event]) => event === 'client:execute_storage_cleanup')).toHaveLength(2))
+  })
+
+  it('formats compact K, M, and B values and toggles exact token counts', () => {
+    expect(formatCompactNumber(1_200)).toBe('1.2 K')
+    expect(formatCompactNumber(12_345)).toBe('12.35 K')
+    expect(formatCompactNumber(1_250_000)).toBe('1.25 M')
+    expect(formatCompactNumber(2_400_000_000)).toBe('2.4 B')
+    render(<SessionMetadataDialog open onOpenChange={() => {}} sessionId={baseSummary.sessionId} summary={baseSummary} state={{ ...baseState, usage: { ...baseState.usage, inputTokens: 1_250_000, outputTokens: 12_345 } }} selectedModel={null} onRename={() => {}} onOpenChangeCwdDialog={() => {}} onChangeApprovalMode={() => {}} onChangeToolCardMode={() => {}} />)
+    fireEvent.click(screen.getByTestId('session-info-statistics-tab'))
+    expect(screen.getByTestId('session-statistics').textContent).toContain('IN1.25 M')
+    expect(screen.getByTestId('session-statistics').textContent).toContain('OUT12.35 K')
+    expect(screen.getAllByTestId('session-token-pair')).toHaveLength(1)
+    expect(screen.getByTestId('session-statistics-grid').querySelectorAll('[data-testid="session-statistics-row"]').length).toBeGreaterThan(5)
+    fireEvent.click(screen.getByTestId('session-statistics-number-exact'))
+    expect(screen.getByTestId('session-statistics').textContent).toContain('IN1,250,000')
+    expect(screen.getByTestId('session-statistics').textContent).toContain('OUT12,345')
+  })
+
+  it('distinguishes zero cost from unavailable cost', () => {
+    const { rerender } = render(<SessionMetadataDialog open onOpenChange={() => {}} sessionId={baseSummary.sessionId} summary={{ ...baseSummary, costUsd: 0 }} state={baseState} selectedModel={null} onRename={() => {}} onOpenChangeCwdDialog={() => {}} onChangeApprovalMode={() => {}} onChangeToolCardMode={() => {}} />)
+    fireEvent.click(screen.getByTestId('session-info-statistics-tab'))
+    expect(screen.getByTestId('session-cost-value').textContent).toBe('$0.00')
+    rerender(<SessionMetadataDialog open onOpenChange={() => {}} sessionId={baseSummary.sessionId} summary={{ ...baseSummary, costUsd: null }} state={baseState} selectedModel={null} onRename={() => {}} onOpenChangeCwdDialog={() => {}} onChangeApprovalMode={() => {}} onChangeToolCardMode={() => {}} />)
+    expect(screen.getByTestId('session-cost-unavailable').textContent).toContain('did not report billable cost')
   })
 })

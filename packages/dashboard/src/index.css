@@ -29,6 +29,25 @@
     display: none;
   }
 
+  .ak-session-row {
+    grid-template-columns: 1.25rem minmax(0, 13.5rem) minmax(3.25rem, auto);
+  }
+
+  .ak-session-title-cell {
+    max-width: 13.5rem;
+  }
+
+  .ak-session-row-actions {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  .ak-sub-agent-card {
+    container-type: inline-size;
+  }
+
   /* Preserve the primary New Chat label at normal sidebar widths. */
   @container (max-width: 16rem) {
     .ak-primary-action-group {
@@ -860,9 +879,43 @@
   to { transform: rotate(360deg); }
 }
 
-@container (max-width: 12rem) {
+.ak-context-usage-active-fill {
+  stroke: hsl(var(--background) / 0.34);
+  animation: ak-context-usage-active-fill 3.2s linear infinite;
+  will-change: stroke-dashoffset;
+}
+
+@keyframes ak-context-usage-active-fill {
+  to { stroke-dashoffset: -16; }
+}
+
+@container (max-width: 22rem) {
+  .ak-session-row {
+    grid-template-columns: 1.25rem minmax(0, 17rem) 0;
+  }
+
+  .ak-session-title-cell {
+    max-width: 17rem;
+  }
+
   .ak-session-last-activity {
     display: none;
+  }
+}
+
+@container (max-width: 16rem) {
+  .ak-session-row {
+    grid-template-columns: 1.25rem minmax(0, 1fr) 0;
+  }
+
+  .ak-session-title-cell {
+    max-width: 100%;
+  }
+}
+
+@container (min-width: 24rem) {
+  .ak-sub-agent-duration {
+    display: inline-flex;
   }
 }
 
@@ -889,6 +942,7 @@
   .ak-terminal-connecting,
   .ak-voice-recorder-listening::after,
   .ak-session-status-spinner,
+  .ak-context-usage-active-fill,
   .ak-explorer-loading-row,
   .ak-loading-spinner {
     animation: none !important;

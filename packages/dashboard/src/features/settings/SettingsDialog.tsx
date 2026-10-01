@@ -8,6 +8,7 @@ import {
   ChevronDown,
   KeyRound,
   Search,
+  Settings,
   Mic,
   Palette,
   PlugZap,
@@ -128,7 +129,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
       >
         <DialogHeader className="relative min-h-[4.5rem] min-w-0 justify-center border-b border-border/40 bg-card/75 px-4 py-2 pr-14 backdrop-blur md:min-h-0 md:px-6 md:py-4 md:pr-14">
           <div className={desktopLayout ? 'hidden' : undefined}>
-            <div className="text-caption font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('settings.title')}</div>
+            <div className="flex items-center gap-1.5 text-caption font-medium uppercase tracking-[0.14em] text-muted-foreground"><Settings className="h-3.5 w-3.5" aria-hidden="true" data-testid="settings-title-icon" />{t('settings.title')}</div>
             <div className="flex min-w-0 items-center gap-1">
             <label className="relative mt-0.5 inline-flex min-w-0 max-w-full flex-1 items-center gap-2 pr-6" data-testid="settings-mobile-section-picker">
               <span className="sr-only">{t('settings.sectionsLabel')}</span>
@@ -148,7 +149,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
             </div>
           </div>
           <div className={desktopLayout ? undefined : 'hidden'}>
-            <DialogTitle className="flex items-center gap-1 text-base font-semibold text-foreground">{t('settings.title')}<HelpHint label={t('settings.title')}>{t('settings.description')}</HelpHint></DialogTitle>
+            <DialogTitle className="flex items-center gap-1.5 text-base font-semibold text-foreground"><Settings className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" data-testid="settings-title-icon" />{t('settings.title')}<HelpHint label={t('settings.title')}>{t('settings.description')}</HelpHint></DialogTitle>
           </div>
           <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
           <DialogClose
@@ -161,15 +162,17 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
         </DialogHeader>
         <div className={cn('grid min-h-0 min-w-0', desktopLayout && 'grid-cols-[14.5rem_minmax(0,1fr)]')}>
           <aside className={cn('min-h-0 min-w-0 border-r border-border/35 bg-muted/15', !desktopLayout && 'hidden')}>
-            <nav className="h-full space-y-1 overflow-x-hidden overflow-y-auto px-3 py-4" aria-label={t('settings.sectionsLabel')}>
+            <nav className="h-full space-y-4 overflow-x-hidden overflow-y-auto px-3 py-4" aria-label={t('settings.sectionsLabel')}>
               {SECTION_GROUPS.map((group) => (
                 <div key={group} className="space-y-1" data-testid={`settings-group-${group}`}>
-                  <div className="px-3 pb-1.5 pt-4 text-caption font-semibold uppercase tracking-[0.16em] text-muted-foreground/75 first:pt-0">
+                  <div className="px-2 pb-1 text-caption font-semibold uppercase tracking-[0.16em] text-muted-foreground/70">
                     {t(`settings.groups.${group}`)}
                   </div>
-                  {SECTIONS.filter((item) => item.group === group).map((item) => (
-                    <SettingsSectionButton key={item.key} section={item} active={section === item.key} onClick={() => setSection(item.key)} />
-                  ))}
+                  <div className="ml-2 space-y-0.5 border-l border-border/45 pl-2" data-testid={`settings-group-items-${group}`}>
+                    {SECTIONS.filter((item) => item.group === group).map((item) => (
+                      <SettingsSectionButton key={item.key} section={item} active={section === item.key} onClick={() => setSection(item.key)} />
+                    ))}
+                  </div>
                 </div>
               ))}
             </nav>

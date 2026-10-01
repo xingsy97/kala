@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Clock3,
   MoreHorizontal,
   Shield,
   Square,
@@ -287,7 +288,7 @@ const SubAgentRow = memo(function SubAgentRow({
   return (
     <div
       className={cn(
-        'relative min-w-0 max-w-full overflow-hidden transition-colors',
+        'ak-sub-agent-card relative min-w-0 max-w-full overflow-hidden transition-colors',
         grouped ? 'w-full' : 'rounded-xl border border-border/70 bg-card/55',
         open && !grouped && 'border-border bg-card/80',
       )}
@@ -323,6 +324,12 @@ const SubAgentRow = memo(function SubAgentRow({
           <span ref={intentionRef} className="min-w-0 flex-1 truncate text-meta text-muted-foreground" title={intention} data-testid={`sub-agent-header-intention-${call.callId}`}>
             {intention}
           </span>
+          {totalMs > 0 ? (
+            <span className="ak-sub-agent-duration hidden flex-none items-center gap-1 text-caption tabular-nums text-muted-foreground" data-testid={`sub-agent-duration-${call.callId}`} title={t('chat.subAgent.duration')}>
+              <Clock3 className="h-3.5 w-3.5" data-testid="sub-agent-duration-icon" aria-hidden="true" />
+              {formatDuration(totalMs)}
+            </span>
+          ) : null}
           {open ? (
             <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           ) : (
@@ -330,7 +337,7 @@ const SubAgentRow = memo(function SubAgentRow({
           )}
         </button>
         <div className="hidden flex-none sm:block">
-          <StatusBadge status={status} turns={turns} durationMs={totalMs} />
+          <StatusBadge status={status} turns={turns} />
         </div>
         <SubAgentDetails
           callId={call.callId}
@@ -440,15 +447,13 @@ function StatusIcon({ status }: { status: SubAgentLifecycle['status'] }): JSX.El
 function StatusBadge({
   status,
   turns,
-  durationMs,
 }: {
   status: SubAgentLifecycle['status']
   turns: number
-  durationMs: number
 }): JSX.Element {
   const { t } = useTranslation()
   const label = statusLabel(status, t)
-  const suffix = suffixFor(status, turns, durationMs, t)
+  const suffix = suffixFor(status, turns, t)
   return (
     <span
       className={cn(
@@ -496,13 +501,11 @@ function statusLabel(status: SubAgentLifecycle['status'], t: ReturnType<typeof u
 function suffixFor(
   status: SubAgentLifecycle['status'],
   turns: number,
-  durationMs: number,
   t: ReturnType<typeof useTranslation>['t'],
 ): string | null {
   if (status === 'idle') return null
   const parts: string[] = []
   if (turns > 0) parts.push(t('chat.subAgent.turn', { count: turns }))
-  if (durationMs > 0) parts.push(formatDuration(durationMs))
   return parts.length > 0 ? `· ${parts.join(' · ')}` : null
 }
 

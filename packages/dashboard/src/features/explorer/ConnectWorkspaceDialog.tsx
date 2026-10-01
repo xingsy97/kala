@@ -20,6 +20,7 @@ import {
   dialogMobileSheetClassName,
 } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
+import { staticAssetUrl } from '../../lib/static-asset-url.js'
 
 type Props = {
   open: boolean
@@ -265,8 +266,8 @@ function SectionLabel({ index, label }: { index: string; label: string }): JSX.E
 
 function PlatformGroup({ label, selected, labelFor, onChange }: { label: string; selected: ExecutorInstallPlatform; labelFor(value: ExecutorInstallPlatform): string; onChange(value: ExecutorInstallPlatform): void }): JSX.Element {
   const icons = {
-    linux: <img src="/icons/linux.svg" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
-    macos: <img src="/icons/macos.svg" alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
+    linux: <img src={staticAssetUrl('/icons/linux.svg')} alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
+    macos: <img src={staticAssetUrl('/icons/macos.svg')} alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
   }
   return <fieldset className="min-w-0"><legend className="sr-only">{label}</legend><div className="grid grid-cols-2 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-medium transition-[background-color,color,box-shadow,transform] active:scale-[0.98] ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.5)]' : 'bg-muted/20 text-muted-foreground hover:bg-accent/55 hover:text-foreground'}`}>{icons[value]}<span className="truncate">{labelFor(value)}</span></button>)}</div></fieldset>
 }

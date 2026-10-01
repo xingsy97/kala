@@ -21,17 +21,41 @@ describe('StorageSection', () => {
               'orphan-artifacts': { bytes: 512, files: 2 },
               corrupt: { bytes: 0, files: 0 },
             },
-            largestSessionTrees: [{
-              sessionId: 'root-session',
-              sessionLabel: 'Storage investigation',
-              workspaceId: 'workspace-one',
-              workspaceName: 'Main workspace',
-              directBytes: 1_024,
-              treeBytes: 2_048,
-              descendantCount: 2,
-              categories: {},
-              treeCategories: {},
-            }],
+            largestSessionTrees: [
+              {
+                sessionId: 'root-session',
+                sessionLabel: 'Storage investigation',
+                workspaceId: 'workspace-one',
+                workspaceName: 'Main workspace',
+                directBytes: 1_024,
+                treeBytes: 2_048,
+                descendantCount: 2,
+                categories: {},
+                treeCategories: {},
+              },
+              {
+                sessionId: 'alpha-session',
+                sessionLabel: 'Alpha archive',
+                workspaceId: 'workspace-one',
+                workspaceName: 'Main workspace',
+                directBytes: 1_024,
+                treeBytes: 3_072,
+                descendantCount: 0,
+                categories: {},
+                treeCategories: {},
+              },
+              {
+                sessionId: 'zebra-session',
+                sessionLabel: 'Zebra diagnostics',
+                workspaceId: 'workspace-one',
+                workspaceName: 'Main workspace',
+                directBytes: 512,
+                treeBytes: 1_024,
+                descendantCount: 1,
+                categories: {},
+                treeCategories: {},
+              },
+            ],
             orphanCandidates: [
               { id: 'orphan-one', category: 'orphan-artifacts', bytes: 512, files: 2 },
               { id: 'snapshot-one', category: 'snapshot', bytes: 512, files: 1 },
@@ -84,6 +108,24 @@ describe('StorageSection', () => {
     expect(screen.getByText('Storage investigation')).toBeTruthy()
     expect(screen.getByText('Main workspace · 2 sub-agents')).toBeTruthy()
     expect(screen.getByText('root-session')).toBeTruthy()
+    const rowOrder = (): string[] => screen.getAllByTestId('settings-storage-file-set-row').map((row) => row.getAttribute('data-session-id') ?? '')
+    const nameSort = screen.getByTestId('settings-storage-sort-name')
+    const sizeSort = screen.getByTestId('settings-storage-sort-size')
+    expect(sizeSort.closest('th')?.getAttribute('aria-sort')).toBe('descending')
+    expect(nameSort.closest('th')?.getAttribute('aria-sort')).toBe('none')
+    expect(rowOrder()).toEqual(['alpha-session', 'root-session', 'zebra-session'])
+    fireEvent.click(nameSort)
+    expect(nameSort.closest('th')?.getAttribute('aria-sort')).toBe('ascending')
+    expect(rowOrder()).toEqual(['alpha-session', 'root-session', 'zebra-session'])
+    fireEvent.click(nameSort)
+    expect(nameSort.closest('th')?.getAttribute('aria-sort')).toBe('descending')
+    expect(rowOrder()).toEqual(['zebra-session', 'root-session', 'alpha-session'])
+    fireEvent.click(sizeSort)
+    expect(sizeSort.closest('th')?.getAttribute('aria-sort')).toBe('ascending')
+    expect(rowOrder()).toEqual(['zebra-session', 'root-session', 'alpha-session'])
+    fireEvent.click(sizeSort)
+    expect(sizeSort.closest('th')?.getAttribute('aria-sort')).toBe('descending')
+    expect(rowOrder()).toEqual(['alpha-session', 'root-session', 'zebra-session'])
     fireEvent.click(screen.getByTestId('settings-storage-cleanup-tab'))
     expect(screen.getByText('1 additional diagnostic entry is excluded from cleanup.')).toBeTruthy()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all cleanup candidates' }))
@@ -91,6 +133,10 @@ describe('StorageSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review cleanup…' }))
     await screen.findByTestId('settings-storage-cleanup-confirmation')
     expect(emit.mock.calls.filter(([event]) => event === 'client:prepare_storage_cleanup')).toHaveLength(1)
+    expect(emit.mock.calls.find(([event]) => event === 'client:prepare_storage_cleanup')?.[1]).toEqual({
+      operation: 'orphan-artifacts',
+      targetId: 'orphan-one',
+    })
     fireEvent.click(screen.getByTestId('settings-storage-cleanup-first-confirm'))
     expect(emit.mock.calls.some(([event]) => event === 'client:execute_storage_cleanup')).toBe(false)
     fireEvent.click(screen.getByTestId('settings-storage-cleanup-final-confirm'))

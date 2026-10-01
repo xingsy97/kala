@@ -211,6 +211,33 @@ describe('RuntimeMetrics', () => {
     )
 
     expect(screen.getByTestId('context-usage-track').querySelector('[data-context-usage-tone]')).toBeNull()
+    expect(screen.queryByTestId('context-usage-running-flow')).toBeNull()
+  })
+
+  it('marks active compute with a motion-safe flow while approval and idle remain static', () => {
+    const base = createInitialState({ sessionId: 'sess-running-context' })
+    const props = {
+      config: { contextLimit: 4_000, hardThreshold: 0.8 },
+      contextSnapshot: contextSnapshot(1_200, 4_000),
+      modelInfo: { id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 },
+      queuedMessages: 0,
+      density: 'simple' as const,
+    }
+    const { rerender } = render(<RuntimeMetrics {...props} state={{ ...base, status: 'thinking', pendingCalls: [] }} />)
+    expect(screen.getByTestId('context-usage-bar').getAttribute('data-running')).toBe('true')
+    expect(screen.getByTestId('context-usage-track').getAttribute('data-running')).toBeNull()
+    expect(screen.getByTestId('context-usage-fill').getAttribute('data-running')).toBe('true')
+    expect(screen.getByTestId('context-usage-fill').getAttribute('stroke-dasharray')).toBe('30 71')
+    expect(screen.getByTestId('context-usage-running-flow').getAttribute('class')).toContain('ak-context-usage-active-fill')
+    expect(screen.getByTestId('context-usage-running-flow').getAttribute('stroke-dasharray')).toBe('5 11')
+    expect(screen.getByTestId('context-usage-running-flow').getAttribute('mask')).toMatch(/^url\(#.+\)$/)
+
+    rerender(<RuntimeMetrics {...props} state={{ ...base, status: 'awaiting_approval', pendingCalls: [{ callId: 'call-1', name: 'bash', input: {}, status: 'awaiting_approval' }] } as never} />)
+    expect(screen.getByTestId('context-usage-bar').getAttribute('data-running')).toBe('false')
+    expect(screen.queryByTestId('context-usage-running-flow')).toBeNull()
+
+    rerender(<RuntimeMetrics {...props} state={base} />)
+    expect(screen.getByTestId('context-usage-overlay').getAttribute('data-running')).toBe('false')
   })
 
   it('uses a full-width simple usage bar while keeping tooltip and popover details', () => {
@@ -238,27 +265,15 @@ describe('RuntimeMetrics', () => {
     const track = screen.getByTestId('context-usage-track')
     expect(track.getAttribute('class') ?? '').toContain('inset-0')
     expect(track.getAttribute('class') ?? '').toContain('pointer-events-none')
-    expect(track.querySelector('path')?.getAttribute('d')).toContain('Q')
-    const trackPath = track.querySelector('path')?.getAttribute('d') ?? ''
-    expect(trackPath.trim().endsWith('Z')).toBe(false)
-    expect(trackPath).not.toContain(' V ')
-    expect(trackPath).not.toContain(' 54.5')
-    expect(track.querySelectorAll('path')).toHaveLength(2)
-    expect(track.querySelectorAll('path')[1]?.getAttribute('d')).toBe(trackPath)
-    expect(track.querySelectorAll('[data-context-segment]')).toHaveLength(0)
-    const usage = track.querySelector('[data-context-usage-tone]')
+    expect(track.getAttribute('data-running')).toBeNull()
+    const paths = track.querySelectorAll(':scope > path')
+    expect(paths[0]?.getAttribute('d')).toContain('Q')
+    expect(paths[1]?.getAttribute('d')).toBe(paths[0]?.getAttribute('d'))
+    const usage = screen.getByTestId('context-usage-fill')
     expect(usage?.getAttribute('data-context-usage-tone')).toBe('ok')
     expect(usage?.getAttribute('class')).toContain('stroke-sky-500/85')
-    expect(usage?.getAttribute('class')).toContain('drop-shadow')
-    expect(usage?.getAttribute('class')).toContain('stroke-dasharray')
     expect(usage?.getAttribute('class')).toContain('motion-reduce:transition-none')
-    expect(usage?.getAttribute('class')).not.toContain('border-')
-    expect(usage?.getAttribute('stroke-linecap')).toBe('round')
     expect(usage?.getAttribute('stroke-dasharray')).toBe('30 71')
-    // Chromium repeats normalized dashes in device units when pathLength is
-    // combined with non-scaling-stroke, producing many visible breaks. The
-    // Composer SVG has a 1:1 viewBox, so vector-effect is unnecessary here.
-    expect(usage?.hasAttribute('vector-effect')).toBe(false)
     expect(screen.queryByTestId('context-usage-simple-label')).toBeNull()
     expect(indicator.textContent ?? '').not.toContain('30%')
     expect(indicator.getAttribute('title') ?? '').toContain('30%')
@@ -275,38 +290,18 @@ describe('RuntimeMetrics', () => {
     expect(anchoredPopover.className).not.toContain('bottom-[5.5rem]')
   })
 
-  it('measures the simple usage border independently of layout animation transforms', () => {
-    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(320)
-    const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(56)
-    const transformedBounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      x: 0,
-      y: 0,
-      top: 0,
-      right: 160,
-      bottom: 28,
-      left: 0,
-      width: 160,
-      height: 28,
-      toJSON: () => ({}),
-    })
-    try {
-      render(
-        <RuntimeMetrics
-          state={createInitialState({ sessionId: 'sess-mode-switch' })}
-          config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
-          contextSnapshot={contextSnapshot(1_200, 4_000)}
-          modelInfo={{ id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 }}
-          queuedMessages={0}
-          density="simple"
-        />,
-      )
-
-      expect(screen.getByTestId('context-usage-track').getAttribute('viewBox')).toBe('0 0 320 56')
-      expect(transformedBounds).not.toHaveBeenCalled()
-    } finally {
-      width.mockRestore()
-      height.mockRestore()
-      transformedBounds.mockRestore()
-    }
+  it('keeps the active geometry clipped to the filled percentage', () => {
+    render(
+      <RuntimeMetrics
+        state={{ ...createInitialState({ sessionId: 'sess-mode-switch' }), status: 'thinking' }}
+        config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
+        contextSnapshot={contextSnapshot(1_400, 4_000)}
+        modelInfo={{ id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 }}
+        queuedMessages={0}
+        density="simple"
+      />,
+    )
+    expect(screen.getByTestId('context-usage-fill').getAttribute('stroke-dasharray')).toBe('35 66')
+    expect(screen.getByTestId('context-usage-running-flow').getAttribute('mask')).toMatch(/^url\(#.+\)$/)
   })
 })

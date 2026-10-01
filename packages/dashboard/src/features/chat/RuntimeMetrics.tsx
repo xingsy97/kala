@@ -33,8 +33,6 @@ type BreakdownSegment = {
   percent: number
 }
 
-function isSimpleDensity(density: Props['density']): boolean { return density === 'simple' }
-
 export function RuntimeMetrics({
   state,
   config,
@@ -51,10 +49,11 @@ export function RuntimeMetrics({
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const ringGradientId = useId()
+  const contextFlowMaskId = useId()
   const [open, setOpen] = useState(false)
   const [breakdownExpanded, setBreakdownExpanded] = useState(false)
-  const ref = useRef<HTMLDivElement | null>(null)
   const [simpleGeometry, setSimpleGeometry] = useState({ width: 100, height: 56 })
+  const ref = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!open) return
     const onDocClick = (event: MouseEvent): void => {
@@ -63,9 +62,8 @@ export function RuntimeMetrics({
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [open])
-
   useEffect(() => {
-    if (!isSimpleDensity(density) || !ref.current) return
+    if (density !== 'simple' || !ref.current) return
     const element = ref.current
     const update = (): void => {
       const width = element.clientWidth
@@ -129,6 +127,7 @@ export function RuntimeMetrics({
   const reservedStart = `${Math.max(0, Math.min(100, (1 - reservedRatio) * 100))}%`
   const reservedWidth = `${Math.max(0, Math.min(100, reservedRatio * 100))}%`
   const isSimple = density === 'simple'
+  const activeCompute = state?.status === 'thinking' || state?.status === 'executing_tools'
 
   // Breakdown segments for the stacked usage bar. Widths are % of the user
   // context window so they visually add up to `visualRatio` when combined.
@@ -155,21 +154,63 @@ export function RuntimeMetrics({
   const borderInset = 1.5
   const frameRadius = frameShape === 'full' ? 16 : 21
   const borderRadius = Math.max(0, Math.min(frameRadius, simpleGeometry.height / 2 - borderInset, simpleGeometry.width / 2 - borderInset))
-  // Intentionally open upper cap: left shoulder, top edge, right shoulder.
-  // Track and aggregate-pressure progress share this exact continuous path.
+  // Intentionally open lower edge: the context track hugs the composer's
+  // left shoulder, top edge, and right shoulder without covering its body.
   const contextBorderPath =
     `M ${borderInset} ${borderRadius + borderInset} ` +
     `Q ${borderInset} ${borderInset} ${borderRadius + borderInset} ${borderInset} ` +
     `H ${simpleGeometry.width - borderRadius - borderInset} ` +
     `Q ${simpleGeometry.width - borderInset} ${borderInset} ` +
     `${simpleGeometry.width - borderInset} ${borderRadius + borderInset}`
-
   return (
-    <div className={cn('relative flex-none', isSimple && 'pointer-events-none absolute inset-0 z-10')} ref={ref} data-testid={isSimple ? 'context-usage-overlay' : undefined}>
+    <div className={cn('relative flex-none', isSimple && 'pointer-events-none absolute inset-0 z-10')} ref={ref} data-testid={isSimple ? 'context-usage-overlay' : undefined} data-running={activeCompute ? 'true' : 'false'}>
       {isSimple ? (
-        <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${simpleGeometry.width} ${simpleGeometry.height}`} aria-hidden="true" data-testid="context-usage-track">
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+          viewBox={`0 0 ${simpleGeometry.width} ${simpleGeometry.height}`}
+          aria-hidden="true"
+          data-testid="context-usage-track"
+        >
+          <defs>
+            <mask id={contextFlowMaskId} maskUnits="userSpaceOnUse" x="0" y="0" width={simpleGeometry.width} height={simpleGeometry.height}>
+              <path
+                d={contextBorderPath}
+                pathLength="100"
+                fill="none"
+                stroke="white"
+                strokeWidth="5"
+                strokeLinecap="round"
+                strokeDasharray={`${usedPercent} ${contextUsageGap}`}
+              />
+            </mask>
+          </defs>
           <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" />
-          {usedPercent > 0 ? <path d={contextBorderPath} pathLength="100" fill="none" className={cn('drop-shadow-[0_0_8px_currentColor] opacity-95 transition-[filter,opacity,stroke-dasharray] duration-500 ease-out motion-reduce:transition-none', contextStrokeTone)} strokeWidth="3.25" strokeLinecap="round" strokeDasharray={`${usedPercent} ${contextUsageGap}`} data-context-usage-tone={evaluation.tone} /> : null}
+          {usedPercent > 0 ? (
+            <path
+              d={contextBorderPath}
+              pathLength="100"
+              fill="none"
+              className={cn('drop-shadow-[0_0_8px_currentColor] opacity-95 transition-[filter,opacity,stroke-dasharray] duration-500 ease-out motion-reduce:transition-none', contextStrokeTone)}
+              strokeWidth="3.25"
+              strokeLinecap="round"
+              strokeDasharray={`${usedPercent} ${contextUsageGap}`}
+              data-context-usage-tone={evaluation.tone}
+              data-running={activeCompute ? 'true' : 'false'}
+              data-testid="context-usage-fill"
+            />
+          ) : null}
+          {activeCompute && usedPercent > 0 ? (
+            <path
+              d={contextBorderPath}
+              fill="none"
+              className="ak-context-usage-active-fill"
+              strokeWidth="3.25"
+              strokeLinecap="butt"
+              strokeDasharray="5 11"
+              mask={`url(#${contextFlowMaskId})`}
+              data-testid="context-usage-running-flow"
+            />
+          ) : null}
         </svg>
       ) : null}
       <button
@@ -187,6 +228,7 @@ export function RuntimeMetrics({
         aria-label={title}
         aria-expanded={open}
         data-testid={isSimple ? 'context-usage-bar' : 'context-usage-indicator'}
+        data-running={activeCompute ? 'true' : 'false'}
         onClick={() => setOpen((value) => !value)}
       >
         {!isSimple ? <svg

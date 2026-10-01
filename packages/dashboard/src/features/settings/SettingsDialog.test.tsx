@@ -124,6 +124,10 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Override host endpoint')).toBeTruthy()
     expect(screen.getByTestId('settings-tab-storage').textContent).toContain('Storage')
     expect(screen.getByTestId('settings-tab-storage').textContent).not.toContain('settings.sections.storage')
+    const administrationItems = screen.getByTestId('settings-group-items-administration')
+    expect(administrationItems.className).toContain('border-l')
+    expect(administrationItems.className).toContain('pl-2')
+    expect(screen.getAllByTestId('settings-title-icon').some((icon) => icon.getAttribute('aria-hidden') === 'true')).toBe(true)
   })
 
   it('keeps connection help hidden but cross-origin requirements and failures visible', async () => {

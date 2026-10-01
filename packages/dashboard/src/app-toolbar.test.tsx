@@ -126,7 +126,7 @@ describe('desktop sidebar controls', () => {
       />,
     )
 
-    expect(screen.getByTestId('desktop-session-rail').className).toContain('w-14')
+    expect(screen.getByTestId('desktop-session-rail').className).toContain('w-16')
     expect(screen.getByTestId('rail-status')).toBeTruthy()
     fireEvent.click(screen.getByTestId('desktop-rail-expand'))
     fireEvent.click(screen.getByTestId('desktop-rail-new-session'))

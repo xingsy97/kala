@@ -67,7 +67,9 @@ describe('WorkspaceMetadataDialog', () => {
     expect(screen.queryByText('/tmp/not-a-workspace-property')).toBeNull()
     expect(screen.getByTestId('workspace-metadata-dialog').className).toContain('grid-rows-[auto_minmax(0,1fr)]')
     expect(screen.getByTestId('workspace-metadata-body').className).toContain('overflow-y-auto')
-    expect(screen.getByTestId('workspace-technical-details').hasAttribute('open')).toBe(false)
+    expect(screen.queryByTestId('workspace-technical-details')).toBeNull()
+    fireEvent.click(screen.getByTestId('workspace-metadata-runtime-tab'))
+    expect(screen.getByTestId('workspace-technical-details').tagName).toBe('SECTION')
   })
 
   it('shows and revokes a saved executor identity', async () => {
@@ -80,6 +82,7 @@ describe('WorkspaceMetadataDialog', () => {
         identities: [{ workspaceId: 'ws-1', createdAt: '2026-07-05T10:00:00.000Z', lastSeenAt: '2026-07-05T10:30:00.000Z' }],
       }), { status: 200 })
     })
+
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -101,5 +104,20 @@ describe('WorkspaceMetadataDialog', () => {
     await waitFor(() => {
       expect(screen.getByText(/No saved reconnect identity/i)).toBeTruthy()
     })
+  })
+
+  it('separates overview, session summary, and runtime technical content into tabs', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ identities: [] }), { status: 200 })))
+    const onOpenSession = vi.fn()
+    render(<WorkspaceMetadataDialog open onOpenChange={() => {}} workspaceId="ws-1" executor={{ ...executor, hostname: 'placeholder-host', defaultCwd: '/placeholder/workspace', executorVersion: '1.2.3', clientVersion: '4' }} sessions={[{ ...session, label: 'Placeholder session', status: 'thinking' }]} onOpenSession={onOpenSession} />)
+    expect(screen.getByTestId('workspace-overview-details').textContent).toContain('/placeholder/workspace')
+    expect(screen.queryByTestId('workspace-session-list')).toBeNull()
+    fireEvent.click(screen.getByTestId('workspace-metadata-sessions-tab'))
+    expect(screen.getByTestId('workspace-session-list').textContent).toContain('Placeholder session')
+    expect(screen.getByTestId('workspace-session-list').textContent).toContain('1 active')
+    fireEvent.click(screen.getByTestId('workspace-session-item'))
+    expect(onOpenSession).toHaveBeenCalledWith('sess-1')
+    fireEvent.click(screen.getByTestId('workspace-metadata-runtime-tab'))
+    expect(screen.getByTestId('workspace-technical-details').textContent).toContain('1.2.3')
   })
 })

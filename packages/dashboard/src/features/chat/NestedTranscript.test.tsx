@@ -48,11 +48,17 @@ describe('NestedTranscript', () => {
     expect(screen.queryByText('Tool')).toBeNull()
     expect(screen.queryByText(/path=\/repo\/a\.md/)).toBeNull()
 
-    fireEvent.click(screen.getByText('Tool activity'))
+    const toggle = screen.getByTestId('nested-tool-group-toggle')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.parentElement?.className).toContain('border')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
 
     expect(screen.getByText('Inspect the working directory.')).toBeTruthy()
     expect(screen.getByText(/\/repo\/a\.md/)).toBeTruthy()
     expect(screen.getByText(/\/repo\/b\.md/)).toBeTruthy()
+    expect(screen.getByTestId('nested-tool-intention-c1').className).toContain('font-sans')
+    expect(screen.getByTestId('nested-tool-detail-c1').querySelector('span')?.className).toContain('font-mono')
 
     fireEvent.click(screen.getByTestId('nested-tool-detail-c2').querySelector('button')!)
     expect(screen.getByText((content) => content.includes('"path": "/repo/a.md"'))).toBeTruthy()

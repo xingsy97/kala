@@ -42,6 +42,7 @@ import {
   AlertDialogTitle,
 } from './components/ui/alert-dialog.js'
 import { cn } from './lib/utils.js'
+import { staticAssetUrl } from './lib/static-asset-url.js'
 import { randomId } from './lib/random-id.js'
 import {
   Dialog,
@@ -3576,7 +3577,7 @@ export function ConnectionStatusProvider({ socket, status, transport, cursor, wo
           {brand ? (
             <span className={cn('relative grid h-8 w-8 place-items-center overflow-hidden rounded-full border-2', statusRing(displayStatus))} data-testid="sidebar-connection-status-ring">
               <span className="absolute inset-0 grid place-items-center leading-none">
-                <img src={isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg'} alt="" className="block h-5 w-5 object-contain" aria-hidden />
+                <img src={staticAssetUrl(isDesktopClient() ? '/icons/octopus-desktop.svg' : '/icons/octopus-web.svg')} alt="" className="block h-5 w-5 object-contain" aria-hidden />
               </span>
             </span>
           ) : <span className={cn('h-2 w-2 rounded-full', statusDot(displayStatus))} />}

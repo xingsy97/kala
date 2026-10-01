@@ -12,7 +12,7 @@ import { Explorer } from './Explorer.js'
 import { canDropWorkspacesAtRoot, reorderWorkspaceIds } from './tree-model.js'
 import { createSessionViewCache } from '../../session-view-cache.js'
 import { HIDDEN_WORKSPACES_STORAGE_KEY } from './hidden-workspaces.js'
-import { PREF_AUTO_HIDE_OFFLINE_WORKSPACES, PREF_HIDE_SUB_AGENT_SESSIONS, PREF_WORKSPACE_ORDER } from '../../lib/prefs.js'
+import { PREF_AUTO_HIDE_OFFLINE_WORKSPACES, PREF_HIDDEN_SESSIONS, PREF_HIDE_SUB_AGENT_SESSIONS, PREF_WORKSPACE_ORDER } from '../../lib/prefs.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 import { SessionPreviewStore } from './session-preview-store.js'
 import { i18n } from '../../i18n/index.js'
@@ -369,7 +369,7 @@ describe('Explorer', () => {
     const wsRow = screen.getByTestId('workspace-row')
     expect(wsRow.getAttribute('data-workspace-id')).toBe('ws-1')
     expect(wsRow.getAttribute('data-online')).toBe('true')
-    expect(wsRow.className).toContain('grid-cols-[1rem_minmax(0,1fr)_auto]')
+    expect(wsRow.className).toContain('grid-cols-[1.25rem_minmax(0,1fr)_auto]')
     expect(wsRow.className).toContain('relative')
     expect(wsRow.textContent).toContain('my-mbp')
     expect(screen.getByTestId('workspace-drag-handle')).toBeTruthy()
@@ -510,7 +510,7 @@ describe('Explorer', () => {
     expect(screen.getAllByTestId('workspace-row').map((row) => row.getAttribute('data-workspace-id'))).toEqual(['ws-2'])
     expect(screen.queryByText('please write hello.txt')).toBeNull()
     expect(screen.getByText('second session')).toBeTruthy()
-    expect(screen.getByTestId('hidden-workspaces-bar').textContent).toContain('1 hidden workspace')
+    expect(screen.getByTestId('hidden-items-bar').textContent).toContain('1 hidden item')
     expect(localStorage.getItem(HIDDEN_WORKSPACES_STORAGE_KEY)).toContain('ws-1')
   })
 
@@ -533,8 +533,11 @@ describe('Explorer', () => {
     expect(screen.queryByTestId('workspace-row')).toBeNull()
     expect(screen.getByTestId('explorer-hidden-empty').textContent).toContain('All workspaces are hidden')
 
-    fireEvent.click(screen.getByTestId('hidden-workspaces-toggle'))
-    expect(screen.getByTestId('hidden-workspaces-list').textContent).toContain('my-mbp')
+    fireEvent.click(screen.getByTestId('hidden-items-toggle'))
+    expect(screen.getByTestId('hidden-workspaces-group').textContent).toContain('my-mbp')
+    expect(screen.getByTestId('workspace-unhide-icon')).toBeTruthy()
+    expect(screen.getByTestId('hidden-workspace-label').className).toContain('truncate')
+    expect(screen.getByTestId('hidden-workspace-label').className).toContain('max-w-[14rem]')
     fireEvent.click(screen.getByTestId('workspace-unhide-ws-1'))
 
     expect(screen.getByTestId('workspace-row').getAttribute('data-workspace-id')).toBe('ws-1')
@@ -564,12 +567,12 @@ describe('Explorer', () => {
     const after = screen.getByTestId('running-session-label')
     expect(after).toBe(before)
     expect(after.className).toContain('ak-thinking-text')
-    expect(after.className).toContain('font-extrabold')
+    expect(after.className).toContain('font-semibold')
     expect(after.className).toContain('ak-session-running-label')
     expect(screen.queryByTestId('session-status-spinner')).toBeNull()
   })
 
-  it('uses emphasized session typography when the session is not running', () => {
+  it('uses restrained semibold session typography when the session is not running', () => {
     render(
       <Explorer
         executors={[executor]}
@@ -584,7 +587,8 @@ describe('Explorer', () => {
     )
 
     const label = screen.getByTestId('session-row').querySelector('.ak-session-label')
-    expect(label?.classList.contains('font-extrabold')).toBe(true)
+    expect(label?.classList.contains('font-semibold')).toBe(true)
+    expect(label?.classList.contains('font-extrabold')).toBe(false)
     expect(label?.classList.contains('ak-thinking-text')).toBe(false)
     expect(label?.classList.contains('ak-session-running-label')).toBe(false)
   })
@@ -635,7 +639,30 @@ describe('Explorer', () => {
 
     expect(screen.getByTestId('workspace-row').getAttribute('data-workspace-id')).toBe('unassigned')
     expect(screen.queryByTestId('workspace-hide-null')).toBeNull()
-    expect(screen.queryByTestId('hidden-workspaces-bar')).toBeNull()
+    expect(screen.queryByTestId('hidden-items-bar')).toBeNull()
+  })
+
+  it('uses one Hidden disclosure for sessions only and restores the session', () => {
+    localStorage.setItem(PREF_HIDDEN_SESSIONS, JSON.stringify({ version: 1, ids: [sessionSummary.sessionId] }))
+    render(<Explorer executors={[executor]} sessions={[sessionSummary]} selectedSessionId={null} onSelect={() => {}} onNewSession={() => {}} onConnectWorkspace={() => {}} onDelete={() => {}} onRename={() => {}} />)
+    expect(screen.queryByTestId('session-row')).toBeNull()
+    fireEvent.click(screen.getByTestId('hidden-items-toggle'))
+    expect(screen.queryByTestId('hidden-workspaces-group')).toBeNull()
+    expect(screen.getByTestId('hidden-sessions-group').textContent).toContain('please write hello.txt')
+    expect(screen.getByTestId('session-unhide-icon')).toBeTruthy()
+    expect(screen.getByTestId('hidden-session-label').className).toContain('truncate')
+    fireEvent.click(screen.getByTestId(`session-unhide-${sessionSummary.sessionId}`))
+    expect(screen.getByTestId('session-row')).toBeTruthy()
+  })
+
+  it('groups hidden workspaces and sessions under the same disclosure', () => {
+    localStorage.setItem(HIDDEN_WORKSPACES_STORAGE_KEY, JSON.stringify({ version: 1, ids: ['ws-1'] }))
+    localStorage.setItem(PREF_HIDDEN_SESSIONS, JSON.stringify({ version: 1, ids: [sessionSummary.sessionId] }))
+    render(<Explorer executors={[executor]} sessions={[sessionSummary]} selectedSessionId={null} onSelect={() => {}} onNewSession={() => {}} onConnectWorkspace={() => {}} onDelete={() => {}} onRename={() => {}} />)
+    expect(screen.getAllByTestId('hidden-items-bar')).toHaveLength(1)
+    fireEvent.click(screen.getByTestId('hidden-items-toggle'))
+    expect(screen.getByTestId('hidden-workspaces-group')).toBeTruthy()
+    expect(screen.getByTestId('hidden-sessions-group')).toBeTruthy()
   })
 
   it('allows workspace drops on the react-arborist root node', () => {
@@ -717,7 +744,7 @@ describe('Explorer', () => {
     expect(sessionRow.getAttribute('data-session-id')).toBe(
       sessionSummary.sessionId,
     )
-    expect(sessionRow.className).toContain('grid-cols-[1rem_minmax(0,1fr)_minmax(0,3.5rem)]')
+    expect(sessionRow.className).toContain('ak-session-row')
     expect(sessionRow.className).toContain('items-center')
     expect(sessionRow.className).not.toContain('ml-4')
     expect(sessionRow.className).toContain('pl-6')
@@ -1278,7 +1305,8 @@ describe('Explorer', () => {
       .closest('[data-row-action]') as HTMLElement
     expect(actionOverlay.className).toContain('pointer-events-none')
     expect(actionOverlay.className).toContain('group-hover:pointer-events-auto')
-    expect(actionOverlay.className).toContain('col-start-3')
+    expect(actionOverlay.className).toContain('ak-session-row-actions')
+    expect(actionOverlay.className).toContain('z-10')
     expect(actionOverlay.className).not.toContain('col-start-2')
     expect(screen.getByTestId('session-more-button').className).not.toContain('hidden')
     expect(screen.getByTestId('session-info-button').className).toContain('hidden')
@@ -1316,7 +1344,7 @@ describe('Explorer', () => {
     expect(labels).toHaveLength(2)
     for (const label of labels) {
       expect(label.className).toContain('ak-thinking-text')
-      expect(label.className).toContain('font-extrabold')
+      expect(label.className).toContain('font-semibold')
       expect(label.className).toContain('ak-session-running-label')
     }
     expect(screen.queryByTestId('session-status-spinner')).toBeNull()
@@ -1336,11 +1364,11 @@ describe('Explorer', () => {
       />,
     )
     const sessionRow = screen.getByTestId('session-row')
-    expect(sessionRow.className).toContain('bg-muted/60')
-    expect(sessionRow.className).toContain('grid-cols-[1rem_minmax(0,1fr)_minmax(0,3.5rem)]')
+    expect(sessionRow.className).toContain('bg-muted/45')
+    expect(sessionRow.className).toContain('ak-session-row')
     expect(sessionRow.className).not.toMatch(/border-l-primary/)
     expect(sessionRow.className).not.toContain('shadow-[inset_0_0_0_1px')
-    expect(screen.queryByTestId('session-selected-marker')).toBeNull()
+    expect(screen.getByTestId('session-selected-marker').className).toContain('w-0.5')
   })
 
   it('filters sessions locally and highlights matched text', () => {

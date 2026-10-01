@@ -380,17 +380,19 @@ function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
 
   if (group.mixed) {
     return (
-      <div className="flex min-w-0 flex-col gap-0.5" data-testid={`nested-tool-group-${group.firstCallId}`}>
+      <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-card/45 shadow-sm" data-testid={`nested-tool-group-${group.firstCallId}`}>
         <button
           type="button"
-          className="flex min-w-0 items-center gap-1.5 rounded bg-muted/60 px-1.5 py-1 text-left text-meta text-muted-foreground hover:bg-muted"
+          className="flex min-h-9 min-w-0 items-center gap-2 border-b border-transparent bg-muted/30 px-2.5 py-1.5 text-left text-meta text-muted-foreground hover:bg-muted/55 aria-expanded:border-border/45 aria-expanded:bg-muted/45"
           onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          data-testid="nested-tool-group-toggle"
         >
-          <span className="flex-none rounded bg-primary px-1 text-[0.75rem] font-medium uppercase tracking-wider text-primary-foreground">
+          <span className="flex-none font-semibold text-foreground">
             Tool activity
           </span>
-          <span className="flex-none font-mono text-[0.75rem] text-foreground">{group.calls.length} ops</span>
-          <span className="min-w-0 flex-1 truncate" title={toolMix}>{toolMix}</span>
+          <span className="flex-none rounded-md bg-background/70 px-1.5 py-0.5 font-mono text-[0.75rem] text-foreground">{group.calls.length} ops</span>
+          <span className="hidden min-w-0 flex-1 truncate sm:block" title={toolMix}>{toolMix}</span>
           {failed > 0 ? <NestedStatusBadge tone="failed" label={`${failed} ${t('chat.transcript.failed')}`} /> : null}
           {succeeded > 0 ? <NestedStatusBadge tone="succeeded" label={`${succeeded} Succeeded`} /> : null}
           {running > 0 ? <NestedStatusBadge tone="running" label={`${running} Running`} /> : null}
@@ -412,7 +414,7 @@ function NestedToolRows({
 }): JSX.Element {
   const rowsByCallId = new Map(rows.map((row) => [row.callId, row]))
   return (
-    <div className="flex min-w-0 flex-col gap-0.5" data-testid={`nested-tool-group-${group.firstCallId}`}>
+    <div className="flex min-w-0 flex-col divide-y divide-border/35" data-testid={`nested-tool-rows-${group.firstCallId}`}>
       {group.calls.map((call) => (
         <NestedToolDetail
           key={call.callId}
@@ -441,30 +443,27 @@ function NestedToolDetail({
   return (
     <div
       className={cn(
-        'min-w-0 rounded font-mono text-meta',
-        ok ? 'text-muted-foreground' : 'bg-muted/55 text-foreground',
+        'min-w-0 bg-background/20 text-meta',
+        ok ? 'text-muted-foreground' : 'bg-destructive/5 text-foreground',
       )}
       data-testid={`nested-tool-detail-${call.callId}`}
     >
       <button
         type="button"
-        className="flex w-full min-w-0 items-center gap-1.5 px-1.5 py-1 text-left"
+        className="grid w-full min-w-0 grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-2 text-left hover:bg-muted/30"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
       >
         <span
           className={cn(
-            'flex-none rounded bg-background/70 px-1 text-[0.75rem] uppercase tracking-wider',
+            'min-w-0 truncate rounded-md border border-border/55 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.75rem]',
             ok ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-300',
           )}
         >
           {call.name}
         </span>
-        <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">{preview}</span>
-        {!ok ? (
-          <span className="flex-none text-[0.75rem] uppercase tracking-wider">{t('chat.transcript.failed')}</span>
-        ) : null}
-        <span className="flex-none text-[0.75rem] text-muted-foreground">{open ? '⌄' : '›'}</span>
+        <span className="min-w-0 truncate font-sans text-meta text-foreground" title={preview} data-testid={`nested-tool-intention-${call.callId}`}>{preview}</span>
+        <span className="flex-none font-sans text-[0.75rem] text-muted-foreground">{!ok ? t('chat.transcript.failed') : open ? '⌄' : '›'}</span>
       </button>
       {open ? (
         <div className="mx-1.5 mb-1.5 grid min-w-0 gap-2 rounded-md border border-border/60 bg-background/70 p-2 text-[0.75rem]">

@@ -38,10 +38,10 @@ export function SettingsSectionButton({
       onClick={onClick}
       data-testid={`settings-tab-${section.key}`}
       className={cn(
-        'w-32 flex-none rounded-xl px-3 py-2.5 text-left text-sm transition-all sm:w-36 md:w-full',
+        'relative h-9 w-32 flex-none rounded-md px-2.5 text-left text-sm transition-colors sm:w-36 md:w-full',
         active
-          ? 'bg-card text-foreground shadow-sm ring-1 ring-border/45'
-          : 'text-muted-foreground hover:bg-card/60 hover:text-foreground',
+          ? 'bg-muted/60 text-foreground before:absolute before:-left-[0.6875rem] before:top-1 before:h-7 before:w-0.5 before:rounded-r before:bg-primary'
+          : 'border-0 text-muted-foreground shadow-none hover:bg-muted/35 hover:text-foreground',
       )}
     >
       <div className="flex min-w-0 items-center gap-2">

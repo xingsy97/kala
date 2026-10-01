@@ -900,13 +900,13 @@ function StickyUserPrompt({
       <button
         type="button"
         onClick={onClick}
-        className="ak-chat-container ak-sticky-user-prompt-surface pointer-events-auto mx-auto grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 px-3 py-1.5 text-left text-card-foreground shadow-[0_10px_26px_hsl(var(--foreground)/0.09)] ring-1 ring-background/60 backdrop-blur-xl transition-colors hover:border-border sm:max-w-[min(var(--ak-chat-content-width,84rem),calc(100%-2rem))] sm:px-3.5 sm:py-2"
+        className="ak-chat-container ak-sticky-user-prompt-surface pointer-events-auto mx-auto grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-border/45 bg-card/88 px-2.5 py-1.5 text-left text-card-foreground shadow-sm backdrop-blur-lg transition-colors hover:border-border/70 sm:max-w-[min(var(--ak-chat-content-width,84rem),calc(100%-2rem))] sm:px-3"
         aria-label={t('chat.transcript.currentPromptJump')}
       >
-        <span className="flex h-6 w-6 flex-none items-center justify-center self-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
+        <span className="flex h-5 w-5 flex-none items-center justify-center self-center text-primary/80">
           <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
-        <span className="min-w-0 border-l border-primary/20 pl-2.5">
+        <span className="min-w-0 border-l border-border/50 pl-2.5">
           {prompt.text ? (
             <span className="ak-chat-text line-clamp-1 whitespace-pre-wrap break-words text-[0.9375rem] font-medium leading-6 tracking-[-0.01em] [overflow-wrap:anywhere] sm:text-base">
               {prompt.text}
@@ -1547,6 +1547,7 @@ function InlineTimestamp({
       )}
       title={label}
       aria-label={label}
+      data-testid="message-timestamp"
     >
       {short}
     </span>
@@ -1991,8 +1992,8 @@ function MessageRow({
           highlighted ? 'rounded-2xl bg-amber-50/60 p-1 dark:bg-amber-950/20' : '',
         )}
       >
-        <div className="flex min-w-0 max-w-[92%] flex-col items-end gap-1.5 sm:max-w-[85%]">
-          <div className="relative max-w-full overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm" data-testid="user-message-surface">
+        <div className="relative min-w-0 max-w-[92%] sm:max-w-[85%]">
+          <div className="relative max-w-full overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 pb-9 text-primary-foreground shadow-sm sm:pb-2.5" data-testid="user-message-surface">
             <div className="flex min-w-0 flex-col gap-2">
               {message.content.map((c, i) => (
                 <ContentBlock
@@ -2007,7 +2008,7 @@ function MessageRow({
               ))}
             </div>
           </div>
-          <div className="flex min-h-7 max-w-full items-center justify-end gap-1.5">
+          <div className="pointer-events-auto absolute bottom-1 left-2 z-10 flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-md bg-primary/85 px-1 backdrop-blur-sm sm:bottom-0 sm:left-auto sm:right-full sm:mr-2 sm:max-w-[18rem] sm:bg-transparent sm:px-0 sm:backdrop-blur-none" data-testid="user-message-metadata">
             <MessageActions
               align="end"
               copyText={messageText}
@@ -2020,8 +2021,8 @@ function MessageRow({
                 testId: `edit-message-${index}`,
               } : undefined}
             />
-            <InlineTimestamp ts={ts} />
             {turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
+            <InlineTimestamp ts={ts} className="absolute bottom-full left-0 mb-0.5 rounded bg-primary/90 px-1 text-primary-foreground sm:bottom-1/2 sm:left-auto sm:right-full sm:mb-0 sm:mr-2 sm:translate-y-1/2 sm:bg-background/90 sm:text-muted-foreground" />
           </div>
         </div>
       </div>
@@ -2056,7 +2057,7 @@ function MessageRow({
       )}
     >
       <AssistantAvatarRail hidden={hideHeader} label={label} tool={message.role === 'tool'} />
-      <div className="relative min-w-0 max-w-full flex-1 overflow-hidden">
+      <div className="relative min-w-0 max-w-full flex-1 overflow-hidden" data-testid="assistant-content-column">
         {hideHeader ? null : (
           <div
             className={cn(
@@ -2113,7 +2114,10 @@ function MessageRow({
             )
           })}
           {!streaming && (ts || turnTiming || (message.role === 'assistant' && assistantActions)) ? (
-            <div className="message-metadata-row flex min-h-7 min-w-0 max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain" data-testid="assistant-message-footer">
+            <div className={cn(
+              'message-metadata-row relative flex min-w-0 max-w-full items-center gap-1 overflow-visible',
+              assistantActions || turnTiming ? 'min-h-7' : 'h-0',
+            )} data-testid="assistant-message-footer">
               {assistantActions ? <MessageActions
                 align="start"
                 copyText={assistantActions.copyText}
@@ -2123,8 +2127,11 @@ function MessageRow({
                   testId: `try-again-message-${index}`,
                 } : undefined}
               /> : null}
-              <InlineTimestamp ts={ts} />
               {turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
+              <InlineTimestamp ts={ts} className={cn(
+                'absolute right-0 rounded bg-background/90 px-1 backdrop-blur-sm sm:right-auto sm:left-full sm:ml-2',
+                assistantActions || turnTiming ? 'bottom-1/2 translate-y-1/2' : 'top-0',
+              )} />
             </div>
           ) : null}
         </div>

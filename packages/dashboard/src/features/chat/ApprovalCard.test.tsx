@@ -14,6 +14,15 @@ describe('ApprovalCard', () => {
     render(<ApprovalCard approvals={[{ sessionId: 's', callId: 'c', name: 'shell', input: { command: 'pnpm test' }, intent: 'Run the tests to verify the change.' }]} onDecision={() => {}} />)
     expect(screen.getByTestId('approval-card-intent').textContent).toBe('Run the tests to verify the change.')
   })
+  it('uses a neutral card surface with amber limited to warning metadata', () => {
+    render(<ApprovalCard approvals={[mkApproval('c', 'bash', { command: 'pnpm test' })]} onDecision={() => {}} />)
+    const card = screen.getByTestId('approval-card')
+    expect(card.className).toContain('bg-card')
+    expect(card.className).toContain('border-border')
+    expect(card.className).not.toContain('bg-amber')
+    expect(card.className).not.toContain('border-amber')
+    expect(screen.getByTestId('approval-tool-name').className).toContain('bg-muted')
+  })
   it('renders nothing when the list is empty', () => {
     const { container } = render(<ApprovalCard approvals={[]} onDecision={vi.fn()} />)
     expect(container.textContent).toBe('')

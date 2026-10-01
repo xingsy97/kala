@@ -63,4 +63,17 @@ describe('SettingsSectionButton', () => {
     fireEvent.click(screen.getByTestId('settings-tab-interface'))
     expect(onClick).toHaveBeenCalled()
   })
+
+  it('renders flat items and an accent indicator only for the active item', () => {
+    const { rerender } = render(<SettingsSectionButton section={{ key: 'interface', icon: Cog }} active={false} onClick={() => {}} />)
+    const inactive = screen.getByTestId('settings-tab-interface')
+    expect(inactive.className).toContain('h-9')
+    expect(inactive.className).toContain('shadow-none')
+    expect(inactive.className).not.toContain('ring-1')
+
+    rerender(<SettingsSectionButton section={{ key: 'interface', icon: Cog }} active onClick={() => {}} />)
+    const active = screen.getByTestId('settings-tab-interface')
+    expect(active.className).toContain('before:w-0.5')
+    expect(active.className).toContain('bg-muted/60')
+  })
 })

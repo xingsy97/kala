@@ -57,7 +57,7 @@ type Props = {
   open: boolean
   onOpenChange(open: boolean): void
   sessionId: string
-  summary?: SessionSummary
+  summary?: SessionSummary & { costUsd?: number | null }
   state: AgentState | null
   contextSnapshot?: ContextUsageSnapshot | null
   selectedModel: string | null
@@ -114,7 +114,11 @@ export function SessionMetadataDialog({
   const [labelDraft, setLabelDraft] = useState(initialLabel)
   const [approvalDraft, setApprovalDraft] = useState<ApprovalMode>(approvalMode)
   const [toolCardModeDraft, setToolCardModeDraft] = useState<ToolCardMode>(toolCardMode)
-  const [activeTab, setActiveTab] = useState<'overview' | 'storage'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'statistics' | 'storage'>('overview')
+  const [numberDisplay, setNumberDisplay] = useState<'compact' | 'exact'>(() => {
+    if (typeof window === 'undefined') return 'compact'
+    return window.localStorage.getItem('ak-session-statistics-number-display') === 'exact' ? 'exact' : 'compact'
+  })
   const [storage, setStorage] = useState<SessionStorageSnapshot | null>(null)
   const [storageError, setStorageError] = useState<string | null>(null)
   const [storageLoading, setStorageLoading] = useState(false)
@@ -240,6 +244,12 @@ export function SessionMetadataDialog({
     if (toolCardModeChanged) onChangeToolCardMode(toolCardModeDraft)
     onOpenChange(false)
   }
+  const setStatisticsNumberDisplay = (value: 'compact' | 'exact'): void => {
+    setNumberDisplay(value)
+    if (typeof window !== 'undefined') window.localStorage.setItem('ak-session-statistics-number-display', value)
+  }
+  const formatStatistic = (value: number): string =>
+    numberDisplay === 'exact' ? value.toLocaleString() : formatCompactNumber(value)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -250,12 +260,15 @@ export function SessionMetadataDialog({
         <DialogHeader className="relative border-b border-border/60 px-4 py-3 pr-14 sm:px-6 sm:py-4 sm:pr-14">
           <DialogTitle className="flex items-center gap-1 text-lg">{t('dialogs.sessionInfo')}<HelpHint label={t('dialogs.sessionInfo')}>{t('dialogs.sessionInfoDescription')}</HelpHint></DialogTitle>
           <DialogDescription className="sr-only">{t('common.contextualHelp')}</DialogDescription>
-          <div className="mt-3 flex gap-1" role="tablist" aria-label="Session information">
+          <div className="mt-3 flex gap-1 overflow-x-auto" role="tablist" aria-label={t('sessionMetadata.tabs.label')}>
             <MetadataTab active={activeTab === 'overview'} testId="session-info-overview-tab" onClick={() => setActiveTab('overview')}>
-              Overview
+              {t('sessionMetadata.tabs.overview')}
+            </MetadataTab>
+            <MetadataTab active={activeTab === 'statistics'} testId="session-info-statistics-tab" onClick={() => setActiveTab('statistics')}>
+              {t('sessionMetadata.tabs.statistics')}
             </MetadataTab>
             <MetadataTab active={activeTab === 'storage'} testId="session-info-storage-tab" onClick={() => setActiveTab('storage')}>
-              Storage
+              {t('sessionMetadata.tabs.storage')}
             </MetadataTab>
           </div>
           <DialogClose className={dialogTouchCloseClassName} aria-label={t('common.close')}>
@@ -284,11 +297,6 @@ export function SessionMetadataDialog({
               mono
             />
           ) : null}
-          <ReadOnlyRow label={t('dialogs.created')} value={formatTs(summary?.createdAt)} />
-          <ReadOnlyRow
-            label={t('dialogs.lastActivity')}
-            value={formatTs(summary?.lastEventAt ?? summary?.createdAt)}
-          />
           <ReadOnlyRow
             label={t('dialogs.workspace')}
             value={
@@ -305,44 +313,6 @@ export function SessionMetadataDialog({
             value={selectedModel ?? t('dialogs.defaultModel')}
             mono
           />
-          <ReadOnlyRow
-            label={t('dialogs.events')}
-            value={String(summary?.eventCount ?? state?.messages.length ?? 0)}
-          />
-          {storage?.tokenUsage ? (
-            <>
-              <UsageRow
-                label="Current context"
-                help="Tokens currently retained in the model context. All sessions includes this session and every descendant sub-agent; this session excludes descendants. Context can decrease after compaction."
-                allSessions={storage.tokenUsage.tree.currentContextTokens.toLocaleString()}
-                thisSession={storage.tokenUsage.direct.currentContextTokens.toLocaleString()}
-              />
-              <UsageRow
-                label="Cumulative API usage"
-                help="Historical input and output tokens sent through model API calls. Unlike current context, these totals do not decrease after compaction."
-                allSessions={formatTokenPair(storage.tokenUsage.tree.cumulativeInputTokens, storage.tokenUsage.tree.cumulativeOutputTokens)}
-                thisSession={formatTokenPair(storage.tokenUsage.direct.cumulativeInputTokens, storage.tokenUsage.direct.cumulativeOutputTokens)}
-              />
-            </>
-          ) : (
-            <>
-              {directContextTokens !== undefined ? (
-                <UsageRow
-                  label="Current context"
-                  help="Tokens currently retained in the model context for this session. Context can decrease after compaction."
-                  thisSession={directContextTokens.toLocaleString()}
-                />
-              ) : null}
-              {directInputTokens !== undefined || directOutputTokens !== undefined ? (
-                <UsageRow
-                  label="Cumulative API usage"
-                  help="Historical input and output tokens sent through model API calls for this session."
-                  thisSession={formatTokenPair(directInputTokens ?? 0, directOutputTokens ?? 0)}
-                />
-              ) : null}
-            </>
-          )}
-          <ReadOnlyRow label={t('dialogs.sessionCost')} value="—" />
         </div>
 
         <div className="border-t border-border/50 pt-3" />
@@ -433,6 +403,75 @@ export function SessionMetadataDialog({
           </FieldRow>
         </div>
         </>
+        ) : activeTab === 'statistics' ? (
+        <section className="grid gap-4 text-sm" aria-label={t('sessionMetadata.tabs.statistics')} data-testid="session-statistics">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-medium">{t('sessionMetadata.statistics.title')}</h3>
+              <p className="text-xs text-muted-foreground">{t('sessionMetadata.statistics.description')}</p>
+            </div>
+            <div className="inline-flex rounded-md border border-border/60 bg-muted/20 p-0.5" role="group" aria-label={t('sessionMetadata.numberDisplay.label')} data-testid="session-statistics-number-toggle">
+              {(['compact', 'exact'] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={cn('min-h-7 rounded px-2 text-caption transition-colors', numberDisplay === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+                  aria-pressed={numberDisplay === value}
+                  aria-label={t(`sessionMetadata.numberDisplay.${value}Aria`)}
+                  title={t(`sessionMetadata.numberDisplay.${value}Title`)}
+                  data-testid={`session-statistics-number-${value}`}
+                  onClick={() => setStatisticsNumberDisplay(value)}
+                >
+                  {t(`sessionMetadata.numberDisplay.${value}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-border/45 bg-muted/10" data-testid="session-statistics-grid">
+            <div className="grid grid-cols-[minmax(7.5rem,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3 border-b border-border/45 bg-muted/25 px-3 py-1.5 text-caption font-semibold uppercase tracking-wider text-muted-foreground">
+              <span>{t('sessionMetadata.statistics.title')}</span>
+              <span>{t('sessionMetadata.statistics.allSessions')}</span>
+              <span>{t('sessionMetadata.statistics.thisSession')}</span>
+            </div>
+            <StatisticsRow
+              label={t('sessionMetadata.statistics.currentContext')}
+              help={t(storage?.tokenUsage ? 'sessionMetadata.statistics.currentContextHelp' : 'sessionMetadata.statistics.currentContextDirectHelp')}
+              allSessions={storage?.tokenUsage ? formatStatistic(storage.tokenUsage.tree.currentContextTokens) : undefined}
+              thisSession={storage?.tokenUsage
+                ? formatStatistic(storage.tokenUsage.direct.currentContextTokens)
+                : directContextTokens !== undefined ? formatStatistic(directContextTokens) : '—'}
+            />
+            <StatisticsRow
+              label={t('sessionMetadata.statistics.cumulativeUsage')}
+              help={t(storage?.tokenUsage ? 'sessionMetadata.statistics.cumulativeUsageHelp' : 'sessionMetadata.statistics.cumulativeUsageDirectHelp')}
+              allSessions={storage?.tokenUsage ? (
+                <TokenPairBadges
+                  input={formatStatistic(storage.tokenUsage.tree.cumulativeInputTokens)}
+                  output={formatStatistic(storage.tokenUsage.tree.cumulativeOutputTokens)}
+                />
+              ) : undefined}
+              thisSession={storage?.tokenUsage ? (
+                <TokenPairBadges
+                  input={formatStatistic(storage.tokenUsage.direct.cumulativeInputTokens)}
+                  output={formatStatistic(storage.tokenUsage.direct.cumulativeOutputTokens)}
+                />
+              ) : (
+                <TokenPairBadges input={formatStatistic(directInputTokens ?? 0)} output={formatStatistic(directOutputTokens ?? 0)} />
+              )}
+            />
+            <StatisticsRow label={t('dialogs.events')} thisSession={<span data-testid="session-statistics-events">{formatStatistic(summary?.eventCount ?? state?.messages.length ?? 0)}</span>} />
+            <StatisticsRow label={t('sessionMetadata.statistics.turns')} thisSession={<span data-testid="session-statistics-turns">{formatStatistic(state?.messages.filter((message) => message.role === 'user').length ?? 0)}</span>} />
+            <StatisticsRow label={t('dialogs.created')} thisSession={formatTs(summary?.createdAt)} />
+            <StatisticsRow label={t('dialogs.lastActivity')} thisSession={formatTs(summary?.lastEventAt ?? summary?.createdAt)} />
+            <StatisticsRow label={t('sessionMetadata.statistics.elapsed')} thisSession={formatElapsed(summary?.createdAt, summary?.lastEventAt)} />
+            <StatisticsRow
+              label={t('dialogs.sessionCost')}
+              thisSession={summary?.costUsd === null || summary?.costUsd === undefined
+                ? <span className="text-muted-foreground" data-testid="session-cost-unavailable">{t('sessionMetadata.statistics.costUnavailable')}</span>
+                : <span data-testid="session-cost-value">${summary.costUsd.toFixed(2)}</span>}
+            />
+          </div>
+        </section>
         ) : (
         <section className="grid gap-4 text-sm" aria-label="Storage" data-testid="session-storage">
           <div className="flex items-center justify-between gap-3">
@@ -637,36 +676,40 @@ function MetadataTab({
   )
 }
 
-function UsageRow({
+function StatisticsRow({
   label,
   help,
   allSessions,
   thisSession,
 }: {
   label: string
-  help: string
-  allSessions?: string
-  thisSession: string
+  help?: string
+  allSessions?: React.ReactNode
+  thisSession: React.ReactNode
 }): JSX.Element {
   return (
-    <div className="grid gap-1 rounded-md border border-border/40 bg-muted/15 px-3 py-2">
-      <div className="flex items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground">
+    <div className="grid grid-cols-[minmax(7.5rem,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3 border-b border-border/35 px-3 py-2 text-sm last:border-b-0" data-testid="session-statistics-row">
+      <div className="flex min-w-0 items-center gap-1 text-xs font-medium text-muted-foreground">
         {label}
-        <HelpHint label={label}>{help}</HelpHint>
+        {help ? <HelpHint label={label}>{help}</HelpHint> : null}
       </div>
-      <div className={cn('grid gap-3', allSessions && 'grid-cols-2')}>
-        {allSessions ? <UsageValue label="All sessions" value={allSessions} /> : null}
-        <UsageValue label="This session" value={thisSession} />
-      </div>
+      <div className="min-w-0 truncate font-medium" title={typeof allSessions === 'string' ? allSessions : undefined}>{allSessions ?? <span className="text-muted-foreground/60">—</span>}</div>
+      <div className="min-w-0 truncate font-medium" title={typeof thisSession === 'string' ? thisSession : undefined}>{thisSession}</div>
     </div>
   )
 }
 
-function UsageValue({ label, value }: { label: string; value: string }): JSX.Element {
+function TokenPairBadges({ input, output }: { input: string; output: string }): JSX.Element {
   return (
-    <div className="min-w-0">
-      <div className="text-caption text-muted-foreground">{label}</div>
-      <div className="truncate font-medium" title={value}>{value}</div>
+    <div className="flex min-w-0 flex-wrap gap-1" data-testid="session-token-pair">
+      <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-sky-500/20 bg-sky-500/[0.07] px-1.5 py-0.5 text-caption">
+        <span className="font-semibold text-muted-foreground">IN</span>
+        <span className="truncate tabular-nums">{input}</span>
+      </span>
+      <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-violet-500/20 bg-violet-500/[0.07] px-1.5 py-0.5 text-caption">
+        <span className="font-semibold text-muted-foreground">OUT</span>
+        <span className="truncate tabular-nums">{output}</span>
+      </span>
     </div>
   )
 }
@@ -706,8 +749,22 @@ function StorageMetric({ label, bytes }: { label: string; bytes: number }): JSX.
   return <div><div className="text-caption text-muted-foreground">{label}</div><div className="font-medium">{formatBytes(bytes)}</div></div>
 }
 
-function formatTokenPair(input: number, output: number): string {
-  return `${input.toLocaleString()} in / ${output.toLocaleString()} out`
+export function formatCompactNumber(value: number): string {
+  const absolute = Math.abs(value)
+  const units: ReadonlyArray<[number, string]> = [[1_000_000_000, 'B'], [1_000_000, 'M'], [1_000, 'K']]
+  const unit = units.find(([threshold]) => absolute >= threshold)
+  if (!unit) return value.toLocaleString()
+  const compact = value / unit[0]
+  return `${Number(compact.toFixed(2))} ${unit[1]}`
+}
+
+function formatElapsed(start: string | undefined, end: string | undefined): string {
+  if (!start || !end) return '—'
+  const duration = Date.parse(end) - Date.parse(start)
+  if (!Number.isFinite(duration) || duration < 0) return '—'
+  const minutes = Math.floor(duration / 60_000)
+  const hours = Math.floor(minutes / 60)
+  return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`
 }
 
 function topLevelSelectedSessionIds(

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { RefreshCw, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, Trash2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { Socket } from 'socket.io-client'
 import type {
   DashboardClientToServerEvents,
@@ -15,8 +16,11 @@ import { cn } from '../../../lib/utils.js'
 import { SectionHeader } from '../controls.js'
 
 type DashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+type SessionTreeSortField = 'name' | 'size'
+type SortDirection = 'asc' | 'desc'
 
 export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.Element {
+  const { t, i18n } = useTranslation()
   const [snapshot, setSnapshot] = useState<GlobalStorageSnapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [inventoryError, setInventoryError] = useState<string | null>(null)
@@ -27,6 +31,10 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
   const [cleanupPlans, setCleanupPlans] = useState<readonly StorageCleanupPlanPreview[]>([])
   const [confirmationStep, setConfirmationStep] = useState<'review' | 'final'>('review')
   const [cleanupBusy, setCleanupBusy] = useState(false)
+  const [sessionTreeSort, setSessionTreeSort] = useState<{ field: SessionTreeSortField; direction: SortDirection }>({
+    field: 'size',
+    direction: 'desc',
+  })
 
   const load = (refresh: boolean): void => {
     if (!socket) return
@@ -106,6 +114,34 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
       .filter(([, value]) => value.bytes > 0 || value.files > 0)
       .sort((left, right) => right[1].bytes - left[1].bytes)
     : []
+  const sortedSessionTrees = useMemo(() => {
+    if (!snapshot) return []
+    return snapshot.largestSessionTrees
+      .map((entry, originalIndex) => ({ entry, originalIndex }))
+      .sort((left, right) => {
+        const primary = sessionTreeSort.field === 'size'
+          ? left.entry.treeBytes - right.entry.treeBytes
+          : sessionTreeName(left.entry).localeCompare(sessionTreeName(right.entry), i18n.language, {
+              numeric: true,
+              sensitivity: 'base',
+            })
+        if (primary !== 0) return sessionTreeSort.direction === 'asc' ? primary : -primary
+        const secondary = sessionTreeName(left.entry).localeCompare(sessionTreeName(right.entry), i18n.language, {
+          numeric: true,
+          sensitivity: 'base',
+        })
+        if (secondary !== 0) return secondary
+        return left.originalIndex - right.originalIndex
+      })
+      .map(({ entry }) => entry)
+  }, [i18n.language, sessionTreeSort, snapshot])
+
+  const toggleSessionTreeSort = (field: SessionTreeSortField): void => {
+    setSessionTreeSort((current) => ({
+      field,
+      direction: current.field === field && current.direction === 'asc' ? 'desc' : 'asc',
+    }))
+  }
 
   return (
     <div data-testid="settings-storage">
@@ -176,19 +212,43 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
                     Each row combines a root session with all of its descendant sub-agents. Open that session's Session Info to inspect and selectively clean individual sub-agent records.
                   </HelpHint>
                 </h3>
-                <div className="divide-y divide-border/40 rounded-md border border-border/50">
-                  {snapshot.largestSessionTrees.map((entry) => (
-                    <div key={entry.sessionId} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2 text-sm">
-                      <div className="min-w-0">
-                        <div className="truncate font-medium" title={entry.sessionLabel ?? 'Untitled session'}>{entry.sessionLabel ?? 'Untitled session'}</div>
-                        <div className="truncate text-xs text-muted-foreground" title={entry.workspaceName ?? entry.workspaceId ?? 'Unknown workspace'}>
-                          {entry.workspaceName ?? entry.workspaceId ?? 'Unknown workspace'} · {entry.descendantCount} sub-agents
-                        </div>
-                        <div className="truncate font-mono text-caption text-muted-foreground/75" title={entry.sessionId}>{entry.sessionId}</div>
-                      </div>
-                      <span className="self-center">{formatBytes(entry.treeBytes)}</span>
-                    </div>
-                  ))}
+                <div className="overflow-hidden rounded-md border border-border/50">
+                  <table className="w-full table-fixed text-sm" data-testid="settings-storage-file-sets">
+                    <thead className="border-b border-border/50 bg-muted/20 text-xs text-muted-foreground">
+                      <tr>
+                        <SortableHeader
+                          field="name"
+                          label={t('settings.storageInventory.name')}
+                          activeField={sessionTreeSort.field}
+                          direction={sessionTreeSort.direction}
+                          onSort={toggleSessionTreeSort}
+                          className="w-auto"
+                        />
+                        <SortableHeader
+                          field="size"
+                          label={t('settings.storageInventory.size')}
+                          activeField={sessionTreeSort.field}
+                          direction={sessionTreeSort.direction}
+                          onSort={toggleSessionTreeSort}
+                          className="w-28 text-right"
+                        />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {sortedSessionTrees.map((entry) => (
+                        <tr key={entry.sessionId} data-testid="settings-storage-file-set-row" data-session-id={entry.sessionId}>
+                          <td className="min-w-0 px-3 py-2">
+                            <div className="truncate font-medium" title={entry.sessionLabel ?? t('settings.storageInventory.untitled')}>{entry.sessionLabel ?? t('settings.storageInventory.untitled')}</div>
+                            <div className="truncate text-xs text-muted-foreground" title={entry.workspaceName ?? entry.workspaceId ?? t('settings.storageInventory.unknownWorkspace')}>
+                              {entry.workspaceName ?? entry.workspaceId ?? t('settings.storageInventory.unknownWorkspace')} · {t('settings.storageInventory.subAgents', { count: entry.descendantCount })}
+                            </div>
+                            <div className="truncate font-mono text-caption text-muted-foreground/75" title={entry.sessionId}>{entry.sessionId}</div>
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums" data-testid="settings-storage-file-set-size">{formatBytes(entry.treeBytes)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </section>
             </>
@@ -294,6 +354,51 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
         <ProductState kind="loading" title="Loading storage inventory" description="Reading cached measurements without scanning disk." />
       )}
     </div>
+  )
+}
+
+function sessionTreeName(entry: GlobalStorageSnapshot['largestSessionTrees'][number]): string {
+  return entry.sessionLabel ?? entry.sessionId
+}
+
+function SortableHeader({
+  field,
+  label,
+  activeField,
+  direction,
+  onSort,
+  className,
+}: {
+  field: SessionTreeSortField
+  label: string
+  activeField: SessionTreeSortField
+  direction: SortDirection
+  onSort: (field: SessionTreeSortField) => void
+  className?: string
+}): JSX.Element {
+  const { t } = useTranslation()
+  const active = activeField === field
+  const nextDirection: SortDirection = active && direction === 'asc' ? 'desc' : 'asc'
+  const ariaSort = active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'
+  const Icon = active ? (direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown
+  const actionLabel = t('settings.storageInventory.sortAction', {
+    field: label,
+    direction: t(`settings.storageInventory.${nextDirection}`),
+  })
+  return (
+    <th scope="col" aria-sort={ariaSort} className={className}>
+      <button
+        type="button"
+        className={cn('flex w-full items-center gap-1 px-3 py-2 font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring', field === 'size' && 'justify-end')}
+        onClick={() => onSort(field)}
+        aria-label={actionLabel}
+        title={actionLabel}
+        data-testid={`settings-storage-sort-${field}`}
+      >
+        {label}
+        <Icon className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </th>
   )
 }
 
