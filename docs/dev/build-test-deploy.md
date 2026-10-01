@@ -18,6 +18,28 @@ pnpm --filter @agent-kernel/host test -- src/loop.test.ts
 
 That form invokes the package script and can still run the full suite depending on how the script forwards arguments.
 
+## Production UI Prototype
+
+The Dashboard prototype runs the production `App` and production components.
+Only HTTP and Dashboard socket transports are replaced with deterministic,
+fictional fixtures. Keep this boundary intact: do not duplicate the app shell,
+chat transcript, composer, sidebars, dialogs, or feature components inside
+`src/prototype`.
+
+```bash
+pnpm --dir packages/dashboard run dev:prototype
+pnpm --dir packages/dashboard run build:prototype
+PROTOTYPE_URL=http://127.0.0.1:4179/ \
+  pnpm --dir packages/dashboard run verify:prototype
+```
+
+Add reusable review states to `src/prototype/mock-dashboard-socket.ts` using
+placeholder identifiers, domains, paths, and content. The browser matrix in
+`scripts/prototype-interaction.mjs` must verify production behavior and
+responsive geometry rather than snapshotting a parallel implementation.
+`dist-prototype` and `review-screenshots` are generated review artifacts and
+must remain untracked.
+
 ## TypeScript Builds
 
 Package `tsconfig.json` files use incremental compiler metadata at `dist/.tsbuildinfo`. The cache is local build output and is ignored by git.

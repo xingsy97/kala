@@ -6,6 +6,8 @@ node_modules/
 dist/
 build/
 /release/
+packages/dashboard/dist-prototype/
+packages/dashboard/review-screenshots/
 *.woff
 *.woff2
 *.ttf

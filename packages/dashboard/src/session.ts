@@ -145,6 +145,12 @@ export function dashboardConnectionManager(socket: DashboardSocket): DashboardCo
  */
 import { computeReveal } from './features/chat/text-reveal/rate.js'
 import { shouldCommitStreamFrame, streamReleaseCount } from './features/chat/text-reveal/scheduler.js'
+import { createPrototypeDashboardSocket } from './prototype/mock-dashboard-socket.js'
+
+function openDashboardSocket(url: string, options: Parameters<typeof socketIo>[1]): DashboardSocket {
+  if (import.meta.env.VITE_KALA_PROTOTYPE === '1') return createPrototypeDashboardSocket() as DashboardSocket
+  return socketIo(url, options) as DashboardSocket
+}
 
 export function acceptsSessionTokenDelta(status: AgentState['status']): boolean {
   return status === 'thinking'
@@ -456,7 +462,7 @@ export function useSession({
         reconnectCleanup = releaseChannel
         return
       }
-      socket = socketIo(`${host}/dashboard`, {
+      socket = openDashboardSocket(`${host}/dashboard`, {
         auth: {
           sessionId,
           role: 'dashboard',
@@ -470,7 +476,7 @@ export function useSession({
         randomizationFactor: 0.5,
         transports: ['websocket', 'polling'],
         tryAllTransports: true,
-      }) as DashboardSocket
+      })
       socketRef.current = socket
       bindSocket(socket)
       setBoundSocket({ sessionId, socket })
@@ -885,7 +891,7 @@ export function useDashboardControlSocket(host: string, token?: string, enabled 
 
   useEffect(() => {
     if (!enabled) { setSocket(null); return }
-    const next = socketIo(`${host}/dashboard`, {
+    const next = openDashboardSocket(`${host}/dashboard`, {
       auth: {
         clientId: `dashboard-${CONTROL_SOCKET_SESSION_ID}`,
         role: 'dashboard',
@@ -897,7 +903,7 @@ export function useDashboardControlSocket(host: string, token?: string, enabled 
       reconnectionDelayMax: 30_000,
       reconnectionAttempts: 30,
       randomizationFactor: 0.5,
-    }) as DashboardSocket
+    })
     const manager = dashboardConnectionManager(next)
     manager.acquire('global')
     const onPreferenceChange = (event: Event): void => {
