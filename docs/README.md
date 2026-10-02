@@ -84,6 +84,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | Three processes and one full turn end-to-end |
+| [architecture/dag-first-agent-work.md](architecture/dag-first-agent-work.md) | **Implemented.** DAG-first planning, normal-Session Task Graph UI, durable recovery, and dedicated DAG execution mode |
 | [architecture/deployment-mode-contract.md](architecture/deployment-mode-contract.md) | **Normative.** Portable/Dedicated/Private Cloud configuration, capabilities, identity boundary, Unit isolation, and required release lanes |
 | [architecture/graceful-restart-and-deployment.md](architecture/graceful-restart-and-deployment.md) | **Normative.** Portable finalizer, Dedicated Supervisor, Dashboard-only activation, restart and rollback invariants |
 | [architecture/dashboard-multiplexed-connection-sot.md](architecture/dashboard-multiplexed-connection-sot.md) | **Normative.** Dashboard multiplexed connection and subscription authority |
@@ -98,6 +99,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [architecture/browser-session-store.md](architecture/browser-session-store.md) | Accepted design for opaque, server-revocable browser Sessions, device lists, refresh, and logout-all |
 | [architecture/observability-contract.md](architecture/observability-contract.md) | Bounded metrics, structured errors, health, SLOs, redaction, alerting, and acceptance |
 | [architecture/data-lifecycle-contract.md](architecture/data-lifecycle-contract.md) | Ownership, deletion, retention, export, quotas, migrations, backup, and recovery semantics |
+| [architecture/external-object-storage-proposal.md](architecture/external-object-storage-proposal.md) | **Deferred proposal.** Tiered S3/MinIO/Azure Blob storage boundaries, consistency protocols, migration phases, and activation criteria |
 | [architecture/strong-isolation-roadmap.md](architecture/strong-isolation-roadmap.md) | Migration from logical Units to worker processes, containers, and remote Runtime pools |
 | [architecture/runtime-naming-migration.md](architecture/runtime-naming-migration.md) | RuntimeIngressGateway/RuntimeHost/RuntimeUnitIngress naming contract and compatibility policy |
 | [architecture/llm-dependency-contract.md](architecture/llm-dependency-contract.md) | Explicit LLM Port/Adapter/Factory/SecretResolver boundaries and lifecycle scopes |
