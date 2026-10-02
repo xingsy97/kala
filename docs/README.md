@@ -123,6 +123,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [operations/release-support-policy.md](operations/release-support-policy.md) | **Normative.** Supported versions, rollback and compatibility boundaries |
 | [operations/public-release-readiness.md](operations/public-release-readiness.md) | **Normative.** Public repository governance, unified version, distribution, supply-chain, operator CLI, and clean-environment release gates |
 | [operations/dedicated-platform-runtime-unit-cutover.md](operations/dedicated-platform-runtime-unit-cutover.md) | External staging, preflight, bounded cutover, verification, observation, and rollback for Dedicated Runtime Unit migration |
+| [operations/scheduled-task-writer-lock.md](operations/scheduled-task-writer-lock.md) | Fail-closed scheduled-task writer lock cutover and manual stale-lock recovery |
 
 ### Design
 
@@ -134,6 +135,8 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [design/authenticated-product-shell.md](design/authenticated-product-shell.md) | Private Cloud account identity, logout, cache partitioning, and authenticated product-shell behavior |
 | [design/logout-semantics.md](design/logout-semantics.md) | Product logout, logout-all, Provider-wide logout, forced-login, and cross-device behavior |
 | [design/account-center.md](design/account-center.md) | Private Cloud profile, login Sessions/devices, identity links, data/legal/support, and Settings grouping |
+| [design/bang-shell-command.md](design/bang-shell-command.md) | Implemented Bang Shell design and usage: explicit intent, workspace binding, queue semantics, cards, cancellation, and limits |
+| [design/scheduled-tasks.md](design/scheduled-tasks.md) | Implemented Unit-local scheduler design and usage: targets, recurrence/DST, recovery, tenancy, API, and Dashboard |
 
 ### Testing
 

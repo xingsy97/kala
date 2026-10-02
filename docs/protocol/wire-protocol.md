@@ -712,13 +712,23 @@ dashboard subscribes so reconnects show the current pending deliveries.
     text: string
     mode: 'steer' | 'queue'
     createdAt: string
+    content?: MessageContent[]
+    shell?: {
+      command: string
+      state: 'queued' | 'running' | 'completed' | 'nonzero' | 'failed'
+      result?: string
+    }
   }>
 }
 ```
 
-`pending` is a convenience mirror of `items.length`. `mode: 'steer'` items are
-front-of-queue steering updates created while a turn was active; `mode: 'queue'`
-items are follow-ups that wait until the active turn is done.
+`pending` is a convenience mirror of `items.length`. The dashboard snapshot
+contains queued follow-ups; transient `mode: 'steer'` deliveries are not shown.
+For a Host-owned `intent: 'shell'` request, `shell.state` is durably projected
+by original `id`: `queued`, then `running`, then a terminal `completed`,
+`nonzero`, or `failed` state. The optional terminal `result` is the same safe
+plain user-message envelope committed to Session history; stdout and stderr in
+that envelope remain untrusted process data.
 
 Dashboard resolves via `client:user_approve` or `client:user_reject`.
 
