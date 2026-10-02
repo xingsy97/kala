@@ -247,7 +247,7 @@ export function attachJsonRoutes(
      * browser is closing" beacon path. Lets the HTTP layer enqueue+drain a
      * user message without a live socket.
      */
-    enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ accepted?: boolean; committed: boolean; cursor?: number }>
+    enqueueUserMessage?: (input: { sessionId: string; text: string; intent: 'text' | 'shell'; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ accepted?: boolean; committed: boolean; cursor?: number }>
     capabilities?: import('@agent-kernel/shared').RuntimeCapabilities
     evaluationUrl?: string
     deployment?: import('@agent-kernel/shared').ProductDeploymentConfig
@@ -804,7 +804,7 @@ export function attachJsonRoutes(
         if (accessError) throw new HttpRouteError(accessError.status, accessError.message)
         const outcome = await payloads.enqueueUserMessage!({
           sessionId: input.data.sessionId, operationId: input.data.operationId, text: input.data.text,
-          mode: input.data.mode ?? 'steer', ...(input.data.content ? { content: input.data.content } : {}),
+          intent: input.data.intent, mode: input.data.mode ?? 'steer', ...(input.data.content ? { content: input.data.content } : {}),
         })
         try {
           await payloads.messageAttachments?.commitReferences(input.data.sessionId, input.data.content)
@@ -931,12 +931,14 @@ export function attachJsonRoutes(
         const operationId = requiredString(input.operationId, 'operationId')
         const text = typeof input.text === 'string' ? input.text : ''
         const mode = input.mode === 'steer' ? 'steer' : 'queue'
+        const intent = input.intent === 'text' || input.intent === 'shell' ? input.intent : undefined
+        if (!intent) throw new Error('intent is required')
         const content = Array.isArray(input.content) ? input.content as readonly import('@agent-kernel/kernel').MessageContent[] : undefined
         if (!text.trim() && !content?.length) throw new Error('message content is required')
         validateMessageAttachmentReferences(payloads.messageAttachments, sessionId, content)
         let outcome: { accepted?: boolean; committed: boolean; cursor?: number }
         try {
-          outcome = await payloads.enqueueUserMessage!({ sessionId, operationId, text, mode, ...(content ? { content } : {}) })
+          outcome = await payloads.enqueueUserMessage!({ sessionId, operationId, text, intent, mode, ...(content ? { content } : {}) })
         } catch (error) {
           if (error instanceof SessionNotFoundError) {
             sendJsonStatus(req, res, 404, { error: 'The target Session no longer exists', code: 'SESSION_NOT_FOUND' })
@@ -1473,7 +1475,7 @@ async function runEnhancementAction(
     artifactRootDir?: string | false
     sessions?: SessionStore
     executorsSnapshot?: () => readonly AttachedExecutor[]
-    enqueueUserMessage?: (input: { sessionId: string; text: string; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ accepted?: boolean; committed: boolean; cursor?: number }>
+    enqueueUserMessage?: (input: { sessionId: string; text: string; intent: 'text' | 'shell'; operationId?: string; mode?: 'queue' | 'steer'; content?: readonly import('@agent-kernel/kernel').MessageContent[] }) => Promise<{ accepted?: boolean; committed: boolean; cursor?: number }>
   },
 ): Promise<unknown> {
   const action = requiredString(body.action, 'action')
@@ -1485,7 +1487,7 @@ async function runEnhancementAction(
     if (!payloads.enqueueUserMessage) throw new HttpRouteError(503, 'queue is not available')
     const sessionId = requiredString(body.sessionId, 'sessionId')
     const text = requiredString(body.text, 'text')
-    await payloads.enqueueUserMessage({ sessionId, text })
+    await payloads.enqueueUserMessage({ sessionId, text, intent: 'text' })
     return { action, sessionId, queued: true }
   }
   const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)

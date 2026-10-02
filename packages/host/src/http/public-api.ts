@@ -15,6 +15,7 @@ import {
   type ApiSession,
   type SessionSummary,
 } from '@agent-kernel/shared'
+import type { CreateScheduledTask, ScheduledRun, ScheduledTask, UpdateScheduledTask } from '../scheduled-tasks/types.js'
 
 export type PublicApiActor = {
   principal: string
@@ -32,6 +33,15 @@ export type PublicApiDependencies = {
   sendMessage(actor: PublicApiActor, sessionId: string, input: ApiSendMessageRequest): Promise<{ accepted?: boolean; committed: boolean; cursor?: number }>
   getDagRun(actor: PublicApiActor, sessionId: string): Promise<unknown | null>
   answerDagDecision(actor: PublicApiActor, sessionId: string, decisionId: string, input: ApiAnswerDagDecisionRequest): Promise<unknown>
+  scheduledTasks?: {
+    list(actor: PublicApiActor): Promise<readonly ScheduledTask[]>
+    get(actor: PublicApiActor, taskId: string): Promise<ScheduledTask | undefined>
+    create(actor: PublicApiActor, input: Omit<CreateScheduledTask, 'ownerKey' | 'createdBy'>): Promise<ScheduledTask>
+    update(actor: PublicApiActor, taskId: string, input: UpdateScheduledTask): Promise<ScheduledTask>
+    pause(actor: PublicApiActor, taskId: string, paused: boolean): Promise<ScheduledTask>
+    delete(actor: PublicApiActor, taskId: string): Promise<boolean>
+    history(actor: PublicApiActor, taskId: string): Promise<readonly ScheduledRun[] | undefined>
+  }
   onInternalError?(error: unknown, requestId: string): void
 }
 
@@ -62,6 +72,52 @@ export function createPublicApiHandler(deps: PublicApiDependencies) {
       const messageMatch = url.pathname.match(/^\/api\/v1\/sessions\/([^/]+)\/messages$/u)
       const dagMatch = url.pathname.match(/^\/api\/v1\/sessions\/([^/]+)\/dag$/u)
       const decisionMatch = url.pathname.match(/^\/api\/v1\/sessions\/([^/]+)\/dag\/decisions\/([^/]+)$/u)
+      const scheduledTaskMatch = url.pathname.match(/^\/api\/v1\/scheduled-tasks\/([^/]+)$/u)
+      const scheduledActionMatch = url.pathname.match(/^\/api\/v1\/scheduled-tasks\/([^/]+)\/(pause|resume|history)$/u)
+
+      if (url.pathname === '/api/v1/scheduled-tasks' && request.method === 'GET') {
+        requireScheduledTasks(deps)
+        sendJson(response, 200, { items: (await deps.scheduledTasks.list(actor)).map(publicScheduledTask) })
+        return true
+      }
+      if (url.pathname === '/api/v1/scheduled-tasks' && request.method === 'POST') {
+        requireWrite(actor); requireScheduledTasks(deps)
+        const task = await deps.scheduledTasks.create(actor, validateScheduledTask(await readJson(request)))
+        sendJson(response, 201, { task: publicScheduledTask(task) })
+        return true
+      }
+      if (scheduledActionMatch && scheduledActionMatch[2] === 'history' && request.method === 'GET') {
+        requireScheduledTasks(deps)
+        const runs = await deps.scheduledTasks.history(actor, decodePath(scheduledActionMatch[1]!))
+        if (!runs) throw new ApiHttpError(404, 'not_found', 'scheduled task not found')
+        sendJson(response, 200, { items: runs })
+        return true
+      }
+      if (scheduledActionMatch && (scheduledActionMatch[2] === 'pause' || scheduledActionMatch[2] === 'resume') && request.method === 'POST') {
+        requireWrite(actor); requireScheduledTasks(deps)
+        const task = await deps.scheduledTasks.pause(actor, decodePath(scheduledActionMatch[1]!), scheduledActionMatch[2] === 'pause')
+        sendJson(response, 200, { task: publicScheduledTask(task) })
+        return true
+      }
+      if (scheduledTaskMatch && request.method === 'GET') {
+        requireScheduledTasks(deps)
+        const task = await deps.scheduledTasks.get(actor, decodePath(scheduledTaskMatch[1]!))
+        if (!task) throw new ApiHttpError(404, 'not_found', 'scheduled task not found')
+        sendJson(response, 200, { task: publicScheduledTask(task) })
+        return true
+      }
+      if (scheduledTaskMatch && request.method === 'PATCH') {
+        requireWrite(actor); requireScheduledTasks(deps)
+        const task = await deps.scheduledTasks.update(actor, decodePath(scheduledTaskMatch[1]!), validateScheduledTaskPatch(await readJson(request)))
+        sendJson(response, 200, { task: publicScheduledTask(task) })
+        return true
+      }
+      if (scheduledTaskMatch && request.method === 'DELETE') {
+        requireWrite(actor); requireScheduledTasks(deps)
+        if (!await deps.scheduledTasks.delete(actor, decodePath(scheduledTaskMatch[1]!))) throw new ApiHttpError(404, 'not_found', 'scheduled task not found')
+        response.writeHead(204); response.end()
+        return true
+      }
 
       if (url.pathname === '/api/v1/sessions' && request.method === 'GET') {
         const limit = parseLimit(url.searchParams.get('limit'))
@@ -211,6 +267,59 @@ function validateDecision(raw: unknown): ApiAnswerDagDecisionRequest {
   }
 }
 
+function publicScheduledTask(task: ScheduledTask): Omit<ScheduledTask, 'ownerKey'> {
+  const { ownerKey: _ownerKey, ...visible } = task
+  return visible
+}
+
+function validateScheduledTask(raw: unknown): Omit<CreateScheduledTask, 'ownerKey' | 'createdBy'> {
+  const value = record(raw)
+  return { prompt: scheduledPrompt(value.prompt), target: scheduledTarget(value.target), schedule: scheduledSchedule(value.schedule) }
+}
+
+function validateScheduledTaskPatch(raw: unknown): UpdateScheduledTask {
+  const value = record(raw)
+  const patch: UpdateScheduledTask = {
+    ...(value.prompt !== undefined ? { prompt: scheduledPrompt(value.prompt) } : {}),
+    ...(value.target !== undefined ? { target: scheduledTarget(value.target) } : {}),
+    ...(value.schedule !== undefined ? { schedule: scheduledSchedule(value.schedule) } : {}),
+  }
+  if (Object.keys(patch).length === 0) throw new ApiHttpError(400, 'invalid_request', 'at least one task field is required')
+  return patch
+}
+
+function scheduledPrompt(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 100_000) throw new ApiHttpError(400, 'invalid_request', 'prompt is required and must not exceed 100000 characters')
+  return value
+}
+
+function scheduledTarget(raw: unknown): CreateScheduledTask['target'] {
+  const value = record(raw)
+  if (value.kind === 'session') return { kind: 'session', sessionId: requiredIdentifier(value.sessionId, 'target.sessionId') }
+  if (value.kind === 'workspace') return {
+    kind: 'workspace', workspaceId: requiredString(value.workspaceId, 'target.workspaceId'),
+    ...(value.workspaceName !== undefined ? { workspaceName: requiredString(value.workspaceName, 'target.workspaceName') } : {}),
+    ...(value.cwd !== undefined ? { cwd: requiredString(value.cwd, 'target.cwd') } : {}),
+  }
+  throw new ApiHttpError(400, 'invalid_request', 'target.kind must be session or workspace')
+}
+
+function scheduledSchedule(raw: unknown): CreateScheduledTask['schedule'] {
+  const value = record(raw)
+  if (value.kind === 'once') return { kind: 'once', at: requiredString(value.at, 'schedule.at') }
+  if (value.kind === 'daily') return { kind: 'daily', timezone: requiredString(value.timezone, 'schedule.timezone'), hour: integer(value.hour, 'schedule.hour'), minute: integer(value.minute, 'schedule.minute') }
+  if (value.kind === 'weekly') {
+    if (!Array.isArray(value.daysOfWeek)) throw new ApiHttpError(400, 'invalid_request', 'schedule.daysOfWeek must be an array')
+    return { kind: 'weekly', timezone: requiredString(value.timezone, 'schedule.timezone'), daysOfWeek: value.daysOfWeek.map((day) => integer(day, 'schedule.daysOfWeek')), hour: integer(value.hour, 'schedule.hour'), minute: integer(value.minute, 'schedule.minute') }
+  }
+  throw new ApiHttpError(400, 'invalid_request', 'schedule.kind must be once, daily, or weekly')
+}
+
+function integer(value: unknown, name: string): number {
+  if (!Number.isInteger(value)) throw new ApiHttpError(400, 'invalid_request', `${name} must be an integer`)
+  return value as number
+}
+
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalidValue('request body must be an object')
   return value as Record<string, unknown>
@@ -247,6 +356,10 @@ function requiredOperationId(value: string | string[] | undefined): string {
 
 function requireWrite(actor: PublicApiActor): void {
   if (!actor.canWrite) throw new ApiHttpError(403, 'forbidden', 'workspace:write scope is required')
+}
+
+function requireScheduledTasks(deps: PublicApiDependencies): asserts deps is PublicApiDependencies & { scheduledTasks: NonNullable<PublicApiDependencies['scheduledTasks']> } {
+  if (!deps.scheduledTasks) throw new ApiHttpError(404, 'not_found', 'scheduled tasks are unavailable')
 }
 
 function parseLimit(value: string | null): number {

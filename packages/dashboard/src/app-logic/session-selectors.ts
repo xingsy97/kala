@@ -39,6 +39,8 @@ export function reconcileOptimisticQueuedMessages(
     if (entry.event.kind !== 'user_message') continue
     if (entry.event.operationId) committedOperationIds.add(entry.event.operationId)
     const text = entry.event.text ?? entry.event.content?.map((part) => part.type === 'text' ? part.text : '').join('') ?? ''
+    const shellOperationId = shellResultOperationId(text)
+    if (shellOperationId) committedOperationIds.add(shellOperationId)
     const ts = Date.parse(entry.ts)
     const bucket = ackedUserTexts.get(text) ?? []
     bucket.push(Number.isFinite(ts) ? ts : Number.POSITIVE_INFINITY)
@@ -61,6 +63,12 @@ export function reconcileOptimisticQueuedMessages(
     return false
   })
   return next.length === optimisticMessages.length ? optimisticMessages : next
+}
+
+export function shellResultOperationId(text: string): string | undefined {
+  if (!text.startsWith('Shell command result (explicit operator request; command execution can modify the workspace):\n')) return undefined
+  const line = text.split('\n', 5).find((candidate) => candidate.startsWith('Operation: '))
+  return line?.slice('Operation: '.length) || undefined
 }
 
 export function queuedMessageKey(item: QueuedMessagePreview): string {

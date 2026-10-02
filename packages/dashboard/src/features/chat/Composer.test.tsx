@@ -14,8 +14,9 @@ function renderComposer(props?: {
   onSubmit?: (
     text: string,
     mode: 'steer' | 'queue',
-    attachments?: readonly (ImageContent | FileContent)[],
-    extraBlocks?: readonly TextContent[],
+    attachments: readonly (ImageContent | FileContent)[] | undefined,
+    extraBlocks: readonly TextContent[] | undefined,
+    intent: 'text' | 'shell',
   ) => void
   onUploadFiles?: (files: readonly File[]) => Promise<readonly ReferencedFileContent[]>
   onReleaseFiles?: (files: readonly ReferencedFileContent[]) => Promise<void>
@@ -34,6 +35,7 @@ function renderComposer(props?: {
   disabled?: boolean
   serviceUnavailable?: boolean
   workspaceUnavailable?: boolean
+  workspaceOnline?: boolean
   onReconnectService?: () => void
   humanAttention?: React.ComponentProps<typeof Composer>['humanAttention']
   displayPrefs?: ChatDisplayPrefs
@@ -60,6 +62,7 @@ function renderComposer(props?: {
       disabled={props?.disabled}
       serviceUnavailable={props?.serviceUnavailable}
       workspaceUnavailable={props?.workspaceUnavailable}
+      workspaceOnline={props?.workspaceOnline}
       onReconnectService={props?.onReconnectService}
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
       {...(props?.onQueuedUpdate ? { onQueuedUpdate: props.onQueuedUpdate } : {})}
@@ -371,7 +374,7 @@ describe('Composer', () => {
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
     expect(onDeleteSession).not.toHaveBeenCalled()
-    expect(onSubmit).toHaveBeenCalledWith('/del', 'steer', undefined, undefined)
+    expect(onSubmit).toHaveBeenCalledWith('/del', 'steer', undefined, undefined, 'text')
 
     fireEvent.change(screen.getByTestId('composer-input'), {
       target: { value: '/delete' },
@@ -416,7 +419,7 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-send')).toBeTruthy()
     expect(screen.queryByTestId('composer-stop')).toBeNull()
     fireEvent.click(screen.getByTestId('composer-send'))
-    expect(onSubmit).toHaveBeenCalledWith('new instruction', 'steer', undefined, undefined)
+    expect(onSubmit).toHaveBeenCalledWith('new instruction', 'steer', undefined, undefined, 'text')
   })
 
   it('runs /clear as a visual-only transcript command', () => {
@@ -467,7 +470,90 @@ describe('Composer', () => {
     })
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
-    expect(onSubmit).toHaveBeenCalledWith('later', 'queue', undefined, undefined)
+    expect(onSubmit).toHaveBeenCalledWith('later', 'queue', undefined, undefined, 'text')
+  })
+
+  it('submits a leading bang as a shell command while preserving command whitespace', () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit })
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '!printf "a b"  ' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    expect(onSubmit).toHaveBeenCalledWith('!printf "a b"  ', 'steer', undefined, undefined, 'shell')
+  })
+
+  it('shows shell mode immediately and exits to safe literal text without deleting the bang', () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit })
+
+    const input = screen.getByTestId('composer-input')
+    fireEvent.change(input, { target: { value: '!echo visible' } })
+
+    expect(screen.getByTestId('composer-shell-mode').textContent).toContain('Shell · workspace')
+    expect(screen.getByTestId('composer-full-shell').querySelector('.border-amber-400\\/80')).toBeTruthy()
+    expect(screen.getByTestId('composer-file-input')).toHaveProperty('disabled', true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exit shell mode and keep as text' }))
+    expect(screen.queryByTestId('composer-shell-mode')).toBeNull()
+    expect(input).toHaveProperty('value', '!echo visible')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSubmit).toHaveBeenCalledWith('!echo visible', 'steer', undefined, undefined, 'text')
+  })
+
+  it('allows a bare bang only after explicitly exiting shell mode and resets on a new draft', async () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit })
+    const input = screen.getByTestId('composer-input')
+
+    fireEvent.change(input, { target: { value: '!' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await screen.findByText('Shell command is empty. Usage: !command')
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exit shell mode and keep as text' }))
+    fireEvent.change(input, { target: { value: '' } })
+    fireEvent.change(input, { target: { value: '!pwd' } })
+    expect(screen.getByTestId('composer-shell-mode')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exit shell mode and keep as text' }))
+    fireEvent.change(input, { target: { value: '!' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSubmit).toHaveBeenCalledWith('!', 'steer', undefined, undefined, 'text')
+  })
+
+  it('shows shell affordance but does not submit when the workspace is offline', () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit, workspaceOnline: false, workspaceUnavailable: true })
+    const input = screen.getByTestId('composer-input')
+
+    fireEvent.change(input, { target: { value: '!pwd' } })
+    expect(screen.getByTestId('composer-shell-mode')).toBeTruthy()
+    expect(screen.getByTestId('composer-send')).toHaveProperty('disabled', true)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('preserves leading whitespace so an indented bang remains an ordinary message', () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit })
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '  !echo chat' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    expect(onSubmit).toHaveBeenCalledWith('  !echo chat', 'steer', undefined, undefined, 'text')
+  })
+
+  it('keeps an empty shell command draft and shows usage', async () => {
+    const onSubmit = vi.fn()
+    renderComposer({ onSubmit })
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '!  ' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    await screen.findByText('Shell command is empty. Usage: !command')
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', '!  ')
   })
 
   it('clears the submitted draft before the reliable acknowledgement resolves', () => {
@@ -477,7 +563,7 @@ describe('Composer', () => {
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'sent now' } })
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
-    expect(onSubmit).toHaveBeenCalledWith('sent now', 'steer', undefined, undefined)
+    expect(onSubmit).toHaveBeenCalledWith('sent now', 'steer', undefined, undefined, 'text')
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
   })
 
@@ -506,6 +592,28 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'new draft')
   })
 
+  it('shows and safely exits shell mode in the simple Composer', () => {
+    const onSubmit = vi.fn()
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    try {
+      renderComposer({ onSubmit })
+      const input = screen.getByTestId('composer-input-simple')
+      input.textContent = '!echo simple'
+      fireEvent.input(input)
+
+      expect(screen.getByTestId('composer-shell-mode').textContent).toContain('Shell · workspace')
+      expect(screen.getByTestId('composer-simple-shell').className).toContain('border-amber-400/80')
+      fireEvent.click(screen.getByRole('button', { name: 'Exit shell mode and keep as text' }))
+      expect(input.textContent).toBe('!echo simple')
+      fireEvent.click(screen.getByTestId('composer-send'))
+      expect(onSubmit).toHaveBeenCalledWith('!echo simple', 'steer', undefined, undefined, 'text')
+    } finally {
+      if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+      else window.localStorage.setItem('ak-composer-mode', previousMode)
+    }
+  })
+
   it('offers working send mode selection in simple mode', () => {
     const onSubmit = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')
@@ -521,7 +629,7 @@ describe('Composer', () => {
       input.textContent = 'follow up'
       fireEvent.input(input)
       fireEvent.click(screen.getByTestId('composer-send'))
-      expect(onSubmit).toHaveBeenCalledWith('follow up', 'queue', undefined, undefined)
+      expect(onSubmit).toHaveBeenCalledWith('follow up', 'queue', undefined, undefined, 'text')
     } finally {
       if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
       else window.localStorage.setItem('ak-composer-mode', previousMode)
@@ -536,7 +644,7 @@ describe('Composer', () => {
     input.textContent = 'first message'
     fireEvent.input(input)
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(onSubmit).toHaveBeenCalledWith('first message', 'steer', undefined, undefined)
+    expect(onSubmit).toHaveBeenCalledWith('first message', 'steer', undefined, undefined, 'text')
     expect(input.textContent).toBe('')
     input.textContent = 'n'
     fireEvent.input(input)
@@ -680,7 +788,7 @@ describe('Composer', () => {
     await waitFor(() => expect(input.textContent).toBe('pasted text'))
     expect(input.getAttribute('data-empty')).toBeNull()
     fireEvent.click(screen.getByTestId('composer-send'))
-    expect(onSubmit).toHaveBeenCalledWith('pasted text', 'steer', undefined, undefined)
+    expect(onSubmit).toHaveBeenCalledWith('pasted text', 'steer', undefined, undefined, 'text')
   })
 
   it('keeps a compact baseline gap in addition to half the iOS safe area', () => {
@@ -1427,6 +1535,24 @@ describe('Composer', () => {
     expect(onReadFile).toHaveBeenCalledWith('a.ts')
     expect(onReadFile).toHaveBeenCalledWith('b.ts')
     await screen.findByTestId('composer-toast')
+  })
+
+  it('persists the literal-bang mode override with the session draft', () => {
+    const state = createInitialState({ sessionId: 'literal-bang-draft' })
+    window.localStorage.removeItem('agent-kernel:composer:draft:literal-bang-draft')
+    window.localStorage.removeItem('ak-composer-draft-intent:literal-bang-draft')
+
+    const first = renderComposer({ state })
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '!keep literal' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Exit shell mode and keep as text' }))
+    first.unmount()
+
+    renderComposer({ state })
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', '!keep literal')
+    expect(screen.queryByTestId('composer-shell-mode')).toBeNull()
+
+    window.localStorage.removeItem('agent-kernel:composer:draft:literal-bang-draft')
+    window.localStorage.removeItem('ak-composer-draft-intent:literal-bang-draft')
   })
 
   it('persists the unsent draft per session and restores it on switch', () => {

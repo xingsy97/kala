@@ -1,0 +1,277 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { createConfig } from '@agent-kernel/kernel'
+import type {
+  DashboardClientToServerEvents,
+  DashboardServerToClientEvents,
+  ExecutorClientToServerEvents,
+  ExecutorServerToClientEvents,
+  ServerMessageQueueEvent,
+} from '@agent-kernel/shared'
+import { PRIVATE_CLOUD_DEPLOYMENT, PROTOCOL_VERSION } from '@agent-kernel/shared'
+import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
+
+import { startHostServer, type HostServer } from '../server.js'
+
+type ScheduledRun = {
+  occurrenceId: string
+  sessionId?: string
+  status: string
+}
+
+const headers = (organizationId: string, role = 'member') => ({
+  'content-type': 'application/json',
+  'x-agent-runlab-principal': `${organizationId}-user`,
+  'x-agent-runlab-organization-id': organizationId,
+  'x-agent-runlab-organization-role': role,
+})
+
+async function waitFor<T>(
+  description: string,
+  probe: () => T | undefined | Promise<T | undefined>,
+  timeoutMs = 6_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const value = await probe()
+    if (value !== undefined) return value
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error(`timed out waiting for ${description}`)
+}
+
+async function connectSocket<ServerEvents, ClientEvents>(
+  socket: ClientSocket<ServerEvents, ClientEvents>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('socket connection timed out')), 2_000)
+    socket.once('connect', () => { clearTimeout(timer); resolve() })
+    socket.once('connect_error', (error) => { clearTimeout(timer); reject(error) })
+  })
+}
+
+describe('scheduled task product API', () => {
+  let server: HostServer | undefined
+  let root: string | undefined
+  const sockets: Array<ClientSocket> = []
+  let releaseLlm: (() => void) | undefined
+
+  afterEach(async () => {
+    releaseLlm?.()
+    releaseLlm = undefined
+    for (const socket of sockets.splice(0)) socket.close()
+    await server?.close()
+    if (root) await rm(root, { recursive: true, force: true })
+    server = undefined
+    root = undefined
+  })
+
+  it('enforces Unit owner visibility, write scope, lifecycle, and history contracts', async () => {
+    root = await mkdtemp(join(tmpdir(), 'kala-scheduled-api-'))
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: root,
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }),
+      llm: { name: 'test', async call() { return { message: { role: 'assistant', content: [] } } } },
+    })
+    const base = `http://127.0.0.1:${server.port}/api/v1`
+    await fetch(`${base}/sessions`, {
+      method: 'POST', headers: headers('org-a'), body: JSON.stringify({ operationId: 'create-s', sessionId: 's1' }),
+    })
+    const created = await fetch(`${base}/scheduled-tasks`, {
+      method: 'POST', headers: headers('org-a'), body: JSON.stringify({
+        prompt: 'scheduled prompt', target: { kind: 'session', sessionId: 's1' },
+        schedule: { kind: 'once', at: '2099-01-01T00:00:00.000Z' },
+      }),
+    })
+    expect(created.status).toBe(201)
+    const task = (await created.json() as { task: { id: string; status: string; nextRunAt: string } }).task
+
+    await fetch(`${base}/sessions`, {
+      method: 'POST', headers: headers('org-b'), body: JSON.stringify({ operationId: 'create-b-workspace', sessionId: 'b-workspace-session', workspaceId: 'workspace-b' }),
+    })
+    const crossUnitWorkspace = await fetch(`${base}/scheduled-tasks`, {
+      method: 'POST', headers: headers('org-a'), body: JSON.stringify({
+        prompt: 'must not run', target: { kind: 'workspace', workspaceId: 'workspace-b' },
+        schedule: { kind: 'once', at: '2099-01-01T00:00:00.000Z' },
+      }),
+    })
+    expect(crossUnitWorkspace.status).toBe(404)
+    await expect(crossUnitWorkspace.json()).resolves.toMatchObject({ error: { code: 'not_found', message: 'workspace not found' } })
+    expect(task).toMatchObject({ status: 'active', nextRunAt: '2099-01-01T00:00:00.000Z' })
+
+    const isolated = await fetch(`${base}/scheduled-tasks`, { headers: headers('org-b') })
+    expect(await isolated.json()).toEqual({ items: [] })
+    expect((await fetch(`${base}/scheduled-tasks/${task.id}`, { headers: headers('org-b') })).status).toBe(404)
+    expect((await fetch(`${base}/scheduled-tasks`, {
+      method: 'POST', headers: headers('org-a', 'viewer'), body: JSON.stringify({}),
+    })).status).toBe(403)
+
+    const paused = await fetch(`${base}/scheduled-tasks/${task.id}/pause`, { method: 'POST', headers: headers('org-a') })
+    expect(await paused.json()).toMatchObject({ task: { status: 'paused' } })
+    const resumed = await fetch(`${base}/scheduled-tasks/${task.id}/resume`, { method: 'POST', headers: headers('org-a') })
+    expect(await resumed.json()).toMatchObject({ task: { status: 'active' } })
+    expect((await fetch(`${base}/sessions/s1`, { method: 'DELETE', headers: { ...headers('org-a'), 'idempotency-key': 'delete-s1' } })).status).toBe(204)
+    expect(await (await fetch(`${base}/scheduled-tasks/${task.id}`, { headers: headers('org-a') })).json()).toMatchObject({ task: { status: 'paused' } })
+    const history = await fetch(`${base}/scheduled-tasks/${task.id}/history`, { headers: headers('org-a') })
+    expect(await history.json()).toEqual({ items: [] })
+    expect((await fetch(`${base}/scheduled-tasks/${task.id}`, { method: 'DELETE', headers: headers('org-a') })).status).toBe(204)
+  })
+
+  it('triggers a once task through the Host and leaves its prompt queued behind an active Session turn', async () => {
+    root = await mkdtemp(join(tmpdir(), 'kala-scheduled-session-trigger-'))
+    let markLlmStarted: (() => void) | undefined
+    const llmStarted = new Promise<void>((resolve) => { markLlmStarted = resolve })
+    const llmBlocked = new Promise<void>((resolve) => { releaseLlm = resolve })
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: root,
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }),
+      llm: {
+        name: 'blocked-test',
+        async call() {
+          markLlmStarted?.()
+          await llmBlocked
+          return { message: { role: 'assistant', content: [] } }
+        },
+      },
+    })
+    const origin = `http://127.0.0.1:${server.port}`
+    const base = `${origin}/api/v1`
+    const sessionId = 'scheduled-existing-session'
+    expect((await fetch(`${base}/sessions`, {
+      method: 'POST', headers: headers('org-queue'), body: JSON.stringify({ operationId: 'create-existing', sessionId }),
+    })).status).toBe(201)
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${origin}/dashboard`, {
+      transports: ['websocket'],
+      auth: { role: 'dashboard', sessionId, clientVersion: PROTOCOL_VERSION },
+      extraHeaders: headers('org-queue'),
+      reconnection: false,
+    })
+    sockets.push(dashboard)
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('session ready timed out')), 2_000)
+      dashboard.once('session:ready', () => { clearTimeout(timer); resolve() })
+    })
+    await connectSocket(dashboard)
+    await ready
+
+    let latestQueue: ServerMessageQueueEvent | undefined
+    dashboard.on('server:message_queue', (event) => {
+      if (event.sessionId === sessionId) latestQueue = event
+    })
+    expect((await fetch(`${base}/sessions/${sessionId}/messages`, {
+      method: 'POST', headers: headers('org-queue'), body: JSON.stringify({ operationId: 'hold-active-turn', text: 'hold this turn' }),
+    })).status).toBe(202)
+    await Promise.race([
+      llmStarted,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('LLM did not start')), 2_000)),
+    ])
+
+    const prompt = 'queued scheduled prompt'
+    const created = await fetch(`${base}/scheduled-tasks`, {
+      method: 'POST',
+      headers: headers('org-queue'),
+      body: JSON.stringify({
+        prompt,
+        target: { kind: 'session', sessionId },
+        schedule: { kind: 'once', at: new Date(Date.now() + 1_200).toISOString() },
+      }),
+    })
+    expect(created.status).toBe(201)
+    const taskId = (await created.json() as { task: { id: string } }).task.id
+
+    const run = await waitFor('scheduled Session run and QUEUE delivery', async () => {
+      const response = await fetch(`${base}/scheduled-tasks/${taskId}/history`, { headers: headers('org-queue') })
+      const items = (await response.json() as { items: ScheduledRun[] }).items
+      const enqueued = items.find((item) => item.status === 'enqueued')
+      const queued = latestQueue?.items.some((item) => item.text === prompt && item.mode === 'queue')
+      return enqueued && queued ? enqueued : undefined
+    })
+    expect(run).toMatchObject({ status: 'enqueued', sessionId })
+    expect((await fetch(`${base}/scheduled-tasks/${taskId}/history`, { headers: headers('org-other') })).status).toBe(404)
+  }, 10_000)
+
+  it('triggers a workspace once task into a fresh bound Session linked from run history', async () => {
+    root = await mkdtemp(join(tmpdir(), 'kala-scheduled-workspace-trigger-'))
+    const workspaceId = 'scheduled-workspace'
+    const executorToken = 'scheduled-workspace-test-token'
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: root,
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      auth: { executorTokens: [{ token: executorToken, workspaceId }] },
+      defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }),
+      llm: { name: 'test', async call() { return { message: { role: 'assistant', content: [] } } } },
+    })
+    const origin = `http://127.0.0.1:${server.port}`
+    const base = `${origin}/api/v1`
+    const seedSessionId = 'workspace-owner-session'
+    expect((await fetch(`${base}/sessions`, {
+      method: 'POST',
+      headers: headers('org-workspace'),
+      body: JSON.stringify({ operationId: 'create-workspace-owner', sessionId: seedSessionId, workspaceId }),
+    })).status).toBe(201)
+
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${origin}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, token: executorToken },
+      reconnection: false,
+    })
+    sockets.push(executor)
+    await connectSocket(executor)
+    executor.emit('executor:announce', {
+      executorId: 'scheduled-workspace-executor',
+      workspaceId,
+      workspaceName: 'scheduled workspace',
+      tools: [],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+    await waitFor('executor announcement', () =>
+      server?.executorsSnapshot().some((item) => item.executorId === 'scheduled-workspace-executor') ? true : undefined,
+    )
+
+    const prompt = 'fresh workspace scheduled prompt'
+    const created = await fetch(`${base}/scheduled-tasks`, {
+      method: 'POST',
+      headers: headers('org-workspace'),
+      body: JSON.stringify({
+        prompt,
+        target: { kind: 'workspace', workspaceId, workspaceName: 'scheduled workspace' },
+        schedule: { kind: 'once', at: new Date(Date.now() + 1_200).toISOString() },
+      }),
+    })
+    expect(created.status).toBe(201)
+    const taskId = (await created.json() as { task: { id: string } }).task.id
+
+    const run = await waitFor('workspace scheduled run', async () => {
+      const response = await fetch(`${base}/scheduled-tasks/${taskId}/history`, { headers: headers('org-workspace') })
+      const items = (await response.json() as { items: ScheduledRun[] }).items
+      return items.find((item) => item.status === 'enqueued' && item.sessionId)
+    })
+    expect(run.sessionId).toEqual(expect.any(String))
+    expect(run.sessionId).not.toBe(seedSessionId)
+
+    const linkedSession = await waitFor('history-linked workspace Session', async () => {
+      const response = await fetch(`${base}/sessions/${run.sessionId}`, { headers: headers('org-workspace') })
+      if (!response.ok) return undefined
+      const body = await response.json() as {
+        session: { summary: { sessionId: string; workspaceId?: string }; state: { messages: Array<{ role: string; content: Array<{ type: string; text?: string }> }> } }
+      }
+      const delivered = body.session.state.messages.some((message) =>
+        message.role === 'user' && message.content.some((content) => content.type === 'text' && content.text === prompt),
+      )
+      return delivered ? body.session : undefined
+    })
+    expect(linkedSession.summary).toMatchObject({ sessionId: run.sessionId, workspaceId })
+    expect((await fetch(`${base}/sessions/${run.sessionId}`, { headers: headers('org-other') })).status).toBe(404)
+    expect((await fetch(`${base}/scheduled-tasks/${taskId}/history`, { headers: headers('org-other') })).status).toBe(404)
+  }, 10_000)
+})

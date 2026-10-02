@@ -107,6 +107,7 @@ export async function admitUserMessage(input: {
   token?: string
   sessionId: string
   text: string
+  intent: 'text' | 'shell'
   mode: 'queue' | 'steer'
   content?: readonly MessageContent[]
   operationId?: string
@@ -129,7 +130,7 @@ export async function admitUserMessage(input: {
         },
         credentials: 'include',
         body: JSON.stringify({
-          sessionId: input.sessionId, operationId, text: input.text, mode: input.mode,
+          sessionId: input.sessionId, operationId, text: input.text, intent: input.intent, mode: input.mode,
           ...(input.content ? { content: input.content } : {}),
         }),
         signal: AbortSignal.timeout(timeoutMs),

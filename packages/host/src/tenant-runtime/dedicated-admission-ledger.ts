@@ -9,6 +9,7 @@ export type AdmissionMessage = {
   sessionId: string
   operationId: string
   mode: 'queue' | 'steer'
+  intent: 'text' | 'shell'
   text: string
   content?: readonly unknown[]
 }
@@ -46,7 +47,7 @@ export type AdmissionOperationStatus = {
 }
 
 type LedgerState = { schemaVersion: 1; revision: number; nextSequence: number; capacity: number; records: AdmissionRecord[] }
-const messageFields = new Set(['schemaVersion', 'principalDigest', 'unitId', 'sessionId', 'operationId', 'mode', 'text', 'content'])
+const messageFields = new Set(['schemaVersion', 'principalDigest', 'unitId', 'sessionId', 'operationId', 'mode', 'intent', 'text', 'content'])
 const recordFields = new Set([...messageFields, 'sequence', 'bodyDigest', 'acceptedAt', 'state', 'routeGeneration', 'leaseGeneration', 'leaseOwner', 'leaseExpiresAt', 'committedAt', 'failedAt', 'sessionCursor', 'attempts', 'lastAttemptAt', 'error'])
 
 export class DedicatedAdmissionLedger {
@@ -263,7 +264,7 @@ function parseAdmissionMessage(value: AdmissionMessage): AdmissionMessage {
     value?.schemaVersion !== 1 || value.unitId !== 'local' || !/^[a-f0-9]{64}$/u.test(value.principalDigest)
     || typeof value.sessionId !== 'string' || value.sessionId.length < 1 || value.sessionId.length > 200
     || typeof value.operationId !== 'string' || value.operationId.length < 1 || value.operationId.length > 128
-    || !['queue', 'steer'].includes(value.mode) || typeof value.text !== 'string'
+    || !['queue', 'steer'].includes(value.mode) || !['text', 'shell'].includes(value.intent) || typeof value.text !== 'string'
     || (!value.text.trim() && !value.content?.length) || (value.content !== undefined && !Array.isArray(value.content))
   ) throw new Error('invalid admission message')
   rejectUnknownFields(value as unknown as Record<string, unknown>, messageFields, 'admission message')

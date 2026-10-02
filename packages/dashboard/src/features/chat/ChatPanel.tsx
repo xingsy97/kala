@@ -1032,12 +1032,16 @@ function PendingUserMessageRow({
   const statusLabel = item.status === 'queued'
     ? t('composer.queued.queueLabel')
     : t('chat.transcript.sendingMessage')
+  const shellState = item.shell?.state
+  const effectiveStatusLabel = shellState
+    ? `Shell command ${shellState === 'nonzero' ? 'completed with a nonzero exit' : shellState}`
+    : statusLabel
   return (
     <div className="group relative flex min-w-0 max-w-full justify-end" data-testid={`pending-user-message-${item.id}`} data-status={item.status}>
       <div
         className="relative min-w-0 max-w-[92%] overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm motion-safe:animate-[ak-pending-pulse_1.6s_ease-in-out_infinite] sm:max-w-[85%]"
-        title={statusLabel}
-        aria-label={statusLabel}
+        title={effectiveStatusLabel}
+        aria-label={effectiveStatusLabel}
         data-testid={`pending-user-message-status-${item.id}`}
       >
         <InlineTimestamp
@@ -1055,7 +1059,46 @@ function PendingUserMessageRow({
               approvalByCallId={new Map()}
             />
           ))}
+          {shellState ? (
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide opacity-80" data-testid={`shell-command-status-${item.id}`}>
+              {shellState === 'running' ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Terminal className="h-3 w-3" aria-hidden="true" />}
+              {shellState === 'nonzero' ? 'nonzero exit' : shellState}
+            </div>
+          ) : null}
         </div>
+      </div>
+    </div>
+  )
+}
+
+type ShellResultView = {
+  operationId?: string
+  state: 'completed' | 'nonzero' | 'failed'
+}
+
+function parseShellResultView(text: string): ShellResultView | null {
+  if (!text.startsWith('Shell command result (explicit operator request; command execution can modify the workspace):\n')) return null
+  const header = text.split('\n', 6)
+  const status = header.find((line) => line.startsWith('Status: '))?.slice('Status: '.length)
+  if (status !== 'completed' && status !== 'nonzero' && status !== 'failed') return null
+  const operationId = header.find((line) => line.startsWith('Operation: '))?.slice('Operation: '.length)
+  return { state: status, ...(operationId ? { operationId } : {}) }
+}
+
+function ShellResultMessage({ text, ts }: { text: string; ts?: string }): JSX.Element {
+  const result = parseShellResultView(text)!
+  const label = result.state === 'nonzero' ? 'Completed with nonzero exit' : result.state === 'failed' ? 'Failed' : 'Completed'
+  return (
+    <div className="flex min-w-0 max-w-full justify-end" data-testid="shell-result-message" data-operation-id={result.operationId} data-status={result.state}>
+      <div className="relative min-w-0 max-w-[92%] overflow-hidden rounded-xl border border-border bg-muted/40 shadow-sm sm:max-w-[85%]">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+          <div className="flex items-center gap-2 text-xs font-semibold"><Terminal className="h-3.5 w-3.5" aria-hidden="true" />Shell command</div>
+          <span className={cn('text-[11px] font-semibold uppercase tracking-wide', result.state === 'completed' ? 'text-emerald-600 dark:text-emerald-400' : result.state === 'nonzero' ? 'text-amber-600 dark:text-amber-400' : 'text-destructive')}>
+            {label}
+          </span>
+        </div>
+        <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed" data-testid="shell-result-output">{text}</pre>
+        <InlineTimestamp ts={ts} className="px-3 pb-2 text-muted-foreground" />
       </div>
     </div>
   )
@@ -1983,6 +2026,7 @@ function MessageRow({
   }
 
   if (message.role === 'user') {
+    if (parseShellResultView(messageText)) return <ShellResultMessage text={messageText} ts={ts} />
     return (
       <div
         id={`msg-${index}`}

@@ -165,6 +165,7 @@ describe('Stable Ingress admission', () => {
         sessionId: 'session-1',
         operationId: 'operation-forged',
         text: 'forged',
+        intent: 'text',
         mode: 'queue',
       }),
     })
@@ -222,6 +223,7 @@ describe('Stable Ingress admission', () => {
         sessionId: 'session-1',
         operationId: 'operation-attachment',
         text: '',
+        intent: 'text',
         mode: 'queue',
         content: [file],
       }),
@@ -238,6 +240,7 @@ describe('Stable Ingress admission', () => {
         sessionId: 'session-1',
         operationId: 'operation-attachment-pending',
         text: '',
+        intent: 'text',
         mode: 'queue',
         content: [file],
       }),
@@ -281,7 +284,7 @@ describe('Stable Ingress admission', () => {
     const admit = async (operationId: string): Promise<Response> => await fetch(`http://127.0.0.1:${ingress!.port}/runtime/admission/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'session-1', operationId, text: operationId, mode: 'queue' }),
+      body: JSON.stringify({ sessionId: 'session-1', operationId, text: operationId, intent: 'text', mode: 'queue' }),
     })
 
     expect((await admit('operation-first')).status).toBe(202)
@@ -368,7 +371,7 @@ describe('Stable Ingress admission', () => {
     const ledgerPath = join(root, 'ledger.json')
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: 'http://127.0.0.1:9', admissionLedgerPath: ledgerPath, admissionCapacity: 1 })
     const origin = `http://127.0.0.1:${ingress.port}`
-    const body = { sessionId: 'session-1', operationId: 'operation-0001', text: 'queued', mode: 'queue' }
+    const body = { sessionId: 'session-1', operationId: 'operation-0001', text: 'queued', intent: 'text', mode: 'queue' }
     const first = await fetch(`${origin}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
     expect(first.status).toBe(202)
     expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ revision: 1, records: [{ operationId: 'operation-0001', state: 'pending' }] })
@@ -389,7 +392,7 @@ describe('Stable Ingress admission', () => {
     await writeJsonFile(candidatePath, { schemaVersion: 1, deploymentId: 'deployment-0001', expectedRouteGeneration: 5, phase: 'paused', updatedAt: new Date().toISOString() })
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: predecessor, routeStatePath: routePath, candidateStatePath: candidatePath, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
     const origin = `http://127.0.0.1:${ingress.port}`
-    const body = { sessionId: 'session-1', operationId: 'operation-0003', text: 'during handoff', mode: 'steer' }
+    const body = { sessionId: 'session-1', operationId: 'operation-0003', text: 'during handoff', intent: 'text', mode: 'steer' }
     expect((await fetch(`${origin}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(202)
     await new Promise((resolve) => setTimeout(resolve, 350))
     expect(predecessorCommits).toHaveLength(0)
@@ -419,7 +422,7 @@ describe('Stable Ingress admission', () => {
     const commits: Record<string, unknown>[] = []
     const active = await backend((body) => commits.push(body), 17)
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: active, candidateStatePath: candidatePath, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
-    const body = { sessionId: 'session-1', operationId: 'operation-0004', text: 'steady state', mode: 'queue' }
+    const body = { sessionId: 'session-1', operationId: 'operation-0004', text: 'steady state', intent: 'text', mode: 'queue' }
     const response = await fetch(`http://127.0.0.1:${ingress.port}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
     expect(response.status).toBe(202)
     await eventually(async () => { expect(commits).toHaveLength(1) })
@@ -450,7 +453,7 @@ describe('Stable Ingress admission', () => {
     const address = server.address()
     const active = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: active, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
-    const body = { sessionId: 'session-1', operationId: 'operation-commit-gap', text: 'exactly once', mode: 'queue' }
+    const body = { sessionId: 'session-1', operationId: 'operation-commit-gap', text: 'exactly once', intent: 'text', mode: 'queue' }
     expect((await fetch(`http://127.0.0.1:${ingress.port}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(202)
     await eventually(async () => {
       expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [{ operationId: body.operationId, state: 'committed', sessionCursor: 23 }] })
@@ -475,7 +478,7 @@ describe('Stable Ingress admission', () => {
     const address = server.address()
     const active = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: active, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
-    const body = { sessionId: 'session-1', operationId: 'operation-queue-accepted', text: 'durable first', mode: 'queue' }
+    const body = { sessionId: 'session-1', operationId: 'operation-queue-accepted', text: 'durable first', intent: 'text', mode: 'queue' }
     expect((await fetch(`http://127.0.0.1:${ingress.port}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(202)
     await eventually(async () => {
       expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [{ operationId: body.operationId, state: 'committed' }] })
@@ -504,7 +507,7 @@ describe('Stable Ingress admission', () => {
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
     const origin = `http://127.0.0.1:${ingress.port}`
     for (const [sessionId, operationId] of [['session-blocked', 'operation-blocked'], ['session-ready', 'operation-ready']] as const) {
-      expect((await fetch(`${origin}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, operationId, text: 'hello', mode: 'queue' }) })).status).toBe(202)
+      expect((await fetch(`${origin}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, operationId, text: 'hello', intent: 'text', mode: 'queue' }) })).status).toBe(202)
     }
     await eventually(async () => {
       expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [
@@ -531,7 +534,7 @@ describe('Stable Ingress admission', () => {
     const address = server.address()
     ingress = await startDedicatedIngress({ port: 0, unitOrigin: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`, admissionLedgerPath: ledgerPath, ingressHandoffSecret: 'test-secret' })
     const origin = `http://127.0.0.1:${ingress.port}`
-    expect((await fetch(`${origin}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'deleted-session', operationId: 'operation-missing-session', text: 'hello', mode: 'queue' }) })).status).toBe(202)
+    expect((await fetch(`${origin}/runtime/admission/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'deleted-session', operationId: 'operation-missing-session', text: 'hello', intent: 'text', mode: 'queue' }) })).status).toBe(202)
     await eventually(async () => {
       expect(JSON.parse(await readFile(ledgerPath, 'utf8'))).toMatchObject({ records: [{ state: 'failed', failedAt: expect.any(String), error: expect.stringContaining('no longer exists') }] })
     })

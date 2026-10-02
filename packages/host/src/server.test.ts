@@ -39,6 +39,7 @@ import { appendRuntimeMetadataEntry, readSessionLog } from './store/log.js'
 import { persistMessageQueueSnapshot } from './message-queue-store.js'
 import { ExecutorIdentityStore } from './store/executor-identity.js'
 import { UnitResourceGovernor } from './tenant-runtime/resource-governor.js'
+import { bangShellResultOperationId } from './bang-shell.js'
 
 type HostCopilotTool = {
   name: string
@@ -342,7 +343,7 @@ describe('wire protocol', () => {
     expect(stale.rejected).toContainEqual({ channel: `session:${sessionId}`, code: 'stale_generation' })
 
     const appended = new Promise<EventAppendedEvent>((resolve) => dashboard.once('event:appended', resolve))
-    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text',
       sessionId, text: 'still subscribed', mode: 'queue', operationId: 'rapid-switch-message',
     })
     expect(ack).toMatchObject({ ok: true })
@@ -385,7 +386,7 @@ describe('wire protocol', () => {
       dashboard.on('state:changed', (payload) => {
         if (payload.sessionId === 'stream-first') stateTurnStarts.push(payload.turnStartedAt)
       })
-      await dashboard.timeout(2000).emitWithAck('client:user_message', {
+      await dashboard.timeout(2000).emitWithAck('client:user_message', { intent: 'text',
         sessionId: 'stream-first', text: 'generate', mode: 'queue', operationId: 'stream-message',
       })
       await emittedFirstChunk
@@ -475,7 +476,7 @@ describe('wire protocol', () => {
     })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
-    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'must not be accepted',
       mode: 'queue',
@@ -483,6 +484,37 @@ describe('wire protocol', () => {
     })
 
     expect(ack).toEqual({ ok: false, error: 'forbidden: runtime:write required' })
+    expect(server.store.get(sessionId)?.state.messages.some((message) => message.role === 'user')).toBe(false)
+    dashboard.close()
+  })
+
+  it('rejects cross-tenant shell messages when queue quota is disabled', async () => {
+    const sessionId = 'cross-tenant-shell-no-quota'
+    await server.store.create({
+      sessionId,
+      workspaceId: 'workspace-tenant-b',
+      config,
+      organizationId: 'org_b',
+      principal: 'b@example.test',
+      organizationRole: 'member',
+    })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      extraHeaders: {
+        'x-agent-runlab-principal': 'a@example.test',
+        'x-agent-runlab-organization-id': 'org_a',
+        'x-agent-runlab-organization-role': 'member',
+      },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+      intent: 'shell', sessionId, text: '! id', mode: 'queue', operationId: 'cross-tenant-shell-no-quota-op',
+    })
+
+    expect(ack).toEqual({ ok: false, error: 'tenant_forbidden' })
     expect(server.store.get(sessionId)?.state.messages.some((message) => message.role === 'user')).toBe(false)
     dashboard.close()
   })
@@ -636,6 +668,7 @@ describe('wire protocol', () => {
       body: JSON.stringify({
         sessionId: 'http-tenant-b',
         operationId: 'http-cross-tenant-admission',
+        intent: 'text',
         text: 'must not enqueue',
       }),
     })
@@ -987,7 +1020,7 @@ describe('wire protocol', () => {
     })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
-    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text',
       sessionId: 'queue-quota-denied',
       text: 'must not persist',
       mode: 'queue',
@@ -1035,7 +1068,7 @@ describe('wire protocol', () => {
     })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
-    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text',
       sessionId: 'queue-quota-allowed',
       text: 'allowed',
       mode: 'queue',
@@ -1166,7 +1199,7 @@ describe('wire protocol', () => {
         if (event.event.kind === 'llm_error') resolve(event)
       })
     })
-    await dashboard.timeout(1000).emitWithAck('client:user_message', {
+    await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text',
       sessionId: 'model-policy-llm',
       text: 'hello',
       operationId: 'model-policy-llm-op',
@@ -1220,7 +1253,7 @@ describe('wire protocol', () => {
         if (event.event.kind === 'llm_error') resolve(event)
       })
     })
-    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+    const ack = await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'hello',
       operationId: 'quota-deny-op',
@@ -1285,7 +1318,7 @@ describe('wire protocol', () => {
         if (event.event.kind === 'llm_response') resolve(event)
       })
     })
-    await dashboard.timeout(1000).emitWithAck('client:user_message', {
+    await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'hello',
       operationId: 'quota-allow-op',
@@ -1386,7 +1419,7 @@ describe('wire protocol', () => {
         }
       })
     })
-    const startAck = await dashboard.timeout(1000).emitWithAck('client:user_message', { sessionId, text: 'choose' })
+    const startAck = await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text', sessionId, text: 'choose' })
     expect(startAck).toEqual({ ok: true })
     await toolRequested
 
@@ -1441,7 +1474,7 @@ describe('wire protocol', () => {
     })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
-    const invalid = await dashboard.timeout(1000).emitWithAck('client:user_message', {
+    const invalid = await dashboard.timeout(1000).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'invalid image',
       operationId: 'invalid-image',
@@ -1451,7 +1484,7 @@ describe('wire protocol', () => {
 
     const oversizedBytes = Buffer.alloc(2 * 1024 * 1024 + 1)
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(oversizedBytes)
-    const oversized = await dashboard.timeout(3000).emitWithAck('client:user_message', {
+    const oversized = await dashboard.timeout(3000).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'oversized image',
       operationId: 'oversized-image',
@@ -1477,7 +1510,7 @@ describe('wire protocol', () => {
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes)
       return bytes.toString('base64')
     }
-    const ack = await dashboard.timeout(3000).emitWithAck('client:user_message', {
+    const ack = await dashboard.timeout(3000).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'two screenshots',
       mode: 'queue',
@@ -1609,7 +1642,7 @@ describe('wire protocol', () => {
       const first = await fetch(`${url}/internal/runtime/admission/commit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'admission-jsonl-test-secret' },
-        body: JSON.stringify({ sessionId, operationId: 'operation-admission-jsonl', text: 'deliver exactly once', mode: 'queue' }),
+        body: JSON.stringify({ sessionId, operationId: 'operation-admission-jsonl', text: 'deliver exactly once', intent: 'text', mode: 'queue' }),
       })
       expect(first.status).toBe(200)
       const initial = await first.json() as { accepted: boolean; committed: boolean; cursor?: number }
@@ -1621,7 +1654,7 @@ describe('wire protocol', () => {
       const retry = await fetch(`${url}/internal/runtime/admission/commit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'admission-jsonl-test-secret' },
-        body: JSON.stringify({ sessionId, operationId: 'operation-admission-jsonl', text: 'deliver exactly once', mode: 'queue' }),
+        body: JSON.stringify({ sessionId, operationId: 'operation-admission-jsonl', text: 'deliver exactly once', intent: 'text', mode: 'queue' }),
       })
       const committed = await retry.json() as { committed: boolean; cursor: number }
       expect(committed).toMatchObject({ committed: true, cursor: expect.any(Number) })
@@ -1667,14 +1700,14 @@ describe('wire protocol', () => {
       let latestQueue: ServerMessageQueueEvent | undefined
       dashboard.on('server:message_queue', (payload) => { if (payload.sessionId === sessionId) latestQueue = payload })
       await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
-      dashboard.emit('client:user_message', { sessionId, text: 'active turn', mode: 'steer' })
+      dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'active turn', mode: 'steer' })
       await vi.waitFor(() => expect(seenPrompts).toHaveLength(1))
 
       const admit = async (operationId: string, text = operationId): Promise<{ accepted: boolean; committed: boolean }> => {
         const response = await fetch(`${url}/internal/runtime/admission/commit`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'admission-cancellation-test-secret' },
-          body: JSON.stringify({ sessionId, operationId, text, mode: 'queue' }),
+          body: JSON.stringify({ sessionId, operationId, text, intent: 'text', mode: 'queue' }),
         })
         expect(response.status).toBe(200)
         return await response.json() as { accepted: boolean; committed: boolean }
@@ -1761,7 +1794,7 @@ describe('wire protocol', () => {
       const response = await fetch(`${url}/internal/runtime/admission/commit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'copilot-cancellation-test-secret' },
-        body: JSON.stringify({ sessionId, operationId: 'operation-copilot-before-arrival', text: 'must not reach Copilot', mode: 'queue' }),
+        body: JSON.stringify({ sessionId, operationId: 'operation-copilot-before-arrival', text: 'must not reach Copilot', intent: 'text', mode: 'queue' }),
       })
       expect(response.status).toBe(200)
       await expect(response.json()).resolves.toMatchObject({ accepted: true, committed: false })
@@ -1779,7 +1812,7 @@ describe('wire protocol', () => {
       const response = await fetch(`${url}/internal/runtime/admission/commit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'admission-missing-session-secret' },
-        body: JSON.stringify({ sessionId: 'deleted-session', operationId: 'operation-deleted-session', text: 'cannot deliver', mode: 'queue' }),
+        body: JSON.stringify({ sessionId: 'deleted-session', operationId: 'operation-deleted-session', text: 'cannot deliver', intent: 'text', mode: 'queue' }),
       })
       expect(response.status).toBe(404)
       await expect(response.json()).resolves.toMatchObject({ code: 'SESSION_NOT_FOUND', error: expect.stringContaining('no longer exists') })
@@ -3079,7 +3112,7 @@ describe('wire protocol', () => {
       })
     })
 
-    dashboard.emit('client:user_message', { sessionId, text: 'hello' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'hello' })
 
     const payload = await changed
     expect(payload.contextSnapshot).toEqual(providerSnapshot)
@@ -3271,7 +3304,7 @@ describe('wire protocol', () => {
         }
       })
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'hello' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'hello' })
     const payload = await done
     expect(seenModels).toEqual(['anthropic:claude-session'])
     expect(payload.contextSnapshot.model.ref).toBe('anthropic:claude-session')
@@ -3329,7 +3362,7 @@ describe('wire protocol', () => {
         }
       })
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'hello' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'hello' })
     const payload = await done
     expect(seenModels).toEqual(['openai:gpt-default'])
     expect(payload.contextSnapshot.model.ref).toBe('openai:gpt-default')
@@ -3677,7 +3710,7 @@ describe('wire protocol', () => {
       })
     })
 
-    dashboard.emit('client:user_message', {
+    dashboard.emit('client:user_message', { intent: 'text',
       sessionId,
       text: 'please write',
     })
@@ -3741,7 +3774,7 @@ describe('wire protocol', () => {
           resolve()
         }
       })
-      dashboard.emit('client:user_message', { sessionId, text: 'go' })
+      dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'go' })
     })
 
     const forked = new Promise<SessionReadyEvent>((resolve) =>
@@ -3897,7 +3930,7 @@ describe('wire protocol', () => {
 
     await waitForAnyExecutor(server)
 
-    dashboard.emit('client:user_message', { sessionId, text: 'go' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'go' })
 
     // Wait for the tool:call to hit the executor before cancelling.
     await new Promise<void>((resolve, reject) => {
@@ -4011,7 +4044,7 @@ describe('wire protocol', () => {
         if (payload.kind === 'sub_agent_finished') resolve(payload)
       })
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'go' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'go' })
 
     const start = await started
     expect(start.parentSessionId).toBe(sessionId)
@@ -4171,7 +4204,7 @@ describe('wire protocol', () => {
     })
     const toolCalled = new Promise<ToolCallMessage>((resolve) => executor.on('tool:call', resolve))
     const toolCancelled = new Promise<{ sessionId: string; callId: string }>((resolve) => executor.on('tool:cancel', resolve))
-    dashboard.emit('client:user_message', { sessionId, text: 'go' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'go' })
     const start = await started
     const pendingCall = await toolCalled
     expect(pendingCall.sessionId).toBe(start.childSessionId)
@@ -4280,7 +4313,7 @@ describe('wire protocol', () => {
         if (payload.kind === 'sub_agent_finished') resolve(payload)
       })
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'go' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'go' })
 
     const start = await started
     expect(start.parentSessionId).toBe(sessionId)
@@ -4424,7 +4457,7 @@ describe('wire protocol', () => {
         }
       })
     })
-    dashA.emit('client:user_message', { sessionId: sessionA, text: 'a' })
+    dashA.emit('client:user_message', { intent: 'text', sessionId: sessionA, text: 'a' })
     await doneA
 
     expect(seenSessions).toContain(sessionA)
@@ -4578,7 +4611,7 @@ describe('wire protocol', () => {
           resolve()
         }
       })
-      dashboard.emit('client:user_message', { sessionId, text: 'please write' })
+      dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'please write' })
     })
 
     // Sessions list — after one round-trip we expect exactly one summary
@@ -5413,6 +5446,234 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('executes a queued bang shell only after it reaches the idle head and sends the persisted result as user text', async () => {
+    const sessionId = 'wire-bang-shell-queue'
+    const workspaceId = 'ws-bang-shell-queue'
+    await server.close()
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => { releaseFirst = resolve })
+    let firstStarted!: () => void
+    const firstCallStarted = new Promise<void>((resolve) => { firstStarted = resolve })
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    let llmCalls = 0
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'bang-shell-queue-test',
+        async call() {
+          llmCalls += 1
+          if (llmCalls === 1) {
+            firstStarted()
+            await firstRelease
+          }
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({
+      sessionId,
+      config,
+      workspaceId,
+      workspaceName: 'shell workspace',
+      initialCwd: '/workspace/project',
+    })
+
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'], auth: { role: 'executor', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    let toolCalls = 0
+    let resolveTool!: (payload: ToolCallMessage) => void
+    const toolCalled = new Promise<ToolCallMessage>((resolve) => { resolveTool = resolve })
+    let releaseTool!: () => void
+    const toolRelease = new Promise<void>((resolve) => { releaseTool = resolve })
+    executor.on('tool:call', (payload: ToolCallMessage, ack: (result: ToolResultAck) => void) => {
+      if (payload.name === 'bash') {
+        toolCalls += 1
+        resolveTool(payload)
+        void toolRelease.then(() => ack({
+          callId: payload.callId,
+          ok: true,
+          content: JSON.stringify({ stdout: 'hello', stderr: 'warning', exitCode: 3, signal: null, durationMs: 5 }),
+        }))
+        return
+      }
+      ack({ callId: payload.callId, ok: true, content: 'ok' })
+    })
+    executor.emit('executor:announce', {
+      executorId: 'ex-bang-shell-queue', workspaceId, workspaceName: 'shell workspace', tools: ['bash'], runtime: 'node', runtimeVersion: '22',
+    })
+    await waitForAnyExecutor(server)
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const shellQueueStates: string[] = []
+    dashboard.on('server:message_queue', (payload) => {
+      const shell = payload.items.find((item) => item.id === 'bang-shell-operation')?.shell
+      if (shell) shellQueueStates.push(shell.state)
+    })
+    expect(await dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'text',
+      sessionId, text: 'hold the turn', mode: 'steer', operationId: 'bang-shell-first',
+    })).toEqual({ ok: true })
+    await firstCallStarted
+    expect(await dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'shell',
+      sessionId, text: '!printf hello', mode: 'queue', operationId: 'bang-shell-operation',
+    })).toEqual({ ok: true })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(toolCalls).toBe(0)
+
+    const appendedUserTexts: string[] = []
+    const resultEvent = new Promise<EventAppendedEvent>((resolve) => dashboard.on('event:appended', (payload) => {
+      if (payload.event.kind !== 'user_message') return
+      appendedUserTexts.push(payload.event.text)
+      if (payload.event.text.includes('Shell command result')) resolve(payload)
+    }))
+    releaseFirst()
+    await expect(toolCalled).resolves.toMatchObject({
+      sessionId,
+      name: 'bash',
+      input: { command: 'printf hello', capture_separate_streams: true },
+      cwd: '/workspace/project',
+    })
+    expect(await dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'text',
+      sessionId, text: 'steer after claimed shell', mode: 'steer', operationId: 'bang-shell-following-steer',
+    })).toEqual({ ok: true })
+    expect(toolCalls).toBe(1)
+    releaseTool()
+    await expect(resultEvent).resolves.toMatchObject({
+      event: {
+        kind: 'user_message',
+        text: expect.stringContaining('Command: printf hello'),
+      },
+    })
+    const event = await resultEvent
+    if (event.event.kind !== 'user_message') throw new Error('expected user message')
+    expect(event.event.text).toContain('Operation: bang-shell-operation')
+    expect(event.event.text).toContain('Status: nonzero')
+    expect(event.event.text).toContain('Exit status: 3')
+    expect(event.event.text).toContain('stdout:\nhello')
+    expect(event.event.text).toContain('stderr:\nwarning')
+    await vi.waitFor(() => {
+      expect(appendedUserTexts).toContain('steer after claimed shell')
+    })
+    expect(appendedUserTexts.indexOf(event.event.text)).toBeLessThan(appendedUserTexts.indexOf('steer after claimed shell'))
+    expect(toolCalls).toBe(1)
+    expect(shellQueueStates).toEqual(expect.arrayContaining(['queued', 'running', 'nonzero']))
+    expect(shellQueueStates.indexOf('queued')).toBeLessThan(shellQueueStates.indexOf('running'))
+    expect(shellQueueStates.indexOf('running')).toBeLessThan(shellQueueStates.indexOf('nonzero'))
+    dashboard.close()
+    executor.close()
+  })
+
+  it('cancels a Host-owned shell on external-runtime Stop and never sends its result', async () => {
+    const sessionId = 'wire-bang-shell-external-stop'
+    const workspaceId = 'ws-bang-shell-external-stop'
+    const operationId = 'bang-shell-external-operation'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      copilot: { enabled: true },
+      llm: scriptedLlm(),
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.create({
+      sessionId,
+      agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11',
+      externalSessionId: sessionId,
+      workspaceId,
+      workspaceName: 'external shell workspace',
+      config,
+    })
+
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'], auth: { role: 'executor', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    let lateAck!: (result: ToolResultAck) => void
+    const toolCalled = new Promise<ToolCallMessage>((resolve) => {
+      executor.on('tool:call', (payload, ack) => {
+        lateAck = ack
+        resolve(payload)
+      })
+    })
+    const toolCancelled = new Promise<{ sessionId: string; callId: string }>((resolve) => executor.on('tool:cancel', resolve))
+    executor.emit('executor:announce', {
+      executorId: 'ex-bang-shell-external-stop', workspaceId, workspaceName: 'external shell workspace', tools: ['bash'], runtime: 'node', runtimeVersion: '22',
+    })
+    await waitForAnyExecutor(server)
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    let shellResultSeen = false
+    dashboard.on('event:appended', (payload) => {
+      if (payload.event.kind === 'user_message' && payload.event.text.includes('Shell command result')) shellResultSeen = true
+    })
+    expect(await dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'shell',
+      sessionId, text: '!sleep forever', mode: 'steer', operationId,
+    })).toEqual({ ok: true })
+    const pendingCall = await toolCalled
+
+    expect(await dashboard.timeout(500).emitWithAck('client:cancel', {
+      sessionId, operationId: 'stop-bang-shell-external',
+    })).toEqual({ ok: true })
+    await expect(toolCancelled).resolves.toEqual({ sessionId, callId: pendingCall.callId })
+    lateAck({ callId: pendingCall.callId, ok: true, content: JSON.stringify({ stdout: 'too late', stderr: '', exitCode: 0 }) })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const log = await readSessionLog(server.store.get(sessionId)!.logPath, { allowExternalRuntime: true })
+    expect(log.runtimeMetadata.some((entry) =>
+      entry.action === 'copilot.user_message' && entry.payload.operationId === bangShellResultOperationId(operationId),
+    )).toBe(false)
+    expect(shellResultSeen).toBe(false)
+    dashboard.close()
+    executor.close()
+  })
+
+  it('treats a literal leading bang as ordinary text when intent is text', async () => {
+    const sessionId = 'wire-literal-bang-no-workspace'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    await expect(dashboard.timeout(500).emitWithAck('client:user_message', {
+      intent: 'text', sessionId, text: '!pwd', mode: 'steer', operationId: 'literal-bang-text',
+    })).resolves.toEqual({ ok: true })
+    dashboard.close()
+  })
+
+  it('rejects bang shell admission for a Session without a workspace', async () => {
+    const sessionId = 'wire-bang-shell-no-workspace'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    await expect(dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'shell',
+      sessionId, text: '!pwd', mode: 'steer', operationId: 'bang-shell-no-workspace',
+    })).resolves.toEqual({ ok: false, error: 'Shell commands require a Session bound to a workspace' })
+    dashboard.close()
+  })
+
   it('queues user messages while a turn is running and dispatches them after rest', async () => {
     const sessionId = 'wire-message-queue'
     await server.close()
@@ -5507,13 +5768,13 @@ describe('wire protocol', () => {
 
     const firstAck = await new Promise<RpcAck>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('direct message ACK waited for the Agent turn')), 500)
-      dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer', operationId: 'direct-first' }, (result) => {
+      dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer', operationId: 'direct-first' }, (result) => {
         clearTimeout(timer)
         resolve(result)
       })
     })
     expect(firstAck).toEqual({ ok: true })
-    const retryAck = await dashboard.timeout(500).emitWithAck('client:user_message', {
+    const retryAck = await dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'first',
       mode: 'steer',
@@ -5528,15 +5789,15 @@ describe('wire protocol', () => {
         }
       }, 10)
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue', operationId: 'queued-second' })
-    const retryQueuedAck = await dashboard.timeout(500).emitWithAck('client:user_message', {
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'second', mode: 'queue', operationId: 'queued-second' })
+    const retryQueuedAck = await dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'second',
       mode: 'queue',
       operationId: 'queued-second',
     })
     expect(retryQueuedAck).toEqual({ ok: true })
-    const rejectedAck = await dashboard.timeout(500).emitWithAck('client:user_message', {
+    const rejectedAck = await dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'text',
       sessionId,
       text: 'third',
       mode: 'queue',
@@ -5607,9 +5868,9 @@ describe('wire protocol', () => {
     })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     while (seenPrompts.length === 0) await new Promise((resolve) => setTimeout(resolve, 5))
-    dashboard.emit('client:user_message', { sessionId, text: 'queued', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'queued', mode: 'queue' })
     await new Promise((resolve) => setTimeout(resolve, 30))
     expect(seenPrompts).toEqual(['first'])
     expect(server.store.get(sessionId)?.state.messages.some((message) => message.role === 'user' && message.content.some((part) => part.type === 'text' && part.text === 'queued'))).toBe(false)
@@ -5630,7 +5891,7 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
     const queueEvents: ServerMessageQueueEvent[] = []
     dashboard.on('server:message_queue', (event) => { if (event.sessionId === sessionId) queueEvents.push(event) })
-    const ack = await dashboard.timeout(500).emitWithAck('client:user_message', {
+    const ack = await dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'text',
       sessionId, text: 'send immediately', mode: 'queue', operationId: 'idle-queue-send',
     })
     expect(ack).toEqual({ ok: true })
@@ -5676,10 +5937,10 @@ describe('wire protocol', () => {
     let latestQueue: ServerMessageQueueEvent | undefined
     dashboard.on('server:message_queue', (event) => { if (event.sessionId === sessionId) latestQueue = event })
 
-    await expect(dashboard.timeout(500).emitWithAck('client:user_message', {
+    await expect(dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'text',
       sessionId, text: 'first', mode: 'steer', operationId: 'post-ack-first',
     })).resolves.toEqual({ ok: true })
-    await expect(dashboard.timeout(500).emitWithAck('client:user_message', {
+    await expect(dashboard.timeout(500).emitWithAck('client:user_message', { intent: 'text',
       sessionId, text: 'second', mode: 'queue', operationId: 'post-ack-second',
     })).resolves.toEqual({ ok: true })
 
@@ -5752,7 +6013,7 @@ describe('wire protocol', () => {
       })
     })
 
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     await new Promise<void>((resolve) => {
       const poll = setInterval(() => {
         if (seenModels.length === 1) {
@@ -5761,7 +6022,7 @@ describe('wire protocol', () => {
         }
       }, 10)
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'second', mode: 'queue' })
     const modelChanged = new Promise<void>((resolve) => dashboard.on('server:control_update', (payload) => {
       if (payload.kind === 'session_meta_changed' && payload.sessionId === sessionId && payload.preferences?.selectedModel === 'provider:model-later') {
         resolve()
@@ -5848,7 +6109,7 @@ describe('wire protocol', () => {
       })
     })
 
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     await new Promise<void>((resolve) => {
       const poll = setInterval(() => {
         if (seenPrompts.length === 1) {
@@ -5857,9 +6118,9 @@ describe('wire protocol', () => {
         }
       }, 10)
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
-    dashboard.emit('client:user_message', { sessionId, text: 'third', mode: 'queue' })
-    dashboard.emit('client:user_message', { sessionId, text: 'delete me', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'second', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'third', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'delete me', mode: 'queue' })
     const queued = await waitForQueue(3)
     const second = queued.items.find((item) => item.text === 'second')!
     const third = queued.items.find((item) => item.text === 'third')!
@@ -5924,7 +6185,7 @@ describe('wire protocol', () => {
       const admission = fetch(`${url}/internal/runtime/admission/commit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'claimed-queue-race-secret' },
-        body: JSON.stringify({ sessionId, operationId, text: 'dispatch this exact text', mode: 'queue' }),
+        body: JSON.stringify({ sessionId, operationId, text: 'dispatch this exact text', intent: 'text', mode: 'queue' }),
       })
       await expect(claimed).resolves.toEqual({ sessionId, operationId, runtime: agentRuntime })
 
@@ -6012,7 +6273,7 @@ describe('wire protocol', () => {
       const admission = fetch(`${url}/internal/runtime/admission/commit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': 'committed-queue-race-secret' },
-        body: JSON.stringify({ sessionId, operationId, text: 'already committed text', mode: 'queue' }),
+        body: JSON.stringify({ sessionId, operationId, text: 'already committed text', intent: 'text', mode: 'queue' }),
       })
       await claimed
       if (agentRuntime === 'kernel') {
@@ -6103,7 +6364,7 @@ describe('wire protocol', () => {
       throw new Error(`queue did not reach ${count}`)
     }
 
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     await new Promise<void>((resolve) => {
       const poll = setInterval(() => {
         if (seenPrompts.length === 1) {
@@ -6112,7 +6373,7 @@ describe('wire protocol', () => {
         }
       }, 10)
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'second', mode: 'queue' })
     expect((await waitForQueue(1)).items[0]?.text).toBe('second')
     expect(firstGovernor.snapshot('unit-a')).toMatchObject({ concurrentTurns: 1, queuedMessages: 1 })
     dashboard.close()
@@ -6229,7 +6490,7 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
     // Start a turn and wait until the LLM call is in flight (blocked).
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     await new Promise<void>((resolve) => {
       const poll = setInterval(() => {
         if (seenPrompts.length === 1) {
@@ -6241,7 +6502,7 @@ describe('wire protocol', () => {
 
     // Steer while the turn is running: this must interrupt the active turn and
     // be delivered — never linger in the queue dock as a stuck "queued" item.
-    dashboard.emit('client:user_message', { sessionId, text: 'steered', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'steered', mode: 'steer' })
     // Release the blocked first call so the abort/redispatch chain can settle.
     releaseFirst()
 
@@ -6288,11 +6549,11 @@ describe('wire protocol', () => {
     let latestQueue: ServerMessageQueueEvent | undefined
     dashboard.on('server:message_queue', (payload) => { if (payload.sessionId === sessionId) latestQueue = payload })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     while (seenPrompts.length === 0) await new Promise((resolve) => setTimeout(resolve, 10))
 
-    dashboard.emit('client:user_message', { sessionId, text: 'later queue', mode: 'queue' })
-    dashboard.emit('client:user_message', { sessionId, text: 'pending steer', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'later queue', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'pending steer', mode: 'steer' })
     await new Promise((resolve) => setTimeout(resolve, 20))
     dashboard.emit('client:cancel', { sessionId })
 
@@ -6305,7 +6566,7 @@ describe('wire protocol', () => {
     expect(seenPrompts.some((prompt) => prompt.includes('later queue'))).toBe(false)
     expect(latestQueue).toMatchObject({ pending: 0, items: [] })
 
-    dashboard.emit('client:user_message', { sessionId, text: 'resume explicitly', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'resume explicitly', mode: 'steer' })
     const resumeDeadline = Date.now() + 3000
     while (Date.now() < resumeDeadline && !seenPrompts.some((prompt) => prompt.includes('resume explicitly'))) await new Promise((resolve) => setTimeout(resolve, 10))
     expect(seenPrompts.some((prompt) => prompt.includes('resume explicitly'))).toBe(true)
@@ -6389,14 +6650,14 @@ describe('wire protocol', () => {
     })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     // Wait until the parent is parked in `executing_tools` (child agent running).
     await childStarted
     // Give the child LLM call a beat to actually start running (blocked on gate).
     await new Promise((resolve) => setTimeout(resolve, 50))
 
     // Steer while a tool is executing. Spec A: this must NOT abort the child.
-    dashboard.emit('client:user_message', { sessionId, text: 'steered', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'steered', mode: 'steer' })
     // Give the steer a beat to be enqueued + flag the session for a boundary stop
     // while the tool is still running, then let the child finish on its own.
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -6458,7 +6719,7 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
     // Start a turn; wait until the first LLM call is in flight (blocked).
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     await new Promise<void>((resolve) => {
       const poll = setInterval(() => {
         if (seenPrompts.length === 1) {
@@ -6470,7 +6731,7 @@ describe('wire protocol', () => {
 
     // Queue a follow-up while the turn is running, then DISCONNECT the dashboard
     // (simulating the user closing the browser / PWA) before the turn finishes.
-    dashboard.emit('client:user_message', { sessionId, text: 'queued', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'queued', mode: 'queue' })
     await new Promise((resolve) => setTimeout(resolve, 50))
     dashboard.close()
 
@@ -6528,7 +6789,7 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
     // Start a turn; wait until the first LLM call is in flight (blocked).
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     await new Promise<void>((resolve) => {
       const poll = setInterval(() => {
         if (seenPrompts.length === 1) {
@@ -6539,9 +6800,9 @@ describe('wire protocol', () => {
     })
 
     // Queue THREE follow-ups while the turn is running, then close the browser.
-    dashboard.emit('client:user_message', { sessionId, text: 'q-one', mode: 'queue' })
-    dashboard.emit('client:user_message', { sessionId, text: 'q-two', mode: 'queue' })
-    dashboard.emit('client:user_message', { sessionId, text: 'q-three', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'q-one', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'q-two', mode: 'queue' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'q-three', mode: 'queue' })
     await new Promise((resolve) => setTimeout(resolve, 80))
     dashboard.close()
 
@@ -6600,7 +6861,7 @@ describe('wire protocol', () => {
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'first', mode: 'steer' })
     await new Promise<void>((resolve) => {
       const poll = setInterval(() => {
         if (seenPrompts.length === 1) {

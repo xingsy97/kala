@@ -141,6 +141,7 @@ import type { DagStore } from '../dag/store.js'
 import type { StorageInventory } from '../store/storage-inventory.js'
 import type { SafeCleanupEngine } from '../store/safe-cleanup.js'
 import { DAG_PLANNER_INSTRUCTION, DAG_PLAN_TOOL } from '../dag/tool.js'
+import { parseBangShellRequest } from '../bang-shell.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -151,6 +152,12 @@ export type QueuedUserMessage = {
   createdAt: string
   content?: readonly MessageContent[]
   model?: string
+  /** Host-owned shell escape. State and result are persisted before Agent dispatch. */
+  shell?: {
+    command: string
+    state?: 'queued' | 'running' | 'completed' | 'nonzero' | 'failed'
+    result?: string
+  }
 }
 
 async function safeRuntimeAction(
@@ -992,7 +999,7 @@ export function configureDashboardNamespace(
       const fileValidation = validateInlineMessageFiles(p.content)
       if (!fileValidation.ok) { ack?.({ ok: false, error: `${fileValidation.error.code}: ${fileValidation.error.message}` }); return }
       const result = await runOperation('client:user_message', p.sessionId, p.operationId, p, async () => {
-        deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
+        deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer', intent: p.intent } })
         await handleUserMessage(deps, p, socket.data.dashboardActor as DashboardActor | undefined)
       })
       ack?.(result)
@@ -1068,6 +1075,10 @@ export function configureDashboardNamespace(
         // queue drainer can observe the resulting resting state and immediately
         // start a queued steer/follow-up, making Stop appear ineffective.
         await deps.messageQueues.stop(p.sessionId)
+        // Host-owned bang-shell calls use the Executor registry even when the
+        // Agent Runtime itself is external. Cancel those calls before cancelling
+        // the Runtime so a stopped command cannot keep modifying the workspace.
+        await deps.loopDeps.tools.cancelPending(p.sessionId)
         const record = await loadRecordForDashboard(deps, p.sessionId)
         if (!record) throw new Error('unknown session')
         await deps.agentRuntimes.require(record.agentRuntime).cancel(record)
@@ -1869,6 +1880,11 @@ export function configureDashboardNamespace(
           if (deps.loop.hasActiveTurn(targetSessionId)) throw new Error('session tree has an active turn; stop it before deleting')
         }
         for (const targetSessionId of targetIds.reverse()) {
+          // Deletion can race Host-owned shell work, which is not represented as
+          // a Loop turn. Tombstone its queue item and cancel the Executor call
+          // before removing Session storage so no late result can recreate it.
+          await deps.messageQueues.stop(targetSessionId)
+          await deps.loopDeps.tools.cancelPending(targetSessionId)
           const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId).catch(() => undefined))
           if (record) await deps.agentRuntimes.get(record.agentRuntime)?.delete?.(record)
           if (record && deps.onSessionDeleted) {
@@ -2215,6 +2231,15 @@ async function safeDispatch(
   }
 }
 
+function assertActorSessionUnit(actor: DashboardActor | undefined, record: SessionRecord): void {
+  if (actor?.kind === 'ingress') {
+    if (!record.organizationId) throw new Error('tenant_attribution_missing')
+    if (actor.organizationId !== record.organizationId) throw new Error('tenant_forbidden')
+  } else if (record.organizationId) {
+    throw new Error('missing organization attribution for Session mutation')
+  }
+}
+
 export async function handleUserMessage(
   deps: DashboardDeps,
   p: ClientUserMessage,
@@ -2230,6 +2255,11 @@ export async function handleUserMessage(
     )
     return
   }
+  assertActorSessionUnit(actor, record)
+  const shell = p.intent === 'shell' ? parseBangShellRequest(p.text) : undefined
+  if (p.intent === 'shell' && !shell) throw new Error('Shell intent requires a leading ! command')
+  if (shell && p.content?.length) throw new Error('Shell commands cannot include attachments or structured content')
+  if (shell && !record.workspaceId) throw new Error('Shell commands require a Session bound to a workspace')
   const capabilities = deps.agentRuntimes.require(record.agentRuntime).descriptor().capabilities
   if (p.mode === 'queue' && !capabilities.queue) {
     deps.broadcastError(p.sessionId, 'host', `${record.agentRuntime} sessions do not support queued messages`)
@@ -2247,6 +2277,7 @@ export async function handleUserMessage(
   if (
     record.agentRuntime !== 'kernel'
     && requestedMode === 'steer'
+    && !shell
     && isRestingStatus(record.state.status)
     && hostQueueIdle
   ) {
@@ -2283,9 +2314,6 @@ export async function handleUserMessage(
     if (actor?.kind !== 'ingress' || !record.organizationId) {
       throw new Error('missing organization attribution for queue quota enforcement')
     }
-    if (actor.organizationId !== record.organizationId) {
-      throw new Error('tenant_forbidden')
-    }
     await deps.queueQuota.assertCanEnqueueMessage({
       organizationId: actor.organizationId,
       principal: actor.principal,
@@ -2295,14 +2323,16 @@ export async function handleUserMessage(
       mode,
     })
   }
+  const operationId = p.operationId ?? ulid()
   const queued: QueuedUserMessage = {
-    id: ulid(),
-    operationId: p.operationId ?? ulid(),
+    id: operationId,
+    operationId,
     text: p.text,
     mode,
     createdAt: new Date().toISOString(),
     ...(p.content ? { content: p.content } : {}),
     ...(messageModel ? { model: messageModel } : {}),
+    ...(shell ? { shell } : {}),
   }
   // The Socket.IO ACK means "reliably accepted", not "the Agent turn has
   // completed". Persist every message before acknowledging, then drain in the
@@ -2319,6 +2349,11 @@ export async function handleUserMessage(
     // Do not truncate an in-flight response/tool. Stop at the next safe boundary
     // and let the persisted front-queued steer become the next user turn.
     deps.loop.requestStopAtBoundary(p.sessionId)
+  } else if (shell && record.agentRuntime !== 'kernel' && mode === 'steer' && !isRestingStatus(record.state.status)) {
+    // Match HTTP admission's external-runtime STEER semantics. The durable
+    // shell item remains at the front and executes only after cancellation has
+    // brought the Runtime to its safe resting boundary.
+    await runtime.cancel(record)
   }
   void deps.messageQueues.drain(p.sessionId)
 }

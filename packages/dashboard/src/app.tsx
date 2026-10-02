@@ -78,6 +78,8 @@ import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
 import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDialog.js'
 import { ExecutorPairingPrompt } from './features/explorer/ExecutorPairingPrompt.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
+import { ScheduledTasksDialog, ScheduledTasksTrigger } from './features/scheduled-tasks/ScheduledTasksDialog.js'
+import type { ScheduledTaskTarget } from './scheduled-tasks-client.js'
 import { taskGraphFromMessages, taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
 import { TaskGraphButton } from './features/chat/TaskGraphButton.js'
 import { DagRunPanel } from './features/dag/DagRunPanel.js'
@@ -291,6 +293,7 @@ export function App(): JSX.Element {
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false)
   const [userMessageNavigationPortalTarget, setUserMessageNavigationPortalTarget] = useState<HTMLDivElement | null>(null)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
+  const [scheduledTasksTarget, setScheduledTasksTarget] = useState<ScheduledTaskTarget | null>(null)
   const [workspaceTerminal, setWorkspaceTerminal] = useState<{ workspaceId: string; workspaceName: string; ownerSessionId: string; sessionId: string; cwd?: string } | null>(null)
   const [workspaceTerminalReady, setWorkspaceTerminalReady] = useState(false)
   const [workspaceTerminalExpanded, setWorkspaceTerminalExpanded] = useState(false)
@@ -2062,16 +2065,23 @@ export function App(): JSX.Element {
                         showPinnedMessage={showPinnedMessage}
                         scrollToBottomToken={chatScrollToBottomToken}
                         userMessageNavigationPortalTarget={userMessageNavigationPortalTarget}
-                        topRightAccessory={wideLayout && explorerOpen && (isDesktopClient() || !inspectorOpen) ? (
+                        topRightAccessory={(
                           <div className="flex items-center gap-2">
-                            {!inspectorOpen ? (
+                            <ScheduledTasksTrigger
+                              target={activeSessionId ? { kind: 'session', sessionId: activeSessionId } : null}
+                              onOpen={() => {
+                                if (activeSessionId) setScheduledTasksTarget({ kind: 'session', sessionId: activeSessionId })
+                              }}
+                              className="h-9 rounded-full border-border/55 bg-background/90 shadow-sm"
+                            />
+                            {wideLayout && explorerOpen && !inspectorOpen ? (
                               <Button variant="outline" size="icon" onClick={() => setInspectorOpen(true)} title={t('app.openInspector')} aria-label={t('app.openInspector')} data-testid="sidebar-toggle" className="h-9 w-9 rounded-full border-border/55 bg-background/90 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground">
                                 <PanelRight className="h-4 w-4" aria-hidden />
                               </Button>
                             ) : null}
-                            {isDesktopClient() ? <DesktopWindowControlsSlot /> : null}
+                            {wideLayout && explorerOpen && isDesktopClient() ? <DesktopWindowControlsSlot /> : null}
                           </div>
-                        ) : null}
+                        )}
                         compactStatus={session.agentRuntime === 'copilot' ? { kind: 'idle' } : compactStatus}
                         liveToolActivityTailCount={liveToolActivityTailCount}
                         toolExecutionStartedAt={session.toolExecutionStartedAt}
@@ -2121,6 +2131,7 @@ export function App(): JSX.Element {
                             ...(config.token ? { token: config.token } : {}),
                             sessionId: activeSessionId,
                             text,
+                            intent: 'text',
                             mode: 'steer',
                           }).then(() => setAwaitingAck(false)).catch((error) => {
                             setPendingUserMessages((prev) => prev.filter((item) => item.id !== pendingId))
@@ -2335,7 +2346,7 @@ export function App(): JSX.Element {
                               files,
                             })
                           }}
-                          onSubmit={async (text, mode, images, extraBlocks) => {
+                          onSubmit={async (text, mode, images, extraBlocks, intent) => {
                             if (activeSessionId === null) return
                             const imageBlocks = images ?? []
                             const extras = extraBlocks ?? []
@@ -2395,11 +2406,14 @@ export function App(): JSX.Element {
                                 ...(config.token ? { token: config.token } : {}),
                                 sessionId: activeSessionId,
                                 text,
+                                intent,
                                 mode,
                                 operationId,
                                 ...(content ? { content } : {}),
                               })
                               if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
+                              // Keep shell work visible until Host queue/transcript projection replaces
+                              // this stable operation identity. ACK is acceptance, not completion.
                             } catch (error) {
                               setPendingUserMessages((prev) => prev.filter((item) => item.id !== operationId))
                               // A delivery-pending error means the Queue operation is
@@ -2758,6 +2772,30 @@ export function App(): JSX.Element {
         sessions={workspaceInfoSessions}
         onRename={(name) => renameWorkspaceAt(workspaceInfoId ?? '', name)}
         onOpenSession={(sessionId) => { selectSession(sessionId); setSection('agent') }}
+        onManageScheduledTasks={() => {
+          if (!workspaceInfoId) return
+          const workspaceName = workspaceInfoExecutor?.workspaceName ?? workspaceInfoSessions[0]?.workspaceName
+          const cwd = workspaceInfoExecutor?.defaultCwd
+          setWorkspaceInfoId(null)
+          setScheduledTasksTarget({
+            kind: 'workspace',
+            workspaceId: workspaceInfoId,
+            ...(workspaceName ? { workspaceName } : {}),
+            ...(cwd ? { cwd } : {}),
+          })
+        }}
+      />
+      <ScheduledTasksDialog
+        open={scheduledTasksTarget !== null}
+        onOpenChange={(open) => { if (!open) setScheduledTasksTarget(null) }}
+        host={hostEndpoint.url}
+        {...(config.token ? { token: config.token } : {})}
+        target={scheduledTasksTarget}
+        onOpenSession={(sessionId) => {
+          setScheduledTasksTarget(null)
+          selectSession(sessionId)
+          setSection('agent')
+        }}
       />
       <Dialog open={workspaceTerminal !== null} onOpenChange={(open) => {
         if (!open) {

@@ -84,19 +84,19 @@ describe('admitUserMessage', () => {
         accepted: true, duplicate: true, operationId: 'operation-0001', sequence: 8, state: 'committed', routeGeneration: 3,
       }), { status: 202, headers: { 'content-type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(admitUserMessage({ host: 'https://runlab.example/', token: 'private-token', sessionId: 'session-1', operationId: 'operation-0001', text: 'continue', mode: 'queue' })).resolves.toMatchObject({ accepted: true, duplicate: true, operationId: 'operation-0001' })
+    await expect(admitUserMessage({ host: 'https://runlab.example/', token: 'private-token', sessionId: 'session-1', operationId: 'operation-0001', text: 'continue', intent: 'text', mode: 'queue' })).resolves.toMatchObject({ accepted: true, duplicate: true, operationId: 'operation-0001' })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     for (const call of fetchMock.mock.calls) {
       expect(call[0]).toBe('https://runlab.example/runtime/admission/messages')
       expect(call[1]).toMatchObject({ method: 'POST', credentials: 'include', headers: { authorization: 'Bearer private-token' } })
-      expect(JSON.parse(String(call[1]?.body))).toMatchObject({ operationId: 'operation-0001', sessionId: 'session-1' })
+      expect(JSON.parse(String(call[1]?.body))).toMatchObject({ operationId: 'operation-0001', sessionId: 'session-1', intent: 'text' })
     }
   })
 
   it('does not retry a permanent validation failure', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid admission message' }), { status: 400 }))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-0002', text: 'bad', mode: 'steer' })).rejects.toThrow('invalid admission message')
+    await expect(admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-0002', text: 'bad', intent: 'text', mode: 'steer' })).rejects.toThrow('invalid admission message')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -108,6 +108,7 @@ describe('admitUserMessage', () => {
       sessionId: 'session-1',
       operationId: 'operation-uncertain',
       text: 'hello',
+      intent: 'text',
       mode: 'steer',
       attempts: 3,
     })
@@ -132,6 +133,7 @@ describe('admitUserMessage', () => {
       sessionId: 'session-1',
       operationId: 'operation-attachment-pending',
       text: '',
+      intent: 'text',
       mode: 'queue',
       content: [{
         type: 'file',
@@ -161,7 +163,7 @@ describe('admitUserMessage', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ operationId: 'operation-0003', sessionId: 'session-1', sequence: 9, state: 'pending', acceptedAt: new Date().toISOString(), routeGeneration: 5, attempts: 1 }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ operationId: 'operation-0003', sessionId: 'session-1', sequence: 9, state: 'committed', acceptedAt: new Date().toISOString(), routeGeneration: 5, attempts: 2, sessionCursor: 44 }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-0003', text: 'hello', mode: 'steer', deliveryTimeoutMs: 2_000 })).resolves.toMatchObject({ accepted: true })
+    await expect(admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-0003', text: 'hello', intent: 'text', mode: 'steer', deliveryTimeoutMs: 2_000 })).resolves.toMatchObject({ accepted: true })
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/runtime/admission/messages',
       '/runtime/admission/messages/operation-0003',
@@ -186,6 +188,7 @@ describe('admitUserMessage', () => {
       sessionId: 'session-1',
       operationId: 'operation-queued',
       text: 'later',
+      intent: 'text',
       mode: 'queue',
       deliveryTimeoutMs: 1,
     })).resolves.toMatchObject({ accepted: true, state: 'pending' })
@@ -196,7 +199,7 @@ describe('admitUserMessage', () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true, duplicate: false, operationId: 'operation-0004', sequence: 10, state: 'pending', routeGeneration: 5 }), { status: 202 }))
       .mockResolvedValue(new Response(JSON.stringify({ operationId: 'operation-0004', sessionId: 'session-1', sequence: 10, state: 'pending', acceptedAt: new Date().toISOString(), routeGeneration: 5, attempts: 3, lastError: 'Runtime has not committed it' }), { status: 200 })))
-    const result = admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-0004', text: 'hello', mode: 'steer', deliveryTimeoutMs: 1 })
+    const result = admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-0004', text: 'hello', intent: 'text', mode: 'steer', deliveryTimeoutMs: 1 })
     await expect(result).rejects.toBeInstanceOf(AdmissionDeliveryPendingError)
   })
 
@@ -204,7 +207,7 @@ describe('admitUserMessage', () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true, duplicate: false, operationId: 'operation-failed', sequence: 11, state: 'pending', routeGeneration: 5 }), { status: 202 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ operationId: 'operation-failed', sessionId: 'deleted-session', sequence: 11, state: 'failed', acceptedAt: new Date().toISOString(), failedAt: new Date().toISOString(), routeGeneration: 5, attempts: 1, lastError: 'The target Session no longer exists' }), { status: 200 })))
-    await expect(admitUserMessage({ host: '', sessionId: 'deleted-session', operationId: 'operation-failed', text: 'hello', mode: 'steer', deliveryTimeoutMs: 2_000 }))
+    await expect(admitUserMessage({ host: '', sessionId: 'deleted-session', operationId: 'operation-failed', text: 'hello', intent: 'text', mode: 'steer', deliveryTimeoutMs: 2_000 }))
       .rejects.toBeInstanceOf(AdmissionDeliveryFailedError)
   })
 
@@ -212,7 +215,7 @@ describe('admitUserMessage', () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true, duplicate: false, operationId: 'operation-expired', sequence: 12, state: 'pending', routeGeneration: 5 }), { status: 202 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ operationId: 'operation-expired', sessionId: 'session-1', sequence: 12, state: 'expired', acceptedAt: new Date().toISOString(), routeGeneration: 5, attempts: 4 }), { status: 200 })))
-    await expect(admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-expired', text: 'hello', mode: 'steer', deliveryTimeoutMs: 2_000 }))
+    await expect(admitUserMessage({ host: '', sessionId: 'session-1', operationId: 'operation-expired', text: 'hello', intent: 'text', mode: 'steer', deliveryTimeoutMs: 2_000 }))
       .rejects.toMatchObject({ state: 'expired', durablyAccepted: true })
   })
 

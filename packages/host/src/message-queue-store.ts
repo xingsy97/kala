@@ -8,7 +8,7 @@ import { appendRuntimeMetadataEntry, findLatestRuntimeMetadata } from './store/l
 import type { QueuedUserMessage } from './connection/dashboard-ns.js'
 
 const ACTION = 'message_queue_snapshot'
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 export const MAX_CANCELLED_OPERATION_IDS = 10_000
 
 export type PersistedMessageQueueState = {
@@ -72,7 +72,7 @@ export async function persistMessageQueueSnapshot(
 
 function normalizeQueueSnapshot(entry: RuntimeMetadataEntry): PersistedMessageQueueState {
   const payload = entry.payload
-  if (!payload || (payload.schemaVersion !== 1 && payload.schemaVersion !== SCHEMA_VERSION) || !Array.isArray(payload.items)) {
+  if (!payload || (payload.schemaVersion !== 1 && payload.schemaVersion !== 2 && payload.schemaVersion !== SCHEMA_VERSION) || !Array.isArray(payload.items)) {
     throw new Error('unsupported persisted message queue snapshot')
   }
   const out: QueuedUserMessage[] = []
@@ -80,7 +80,7 @@ function normalizeQueueSnapshot(entry: RuntimeMetadataEntry): PersistedMessageQu
     const item = normalizeQueuedMessage(raw)
     if (item) out.push(item)
   }
-  const cancelledOperationIds = payload.schemaVersion === SCHEMA_VERSION
+  const cancelledOperationIds = payload.schemaVersion === 2 || payload.schemaVersion === SCHEMA_VERSION
     ? normalizeCancelledOperationIds(payload.cancelledOperationIds)
     : []
   const cancelled = new Set(cancelledOperationIds)
@@ -121,6 +121,7 @@ function normalizeQueuedMessage(raw: unknown): QueuedUserMessage | undefined {
   const createdAt = stringValue(record.createdAt)
   const mode = record.mode === 'queue' || record.mode === 'steer' ? record.mode : undefined
   const content = schema.MessageContentSchema.array().safeParse(record.content ?? [])
+  const shell = normalizeShell(record.shell)
   if (!id || text === undefined || !createdAt || !mode || !content.success) return undefined
   if (text.trim().length === 0 && content.data.length === 0) return undefined
   return {
@@ -131,6 +132,7 @@ function normalizeQueuedMessage(raw: unknown): QueuedUserMessage | undefined {
     createdAt,
     ...(content.data.length > 0 ? { content: content.data as readonly MessageContent[] } : {}),
     ...(typeof record.model === 'string' && record.model.trim().length > 0 ? { model: record.model } : {}),
+    ...(shell ? { shell } : {}),
   }
 }
 
@@ -143,6 +145,25 @@ function serializeQueuedMessage(item: QueuedUserMessage): Record<string, unknown
     createdAt: item.createdAt,
     ...(item.content ? { content: item.content } : {}),
     ...(item.model ? { model: item.model } : {}),
+    ...(item.shell ? { shell: item.shell } : {}),
+  }
+}
+
+function normalizeShell(raw: unknown): QueuedUserMessage['shell'] | undefined {
+  if (raw === undefined) return undefined
+  if (!raw || typeof raw !== 'object') throw new Error('invalid persisted shell queue item')
+  const value = raw as Record<string, unknown>
+  const command = stringValue(value.command)
+  const state = value.state === 'queued' || value.state === 'running' || value.state === 'completed' || value.state === 'nonzero' || value.state === 'failed'
+    ? value.state
+    : value.state === undefined ? undefined : null
+  if (!command || state === null || (value.result !== undefined && typeof value.result !== 'string')) {
+    throw new Error('invalid persisted shell queue item')
+  }
+  return {
+    command,
+    ...(state ? { state } : {}),
+    ...(typeof value.result === 'string' ? { result: value.result } : {}),
   }
 }
 

@@ -156,6 +156,24 @@ describe('optimistic queued messages', () => {
     expect(reconcileOptimisticQueuedMessages(optimistic, [], timeline)).toEqual([])
   })
 
+  it('keeps a shell optimistic row through queue snapshots and reconciles it by original operation on terminal commit', () => {
+    const optimistic = [{ id: 'shell-operation', text: '!printf hello', mode: 'queue' as const, createdAt: '2026-10-02T10:00:00.000Z' }]
+    const running = [{ ...optimistic[0]!, shell: { command: 'printf hello', state: 'running' as const } }]
+    expect(reconcileOptimisticQueuedMessages(optimistic, running, [])).toBe(optimistic)
+
+    const terminal: TimelineEntry[] = [{
+      seq: 2,
+      ts: '2026-10-02T10:00:02.000Z',
+      event: {
+        kind: 'user_message',
+        operationId: 'bang-shell-result-derived',
+        text: 'Shell command result (explicit operator request; command execution can modify the workspace):\nCommand identity: sha256:test\nOperation: shell-operation\nStatus: completed\nCommand: printf hello',
+      },
+      effects: [],
+    }]
+    expect(reconcileOptimisticQueuedMessages(optimistic, [], terminal)).toEqual([])
+  })
+
   it('does not merge distinct queued operations that have identical content', () => {
     const server = [{ id: 'operation-1', text: 'repeat', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }]
     const optimistic = [{ id: 'operation-2', text: 'repeat', mode: 'queue' as const, createdAt: '2026-07-07T00:00:01.000Z' }]

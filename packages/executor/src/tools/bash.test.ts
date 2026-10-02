@@ -33,6 +33,22 @@ describe('bash', () => {
     expect(out).toContain('--- exit code: 3')
   })
 
+  it('optionally returns separate stdout and stderr for operator shell escapes', async () => {
+    const out = await bashTool.run(
+      { command: 'printf out; printf err >&2; exit 7', capture_separate_streams: true },
+      makeCtx(root),
+    )
+
+    expect(JSON.parse(out)).toMatchObject({
+      stdout: 'out',
+      stderr: 'err',
+      exitCode: 7,
+      signal: null,
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    })
+  })
+
   it('runs commands from the session cwd when no tool-local cwd is supplied', async () => {
     const child = join(root, 'child')
     mkdirSync(child)

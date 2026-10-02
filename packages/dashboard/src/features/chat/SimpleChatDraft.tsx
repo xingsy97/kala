@@ -96,7 +96,7 @@ export function SimpleChatDraft({
     const operation = (async () => {
       try {
         await ensureSession()
-        await admitUserMessage({ ...address, ...submission, mode: 'steer' })
+        await admitUserMessage({ ...address, ...submission, intent: 'text', mode: 'steer' })
         if (mounted.current) onCreated(sessionId)
       } catch (cause) {
         if (mounted.current) {

@@ -545,6 +545,8 @@ export type ClientUserMessage = {
   operationId?: string
   sessionId: string
   text: string
+  /** Explicit operator intent. A leading `!` is never executable without `shell`. */
+  intent: 'text' | 'shell'
   mode?: 'steer' | 'queue'
   /**
    * Structured content blocks. When present, kernel uses these verbatim
@@ -2106,6 +2108,12 @@ export type QueuedMessagePreview = {
   /** Structured attachments are included so the compact queue dock can render
    * stable placeholders such as [Image #1] without embedding full previews. */
   content?: readonly MessageContent[]
+  /** Host-owned shell lifecycle, keyed by this item's original operation id. */
+  shell?: {
+    command: string
+    state: 'queued' | 'running' | 'completed' | 'nonzero' | 'failed'
+    result?: string
+  }
 }
 
 export type ExecutorClientToServerEvents = {

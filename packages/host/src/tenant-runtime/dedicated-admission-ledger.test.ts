@@ -10,7 +10,7 @@ const roots: string[] = []
 const principal = 'a'.repeat(64)
 
 function message(operationId: string, sessionId = 'session-1', text = operationId): AdmissionMessage {
-  return { schemaVersion: 1, principalDigest: principal, unitId: 'local', sessionId, operationId, mode: 'queue', text }
+  return { schemaVersion: 1, principalDigest: principal, unitId: 'local', sessionId, operationId, mode: 'queue', intent: 'text', text }
 }
 
 async function ledger(capacity = 1000): Promise<{ path: string; value: DedicatedAdmissionLedger }> {

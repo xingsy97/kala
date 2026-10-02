@@ -248,7 +248,7 @@ export async function startDedicatedIngress(options: {
         try {
           const response = await fetch(`${handoffOrigin}/internal/runtime/admission/commit`, {
             method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-handoff': options.ingressHandoffSecret },
-            body: JSON.stringify({ sessionId: record.sessionId, operationId: record.operationId, text: record.text, mode: record.mode, ...(record.content ? { content: record.content } : {}) }),
+            body: JSON.stringify({ sessionId: record.sessionId, operationId: record.operationId, text: record.text, intent: record.intent, mode: record.mode, ...(record.content ? { content: record.content } : {}) }),
             signal: AbortSignal.timeout(5000),
           })
           if (!response.ok) {
@@ -365,7 +365,7 @@ async function acceptAdmission(
   const message: AdmissionMessage = {
     schemaVersion: 1, principalDigest: principalDigest(authenticated.actor), unitId: 'local',
     sessionId: parsed.data.sessionId, operationId: required(parsed.data.operationId, 'operationId'),
-    mode: parsed.data.mode === 'queue' ? 'queue' : 'steer', text: parsed.data.text,
+    mode: parsed.data.mode === 'queue' ? 'queue' : 'steer', intent: parsed.data.intent, text: parsed.data.text,
     ...(parsed.data.content ? { content: parsed.data.content } : {}),
   }
   const hasReferencedAttachments = message.content?.some(isHostReferencedAttachment) ?? false

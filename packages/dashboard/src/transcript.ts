@@ -41,6 +41,7 @@ export type TranscriptItem =
       mode: 'steer' | 'queue'
       status: 'sending' | 'queued'
       content?: readonly MessageContent[]
+      shell?: QueuedMessagePreview['shell']
       createdAt: string
     }
   | CompactProgress
@@ -350,6 +351,7 @@ export function appendLiveTranscriptItems(
       mode: queued.mode,
       status: 'queued',
       ...(queued.content ? { content: queued.content } : {}),
+      ...(queued.shell ? { shell: queued.shell } : {}),
       createdAt: queued.createdAt,
     })
   })

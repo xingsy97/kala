@@ -61,8 +61,27 @@ describe('durable message queue metadata', () => {
     const parsed = await readSessionLog(record.logPath)
     expect(parsed.runtimeMetadata.at(-1)).toMatchObject({
       action: 'message_queue_snapshot',
-      payload: { schemaVersion: 2, items: [], cancelledOperationIds: ['operation-deleted-before-arrival', 'operation-stopped'] },
+      payload: { schemaVersion: 3, items: [], cancelledOperationIds: ['operation-deleted-before-arrival', 'operation-stopped'] },
     })
+  })
+
+  it('restores a shell command and its persisted result without re-execution state loss', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'message-queue-shell-'))
+    roots.push(root)
+    const store = new SessionStore(root)
+    const record = await store.create({ sessionId: 'shell-queue', config: createConfig({ tools: [] }) })
+    const item = {
+      id: 'shell-item',
+      operationId: 'shell-operation',
+      text: '!printf hello',
+      mode: 'queue' as const,
+      createdAt: new Date().toISOString(),
+      shell: { command: 'printf hello', state: 'nonzero' as const, result: 'persisted shell result' },
+    }
+
+    await persistMessageQueueSnapshot(store, record.sessionId, [item])
+
+    await expect(loadPersistedMessageQueue(new SessionStore(root), record.sessionId)).resolves.toEqual([item])
   })
 
   it('rejects a new cancellation beyond the cap without dropping existing tombstones', async () => {

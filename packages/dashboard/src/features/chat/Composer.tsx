@@ -58,7 +58,7 @@ type Props = {
   serviceUnavailable?: boolean
   workspaceUnavailable?: boolean
   onReconnectService?(): void
-  onSubmit(text: string, mode: SendMode, attachments?: readonly (ImageContent | FileContent)[], extraBlocks?: readonly TextContent[]): void | Promise<void>
+  onSubmit(text: string, mode: SendMode, attachments: readonly (ImageContent | FileContent)[] | undefined, extraBlocks: readonly TextContent[] | undefined, intent: MessageIntent): void | Promise<void>
   onUploadFiles?(files: readonly File[]): Promise<readonly ReferencedFileContent[]>
   onReleaseFiles?(files: readonly ReferencedFileContent[]): Promise<void>
   onCompact?(): void
@@ -107,6 +107,7 @@ type Props = {
 }
 
 export type SendMode = 'steer' | 'queue'
+export type MessageIntent = 'text' | 'shell'
 const SEND_MODE_STORAGE_PREFIX = PREF_COMPOSER_SEND_MODE_PREFIX
 const QUEUED_MESSAGES_VISIBLE_LIMIT = 3
 
@@ -167,6 +168,7 @@ function writeStoredSendMode(sessionId: string | null, mode: SendMode): void {
 }
 
 const DRAFT_STORAGE_PREFIX = PREF_COMPOSER_DRAFT_PREFIX
+const DRAFT_INTENT_STORAGE_PREFIX = 'ak-composer-draft-intent:'
 
 /** Read the saved, unsent composer draft for a session (empty when none). */
 function readStoredDraft(sessionId: string | null): string {
@@ -186,6 +188,27 @@ function writeStoredDraft(sessionId: string | null, text: string): void {
     else window.localStorage.removeItem(`${DRAFT_STORAGE_PREFIX}${sessionId}`)
   } catch {
     // Storage can be unavailable in private mode or quota-exceeded states.
+  }
+}
+
+function readStoredDraftIntent(sessionId: string | null, text: string): MessageIntent {
+  if (!text.startsWith('!')) return 'text'
+  if (!sessionId || typeof window === 'undefined') return 'shell'
+  try {
+    return window.localStorage.getItem(`${DRAFT_INTENT_STORAGE_PREFIX}${sessionId}`) === 'text' ? 'text' : 'shell'
+  } catch {
+    return 'shell'
+  }
+}
+
+function writeStoredDraftIntent(sessionId: string | null, text: string, intent: MessageIntent): void {
+  if (!sessionId || typeof window === 'undefined') return
+  try {
+    const key = `${DRAFT_INTENT_STORAGE_PREFIX}${sessionId}`
+    if (text.startsWith('!') && intent === 'text') window.localStorage.setItem(key, 'text')
+    else window.localStorage.removeItem(key)
+  } catch {
+    // Draft mode persistence is best effort, matching draft text persistence.
   }
 }
 
@@ -273,6 +296,10 @@ export function Composer({
   const displayStyle = chatDisplayStyle(displayPrefs)
   const sessionId = state?.sessionId ?? null
   const [text, setText] = useState<string>(() => readStoredDraft(sessionId))
+  const [messageIntent, setMessageIntent] = useState<MessageIntent>(() => {
+    const draft = readStoredDraft(sessionId)
+    return readStoredDraftIntent(sessionId, draft)
+  })
   // Per-session draft persistence. Switching sessions must show that session's
   // own unsent draft, not whatever was typed in the previous one. We reload the
   // draft when the session changes and persist edits under the session they were
@@ -282,7 +309,9 @@ export function Composer({
   const loadedDraftSession = useRef<string | null>(sessionId)
   useEffect(() => {
     loadedDraftSession.current = sessionId
-    setText(readStoredDraft(sessionId))
+    const draft = readStoredDraft(sessionId)
+    setText(draft)
+    setMessageIntent(readStoredDraftIntent(sessionId, draft))
   }, [sessionId])
   const draftWriteTimer = useRef<number | null>(null)
   const latestDraft = useRef({ sessionId, text })
@@ -292,17 +321,21 @@ export function Composer({
     if (draftWriteTimer.current !== null) window.clearTimeout(draftWriteTimer.current)
     draftWriteTimer.current = window.setTimeout(() => {
       writeStoredDraft(sessionId, text)
+      writeStoredDraftIntent(sessionId, text, messageIntent)
       draftWriteTimer.current = null
     }, 300)
     return () => {
       if (draftWriteTimer.current !== null) window.clearTimeout(draftWriteTimer.current)
       draftWriteTimer.current = null
     }
-  }, [text, sessionId])
+  }, [text, messageIntent, sessionId])
   useEffect(() => () => {
     const pending = latestDraft.current
-    if (pending.sessionId === sessionId) writeStoredDraft(pending.sessionId, pending.text)
-  }, [sessionId])
+    if (pending.sessionId === sessionId) {
+      writeStoredDraft(pending.sessionId, pending.text)
+      writeStoredDraftIntent(pending.sessionId, pending.text, messageIntent)
+    }
+  }, [sessionId, messageIntent])
   const [sendMode, setSendMode] = useState<SendMode>(() => readStoredSendMode(sessionId))
   useEffect(() => {
     setSendMode(readStoredSendMode(sessionId))
@@ -327,6 +360,14 @@ export function Composer({
   const [mentionActive, setMentionActive] = useState(0)
   const [mentionLoading, setMentionLoading] = useState(false)
   const [pendingToast, setPendingToast] = useState<string | null>(null)
+  const shellMode = messageIntent === 'shell' && text.startsWith('!')
+  const inputPlaceholder = shellMode && !disabled && workspaceOnline !== false
+    ? 'Enter a shell command…'
+    : placeholderText
+  const exitShellMode = (): void => {
+    setMessageIntent('text')
+    writeStoredDraftIntent(sessionId, text, 'text')
+  }
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const simpleCaretRef = useRef(0)
   const voiceDraftRef = useRef({ text: '', caret: 0 })
@@ -508,6 +549,11 @@ export function Composer({
   }, [pendingToast])
 
   const updateText = (next: string, caret: number): void => {
+    setMessageIntent((current) => {
+      if (!next.startsWith('!')) return 'text'
+      if (text.length === 0 || !text.startsWith('!')) return 'shell'
+      return current
+    })
     setText(next)
     const found = detectMention(next, caret)
     setMentionState(found)
@@ -537,7 +583,19 @@ export function Composer({
     if (disabled || workspaceOnline === false || submitting || submitInFlight.current) return
     const sourceText = textOverride ?? text
     const trimmed = sourceText.trim()
+    const isBangShell = messageIntent === 'shell' && sourceText.startsWith('!')
     if (trimmed.length === 0 && pastedImages.length === 0 && attachedFiles.length === 0) return
+    if (isBangShell && sourceText.slice(1).trim().length === 0) {
+      setPendingToast('Shell command is empty. Usage: !command')
+      return
+    }
+    if (isBangShell && (pastedImages.length > 0 || attachedFiles.length > 0)) {
+      setPendingToast('Shell commands cannot include attachments')
+      return
+    }
+    // Preserve leading whitespace before a bang so the Host can enforce the
+    // same first-character rule instead of seeing a trimmed false positive.
+    const submittedMessageText = isBangShell || sourceText.trimStart().startsWith('!') ? sourceText : trimmed
     const parsedCommand = parseSlashCommand(trimmed)
     const command = parsedCommand
       ? slashCommands.find((c) => c.command === parsedCommand.name)
@@ -561,7 +619,7 @@ export function Composer({
       return
     }
     const extraBlocks: TextContent[] = []
-    if (onReadFile) {
+    if (onReadFile && !isBangShell) {
       const mentions = collectMentionPaths(trimmed)
       const seen = new Set<string>()
       for (const path of mentions) {
@@ -585,11 +643,13 @@ export function Composer({
       }
     }
     const submittedText = sourceText
+    const submittedIntent = isBangShell ? 'shell' as const : 'text' as const
     const submittedImages = pastedImages
     const submittedFiles = attachedFiles
     // Clear optimistically while raw File objects remain only in this
     // in-memory snapshot. Upload still completes before message admission.
     setText('')
+    setMessageIntent('text')
     setPastedImages([])
     setAttachedFiles([])
     setMentionState(null)
@@ -616,14 +676,15 @@ export function Composer({
       // it would be rendered as user-authored transcript content and would also
       // break optimistic/admitted message reconciliation keys.
       const attachments = [...(uploadImages ? [] : images), ...files]
-      const payloadError = validateClientMessagePayload({ text: trimmed, mode: sendMode, content: [...(trimmed ? [{ type: 'text', text: trimmed }] : []), ...extraBlocks, ...attachments] })
+      const payloadError = validateClientMessagePayload({ text: submittedMessageText, mode: sendMode, content: [...(submittedMessageText ? [{ type: 'text', text: submittedMessageText }] : []), ...extraBlocks, ...attachments] })
       if (payloadError) throw new Error(payloadError.message)
       admissionStarted = true
       await onSubmit(
-        trimmed,
+        submittedMessageText,
         sendMode,
         attachments.length > 0 ? attachments : undefined,
         extraBlocks.length > 0 ? extraBlocks : undefined,
+        submittedIntent,
       )
     } catch (error) {
       // Restore only into an untouched composer. Never overwrite text or images
@@ -642,7 +703,13 @@ export function Composer({
         }
       }
       if (!durablyAccepted) {
-        setText((current) => current.length === 0 ? submittedText : current)
+        setText((current) => {
+          if (current.length === 0) {
+            setMessageIntent(submittedIntent)
+            return submittedText
+          }
+          return current
+        })
         setPastedImages((current) => current.length === 0 ? submittedImages : current)
         setAttachedFiles((current) => current.length === 0 ? submittedFiles : current)
       }
@@ -688,7 +755,7 @@ export function Composer({
   }
 
   async function addFiles(files: readonly File[]): Promise<boolean> {
-    if (!allowAttachments || files.length === 0) return false
+    if (!allowAttachments || shellMode || files.length === 0) return false
     try {
       const imageFiles = files.filter((file) => file.type.startsWith('image/'))
       const genericFiles = files.filter((file) => !file.type.startsWith('image/'))
@@ -751,6 +818,7 @@ export function Composer({
   }
 
   async function pasteAttachments(data: DataTransfer | null): Promise<boolean> {
+    if (shellMode) return false
     const clipboardFiles = Array.from(data?.files ?? [])
     if (clipboardFiles.length > 0) return addFiles(clipboardFiles)
     const added = await extractImagesFromClipboardData(data)
@@ -801,13 +869,28 @@ export function Composer({
     void submit()
   }
 
+  const shellModeIndicator = shellMode ? (
+    <div className="flex min-w-0 items-center gap-1.5 px-3 pt-1.5 text-[11px] text-amber-700 dark:text-amber-300" data-testid="composer-shell-mode">
+      <span className="font-medium">Shell · workspace</span>
+      <span className="truncate text-muted-foreground">Runs in this Session workspace</span>
+      <button
+        type="button"
+        className="ml-auto inline-flex h-5 w-5 flex-none items-center justify-center rounded-full hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+        aria-label="Exit shell mode and keep as text"
+        onClick={exitShellMode}
+      >
+        <X className="h-3 w-3" aria-hidden="true" />
+      </button>
+    </div>
+  ) : null
+
   const canSubmit = !disabled && !submitting && workspaceOnline !== false && (text.trim().length > 0 || pastedImages.length > 0 || attachedFiles.length > 0)
   const canStop = typeof onCancel === 'function' && (awaitingAck || isActiveTurnStatus(state?.status))
   const showStopButton = !canSubmit && canStop
   const simpleTools = (
     <SimpleComposerToolsMenu
       disabled={Boolean(disabled)}
-      allowAttachments={allowAttachments}
+      allowAttachments={allowAttachments && !shellMode}
       onAttach={() => fileInputRef.current?.click()}
       onToggleMode={toggleMode}
       config={<ComposerConfigButton
@@ -884,12 +967,12 @@ export function Composer({
       data-testid="composer"
       data-composer-mode={mode}
       onDragOver={(event) => {
-        if (!allowAttachments || disabled || !event.dataTransfer?.types?.includes('Files')) return
+        if (!allowAttachments || shellMode || disabled || !event.dataTransfer?.types?.includes('Files')) return
         event.preventDefault()
         event.dataTransfer.dropEffect = 'copy'
       }}
       onDrop={(event) => {
-        if (!allowAttachments || disabled) return
+        if (!allowAttachments || shellMode || disabled) return
         const files = Array.from(event.dataTransfer?.files ?? [])
         if (files.length === 0) return
         event.preventDefault()
@@ -900,7 +983,7 @@ export function Composer({
         ref={fileInputRef}
         type="file"
         multiple
-        disabled={disabled || !allowAttachments}
+        disabled={disabled || !allowAttachments || shellMode}
         className="hidden"
         data-testid="composer-file-input"
         onChange={(event) => {
@@ -921,7 +1004,10 @@ export function Composer({
             <div className="flex min-w-0 items-end gap-2 sm:-ml-8" data-testid="composer-simple-row">
               <ComposerLeftAccessory mode={mode}>{leftAccessory}</ComposerLeftAccessory>
               <div
-                className="ak-composer-surface relative flex min-h-12 min-w-0 flex-1 flex-col overflow-visible rounded-[20px] transition-[border-color,background-color,box-shadow]"
+                className={cn(
+                  'ak-composer-surface relative flex min-h-12 min-w-0 flex-1 flex-col overflow-visible rounded-[20px] transition-[border-color,background-color,box-shadow]',
+                  shellMode && 'border-amber-400/80 bg-amber-50/30 ring-1 ring-amber-400/20 dark:bg-amber-950/10',
+                )}
                 data-testid="composer-simple-shell"
                 data-layout="mobile-input-first"
               >
@@ -929,6 +1015,7 @@ export function Composer({
                   <VoiceRecorderSurface voice={voice} onStopAndSend={stopVoiceAndSend} compact />
                 ) : (
                 <>
+                  {shellModeIndicator}
                   {contextUsageBar('compact')}
                   <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-1 px-1 py-0.5 sm:min-h-12 sm:flex-nowrap sm:justify-start">
@@ -947,9 +1034,9 @@ export function Composer({
                       text={text}
                       images={[]}
                       disabled={disabled}
-                      placeholder={placeholderText}
+                      placeholder={inputPlaceholder}
                       ariaLabel={t('composer.placeholder')}
-                      onTextChange={(next) => setText(next)}
+                      onTextChange={(next) => updateText(next, next.length)}
                       onSelectionChange={(caret) => { simpleCaretRef.current = caret }}
                       onRemoveImage={(id) => removeImage(id)}
                       onPaste={handleSimplePaste}
@@ -980,6 +1067,7 @@ export function Composer({
         <div
           className={cn(
             'ak-composer-surface relative min-w-0 flex-1 rounded-2xl transition-[border-color,background-color,box-shadow]',
+            shellMode && 'border-amber-400/80 bg-amber-50/30 ring-1 ring-amber-400/20 dark:bg-amber-950/10',
           )}
         >
           {voiceActive ? (
@@ -987,6 +1075,7 @@ export function Composer({
           ) : (
           <>
           {contextUsageBar('full')}
+          {shellModeIndicator}
           <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
           <div className="relative">
             <Textarea
@@ -1003,7 +1092,7 @@ export function Composer({
               }}
               rows={1}
               disabled={disabled}
-              placeholder={placeholderText}
+              placeholder={inputPlaceholder}
               className="max-h-[min(240px,35vh)] min-h-12 w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-2.5 text-[1.125rem] leading-7 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
               data-testid="composer-input"
               onPaste={(e) => {
@@ -1100,7 +1189,7 @@ export function Composer({
               data-testid="composer-footer-rail"
             >
               <ComposerModeToggle mode={mode} onToggle={toggleMode} />
-              {allowAttachments ? <AttachmentButton disabled={disabled} onClick={() => fileInputRef.current?.click()} /> : null}
+              {allowAttachments ? <AttachmentButton disabled={disabled || shellMode} onClick={() => fileInputRef.current?.click()} /> : null}
               <ComposerConfigButton
                 model={model}
                 models={models}

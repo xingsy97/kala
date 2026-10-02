@@ -212,6 +212,7 @@ describe('executor end-to-end', () => {
 
     dashboard.emit('client:user_message', {
       sessionId,
+      intent: 'text',
       text: 'please write',
     })
 
@@ -300,6 +301,7 @@ describe('executor end-to-end', () => {
 
     dashboard.emit('client:user_message', {
       sessionId,
+      intent: 'text',
       text: 'show cwd',
     })
 
@@ -395,6 +397,7 @@ describe('executor end-to-end', () => {
 
     dashboard.emit('client:user_message', {
       sessionId,
+      intent: 'text',
       text: 'what is pwd',
     })
     await waitForDone(dashboard)

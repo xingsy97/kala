@@ -89,6 +89,7 @@ import { inspectUnitQuiescence } from './tenant-runtime/quiescence.js'
 import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
 import { loadPersistedMessageQueueState, persistMessageQueueSnapshot, type PersistedMessageQueueState } from './message-queue-store.js'
 import { readSessionLog } from './store/log.js'
+import { bangShellCallId, bangShellResultOperationId, bangShellResultState, formatBangShellResult, isBangShellResultForCommand, parseBangShellRequest } from './bang-shell.js'
 import { modelIdFromRef, resolveModelContextWindow } from './model-capabilities.js'
 import type { WebSearchCredentialStore } from './web-search/index.js'
 import type { WebSearchCredentialStatus } from './web-search/credential-store.js'
@@ -110,6 +111,9 @@ import { createPublicApiHandler, type PublicApiActor } from './http/public-api.j
 import { resetCompactRuntime } from './extensions/compaction.js'
 import { StorageInventory } from './store/storage-inventory.js'
 import { SafeCleanupEngine } from './store/safe-cleanup.js'
+import { ScheduledTaskStore } from './scheduled-tasks/store.js'
+import { occurrenceSessionId, UnitScheduler } from './scheduled-tasks/scheduler.js'
+import type { ScheduledTask, ScheduledTaskSnapshot } from './scheduled-tasks/types.js'
 
 export type HostServerOptions = {
   port: number
@@ -275,6 +279,7 @@ export async function startHostServer(
   let dagOrchestrator: DagOrchestrator | undefined
   let storageInventory: StorageInventory | undefined
   let safeCleanup: SafeCleanupEngine | undefined
+  let scheduledTaskScheduler: UnitScheduler | undefined
   let detachPublicAccessGate: (() => void) | undefined
   const closeServer = async (): Promise<void> => {
     if (closed) return
@@ -283,6 +288,8 @@ export async function startHostServer(
     for (const batch of tokenDeltaBatches.values()) clearTimeout(batch.timer)
     tokenDeltaBatches.clear()
     streamingDrafts.clear()
+    // Stop claims first; shutdown waits for the active scheduler mutation/side effect.
+    await scheduledTaskScheduler?.stop()
     // Queue persistence and post-turn drains may still be crossing their durable
     // boundary after the last socket closes. Wait before callers remove the
     // Session directory (tests) or replace storage (shutdown/deploy).
@@ -461,12 +468,14 @@ export async function startHostServer(
   const enqueueUserMessage = async ({
     sessionId,
     text,
+    intent,
     operationId: requestedOperationId,
     mode = 'queue',
     content,
   }: {
     sessionId: string
     text: string
+    intent: 'text' | 'shell'
     operationId?: string
     mode?: 'queue' | 'steer'
     content?: readonly import('@agent-kernel/kernel').MessageContent[]
@@ -475,11 +484,22 @@ export async function startHostServer(
     let record = store.get(sessionId)
     if (!record) record = await store.load(sessionId, { recoverDangling: false })
     validateMessageAttachmentReferences(messageAttachments, sessionId, content)
-    const existingOperation = await findSessionOperation(
-      record.logPath,
-      operationId,
-      record.agentRuntime === 'kernel' ? {} : { maxScanBytes: 64 * 1024 * 1024 },
-    )
+    const shell = intent === 'shell' ? parseBangShellRequest(text) : undefined
+    if (intent === 'shell' && !shell) throw new Error('Shell intent requires a leading ! command')
+    if (shell && content?.length) throw new Error('Shell commands cannot include attachments or structured content')
+    if (shell && !record.workspaceId) throw new Error('Shell commands require a Session bound to a workspace')
+    const operationScan = record.agentRuntime === 'kernel' ? {} : { maxScanBytes: 64 * 1024 * 1024 }
+    if (shell) {
+      const existingResult = await findSessionOperation(record.logPath, bangShellResultOperationId(operationId), operationScan)
+      if (existingResult?.kind === 'event') {
+        if (!isBangShellResultForCommand(existingResult.event.text, shell.command)) {
+          throw new Error(`operationId ${operationId} was already used for a different shell command`)
+        }
+        return { accepted: true, committed: true, cursor: existingResult.cursor }
+      }
+      if (existingResult?.kind === 'runtime_metadata') return { accepted: true, committed: true, cursor: record.state.cursor }
+    }
+    const existingOperation = await findSessionOperation(record.logPath, operationId, operationScan)
     if (existingOperation?.kind === 'event') {
       assertMessageOperationCompatible(existingOperation.event, text, content)
       return { accepted: true, committed: true, cursor: existingOperation.cursor }
@@ -495,6 +515,7 @@ export async function startHostServer(
         createdAt: new Date().toISOString(),
         ...(content ? { content } : {}),
         ...(effectiveModelForSession(sessionId) ? { model: effectiveModelForSession(sessionId) } : {}),
+        ...(shell ? { shell: { ...shell, state: 'queued' as const } } : {}),
       }, mode === 'steer' ? 'front' : undefined)
       if (mode === 'steer' && !resting) {
         await agentRuntimes!.require(record.agentRuntime).cancel(record)
@@ -504,7 +525,7 @@ export async function startHostServer(
       } else {
         void messageQueues.drain(sessionId)
       }
-      const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
+      const committedCursor = await sessionUserOperationCursor(store, sessionId, shell ? bangShellResultOperationId(operationId) : operationId)
       return committedCursor === undefined
         ? { accepted: true, committed: false }
         : { accepted: true, committed: true, cursor: committedCursor }
@@ -521,10 +542,11 @@ export async function startHostServer(
       mode: effectiveMode,
       createdAt: new Date().toISOString(),
       ...(content ? { content } : {}),
+      ...(shell ? { shell: { ...shell, state: 'queued' as const } } : {}),
     }, effectiveMode === 'steer' ? 'front' : undefined)
     if (effectiveMode === 'steer' && !isRestingStatus(record.state.status)) loop.requestStopAtBoundary(sessionId)
     void messageQueues.drain(sessionId)
-    const committedCursor = await sessionUserOperationCursor(store, sessionId, operationId)
+    const committedCursor = await sessionUserOperationCursor(store, sessionId, shell ? bangShellResultOperationId(operationId) : operationId)
     return committedCursor === undefined
       ? { accepted: true, committed: false }
       : { accepted: true, committed: true, cursor: committedCursor }
@@ -685,6 +707,7 @@ export async function startHostServer(
   const cancelledQueueOperations = new Map<string, Set<string>>()
   const claimedQueueOperations = new Map<string, QueuedUserMessage>()
   const drainingQueues = new Set<string>()
+  const requestedQueueDrains = new Set<string>()
   const queueLoads = new Map<string, Promise<PersistedMessageQueueState>>()
   const queueMutations = new Map<string, Promise<void>>()
 
@@ -711,6 +734,11 @@ export async function startHostServer(
         mode: item.mode,
         createdAt: item.createdAt,
         ...(item.content ? { content: item.content } : {}),
+        ...(item.shell ? { shell: {
+          command: item.shell.command,
+          state: item.shell.state ?? 'queued',
+          ...(item.shell.result ? { result: item.shell.result } : {}),
+        } } : {}),
       })),
     }
   }
@@ -794,7 +822,16 @@ export async function startHostServer(
         ...next,
         ...(next.content ? { content: [...next.content] } : {}),
       }
+      if (claimed.shell && claimed.shell.state !== 'running' && !claimed.shell.result) {
+        claimed.shell = { ...claimed.shell, state: 'running' }
+        const queue = [...await loadQueue(sessionId)]
+        queue[0] = claimed
+        await persistQueue(sessionId, queue)
+      }
       claimedQueueOperations.set(sessionId, claimed)
+      return claimed
+    }).then((claimed) => {
+      if (claimed?.shell?.state === 'running' && !closed) emitQueueUpdate(sessionId)
       return claimed
     })
 
@@ -827,6 +864,44 @@ export async function startHostServer(
       return !cancelledQueueOperations.get(sessionId)?.has(claimed.operationId)
     })
 
+  const prepareQueuedDispatch = async (
+    sessionId: string,
+    record: SessionRecord,
+    claimed: QueuedUserMessage,
+  ): Promise<{ text: string; operationId: string; content?: readonly import('@agent-kernel/kernel').MessageContent[] } | undefined> => {
+    if (!claimed.shell) {
+      return { text: claimed.text, operationId: claimed.operationId, ...(claimed.content ? { content: claimed.content } : {}) }
+    }
+    if (!claimed.shell.result) {
+      const toolResult = record.workspaceId
+        ? await executors.callTool(sessionId, {
+            kind: 'call_tool',
+            callId: bangShellCallId(claimed.operationId),
+            name: 'bash',
+            input: { command: claimed.shell.command, capture_separate_streams: true },
+            cwd: record.state.cwd,
+          })
+        : { ok: false, content: 'Shell commands require a Session bound to a workspace' }
+      const formatted = formatBangShellResult(claimed.shell.command, toolResult, claimed.operationId)
+      const resultState = bangShellResultState(toolResult)
+      let resultPersisted = false
+      await withQueueMutation(sessionId, async () => {
+        const queue = [...await loadQueue(sessionId)]
+        const activeClaim = claimedQueueOperations.get(sessionId)
+        if (activeClaim?.id !== claimed.id || activeClaim.operationId !== claimed.operationId) return
+        if (queue[0]?.id !== claimed.id || queue[0].operationId !== claimed.operationId || !queue[0].shell) return
+        if (cancelledQueueOperations.get(sessionId)?.has(claimed.operationId)) return
+        queue[0] = { ...queue[0], shell: { ...queue[0].shell, state: resultState, result: formatted } }
+        await persistQueue(sessionId, queue)
+        claimed.shell = { ...claimed.shell!, state: resultState, result: formatted }
+        resultPersisted = true
+      })
+      if (!resultPersisted) return undefined
+      emitQueueUpdate(sessionId)
+    }
+    return { text: claimed.shell.result!, operationId: bangShellResultOperationId(claimed.operationId) }
+  }
+
   const messageQueues: MessageQueueManager = {
     isStable() {
       return queueLoads.size === 0 && queueMutations.size === 0 && drainingQueues.size === 0
@@ -853,13 +928,43 @@ export async function startHostServer(
           return
         }
         if (cancelledQueueOperations.get(sessionId)?.has(msg.operationId)) return
-        if (await sessionUserOperationCursor(store, sessionId, msg.operationId) !== undefined) return
+        const committedOperationId = msg.shell ? bangShellResultOperationId(msg.operationId) : msg.operationId
+        if (msg.shell) {
+          const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
+          const committed = await findSessionOperation(
+            record.logPath,
+            committedOperationId,
+            record.agentRuntime === 'kernel' ? {} : { maxScanBytes: 64 * 1024 * 1024 },
+          )
+          if (committed?.kind === 'event') {
+            if (!isBangShellResultForCommand(committed.event.text, msg.shell.command)) {
+              throw new Error(`operationId ${msg.operationId} was already used for a different shell command`)
+            }
+            return
+          }
+          if (committed?.kind === 'runtime_metadata') return
+        } else if (await sessionUserOperationCursor(store, sessionId, committedOperationId) !== undefined) {
+          return
+        }
         const admission = resourceGovernor && resourceUnitId
           ? resourceGovernor.tryEnqueue(resourceUnitId)
           : { ok: true as const }
         if (!admission.ok) throw new Error(`Runtime Unit queue limit exceeded (${admission.code})`)
-        if (priority === 'front') queue.unshift(msg)
-        else queue.push(msg)
+        if (priority === 'front') {
+          const claimed = claimedQueueOperations.get(sessionId)
+          let insertAt = 0
+          if (claimed) {
+            if (queue[0]?.id !== claimed.id || queue[0].operationId !== claimed.operationId) {
+              throw new Error(`claimed queue head ${claimed.id} is no longer fixed`)
+            }
+            insertAt = 1
+          }
+          // Front-priority STEER messages remain ahead of ordinary QUEUE items,
+          // but retain their own arrival order. A claimed head is immutable until
+          // its effect and result persistence have crossed the durable boundary.
+          while (queue[insertAt]?.mode === 'steer') insertAt += 1
+          queue.splice(insertAt, 0, msg)
+        } else queue.push(msg)
         try {
           await persistQueue(sessionId, queue)
         } catch (error) {
@@ -904,7 +1009,17 @@ export async function startHostServer(
         const nextContent = content ?? current.content
         const hasImages = nextContent?.some((part) => part.type === 'image') ?? false
         if (trimmed.length === 0 && !hasImages) return
-        queue[index] = { ...current, text: trimmed, ...(nextContent ? { content: nextContent } : {}) }
+        const shell = parseBangShellRequest(text)
+        if (shell && nextContent?.length) throw new Error('Shell commands cannot include attachments or structured content')
+        if (shell && !(store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })).workspaceId) {
+          throw new Error('Shell commands require a Session bound to a workspace')
+        }
+        queue[index] = {
+          ...current,
+          text: shell ? text : trimmed,
+          ...(nextContent ? { content: nextContent } : {}),
+          ...(shell ? { shell: { ...shell, state: 'queued' as const } } : { shell: undefined }),
+        }
         await persistQueue(sessionId, queue)
         changed = true
       })
@@ -948,7 +1063,11 @@ export async function startHostServer(
     },
     snapshot: queueSnapshot,
     async drain(sessionId) {
-      if (closed || loop.isDraining() || drainingQueues.has(sessionId)) return
+      if (closed || loop.isDraining()) return
+      if (drainingQueues.has(sessionId)) {
+        requestedQueueDrains.add(sessionId)
+        return
+      }
       drainingQueues.add(sessionId)
       try {
         while (!closed) {
@@ -978,17 +1097,19 @@ export async function startHostServer(
             try {
               await options.queueDispatchBarrier?.({ sessionId, operationId: next.operationId, runtime: record.agentRuntime })
               if (!await isClaimedQueueHeadDispatchable(sessionId, next)) continue
-              const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, next.operationId) !== undefined
+              const dispatch = await prepareQueuedDispatch(sessionId, record, next)
+              if (!dispatch) continue
+              const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, dispatch.operationId) !== undefined
               if (!alreadyDispatched) {
                 const runtime = agentRuntimes?.require(record.agentRuntime)
                 if (!runtime) return
                 await runtime.send(record, {
-                  text: next.text,
-                  ...(next.content ? { content: next.content } : {}),
+                  text: dispatch.text,
+                  ...(dispatch.content ? { content: dispatch.content } : {}),
                   ...(next.model ?? effectiveModelForSession(sessionId)
                     ? { model: next.model ?? effectiveModelForSession(sessionId) }
                     : {}),
-                  operationId: next.operationId,
+                  operationId: dispatch.operationId,
                   queuedAt: next.createdAt,
                 })
               }
@@ -1035,14 +1156,16 @@ export async function startHostServer(
           try {
             await options.queueDispatchBarrier?.({ sessionId, operationId: next.operationId, runtime: record.agentRuntime })
             if (!await isClaimedQueueHeadDispatchable(sessionId, next)) continue
-            const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, next.operationId) !== undefined
+            const dispatch = await prepareQueuedDispatch(sessionId, record, next)
+            if (!dispatch) continue
+            const alreadyDispatched = await sessionUserOperationCursor(store, sessionId, dispatch.operationId) !== undefined
             if (!alreadyDispatched) {
               await loop.dispatch(sessionId, {
                 kind: 'user_message',
-                operationId: next.operationId,
+                operationId: dispatch.operationId,
                 queuedAt: next.createdAt,
-                text: next.text,
-                ...(next.content ? { content: next.content } : {}),
+                text: dispatch.text,
+                ...(dispatch.content ? { content: dispatch.content } : {}),
               }, { ...(next.model ? { model: next.model } : {}), onCommitted: dequeueCommitted })
             } else {
               await dequeueCommitted()
@@ -1055,6 +1178,9 @@ export async function startHostServer(
         }
       } finally {
         drainingQueues.delete(sessionId)
+        if (requestedQueueDrains.delete(sessionId) && !closed && !loop.isDraining()) {
+          void messageQueues.drain(sessionId)
+        }
       }
     },
   }
@@ -1443,7 +1569,13 @@ export async function startHostServer(
   const apiRecord = async (actor: PublicApiActor, sessionId: string): Promise<SessionRecord | undefined> => {
     const record = await loadApiRecord(sessionId)
     if (!record) return undefined
-    if (actor.organizationId && record.organizationId !== actor.organizationId) return undefined
+    if (actor.organizationId) {
+      if (record.organizationId !== actor.organizationId) return undefined
+    } else if (record.organizationId) {
+      // Portable identities share their local Unit because legacy Sessions have no
+      // principal owner, but they can never cross into an organization Unit.
+      return undefined
+    }
     return record
   }
   const apiSession = async (actor: PublicApiActor, sessionId: string) => {
@@ -1456,6 +1588,102 @@ export async function startHostServer(
     actor.organizationId && actor.role
       ? { kind: 'ingress', principal: actor.principal, organizationId: actor.organizationId, role: actor.role }
       : { kind: 'token', label: actor.principal }
+  const scheduleOwnerKey = (actor: PublicApiActor): string => actor.organizationId ? `organization:${actor.organizationId}` : `principal:${actor.principal}`
+  const validateScheduledTarget = async (actor: PublicApiActor, task: Pick<ScheduledTask, 'target'>): Promise<void> => {
+    if (task.target.kind === 'session') {
+      if (!await apiRecord(actor, task.target.sessionId)) throw new Error('session not found')
+      return
+    }
+    const target = task.target
+    // Executor announcements do not carry authoritative Unit ownership. Fail closed
+    // unless an existing Session registry entry binds this workspace to the actor's Unit.
+    const summaries = await store.listSummaries()
+    let workspaceOwned = false
+    for (const summary of summaries) {
+      if (summary.workspaceId !== target.workspaceId) continue
+      if (await apiRecord(actor, summary.sessionId)) { workspaceOwned = true; break }
+    }
+    if (!workspaceOwned) throw new Error('workspace not found')
+    const executor = executors.snapshot().find((candidate) => candidate.workspaceId === target.workspaceId)
+    if (!executor) throw new Error('workspace offline')
+    if (target.cwd) {
+      const validation = await validateWorkspaceCwd({ executors }, target.workspaceId, target.cwd)
+      if (!validation.ok) throw new Error(validation.reason)
+    }
+  }
+  const scheduledActor = (task: ScheduledTaskSnapshot): PublicApiActor => {
+    const organizationId = task.ownerKey.startsWith('organization:') ? task.ownerKey.slice('organization:'.length) : undefined
+    return {
+      principal: task.createdBy,
+      canWrite: true,
+      ...(organizationId ? { organizationId, role: 'member' as const } : {}),
+    }
+  }
+  const scheduledTaskStore = new ScheduledTaskStore(join(options.sessionsDir, '.scheduled-tasks'))
+  scheduledTaskScheduler = new UnitScheduler(scheduledTaskStore, {
+    async validate(task) {
+      await validateScheduledTarget(scheduledActor(task), task)
+    },
+    async receipt(run, task) {
+      const sessionId = task.target.kind === 'session' ? task.target.sessionId : occurrenceSessionId(run.occurrenceId)
+      const record = await loadApiRecord(sessionId)
+      if (!record) return task.target.kind === 'workspace' ? 'absent' : 'unknown'
+      const operation = await findSessionOperation(record.logPath, run.operationId, record.agentRuntime === 'kernel' ? {} : { maxScanBytes: 64 * 1024 * 1024 })
+      if (operation) return 'committed'
+      // The durable message queue also de-duplicates this operation ID. An absent
+      // Session receipt is therefore safe to retry locally with the same ID.
+      return 'absent'
+    },
+    async enqueueSession(input) {
+      const organizationId = input.task.ownerKey.startsWith('organization:') ? input.task.ownerKey.slice('organization:'.length) : undefined
+      if (options.queueQuota) {
+        if (!organizationId) throw new Error('missing organization attribution for scheduled queue quota')
+        await options.queueQuota.assertCanEnqueueMessage({
+          organizationId, principal: input.task.createdBy, role: 'member',
+          sessionId: input.sessionId, pendingMessages: messageQueues.pending(input.sessionId), mode: 'queue',
+        })
+      }
+      await enqueueUserMessage({ sessionId: input.sessionId, text: input.prompt, intent: 'text', operationId: input.operationId, mode: 'queue' })
+    },
+    async createWorkspaceSession({ sessionId, task, operationId }) {
+      if (task.target.kind !== 'workspace') throw new Error('invalid workspace occurrence target')
+      const target = task.target
+      const executor = executors.snapshot().find((candidate) => candidate.workspaceId === target.workspaceId)
+      if (!executor) throw new Error('workspace offline')
+      let cwd = target.cwd
+      if (cwd) {
+        const validation = await validateWorkspaceCwd({ executors }, target.workspaceId, cwd)
+        if (!validation.ok) throw new Error(validation.reason)
+        cwd = validation.cwd
+      }
+      const organizationId = task.ownerKey.startsWith('organization:') ? task.ownerKey.slice('organization:'.length) : undefined
+      if (options.sessionQuota && !await loadApiRecord(sessionId)) {
+        if (!organizationId) throw new Error('missing organization attribution for scheduled session quota')
+        await options.sessionQuota.assertCanCreateSession({ organizationId, principal: task.createdBy, role: 'member', sessionId })
+      }
+      if (options.queueQuota) {
+        if (!organizationId) throw new Error('missing organization attribution for scheduled queue quota')
+        await options.queueQuota.assertCanEnqueueMessage({
+          organizationId, principal: task.createdBy, role: 'member', sessionId,
+          pendingMessages: messageQueues.pending(sessionId), mode: 'queue',
+        })
+      }
+      const config = deriveSessionConfig(getDefaultConfig(), undefined, 'chat')
+      const { record, created } = await store.ensure({
+        sessionId, agentRuntime: 'kernel', executionMode: 'chat', defaultConfig: config, runtimeConfig: config,
+        workspaceId: target.workspaceId,
+        ...(target.workspaceName ? { workspaceName: target.workspaceName } : {}),
+        ...(organizationId ? { organizationId, principal: task.createdBy, organizationRole: 'member' as const } : {}),
+        ...(cwd ? { initialCwd: cwd } : {}),
+      })
+      if (record.workspaceId !== target.workspaceId || (organizationId && record.organizationId !== organizationId)) throw new Error('scheduled occurrence Session conflict')
+      if (created) {
+        await extensions.sessionCreated({ deps: loopDeps, record }).catch(() => undefined)
+        scheduleSessionsBroadcast()
+      }
+      await enqueueUserMessage({ sessionId, text: task.prompt, intent: 'text', operationId, mode: 'queue' })
+    },
+  }, { unitId: options.resourceUnitId ?? 'local', catchupLimit: 10 })
   publicApiHandler = createPublicApiHandler({
     authorize(request) {
       const authorization = request.headers.authorization
@@ -1577,7 +1805,10 @@ export async function startHostServer(
       for (const targetSessionId of targetIds) {
         if (loop.hasActiveTurn(targetSessionId)) throw new Error('session tree has an active turn; stop it before deleting')
       }
+      await scheduledTaskStore.pauseSessionTargets(scheduleOwnerKey(actor), new Set(targetIds))
       for (const targetSessionId of targetIds.reverse()) {
+        await messageQueues.stop(targetSessionId)
+        await executors.cancelPending(targetSessionId)
         const record = await apiRecord(actor, targetSessionId)
         if (!record) continue
         await agentRuntimes!.get(record.agentRuntime)?.delete?.(record)
@@ -1604,6 +1835,7 @@ export async function startHostServer(
       return await enqueueUserMessage({
         sessionId,
         text: input.text,
+        intent: 'text',
         operationId: input.operationId,
         mode: input.mode ?? 'queue',
         ...(input.content ? { content: input.content } : {}),
@@ -1622,6 +1854,23 @@ export async function startHostServer(
       dashboardNs.to(sessionRoom(sessionId)).emit('server:dag_run', { sessionId, run: updated })
       return updated
     },
+    scheduledTasks: {
+      list: async (actor) => await scheduledTaskStore.listTasks(scheduleOwnerKey(actor)),
+      get: async (actor, taskId) => await scheduledTaskStore.getTask(scheduleOwnerKey(actor), taskId),
+      async create(actor, input) {
+        await validateScheduledTarget(actor, input)
+        return await scheduledTaskStore.create({ ...input, ownerKey: scheduleOwnerKey(actor), createdBy: actor.principal })
+      },
+      async update(actor, taskId, input) {
+        const existing = await scheduledTaskStore.getTask(scheduleOwnerKey(actor), taskId)
+        if (!existing) throw new Error('scheduled task not found')
+        if (input.target) await validateScheduledTarget(actor, { target: input.target })
+        return await scheduledTaskStore.update(scheduleOwnerKey(actor), taskId, input)
+      },
+      pause: async (actor, taskId, paused) => await scheduledTaskStore.setPaused(scheduleOwnerKey(actor), taskId, paused),
+      delete: async (actor, taskId) => await scheduledTaskStore.delete(scheduleOwnerKey(actor), taskId),
+      history: async (actor, taskId) => await scheduledTaskStore.history(scheduleOwnerKey(actor), taskId),
+    },
     onInternalError(error, requestId) {
       options.logger?.warn({
         requestId,
@@ -1629,6 +1878,7 @@ export async function startHostServer(
       }, 'public API request failed')
     },
   })
+  await scheduledTaskScheduler.start()
   restart = new RestartCoordinator({
     store,
     loop,

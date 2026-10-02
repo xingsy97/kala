@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Pencil, ShieldCheck, ShieldOff } from 'lucide-react'
+import { CalendarClock, Pencil, ShieldCheck, ShieldOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { HelpHint } from '../../components/ui/help-hint.js'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -27,6 +27,7 @@ type Props = {
   sessions: readonly SessionSummary[]
   onRename?(workspaceName: string): void
   onOpenSession?(sessionId: string): void
+  onManageScheduledTasks?(): void
 }
 
 export function WorkspaceMetadataDialog({
@@ -38,6 +39,7 @@ export function WorkspaceMetadataDialog({
   sessions,
   onRename,
   onOpenSession,
+  onManageScheduledTasks,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -161,6 +163,18 @@ export function WorkspaceMetadataDialog({
             <WorkspaceHomeMetric label={t('workspaceMetadata.home.sessions')} value={String(sessions.length)} tone={sessions.length ? 'info' : 'neutral'} />
             <WorkspaceHomeMetric label={t('workspaceMetadata.home.sandboxRoots')} value={String(executor?.sandboxRoots?.length ?? 0)} tone={executor?.sandboxRoots?.length ? 'good' : 'neutral'} />
           </section>
+          {onManageScheduledTasks ? (
+            <section className="flex flex-col gap-3 rounded-md border border-border/50 bg-card p-3 sm:flex-row sm:items-center sm:justify-between" data-testid="workspace-scheduled-tasks-card">
+              <div>
+                <p className="text-sm font-medium">Scheduled tasks</p>
+                <p className="mt-1 text-xs text-muted-foreground">Run a prompt on a schedule in a fresh Session for this workspace.</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={onManageScheduledTasks}>
+                <CalendarClock className="mr-1.5 h-4 w-4" aria-hidden />
+                Manage tasks
+              </Button>
+            </section>
+          ) : null}
           <form onSubmit={submit} className="rounded-md border border-border/50 bg-card p-3" data-testid="workspace-metadata-rename-form">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="workspace-display-name">
               {t('workspaceMetadata.displayName')}

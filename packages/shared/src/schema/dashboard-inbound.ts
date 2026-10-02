@@ -111,6 +111,7 @@ export const ClientUserMessageSchema = z.object({
   operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   text: z.string(),
+  intent: z.enum(['text', 'shell']),
   mode: z.enum(['steer', 'queue']).optional(),
   content: z.array(MessageContentSchema).optional(),
 }) satisfies z.ZodType<ClientUserMessage>

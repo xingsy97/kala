@@ -53,6 +53,7 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
     }
     const cwdInput = optionalString(input, 'cwd')
     const runInBackground = optionalBoolean(input, 'run_in_background') ?? optionalBoolean(input, 'background') ?? false
+    const captureSeparateStreams = optionalBoolean(input, 'capture_separate_streams') ?? false
     const shell = selectShell(optionalString(input, 'shell'))
     const timeoutMs = bashTimeoutMs(input) ?? DEFAULT_TIMEOUT_MS
     const env: NodeJS.ProcessEnv = {
@@ -76,7 +77,9 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
     // Race #1: caller aborted before spawn. Short-circuit so we don't leak
     // a subprocess whose only outcome would be an immediate SIGKILL.
     if (ctx.signal.aborted) {
-      return `--- exit code: -1, duration: 0ms\n--- aborted before spawn`
+      return captureSeparateStreams
+        ? JSON.stringify({ stdout: '', stderr: 'aborted before spawn', exitCode: null, signal: 'ABORT', durationMs: 0 })
+        : `--- exit code: -1, duration: 0ms\n--- aborted before spawn`
     }
 
     if (runInBackground) {
@@ -109,24 +112,43 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
         // spawn). Report as a status marker so the LLM can react rather than
         // the loop hanging on an unresolved promise.
         const msg = err instanceof Error ? err.message : String(err)
-        settle(`--- exit code: -1, duration: 0ms\n--- spawn failed: ${msg}`)
+        settle(captureSeparateStreams
+          ? JSON.stringify({ stdout: '', stderr: `spawn failed: ${msg}`, exitCode: null, signal: null, durationMs: 0 })
+          : `--- exit code: -1, duration: 0ms\n--- spawn failed: ${msg}`)
         return
       }
 
       const chunks: Buffer[] = []
+      const stdoutChunks: Buffer[] = []
+      const stderrChunks: Buffer[] = []
       let bytes = 0
+      let stdoutTruncated = false
+      let stderrTruncated = false
       let killedByTimeout = false
       let killedByAbort = false
 
-      const onData = (buf: Buffer): void => {
-        if (bytes >= MAX_OUTPUT) return
+      const onData = (target: 'stdout' | 'stderr', buf: Buffer): void => {
+        if (bytes >= MAX_OUTPUT) {
+          if (target === 'stdout') stdoutTruncated = true
+          else stderrTruncated = true
+          return
+        }
         const room = MAX_OUTPUT - bytes
         const slice = buf.length > room ? buf.subarray(0, room) : buf
-        chunks.push(slice)
+        if (captureSeparateStreams) {
+          if (target === 'stdout') stdoutChunks.push(slice)
+          else stderrChunks.push(slice)
+        } else {
+          chunks.push(slice)
+        }
         bytes += slice.length
+        if (slice.length < buf.length) {
+          if (target === 'stdout') stdoutTruncated = true
+          else stderrTruncated = true
+        }
       }
-      child.stdout?.on('data', onData)
-      child.stderr?.on('data', onData)
+      child.stdout?.on('data', (buf: Buffer) => onData('stdout', buf))
+      child.stderr?.on('data', (buf: Buffer) => onData('stderr', buf))
 
       const timer = setTimeout(() => {
         killedByTimeout = true
@@ -150,15 +172,29 @@ async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['ru
         cleanup()
         const msg = err instanceof Error ? err.message : String(err)
         const duration = Date.now() - start
-        settle(
-          `--- exit code: -1, duration: ${duration}ms\n--- spawn failed: ${msg}`,
-        )
+        settle(captureSeparateStreams
+          ? JSON.stringify({ stdout: '', stderr: `spawn failed: ${msg}`, exitCode: null, signal: null, durationMs: duration })
+          : `--- exit code: -1, duration: ${duration}ms\n--- spawn failed: ${msg}`)
       })
 
       child.on('close', (code, signal) => {
         cleanup()
         const duration = Date.now() - start
         const output = Buffer.concat(chunks).toString('utf8')
+        if (captureSeparateStreams) {
+          settle(JSON.stringify({
+            stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+            stderr: Buffer.concat(stderrChunks).toString('utf8'),
+            exitCode: code,
+            signal,
+            durationMs: duration,
+            stdoutTruncated,
+            stderrTruncated,
+            timedOut: killedByTimeout,
+            aborted: killedByAbort,
+          }))
+          return
+        }
         // Exit code is null when the child was killed by a signal. Preserve
         // the distinction so callers can tell abort/timeout apart from a
         // clean non-zero exit.

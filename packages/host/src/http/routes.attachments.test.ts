@@ -84,6 +84,7 @@ describe('message attachment upload route', () => {
         sessionId: 'session-1',
         operationId: 'operation-viewer',
         text: 'not allowed',
+        intent: 'text',
         mode: 'queue',
       }),
     })
@@ -109,6 +110,7 @@ describe('message attachment upload route', () => {
         sessionId: 'session-1',
         operationId: 'operation-fail',
         text: '',
+        intent: 'text',
         mode: 'queue',
         content: [failedFile],
       }),
@@ -171,6 +173,7 @@ describe('message attachment upload route', () => {
         sessionId: 'session-1',
         operationId: 'operation-attachment',
         text: '',
+        intent: 'text',
         mode: 'queue',
         content: [responseBody.file],
       }),

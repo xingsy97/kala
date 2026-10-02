@@ -37,6 +37,7 @@ describe('wire contract — round-trip parses', () => {
     const out = schema.ClientUserMessageSchema.parse({
       sessionId: 's-1',
       text: 'hello',
+      intent: 'text',
     })
     expect(out.sessionId).toBe('s-1')
   })
@@ -45,6 +46,7 @@ describe('wire contract — round-trip parses', () => {
     const out = schema.ClientUserMessageSchema.parse({
       sessionId: 's-1',
       text: 'see image',
+      intent: 'text',
       content: [
         { type: 'text', text: 'part' },
         { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: 'AAA' } },
@@ -195,7 +197,7 @@ describe('wire contract — rejection cases', () => {
   })
 
   it('keeps content and path fields outside id normalization', () => {
-    expect(schema.ClientUserMessageSchema.parse({ sessionId: 's', text: '   ' }).text).toBe('   ')
+    expect(schema.ClientUserMessageSchema.parse({ sessionId: 's', text: '   ', intent: 'text' }).text).toBe('   ')
     expect(schema.ClientReadFileSchema.parse({
       requestId: 'r', workspaceId: 'ws', sessionId: 's', path: ' ./x ',
     }).path).toBe(' ./x ')
