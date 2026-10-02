@@ -123,6 +123,23 @@ export function ScheduledTasksTrigger({ target, onOpen, className, scope: reques
   )
 }
 
+export function ScheduledTasksPanel({ target, onOpen }: { target: ScheduledTaskTarget | null; onOpen(): void }): JSX.Element {
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto p-4" data-testid="scheduled-tasks-panel">
+      <div className="rounded-lg border border-border/60 bg-card p-4">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <CalendarClock className="h-4 w-4" aria-hidden />
+        </div>
+        <h2 className="mt-3 text-sm font-semibold">Scheduled tasks</h2>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Run prompts on a schedule in this Session. Scheduled work waits behind any active request.
+        </p>
+        <ScheduledTasksTrigger target={target} onOpen={onOpen} className="mt-4 w-full justify-center" />
+      </div>
+    </div>
+  )
+}
+
 export function ScheduledTasksDialog({ open, onOpenChange, host, token, target, client: suppliedClient, onOpenSession }: Props): JSX.Element {
   const client = useMemo(() => suppliedClient ?? createScheduledTasksClient({ host, ...(token ? { token } : {}) }), [host, suppliedClient, token])
   const [tasks, setTasks] = useState<readonly ScheduledTask[]>([])

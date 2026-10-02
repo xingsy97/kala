@@ -1,9 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="500" height="220" viewBox="0 0 500 220" role="img" aria-label="kala">
+<svg xmlns="http://www.w3.org/2000/svg" width="590" height="220" viewBox="0 0 590 220" role="img" aria-label="Kala">
   <g fill="none" stroke="#17181a" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
     <path d="M20 10v200M20 115l80-97M20 115l84 95"/>
-    <circle cx="188" cy="132" r="58"/>
-    <path d="M246 75v135M318 10v200"/>
-    <circle cx="422" cy="132" r="58"/>
-    <path d="M480 75v135"/>
+    <circle cx="206" cy="132" r="58"/><path d="M264 75v135"/>
+    <path d="M350 10v200"/>
+    <circle cx="492" cy="132" r="58"/><path d="M550 75v135"/>
   </g>
 </svg>

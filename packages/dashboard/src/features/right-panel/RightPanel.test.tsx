@@ -11,7 +11,7 @@ describe('RightPanel', () => {
   it('defaults through the selected inspector tab, switches without unmounting content, and collapses', () => {
     const onTabChange = vi.fn()
     const onCollapse = vi.fn()
-    const { rerender } = render(<RightPanel activeTab="inspector" onTabChange={onTabChange} onCollapse={onCollapse} files={<div>files body</div>} git={<div>git body</div>} inspector={<div>inspector body</div>} terminal={<div>terminal body</div>} />)
+    const { rerender } =     render(<RightPanel activeTab="inspector" onTabChange={onTabChange} onCollapse={onCollapse} files={<div>files body</div>} git={<div>git body</div>} inspector={<div>inspector body</div>} terminal={<div>terminal body</div>} scheduledTasks={<div>scheduled tasks body</div>} />)
 
     const tablist = screen.getByRole('tablist', { name: 'Workspace tools' })
     expect(tablist.parentElement?.className).toContain('bg-card/70')
@@ -30,7 +30,7 @@ describe('RightPanel', () => {
     fireEvent.click(screen.getByTestId('right-panel-terminal-tab'))
     expect(onTabChange).toHaveBeenCalledWith('terminal')
 
-    rerender(<RightPanel activeTab="terminal" onTabChange={onTabChange} onCollapse={onCollapse} files={<div>files body</div>} git={<div>git body</div>} inspector={<div>inspector body</div>} terminal={<div>terminal body</div>} />)
+    rerender(<RightPanel activeTab="terminal" onTabChange={onTabChange} onCollapse={onCollapse} files={<div>files body</div>} git={<div>git body</div>} inspector={<div>inspector body</div>} terminal={<div>terminal body</div>} scheduledTasks={<div>scheduled tasks body</div>} />)
     expect(screen.getByTestId('right-panel-terminal-tab').getAttribute('aria-selected')).toBe('true')
     expect(screen.getByTestId('right-panel-terminal-content').classList.contains('hidden')).toBe(false)
     expect(screen.getByTestId('right-panel-inspector-content').classList.contains('hidden')).toBe(true)
@@ -39,6 +39,8 @@ describe('RightPanel', () => {
     expect(onTabChange).toHaveBeenCalledWith('files')
     fireEvent.click(screen.getByTestId('right-panel-git-tab'))
     expect(onTabChange).toHaveBeenCalledWith('git')
+    fireEvent.click(screen.getByTestId('right-panel-scheduled-tasks-tab'))
+    expect(onTabChange).toHaveBeenCalledWith('scheduledTasks')
     fireEvent.click(screen.getByTestId('right-panel-collapse'))
     expect(onCollapse).toHaveBeenCalledOnce()
   })

@@ -11,7 +11,7 @@ import {
 
 type Handler = (...args: unknown[]) => void
 
-const now = Date.now()
+const now = Date.parse('2026-10-02T08:00:00.000Z')
 const iso = (offsetMinutes: number): string => new Date(now + offsetMinutes * 60_000).toISOString()
 
 type PrototypeSessionSummary = SessionSummary & { costUsd?: number | null }
@@ -28,6 +28,9 @@ type PrototypeClientPayload = {
   label: string
   workspaceId: string
   workspaceName: string
+  path?: string
+  query?: string
+  limit?: number
   value?: string
   values?: string[]
   customText?: string
@@ -45,7 +48,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-studio',
     workspaceName: 'Product Studio',
     currentCwd: '/workspace/product-studio',
-    label: 'Long response · pinned prompt · production transcript geometry review',
+    label: 'Refine the dashboard layout',
     firstUserMessage: 'Review the production sidebar hierarchy, preserve the existing workbench, verify responsive behavior at three widths, keep hover actions stable, and provide enough implementation detail that the transcript can be scrolled while the original prompt remains available as a lightweight pinned context anchor.',
     status: 'thinking',
     costUsd: null,
@@ -61,7 +64,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-studio',
     workspaceName: 'Product Studio',
     currentCwd: '/workspace/product-studio',
-    label: 'Approval workflow review',
+    label: 'Update retry guard tests',
     firstUserMessage: 'Apply the reviewed retry guard and update the focused tests.',
     status: 'awaiting_approval',
     costUsd: 0,
@@ -76,7 +79,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-studio',
     workspaceName: 'Product Studio',
     currentCwd: '/workspace/product-studio',
-    label: 'Ask user · two decisions',
+    label: 'Plan a safe retry rollout',
     firstUserMessage: 'Prepare a safe rollout plan and ask me for the two decisions you need.',
     status: 'executing_tools',
     costUsd: 1.25,
@@ -91,7 +94,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-labs',
     workspaceName: 'Research Lab',
     currentCwd: '/workspace/research-lab',
-    label: 'Sub-agent activity matrix',
+    label: 'Review responsive behavior',
     firstUserMessage: 'Run a realistic parallel review across implementation, tests, accessibility, and failure recovery.',
     status: 'executing_tools',
   },
@@ -106,7 +109,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-labs',
     workspaceName: 'Research Lab',
     currentCwd: '/workspace/research-lab',
-    label: 'Explore · live responsive evidence',
+    label: 'Inspect responsive layouts',
     firstUserMessage: 'Inspect responsive behavior and collect focused evidence.',
     status: 'executing_tools',
   },
@@ -121,7 +124,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-labs',
     workspaceName: 'Research Lab',
     currentCwd: '/workspace/research-lab',
-    label: 'Task · retry policy verification',
+    label: 'Verify the retry policy',
     firstUserMessage: 'Review the retry policy and verify the focused tests.',
     status: 'done',
   },
@@ -136,7 +139,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-labs',
     workspaceName: 'Research Lab',
     currentCwd: '/workspace/research-lab',
-    label: 'Task · unavailable fixture probe',
+    label: 'Test retry integration',
     firstUserMessage: 'Run the retry integration fixture and report controlled failures.',
     status: 'error',
   },
@@ -151,7 +154,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-labs',
     workspaceName: 'Research Lab',
     currentCwd: '/workspace/research-lab',
-    label: 'Research · optional retry comparison',
+    label: 'Compare retry guidance',
     firstUserMessage: 'Collect optional comparison evidence until the parent has enough.',
     status: 'done',
   },
@@ -165,7 +168,7 @@ const sessions: PrototypeSessionSummary[] = [
     workspaceId: 'workspace-windows',
     workspaceName: 'Windows QA',
     currentCwd: '/workspace/research-lab',
-    label: 'Usage · billion-token history',
+    label: 'Inspect usage history',
     firstUserMessage: 'Inspect long-running usage statistics.',
     status: 'done',
     costUsd: 0,
@@ -177,7 +180,7 @@ const sessions: PrototypeSessionSummary[] = [
     createdAt: iso(-45),
     lastEventAt: iso(-12),
     eventCount: 2,
-    label: 'Completed accessibility audit',
+    label: 'Audit dashboard accessibility',
     firstUserMessage: 'Audit accessibility across the production Dashboard.',
     status: 'idle',
     costUsd: 12.34,
@@ -251,6 +254,7 @@ const activeMessages: Message[] = [
       { type: 'text', text: 'I inspected the production layout and kept the workbench intact. The implementation below uses the real Explorer, ChatPanel, Composer, and responsive panel system.' },
       { type: 'tool_call', callId: 'read-explorer', name: 'read', input: { path: 'src/features/explorer/Explorer.tsx' }, intent: 'Inspect the production Explorer hierarchy and row geometry.' },
       { type: 'tool_call', callId: 'read-chat', name: 'read', input: { path: 'src/features/chat/ChatPanel.tsx' }, intent: 'Inspect metadata overlays and Thinking alignment.' },
+      { type: 'tool_call', callId: 'overview-graph', name: 'todo_graph', input: { operations: [{ operation: 'replace', nodes: ['baseline', 'protocol', 'dashboard', 'docs', 'unit', 'integration', 'responsive', 'accessibility', 'operations', 'browser', 'supply', 'release'] }] }, intent: 'Plan the implementation and validation work as a dependency graph.' },
       { type: 'tool_call', callId: 'run-focused-tests', name: 'bash', input: { command: 'pnpm vitest run Explorer ChatPanel RuntimeMetrics' }, intent: 'Validate focused production behavior.' },
     ],
   },
@@ -259,6 +263,54 @@ const activeMessages: Message[] = [
     content: [
       { type: 'tool_result', callId: 'read-explorer', ok: true, content: 'Explorer hierarchy inspected. Session title, activity time, and hover actions share a container-query driven row.' },
       { type: 'tool_result', callId: 'read-chat', ok: true, content: 'Chat metadata and Thinking clusters inspected. Overlay geometry can avoid hidden layout slots.' },
+      { type: 'tool_result', callId: 'overview-graph', ok: true, content: JSON.stringify({
+        version: 1,
+        revision: 7,
+        nodes: [
+          { id: 'baseline', content: 'Map product constraints', status: 'completed', priority: 'high' },
+          { id: 'protocol', content: 'Refine runtime contract', status: 'in_progress', priority: 'high' },
+          { id: 'dashboard', content: 'Build responsive workspace', status: 'in_progress', priority: 'high' },
+          { id: 'docs', content: 'Document operator workflow', status: 'in_progress', priority: 'medium' },
+          { id: 'unit', content: 'Verify state invariants', status: 'pending', priority: 'high' },
+          { id: 'integration', content: 'Exercise runtime recovery', status: 'pending', priority: 'high' },
+          { id: 'responsive', content: 'Run viewport matrix', status: 'pending', priority: 'high' },
+          { id: 'accessibility', content: 'Audit keyboard and screen reader UX', status: 'pending', priority: 'medium' },
+          { id: 'operations', content: 'Review deployment runbook', status: 'pending', priority: 'medium' },
+          { id: 'browser', content: 'Complete browser acceptance', status: 'pending', priority: 'high' },
+          { id: 'supply', content: 'Verify release evidence', status: 'pending', priority: 'high' },
+          { id: 'release', content: 'Approve production release', status: 'pending', priority: 'high' },
+        ],
+        edges: [
+          { from: 'baseline', to: 'protocol' },
+          { from: 'baseline', to: 'dashboard' },
+          { from: 'baseline', to: 'docs' },
+          { from: 'protocol', to: 'unit' },
+          { from: 'protocol', to: 'integration' },
+          { from: 'dashboard', to: 'responsive' },
+          { from: 'dashboard', to: 'accessibility' },
+          { from: 'docs', to: 'operations' },
+          { from: 'integration', to: 'browser' },
+          { from: 'responsive', to: 'browser' },
+          { from: 'accessibility', to: 'browser' },
+          { from: 'unit', to: 'supply' },
+          { from: 'operations', to: 'supply' },
+          { from: 'browser', to: 'release' },
+          { from: 'supply', to: 'release' },
+        ],
+        summary: { total: 12, completed: 1, active: 3, ready: 0, blocked: 8, cancelled: 0 },
+        ready: [],
+        blocked: [
+          { id: 'unit', waitingOn: ['protocol'] },
+          { id: 'integration', waitingOn: ['protocol'] },
+          { id: 'responsive', waitingOn: ['dashboard'] },
+          { id: 'accessibility', waitingOn: ['dashboard'] },
+          { id: 'operations', waitingOn: ['docs'] },
+          { id: 'browser', waitingOn: ['integration', 'responsive', 'accessibility'] },
+          { id: 'supply', waitingOn: ['unit', 'operations'] },
+          { id: 'release', waitingOn: ['browser', 'supply'] },
+        ],
+        changed: ['protocol', 'dashboard', 'docs'],
+      }) },
       { type: 'tool_result', callId: 'run-focused-tests', ok: true, content: 'Focused production tests passed in the prototype fixture.' },
     ],
   },
@@ -275,6 +327,52 @@ const activeMessages: Message[] = [
       '',
       'Validation covers metadata geometry, merged Thinking updates, pinned prompt visibility, three Explorer widths, compact statistics, storage inventory, approval, ask-user decisions, and sub-agent lifecycle states.',
     ].join('\n') }],
+  },
+  {
+    role: 'user',
+    content: [{ type: 'text', text: 'Keep the final verification focused on the production workbench and preserve the existing interaction hierarchy.' }],
+  },
+  {
+    role: 'assistant',
+    content: [
+      { type: 'text', text: 'The focused checks are green. I am delegating one independent review before closing the plan.' },
+      { type: 'tool_call', callId: 'overview-agent', name: 'agent', input: { agent_type: 'Explore', intention: 'Review the responsive implementation independently and summarize the strongest evidence.' } },
+    ],
+  },
+  {
+    role: 'tool',
+    content: [
+      { type: 'tool_result', callId: 'overview-agent', ok: true, content: '<sub_agent session_id="prototype-subagent-completed" agent_type="Explore" intention="Review the responsive implementation independently and summarize the strongest evidence." status="completed" turns="4" duration_ms="12600"><result>Responsive hierarchy, tool activity, and pinned prompt behavior are consistent across the focused viewport matrix.</result></sub_agent>' },
+    ],
+  },
+  {
+    role: 'assistant',
+    content: [
+      { type: 'text', text: 'The independent review confirms the layout contract. I am checking the browser matrix and release evidence before closing the graph.' },
+      { type: 'tool_call', callId: 'review-layout-source', name: 'read', input: { path: 'src/features/chat/ChatPanel.tsx' }, intent: 'Confirm the final production transcript and tool-dot layout source.' },
+      { type: 'tool_call', callId: 'review-layout-search', name: 'grep', input: { pattern: 'overflow|container', path: 'src/features' }, intent: 'Check the responsive layout guards across the changed feature surfaces.' },
+      { type: 'tool_call', callId: 'review-browser-matrix', name: 'bash', input: { command: 'pnpm test:browser -- responsive' }, intent: 'Verify desktop, tablet, and mobile production geometry.' },
+      { type: 'tool_call', callId: 'review-accessibility', name: 'bash', input: { command: 'pnpm test:accessibility -- dashboard' }, intent: 'Verify keyboard navigation, labels, focus order, and reduced-motion behavior.' },
+      { type: 'tool_call', callId: 'review-production-build', name: 'bash', input: { command: 'pnpm --filter @agent-kernel/dashboard build' }, intent: 'Build the production Dashboard with the verified responsive components.' },
+      { type: 'tool_call', callId: 'review-privacy-gate', name: 'bash', input: { command: 'pnpm privacy:check' }, intent: 'Verify that public product evidence contains only fictional fixture data.' },
+      { type: 'tool_call', callId: 'review-release-evidence', name: 'read', input: { path: 'release/evidence/verification.json' }, intent: 'Confirm the release evidence records the focused checks.' },
+    ],
+  },
+  {
+    role: 'tool',
+    content: [
+      { type: 'tool_result', callId: 'review-layout-source', ok: true, content: 'The production ChatPanel keeps tool summaries compact while preserving accessible detail on demand.' },
+      { type: 'tool_result', callId: 'review-layout-search', ok: true, content: 'Responsive guards cover the transcript, Composer, Explorer, and right-panel boundaries.' },
+      { type: 'tool_result', callId: 'review-browser-matrix', ok: true, content: 'Desktop, tablet, and mobile acceptance passed with no horizontal overflow.' },
+      { type: 'tool_result', callId: 'review-accessibility', ok: true, content: 'Keyboard, labels, focus order, contrast, and reduced-motion checks passed.' },
+      { type: 'tool_result', callId: 'review-production-build', ok: true, content: 'The production Dashboard build completed with the verified component graph.' },
+      { type: 'tool_result', callId: 'review-privacy-gate', ok: true, content: 'Privacy verification found only fictional prototype identifiers and public product content.' },
+      { type: 'tool_result', callId: 'review-release-evidence', ok: true, content: 'Verification receipt includes unit, browser, accessibility, and supply-chain evidence.' },
+    ],
+  },
+  {
+    role: 'assistant',
+    content: [{ type: 'text', text: 'The implementation, independent review, responsive matrix, and release evidence are complete. The final release gate is ready for the operator.' }],
   },
 ]
 
@@ -341,6 +439,32 @@ function subAgentMatrixMessages(): Message[] {
     {
       role: 'assistant',
       content: [
+        { type: 'text', text: 'I will map and verify the production surfaces first, then coordinate independent reviews while keeping every lifecycle visible.' },
+        { type: 'tool_call', callId: 'agent-read-contract', name: 'read', input: { path: 'src/features/chat/SubAgentCard.tsx' }, intent: 'Inspect the production sub-agent lifecycle contract before delegation.' },
+        { type: 'tool_call', callId: 'agent-search-statuses', name: 'grep', input: { pattern: 'running|completed|failed|cancelled|pending', path: 'src/features/chat' }, intent: 'Confirm every delegated lifecycle has a production rendering path.' },
+        { type: 'tool_call', callId: 'agent-test-matrix', name: 'bash', input: { command: 'pnpm vitest run SubAgentCard' }, intent: 'Verify the focused lifecycle matrix before launching delegated work.' },
+        { type: 'tool_call', callId: 'agent-check-layout', name: 'bash', input: { command: 'pnpm verify:subagent-scroll' }, intent: 'Verify nested activity remains usable at compact viewport widths.' },
+        { type: 'tool_call', callId: 'agent-read-protocol', name: 'read', input: { path: 'docs/host/sub-agent-design.md' }, intent: 'Confirm parent-child lifecycle and cancellation semantics.' },
+        { type: 'tool_call', callId: 'agent-build-dashboard', name: 'bash', input: { command: 'pnpm --filter @agent-kernel/dashboard build' }, intent: 'Build the production delegated-work surfaces.' },
+        { type: 'tool_call', callId: 'agent-privacy-check', name: 'bash', input: { command: 'pnpm privacy:check' }, intent: 'Verify the lifecycle fixture contains no private data.' },
+      ],
+    },
+    {
+      role: 'tool',
+      content: [
+        { type: 'tool_result', callId: 'agent-read-contract', ok: true, content: 'The production card supports running, completed, failed, cancelled, idle, and pending delegated work.' },
+        { type: 'tool_result', callId: 'agent-search-statuses', ok: true, content: 'Every lifecycle maps to a visible label, timing state, and inspectable nested transcript.' },
+        { type: 'tool_result', callId: 'agent-test-matrix', ok: true, content: 'The focused sub-agent lifecycle matrix passed.' },
+        { type: 'tool_result', callId: 'agent-check-layout', ok: true, content: 'Nested activity remained readable and scrollable across the compact viewport matrix.' },
+        { type: 'tool_result', callId: 'agent-read-protocol', ok: true, content: 'Parent-child ownership, completion, failure, cancellation, and pending states are explicit.' },
+        { type: 'tool_result', callId: 'agent-build-dashboard', ok: true, content: 'The production Dashboard build completed.' },
+        { type: 'tool_result', callId: 'agent-privacy-check', ok: true, content: 'The fixture contains only fictional product data.' },
+      ],
+    },
+    { role: 'user', content: [{ type: 'text', text: 'Keep every delegated lifecycle visible together so I can compare running, completed, failed, cancelled, and pending work.' }] },
+    {
+      role: 'assistant',
+      content: [
         { type: 'text', text: 'Starting a mixed lifecycle matrix with long intentions and nested production transcripts.' },
         { type: 'tool_call', callId: 'agent-running', name: 'agent', input: { agent_type: 'Explore', intention: 'Inspect responsive geometry across wide, threshold, and very narrow Explorer widths while collecting exact DOM measurements and nested tool evidence.' } },
         { type: 'tool_call', callId: 'agent-completed', name: 'agent', input: { agent_type: 'Task', intention: 'Run focused production tests and summarize the stable assertions.' } },
@@ -358,6 +482,12 @@ function subAgentMatrixMessages(): Message[] {
       ],
     },
   ]
+}
+
+function messageCursor(messages: readonly Message[]): number {
+  return messages.reduce((cursor, message) => cursor + 1 + (message.role === 'tool'
+    ? message.content.filter((content) => content.type === 'tool_result').length
+    : 0), 0)
 }
 
 function stateFor(sessionId: string): AgentState {
@@ -486,7 +616,7 @@ function stateFor(sessionId: string): AgentState {
     } as AgentState
   }
   if (sessionId === 'prototype-active') {
-    return { ...base, messages: activeMessages, cursor: 8, status: 'thinking', pendingCalls: [] } as AgentState
+    return { ...base, messages: activeMessages, cursor: messageCursor(activeMessages), status: 'thinking', pendingCalls: [] } as AgentState
   }
   if (sessionId === 'prototype-attention') {
     return {
@@ -511,22 +641,51 @@ function stateFor(sessionId: string): AgentState {
   }
   if (sessionId === 'prototype-ask-user') {
     const pendingCalls = askUserPendingCalls(sessionId)
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'Prepare the production rollout for the retry-policy change. Inspect the current runbook and tests, identify the safe window, and stop for decisions that require an operator.' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'I will gather the rollout, recovery, and verification evidence before asking for decisions that belong to you.' }] },
+      { role: 'user', content: [{ type: 'text', text: 'Keep rollout timing and validation depth as explicit operator-owned choices.' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', text: 'I will inspect the deployment contract and focused recovery tests before asking for operator-owned choices.' },
+          { type: 'tool_call', callId: 'ask-read-runbook', name: 'read', input: { path: 'docs/operations/retry-policy-rollout.md' }, intent: 'Read the rollout and rollback contract.' },
+          { type: 'tool_call', callId: 'ask-search-checkpoints', name: 'grep', input: { pattern: 'checkpoint|rollback|observation', path: 'docs/operations' }, intent: 'Locate every operator-owned rollout checkpoint.' },
+          { type: 'tool_call', callId: 'ask-run-tests', name: 'bash', input: { command: 'pnpm test retry-policy recovery' }, intent: 'Verify retry behavior and recovery before choosing a window.' },
+          { type: 'tool_call', callId: 'ask-build-dashboard', name: 'bash', input: { command: 'pnpm --filter @agent-kernel/dashboard build' }, intent: 'Build the production decision workflow before presenting choices.' },
+          { type: 'tool_call', callId: 'ask-check-accessibility', name: 'bash', input: { command: 'pnpm test:accessibility -- ask-user' }, intent: 'Verify choice labels, descriptions, focus order, and keyboard submission.' },
+          { type: 'tool_call', callId: 'ask-read-evidence', name: 'read', input: { path: 'release/evidence/verification.json' }, intent: 'Confirm the rollout evidence is bound to the reviewed revision.' },
+          { type: 'tool_call', callId: 'ask-privacy-check', name: 'bash', input: { command: 'pnpm privacy:check' }, intent: 'Verify the operator decision fixture contains no private data.' },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [
+          { type: 'tool_result', callId: 'ask-read-runbook', ok: true, content: 'Runbook requires a staffed rollback window, two healthy checkpoints, and ten minutes of error-rate observation.' },
+          { type: 'tool_result', callId: 'ask-search-checkpoints', ok: true, content: 'Found the readiness, cutover, observation, and rollback decision boundaries.' },
+          { type: 'tool_result', callId: 'ask-run-tests', ok: true, content: 'retry-policy and recovery: 28 focused tests passed; rollback fixture restored the previous route generation.' },
+          { type: 'tool_result', callId: 'ask-build-dashboard', ok: true, content: 'The production Dashboard decision workflow built successfully.' },
+          { type: 'tool_result', callId: 'ask-check-accessibility', ok: true, content: 'Choice descriptions, focus order, and keyboard submission checks passed.' },
+          { type: 'tool_result', callId: 'ask-read-evidence', ok: true, content: 'Release evidence contains the focused recovery and browser receipts.' },
+          { type: 'tool_result', callId: 'ask-privacy-check', ok: true, content: 'The fixture contains only fictional product data.' },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'The implementation and rollback evidence are ready. I need the operator to choose the rollout window and validation depth before proceeding.' }] },
+    ]
     return {
       ...base,
-      messages: [
-        { role: 'user', content: [{ type: 'text', text: 'Prepare a safe rollout plan and ask me for the two decisions you need.' }] },
-        { role: 'assistant', content: [{ type: 'text', text: 'I need two decisions. The production AskUserChoiceCard will advance to the second question after the first response.' }] },
-      ],
-      cursor: 2 + (askResponses.get(sessionId)?.length ?? 0),
+      messages,
+      cursor: messageCursor(messages) + (askResponses.get(sessionId)?.length ?? 0),
       status: pendingCalls.length > 0 ? 'executing_tools' : 'done',
       pendingCalls,
     } as AgentState
   }
   if (sessionId === 'prototype-subagents') {
+    const messages = subAgentMatrixMessages()
     return {
       ...base,
-      messages: subAgentMatrixMessages(),
-      cursor: 7,
+      messages,
+      cursor: messageCursor(messages),
       status: 'executing_tools',
       pendingCalls: [
         { callId: 'agent-running', name: 'agent', input: {}, status: 'dispatched' },
@@ -570,6 +729,13 @@ function historyFor(sessionId: string): EventAppendedEvent[] {
 function readyFor(sessionId: string): SessionReadyEvent {
   const summary = sessions.find((candidate) => candidate.sessionId === sessionId)
   const state = stateFor(sessionId)
+  const contextInputTokens = sessionId === 'prototype-subagents'
+    ? 260_000
+    : sessionId === 'prototype-active'
+      ? 220_000
+      : sessionId === 'prototype-ask-user'
+        ? 180_000
+        : 12_345
   return {
     sessionId,
     agentRuntime: 'kernel',
@@ -579,17 +745,17 @@ function readyFor(sessionId: string): SessionReadyEvent {
     state,
     config: { systemPrompt: 'Prototype placeholder system prompt.', tools: [] },
     contextSnapshot: {
-      model: { ref: 'placeholder-model', id: 'placeholder-model', provider: 'mock' },
+      model: { ref: 'openai:gpt-5.6', id: 'gpt-5.6', provider: 'openai' },
       contextWindow: { tokens: 1_000_000, source: 'model_registry' },
-      usage: { inputTokens: sessionId === 'prototype-active' ? 350_000 : 12_345, totalTokens: sessionId === 'prototype-active' ? 350_000 : 12_345 },
-      breakdown: { system: 2_400, transcript: sessionId === 'prototype-active' ? 341_000 : 8_000, tools: 5_000, memory: 1_000, attachments: 600, pendingUserInput: 0 },
+      usage: { inputTokens: contextInputTokens, totalTokens: contextInputTokens },
+      breakdown: { system: 2_400, transcript: Math.max(8_000, contextInputTokens - 9_000), tools: 5_000, memory: 1_000, attachments: 600, pendingUserInput: 0 },
       estimator: { total: { kind: 'heuristic', confidence: 'estimated' }, breakdown: { kind: 'heuristic', confidence: 'estimated' }, version: 'prototype-placeholder-v1' },
       updatedAt: Date.now(),
     },
     reason: 'load',
     ...(summary?.parentSessionId ? { parentSessionId: summary.parentSessionId, parentCursor: 7, parentCallId: 'agent-running', agentType: 'Explore' } : {}),
     ...(summary?.workspaceId ? { workspaceId: summary.workspaceId, workspaceName: summary.workspaceName } : {}),
-    selectedModel: 'placeholder-model',
+    selectedModel: 'openai:gpt-5.6',
   }
 }
 
@@ -672,6 +838,58 @@ class PrototypeDashboardSocket {
       queueMicrotask(() => this.serverEmit('server:sessions', { sessions }))
       return this
     }
+    if (event === 'client:list_dirs') {
+      const session = sessions.find((candidate) => candidate.workspaceId === payload.workspaceId)
+      const root = session?.currentCwd ?? '/workspace'
+      const path = payload.path ?? root
+      const entries = path === root
+        ? [
+            { name: '.github', path: `${root}/.github`, type: 'directory' as const },
+            { name: 'deploy', path: `${root}/deploy`, type: 'directory' as const },
+            { name: 'docs', path: `${root}/docs`, type: 'directory' as const },
+            { name: 'packages', path: `${root}/packages`, type: 'directory' as const },
+            { name: 'scripts', path: `${root}/scripts`, type: 'directory' as const },
+            { name: 'tests', path: `${root}/tests`, type: 'directory' as const },
+            { name: 'package.json', path: `${root}/package.json`, type: 'file' as const, size: 4_812 },
+            { name: 'pnpm-workspace.yaml', path: `${root}/pnpm-workspace.yaml`, type: 'file' as const, size: 1_284 },
+            { name: 'README.md', path: `${root}/README.md`, type: 'file' as const, size: 12_640 },
+          ]
+        : path === `${root}/packages`
+          ? [
+              { name: 'dashboard', path: `${path}/dashboard`, type: 'directory' as const },
+              { name: 'executor', path: `${path}/executor`, type: 'directory' as const },
+              { name: 'host', path: `${path}/host`, type: 'directory' as const },
+              { name: 'protocol', path: `${path}/protocol`, type: 'directory' as const },
+            ]
+        : [
+            { name: 'src', path: `${path}/src`, type: 'directory' as const },
+            { name: 'package.json', path: `${path}/package.json`, type: 'file' as const, size: 2_418 },
+            { name: 'tsconfig.json', path: `${path}/tsconfig.json`, type: 'file' as const, size: 912 },
+          ]
+      const result = { requestId: payload.requestId, workspaceId: payload.workspaceId, path, roots: [root], entries }
+      ack?.(result)
+      queueMicrotask(() => this.serverEmit('server:dir_list', result))
+      return this
+    }
+    if (event === 'client:list_files') {
+      const session = sessions.find((candidate) => candidate.workspaceId === payload.workspaceId)
+      const root = session?.currentCwd ?? '/workspace'
+      queueMicrotask(() => this.serverEmit('server:file_list', {
+        requestId: payload.requestId,
+        workspaceId: payload.workspaceId,
+        files: [
+          { path: `${root}/packages/dashboard/src/app.tsx`, size: 128_406 },
+          { path: `${root}/packages/dashboard/src/features/chat/Composer.tsx`, size: 54_812 },
+          { path: `${root}/packages/host/src/runtime.ts`, size: 38_240 },
+          { path: `${root}/packages/executor/src/executor.ts`, size: 24_116 },
+          { path: `${root}/packages/protocol/src/events.ts`, size: 18_904 },
+          { path: `${root}/docs/architecture/overview.md`, size: 22_731 },
+          { path: `${root}/scripts/release/build-release-assets.mjs`, size: 16_508 },
+          { path: `${root}/package.json`, size: 4_812 },
+        ],
+      }))
+      return this
+    }
     if (event === 'client:load_history') {
       const entries = historyFor(payload.sessionId)
       queueMicrotask(() => this.serverEmit('server:history', { sessionId: payload.sessionId, entries }))
@@ -709,9 +927,9 @@ class PrototypeDashboardSocket {
             corrupt: { bytes: 1_024, files: 1 },
           },
           largestSessionTrees: [
-            { sessionId: 'prototype-subagents', sessionLabel: 'Sub-agent activity matrix', workspaceId: 'workspace-labs', workspaceName: 'Research Lab', directBytes: 2_097_152, treeBytes: 6_291_456, descendantCount: 5, categories: {}, treeCategories: {} },
-            { sessionId: 'prototype-active', sessionLabel: 'Long response · pinned prompt · production transcript geometry review', workspaceId: 'workspace-studio', workspaceName: 'Product Studio', directBytes: 3_145_728, treeBytes: 3_670_016, descendantCount: 0, categories: {}, treeCategories: {} },
-            { sessionId: 'prototype-usage', sessionLabel: 'Usage · billion-token history', workspaceId: 'workspace-windows', workspaceName: 'Windows QA', directBytes: 1_048_576, treeBytes: 1_572_864, descendantCount: 0, categories: {}, treeCategories: {} },
+            { sessionId: 'prototype-subagents', sessionLabel: 'Review responsive behavior', workspaceId: 'workspace-labs', workspaceName: 'Research Lab', directBytes: 2_097_152, treeBytes: 6_291_456, descendantCount: 5, categories: {}, treeCategories: {} },
+            { sessionId: 'prototype-active', sessionLabel: 'Refine the dashboard layout', workspaceId: 'workspace-studio', workspaceName: 'Product Studio', directBytes: 3_145_728, treeBytes: 3_670_016, descendantCount: 0, categories: {}, treeCategories: {} },
+            { sessionId: 'prototype-usage', sessionLabel: 'Inspect usage history', workspaceId: 'workspace-windows', workspaceName: 'Windows QA', directBytes: 1_048_576, treeBytes: 1_572_864, descendantCount: 0, categories: {}, treeCategories: {} },
           ],
           orphanCandidates: [
             { id: 'mock-artifacts-unattached-001', category: 'orphan-artifacts', bytes: 524_288, files: 5 },
@@ -818,7 +1036,13 @@ class PrototypeDashboardSocket {
           status: 'ready',
           version: 'prototype',
           capabilities: KERNEL_AGENT_RUNTIME_CAPABILITIES,
-          models: [{ id: 'placeholder-model', label: 'Placeholder Model', provider: 'mock' }],
+          models: [{
+            ref: 'openai:gpt-5.6',
+            id: 'gpt-5.6',
+            label: 'GPT 5.6',
+            provider: 'Anthropic',
+            providerId: 'anthropic',
+          }],
         }],
       })
     }

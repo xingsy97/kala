@@ -101,7 +101,6 @@ export function SubAgentCard(props: Props): JSX.Element {
           socket={props.socket}
           result={props.group.results.get(call.callId) ?? null}
           approval={props.approvalByCallId.get(call.callId) ?? null}
-          dotsMode={props.toolCardMode === 'dots'}
         />
       ))}
     </div>
@@ -122,7 +121,6 @@ type RowProps = {
    */
   compact?: boolean
   grouped?: boolean
-  dotsMode?: boolean
 }
 
 const SubAgentRow = memo(function SubAgentRow({
@@ -132,7 +130,6 @@ const SubAgentRow = memo(function SubAgentRow({
   result,
   compact = false,
   grouped = false,
-  dotsMode = false,
 }: RowProps): JSX.Element {
   const { t } = useTranslation()
   const envelope = result ? parseSubAgentEnvelope(result.content) : null
@@ -258,28 +255,6 @@ const SubAgentRow = memo(function SubAgentRow({
     if (compact && status === 'running') setOpen(true)
     if (compact && terminal) setOpen(false)
   }, [status, compact, grouped])
-
-  if (dotsMode && !open && terminal) {
-    const label = `${t('chat.subAgent.label')}${agentType ? ` · ${agentType}` : ''} · ${statusLabel(status, t)}${turns > 0 ? ` · ${t('chat.subAgent.turn', { count: turns })}` : ''}`
-    return (
-      <div className="w-fit" data-testid={`sub-agent-row-${call.callId}`} data-sub-agent-status={status}>
-        <button
-          type="button"
-          onClick={() => withViewTransition(() => setOpen(true))}
-          className={cn(
-            'inline-flex h-8 w-8 items-center justify-center rounded-full bg-background ring-1 ring-border/70 ring-offset-1 ring-offset-background transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            status === 'completed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400',
-          )}
-          title={label}
-          aria-label={label}
-          data-testid={`sub-agent-dot-${call.callId}`}
-          data-sub-agent-toggle={call.callId}
-        >
-          {status === 'completed' ? <Workflow className="h-4 w-4" aria-hidden="true" /> : <AlertCircle className="h-4 w-4" aria-hidden="true" />}
-        </button>
-      </div>
-    )
-  }
 
   const childSessionId = view.lifecycle.status === 'idle'
     ? envelope?.sessionId

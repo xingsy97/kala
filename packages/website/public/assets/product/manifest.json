@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "source": "packages/dashboard production App with prototype transport fixtures",
+  "privacy": "fictional product fixture data only",
+  "captures": [
+    {
+      "name": "hero-workbench.webp",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sessionId": "prototype-active",
+      "sha256": "ecd70f5f687c00ce6d040a13108384fe419706917986cd0fbaf51c58988de6c0",
+      "bytes": 97958
+    },
+    {
+      "name": "task-graph.webp",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sessionId": "prototype-active",
+      "sha256": "7160014a44363269e6c232fc28d8b161c1a522585667fe2fee25d5e6e394cb24",
+      "bytes": 35576
+    },
+    {
+      "name": "ask-user-workflow.webp",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sessionId": "prototype-ask-user",
+      "sha256": "5c75ddd1f709a3fec7c408962470d787dd4a6315a349313be9e0d4cc4e42070a",
+      "bytes": 81942
+    },
+    {
+      "name": "subagent-activity.webp",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sessionId": "prototype-subagents",
+      "sha256": "55a46076fc7c8b6dc11a21eba55f62286df139ea8202384e9f3e20bc2e652343",
+      "bytes": 88900
+    },
+    {
+      "name": "tablet-session.webp",
+      "theme": "light",
+      "viewport": {
+        "width": 834,
+        "height": 1112
+      },
+      "sessionId": "prototype-subagents",
+      "sha256": "db593d2a101fff067795805471bc4b9df08c8cc9a67f98d17d6ecf28569d1259",
+      "bytes": 69538
+    },
+    {
+      "name": "mobile-session.webp",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "sessionId": "prototype-subagents",
+      "sha256": "315ca2aeed7c520e53f21937717c2683b69cbc695282fd7c690556ff6ae6f5d8",
+      "bytes": 39698
+    },
+    {
+      "name": "hero-workbench-dark.webp",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sessionId": "prototype-active",
+      "sha256": "dd82f18dc8c9f0b4729c3242c0fc260731234181d2359b2fe8956cbe438f9b56",
+      "bytes": 93816
+    },
+    {
+      "name": "task-graph-dark.webp",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sessionId": "prototype-active",
+      "sha256": "0a0b3fc1ee9484c421e1f9b3afb5d6ed90e5c200b57ed6ca91ec5f7ff35d081f",
+      "bytes": 32470
+    },
+    {
+      "name": "ask-user-workflow-dark.webp",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sessionId": "prototype-ask-user",
+      "sha256": "18a25f8920e41aa869c0914e0faf58f32d8770001df8429dedc0fe3a95abddd9",
+      "bytes": 77482
+    },
+    {
+      "name": "subagent-activity-dark.webp",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "sessionId": "prototype-subagents",
+      "sha256": "b0bcbbdf49f70f19a0ce195abda5f41a408d643fd94ba4b2665b917e63763066",
+      "bytes": 85884
+    },
+    {
+      "name": "tablet-session-dark.webp",
+      "theme": "dark",
+      "viewport": {
+        "width": 834,
+        "height": 1112
+      },
+      "sessionId": "prototype-subagents",
+      "sha256": "c9d2a548c087e49faa14b0dea5b61a0b71b0f8234fa6df29e6defb1ad56a7a26",
+      "bytes": 68020
+    },
+    {
+      "name": "mobile-session-dark.webp",
+      "theme": "dark",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "sessionId": "prototype-subagents",
+      "sha256": "03256fc1955133f8eb9bacb748fbf568224490674af25d01f455c305930ccd2a",
+      "bytes": 38698
+    }
+  ]
+}

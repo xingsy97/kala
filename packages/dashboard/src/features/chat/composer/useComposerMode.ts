@@ -10,6 +10,7 @@ function readInitialMode(): ComposerMode {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw === 'simple' || raw === 'full') return raw
+    if (window.matchMedia('(max-width: 639px)').matches) return 'simple'
   } catch {}
   return 'full'
 }

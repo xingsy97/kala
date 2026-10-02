@@ -1656,6 +1656,7 @@ export const resources = {
         git: 'Git',
         inspector: 'Inspector',
         terminal: 'Terminal',
+        scheduledTasks: 'Scheduled tasks',
         collapse: 'Collapse right panel',
       },
       memo: {
@@ -3513,6 +3514,7 @@ export const resources = {
         git: 'Git',
         inspector: '检查器',
         terminal: '终端',
+        scheduledTasks: '定时任务',
         collapse: '收起右侧面板',
       },
       memo: {

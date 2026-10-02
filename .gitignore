@@ -8,6 +8,7 @@ build/
 /release/
 packages/dashboard/dist-prototype/
 packages/dashboard/review-screenshots/
+packages/website/.generated/
 *.woff
 *.woff2
 *.ttf

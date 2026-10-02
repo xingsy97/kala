@@ -1009,7 +1009,7 @@ export function Composer({
                   shellMode && 'border-amber-400/80 bg-amber-50/30 ring-1 ring-amber-400/20 dark:bg-amber-950/10',
                 )}
                 data-testid="composer-simple-shell"
-                data-layout="mobile-input-first"
+                data-layout="single-row"
               >
                 {voiceActive ? (
                   <VoiceRecorderSurface voice={voice} onStopAndSend={stopVoiceAndSend} compact />
@@ -1018,7 +1018,7 @@ export function Composer({
                   {shellModeIndicator}
                   {contextUsageBar('compact')}
                   <AttachmentTray images={pastedImages} files={attachedFiles} onRemoveImage={removeImage} onRemoveFile={removeFile} bordered />
-                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-1 px-1 py-0.5 sm:min-h-12 sm:flex-nowrap sm:justify-start">
+                  <div className="flex min-h-12 min-w-0 flex-nowrap items-center gap-1 px-1 py-0.5" data-testid="composer-simple-controls">
                   <SlashCommandMenu
                     commands={matchingCommands}
                     disabled={disabled}

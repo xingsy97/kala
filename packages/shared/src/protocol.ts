@@ -242,7 +242,7 @@ export type SessionReadyEvent = {
  * threshold overrides, editor language, UI density, etc.
  */
 export type ToolCardMode = 'dots' | 'standard'
-export type RightPanelTab = 'files' | 'git' | 'terminal' | 'inspector'
+export type RightPanelTab = 'files' | 'git' | 'terminal' | 'inspector' | 'scheduledTasks'
 
 export type SessionPreferences = {
   selectedModel?: string

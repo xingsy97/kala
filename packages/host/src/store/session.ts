@@ -2082,7 +2082,7 @@ function latestRightPanelTabFromMetadata(
 ): SessionPreferences['rightPanelTab'] {
   for (let i = metadata.length - 1; i >= 0; i -= 1) {
     const value = metadata[i]!.rightPanelTab
-    if (value === 'files' || value === 'git' || value === 'terminal' || value === 'inspector') return value
+    if (value === 'files' || value === 'git' || value === 'terminal' || value === 'inspector' || value === 'scheduledTasks') return value
   }
   return undefined
 }

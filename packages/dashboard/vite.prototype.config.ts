@@ -23,8 +23,15 @@ function prototypeApi(): Plugin {
         }
         if (url.pathname === '/models') {
           sendJson({
-            models: [{ id: 'placeholder-model', label: 'Placeholder Model', provider: 'mock' }],
-            defaultModel: 'placeholder-model',
+            models: [{
+              ref: 'openai:gpt-5.6',
+              id: 'gpt-5.6',
+              label: 'GPT 5.6',
+              provider: 'OpenAI',
+              providerId: 'openai',
+              contextWindow: 1_000_000,
+            }],
+            defaultModel: 'openai:gpt-5.6',
           })
           return
         }

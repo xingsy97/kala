@@ -190,7 +190,7 @@ export function RuntimeMetrics({
               d={contextBorderPath}
               pathLength="100"
               fill="none"
-              className={cn('drop-shadow-[0_0_8px_currentColor] opacity-95 transition-[filter,opacity,stroke-dasharray] duration-500 ease-out motion-reduce:transition-none', contextStrokeTone)}
+              className={cn('drop-shadow-[0_0_3px_currentColor] opacity-90 transition-[filter,opacity,stroke-dasharray] duration-500 ease-out motion-reduce:transition-none dark:drop-shadow-[0_0_8px_currentColor] dark:opacity-95', contextStrokeTone)}
               strokeWidth="3.25"
               strokeLinecap="round"
               strokeDasharray={`${usedPercent} ${contextUsageGap}`}

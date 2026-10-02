@@ -1,0 +1,27 @@
+{
+  "name": "@agent-kernel/website",
+  "version": "0.2.0",
+  "description": "Official Kala product website.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "render": "node scripts/render.mjs",
+    "dev": "pnpm run render && vite --config vite.config.ts --host 0.0.0.0 --port 4180",
+    "build": "pnpm run render && vite build --config vite.config.ts",
+    "preview": "vite preview --config vite.config.ts --host 0.0.0.0 --port 4180",
+    "capture:product": "node scripts/capture-product.mjs",
+    "test": "node --test scripts/site.test.mjs",
+    "verify:browser": "node scripts/verify-browser.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "puppeteer-core": "25.3.0",
+    "typescript": "5.6.3",
+    "vite": "6.4.3"
+  }
+}

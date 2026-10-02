@@ -1,0 +1,76 @@
+name: Website Pages
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/website-pages.yml'
+      - 'deploy/private-cloud/branding/**'
+      - 'packages/website/**'
+      - 'scripts/release/release-catalog.json'
+      - 'scripts/release/release-notes.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'security/privacy-policy.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KALA_RELEASE_VERSION: ${{ github.event.release.tag_name }}
+      KALA_SITE_BASE: /${{ github.event.repository.name }}/
+      KALA_SITE_ORIGIN: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
+      - name: Install website dependencies
+        run: pnpm install --frozen-lockfile --filter @agent-kernel/website...
+      - name: Verify website content
+        run: pnpm --dir packages/website test
+      - name: Build website
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: pnpm --dir packages/website build
+      - name: Verify browser behavior
+        env:
+          WEBSITE_URL: http://127.0.0.1:4180/${{ github.event.repository.name }}/
+        run: pnpm --dir packages/website verify:browser
+      - name: Verify public content
+        run: node scripts/security/privacy-check.mjs --repository
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: packages/website/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

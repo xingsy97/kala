@@ -879,7 +879,7 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-full-shell').contains(screen.getByTestId('context-usage-bar'))).toBe(true)
   })
 
-  it('gives the simple input its own mobile row and keeps tool actions together', () => {
+  it('keeps the simple composer controls in one mobile row', () => {
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
     try {
@@ -891,10 +891,12 @@ describe('Composer', () => {
 
       const shell = screen.getByTestId('composer-simple-shell')
       const row = screen.getByTestId('composer-simple-row')
+      const controls = screen.getByTestId('composer-simple-controls')
       const tools = screen.getByTestId('composer-simple-tools')
       const sendColumn = screen.getByTestId('composer-simple-send-column')
       const leftAccessory = screen.getByTestId('composer-left-accessory')
-      expect(shell.getAttribute('data-layout')).toBe('mobile-input-first')
+      expect(shell.getAttribute('data-layout')).toBe('single-row')
+      expect(controls.className).toContain('flex-nowrap')
       expect(row.className).toContain('sm:-ml-8')
       expect(leftAccessory.className).toContain('[&_[data-testid=user-message-navigation]]:flex-col')
       expect(leftAccessory.className).toContain('[&_[data-testid=user-message-navigation]]:gap-0')
@@ -909,7 +911,7 @@ describe('Composer', () => {
       input.textContent = 'first line\nsecond line'
       fireEvent.input(input)
 
-      expect(shell.getAttribute('data-layout')).toBe('mobile-input-first')
+      expect(shell.getAttribute('data-layout')).toBe('single-row')
       expect(screen.queryByTestId('composer-tools-menu')).toBeNull()
       expect(screen.queryByTestId('hidden-shell-tool')).toBeNull()
       expect(sendColumn.contains(screen.getByTestId('composer-send'))).toBe(true)

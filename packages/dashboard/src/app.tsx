@@ -78,7 +78,7 @@ import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
 import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDialog.js'
 import { ExecutorPairingPrompt } from './features/explorer/ExecutorPairingPrompt.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
-import { ScheduledTasksDialog, ScheduledTasksTrigger } from './features/scheduled-tasks/ScheduledTasksDialog.js'
+import { ScheduledTasksDialog, ScheduledTasksPanel } from './features/scheduled-tasks/ScheduledTasksDialog.js'
 import type { ScheduledTaskTarget } from './scheduled-tasks-client.js'
 import { taskGraphFromMessages, taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
 import { TaskGraphButton } from './features/chat/TaskGraphButton.js'
@@ -2067,13 +2067,6 @@ export function App(): JSX.Element {
                         userMessageNavigationPortalTarget={userMessageNavigationPortalTarget}
                         topRightAccessory={(
                           <div className="flex items-center gap-2">
-                            <ScheduledTasksTrigger
-                              target={activeSessionId ? { kind: 'session', sessionId: activeSessionId } : null}
-                              onOpen={() => {
-                                if (activeSessionId) setScheduledTasksTarget({ kind: 'session', sessionId: activeSessionId })
-                              }}
-                              className="h-9 rounded-full border-border/55 bg-background/90 shadow-sm"
-                            />
                             {wideLayout && explorerOpen && !inspectorOpen ? (
                               <Button variant="outline" size="icon" onClick={() => setInspectorOpen(true)} title={t('app.openInspector')} aria-label={t('app.openInspector')} data-testid="sidebar-toggle" className="h-9 w-9 rounded-full border-border/55 bg-background/90 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground">
                                 <PanelRight className="h-4 w-4" aria-hidden />
@@ -2526,6 +2519,12 @@ export function App(): JSX.Element {
                         files={<Suspense fallback={<PageLoadingFallback compact />}><SessionFilesPanel mode="sidebar" socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} fontSizePx={fileExplorerFontSizePx} /></Suspense>}
                         git={<Suspense fallback={<PageLoadingFallback compact />}><SourceControlPanel socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} /></Suspense>}
                         terminal={activeSessionId && currentSession?.workspaceId ? <Suspense fallback={<PageLoadingFallback compact />}><SessionTerminalPanel socket={session.socket} workspaceId={currentSession.workspaceId} sessionId={activeSessionId} cwd={currentCwd} online={sessionWorkspaceOnline} visible={rightPanelTab === 'terminal'} /></Suspense> : <div className="p-4 text-xs text-muted-foreground">{t('terminal.workspaceRequired')}</div>}
+                        scheduledTasks={<ScheduledTasksPanel
+                          target={activeSessionId ? { kind: 'session', sessionId: activeSessionId } : null}
+                          onOpen={() => {
+                            if (activeSessionId) setScheduledTasksTarget({ kind: 'session', sessionId: activeSessionId })
+                          }}
+                        />}
                       />
                     </div>
                   </ResizablePanel>
@@ -2615,6 +2614,12 @@ export function App(): JSX.Element {
               files={<Suspense fallback={<PageLoadingFallback compact />}><SessionFilesPanel mode="sidebar" socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} fontSizePx={fileExplorerFontSizePx} /></Suspense>}
               git={<Suspense fallback={<PageLoadingFallback compact />}><SourceControlPanel socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} /></Suspense>}
               terminal={activeSessionId && currentSession?.workspaceId ? <Suspense fallback={<PageLoadingFallback compact />}><SessionTerminalPanel socket={session.socket} workspaceId={currentSession.workspaceId} sessionId={activeSessionId} cwd={currentCwd} online={sessionWorkspaceOnline} visible={rightPanelTab === 'terminal'} /></Suspense> : <div className="p-4 text-xs text-muted-foreground">{t('terminal.workspaceRequired')}</div>}
+              scheduledTasks={<ScheduledTasksPanel
+                target={activeSessionId ? { kind: 'session', sessionId: activeSessionId } : null}
+                onOpen={() => {
+                  if (activeSessionId) setScheduledTasksTarget({ kind: 'session', sessionId: activeSessionId })
+                }}
+              />}
             />
           </div>
         </DialogContent>

@@ -222,7 +222,7 @@ describe('SubAgentCard', () => {
     expect(screen.getByText('done')).toBeTruthy()
   })
 
-  it('renders a completed sub-agent as a compact node in dots mode and expands it', () => {
+  it('keeps a completed sub-agent in its dedicated collapsed UI in dots mode', () => {
     const call = makeCall('c-dot', { prompt: 'inspect', agent_type: 'Explore' })
     const result: ToolResultContent = {
       type: 'tool_result',
@@ -250,10 +250,12 @@ describe('SubAgentCard', () => {
       />,
     )
 
-    expect(screen.getByTestId('sub-agent-dot-c-dot')).toBeTruthy()
-    expect(screen.queryByTestId('sub-agent-status-badge')).toBeNull()
-    fireEvent.click(screen.getByTestId('sub-agent-dot-c-dot'))
+    expect(screen.queryByTestId('sub-agent-dot-c-dot')).toBeNull()
+    expect(screen.getByTestId('sub-agent-row-c-dot').className).toContain('ak-sub-agent-card')
     expect(screen.getByTestId('sub-agent-status-badge').textContent).toContain('Completed')
+    expect(screen.queryByText('done')).toBeNull()
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c-dot'))
+    expect(screen.getByText('done')).toBeTruthy()
   })
 
   it('renders the failed state and shows the error body', () => {
