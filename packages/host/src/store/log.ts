@@ -339,7 +339,7 @@ async function writeSnapshotSidecar(logPath: string, entry: SnapshotEntry): Prom
 
 export async function appendMetadataEntry(
   path: string,
-  patch: Pick<MetadataEntry, 'label' | 'workspaceId' | 'workspaceName' | 'selectedModel' | 'toolCardMode' | 'transcriptViewStart' | 'rightPanelTab'>,
+  patch: Pick<MetadataEntry, 'label' | 'workspaceId' | 'workspaceName' | 'organizationId' | 'principal' | 'organizationRole' | 'selectedModel' | 'toolCardMode' | 'transcriptViewStart' | 'rightPanelTab'>,
 ): Promise<MetadataEntry> {
   const entry: MetadataEntry = {
     kind: 'metadata',
@@ -347,6 +347,9 @@ export async function appendMetadataEntry(
     ...(patch.label !== undefined ? { label: patch.label } : {}),
     ...(patch.workspaceId !== undefined ? { workspaceId: patch.workspaceId } : {}),
     ...(patch.workspaceName !== undefined ? { workspaceName: patch.workspaceName } : {}),
+    ...(patch.organizationId !== undefined ? { organizationId: patch.organizationId } : {}),
+    ...(patch.principal !== undefined ? { principal: patch.principal } : {}),
+    ...(patch.organizationRole !== undefined ? { organizationRole: patch.organizationRole } : {}),
     ...(patch.selectedModel !== undefined ? { selectedModel: patch.selectedModel } : {}),
     ...(patch.toolCardMode !== undefined ? { toolCardMode: patch.toolCardMode } : {}),
     ...(patch.transcriptViewStart !== undefined ? { transcriptViewStart: patch.transcriptViewStart } : {}),

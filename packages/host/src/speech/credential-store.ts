@@ -1,6 +1,8 @@
 import { KalaStateStore } from '../store/state-store.js'
 
 export const DEFAULT_AZURE_SPEECH_ENDPOINT = 'https://japaneast.api.cognitive.microsoft.com/'
+export const DEFAULT_SPEECH_MAX_MINUTES = 15
+export const MAX_SPEECH_MAX_MINUTES = 120
 export type SpeechTranscriptionMode = 'realtime' | 'after_recording'
 
 export type AzureSpeechCredential = {
@@ -9,6 +11,8 @@ export type AzureSpeechCredential = {
   region: string
   enabled: boolean
   mode: SpeechTranscriptionMode
+  realtimeMaxMinutes: number
+  afterRecordingMaxMinutes: number
 }
 
 export type AzureSpeechCredentialStatus = {
@@ -18,13 +22,22 @@ export type AzureSpeechCredentialStatus = {
   region: string
   enabled: boolean
   mode: SpeechTranscriptionMode
+  realtimeMaxMinutes: number
+  afterRecordingMaxMinutes: number
   updatedAt?: string
 }
 
 export interface AzureSpeechCredentialStore {
   get(): Promise<AzureSpeechCredential | undefined> | AzureSpeechCredential | undefined
   status(): Promise<AzureSpeechCredentialStatus> | AzureSpeechCredentialStatus
-  set(input: { endpoint: string; apiKey?: string; enabled: boolean; mode: SpeechTranscriptionMode }): Promise<AzureSpeechCredentialStatus> | AzureSpeechCredentialStatus
+  set(input: {
+    endpoint: string
+    apiKey?: string
+    enabled: boolean
+    mode: SpeechTranscriptionMode
+    realtimeMaxMinutes?: number
+    afterRecordingMaxMinutes?: number
+  }): Promise<AzureSpeechCredentialStatus> | AzureSpeechCredentialStatus
   delete(): Promise<AzureSpeechCredentialStatus> | AzureSpeechCredentialStatus
 }
 
@@ -69,14 +82,29 @@ export class LocalAzureSpeechCredentialStore implements AzureSpeechCredentialSto
       region: status.region,
       enabled: status.enabled,
       mode: status.mode,
+      realtimeMaxMinutes: status.realtimeMaxMinutes,
+      afterRecordingMaxMinutes: status.afterRecordingMaxMinutes,
     }
   }
 
-  async set(input: { endpoint: string; apiKey?: string; enabled: boolean; mode: SpeechTranscriptionMode }): Promise<AzureSpeechCredentialStatus> {
+  async set(input: {
+    endpoint: string
+    apiKey?: string
+    enabled: boolean
+    mode: SpeechTranscriptionMode
+    realtimeMaxMinutes?: number
+    afterRecordingMaxMinutes?: number
+  }): Promise<AzureSpeechCredentialStatus> {
     const { endpoint, region } = normalizeAzureSpeechEndpoint(input.endpoint)
     const existing = await this.get()
     const apiKey = input.apiKey ?? existing?.apiKey
     if (!apiKey) throw new Error('an Azure Speech key is required')
+    const realtimeMaxMinutes = input.realtimeMaxMinutes === undefined
+      ? existing?.realtimeMaxMinutes ?? DEFAULT_SPEECH_MAX_MINUTES
+      : validatedMaxMinutes('realtimeMaxMinutes', input.realtimeMaxMinutes)
+    const afterRecordingMaxMinutes = input.afterRecordingMaxMinutes === undefined
+      ? existing?.afterRecordingMaxMinutes ?? DEFAULT_SPEECH_MAX_MINUTES
+      : validatedMaxMinutes('afterRecordingMaxMinutes', input.afterRecordingMaxMinutes)
     const updatedAt = new Date().toISOString()
     this.state.setCredential('azure_speech', apiKey, {
       version: 1,
@@ -85,8 +113,20 @@ export class LocalAzureSpeechCredentialStore implements AzureSpeechCredentialSto
       region,
       enabled: input.enabled,
       mode: input.mode,
+      realtimeMaxMinutes,
+      afterRecordingMaxMinutes,
     }, updatedAt)
-    return { configured: true, provider: 'azure', endpoint, region, enabled: input.enabled, mode: input.mode, updatedAt }
+    return {
+      configured: true,
+      provider: 'azure',
+      endpoint,
+      region,
+      enabled: input.enabled,
+      mode: input.mode,
+      realtimeMaxMinutes,
+      afterRecordingMaxMinutes,
+      updatedAt,
+    }
   }
 
   async delete(): Promise<AzureSpeechCredentialStatus> {
@@ -105,11 +145,35 @@ function statusFromRecord(record: { metadata: Record<string, unknown>; updatedAt
     region: typeof record.metadata.region === 'string' ? record.metadata.region : normalized.region,
     enabled: record.metadata.enabled === true,
     mode: record.metadata.mode === 'after_recording' ? 'after_recording' : 'realtime',
+    realtimeMaxMinutes: storedMaxMinutes(record.metadata.realtimeMaxMinutes),
+    afterRecordingMaxMinutes: storedMaxMinutes(record.metadata.afterRecordingMaxMinutes),
     updatedAt: record.updatedAt,
   }
 }
 
 function unconfiguredStatus(): AzureSpeechCredentialStatus {
   const { endpoint, region } = normalizeAzureSpeechEndpoint(DEFAULT_AZURE_SPEECH_ENDPOINT)
-  return { configured: false, provider: 'azure', endpoint, region, enabled: false, mode: 'realtime' }
+  return {
+    configured: false,
+    provider: 'azure',
+    endpoint,
+    region,
+    enabled: false,
+    mode: 'realtime',
+    realtimeMaxMinutes: DEFAULT_SPEECH_MAX_MINUTES,
+    afterRecordingMaxMinutes: DEFAULT_SPEECH_MAX_MINUTES,
+  }
+}
+
+function storedMaxMinutes(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= MAX_SPEECH_MAX_MINUTES
+    ? value
+    : DEFAULT_SPEECH_MAX_MINUTES
+}
+
+function validatedMaxMinutes(field: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_SPEECH_MAX_MINUTES) {
+    throw new Error(`${field} must be an integer between 1 and ${MAX_SPEECH_MAX_MINUTES}`)
+  }
+  return value
 }

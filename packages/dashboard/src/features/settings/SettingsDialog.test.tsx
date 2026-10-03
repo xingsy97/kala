@@ -56,13 +56,12 @@ const payload: ServerSettingsPayload = {
     updatedAt: '2026-07-20T00:00:00.000Z',
   },
   agentPrompt: {
-    selectedPreset: 'codex',
-    presets: [
-      { id: 'codex', label: 'Codex', description: 'Direct coding-agent prompt.' },
-      { id: 'claude-code', label: 'Claude Code', description: 'Concise pair-programming prompt.' },
-      { id: 'custom', label: 'Custom', description: 'Editable prompt.' },
+    selectedSlotId: 'slot-1',
+    slots: [
+      { id: 'slot-1', name: '默认', prompt: 'Primary prompt' },
+      { id: 'slot-2', name: '方案 2', prompt: 'Second prompt' },
+      { id: 'slot-3', name: '方案 3', prompt: 'Third prompt' },
     ],
-    customPrompt: 'Codex prompt\n\nWhen referencing a file, use [filename](path/to/this/file).',
     configPath: '<home>/.config/kala/agent.json',
   },
   paths: {
@@ -110,6 +109,26 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog open={false} onOpenChange={() => {}} />)
     expect(screen.queryByTestId('settings-dialog')).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not reuse another organization’s cached agent prompt when identity changes', async () => {
+    const first = { ...payload, agentPrompt: { ...payload.agentPrompt!, configPath: '/org-a/agent.json', slots: [
+      { id: 'slot-1', name: 'Default', prompt: 'Organization A private prompt' },
+      ...payload.agentPrompt!.slots.slice(1),
+    ] } }
+    const second = { ...payload, agentPrompt: { ...payload.agentPrompt!, configPath: '/org-b/agent.json', slots: [
+      { id: 'slot-1', name: 'Default', prompt: 'Organization B prompt' },
+      ...payload.agentPrompt!.slots.slice(1),
+    ] } }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(first), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(second), { status: 200 }))
+    const view = render(<SettingsDialog key="org-a" cacheNamespace="org-a" open initialSection="agent" onOpenChange={() => {}} />)
+    expect((await screen.findByTestId('settings-agent-slot-prompt') as HTMLTextAreaElement).value).toBe('Organization A private prompt')
+    view.rerender(<SettingsDialog key="org-b" cacheNamespace="org-b" open initialSection="agent" onOpenChange={() => {}} />)
+    await waitFor(() => expect((screen.getByTestId('settings-agent-slot-prompt') as HTMLTextAreaElement).value).toBe('Organization B prompt'))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText('Organization A private prompt')).toBeNull()
   })
 
   it('fetches /settings on open and shows connection settings by default', async () => {
@@ -189,9 +208,7 @@ describe('SettingsDialog', () => {
     expect(document.querySelector('button button')).toBeNull()
     fireEvent.click(screen.getByTestId('settings-tab-hooks'))
     expect(screen.getByText(i18n.t('settings.hooks.subtitle')).getAttribute('data-description-kind')).toBe('notice')
-    fireEvent.click(screen.getByTestId('settings-tab-approvals'))
-    expect(screen.getByText(i18n.t('settings.approvals.subtitle')).getAttribute('data-description-kind')).toBe('notice')
-    expect(screen.getByText('KALA_ALLOW_ALL_OK=1')).toBeTruthy()
+    expect(screen.queryByTestId('settings-tab-approvals')).toBeNull()
   })
 
   it('configures, tests, and removes web search', async () => {
@@ -228,8 +245,8 @@ describe('SettingsDialog', () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
       .mockResolvedValueOnce(Response.json({ configured: false, provider: 'azure', endpoint, region: 'japaneast', enabled: false, mode: 'realtime' }))
-      .mockResolvedValueOnce(Response.json({ configured: true, provider: 'azure', endpoint, region: 'japaneast', enabled: true, mode: 'after_recording' }))
-      .mockResolvedValueOnce(Response.json({ configured: true, provider: 'azure', endpoint, region: 'japaneast', enabled: false, mode: 'after_recording' }))
+      .mockResolvedValueOnce(Response.json({ configured: true, provider: 'azure', endpoint, region: 'japaneast', enabled: true, mode: 'after_recording', realtimeMaxMinutes: 20, afterRecordingMaxMinutes: 10 }))
+      .mockResolvedValueOnce(Response.json({ configured: true, provider: 'azure', endpoint, region: 'japaneast', enabled: false, mode: 'after_recording', realtimeMaxMinutes: 20, afterRecordingMaxMinutes: 10 }))
       .mockResolvedValueOnce(Response.json({ ok: true }))
       .mockResolvedValueOnce(Response.json({ configured: false, provider: 'azure', endpoint, region: 'japaneast', enabled: false, mode: 'realtime' }))
     render(<SettingsDialog open onOpenChange={() => {}} initialSection="speech" />)
@@ -241,12 +258,18 @@ describe('SettingsDialog', () => {
     expect(screen.queryByText(/Audio streams directly from this browser/)).toBeNull()
     fireEvent.click(screen.getAllByLabelText('About Voice Input')[0]!)
     expect(await screen.findByText(/Keys remain encrypted on the Host/)).toBeTruthy()
+    expect((screen.getByTestId('settings-speech-realtimeMaxMinutes') as HTMLInputElement).value).toBe('15')
+    expect((screen.getByTestId('settings-speech-afterRecordingMaxMinutes') as HTMLInputElement).value).toBe('15')
+    fireEvent.change(screen.getByTestId('settings-speech-realtimeMaxMinutes'), { target: { value: '121' } })
+    expect(screen.getByTestId('settings-speech-save').hasAttribute('disabled')).toBe(true)
+    fireEvent.change(screen.getByTestId('settings-speech-realtimeMaxMinutes'), { target: { value: '20' } })
+    fireEvent.change(screen.getByTestId('settings-speech-afterRecordingMaxMinutes'), { target: { value: '10' } })
     fireEvent.change(screen.getByTestId('settings-speech-mode'), { target: { value: 'after_recording' } })
     fireEvent.change(screen.getByTestId('settings-speech-api-key'), { target: { value: 'temporary-azure-key-value' } })
     fireEvent.click(screen.getByTestId('settings-speech-save'))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/settings/speech', expect.objectContaining({
       method: 'PUT',
-      body: JSON.stringify({ endpoint, enabled: true, mode: 'after_recording', apiKey: 'temporary-azure-key-value' }),
+      body: JSON.stringify({ endpoint, enabled: true, mode: 'after_recording', realtimeMaxMinutes: 20, afterRecordingMaxMinutes: 10, apiKey: 'temporary-azure-key-value' }),
     })))
     expect(screen.queryByText('temporary-azure-key-value')).toBeNull()
 
@@ -254,7 +277,7 @@ describe('SettingsDialog', () => {
     fireEvent.click(screen.getByTestId('settings-speech-save'))
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith('/settings/speech', expect.objectContaining({
       method: 'PUT',
-      body: JSON.stringify({ endpoint, enabled: false, mode: 'after_recording' }),
+      body: JSON.stringify({ endpoint, enabled: false, mode: 'after_recording', realtimeMaxMinutes: 20, afterRecordingMaxMinutes: 10 }),
     })))
 
     fireEvent.click(await screen.findByTestId('settings-speech-test'))
@@ -318,9 +341,9 @@ describe('SettingsDialog', () => {
     expect(content.className).toContain('overflow-x-hidden')
 
     fireEvent.click(screen.getByTestId('settings-tab-runtime'))
-    const paths = await screen.findByTestId('settings-runtime-paths')
-    expect(paths.querySelector('table')).toBeNull()
-    expect(paths.className).not.toContain('overflow-x-auto')
+    expect(await screen.findByRole('heading', { name: 'Runtime' })).toBeTruthy()
+    expect(screen.queryByText('<home>/.kala/sessions')).toBeNull()
+    expect(screen.queryByText('<home>/.claude/settings.json')).toBeNull()
   })
 
   it('uses a mobile-safe settings shell', async () => {
@@ -339,8 +362,8 @@ describe('SettingsDialog', () => {
     expect(mobileSelect.className).toContain('opacity-0')
     expect(screen.getByTestId('settings-mobile-section-picker').textContent).toContain('Connection')
     expect(mobileSelect.value).toBe('connection')
-    fireEvent.change(mobileSelect, { target: { value: 'approvals' } })
-    expect(await screen.findByRole('heading', { name: 'Approvals' })).toBeTruthy()
+    fireEvent.change(mobileSelect, { target: { value: 'runtime' } })
+    expect(await screen.findByRole('heading', { name: 'Runtime' })).toBeTruthy()
     expect(screen.getByTestId('settings-tab-connection').className).toContain('md:w-full')
   })
 
@@ -385,10 +408,11 @@ describe('SettingsDialog', () => {
 
     fireEvent.click(screen.getByTestId('settings-tab-socketAdmin'))
 
-    expect(await screen.findByText('Admin UI endpoint')).toBeTruthy()
-    expect(screen.getByText('/admin/socket.io')).toBeTruthy()
+    expect(await screen.findByText('Open Socket Admin')).toBeTruthy()
+    expect(screen.getByTitle(`${window.location.origin}/admin/socket.io`)).toBeTruthy()
     expect(screen.getByText('admin')).toBeTruthy()
-    expect(screen.getByText('embedded in host bundle')).toBeTruthy()
+    expect(screen.getByText(/Use the password chosen during initialization/)).toBeTruthy()
+    expect(screen.queryByText('<home>/.config/kala/socket-admin.json')).toBeNull()
   })
 
   it('initializes the Socket.IO Admin UI password once', async () => {
@@ -426,7 +450,7 @@ describe('SettingsDialog', () => {
         body: JSON.stringify({ password: 'secret-password', mode: 'development' }),
       }))
     })
-    expect(await screen.findByText('Admin UI endpoint')).toBeTruthy()
+    expect(await screen.findByText('Open Socket Admin')).toBeTruthy()
     expect(screen.queryByText('Password initialized. Restart the host to enable Socket.IO Admin UI.')).toBeNull()
   })
 
@@ -458,10 +482,10 @@ describe('SettingsDialog', () => {
     expect(screen.getByTestId('settings-socket-admin-save-mode')).toBeTruthy()
   })
 
-  it('updates the agent prompt preset', async () => {
+  it('switches the default agent prompt slot with the complete persisted slot payload', async () => {
     const nextPayload: ServerSettingsPayload = {
       ...payload,
-      agentPrompt: payload.agentPrompt ? { ...payload.agentPrompt, selectedPreset: 'claude-code' } : undefined,
+      agentPrompt: payload.agentPrompt ? { ...payload.agentPrompt, selectedSlotId: 'slot-2' } : undefined,
     }
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
@@ -471,46 +495,70 @@ describe('SettingsDialog', () => {
     await waitForSettingsLoaded()
 
     fireEvent.click(screen.getByTestId('settings-tab-agent'))
-    fireEvent.click(await screen.findByTestId('settings-agent-preset-claude-code'))
+    fireEvent.click(await screen.findByTestId('settings-agent-default-slot-2'))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/settings/agent-prompt', expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ preset: 'claude-code' }),
+        body: JSON.stringify({ selectedSlotId: 'slot-2', slots: payload.agentPrompt!.slots }),
       }))
     })
     await waitFor(() => {
-      expect(screen.getByTestId('settings-agent-preset-claude-code').getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByTestId('settings-agent-default-slot-2').hasAttribute('disabled')).toBe(true)
+      expect(screen.getByTestId('settings-agent-default-feedback').textContent).toContain('Default for new sessions updated')
     })
   })
 
-  it('edits and saves the custom system prompt', async () => {
-    const customPayload: ServerSettingsPayload = {
-      ...payload,
-      agentPrompt: payload.agentPrompt ? { ...payload.agentPrompt, selectedPreset: 'custom' } : undefined,
-    }
+  it('renames and saves a complete agent prompt slot', async () => {
+    const savedSlots = payload.agentPrompt!.slots.map((slot) => slot.id === 'slot-1'
+      ? { ...slot, name: 'Review mode', prompt: 'Review the implementation carefully.' }
+      : slot)
     const savedPayload: ServerSettingsPayload = {
-      ...customPayload,
-      agentPrompt: customPayload.agentPrompt ? { ...customPayload.agentPrompt, customPrompt: 'My custom prompt' } : undefined,
+      ...payload,
+      agentPrompt: payload.agentPrompt ? { ...payload.agentPrompt, slots: savedSlots } : undefined,
     }
     fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(customPayload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(savedPayload), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(savedPayload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
 
     fireEvent.click(screen.getByTestId('settings-tab-agent'))
-    const editor = await screen.findByTestId('settings-agent-custom-prompt')
-    fireEvent.change(editor, { target: { value: 'My custom prompt' } })
-    fireEvent.click(screen.getByTestId('settings-agent-custom-prompt-save'))
+    fireEvent.change(await screen.findByTestId('settings-agent-slot-name'), { target: { value: 'Review mode' } })
+    fireEvent.change(screen.getByTestId('settings-agent-slot-prompt'), { target: { value: 'Review the implementation carefully.' } })
+    fireEvent.click(screen.getByTestId('settings-agent-slot-save'))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/settings/agent-prompt', expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ preset: 'custom', customPrompt: 'My custom prompt' }),
+        body: JSON.stringify({ selectedSlotId: 'slot-1', slots: savedSlots }),
       }))
     })
+    expect(await screen.findByText('Slot saved.')).toBeTruthy()
+    expect(screen.getByTestId('settings-agent-slot-slot-1').textContent).toContain('Review mode')
+  })
+
+  it('keeps a failed agent slot draft when editing another slot', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ error: 'disk full' }, { status: 500 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-agent'))
+    fireEvent.change(await screen.findByTestId('settings-agent-slot-name'), { target: { value: 'Unsaved review' } })
+    fireEvent.change(screen.getByTestId('settings-agent-slot-prompt'), { target: { value: 'A draft that must survive.' } })
+    fireEvent.click(screen.getByTestId('settings-agent-slot-save'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-agent-save-feedback').textContent).toContain('disk full')
+    })
+    fireEvent.click(screen.getByTestId('settings-agent-edit-slot-2'))
+    expect((screen.getByTestId('settings-agent-slot-name') as HTMLInputElement).value).toBe('方案 2')
+    fireEvent.click(screen.getByTestId('settings-agent-edit-slot-1'))
+    expect((screen.getByTestId('settings-agent-slot-name') as HTMLInputElement).value).toBe('Unsaved review')
+    expect((screen.getByTestId('settings-agent-slot-prompt') as HTMLTextAreaElement).value).toBe('A draft that must survive.')
   })
 
   it('does not label missing source metadata as manual', async () => {
@@ -663,14 +711,12 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('post_tool_use')).toBeTruthy()
   })
 
-  it('flags MCP as not implemented', async () => {
+  it('does not expose unimplemented MCP settings', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
 
-    fireEvent.click(screen.getByTestId('settings-tab-mcp'))
-    await screen.findByText('Not implemented yet')
-    expect(screen.getAllByText(/docs\/host\/mcp\.md/i).length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('settings-tab-mcp')).toBeNull()
   })
 
   it('surfaces a fetch failure without crashing', async () => {
@@ -743,7 +789,7 @@ describe('SettingsDialog', () => {
 
     for (const group of ['personal', 'workspace', 'agent', 'administration']) expect(screen.getByTestId(`settings-group-${group}`)).toBeTruthy()
     expect(screen.getByTestId('settings-group-personal').textContent).toContain('Notifications')
-    expect(screen.getByTestId('settings-group-workspace').textContent).toContain('Executor access')
+    expect(screen.getByTestId('settings-group-workspace').textContent).toContain('Workspaces')
     expect(screen.getByTestId('settings-group-administration').textContent).toContain('Connection')
   })
 
@@ -964,11 +1010,25 @@ describe('SettingsDialog', () => {
         }],
       }), { status: 200 }))
 
-    render(<SettingsDialog open onOpenChange={() => {}} />)
+    const executors: AttachedExecutor[] = [{
+      executorId: 'exec-workspace',
+      workspaceId: 'ws-live',
+      workspaceName: 'Live workspace',
+      tools: ['bash'],
+      runtime: 'node',
+      runtimeVersion: 'v22.22.2',
+      clientVersion: '1.0.0',
+      executorVersion: '0.2.0',
+      hostname: 'workspace-host',
+    }]
+    render(<SettingsDialog open onOpenChange={() => {}} executors={executors} />)
     await waitForSettingsLoaded()
 
     fireEvent.click(screen.getByTestId('settings-tab-executorAccess'))
 
+    expect(screen.getByText('Connected workspaces')).toBeTruthy()
+    expect(screen.getByText('Live workspace')).toBeTruthy()
+    expect(screen.getByText('workspace-host · Node.js v22.22.2')).toBeTruthy()
     await screen.findByTestId('executor-invite-list')
     expect(screen.getAllByTestId('executor-invite-row')).toHaveLength(2)
     expect(screen.getByText('Unbound invite')).toBeTruthy()
@@ -1037,14 +1097,15 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Runtime release')).toBeTruthy()
     expect(await screen.findByTestId('settings-dedicated-deployment')).toBeTruthy()
     expect(screen.getByText('Current deployment')).toBeTruthy()
-    expect(screen.getByText('example-executor')).toBeTruthy()
-    expect(screen.getByText('example-executor-host · Node.js v22.22.2')).toBeTruthy()
-    expect(screen.getByText('background shell, file picker, overflow files')).toBeTruthy()
+    expect(screen.queryByText('example-executor')).toBeNull()
     const diagnostics = screen.getByTestId('settings-deployment-diagnostics')
     expect(diagnostics).toBeTruthy()
     fireEvent.click(diagnostics.querySelector('summary')!)
     expect(screen.getByTestId('settings-force-dashboard-refresh')).toBeTruthy()
     expect(screen.getByText('Use only when an update is stuck. Removes this origin’s Dashboard service worker and caches, then loads a fresh network copy.')).toBeTruthy()
     expect(screen.queryByText('Executor: example-executor')).toBeNull()
+    fireEvent.click(screen.getByTestId('settings-tab-executorAccess'))
+    expect(await screen.findByText('example-executor')).toBeTruthy()
+    expect(screen.getByText('example-executor-host · Node.js v22.22.2')).toBeTruthy()
   })
 })

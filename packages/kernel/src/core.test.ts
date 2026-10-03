@@ -1073,6 +1073,35 @@ describe('purity', () => {
 // ============================================================================
 
 describe('fold', () => {
+  it('replays system prompt changes and keeps the override through message compaction', () => {
+    const final = fold(initial(), [
+      { kind: 'system_prompt_changed', prompt: 'new system', version: 7 },
+      {
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 0, end: 1 },
+        replacementMessages: [{ role: 'user', content: [{ type: 'text', text: 'summary' }] }],
+      },
+    ], CONFIG)
+
+    expect(final.systemPromptOverride).toEqual({ prompt: 'new system', version: 7 })
+    expect(final.messages[0]).toEqual({
+      role: 'system',
+      content: [{ type: 'text', text: 'new system' }],
+    })
+    expect(final.messages.filter((message) => message.role === 'system')).toHaveLength(1)
+  })
+
+  it('applies system prompt changes while busy without scheduling another model call', () => {
+    const thinking = step(initial(), { kind: 'user_message', text: 'work' }, CONFIG).next
+    const result = step(thinking, { kind: 'system_prompt_changed', prompt: 'busy update' }, CONFIG)
+
+    expect(result.transition.outcome).toBe('applied')
+    expect(result.next.status).toBe('thinking')
+    expect(result.next.messages[0]?.content).toEqual([{ type: 'text', text: 'busy update' }])
+    expect(result.effects).toEqual([])
+  })
+
   it('replays a full session deterministically', () => {
     const events: AgentEvent[] = [
       { kind: 'user_message', text: 'read /tmp/x' },

@@ -31,6 +31,7 @@ const eventArb: fc.Arbitrary<AgentEvent> = fc.oneof(
   fc.constantFrom('auto' as const, 'ask' as const, 'deny' as const, 'allow_all' as const)
     .map((mode) => ({ kind: 'approval_mode_changed' as const, mode })),
   short.map((cwd) => ({ kind: 'cwd_changed' as const, cwd })),
+  short.map((prompt) => ({ kind: 'system_prompt_changed' as const, prompt })),
   fc.record({ start: fc.integer({ min: -2, max: 8 }), end: fc.integer({ min: -2, max: 8 }) })
     .map((replaceRange) => ({ kind: 'messages_replaced' as const, reason: 'manual_rewrite' as const, replaceRange, replacementMessages: [] })),
 )

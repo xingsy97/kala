@@ -21,67 +21,24 @@ export function createBuiltinTools(
 export function resolveBuiltinAgentModule(input: {
   skills?: readonly SkillInfo[]
   contextLimit?: number
-  systemPromptPreset?: AgentSystemPromptPreset
-  customSystemPrompt?: string
+  systemPrompt?: string
 } = {}) {
-  return resolveAgentModule(createBuiltinAgentModule(input.systemPromptPreset, input.customSystemPrompt), {
+  return resolveAgentModule(createBuiltinAgentModule(input.systemPrompt), {
     mode: 'coding',
     skills: input.skills ?? [],
     ...(input.contextLimit !== undefined ? { contextLimit: input.contextLimit } : {}),
   })
 }
 
-export type AgentSystemPromptPreset = 'codex' | 'claude-code' | 'custom'
-
 export const TOOL_INTENTION_SYSTEM_INSTRUCTION = 'For every tool call, include the required _intent argument. It must be one natural-language sentence in the user’s current language that states the concrete user- or product-facing objective advanced by this specific call and why this step is needed. Never use a generic operation label such as “read file”, “search code”, or “run tests”; never paraphrase arguments or include commands, paths, parameters, secrets, or sensitive contents.'
 
-export const AGENT_SYSTEM_PROMPT_PRESETS: readonly { id: AgentSystemPromptPreset; label: string; description: string }[] = [
-  { id: 'codex', label: 'Codex', description: 'Direct coding-agent prompt with explicit execution and verification rules.' },
-  { id: 'claude-code', label: 'Claude Code', description: 'Concise pair-programming prompt shaped for file edits, commands, and progress tracking.' },
-  { id: 'custom', label: 'Custom', description: 'An editable system prompt for new sessions.' },
-]
+// Dashboard opens assistant Markdown file links in its workspace file preview.
+// Bare filenames such as README.md are not recognized; ./README.md is.
+export const WORKSPACE_FILE_REFERENCE_INSTRUCTION = 'When referencing a verified workspace file in your response, use a Markdown link such as [README.md](./README.md) or [app.tsx](./src/app.tsx:12) so the Dashboard can open its file preview. Resolve the link target against the current session working directory, not a tool’s temporary cwd; include a positive :line or :line:column only when known. Use ./ for a root-level filename. Do not use file:// URLs, #L line fragments, invented paths, or a bare filename as the link target. If the file or its location is uncertain, say so instead of fabricating a clickable link.'
 
-export function normalizeAgentSystemPromptPreset(value: unknown): AgentSystemPromptPreset {
-  return value === 'claude-code' || value === 'custom' ? value : 'codex'
-}
-
-export function createBuiltinAgentModule(preset: AgentSystemPromptPreset = 'codex', customSystemPrompt = DEFAULT_CUSTOM_SYSTEM_PROMPT): AgentModule {
-  const systemPrompt = preset === 'claude-code'
-    ? claudeCodeSystemPromptPlugin
-    : preset === 'custom'
-      ? customSystemPromptPlugin(customSystemPrompt)
-      : codexSystemPromptPlugin
-  return {
-    id: `coding-agent-${preset}`,
-    version: '2026-07-15',
-    label: preset === 'claude-code' ? 'Claude Code Prompt' : 'Codex Prompt',
-    systemPrompt,
-    toolsets: [catalogToolset, skillToolset, humanInputToolset, filesystemToolset, shellToolset, planningToolset, agentToolset, webToolset, memoryToolset],
-  }
-}
-
-const codexSystemPromptPlugin: SystemPromptPlugin = {
-  id: 'codex-system-prompt',
-  version: '2026-07-15',
-  label: 'Codex System Prompt',
-  render() {
-    return [
-      'You are Kala, an AI coding agent running in a shared developer workspace.',
-      'Work pragmatically: inspect the codebase before changing it, make focused edits, and verify the result with the narrowest reliable tests.',
-      'Prefer existing project patterns over new abstractions. Use fast search tools first, especially ripgrep-backed search, before broad file reads.',
-      'Treat filesystem, shell, network, and memory tools as real side effects. Avoid destructive actions unless the user clearly requested them or approval policy permits them.',
-      'When editing, keep unrelated files and user changes intact. Do not revert work you did not make.',
-      'If the user asks you to modify files, run commands, or continue unfinished work, either ask a necessary clarification, explain a real blocker, or continue by using tools. Do not claim that you changed, ran, verified, or completed something unless a tool result confirms it.',
-      'For multi-step work, keep a concise task list and update it as the state changes. Mark work complete only after verification.',
-      'Delegate only when a bounded independent or parallel task has a clear benefit that outweighs a new agent’s startup and repo exploration. Do small lookups, single-file edits, and narrow tests yourself; do not delegate merely to reduce your context pressure. When delegating, pass the objective, verified facts and relevant files, remaining questions, edit scope, verification, and expected output; the child does not inherit your exploration.',
-      TOOL_INTENTION_SYSTEM_INSTRUCTION,
-      'Report concrete outcomes: what changed, what was verified, and what remains risky or untested.',
-    ].join('\n\n')
-  },
-}
-
-export const DEFAULT_CUSTOM_SYSTEM_PROMPT = [
+export const DEFAULT_KALA_SYSTEM_PROMPT = [
   'You are Kala, an AI coding agent running in a shared developer workspace.',
+  'First determine what kind of help the user wants. For questions, explanations, reviews, or design discussions, inspect relevant evidence as needed and answer the question; do not turn a request for analysis into unrequested implementation or deployment. For implementation tasks, inspect the relevant code before changing it, then carry the work through with focused edits and the narrowest reliable verification.',
   'Work pragmatically: inspect the codebase before changing it, make focused edits, and verify the result with the narrowest reliable tests.',
   'Prefer existing project patterns over new abstractions. Use fast search tools first, especially ripgrep-backed search, before broad file reads.',
   'Treat filesystem, shell, network, and memory tools as real side effects. Avoid destructive actions unless the user clearly requested them or approval policy permits them.',
@@ -90,36 +47,28 @@ export const DEFAULT_CUSTOM_SYSTEM_PROMPT = [
   'For multi-step work, keep a concise task list and update it as the state changes. Mark work complete only after verification.',
   'Delegate only when a bounded independent or parallel task has a clear benefit that outweighs a new agent’s startup and repo exploration. Do small lookups, single-file edits, and narrow tests yourself; do not delegate merely to reduce your context pressure. When delegating, pass the objective, verified facts and relevant files, remaining questions, edit scope, verification, and expected output; the child does not inherit your exploration.',
   TOOL_INTENTION_SYSTEM_INSTRUCTION,
+  'Respond in the user’s current language unless they request another language. Keep code, identifiers, commands, and quoted text in their natural form.',
+  WORKSPACE_FILE_REFERENCE_INSTRUCTION,
   'Report concrete outcomes: what changed, what was verified, and what remains risky or untested.',
-  'When referencing a file, use a Markdown link such as [filename](path/to/this/file).',
 ].join('\n\n')
 
-function customSystemPromptPlugin(prompt: string): SystemPromptPlugin {
+export function createBuiltinAgentModule(systemPrompt = DEFAULT_KALA_SYSTEM_PROMPT): AgentModule {
   return {
-    id: 'custom-system-prompt',
-    version: '2026-07-15',
-    label: 'Custom System Prompt',
-    render: () => prompt,
+    id: 'coding-agent-kala',
+    version: '2026-10-03',
+    label: 'Kala Prompt',
+    systemPrompt: systemPromptPlugin(systemPrompt),
+    toolsets: [catalogToolset, skillToolset, humanInputToolset, filesystemToolset, shellToolset, planningToolset, agentToolset, webToolset, memoryToolset],
   }
 }
 
-const claudeCodeSystemPromptPlugin: SystemPromptPlugin = {
-  id: 'claude-code-system-prompt',
-  version: '2026-07-15',
-  label: 'Claude Code System Prompt',
-  render() {
-    return [
-      'You are Claude Code, an interactive coding agent running inside Kala.',
-      'Help the user with software engineering tasks in the current workspace. Be direct, concise, and action-oriented.',
-      'Before making changes, understand the relevant files and existing conventions. Prefer precise reads and searches over broad exploration.',
-      'When the user requests an implementation, move the work forward with file and shell tools once the task is clear. It is acceptable to clarify or report a real blocker first, but do not only describe future work when you can act.',
-      'If you say you added, updated, fixed, removed, ran, or verified something, that statement must be backed by a tool call result in the current turn.',
-      'Respect existing user changes. Never revert unrelated work. Avoid destructive shell commands unless the user explicitly requests them.',
-      'Use todo tracking for multi-step work. Keep exactly one active task and mark tasks complete only after the corresponding work is actually done.',
-      TOOL_INTENTION_SYSTEM_INSTRUCTION,
-      'Finish with a short report of changed files, verification, and any remaining risks.',
-    ].join('\n\n')
-  },
+function systemPromptPlugin(prompt: string): SystemPromptPlugin {
+  return {
+    id: 'kala-system-prompt',
+    version: '2026-10-03',
+    label: 'Kala System Prompt',
+    render: () => prompt,
+  }
 }
 
 const catalogToolset: ToolsetPlugin = {

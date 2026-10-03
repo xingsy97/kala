@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../../components/ui/button.js'
-import { CopyButton, SectionHeader, SettingsKeyValueList } from '../controls.js'
+import { SectionHeader } from '../controls.js'
 import { errorMessageFromBody } from '../section-utils.js'
 
 export function RuntimeSection({
@@ -78,13 +78,6 @@ export function RuntimeSection({
       if (timer !== undefined) window.clearTimeout(timer)
     }
   }, [operation?.operationId, operation?.phase, platform])
-  const rows: Array<[string, string]> = [
-    [t('settings.runtime.anthropicSettings'), payload.paths.claudeSettings],
-    [t('settings.runtime.openaiProviders'), payload.paths.codexConfig],
-    [t('settings.runtime.manualModels'), payload.paths.manualModels],
-    [t('settings.runtime.hooksConfig'), payload.paths.hooksConfig],
-    [t('settings.runtime.sessionsDirectory'), payload.paths.sessionsDir],
-  ]
   const runtime = payload.runtime
   const currentAttempt = runtime?.current
   const restartActive = platform ? Boolean(operation && !['completed', 'aborted', 'rolled_back', 'rollback_failed', 'failed', 'rejected'].includes(operation.phase)) : Boolean(currentAttempt)
@@ -122,18 +115,6 @@ export function RuntimeSection({
           {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
         </div>
       ) : null}
-      <SettingsKeyValueList
-        testId="settings-runtime-paths"
-        rows={rows.map(([label, path]) => ({
-          label,
-          value: (
-            <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
-              <span className="min-w-0 flex-1 break-all" title={path}>{path}</span>
-              <CopyButton value={path} />
-            </div>
-          ),
-        }))}
-      />
     </div>
   )
 }

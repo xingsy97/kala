@@ -5,7 +5,10 @@ import { Button } from '../../../components/ui/button.js'
 import { HelpHint } from '../../../components/ui/help-hint.js'
 import {
   DEFAULT_AZURE_SPEECH_ENDPOINT,
+  DEFAULT_SPEECH_MAX_MINUTES,
+  MAX_SPEECH_MAX_MINUTES,
   loadSpeechSettings,
+  speechMaxMinutes,
   SPEECH_SETTINGS_CHANGED_EVENT,
   type SpeechTranscriptionMode,
   type SpeechSettings,
@@ -20,6 +23,8 @@ export function SpeechSection(): JSX.Element {
   const [apiKey, setApiKey] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [mode, setMode] = useState<SpeechTranscriptionMode>('realtime')
+  const [realtimeMaxMinutes, setRealtimeMaxMinutes] = useState(DEFAULT_SPEECH_MAX_MINUTES)
+  const [afterRecordingMaxMinutes, setAfterRecordingMaxMinutes] = useState(DEFAULT_SPEECH_MAX_MINUTES)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,6 +38,8 @@ export function SpeechSection(): JSX.Element {
       setEndpoint(next.endpoint)
       setEnabled(next.configured ? next.enabled : true)
       setMode(next.mode)
+      setRealtimeMaxMinutes(speechMaxMinutes(next.realtimeMaxMinutes))
+      setAfterRecordingMaxMinutes(speechMaxMinutes(next.afterRecordingMaxMinutes))
     }).catch((loadError: unknown) => {
       if (!cancelled) setError(loadError instanceof Error ? loadError.message : String(loadError))
     }).finally(() => {
@@ -43,7 +50,7 @@ export function SpeechSection(): JSX.Element {
 
   const save = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!settings?.configured && !apiKey.trim()) return
+    if ((!settings?.configured && !apiKey.trim()) || !validMaxMinutes(realtimeMaxMinutes) || !validMaxMinutes(afterRecordingMaxMinutes)) return
     setBusy(true)
     setError(null)
     setMessage(null)
@@ -55,6 +62,8 @@ export function SpeechSection(): JSX.Element {
           endpoint: endpoint.trim(),
           enabled,
           mode,
+          realtimeMaxMinutes,
+          afterRecordingMaxMinutes,
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         }),
       })
@@ -62,6 +71,8 @@ export function SpeechSection(): JSX.Element {
       const next = (await response.json()) as SpeechSettings
       setSettings(next)
       setEndpoint(next.endpoint)
+      setRealtimeMaxMinutes(speechMaxMinutes(next.realtimeMaxMinutes))
+      setAfterRecordingMaxMinutes(speechMaxMinutes(next.afterRecordingMaxMinutes))
       setApiKey('')
       setMessage(t('settings.speech.saved'))
       window.dispatchEvent(new Event(SPEECH_SETTINGS_CHANGED_EVENT))
@@ -99,6 +110,8 @@ export function SpeechSection(): JSX.Element {
       setEndpoint(next.endpoint)
       setEnabled(true)
       setMode('realtime')
+      setRealtimeMaxMinutes(DEFAULT_SPEECH_MAX_MINUTES)
+      setAfterRecordingMaxMinutes(DEFAULT_SPEECH_MAX_MINUTES)
       setApiKey('')
       setMessage(t('settings.speech.removed'))
       window.dispatchEvent(new Event(SPEECH_SETTINGS_CHANGED_EVENT))
@@ -166,6 +179,23 @@ export function SpeechSection(): JSX.Element {
               <option value="after_recording">{t('settings.speech.modeAfterRecording')}</option>
             </select>
 
+            <div className="grid gap-3 sm:grid-cols-2">
+              {([
+                ['realtimeMaxMinutes', realtimeMaxMinutes, setRealtimeMaxMinutes],
+                ['afterRecordingMaxMinutes', afterRecordingMaxMinutes, setAfterRecordingMaxMinutes],
+              ] as const).map(([key, value, setValue]) => (
+                <div key={key}>
+                  <label className="block text-sm font-medium" htmlFor={`settings-speech-${key}`}>
+                    {t(`settings.speech.${key}`)}
+                  </label>
+                  <input id={`settings-speech-${key}`} data-testid={`settings-speech-${key}`} type="number" min="1" max={MAX_SPEECH_MAX_MINUTES} step="1" required
+                    className="mt-1 h-9 w-full rounded-md border px-3 text-sm" value={value}
+                    onChange={(event) => setValue(event.target.value === '' ? 0 : Number(event.target.value))} />
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">{t('settings.speech.maxMinutesInfo')}</p>
+
             <label className="flex items-center gap-1 text-sm font-medium" htmlFor="settings-speech-endpoint">
               {t('settings.speech.endpoint')}
               <HelpHint label={t('settings.speech.endpoint')}>{t('settings.speech.endpointHint')}</HelpHint>
@@ -195,7 +225,7 @@ export function SpeechSection(): JSX.Element {
               placeholder={settings?.configured ? t('settings.speech.apiKeyConfiguredPlaceholder') : t('settings.speech.apiKeyPlaceholder')}
             />
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={busy || !endpoint.trim() || (!settings?.configured && !apiKey.trim())} data-testid="settings-speech-save">
+              <Button type="submit" disabled={busy || !endpoint.trim() || !validMaxMinutes(realtimeMaxMinutes) || !validMaxMinutes(afterRecordingMaxMinutes) || (!settings?.configured && !apiKey.trim())} data-testid="settings-speech-save">
                 {t('common.save')}
               </Button>
               <Button type="button" variant="outline" disabled={busy || !settings?.configured} onClick={() => { void testConnection() }} data-testid="settings-speech-test">
@@ -215,6 +245,10 @@ export function SpeechSection(): JSX.Element {
       )}
     </div>
   )
+}
+
+function validMaxMinutes(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 1 && value <= MAX_SPEECH_MAX_MINUTES
 }
 
 function isSecureVoiceContext(): boolean {

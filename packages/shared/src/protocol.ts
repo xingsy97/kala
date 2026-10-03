@@ -1748,25 +1748,21 @@ export type ClientSetDefaultModel = {
   model: string
 }
 
-export type AgentSystemPromptPresetId = 'codex' | 'claude-code' | 'custom'
+export type AgentPromptSlotId = 'slot-1' | 'slot-2' | 'slot-3'
 
-export type SettingsAgentPromptPreset = {
-  id: AgentSystemPromptPresetId
-  label: string
-  description: string
+export type SettingsAgentPromptSlot = {
+  id: AgentPromptSlotId
+  name: string
+  prompt: string
 }
 
 export type SettingsAgentPrompt = {
-  selectedPreset: AgentSystemPromptPresetId
-  presets: readonly SettingsAgentPromptPreset[]
-  customPrompt: string
+  selectedSlotId: AgentPromptSlotId
+  slots: readonly SettingsAgentPromptSlot[]
   configPath: string
 }
 
-export type ClientUpdateAgentPromptSettings = {
-  preset: AgentSystemPromptPresetId
-  customPrompt?: string
-}
+export type ClientUpdateAgentPromptSettings = Pick<SettingsAgentPrompt, 'selectedSlotId' | 'slots'>
 
 export type SettingsHookSummary = {
   event: 'pre_tool_use' | 'post_tool_use' | 'session_start' | 'session_end'

@@ -1,6 +1,6 @@
 import type { AttachedExecutor, ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload } from '@agent-kernel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { ChevronRight, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -133,6 +133,18 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
   return (
     <div>
       <SectionHeader title={t('settings.sections.executorAccess.label')} subtitle={t('settings.executorAccess.subtitle')} />
+      <section className="mb-5" aria-labelledby="connected-workspaces-heading">
+        <h4 id="connected-workspaces-heading" className="text-sm font-semibold text-foreground">{t('settings.executorAccess.connectedTitle')}</h4>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{t('settings.executorAccess.connectedDesc')}</p>
+        {executors.length === 0 ? (
+          <EmptyRow>{t('settings.executorAccess.noConnected')}</EmptyRow>
+        ) : (
+          <div className="mt-3 space-y-2" data-testid="settings-connected-executors">
+            {executors.map((executor) => <ConnectedWorkspace key={executor.executorId} executor={executor} />)}
+          </div>
+        )}
+      </section>
+      <h4 className="mb-2 text-sm font-semibold text-foreground">{t('settings.executorAccess.invitesTitle')}</h4>
       <form onSubmit={submit} className="mb-4 max-w-full min-w-0 overflow-hidden rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
         <p className="mb-3 text-xs text-muted-foreground" data-description-kind="notice">{t('settings.executorAccess.plaintextNotice')}</p>
         <div className="grid min-w-0 gap-2 lg:grid-cols-2">
@@ -249,6 +261,35 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
         </div>
       )}
     </div>
+  )
+}
+
+function ConnectedWorkspace({ executor }: { executor: AttachedExecutor }): JSX.Element {
+  const { t } = useTranslation()
+  const runtime = executor.runtime === 'node' ? 'Node.js' : executor.runtime === 'browser-webcontainer' ? 'Browser WebContainer' : executor.runtime
+  const instance = [executor.hostname, `${runtime} ${executor.runtimeVersion}`, executor.os].filter(Boolean).join(' · ')
+  return (
+    <details className="rounded-lg border border-border bg-card/40">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="truncate text-sm font-medium text-foreground">{executor.workspaceName}</span>
+          </div>
+          <div className="mt-1 truncate text-xs text-muted-foreground">{instance}</div>
+        </div>
+        <div className="flex flex-none items-center gap-2 text-xs text-muted-foreground">
+          <span>{executor.executorVersion ?? t('settings.deployment.notReported')}</span>
+          <ChevronRight className="h-4 w-4" />
+        </div>
+      </summary>
+      <div className="grid gap-2 border-t border-border px-4 py-3 text-xs sm:grid-cols-2">
+        <InviteMeta label={t('settings.deployment.workspace')} value={executor.workspaceId} mono />
+        <InviteMeta label={t('settings.deployment.executor')} value={executor.executorId} mono />
+        <InviteMeta label={t('settings.deployment.executorProtocol')} value={executor.clientVersion ?? '—'} mono />
+        <InviteMeta label={t('settings.deployment.attachedAt')} value={formatDate(executor.attachedAt)} />
+      </div>
+    </details>
   )
 }
 

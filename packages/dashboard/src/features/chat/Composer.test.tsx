@@ -195,6 +195,70 @@ describe('Composer', () => {
     }
   })
 
+  it('shows the existing draft during recording in both full and simple Composer modes', async () => {
+    const originalMode = window.localStorage.getItem('ak-composer-mode')
+    const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      getUserMedia: async () => ({ getTracks: () => [{ stop: vi.fn() }] }),
+    } })
+    class FakeRecorder extends EventTarget {
+      static isTypeSupported(): boolean { return true }
+      state: RecordingState = 'inactive'
+      start(): void { this.state = 'recording' }
+      stop(): void { this.state = 'inactive'; this.dispatchEvent(new Event('stop')) }
+    }
+    vi.stubGlobal('MediaRecorder', FakeRecorder)
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ configured: true, provider: 'azure', enabled: true, mode: 'after_recording', afterRecordingMaxMinutes: 15 })))
+    try {
+      for (const mode of ['full', 'simple']) {
+        window.localStorage.setItem('ak-composer-mode', mode)
+        const state = createInitialState({ sessionId: `voice-layout-${mode}` })
+        window.localStorage.removeItem(`ak-composer-voice-layout:${state.sessionId}`)
+        const view = renderComposer({ state })
+        const draft = 'Previously typed context for the next sentence.'
+        const input = screen.getByTestId(mode === 'simple' ? 'composer-input-simple' : 'composer-input')
+        if (mode === 'simple') { input.textContent = draft; fireEvent.input(input) }
+        else fireEvent.change(input, { target: { value: draft } })
+        await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+        fireEvent.click(screen.getByTestId('composer-voice-start'))
+        const workbenchDraft = await screen.findByTestId('voice-workbench-draft')
+        expect(workbenchDraft.textContent).toContain(draft)
+        expect(screen.queryByTestId('voice-workbench-return-latest')).toBeNull()
+        fireEvent.click(screen.getByTestId('voice-workbench-minimize'))
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('composer-voice-expand')))
+        expect(window.localStorage.getItem(`ak-composer-voice-layout:${state.sessionId}`)).toBe('compact')
+        const priorText = await screen.findByTestId('composer-voice-draft')
+        expect(priorText.textContent).toContain('Draft ·')
+        expect(priorText.textContent).toContain(draft)
+        await waitFor(() => expect(screen.getByTestId('composer-voice-recorder').getAttribute('data-voice-phase')).toBe('listening'))
+        fireEvent.click(screen.getByTestId('composer-voice-cancel'))
+        await waitFor(() => expect(screen.queryByTestId('composer-voice-recorder')).toBeNull())
+        expect(mode === 'simple' ? screen.getByTestId('composer-input-simple').textContent : (screen.getByTestId('composer-input') as HTMLTextAreaElement).value).toBe(draft)
+        const restoredInput = screen.getByTestId(mode === 'simple' ? 'composer-input-simple' : 'composer-input')
+        if (mode === 'simple') { restoredInput.textContent = '   '; fireEvent.input(restoredInput) }
+        else fireEvent.change(restoredInput, { target: { value: '   ' } })
+        fireEvent.click(screen.getByTestId('composer-voice-start'))
+        await waitFor(() => expect(screen.getByTestId('composer-voice-recorder').getAttribute('data-voice-phase')).toBe('listening'))
+        expect(screen.queryByTestId('composer-voice-draft')).toBeNull()
+        fireEvent.click(screen.getByTestId('composer-voice-cancel'))
+        view.unmount()
+        const reopened = renderComposer({ state })
+        fireEvent.click(screen.getByTestId('composer-voice-start'))
+        await waitFor(() => expect(screen.getByTestId('composer-voice-recorder').getAttribute('data-voice-phase')).toBe('listening'))
+        expect(screen.queryByTestId('voice-workbench')).toBeNull()
+        fireEvent.click(screen.getByTestId('composer-voice-cancel'))
+        reopened.unmount()
+        window.localStorage.removeItem(`ak-composer-voice-layout:${state.sessionId}`)
+      }
+    } finally {
+      if (originalMode === null) window.localStorage.removeItem('ak-composer-mode')
+      else window.localStorage.setItem('ak-composer-mode', originalMode)
+      if (mediaDevicesDescriptor) Object.defineProperty(navigator, 'mediaDevices', mediaDevicesDescriptor)
+      else Reflect.deleteProperty(navigator, 'mediaDevices')
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('keeps runtime state out of the footer while preserving the full Composer usage frame', () => {
     render(
       <Composer

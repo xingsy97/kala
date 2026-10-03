@@ -13,7 +13,7 @@ Azure Cognitive Services HTTPS endpoints in the form
 
 The subscription key is encrypted at rest by the Host with AES-256-GCM and
 private filesystem permissions. Settings responses expose only configuration
-status, transcription mode, endpoint, region, and update time. Existing keys cannot be read back
+status, transcription mode, per-mode recording limits, endpoint, region, and update time. Existing keys cannot be read back
 through the Dashboard API.
 
 ## Transcription modes
@@ -31,7 +31,14 @@ through the Dashboard API.
   Host forwards it in memory to Azure Fast Transcription API
   `2025-10-15`. Neither the Dashboard nor Host writes the audio to disk.
 
-Both modes use `zh-CN` and `en-US` language candidates. Canceling deliberately
+Both modes use `zh-CN` and `en-US` language candidates. Settings provide separate
+**Live transcription limit** and **After-recording limit** controls (1–120 minutes,
+both default to 15). Each automatically stops and commits the recognized text at
+its limit without sending the message. The live limit guards against forgotten
+microphones and unexpected Azure charges; it is a Kala policy, not an Azure
+five-minute continuous recognition cap. A long after-recording upload may also
+hit the Host's 25 MiB request limit. Already typed text remains visible in the
+recorder while new speech is captured. Canceling deliberately
 discards only the current recording and restores the original draft. A failed
 after-recording request retains its in-memory Blob only long enough to support
 Retry or Dismiss.

@@ -228,7 +228,7 @@ export type DashboardDeps = {
   loop: LoopHandle
   loopDeps: HostLoopDeps
   executors: ReturnType<typeof createExecutorRegistry>
-  defaultConfig: AgentConfig | (() => AgentConfig)
+  defaultConfig: AgentConfig | ((actor?: DashboardActor) => AgentConfig)
   auth?: AuthConfig
   audit?: AuditLogger
   sessionQuota?: TenantSessionQuotaEnforcer
@@ -349,8 +349,8 @@ export function configureDashboardNamespace(
 ): void {
   const operations = new OperationDeduper()
   const cleanupPlans = new Map<string, { principal: string; sessionIds: readonly string[] }>()
-  const getDefaultConfig = (): AgentConfig => typeof deps.defaultConfig === 'function'
-    ? deps.defaultConfig()
+  const getDefaultConfig = (actor?: DashboardActor): AgentConfig => typeof deps.defaultConfig === 'function'
+    ? deps.defaultConfig(actor)
     : deps.defaultConfig
   const mutableRuntimeReady = (): boolean => deps.mutableReady?.() !== false
   ns.use((socket, nextFn) => {
@@ -1698,7 +1698,7 @@ export function configureDashboardNamespace(
           ack?.({ ok: false, error: message })
           return
         }
-        const actor = auditActor(socket)
+        const actor = socket.data.dashboardActor as DashboardActor
         if (normalizedSelectedModel) {
           await assertTenantModelAllowed(deps, actor, p.sessionId, normalizedSelectedModel)
         }
@@ -1734,8 +1734,8 @@ export function configureDashboardNamespace(
           executionMode,
           ...(runtime.descriptor().version ? { agentRuntimeVersion: runtime.descriptor().version } : {}),
           ...(agentRuntime === 'copilot' ? { externalSessionId: p.sessionId } : {}),
-          defaultConfig: deriveSessionConfig(getDefaultConfig(), p.tools, executionMode),
-          runtimeConfig: deriveSessionConfig(getDefaultConfig(), p.tools, executionMode),
+          defaultConfig: deriveSessionConfig(getDefaultConfig(actor), p.tools, executionMode),
+          runtimeConfig: deriveSessionConfig(getDefaultConfig(actor), p.tools, executionMode),
           ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }

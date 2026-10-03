@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Archive, ArrowRight, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, FileText, GripVertical, ListChecks, LoaderCircle, LockKeyhole, Mic, Navigation, PanelTopClose, PanelTopOpen, Paperclip, Pencil, Plus, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
+import { Archive, ArrowRight, AtSign, Bot, Check, ChevronDown, ChevronUp, Cloud, CornerDownRight, Eraser, FileText, GripVertical, ListChecks, LoaderCircle, LockKeyhole, Maximize2, Mic, Navigation, PanelTopClose, PanelTopOpen, Paperclip, Pencil, Plus, RefreshCw, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -52,6 +52,9 @@ import { useComposerMode } from './composer/useComposerMode.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 import { prepareComposerImage } from './image-compression.js'
 import { joinTranscriptChunks, mergeTranscriptAtCaret, useVoiceRecorder, type VoiceRecorderError } from '../voice/useVoiceRecorder.js'
+import { speechMaxMinutes } from '../voice/speech-api.js'
+import { VoiceWorkbench, VoiceCompactAnchor } from './VoiceWorkbench.js'
+import { VoiceLevelTrace } from './VoiceLevelTrace.js'
 
 type Props = {
   disabled?: boolean
@@ -170,6 +173,20 @@ function writeStoredSendMode(sessionId: string | null, mode: SendMode): void {
 
 const DRAFT_STORAGE_PREFIX = PREF_COMPOSER_DRAFT_PREFIX
 const DRAFT_INTENT_STORAGE_PREFIX = 'ak-composer-draft-intent:'
+const VOICE_LAYOUT_STORAGE_PREFIX = 'ak-composer-voice-layout:'
+type VoiceLayout = 'expanded' | 'compact'
+
+function readStoredVoiceLayout(sessionId: string | null): VoiceLayout {
+  if (!sessionId || typeof window === 'undefined') return 'expanded'
+  try { return window.localStorage.getItem(`${VOICE_LAYOUT_STORAGE_PREFIX}${sessionId}`) === 'compact' ? 'compact' : 'expanded' }
+  catch { return 'expanded' }
+}
+
+function writeStoredVoiceLayout(sessionId: string | null, layout: VoiceLayout): void {
+  if (!sessionId || typeof window === 'undefined') return
+  try { window.localStorage.setItem(`${VOICE_LAYOUT_STORAGE_PREFIX}${sessionId}`, layout) }
+  catch { /* Storage is best effort, as for drafts. */ }
+}
 
 /** Read the saved, unsent composer draft for a session (empty when none). */
 function readStoredDraft(sessionId: string | null): string {
@@ -300,6 +317,12 @@ export function Composer({
   const { mode, toggle: toggleMode } = useComposerMode()
   const displayStyle = chatDisplayStyle(displayPrefs)
   const sessionId = state?.sessionId ?? null
+  const [voiceLayoutPreference, setVoiceLayoutPreference] = useState(() => ({ sessionId, layout: readStoredVoiceLayout(sessionId) }))
+  const voiceLayout = voiceLayoutPreference.sessionId === sessionId ? voiceLayoutPreference.layout : readStoredVoiceLayout(sessionId)
+  const updateVoiceLayout = (layout: VoiceLayout): void => {
+    setVoiceLayoutPreference({ sessionId, layout })
+    writeStoredVoiceLayout(sessionId, layout)
+  }
   const [text, setText] = useState<string>(() => readStoredDraft(sessionId))
   const [messageIntent, setMessageIntent] = useState<MessageIntent>(() => {
     const draft = readStoredDraft(sessionId)
@@ -378,11 +401,15 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const simpleCaretRef = useRef(0)
   const voiceDraftRef = useRef({ text: '', caret: 0 })
+  const voiceRequestRef = useRef<{ sessionId: string | null } | null>(null)
+  const previousVoiceSessionRef = useRef(sessionId)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const mentionRequestId = useRef(0)
   const approvalModeLabel = approvalModeDisplay(approvalMode, t).label
   const voice = useVoiceRecorder({
     onTranscript: (transcript) => {
+      // A late result must never write speech from the previous session into this one.
+      if (!voiceRequestRef.current || voiceRequestRef.current.sessionId !== sessionId) return
       const draft = voiceDraftRef.current
       const next = mergeTranscriptAtCaret(draft.text, draft.caret, transcript)
       setText(next)
@@ -403,12 +430,13 @@ export function Composer({
       ? textareaRef.current?.selectionStart ?? text.length
       : simpleCaretRef.current || text.length
     voiceDraftRef.current = { text, caret }
+    voiceRequestRef.current = { sessionId }
     void voice.start()
-  }, [mode, text, voice])
-  const voiceActive = voice.phase !== 'idle'
+  }, [mode, text, voice, sessionId])
+  const voiceActive = voice.phase !== 'idle' && voiceRequestRef.current?.sessionId === sessionId
 
   useEffect(() => {
-    if (!voiceActive) return
+    if (!voiceActive || voiceLayout === 'expanded') return
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -417,11 +445,13 @@ export function Composer({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [voice, voiceActive])
+  }, [voice, voiceActive, voiceLayout])
 
   useEffect(() => {
-    if (voice.phase === 'idle') return
-    void voice.cancel()
+    if (previousVoiceSessionRef.current === sessionId) return
+    previousVoiceSessionRef.current = sessionId
+    // Also invalidate a pending settings/microphone request before it reaches listening.
+    if (voiceRequestRef.current && voiceRequestRef.current.sessionId !== sessionId) void voice.cancel()
   // A recording belongs to the session where it began.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
@@ -765,6 +795,7 @@ export function Composer({
       submit,
     })
   }
+  const expandedVoice = voiceActive && voiceLayout === 'expanded'
 
   async function extractImagesFromClipboardData(data: DataTransfer | null): Promise<PastedImage[]> {
     if (!allowAttachments) return []
@@ -989,6 +1020,7 @@ export function Composer({
   }
 
   return (
+    <>
     <form
       onSubmit={handleSubmit}
       className={cn(
@@ -1048,7 +1080,9 @@ export function Composer({
                 data-layout="single-row"
               >
                 {voiceActive ? (
-                  <VoiceRecorderSurface voice={voice} onStopAndSend={stopVoiceAndSend} compact />
+                  expandedVoice
+                    ? <VoiceCompactAnchor voice={voice} />
+                    : <VoiceRecorderSurface voice={voice} draftText={voiceDraftRef.current.text} onStopAndSend={stopVoiceAndSend} compact onExpand={() => updateVoiceLayout('expanded')} />
                 ) : (
                 <>
                   {shellModeIndicator}
@@ -1107,7 +1141,9 @@ export function Composer({
           )}
         >
           {voiceActive ? (
-            <VoiceRecorderSurface voice={voice} onStopAndSend={stopVoiceAndSend} />
+            expandedVoice
+              ? <VoiceCompactAnchor voice={voice} />
+              : <VoiceRecorderSurface voice={voice} draftText={voiceDraftRef.current.text} onStopAndSend={stopVoiceAndSend} onExpand={() => updateVoiceLayout('expanded')} />
           ) : (
           <>
           {contextUsageBar('full')}
@@ -1339,6 +1375,8 @@ export function Composer({
         ) : null}
       </div>
     </form>
+    {expandedVoice ? <VoiceWorkbench voice={voice} draft={voiceDraftRef.current} onCompact={() => updateVoiceLayout('compact')} onStopAndSend={stopVoiceAndSend} /> : null}
+    </>
   )
 }
 
@@ -1422,15 +1460,20 @@ function VoiceInputButton({
 
 function VoiceRecorderSurface({
   voice,
+  draftText,
   onStopAndSend,
+  onExpand,
   compact = false,
 }: {
   voice: VoiceRecorderControls
+  draftText: string
   onStopAndSend(): Promise<void>
+  onExpand(): void
   compact?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const transcriptRef = useRef<HTMLDivElement | null>(null)
+  const draftRef = useRef<HTMLDivElement | null>(null)
   const followTranscriptRef = useRef(true)
   const listening = voice.phase === 'listening'
   const error = voice.phase === 'error' ? voiceErrorLabel(voice.error, t) : null
@@ -1441,11 +1484,17 @@ function VoiceRecorderSurface({
     const element = transcriptRef.current
     if (element && followTranscriptRef.current) element.scrollTop = element.scrollHeight
   }, [transcript])
+  useEffect(() => {
+    if (draftRef.current) draftRef.current.scrollTop = draftRef.current.scrollHeight
+  }, [draftText])
+  const maxMinutes = voice.configuration?.mode === 'after_recording'
+    ? voice.configuration.afterRecordingMaxMinutes : voice.configuration?.realtimeMaxMinutes
+  const maxSeconds = speechMaxMinutes(maxMinutes) * 60
   const status = voice.phase === 'requesting'
     ? t('composer.voice.requesting')
     : voice.phase === 'processing'
       ? t('composer.voice.processing')
-      : error ?? (voice.elapsedSeconds >= 270
+      : error ?? (voice.elapsedSeconds >= maxSeconds - 30
         ? t('composer.voice.finishingSoon')
         : liveMode ? t('composer.voice.listening') : t('composer.voice.recording'))
   return (
@@ -1457,9 +1506,8 @@ function VoiceRecorderSurface({
       )}
       data-testid="composer-voice-recorder"
       data-voice-phase={voice.phase}
-      role="status"
-      aria-live="polite"
     >
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{status}</span>
       {voice.phase === 'error' ? (
         <button
           type="button"
@@ -1488,6 +1536,11 @@ function VoiceRecorderSurface({
           <span className={cn('relative h-2.5 w-2.5 rounded-full', voice.phase === 'error' ? 'bg-destructive' : listening ? 'bg-rose-500' : 'bg-primary')} />
         </span>
         <div className="min-w-0 flex-1">
+          {draftText.trim() ? (
+            <div ref={draftRef} className={cn('mb-1 max-h-16 overflow-y-auto whitespace-pre-wrap break-words border-b border-border/50 pb-1 text-sm text-foreground [scrollbar-width:thin]', compact && 'max-h-10')} data-testid="composer-voice-draft" aria-live="off">
+              <span className="mr-2 text-xs text-muted-foreground">{t('composer.voice.existingDraft')}</span>{draftText}
+            </div>
+          ) : null}
           {listening && liveMode && transcript ? (
             <div
               ref={transcriptRef}
@@ -1510,8 +1563,7 @@ function VoiceRecorderSurface({
         {voice.phase !== 'error' ? (
           <VoiceLevelTrace
             levels={voice.levels}
-            compact={compact}
-            hideOnNarrow={listening && liveMode && Boolean(transcript)}
+            className={cn('w-20 flex-none sm:w-28 md:w-36', !compact && 'sm:w-36 md:w-44', listening && liveMode && Boolean(transcript) && 'hidden sm:block')}
           />
         ) : null}
         {voice.phase !== 'error' ? (
@@ -1521,6 +1573,7 @@ function VoiceRecorderSurface({
         ) : null}
       </div>
 
+      <button type="button" className="flex h-9 w-9 flex-none items-center justify-center rounded-lg text-muted-foreground hover:bg-accent" onClick={onExpand} aria-label={t('composer.voice.expand')} title={t('composer.voice.expand')} data-testid="composer-voice-expand"><Maximize2 className="h-4 w-4" aria-hidden="true" /></button>
       {listening ? (
         <VoiceStopControl
           compact={compact}
@@ -1657,51 +1710,6 @@ export function VoiceStopControl({
           ? <Navigation className="h-4 w-4 fill-current" aria-hidden="true" />
           : <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />}
       </button>
-    </div>
-  )
-}
-
-function VoiceLevelTrace({
-  levels,
-  compact,
-  hideOnNarrow,
-}: {
-  levels: readonly number[]
-  compact: boolean
-  hideOnNarrow: boolean
-}): JSX.Element {
-  const width = 160
-  const height = 24
-  const floor = height - 2
-  const points = levels.map((level, index) => {
-    const x = levels.length <= 1 ? 0 : (index / (levels.length - 1)) * width
-    const y = floor - Math.max(0, Math.min(1, level)) * (height - 5)
-    return `${x.toFixed(2)},${y.toFixed(2)}`
-  }).join(' ')
-  const area = `M 0 ${floor} L ${points.replaceAll(' ', ' L ')} L ${width} ${floor} Z`
-  return (
-    <div
-      className={cn(
-        'h-6 w-20 flex-none text-primary sm:w-28 md:w-36',
-        !compact && 'sm:w-36 md:w-44',
-        hideOnNarrow && 'hidden sm:block',
-      )}
-      data-testid="composer-voice-waveform"
-      aria-hidden="true"
-    >
-      <svg className="h-full w-full overflow-visible" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-        <path d={area} fill="currentColor" opacity="0.09" />
-        <polyline
-          points={points}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.75"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-          opacity="0.82"
-        />
-      </svg>
     </div>
   )
 }

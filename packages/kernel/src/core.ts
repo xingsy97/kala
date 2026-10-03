@@ -43,6 +43,7 @@ import {
   onLlmError,
   onLlmResponse,
   onMessagesReplaced,
+  onSystemPromptChanged,
   onToolResult,
   onUserApprove,
   onUserMessage,
@@ -78,6 +79,7 @@ const transitions = {
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
+    system_prompt_changed: (s, e) => onSystemPromptChanged(s, e.prompt, e.version),
   },
   thinking: {
     user_message: undefined,
@@ -91,6 +93,7 @@ const transitions = {
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: undefined,
+    system_prompt_changed: (s, e) => onSystemPromptChanged(s, e.prompt, e.version),
   },
   awaiting_approval: {
     user_message: undefined,
@@ -104,6 +107,7 @@ const transitions = {
     messages_replaced: undefined,
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: undefined,
+    system_prompt_changed: (s, e) => onSystemPromptChanged(s, e.prompt, e.version),
   },
   executing_tools: {
     user_message: undefined,
@@ -117,6 +121,7 @@ const transitions = {
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: undefined,
+    system_prompt_changed: (s, e) => onSystemPromptChanged(s, e.prompt, e.version),
   },
   done: {
     user_message: (s, e, c) => onUserMessage(s, e, c),
@@ -130,6 +135,7 @@ const transitions = {
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
+    system_prompt_changed: (s, e) => onSystemPromptChanged(s, e.prompt, e.version),
   },
   error: {
     user_message: (s, e, c) => onUserMessage(s, e, c),
@@ -143,6 +149,7 @@ const transitions = {
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: undefined,
+    system_prompt_changed: (s, e) => onSystemPromptChanged(s, e.prompt, e.version),
   },
 } satisfies TransitionTable
 

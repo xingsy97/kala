@@ -18,14 +18,15 @@
  */
 
 import { execSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
 
 import type { ManualModelInput, ManualProviderInput, ModelInfo, ModelSource, ProviderWire } from '@agent-kernel/shared'
 
-import { DEFAULT_CUSTOM_SYSTEM_PROMPT, normalizeAgentSystemPromptPreset, type AgentSystemPromptPreset } from './builtin-tools.js'
+import { DEFAULT_KALA_SYSTEM_PROMPT } from './builtin-tools.js'
 import type { HookConfig, HookEvent } from './extensions/hooks.js'
 import { knownContextWindow } from './model-capabilities.js'
 
@@ -51,9 +52,24 @@ export type RuntimeConfig = {
   manualDefaultModel?: string
 }
 
+export type AgentPromptSlotId = 'slot-1' | 'slot-2' | 'slot-3'
+
+export type AgentPromptSlot = {
+  id: AgentPromptSlotId
+  name: string
+  prompt: string
+}
+
 export type AgentRuntimeSettings = {
-  systemPromptPreset: AgentSystemPromptPreset
-  customSystemPrompt: string
+  selectedSlotId: AgentPromptSlotId
+  slots: readonly AgentPromptSlot[]
+}
+
+export class InvalidAgentRuntimeSettingsError extends Error {
+  constructor(path: string, options?: ErrorOptions) {
+    super(`invalid agent prompt settings file: ${path}`, options)
+    this.name = 'InvalidAgentRuntimeSettingsError'
+  }
 }
 
 export type LoadRuntimeConfigOptions = {
@@ -411,28 +427,82 @@ export function defaultAgentSettingsPath(home = homedir()): string {
   return join(home, '.config', 'kala', 'agent.json')
 }
 
-export function loadAgentRuntimeSettings(path = defaultAgentSettingsPath()): AgentRuntimeSettings {
-  const raw = tryReadFile(path)
-  if (raw === undefined) return { systemPromptPreset: 'codex', customSystemPrompt: DEFAULT_CUSTOM_SYSTEM_PROMPT }
-  try {
-    const parsed = JSON.parse(raw) as { systemPromptPreset?: unknown; customSystemPrompt?: unknown }
-    return {
-      systemPromptPreset: normalizeAgentSystemPromptPreset(parsed.systemPromptPreset),
-      customSystemPrompt: typeof parsed.customSystemPrompt === 'string' && parsed.customSystemPrompt.trim()
-        ? parsed.customSystemPrompt
-        : DEFAULT_CUSTOM_SYSTEM_PROMPT,
-    }
-  } catch {
-    return { systemPromptPreset: 'codex', customSystemPrompt: DEFAULT_CUSTOM_SYSTEM_PROMPT }
+/** Keep untrusted organization ids out of paths while retaining stable isolation. */
+export function organizationAgentSettingsPath(globalPath: string, organizationId: string): string {
+  const key = createHash('sha256').update(organizationId, 'utf8').digest('hex')
+  return join(dirname(globalPath), 'agent-organizations', `${key}.json`)
+}
+
+export function defaultAgentRuntimeSettings(): AgentRuntimeSettings {
+  return {
+    selectedSlotId: 'slot-1',
+    slots: [
+      { id: 'slot-1', name: '默认', prompt: DEFAULT_KALA_SYSTEM_PROMPT },
+      { id: 'slot-2', name: '方案 2', prompt: DEFAULT_KALA_SYSTEM_PROMPT },
+      { id: 'slot-3', name: '方案 3', prompt: DEFAULT_KALA_SYSTEM_PROMPT },
+    ],
   }
 }
 
+export function loadAgentRuntimeSettings(path = defaultAgentSettingsPath()): AgentRuntimeSettings {
+  const raw = tryReadFile(path)
+  if (raw === undefined) return defaultAgentRuntimeSettings()
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    const settings = parseAgentRuntimeSettings(parsed)
+    if (settings) return settings
+    if (isLegacyAgentRuntimeSettings(parsed)) {
+      const migrated = defaultAgentRuntimeSettings()
+      migrated.selectedSlotId = parsed.systemPromptPreset === 'claude-code'
+        ? 'slot-2'
+        : parsed.systemPromptPreset === 'custom'
+          ? 'slot-3'
+          : 'slot-1'
+      writeAgentRuntimeSettings(path, migrated)
+      return migrated
+    }
+  } catch (error) {
+    if (error instanceof InvalidAgentRuntimeSettingsError) throw error
+    throw new InvalidAgentRuntimeSettingsError(path, { cause: error })
+  }
+  throw new InvalidAgentRuntimeSettingsError(path)
+}
+
 export function writeAgentRuntimeSettings(path: string, settings: AgentRuntimeSettings): void {
+  const normalized = parseAgentRuntimeSettings(settings)
+  if (!normalized) throw new Error('invalid agent prompt settings')
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify({
-    systemPromptPreset: normalizeAgentSystemPromptPreset(settings.systemPromptPreset),
-    customSystemPrompt: settings.customSystemPrompt,
-  }, null, 2)}\n`, 'utf8')
+  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`
+  writeFileSync(temporaryPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8')
+  renameSync(temporaryPath, path)
+}
+
+function parseAgentRuntimeSettings(value: unknown): AgentRuntimeSettings | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as { selectedSlotId?: unknown; slots?: unknown }
+  const selectedSlotId = candidate.selectedSlotId
+  if (!isAgentPromptSlotId(selectedSlotId) || !Array.isArray(candidate.slots) || candidate.slots.length !== 3) return undefined
+  const ids = ['slot-1', 'slot-2', 'slot-3'] as const
+  const slots: AgentPromptSlot[] = []
+  for (let index = 0; index < ids.length; index += 1) {
+    const id = ids[index]!
+    const slot = candidate.slots[index]
+    if (!slot || typeof slot !== 'object') return undefined
+    const entry = slot as { id?: unknown; name?: unknown; prompt?: unknown }
+    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+    const prompt = typeof entry.prompt === 'string' ? entry.prompt : ''
+    if (entry.id !== id || !name || name.length > 80 || !prompt.trim() || prompt.length > 100_000) return undefined
+    slots.push({ id, name, prompt })
+  }
+  return { selectedSlotId, slots }
+}
+
+function isAgentPromptSlotId(value: unknown): value is AgentPromptSlotId {
+  return value === 'slot-1' || value === 'slot-2' || value === 'slot-3'
+}
+
+function isLegacyAgentRuntimeSettings(value: unknown): value is { systemPromptPreset?: unknown } {
+  return !!value && typeof value === 'object' && !('slots' in value)
 }
 
 function applyManualModels(

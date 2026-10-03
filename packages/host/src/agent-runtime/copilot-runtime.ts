@@ -84,9 +84,11 @@ export class CopilotAgentRuntime implements AgentRuntime {
   readonly id = 'copilot' as const
   private client: CopilotClient | undefined
   private readonly sessions = new Map<string, CopilotSession>()
+  private readonly sessionSystemPrompts = new Map<string, string>()
   private readonly approvals = new Map<string, PendingApproval>()
   private readonly cancelledCalls = new Set<string>()
   private readonly turnGenerations = new Map<string, number>()
+  private readonly turnSystemPrompts = new Map<string, string>()
   private readonly cancelledTurnGenerations = new Set<string>()
   private readonly requestGenerations = new Map<string, number>()
   private readonly sdkInteractionGenerations = new Map<string, number>()
@@ -187,6 +189,9 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {
     this.context.store.assertStorageWritable(record.sessionId)
+    // Capture before ensureSession yields: a concurrent durable replacement must
+    // fence every event from the SDK Session configured with this prompt.
+    const turnSystemPrompt = record.config.systemPrompt ?? 'You are an AI coding agent.'
     const session = await this.ensureSession(record, input.model)
     if (input.model) await session.setModel(input.model)
     const generation = (this.turnGenerations.get(record.sessionId) ?? 0) + 1
@@ -197,6 +202,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
     }
     this.activeTurnTimings.set(record.sessionId, timing)
     this.turnGenerations.set(record.sessionId, generation)
+    this.turnSystemPrompts.set(record.sessionId, turnSystemPrompt)
     this.requestGenerations.set(approvalKey(record.sessionId, requestId), generation)
     await this.project(record, 'copilot.user_message', {
       text: input.text,
@@ -389,6 +395,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
     if (session) {
       await session.disconnect()
       this.sessions.delete(record.sessionId)
+      this.sessionSystemPrompts.delete(record.sessionId)
     }
     this.contextEventTimes.delete(record.sessionId)
     this.contextTokenHighWater.delete(record.sessionId)
@@ -398,7 +405,9 @@ export class CopilotAgentRuntime implements AgentRuntime {
 
   async close(): Promise<void> {
     this.sessions.clear()
+    this.sessionSystemPrompts.clear()
     this.turnGenerations.clear()
+    this.turnSystemPrompts.clear()
     this.cancelledTurnGenerations.clear()
     this.requestGenerations.clear()
     this.sdkInteractionGenerations.clear()
@@ -413,8 +422,16 @@ export class CopilotAgentRuntime implements AgentRuntime {
   }
 
   private async ensureSession(record: SessionRecord, model?: string): Promise<CopilotSession> {
+    const effectivePrompt = record.config.systemPrompt ?? 'You are an AI coding agent.'
     const existing = this.sessions.get(record.sessionId)
-    if (existing) return existing
+    if (existing && this.sessionSystemPrompts.get(record.sessionId) === effectivePrompt) return existing
+    if (existing) {
+      // Disconnect only the local SDK object. deleteSession() would destroy the
+      // resumable provider session and is intentionally reserved for user delete.
+      await existing.disconnect()
+      this.sessions.delete(record.sessionId)
+      this.sessionSystemPrompts.delete(record.sessionId)
+    }
     if (!this.client || this.status !== 'ready') {
       throw new Error(this.reason ?? 'Copilot runtime is unavailable')
     }
@@ -433,6 +450,7 @@ export class CopilotAgentRuntime implements AgentRuntime {
     }
     session.on((event) => this.handleEvent(record, event))
     this.sessions.set(record.sessionId, session)
+    this.sessionSystemPrompts.set(record.sessionId, effectivePrompt)
     await this.restorePersistedContext(record, session)
     return session
   }
@@ -843,7 +861,9 @@ export class CopilotAgentRuntime implements AgentRuntime {
   }
 
   private isCurrentTurn(sessionId: string, generation: number): boolean {
+    const currentPrompt = this.context.store.get(sessionId)?.config.systemPrompt ?? 'You are an AI coding agent.'
     return this.turnGenerations.get(sessionId) === generation
+      && this.turnSystemPrompts.get(sessionId) === currentPrompt
       && !this.cancelledTurnGenerations.has(turnGenerationKey(sessionId, generation))
   }
 

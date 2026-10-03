@@ -967,13 +967,12 @@ const SettingsSkillSummarySchema = z.object({
 })
 
 const SettingsAgentPromptSchema = z.object({
-  selectedPreset: z.enum(['codex', 'claude-code', 'custom']),
-  presets: z.array(z.object({
-    id: z.enum(['codex', 'claude-code', 'custom']),
-    label: z.string(),
-    description: z.string(),
-  })),
-  customPrompt: z.string(),
+  selectedSlotId: z.enum(['slot-1', 'slot-2', 'slot-3']),
+  slots: z.tuple([
+    z.object({ id: z.literal('slot-1'), name: z.string(), prompt: z.string() }),
+    z.object({ id: z.literal('slot-2'), name: z.string(), prompt: z.string() }),
+    z.object({ id: z.literal('slot-3'), name: z.string(), prompt: z.string() }),
+  ]),
   configPath: z.string(),
 }) satisfies z.ZodType<SettingsAgentPrompt>
 

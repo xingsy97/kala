@@ -6,12 +6,13 @@
  * the operator's current key.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { loadAnthropicCliDefaults, loadEnvFile, loadRuntimeConfig, parseCodexToml, parseHookConfigToml, loadHookConfigs, requireAnthropicBaseUrl } from './runtime-config.js'
+import { defaultAgentRuntimeSettings, loadAgentRuntimeSettings, loadAnthropicCliDefaults, loadEnvFile, loadRuntimeConfig, organizationAgentSettingsPath, parseCodexToml, parseHookConfigToml, loadHookConfigs, requireAnthropicBaseUrl, writeAgentRuntimeSettings } from './runtime-config.js'
+import { DEFAULT_KALA_SYSTEM_PROMPT } from './builtin-tools.js'
 
 describe('parseCodexToml', () => {
   it('extracts top-level model + provider block fields', () => {
@@ -409,5 +410,92 @@ describe('loadHookConfigs', () => {
     )
     const out = loadHookConfigs(path)
     expect(out).toEqual([{ event: 'pre_tool_use', command: 'echo ok' }])
+  })
+})
+
+describe('agent prompt slots', () => {
+  let dir: string
+  let path: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ak-agent-settings-'))
+    path = join(dir, 'agent.json')
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('uses three named copies of the Kala template for a new installation', () => {
+    expect(loadAgentRuntimeSettings(path)).toEqual({
+      selectedSlotId: 'slot-1',
+      slots: [
+        { id: 'slot-1', name: '默认', prompt: DEFAULT_KALA_SYSTEM_PROMPT },
+        { id: 'slot-2', name: '方案 2', prompt: DEFAULT_KALA_SYSTEM_PROMPT },
+        { id: 'slot-3', name: '方案 3', prompt: DEFAULT_KALA_SYSTEM_PROMPT },
+      ],
+    })
+  })
+
+  it.each([
+    ['codex', 'slot-1'],
+    ['claude-code', 'slot-2'],
+    ['custom', 'slot-3'],
+  ] as const)('migrates legacy %s settings to %s and replaces every old prompt', (preset, selectedSlotId) => {
+    writeFileSync(path, JSON.stringify({ systemPromptPreset: preset, customSystemPrompt: 'delete this legacy text' }))
+
+    const settings = loadAgentRuntimeSettings(path)
+
+    expect(settings.selectedSlotId).toBe(selectedSlotId)
+    expect(settings.slots.map((slot) => slot.prompt)).toEqual(Array(3).fill(DEFAULT_KALA_SYSTEM_PROMPT))
+    expect(readFileSync(path, 'utf8')).not.toContain('delete this legacy text')
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(settings)
+  })
+
+  it('persists and reloads custom names, prompts, and selection atomically', () => {
+    const settings = {
+      selectedSlotId: 'slot-2' as const,
+      slots: [
+        { id: 'slot-1' as const, name: 'Build', prompt: 'Implement carefully.' },
+        { id: 'slot-2' as const, name: 'Plan', prompt: 'Discuss the design.' },
+        { id: 'slot-3' as const, name: 'Review', prompt: 'Review only.' },
+      ],
+    }
+
+    writeAgentRuntimeSettings(path, settings)
+
+    expect(loadAgentRuntimeSettings(path)).toEqual(settings)
+    expect(readdirSync(dir)).toEqual(['agent.json'])
+  })
+
+  it('reports invalid stored Slot data without replacing it with defaults', () => {
+    const defaults = defaultAgentRuntimeSettings()
+    const invalid = { ...defaults, slots: [defaults.slots[1]!, defaults.slots[0]!, defaults.slots[2]!] }
+    const damaged = JSON.stringify(invalid)
+    writeFileSync(path, damaged)
+
+    expect(() => loadAgentRuntimeSettings(path)).toThrow(`invalid agent prompt settings file: ${path}`)
+    expect(readFileSync(path, 'utf8')).toBe(damaged)
+
+    writeAgentRuntimeSettings(path, defaults)
+    const beforeFailure = readFileSync(path, 'utf8')
+    expect(() => writeAgentRuntimeSettings(path, invalid)).toThrow('invalid agent prompt settings')
+    expect(readFileSync(path, 'utf8')).toBe(beforeFailure)
+  })
+
+  it('reports malformed JSON without silently selecting defaults', () => {
+    writeFileSync(path, '{"selectedSlotId":')
+
+    expect(() => loadAgentRuntimeSettings(path)).toThrow(`invalid agent prompt settings file: ${path}`)
+    expect(readFileSync(path, 'utf8')).toBe('{"selectedSlotId":')
+  })
+
+  it('uses stable, non-overlapping hashed paths for organization settings', () => {
+    const globalPath = join(dir, 'agent.json')
+    const first = organizationAgentSettingsPath(globalPath, 'org/a')
+    const again = organizationAgentSettingsPath(globalPath, 'org/a')
+    const second = organizationAgentSettingsPath(globalPath, 'org/b')
+
+    expect(first).toBe(again)
+    expect(first).not.toBe(second)
+    expect(first).not.toContain('org/a')
+    expect(second).not.toContain('org/b')
   })
 })

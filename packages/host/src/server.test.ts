@@ -253,7 +253,7 @@ async function createRedeemedTenantExecutorInstall(
   const createdResponse = await fetch(`${url}/api/executor-installs`, {
     method: 'POST',
     headers: adminHeaders,
-    body: JSON.stringify({ platform: 'linux', mode: 'temporary', workspaceRoot: '/work' }),
+    body: JSON.stringify({ platform: 'linux', mode: 'temporary', privilegeMode: 'privileged', workspaceRoot: '/work' }),
   })
   if (!createdResponse.ok) throw new Error(`install create failed: ${createdResponse.status}`)
   const created = await createdResponse.json() as { id: string; setupCode: string }
@@ -950,7 +950,10 @@ describe('wire protocol', () => {
       port: 0,
       sessionsDir: dir,
       llm: scriptedLlm(),
-      defaultConfig: config,
+      defaultConfig: (actor) => createConfig({
+        tools: config.tools,
+        systemPrompt: actor?.kind === 'ingress' ? `prompt-for-${actor.organizationId}` : 'portable-prompt',
+      }),
       sessionQuota: {
         async assertCanCreateSession(params) {
           checks.push(params)
@@ -977,6 +980,7 @@ describe('wire protocol', () => {
     expect(ack).toEqual({ ok: true })
     expect(checks).toEqual([expect.objectContaining({ organizationId: 'org_quota', sessionId: 'session-quota-allowed' })])
     expect(server.store.get('session-quota-allowed')?.organizationId).toBe('org_quota')
+    expect(server.store.get('session-quota-allowed')?.config.systemPrompt).toBe('prompt-for-org_quota')
     dashboard.close()
   })
 
@@ -2114,47 +2118,40 @@ describe('wire protocol', () => {
     }
   })
 
-  it('updates agent prompt settings through HTTP', async () => {
-    let selectedPreset: 'codex' | 'claude-code' | 'custom' = 'codex'
+  it('scopes agent prompt GET/POST and existing Session synchronization to the actor organization', async () => {
+    const prompts = new Map([['org_a', 'old-a'], ['org_b', 'old-b']])
+    const slotsFor = (prompt: string) => [
+      { id: 'slot-1' as const, name: 'One', prompt },
+      { id: 'slot-2' as const, name: 'Two', prompt: `${prompt}-two` },
+      { id: 'slot-3' as const, name: 'Three', prompt: `${prompt}-three` },
+    ]
     const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-agent-prompt-'))
     const localServer = await startHostServer({
       port: 0,
       sessionsDir: localSessionsDir,
       llm: scriptedLlm(),
-      defaultConfig: config,
-      settings: () => ({
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      defaultConfig: (actor) => createConfig({ tools: [], systemPrompt: prompts.get(actor?.kind === 'ingress' ? actor.organizationId : '') ?? 'portable' }),
+      settings: (actor) => ({
         providers: [],
         defaultModel: '',
         hooks: [],
         agentPrompt: {
-          selectedPreset,
-          presets: [
-            { id: 'codex', label: 'Codex', description: 'Codex prompt' },
-            { id: 'claude-code', label: 'Claude Code', description: 'Claude Code prompt' },
-            { id: 'custom', label: 'Custom', description: 'Custom prompt' },
-          ],
-          customPrompt: 'Custom prompt',
+          selectedSlotId: 'slot-1',
+          slots: slotsFor(prompts.get(actor.kind === 'ingress' ? actor.organizationId : '') ?? 'portable'),
           configPath: '/tmp/agent.json',
         },
         paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
         mcp: { supported: false, note: '' },
       }),
-      updateAgentPrompt: (input) => {
-        selectedPreset = input.preset
+      updateAgentPrompt: (input, actor) => {
+        if (actor.kind !== 'ingress') throw new Error('organization required')
+        prompts.set(actor.organizationId, input.slots.find((slot) => slot.id === input.selectedSlotId)!.prompt)
         return {
           providers: [],
           defaultModel: '',
           hooks: [],
-          agentPrompt: {
-            selectedPreset,
-            presets: [
-              { id: 'codex', label: 'Codex', description: 'Codex prompt' },
-              { id: 'claude-code', label: 'Claude Code', description: 'Claude Code prompt' },
-              { id: 'custom', label: 'Custom', description: 'Custom prompt' },
-            ],
-            customPrompt: input.customPrompt ?? 'Custom prompt',
-            configPath: '/tmp/agent.json',
-          },
+          agentPrompt: { selectedSlotId: input.selectedSlotId, slots: input.slots, configPath: '/tmp/agent.json' },
           paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
           mcp: { supported: false, note: '' },
         }
@@ -2162,19 +2159,191 @@ describe('wire protocol', () => {
     })
 
     try {
+      await localServer.store.create({ sessionId: 'old-org-a', config: createConfig({ tools: [], systemPrompt: 'old-a' }), organizationId: 'org_a' })
+      await localServer.store.create({ sessionId: 'old-org-b', config: createConfig({ tools: [], systemPrompt: 'old-b' }), organizationId: 'org_b' })
+      const headers = {
+        'content-type': 'application/json',
+        'x-agent-runlab-principal': 'admin@example.test',
+        'x-agent-runlab-organization-id': 'org_a',
+        'x-agent-runlab-organization-role': 'admin',
+      }
+      const before = await fetch(`http://localhost:${localServer.port}/settings`, { headers })
+      expect((await before.json() as ServerSettingsPayload).agentPrompt?.slots[0]?.prompt).toBe('old-a')
+
       const response = await fetch(`http://localhost:${localServer.port}/settings/agent-prompt`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ preset: 'claude-code' }),
+        headers,
+        body: JSON.stringify({ selectedSlotId: 'slot-1', slots: slotsFor('new-a') }),
       })
       expect(response.status).toBe(200)
-      const body = await response.json() as { agentPrompt?: { selectedPreset?: string } }
-      expect(body.agentPrompt?.selectedPreset).toBe('claude-code')
-      expect(selectedPreset).toBe('claude-code')
+      const body = await response.json() as ServerSettingsPayload
+      expect(body.agentPrompt?.slots[0]?.prompt).toBe('new-a')
+      expect(localServer.store.get('old-org-a')?.config.systemPrompt).toBe('new-a')
+      expect(localServer.store.get('old-org-a')?.state.systemPromptOverride?.prompt).toBe('new-a')
+      expect(localServer.store.get('old-org-b')?.config.systemPrompt).toBe('old-b')
+      expect(localServer.store.get('old-org-b')?.state.systemPromptOverride).toBeUndefined()
+      const created = await fetch(`http://localhost:${localServer.port}/api/v1/sessions`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ operationId: 'org-a-api-create', sessionId: 'org-a-api' }),
+      })
+      expect(created.status).toBe(201)
+      expect(localServer.store.get('org-a-api')?.config.systemPrompt).toBe('new-a')
+      expect(localServer.store.get('org-a-api')?.organizationId).toBe('org_a')
     } finally {
       await localServer.close()
       rmSync(localSessionsDir, { recursive: true, force: true })
     }
+  })
+
+  it('returns 503 after settings commit and retries residual Session synchronization', async () => {
+    let prompt = 'old prompt'
+    const slotsFor = (value: string) => [
+      { id: 'slot-1' as const, name: 'One', prompt: value },
+      { id: 'slot-2' as const, name: 'Two', prompt: `${value}-two` },
+      { id: 'slot-3' as const, name: 'Three', prompt: `${value}-three` },
+    ]
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-agent-prompt-retry-'))
+    const settings = (): ServerSettingsPayload => ({
+      providers: [], defaultModel: '', hooks: [],
+      agentPrompt: { selectedSlotId: 'slot-1', slots: slotsFor(prompt), configPath: '/tmp/agent.json' },
+      paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+      mcp: { supported: false, note: '' },
+    })
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: () => createConfig({ tools: [], systemPrompt: prompt }),
+      settings,
+      updateAgentPrompt: (input) => {
+        prompt = input.slots.find((slot) => slot.id === input.selectedSlotId)!.prompt
+        return settings()
+      },
+      promptSynchronizationRetryMs: 10,
+    })
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      await localServer.store.create({ sessionId: 'prompt-retry', config: createConfig({ tools: [], systemPrompt: 'old prompt' }) })
+      const apply = vi.spyOn(localServer.store, 'applySystemPrompt')
+      apply.mockRejectedValueOnce(new Error('storage temporarily unavailable'))
+
+      const response = await fetch(`http://localhost:${localServer.port}/settings/agent-prompt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ selectedSlotId: 'slot-1', slots: slotsFor('new prompt') }),
+      })
+
+      expect(response.status).toBe(503)
+      expect(await response.text()).toContain('settings were saved')
+      expect(prompt).toBe('new prompt')
+      expect(localServer.store.get('prompt-retry')?.config.systemPrompt).toBe('old prompt')
+      await vi.waitFor(() => {
+        expect(localServer.store.get('prompt-retry')?.config.systemPrompt).toBe('new prompt')
+      })
+      expect(apply).toHaveBeenCalledTimes(2)
+    } finally {
+      await localServer.close()
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports saved settings as pending when organization discovery fails, then retries discovery', async () => {
+    let prompt = 'old discovery prompt'
+    const slotsFor = (value: string) => [
+      { id: 'slot-1' as const, name: 'One', prompt: value },
+      { id: 'slot-2' as const, name: 'Two', prompt: value },
+      { id: 'slot-3' as const, name: 'Three', prompt: value },
+    ]
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-agent-prompt-discovery-'))
+    const settings = (): ServerSettingsPayload => ({
+      providers: [], defaultModel: '', hooks: [],
+      agentPrompt: { selectedSlotId: 'slot-1', slots: slotsFor(prompt), configPath: '/tmp/agent.json' },
+      paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+      mcp: { supported: false, note: '' },
+    })
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: () => createConfig({ tools: [], systemPrompt: prompt }),
+      settings,
+      updateAgentPrompt: (input) => {
+        prompt = input.slots.find((slot) => slot.id === input.selectedSlotId)!.prompt
+        return settings()
+      },
+      promptSynchronizationRetryMs: 10,
+    })
+    try {
+      await localServer.store.create({ sessionId: 'prompt-discovery-retry', config: createConfig({ tools: [], systemPrompt: prompt }) })
+      const discovery = vi.spyOn(localServer.store, 'listSessionIdsForOrganization')
+      const backgroundDiscovery = vi.spyOn(localServer.store, 'listSessionIds')
+      discovery.mockRejectedValueOnce(new Error('Temporary Session header read failure'))
+      const response = await fetch(`http://localhost:${localServer.port}/settings/agent-prompt`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ selectedSlotId: 'slot-1', slots: slotsFor('new discovery prompt') }),
+      })
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ settingsSaved: true })
+      expect(prompt).toBe('new discovery prompt')
+      await vi.waitFor(() => {
+        expect(localServer.store.get('prompt-discovery-retry')?.config.systemPrompt).toBe('new discovery prompt')
+      })
+      expect(discovery).toHaveBeenCalledOnce()
+      await vi.waitFor(() => expect(backgroundDiscovery).toHaveBeenCalled())
+    } finally {
+      await localServer.close()
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
+  it('reconciles persisted Session prompts after restart without waiting for a model call', async () => {
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-agent-prompt-startup-'))
+    const first = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: createConfig({ tools: [], systemPrompt: 'old startup prompt' }),
+    })
+    await first.store.create({ sessionId: 'startup-prompt-repair', config: createConfig({ tools: [], systemPrompt: 'old startup prompt' }) })
+    await first.close()
+
+    const second = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: createConfig({ tools: [], systemPrompt: 'new startup prompt' }),
+      promptSynchronizationRetryMs: 10,
+    })
+    try {
+      await vi.waitFor(() => {
+        expect(second.store.get('startup-prompt-repair')?.config.systemPrompt).toBe('new startup prompt')
+      })
+      expect(second.store.get('startup-prompt-repair')?.state.systemPromptOverride?.prompt).toBe('new startup prompt')
+    } finally {
+      await second.close()
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not recover or append to a dangling Copilot Session when startup finds no prompt change', async () => {
+    await server.close()
+    server = await startHostServer({ port: 0, sessionsDir: dir, llm: scriptedLlm(), defaultConfig: config })
+    const record = await server.store.create({
+      sessionId: 'unchanged-copilot-prompt', agentRuntime: 'copilot',
+      agentRuntimeVersion: '1.0.11', externalSessionId: 'unchanged-copilot-prompt', config,
+    })
+    await server.store.recordRuntimeProjection(record.sessionId, {
+      ...record.state, status: 'thinking', cursor: record.state.cursor + 1,
+      messages: [...record.state.messages, { role: 'user', content: [{ type: 'text', text: 'do not interrupt' }] }],
+    }, 'copilot.user_message', {})
+    await server.close()
+    const before = readFileSync(record.logPath, 'utf8')
+    server = await startHostServer({ port: 0, sessionsDir: dir, llm: scriptedLlm(), defaultConfig: config, promptSynchronizationRetryMs: 10 })
+    url = `http://localhost:${server.port}`
+    await vi.waitFor(() => expect(server.store.get(record.sessionId)).toBeTruthy())
+    expect(server.store.get(record.sessionId)?.state.status).toBe('thinking')
+    expect(readFileSync(record.logPath, 'utf8')).toBe(before)
   })
 
   it('enables Socket.IO Admin UI immediately after the password is initialized', async () => {

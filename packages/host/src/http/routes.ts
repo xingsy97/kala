@@ -82,7 +82,7 @@ import { exportSubAgentGraph } from '../subagent-graph.js'
 import { runWebSearch, type WebSearchCredentialStore } from '../web-search/index.js'
 import type { WebSearchCredentialStatus } from '../web-search/credential-store.js'
 import type { AzureSpeechCredentialStore } from '../speech/credential-store.js'
-import { normalizeAzureSpeechEndpoint } from '../speech/credential-store.js'
+import { MAX_SPEECH_MAX_MINUTES, normalizeAzureSpeechEndpoint } from '../speech/credential-store.js'
 import { transcribeAzureSpeechAudio } from '../speech/fast-transcription.js'
 import { issueAzureSpeechToken } from '../speech/token-service.js'
 import { validatedPublicOrigin } from './public-access-gate.js'
@@ -213,13 +213,13 @@ export function attachJsonRoutes(
   payloads: {
     models: readonly ModelInfo[] | (() => readonly ModelInfo[])
     defaultModel: string | (() => string)
-    settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
+    settings?: ServerSettingsPayload | ((actor: DashboardActor) => ServerSettingsPayload | Promise<ServerSettingsPayload>)
     addManualModel?: (input: ClientAddManualModel) => ServerSettingsPayload
     deleteManualModel?: (input: ClientDeleteManualModel) => ServerSettingsPayload
     addManualProvider?: (input: ClientAddManualProvider) => ServerSettingsPayload
     deleteManualProvider?: (input: ClientDeleteManualProvider) => ServerSettingsPayload
     setDefaultModel?: (input: ClientSetDefaultModel) => ServerSettingsPayload
-    updateAgentPrompt?: (input: ClientUpdateAgentPromptSettings) => ServerSettingsPayload
+    updateAgentPrompt?: (input: ClientUpdateAgentPromptSettings, actor: DashboardActor) => ServerSettingsPayload | Promise<ServerSettingsPayload>
     initializeSocketAdmin?: (input: { password: string; mode?: 'development' | 'production' }) => ServerSettingsPayload
     updateSocketAdminMode?: (input: { mode: 'development' | 'production' }) => ServerSettingsPayload
     artifactRootDir?: string | false
@@ -680,7 +680,14 @@ export function attachJsonRoutes(
         if (!auth.ok) { sendError(res, auth.status, auth.error); return }
         void readJson(req).then((raw) => {
           const body = typeof raw === 'object' && raw !== null
-            ? raw as { endpoint?: unknown; apiKey?: unknown; enabled?: unknown; mode?: unknown }
+            ? raw as {
+                endpoint?: unknown
+                apiKey?: unknown
+                enabled?: unknown
+                mode?: unknown
+                realtimeMaxMinutes?: unknown
+                afterRecordingMaxMinutes?: unknown
+              }
             : {}
           if (typeof body.endpoint !== 'string') throw new HttpRouteError(400, 'endpoint is required')
           let endpoint: string
@@ -694,6 +701,14 @@ export function attachJsonRoutes(
           if (body.mode !== undefined && body.mode !== 'realtime' && body.mode !== 'after_recording') {
             throw new HttpRouteError(400, 'mode must be realtime or after_recording')
           }
+          for (const [field, value] of [
+            ['realtimeMaxMinutes', body.realtimeMaxMinutes],
+            ['afterRecordingMaxMinutes', body.afterRecordingMaxMinutes],
+          ] as const) {
+            if (value !== undefined && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > MAX_SPEECH_MAX_MINUTES)) {
+              throw new HttpRouteError(400, `${field} must be an integer between 1 and ${MAX_SPEECH_MAX_MINUTES}`)
+            }
+          }
           const mode = body.mode === 'after_recording' ? 'after_recording' : 'realtime'
           const apiKey = body.apiKey
           if (apiKey !== undefined && (typeof apiKey !== 'string' || apiKey !== apiKey.trim() || apiKey.length < 16 || apiKey.length > 512)) {
@@ -705,6 +720,8 @@ export function attachJsonRoutes(
               endpoint,
               enabled,
               mode,
+              ...(typeof body.realtimeMaxMinutes === 'number' ? { realtimeMaxMinutes: body.realtimeMaxMinutes } : {}),
+              ...(typeof body.afterRecordingMaxMinutes === 'number' ? { afterRecordingMaxMinutes: body.afterRecordingMaxMinutes } : {}),
               ...(typeof apiKey === 'string' ? { apiKey } : {}),
             })
           })
@@ -1112,11 +1129,22 @@ export function attachJsonRoutes(
             sendError(res, 400, 'invalid agent prompt settings input')
             return
           }
-          const result = payloads.updateAgentPrompt!(input)
-          payloads.audit?.log({ action: 'settings.agent_prompt_update', actor: httpActor(req, payloads.auth), target: { preset: input.preset }, outcome: 'ok' })
-          sendJson(req, res, result)
+          return Promise.resolve(payloads.updateAgentPrompt!(input, auth.actor)).then((result) => {
+            payloads.audit?.log({ action: 'settings.agent_prompt_update', actor: auth.actor, target: { slotId: input.selectedSlotId }, outcome: 'ok' })
+            sendJson(req, res, result)
+          })
         })
-        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+        .catch((err: unknown) => {
+          const status = err instanceof Error && 'status' in err && typeof err.status === 'number'
+            ? err.status
+            : 400
+          const message = err instanceof Error ? err.message : String(err)
+          if (status === 503 && err instanceof Error && 'settingsSaved' in err && err.settingsSaved === true) {
+            sendJsonStatus(req, res, status, { error: message, settingsSaved: true })
+          } else {
+            sendError(res, status, message)
+          }
+        })
       return
     }
     if (path === '/settings/socket-admin/init' && req.method === 'POST' && payloads.initializeSocketAdmin) {
@@ -1354,7 +1382,14 @@ export function attachJsonRoutes(
     }
     if (path === '/settings' && payloads.settings) {
       claimRoute(req)
-      sendJson(req, res, valueOf(payloads.settings))
+      const auth = authorizeDashboardHttp(req, payloads.auth)
+      if (!auth.ok) { sendError(res, 401, auth.reason); return }
+      const settings = typeof payloads.settings === 'function'
+        ? payloads.settings(auth.actor)
+        : payloads.settings
+      void Promise.resolve(settings)
+        .then((body) => sendJson(req, res, body))
+        .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
       return
     }
     if (path === '/router/health' && payloads.routerHealth) {
@@ -1396,7 +1431,7 @@ function isProtectedJsonRoute(path: string): boolean {
     path.startsWith('/router/')
 }
 
-function authorizeSensitiveManagement(req: IncomingMessage, tenancy: import('@agent-kernel/shared').PlatformTenancy, auth: AuthConfig | undefined): { ok: true; actor: AuditActor } | { ok: false; status: number; error: string; reason: string } {
+function authorizeSensitiveManagement(req: IncomingMessage, tenancy: import('@agent-kernel/shared').PlatformTenancy, auth: AuthConfig | undefined): { ok: true; actor: DashboardActor } | { ok: false; status: number; error: string; reason: string } {
   const authorization = req.headers.authorization
   const token = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined
   const result = authenticateDashboardHandshake({ role: 'dashboard', clientVersion: 'http', ...(token ? { token } : {}) }, req, auth)

@@ -304,6 +304,11 @@ export type AgentStateCommon = {
    * the `approval_mode_changed` event.
    */
   readonly approvalMode: ApprovalMode
+  /** Durable override installed by a mid-session Settings update. */
+  readonly systemPromptOverride?: {
+    readonly prompt: string
+    readonly version?: string | number
+  }
 }
 
 export type AgentStatePhase =
@@ -419,6 +424,13 @@ export type CwdChangedEvent = {
   cwd: string
 }
 
+/** Mid-session system prompt replacement. State-only; produces no effects. */
+export type SystemPromptChangedEvent = {
+  kind: 'system_prompt_changed'
+  prompt: string
+  version?: string | number
+}
+
 export type AgentEvent =
   | UserMessageEvent
   | LlmResponseEvent
@@ -431,6 +443,7 @@ export type AgentEvent =
   | MessagesReplacedEvent
   | ApprovalModeChangedEvent
   | CwdChangedEvent
+  | SystemPromptChangedEvent
 
 // ============================================================================
 // Effects (outputs from the reducer; host performs the actual IO)

@@ -38,6 +38,8 @@ function store(): AzureSpeechCredentialStore {
       region: 'japaneast',
       enabled: true,
       mode: 'after_recording',
+      realtimeMaxMinutes: 15,
+      afterRecordingMaxMinutes: 15,
     }),
     status: () => ({
       configured: true,
@@ -46,6 +48,8 @@ function store(): AzureSpeechCredentialStore {
       region: 'japaneast',
       enabled: true,
       mode: 'after_recording',
+      realtimeMaxMinutes: 15,
+      afterRecordingMaxMinutes: 15,
     }),
     set: () => { throw new Error('not used') },
     delete: () => { throw new Error('not used') },

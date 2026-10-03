@@ -16,7 +16,7 @@ describe('speech API', () => {
       enabled: true,
     })))
 
-    await expect(loadSpeechSettings()).resolves.toMatchObject({ mode: 'realtime' })
+    await expect(loadSpeechSettings()).resolves.toMatchObject({ mode: 'realtime', realtimeMaxMinutes: 15, afterRecordingMaxMinutes: 15 })
   })
 
   it('uploads an in-memory recording without wrapping it in JSON', async () => {

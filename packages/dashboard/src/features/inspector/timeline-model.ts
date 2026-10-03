@@ -27,6 +27,7 @@ export function inboundOf(event: AgentEvent): { source: string; tone: string } {
     case 'clear':
       return { source: 'user', tone: 'text-amber-600 dark:text-amber-300' }
     case 'messages_replaced':
+    case 'system_prompt_changed':
       return { source: 'host', tone: 'text-amber-600 dark:text-amber-300' }
   }
 }
@@ -74,6 +75,7 @@ export function eventCategories(entry: TimelineEntry): Set<TraceCategory> {
       categories.add('tool')
       break
     case 'messages_replaced':
+    case 'system_prompt_changed':
       categories.add('system')
       break
   }
@@ -235,6 +237,8 @@ export function eventSummary(event: AgentEvent, priorCallLlm: PriorCallLlm | nul
         : `messages replaced · ${event.reason}`
     case 'approval_mode_changed':
       return `approval mode ${event.mode}`
+    case 'system_prompt_changed':
+      return 'system prompt updated'
     case 'cwd_changed':
       return event.cwd
     case 'cancel':

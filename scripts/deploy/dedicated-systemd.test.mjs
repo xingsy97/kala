@@ -23,6 +23,7 @@ describe('Dedicated systemd packaging', () => {
     expect(unit).toContain('KALA_ROUTE_STATE=/var/lib/kala/deploy/route-state.json')
     expect(unit).toContain('/var/lib/kala/deploy/requests')
     expect(unit).toContain('/var/lib/kala/deploy/submissions')
+    expect(unit).toContain('/var/lib/kala/.config/kala')
     expect(supervisor).toContain('deploy/control-current/kala-dedicated-deploy-supervisor.cjs')
     expect(supervisor).toContain('/usr/bin/flock --exclusive --nonblock --no-fork')
     expect(supervisor).toContain('ReadOnlyPaths=/var/lib/kala/admission /var/lib/kala/units/local/write.lock')

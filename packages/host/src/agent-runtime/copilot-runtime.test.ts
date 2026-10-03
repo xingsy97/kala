@@ -28,6 +28,7 @@ const sdk = vi.hoisted(() => ({
     tools: CapturedTool[]
     streaming?: boolean
     workingDirectory?: string
+    systemMessage?: { mode: string; content: string }
     availableTools?: readonly string[]
     excludedTools?: readonly string[]
     additionalDirectories?: readonly string[]
@@ -50,6 +51,7 @@ const sdk = vi.hoisted(() => ({
     tools: CapturedTool[]
     streaming?: boolean
     workingDirectory?: string
+    systemMessage?: { mode: string; content: string }
     availableTools?: readonly string[]
     excludedTools?: readonly string[]
     additionalDirectories?: readonly string[]
@@ -76,6 +78,8 @@ const sdk = vi.hoisted(() => ({
   sentMessages: [] as Array<unknown>,
   currentModel: { modelId: 'gpt-5.4-mini', contextTier: 'long_context' },
   abort: vi.fn(async () => {}),
+  disconnect: vi.fn(async () => {}),
+  deleteSession: vi.fn(async () => {}),
   setModel: vi.fn(async () => {}),
   compact: vi.fn(async () => ({
     success: true,
@@ -162,10 +166,10 @@ vi.mock('@github/copilot-sdk', () => ({
         },
         abort: sdk.abort,
         setModel: sdk.setModel,
-        async disconnect() {},
+        disconnect: sdk.disconnect,
       }
     }
-    async deleteSession() {}
+    async deleteSession() { await sdk.deleteSession() }
   },
 }))
 
@@ -185,6 +189,8 @@ describe('Copilot runtime custom tools', () => {
     sdk.sentMessages.length = 0
     sdk.currentModel = { modelId: 'gpt-5.4-mini', contextTier: 'long_context' }
     sdk.abort.mockClear()
+    sdk.disconnect.mockClear()
+    sdk.deleteSession.mockClear()
     sdk.setModel.mockClear()
     sdk.compact.mockClear()
     sdk.getEvents.mockReset()
@@ -410,6 +416,7 @@ describe('Copilot runtime custom tools', () => {
       agentRuntime: 'copilot',
       initialCwd: '/workspace/only-on-the-executor',
       config: createConfig({
+        systemPrompt: 'This is the saved Kala session prompt.',
         tools: [{
           name: 'todo_graph',
           description: 'Update the task graph',
@@ -433,6 +440,7 @@ describe('Copilot runtime custom tools', () => {
     })
     expect(sdk.configs.at(-1)?.workingDirectory).toBe(join(dir, '..'))
     expect(sdk.configs.at(-1)?.remoteSession).toBe('off')
+    expect(sdk.configs.at(-1)?.systemMessage).toEqual({ mode: 'replace', content: 'This is the saved Kala session prompt.' })
     expect(sdk.configs.at(-1)).toMatchObject({
       streaming: true,
       additionalDirectories: [],
@@ -1368,7 +1376,7 @@ describe('Copilot runtime custom tools', () => {
     await runtime.close()
   })
 
-  it('keeps streaming enabled when resuming an existing SDK session', async () => {
+  it('resumes with the saved system prompt in replace mode and streaming enabled', async () => {
     sdk.resumeSucceeds = true
     const runtime = new CopilotAgentRuntime({
       store,
@@ -1386,7 +1394,7 @@ describe('Copilot runtime custom tools', () => {
     const record = await store.create({
       sessionId: 'copilot-resume-private',
       agentRuntime: 'copilot',
-      config: createConfig({ tools: [] }),
+      config: createConfig({ tools: [], systemPrompt: 'Original session instructions.' }),
     })
 
     await runtime.start()
@@ -1395,8 +1403,81 @@ describe('Copilot runtime custom tools', () => {
     expect(sdk.resumeConfigs).toHaveLength(1)
     expect(sdk.resumeConfigs[0]?.remoteSession).toBe('off')
     expect(sdk.resumeConfigs[0]?.streaming).toBe(true)
+    expect(sdk.resumeConfigs[0]?.systemMessage).toEqual({ mode: 'replace', content: 'Original session instructions.' })
     expect(sdk.configs).toHaveLength(0)
     expect(sdk.clientOptions[0]?.connection?.args).toEqual(['--no-remote-export'])
+    await runtime.close()
+  })
+
+  it('re-resumes with replace after a persisted prompt change without deleting the SDK Session', async () => {
+    sdk.resumeSucceeds = true
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: '' } }, cancelPending() {} },
+      broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-prompt-refresh',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [], systemPrompt: 'old prompt' }),
+    })
+    sdk.responses.push(
+      { type: 'assistant.message', id: 'first', timestamp: '2026-10-03T00:00:00.000Z', data: { content: 'first', messageId: 'first-message' } },
+      { type: 'assistant.message', id: 'second', timestamp: '2026-10-03T00:00:01.000Z', data: { content: 'second', messageId: 'second-message' } },
+    )
+
+    await runtime.start()
+    await runtime.send(record, { text: 'first turn' })
+    await vi.waitFor(() => expect(record.state.status).toBe('done'))
+    await store.applySystemPrompt(record.sessionId, 'new prompt')
+    await runtime.send(record, { text: 'second turn' })
+
+    expect(sdk.resumeConfigs).toHaveLength(2)
+    expect(sdk.resumeConfigs[1]?.systemMessage).toEqual({ mode: 'replace', content: 'new prompt' })
+    expect(sdk.disconnect).toHaveBeenCalledOnce()
+    expect(sdk.deleteSession).not.toHaveBeenCalled()
+    await runtime.close()
+  })
+
+  it('fences late old-prompt output immediately at durable prompt replacement', async () => {
+    sdk.resumeSucceeds = true
+    const runtime = new CopilotAgentRuntime({
+      store,
+      tools: { async callTool() { return { ok: true, content: '' } }, cancelPending() {} },
+      broadcast: { onState() {}, onTokenDelta() {}, onApprovalRequired() {}, onError() {} },
+    }, { enabled: true, sessionsDir: dir })
+    const record = await store.create({
+      sessionId: 'copilot-prompt-generation-fence',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [], systemPrompt: 'old prompt' }),
+    })
+
+    await runtime.start()
+    await runtime.send(record, { text: 'old-prompt turn' })
+    await store.applySystemPrompt(record.sessionId, 'new prompt')
+    sdk.listeners[0]?.({
+      type: 'assistant.message',
+      id: 'late-old-output',
+      timestamp: '2026-10-03T00:00:00.000Z',
+      data: { content: 'must not persist', messageId: 'late-old-output' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(record.state.messages.some((message) => message.content.some((content) => content.type === 'text' && content.text === 'must not persist'))).toBe(false)
+    await runtime.cancel(record)
+    sdk.responses.push({
+      type: 'assistant.message',
+      id: 'new-output',
+      timestamp: '2026-10-03T00:00:01.000Z',
+      data: { content: 'new prompt output', messageId: 'new-output' },
+    })
+    await runtime.send(record, { text: 'new-prompt turn' })
+    await vi.waitFor(() => expect(record.state.status).toBe('done'))
+
+    expect(sdk.abort).toHaveBeenCalledOnce()
+    expect(sdk.resumeConfigs.at(-1)?.systemMessage).toEqual({ mode: 'replace', content: 'new prompt' })
+    expect(sdk.disconnect).toHaveBeenCalledOnce()
+    expect(sdk.deleteSession).not.toHaveBeenCalled()
     await runtime.close()
   })
 

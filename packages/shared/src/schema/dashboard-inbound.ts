@@ -552,6 +552,10 @@ export const ClientSetDefaultModelSchema = z.object({
 }) satisfies z.ZodType<ClientSetDefaultModel>
 
 export const ClientUpdateAgentPromptSettingsSchema = z.object({
-  preset: z.enum(['codex', 'claude-code', 'custom']),
-  customPrompt: z.string().min(1).max(100_000).optional(),
+  selectedSlotId: z.enum(['slot-1', 'slot-2', 'slot-3']),
+  slots: z.tuple([
+    z.object({ id: z.literal('slot-1'), name: z.string().trim().min(1).max(80), prompt: z.string().min(1).max(100_000).refine((prompt) => prompt.trim().length > 0) }),
+    z.object({ id: z.literal('slot-2'), name: z.string().trim().min(1).max(80), prompt: z.string().min(1).max(100_000).refine((prompt) => prompt.trim().length > 0) }),
+    z.object({ id: z.literal('slot-3'), name: z.string().trim().min(1).max(80), prompt: z.string().min(1).max(100_000).refine((prompt) => prompt.trim().length > 0) }),
+  ]),
 }) satisfies z.ZodType<ClientUpdateAgentPromptSettings>

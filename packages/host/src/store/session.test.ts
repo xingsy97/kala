@@ -81,6 +81,166 @@ describe('SessionStore.ensure', () => {
     expect(loaded.config.systemPrompt).toBe('mode:dag')
   })
 
+  it('durably replays system prompt updates without rewriting the legacy header or other config', async () => {
+    const originalConfig = createConfig({
+      tools: [{ name: 'read', description: 'read', inputSchema: { type: 'object' }, requiresApproval: false }],
+      systemPrompt: 'old system',
+      contextLimit: 12_345,
+    })
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'kernel-prompt-update', config: originalConfig })
+    const headerBefore = readFileSync(record.logPath, 'utf8').split('\n')[0]
+
+    await expect(store.applySystemPrompt(record.sessionId, 'new system', 4)).resolves.toBe(true)
+    await expect(store.applySystemPrompt(record.sessionId, 'new system', 4)).resolves.toBe(false)
+
+    expect(record.config).toMatchObject({ systemPrompt: 'new system', contextLimit: 12_345 })
+    expect(record.config.tools).toBe(originalConfig.tools)
+    expect(record.state.cursor).toBe(1)
+    expect(record.state.messages[0]).toEqual({
+      role: 'system',
+      content: [{ type: 'text', text: 'new system' }],
+    })
+    expect(readFileSync(record.logPath, 'utf8').split('\n')[0]).toBe(headerBefore)
+
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.header.config.systemPrompt).toBe('old system')
+    expect(parsed.events.map((entry) => entry.event)).toEqual([
+      { kind: 'system_prompt_changed', prompt: 'new system', version: 4 },
+    ])
+
+    const reloaded = await new SessionStore(dir, {
+      runtimeConfig: createConfig({ tools: originalConfig.tools, systemPrompt: 'stale runtime', contextLimit: 99_999 }),
+    }).load(record.sessionId)
+    expect(reloaded.config).toMatchObject({ systemPrompt: 'new system', contextLimit: 99_999 })
+    expect(reloaded.state.systemPromptOverride).toEqual({ prompt: 'new system', version: 4 })
+    expect(reloaded.state.messages[0]?.content).toEqual([{ type: 'text', text: 'new system' }])
+  })
+
+  it('does not publish prompt config or state when the durable append fails', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'prompt-append-failure', config })
+    const originalState = record.state
+    const originalConfig = record.config
+    rmSync(record.logPath)
+    mkdirSync(record.logPath)
+
+    await expect(store.applySystemPrompt(record.sessionId, 'must not publish')).rejects.toThrow()
+
+    expect(record.state).toBe(originalState)
+    expect(record.config).toBe(originalConfig)
+  })
+
+  it('enumerates only one organization from unloaded headers and backfilled metadata', async () => {
+    const writer = new SessionStore(dir)
+    await writer.create({ sessionId: 'org-a-header', config, organizationId: 'org-a' })
+    await writer.create({ sessionId: 'org-b-header', config, organizationId: 'org-b' })
+    await writer.create({ sessionId: 'org-a-backfilled', config })
+    await writer.ensure({
+      sessionId: 'org-a-backfilled',
+      defaultConfig: config,
+      organizationId: 'org-a',
+    })
+
+    const reader = new SessionStore(dir)
+    await expect(reader.listSessionIdsForOrganization('org-a')).resolves.toEqual(
+      expect.arrayContaining(['org-a-header', 'org-a-backfilled']),
+    )
+    expect(await reader.listSessionIdsForOrganization('org-a')).not.toContain('org-b-header')
+    expect(reader.list()).toEqual([])
+  })
+
+  it('does not silently omit temporarily unreadable Sessions during organization prompt discovery', async () => {
+    const writer = new SessionStore(dir)
+    const record = await writer.create({ sessionId: 'org-a-temporary-failure', config, organizationId: 'org-a' })
+    const originalLog = readFileSync(record.logPath)
+    const reader = new SessionStore(dir)
+    writeFileSync(record.logPath, 'incomplete session header\n')
+    await expect(reader.listSessionIdsForOrganization('org-a')).rejects.toThrow('Could not determine ownership')
+    await expect(reader.listSessionIds()).rejects.toThrow('Could not discover')
+    writeFileSync(record.logPath, originalLog)
+    await expect(reader.listSessionIdsForOrganization('org-a')).resolves.toContain(record.sessionId)
+    await expect(reader.listSessionIds()).resolves.toContain(record.sessionId)
+  })
+
+  it('projects prompt updates for Copilot without mixing Kernel events and reloads the snapshot', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({
+      sessionId: 'copilot-prompt-update',
+      agentRuntime: 'copilot',
+      config: createConfig({ tools: [], systemPrompt: 'old copilot system' }),
+    })
+    await store.recordRuntimeProjection(record.sessionId, {
+      ...record.state,
+      cursor: 1,
+      status: 'done',
+      pendingCalls: [],
+      messages: [
+        ...record.state.messages,
+        { role: 'user', content: [{ type: 'text', text: 'keep this turn' }] },
+      ],
+    }, 'copilot.done', {})
+
+    await expect(store.applySystemPrompt(record.sessionId, 'new copilot system', 'settings-2')).resolves.toBe(true)
+    await expect(store.applySystemPrompt(record.sessionId, 'new copilot system', 'settings-2')).resolves.toBe(false)
+
+    const parsed = await readSessionLog(record.logPath, { allowExternalRuntime: true })
+    expect(parsed.events).toEqual([])
+    expect(parsed.snapshots).toHaveLength(1)
+    expect(parsed.snapshots[0]?.seq).toBe(2)
+    expect(parsed.runtimeMetadata.at(-1)).toMatchObject({
+      action: 'runtime.system_prompt_changed',
+      payload: { projectionCursor: 2, version: 'settings-2' },
+    })
+
+    const reloaded = await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })
+    expect(reloaded.state.cursor).toBe(2)
+    expect(reloaded.state.systemPromptOverride).toEqual({ prompt: 'new copilot system', version: 'settings-2' })
+    expect(reloaded.config.systemPrompt).toBe('new copilot system')
+    expect(reloaded.state.messages[0]?.content).toEqual([{ type: 'text', text: 'new copilot system' }])
+    expect(reloaded.state.messages.some((message) => message.role === 'user')).toBe(true)
+  })
+
+  it('serializes a busy Kernel transition before applying the prompt update', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'kernel-prompt-race', config })
+    const event = { kind: 'user_message' as const, text: 'stream this' }
+    const transition = step(record.state, event, record.config)
+
+    const streaming = store.record(record.sessionId, event, transition.effects, transition.next)
+    const update = store.applySystemPrompt(record.sessionId, 'busy serialized system', 8)
+    await expect(Promise.all([streaming, update])).resolves.toEqual([undefined, true])
+
+    expect(record.state.cursor).toBe(2)
+    expect(record.state.status).toBe('thinking')
+    expect(record.state.messages[0]?.content).toEqual([{ type: 'text', text: 'busy serialized system' }])
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.events.map((entry) => entry.event.kind)).toEqual(['user_message', 'system_prompt_changed'])
+  })
+
+  it('serializes Copilot projections and prompt updates on the same cursor tail', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'copilot-prompt-race', agentRuntime: 'copilot', config })
+    const projected = {
+      ...record.state,
+      cursor: 1,
+      status: 'done' as const,
+      pendingCalls: [] as const,
+      messages: [...record.state.messages, { role: 'user' as const, content: [{ type: 'text' as const, text: 'concurrent turn' }] }],
+    }
+
+    const projection = store.recordRuntimeProjection(record.sessionId, projected, 'copilot.done', {})
+    const update = store.applySystemPrompt(record.sessionId, 'serialized system', 9)
+    await expect(Promise.all([projection, update])).resolves.toEqual([undefined, true])
+
+    expect(record.state.cursor).toBe(2)
+    expect(record.state.messages[0]?.content).toEqual([{ type: 'text', text: 'serialized system' }])
+    expect(record.state.messages.some((message) => message.role === 'user')).toBe(true)
+    const reloaded = await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })
+    expect(reloaded.state.cursor).toBe(2)
+    expect(reloaded.state.messages[0]?.content).toEqual([{ type: 'text', text: 'serialized system' }])
+  })
+
   it('locks observable tool versions and schema hashes at session creation', async () => {
     const store = new SessionStore(dir)
     const versioned = createConfig({ tools: [{ name: 'read', description: 'read', inputSchema: { type: 'object' }, requiresApproval: false, version: '2.1.0', schemaHash: 'sha256:test' }] })

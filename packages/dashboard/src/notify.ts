@@ -17,11 +17,14 @@
  * (see [[App]]). This module never renders.
  */
 
+import { createElement } from 'react'
 import { toast, type ExternalToast } from 'sonner'
 
 export type NotifyOpts = {
   description?: string
   action?: { label: string; onClick: () => void }
+  /** Make the toast message a keyboard-accessible click target. */
+  onClick?: () => void
   /** ms; undefined uses sonner's default (~4s); Infinity keeps it until closed. */
   duration?: number
   /** Stable id — repeats replace the previous toast in-place. */
@@ -40,12 +43,22 @@ function toSonnerOpts(opts?: NotifyOpts): ExternalToast | undefined {
   return out
 }
 
+function toastTitle(message: string, opts?: NotifyOpts) {
+  return opts?.onClick
+    ? createElement('button', {
+      type: 'button',
+      className: 'pointer-events-auto -mx-3 -my-2 block w-[calc(100%+1.5rem)] px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      onClick: opts.onClick,
+    }, message)
+    : message
+}
+
 export const notify = {
   info(message: string, opts?: NotifyOpts): void {
     toast.info(message, toSonnerOpts(opts))
   },
   success(message: string, opts?: NotifyOpts): void {
-    toast.success(message, toSonnerOpts(opts))
+    toast.success(toastTitle(message, opts), toSonnerOpts(opts))
   },
   warning(message: string, opts?: NotifyOpts): void {
     toast.warning(message, toSonnerOpts(opts))

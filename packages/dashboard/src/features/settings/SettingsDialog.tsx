@@ -1,12 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import {
   Bell,
-  Blocks,
   Bot,
   Cable,
   Cpu,
   ChevronDown,
-  KeyRound,
   Search,
   Settings,
   Mic,
@@ -44,13 +42,11 @@ import { SettingsSectionButton, SettingsSectionHelpContext } from './controls.js
 import { HelpHint } from '../../components/ui/help-hint.js'
 import { useMinWidth } from '../../app-logic/use-viewport.js'
 import { AgentSection } from './sections/AgentSection.js'
-import { ApprovalsSection } from './sections/ApprovalsSection.js'
 import { ConnectionSection } from './sections/ConnectionSection.js'
 import { DeploymentSection } from './sections/DeploymentSection.js'
 import { ExecutorAccessSection } from './sections/ExecutorAccessSection.js'
 import { HooksSection } from './sections/HooksSection.js'
 import { InterfaceSection } from './sections/InterfaceSection.js'
-import { McpSection } from './sections/McpSection.js'
 import { ModelsSection } from './sections/ModelsSection.js'
 import { NotificationsSection } from './sections/NotificationsSection.js'
 import { RuntimeSection } from './sections/RuntimeSection.js'
@@ -63,6 +59,8 @@ import { StorageSection } from './sections/StorageSection.js'
 
 type Props = {
   open: boolean
+  /** Includes the authenticated identity; prevents cross-organization Settings cache reuse. */
+  cacheNamespace?: string
   onOpenChange(open: boolean): void
   onModelsChanged?(): void
   executors?: readonly AttachedExecutor[]
@@ -73,7 +71,7 @@ type Props = {
   storageSocket?: Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 }
 
-type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'speech' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications' | 'storage'
+type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'speech' | 'security' | 'socketAdmin' | 'executorAccess' | 'hooks' | 'interface' | 'deployment' | 'notifications' | 'storage'
 
 type SectionGroup = 'personal' | 'workspace' | 'agent' | 'administration'
 const SECTION_GROUPS: readonly SectionGroup[] = ['personal', 'workspace', 'agent', 'administration']
@@ -85,7 +83,6 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint', icon: Cpu, group: 'agent' },
   { key: 'webSearch', label: 'settings.sections.webSearch.label', hint: 'settings.sections.webSearch.hint', icon: Search, group: 'agent' },
   { key: 'speech', label: 'settings.sections.speech.label', hint: 'settings.sections.speech.hint', icon: Mic, group: 'agent' },
-  { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint', icon: KeyRound, group: 'agent' },
   { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint', icon: Cable, group: 'administration' },
   { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint', icon: Shield, group: 'administration' },
   { key: 'socketAdmin', label: 'settings.sections.socketAdmin.label', hint: 'settings.sections.socketAdmin.hint', icon: ServerCog, group: 'administration' },
@@ -93,10 +90,9 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint', icon: SlidersHorizontal, group: 'administration' },
   { key: 'storage', label: 'settings.sections.storage.label', hint: 'settings.sections.storage.hint', icon: Database, group: 'administration' },
   { key: 'deployment', label: 'settings.sections.deployment.label', hint: 'settings.sections.deployment.hint', icon: Rocket, group: 'administration' },
-  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint', icon: Blocks, group: 'administration' },
 ]
 
-export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token, initialSection = 'connection', storageSocket }: Props): JSX.Element {
+export function SettingsDialog({ open, cacheNamespace = 'default', onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token, initialSection = 'connection', storageSocket }: Props): JSX.Element {
   const { t } = useTranslation()
   const desktopLayout = useMinWidth(768)
   const queryClient = useQueryClient()
@@ -105,7 +101,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   const activeSection = SECTIONS.find((item) => item.key === section) ?? SECTIONS[0]!
 
   const settingsQuery = useQuery({
-    queryKey: ['settings'],
+    queryKey: ['settings', cacheNamespace],
     queryFn: async (): Promise<ServerSettingsPayload> => {
       const r = await fetch('/settings', { cache: 'no-store' })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -118,7 +114,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   const loadError = settingsQuery.error ? (settingsQuery.error as Error).message : null
 
   const applyPayload = (next: ServerSettingsPayload): void => {
-    queryClient.setQueryData(['settings'], next)
+    queryClient.setQueryData(['settings', cacheNamespace], next)
   }
 
   return (
@@ -207,18 +203,14 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
                 <SocketAdminSection payload={payload} onPayloadChange={applyPayload} />
               ) : section === 'executorAccess' ? (
                 <ExecutorAccessSection executors={executors} />
-              ) : section === 'approvals' ? (
-                <ApprovalsSection />
               ) : section === 'hooks' ? (
                 <HooksSection payload={payload} />
               ) : section === 'interface' ? (
                 <InterfaceSection sessionCache={sessionCache} />
               ) : section === 'deployment' ? (
-                <DeploymentSection payload={payload} executors={executors} host={host} token={token} />
-              ) : section === 'notifications' ? (
-                <NotificationsSection />
+                <DeploymentSection payload={payload} host={host} token={token} />
               ) : (
-                <McpSection payload={payload} />
+                <NotificationsSection />
               )}
               </SettingsSectionHelpContext.Provider>
             </div>

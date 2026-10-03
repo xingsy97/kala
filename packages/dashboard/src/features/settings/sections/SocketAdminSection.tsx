@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../../components/ui/button.js'
-import { EmptyRow, SectionHeader, SettingsKeyValueList } from '../controls.js'
+import { CopyButton, EmptyRow, SectionHeader } from '../controls.js'
 
 export function SocketAdminSection({ payload, onPayloadChange }: { payload: ServerSettingsPayload; onPayloadChange(payload: ServerSettingsPayload): void }): JSX.Element {
   const { t } = useTranslation()
@@ -88,7 +88,7 @@ export function SocketAdminSection({ payload, onPayloadChange }: { payload: Serv
                 minLength={8}
                 required
               />
-              <p className="mt-2 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('settings.socketAdmin.initialPasswordDesc', { path: admin.configPath })}</p>
+              <p className="mt-2 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('settings.socketAdmin.initialPasswordDesc')}</p>
             </div>
             <label className="min-w-0 text-sm font-medium text-foreground">
               {t('settings.socketAdmin.initialMode')}
@@ -114,15 +114,6 @@ export function SocketAdminSection({ payload, onPayloadChange }: { payload: Serv
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const href = `${origin}${admin.path}`
   const configuredMode = admin.configuredMode
-  const rows: Array<[string, string]> = [
-    [t('settings.socketAdmin.path'), admin.path],
-    [t('settings.socketAdmin.username'), admin.username],
-    [t('settings.socketAdmin.runtimeMode'), admin.runtimeMode],
-    [t('settings.socketAdmin.configuredMode'), configuredMode],
-    [t('settings.socketAdmin.configPath'), admin.configPath],
-    ...(admin.createdAt ? [[t('settings.socketAdmin.createdAt'), admin.createdAt] as [string, string]] : []),
-    ...(admin.distSource ? [[t('settings.socketAdmin.distSource'), t(`settings.socketAdmin.dist.${admin.distSource}`)] as [string, string]] : []),
-  ]
   return (
     <div>
       <SectionHeader title={t('settings.sections.socketAdmin.label')} subtitle={t('settings.socketAdmin.subtitle')} />
@@ -131,22 +122,40 @@ export function SocketAdminSection({ payload, onPayloadChange }: { payload: Serv
           {t('settings.socketAdmin.modeRestartRequired', { current: admin.runtimeMode, configured: configuredMode })}
         </div>
       ) : null}
-      <div className="mb-4 flex min-w-0 flex-col gap-3 rounded-md bg-black/[0.18] p-4 ring-1 ring-white/10 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-foreground">{t('settings.socketAdmin.openTitle')}</div>
-          <div className="mt-1 break-all font-mono text-xs text-muted-foreground" title={href}>{href}</div>
-        </div>
-        {admin.active ? (
-          <Button type="button" variant="outline" size="sm" className="h-8 flex-none" asChild>
-            <a href={href} target="_blank" rel="noreferrer">
+      <div className="mb-4 min-w-0 rounded-md bg-black/[0.18] p-4 ring-1 ring-white/10">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground">{t('settings.socketAdmin.openTitle')}</div>
+            <div className="mt-1 flex items-start gap-2 break-all font-mono text-xs text-muted-foreground" title={href}>
+              <span className="min-w-0 flex-1">{href}</span>
+              <CopyButton value={href} />
+            </div>
+          </div>
+          {admin.active ? (
+            <Button type="button" variant="outline" size="sm" className="h-8 flex-none" asChild>
+              <a href={href} target="_blank" rel="noreferrer">
+                <ExternalLink className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.socketAdmin.open')}
+              </a>
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" size="sm" className="h-8 flex-none" disabled>
               <ExternalLink className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.socketAdmin.open')}
-            </a>
-          </Button>
-        ) : (
-          <Button type="button" variant="outline" size="sm" className="h-8 flex-none" disabled>
-            <ExternalLink className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.socketAdmin.open')}
-          </Button>
-        )}
+            </Button>
+          )}
+        </div>
+        <div className="mt-4 grid gap-3 border-t border-white/10 pt-4 sm:grid-cols-2">
+          <div>
+            <div className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t('settings.socketAdmin.username')}</div>
+            <div className="mt-1 flex items-center gap-2">
+              <code className="text-sm text-foreground">{admin.username}</code>
+              <CopyButton value={admin.username} />
+            </div>
+          </div>
+          <div>
+            <div className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t('settings.socketAdmin.password')}</div>
+            <div className="mt-1 text-xs leading-5 text-muted-foreground">{t('settings.socketAdmin.passwordHidden')}</div>
+          </div>
+        </div>
       </div>
       <div className="mb-4 rounded-md bg-black/[0.18] p-4 ring-1 ring-white/10">
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
@@ -172,10 +181,6 @@ export function SocketAdminSection({ payload, onPayloadChange }: { payload: Serv
         </div>
         <p className="mt-3 text-xs leading-5 text-muted-foreground">{t('settings.socketAdmin.modeDesc')}</p>
       </div>
-      <SettingsKeyValueList rows={rows.map(([label, value]) => ({
-        label,
-        value: <span className="break-all font-mono text-xs text-muted-foreground">{value}</span>,
-      }))} />
     </div>
   )
 }

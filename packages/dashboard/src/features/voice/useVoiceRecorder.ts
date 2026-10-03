@@ -4,11 +4,11 @@ import {
   loadSpeechSettings,
   requestSpeechToken,
   SPEECH_SETTINGS_CHANGED_EVENT,
+  speechMaxMinutes,
   transcribeSpeechRecording,
   type SpeechSettings,
 } from './speech-api.js'
 
-const MAX_RECORDING_MS = 5 * 60_000
 const WAVEFORM_POINTS = 64
 
 export type VoiceRecorderPhase = 'idle' | 'requesting' | 'listening' | 'processing' | 'error'
@@ -140,9 +140,10 @@ export function useVoiceRecorder(options: {
     if (audioContext && audioContext.state !== 'closed') void audioContext.close()
   }, [])
 
-  const submitRecording = useCallback(async (recording: Blob): Promise<string | undefined> => {
+  const submitRecording = useCallback(async (recording: Blob, runId: number): Promise<string | undefined> => {
     try {
       const transcript = await transcribeSpeechRecording(recording)
+      if (!mountedRef.current || runId !== runIdRef.current) return undefined
       pendingRecordingRef.current = null
       onTranscriptRef.current(transcript)
       if (mountedRef.current) {
@@ -158,6 +159,7 @@ export function useVoiceRecorder(options: {
       }
       return transcript
     } catch {
+      if (!mountedRef.current || runId !== runIdRef.current) return undefined
       pendingRecordingRef.current = recording
       if (mountedRef.current) {
         setState((current) => ({
@@ -177,6 +179,7 @@ export function useVoiceRecorder(options: {
     if (stoppingRef.current) return undefined
     stoppingRef.current = true
     runIdRef.current += 1
+    const runId = runIdRef.current
     if (mountedRef.current && !error) setState((current) => ({ ...current, phase: 'processing' }))
     const mediaRecorder = mediaRecorderRef.current
     mediaRecorderRef.current = null
@@ -200,8 +203,9 @@ export function useVoiceRecorder(options: {
     interimTranscriptRef.current = ''
     stoppingRef.current = false
     if (!commit) pendingRecordingRef.current = null
+    if (runId !== runIdRef.current || !mountedRef.current) return undefined
     if (commit && recording && !error) {
-      return await submitRecording(recording)
+      return await submitRecording(recording, runId)
     }
     if (commit && transcript) onTranscriptRef.current(transcript)
     if (!mountedRef.current) return commit && !error && transcript ? transcript : undefined
@@ -220,12 +224,22 @@ export function useVoiceRecorder(options: {
   }, [finish])
 
   const cancel = useCallback(async (): Promise<void> => {
+    // Invalidate a pending response before the first await, including when
+    // finish() is already waiting for MediaRecorder or the network.
+    runIdRef.current += 1
+    if (stoppingRef.current) {
+      if (mountedRef.current) setState((current) => ({ ...current, phase: 'idle', error: undefined }))
+      return
+    }
     await finish(false)
   }, [finish])
 
   const start = useCallback(async (): Promise<void> => {
-    if (state.phase !== 'idle' && state.phase !== 'error') return
+    if ((state.phase !== 'idle' && state.phase !== 'error') || stoppingRef.current) return
+    // Claim a generation before the first await: session switches can happen while settings load.
+    const requestId = ++runIdRef.current
     const configuration = configurationRef.current ?? await refreshConfiguration()
+    if (!mountedRef.current || requestId !== runIdRef.current) return
     if (!configuration?.configured || !configuration.enabled) {
       if (onConfigureRef.current) onConfigureRef.current()
       else setState((current) => ({ ...current, phase: 'error', error: 'not_configured' }))
@@ -244,7 +258,7 @@ export function useVoiceRecorder(options: {
     }
 
     setState((current) => ({ ...current, phase: 'requesting', error: undefined, finalTranscript: '', interimTranscript: '', elapsedSeconds: 0, levels: emptyLevels() }))
-    const runId = ++runIdRef.current
+    const runId = requestId
     finalTranscriptRef.current = ''
     interimTranscriptRef.current = ''
     pendingRecordingRef.current = null
@@ -265,7 +279,13 @@ export function useVoiceRecorder(options: {
       elapsedTimerRef.current = window.setInterval(() => {
         if (mountedRef.current) setState((current) => ({ ...current, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000) }))
       }, 250)
-      maximumTimerRef.current = window.setTimeout(() => { void finish(true) }, MAX_RECORDING_MS)
+      // Both modes need an explicit, operator-configured billing/forgetfulness
+      // safeguard. Continuous recognition has no five-minute service deadline.
+      const maxMinutes = configuration.mode === 'after_recording'
+        ? configuration.afterRecordingMaxMinutes : configuration.realtimeMaxMinutes
+      maximumTimerRef.current = window.setTimeout(
+        () => { void finish(true) }, speechMaxMinutes(maxMinutes) * 60_000,
+      )
       if (configuration.mode === 'after_recording') {
         if (typeof MediaRecorder === 'undefined') throw new Error('MediaRecorder is unavailable')
         const mimeType = preferredRecordingMediaType()
@@ -291,12 +311,15 @@ export function useVoiceRecorder(options: {
       const languages = sdk.AutoDetectSourceLanguageConfig.fromLanguages(['zh-CN', 'en-US'])
       const recognizer = sdk.SpeechRecognizer.FromConfig(speechConfig, languages, audioConfig)
       recognizerRef.current = recognizer
+      const isCurrentRecognizer = (): boolean => mountedRef.current && runId === runIdRef.current && recognizerRef.current === recognizer
       recognizer.recognizing = (_sender, event) => {
+        if (!isCurrentRecognizer()) return
         const interimTranscript = event.result.text.trim()
         interimTranscriptRef.current = interimTranscript
         if (mountedRef.current) setState((current) => ({ ...current, interimTranscript }))
       }
       recognizer.recognized = (_sender, event) => {
+        if (!isCurrentRecognizer()) return
         if (event.result.reason !== sdk.ResultReason.RecognizedSpeech) return
         const finalTranscript = joinTranscriptChunks(finalTranscriptRef.current, event.result.text)
         finalTranscriptRef.current = finalTranscript
@@ -304,6 +327,7 @@ export function useVoiceRecorder(options: {
         if (mountedRef.current) setState((current) => ({ ...current, finalTranscript, interimTranscript: '' }))
       }
       recognizer.canceled = (_sender, event) => {
+        if (!isCurrentRecognizer()) return
         if (event.reason === sdk.CancellationReason.Error) void finish(true, 'service_unavailable')
       }
       const refreshToken = async (): Promise<void> => {
@@ -320,7 +344,7 @@ export function useVoiceRecorder(options: {
             Math.max(60, refreshed.expiresInSeconds - 120) * 1000,
           )
         } catch {
-          await finish(true, 'service_unavailable')
+          if (isCurrentRecognizer()) await finish(true, 'service_unavailable')
         }
       }
       tokenRefreshTimerRef.current = window.setTimeout(
@@ -330,6 +354,8 @@ export function useVoiceRecorder(options: {
       await new Promise<void>((resolve, reject) => {
         recognizer.startContinuousRecognitionAsync(resolve, reject)
       })
+      // Cancel or a session switch can invalidate the run while SDK startup is pending.
+      if (!isCurrentRecognizer()) return
       setState((current) => ({ ...current, phase: 'listening' }))
     } catch (error) {
       if (runId !== runIdRef.current) return
@@ -355,6 +381,7 @@ export function useVoiceRecorder(options: {
     window.addEventListener(SPEECH_SETTINGS_CHANGED_EVENT, refresh)
     return () => {
       mountedRef.current = false
+      runIdRef.current += 1
       window.removeEventListener(SPEECH_SETTINGS_CHANGED_EVENT, refresh)
       void finish(false)
     }
@@ -372,7 +399,7 @@ export function useVoiceRecorder(options: {
         return
       }
       setState((current) => ({ ...current, phase: 'processing', error: undefined }))
-      await submitRecording(recording)
+      await submitRecording(recording, ++runIdRef.current)
     },
     dismissError: () => {
       pendingRecordingRef.current = null

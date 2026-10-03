@@ -1,3 +1,4 @@
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('sonner', () => {
@@ -59,6 +60,18 @@ describe('notify', () => {
       duration: 1234,
       id: 'x',
     })
+  })
+
+  it('makes a completion toast title a real clickable button while preserving its id', () => {
+    const open = vi.fn()
+    notify.success('Session finished — background task', { id: 'finished-b', onClick: open })
+    const [title, opts] = mocked.success.mock.calls[0]!
+    expect(opts).toEqual({ id: 'finished-b' })
+    render(title)
+    const button = screen.getByRole('button', { name: 'Session finished — background task' })
+    expect(button.className).toContain('pointer-events-auto')
+    fireEvent.click(button)
+    expect(open).toHaveBeenCalledTimes(1)
   })
 
   it('omits keys the caller left unset', () => {

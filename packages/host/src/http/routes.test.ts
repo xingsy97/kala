@@ -5,6 +5,50 @@ import { attachJsonRoutes } from './routes.js'
 import { PRIVATE_CLOUD_DEPLOYMENT } from '@agent-kernel/shared'
 
 describe('HTTP route ownership', () => {
+  it('marks only persisted agent prompt settings as pending when sessions cannot sync', async () => {
+    const server = createServer()
+    let saved = true
+    attachJsonRoutes(server, {
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      updateAgentPrompt: () => {
+        const error = new Error(saved ? 'Session retry pending' : 'Host not writable') as Error & { status: number; settingsSaved?: boolean }
+        error.status = 503
+        if (saved) error.settingsSaved = true
+        throw error
+      },
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('missing address')
+      const body = JSON.stringify({
+        selectedSlotId: 'slot-1',
+        slots: [
+          { id: 'slot-1', name: 'Default', prompt: 'Updated prompt' },
+          { id: 'slot-2', name: 'Second', prompt: 'Second prompt' },
+          { id: 'slot-3', name: 'Third', prompt: 'Third prompt' },
+        ],
+      })
+      for (saved of [true, false]) {
+        const response = await fetch(`http://127.0.0.1:${address.port}/settings/agent-prompt`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-agent-runlab-principal': 'admin@example.test',
+            'x-agent-runlab-organization-id': 'org_settings',
+            'x-agent-runlab-organization-role': 'admin',
+          },
+          body,
+        })
+        expect(response.status).toBe(503)
+        expect(await response.json()).toMatchObject(saved
+          ? { error: 'Session retry pending', settingsSaved: true }
+          : { error: 'Host not writable' })
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
   it('does not touch Engine.IO response headers', () => {
     const server = createServer()
     attachJsonRoutes(server, {})

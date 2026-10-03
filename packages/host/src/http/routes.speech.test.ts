@@ -23,32 +23,83 @@ describe('Azure Speech settings routes', () => {
 
     const initial = await originalFetch(`${baseUrl}/settings/speech`)
     expect(initial.headers.get('cache-control')).toBe('no-store')
-    expect(await initial.json()).toMatchObject({ configured: false, endpoint: TEST_ENDPOINT, enabled: false })
+    expect(await initial.json()).toMatchObject({
+      configured: false,
+      endpoint: TEST_ENDPOINT,
+      enabled: false,
+      realtimeMaxMinutes: 15,
+      afterRecordingMaxMinutes: 15,
+    })
 
     const saved = await originalFetch(`${baseUrl}/settings/speech`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ endpoint: TEST_ENDPOINT, apiKey: TEST_KEY, enabled: true, mode: 'after_recording' }),
+      body: JSON.stringify({
+        endpoint: TEST_ENDPOINT,
+        apiKey: TEST_KEY,
+        enabled: true,
+        mode: 'after_recording',
+        realtimeMaxMinutes: 3,
+        afterRecordingMaxMinutes: 45,
+      }),
     })
     const savedText = await saved.text()
     expect(saved.status).toBe(200)
     expect(savedText).not.toContain(TEST_KEY)
-    expect(JSON.parse(savedText)).toMatchObject({ configured: true, region: 'japaneast', enabled: true, mode: 'after_recording' })
+    expect(JSON.parse(savedText)).toMatchObject({
+      configured: true,
+      region: 'japaneast',
+      enabled: true,
+      mode: 'after_recording',
+      realtimeMaxMinutes: 3,
+      afterRecordingMaxMinutes: 45,
+    })
 
     const disabled = await originalFetch(`${baseUrl}/settings/speech`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint: TEST_ENDPOINT, enabled: false, mode: 'realtime' }),
     })
-    expect(await disabled.json()).toMatchObject({ configured: true, enabled: false })
+    expect(await disabled.json()).toMatchObject({
+      configured: true,
+      enabled: false,
+      realtimeMaxMinutes: 3,
+      afterRecordingMaxMinutes: 45,
+    })
     expect((await credentials.get())?.apiKey).toBe(TEST_KEY)
 
     const removed = await originalFetch(`${baseUrl}/settings/speech`, { method: 'DELETE' })
-    expect(await removed.json()).toMatchObject({ configured: false, enabled: false })
+    expect(await removed.json()).toMatchObject({
+      configured: false,
+      enabled: false,
+      realtimeMaxMinutes: 15,
+      afterRecordingMaxMinutes: 15,
+    })
+  })
+
+  it.each([
+    ['realtimeMaxMinutes', 0],
+    ['realtimeMaxMinutes', 121],
+    ['realtimeMaxMinutes', 1.5],
+    ['afterRecordingMaxMinutes', '15'],
+  ])('rejects invalid %s values', async (field, value) => {
+    const credentials = memoryStore()
+    const set = vi.spyOn(credentials, 'set')
+    const baseUrl = await startRoutes(credentials)
+
+    const response = await originalFetch(`${baseUrl}/settings/speech`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ endpoint: TEST_ENDPOINT, apiKey: TEST_KEY, [field]: value }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: `${field} must be an integer between 1 and 120` })
+    expect(set).not.toHaveBeenCalled()
   })
 
   it('issues only the short-lived token to an authenticated writable dashboard', async () => {
-    const credentials = memoryStore({ apiKey: TEST_KEY, endpoint: TEST_ENDPOINT, region: 'japaneast', enabled: true, mode: 'realtime' })
+    const credentials = memoryStore({ apiKey: TEST_KEY, endpoint: TEST_ENDPOINT, region: 'japaneast', enabled: true, mode: 'realtime', realtimeMaxMinutes: 15, afterRecordingMaxMinutes: 15 })
     vi.stubGlobal('fetch', vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       expect(new Headers(init?.headers).get('Ocp-Apim-Subscription-Key')).toBe(TEST_KEY)
       return new Response('short-token', { status: 200 })
@@ -63,7 +114,7 @@ describe('Azure Speech settings routes', () => {
   })
 
   it('forwards a bounded recording to fast transcription without exposing the key', async () => {
-    const credentials = memoryStore({ apiKey: TEST_KEY, endpoint: TEST_ENDPOINT, region: 'japaneast', enabled: true, mode: 'after_recording' })
+    const credentials = memoryStore({ apiKey: TEST_KEY, endpoint: TEST_ENDPOINT, region: 'japaneast', enabled: true, mode: 'after_recording', realtimeMaxMinutes: 15, afterRecordingMaxMinutes: 15 })
     vi.stubGlobal('fetch', vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       expect(new Headers(init?.headers).get('Ocp-Apim-Subscription-Key')).toBe(TEST_KEY)
       return Response.json({ combinedPhrases: [{ text: 'Mixed language result.' }] })
@@ -82,7 +133,7 @@ describe('Azure Speech settings routes', () => {
   })
 
   it('requires an ingress admin to change or test credentials in multi-tenant deployments', async () => {
-    const credentials = memoryStore({ apiKey: TEST_KEY, endpoint: TEST_ENDPOINT, region: 'japaneast', enabled: true, mode: 'realtime' })
+    const credentials = memoryStore({ apiKey: TEST_KEY, endpoint: TEST_ENDPOINT, region: 'japaneast', enabled: true, mode: 'realtime', realtimeMaxMinutes: 15, afterRecordingMaxMinutes: 15 })
     const set = vi.spyOn(credentials, 'set')
     const baseUrl = await startRoutes(credentials, PRIVATE_CLOUD_DEPLOYMENT)
     const memberHeaders = {
@@ -122,14 +173,41 @@ function memoryStore(initial?: AzureSpeechCredential): AzureSpeechCredentialStor
   let value = initial
   let updatedAt: string | undefined
   const status = (): AzureSpeechCredentialStatus => value
-    ? { configured: true, provider: 'azure', endpoint: value.endpoint, region: value.region, enabled: value.enabled, mode: value.mode, updatedAt }
-    : { configured: false, provider: 'azure', endpoint: TEST_ENDPOINT, region: 'japaneast', enabled: false, mode: 'realtime' }
+    ? {
+        configured: true,
+        provider: 'azure',
+        endpoint: value.endpoint,
+        region: value.region,
+        enabled: value.enabled,
+        mode: value.mode,
+        realtimeMaxMinutes: value.realtimeMaxMinutes,
+        afterRecordingMaxMinutes: value.afterRecordingMaxMinutes,
+        updatedAt,
+      }
+    : {
+        configured: false,
+        provider: 'azure',
+        endpoint: TEST_ENDPOINT,
+        region: 'japaneast',
+        enabled: false,
+        mode: 'realtime',
+        realtimeMaxMinutes: 15,
+        afterRecordingMaxMinutes: 15,
+      }
   return {
     get: () => value,
     status,
     set: (input) => {
       if (!input.apiKey && !value) throw new Error('an Azure Speech key is required')
-      value = { apiKey: input.apiKey ?? value!.apiKey, endpoint: input.endpoint, region: 'japaneast', enabled: input.enabled, mode: input.mode }
+      value = {
+        apiKey: input.apiKey ?? value!.apiKey,
+        endpoint: input.endpoint,
+        region: 'japaneast',
+        enabled: input.enabled,
+        mode: input.mode,
+        realtimeMaxMinutes: input.realtimeMaxMinutes ?? value?.realtimeMaxMinutes ?? 15,
+        afterRecordingMaxMinutes: input.afterRecordingMaxMinutes ?? value?.afterRecordingMaxMinutes ?? 15,
+      }
       updatedAt = '2026-09-28T00:00:00.000Z'
       return status()
     },

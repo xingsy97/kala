@@ -52,7 +52,7 @@ import {
 } from '../src/llm/provider-health.js'
 import { routerAdapter, toFallbackArtifact, type MutableRouter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
-import { AGENT_SYSTEM_PROMPT_PRESETS, normalizeAgentSystemPromptPreset, resolveBuiltinAgentModule } from '../src/builtin-tools.js'
+import { resolveBuiltinAgentModule } from '../src/builtin-tools.js'
 import { createHookRunner } from '../src/extensions/hooks.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import {
@@ -62,6 +62,7 @@ import {
   loadRuntimeConfig,
   modelInfo,
   modelRef,
+  organizationAgentSettingsPath,
   type ProviderSpec,
   writeAgentRuntimeSettings,
   writeManualConfig,
@@ -71,7 +72,7 @@ import type { EmbeddedStaticAsset } from '../src/http/routes.js'
 import { loadSocketAdminConfig, type EmbeddedSocketAdminAsset } from '../src/socket-admin.js'
 import { loadProductDeploymentConfig } from '../src/deployment-config.js'
 import { createSocketAdminStore } from '../src/socket-admin-store.js'
-import { authSettings, type AuthConfig } from '../src/auth-control.js'
+import { authSettings, type AuthConfig, type DashboardActor } from '../src/auth-control.js'
 import { createAuditLogger } from '../src/audit-log.js'
 import { ModelMetadataService } from '../src/model-metadata/model-metadata-service.js'
 import { resolveModelContextWindow } from '../src/model-capabilities.js'
@@ -216,16 +217,21 @@ async function main(): Promise<void> {
 
   const skills = await discoverSkills()
   const agentSettingsPath = defaultAgentSettingsPath()
-  let agentSettings = loadAgentRuntimeSettings(agentSettingsPath)
-  const resolveCurrentAgentModule = () => resolveBuiltinAgentModule({
-    skills: skills.skills,
-    systemPromptPreset: agentSettings.systemPromptPreset,
-    customSystemPrompt: agentSettings.customSystemPrompt,
-    ...(resolveModelContextWindow(registry.defaultModel, registry.models)
-      ? { contextLimit: resolveModelContextWindow(registry.defaultModel, registry.models) }
-      : {}),
-  })
-  let resolvedAgentModule = resolveCurrentAgentModule()
+  const settingsPathForActor = (actor?: DashboardActor): string => actor?.kind === 'ingress'
+    ? organizationAgentSettingsPath(agentSettingsPath, actor.organizationId)
+    : agentSettingsPath
+  const agentSettingsForActor = (actor?: DashboardActor) => loadAgentRuntimeSettings(settingsPathForActor(actor))
+  const resolveAgentModuleForActor = (actor?: DashboardActor) => {
+    const settings = agentSettingsForActor(actor)
+    return resolveBuiltinAgentModule({
+      skills: skills.skills,
+      systemPrompt: settings.slots.find((slot) => slot.id === settings.selectedSlotId)!.prompt,
+      ...(resolveModelContextWindow(registry.defaultModel, registry.models)
+        ? { contextLimit: resolveModelContextWindow(registry.defaultModel, registry.models) }
+        : {}),
+    })
+  }
+  const resolvedAgentModule = resolveAgentModuleForActor()
   if (hasFlag(argv, '--print-agent-module')) {
     process.stdout.write(`${JSON.stringify(resolvedAgentModule.metadata, null, 2)}\n`)
     return
@@ -259,7 +265,10 @@ async function main(): Promise<void> {
       command: h.command,
       ...(h.match !== undefined ? { match: h.match } : {}),
   }))
-  const makeSettings = (): ServerSettingsPayload => ({
+  const makeSettings = (actor?: DashboardActor): ServerSettingsPayload => {
+    const actorSettings = agentSettingsForActor(actor)
+    const actorAgentModule = resolveAgentModuleForActor(actor)
+    return {
     providers: registry.providers.map((p) => ({
       id: p.id,
       label: p.label,
@@ -275,12 +284,11 @@ async function main(): Promise<void> {
       protocol: PROTOCOL_VERSION,
       build: buildInfo,
     },
-    agentModule: resolvedAgentModule.metadata,
+    agentModule: actorAgentModule.metadata,
     agentPrompt: {
-      selectedPreset: agentSettings.systemPromptPreset,
-      presets: AGENT_SYSTEM_PROMPT_PRESETS,
-      customPrompt: agentSettings.customSystemPrompt,
-      configPath: agentSettingsPath,
+      selectedSlotId: actorSettings.selectedSlotId,
+      slots: actorSettings.slots,
+      configPath: settingsPathForActor(actor),
     },
     auth: authSettings(effectiveAuth),
     socketAdmin: socketAdminState.summary,
@@ -296,7 +304,8 @@ async function main(): Promise<void> {
       note: 'MCP runtime is not implemented yet — see docs/host/mcp.md for the planned design.',
     },
     release,
-  })
+    }
+  }
 
   const evaluationUrl = publicHttpUrl(process.env.KALA_EVALUATION_URL)
   const server = await startHostServer({
@@ -329,7 +338,7 @@ async function main(): Promise<void> {
     deleteWebSearchCredential: (provider) => webSearchCredentialStore.delete(provider),
     speechCredentials: speechCredentialStore,
     stateStore,
-    defaultConfig: () => resolvedAgentModule.config,
+    defaultConfig: (actor) => resolveAgentModuleForActor(actor).config,
     models: () => registry.models,
     defaultModel: () => registry.defaultModel,
     settings: makeSettings,
@@ -364,14 +373,11 @@ async function main(): Promise<void> {
       writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
       return makeSettings()
     },
-    updateAgentPrompt: (input) => {
-      agentSettings = {
-        systemPromptPreset: normalizeAgentSystemPromptPreset(input.preset),
-        customSystemPrompt: input.customPrompt ?? agentSettings.customSystemPrompt,
-      }
-      writeAgentRuntimeSettings(agentSettingsPath, agentSettings)
-      resolvedAgentModule = resolveCurrentAgentModule()
-      return makeSettings()
+    updateAgentPrompt: (input, actor) => {
+      // Publish nothing in memory until the atomic rename succeeds. A failed
+      // save therefore leaves both GET and the next model call on the old file.
+      writeAgentRuntimeSettings(settingsPathForActor(actor), input)
+      return makeSettings(actor)
     },
     initializeSocketAdmin: (input) => {
       const password = input.password.trim()

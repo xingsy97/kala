@@ -74,7 +74,7 @@ import { MessageAttachmentStore } from './message-attachment-store.js'
 import { validateMessageAttachmentReferences } from './message-attachment-resolver.js'
 import { createLocalImagePublisher } from './local-image-publisher.js'
 import { MemoStore } from './memo-store.js'
-import type { AuthConfig } from './auth-control.js'
+import type { AuthConfig, DashboardActor } from './auth-control.js'
 import { authenticateDashboardHandshake } from './auth-control.js'
 import type { AuditLogger } from './audit-log.js'
 import { noopAuditLogger } from './audit-log.js'
@@ -138,7 +138,7 @@ export type HostServerOptions = {
   }
   /** Test synchronization seam: runs after a queue head is claimed, before dispatch I/O. */
   queueDispatchBarrier?: (claimed: { sessionId: string; operationId: string; runtime: string }) => Promise<void>
-  defaultConfig: AgentConfig | (() => AgentConfig)
+  defaultConfig: AgentConfig | ((actor?: DashboardActor) => AgentConfig)
   toolTimeoutMs?: number
   /**
    * Grace window after an executor disconnects before its "detached" event
@@ -191,7 +191,7 @@ export type HostServerOptions = {
    * file paths. Never carries API keys or command args beyond what the
    * operator already put in their config.
    */
-  settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
+  settings?: ServerSettingsPayload | ((actor: DashboardActor) => ServerSettingsPayload | Promise<ServerSettingsPayload>)
   addManualModel?: Parameters<typeof attachJsonRoutes>[1]['addManualModel']
   deleteManualModel?: Parameters<typeof attachJsonRoutes>[1]['deleteManualModel']
   addManualProvider?: Parameters<typeof attachJsonRoutes>[1]['addManualProvider']
@@ -213,6 +213,8 @@ export type HostServerOptions = {
   /** Remove slot readiness before a planned restart closes its listener. */
   invalidateReadiness?: () => void | Promise<void>
   restartShutdownTimeoutMs?: number
+  /** Test/embedding override for residual system-prompt synchronization retries. */
+  promptSynchronizationRetryMs?: number
   mutableReady?: () => boolean
   onProcessReady?: (input: { pid: number; port: number; readyAt: string }) => void | Promise<void>
 }
@@ -281,9 +283,11 @@ export async function startHostServer(
   let safeCleanup: SafeCleanupEngine | undefined
   let scheduledTaskScheduler: UnitScheduler | undefined
   let detachPublicAccessGate: (() => void) | undefined
+  let promptSynchronizationTimer: ReturnType<typeof setTimeout> | undefined
   const closeServer = async (): Promise<void> => {
     if (closed) return
     closed = true
+    if (promptSynchronizationTimer) clearTimeout(promptSynchronizationTimer)
     detachPublicAccessGate?.()
     for (const batch of tokenDeltaBatches.values()) clearTimeout(batch.timer)
     tokenDeltaBatches.clear()
@@ -333,8 +337,8 @@ export async function startHostServer(
   }
   if (options.socketAdmin) activateSocketAdmin(options.socketAdmin)
 
-  const getDefaultConfig = (): AgentConfig => typeof options.defaultConfig === 'function'
-    ? options.defaultConfig()
+  const getDefaultConfig = (actor?: DashboardActor): AgentConfig => typeof options.defaultConfig === 'function'
+    ? options.defaultConfig(actor)
     : options.defaultConfig
   const sessionArtifacts = new SessionArtifactRegistry(join(options.sessionsDir, '..', 'session-artifacts'))
   await sessionArtifacts.load()
@@ -449,9 +453,9 @@ export async function startHostServer(
   )
 
   let restart: RestartCoordinator | undefined
-  const settingsWithSkills = (settings: ServerSettingsPayload | (() => ServerSettingsPayload)) => (): ServerSettingsPayload => {
+  const settingsWithSkills = (settings: NonNullable<HostServerOptions['settings']>) => async (actor: DashboardActor): Promise<ServerSettingsPayload> => {
     const base = typeof settings === 'function'
-      ? settings()
+      ? await settings(actor)
       : settings
     return {
       ...base,
@@ -462,6 +466,122 @@ export async function startHostServer(
       },
       ...(restart ? { runtime: restart.status() } : {}),
       socketConnections: socketConnectionAuditSnapshot(io),
+    }
+  }
+  let publishSystemPromptChanged = (_record: SessionRecord): void => {}
+  const organizationIdForActor = (actor: DashboardActor): string | undefined => actor.kind === 'ingress'
+    ? actor.organizationId
+    : undefined
+  const actorForRecord = (record: SessionRecord): DashboardActor => record.organizationId
+    ? {
+        kind: 'ingress',
+        principal: record.principal ?? 'system',
+        organizationId: record.organizationId,
+        role: record.organizationRole ?? 'member',
+      }
+    : { kind: 'anonymous' }
+  const pendingPromptSynchronizations = new Set<string>()
+  const promptSettingUpdateTails = new Map<string, Promise<ServerSettingsPayload>>()
+  let startupPromptDiscoveryPending = true
+  let promptSynchronizationRunning = false
+  const ensureEffectiveSystemPrompt = async (record: SessionRecord): Promise<boolean> => {
+    const prompt = getDefaultConfig(actorForRecord(record)).systemPrompt ?? ''
+    const current = record.state.systemPromptOverride?.prompt
+      ?? (record.state.messages[0]?.role === 'system'
+        ? record.state.messages[0].content.filter((item) => item.type === 'text').map((item) => item.text).join('')
+        : '')
+    if (record.config.systemPrompt === prompt && current === prompt) return false
+    // Fence an in-flight Copilot request before the durable replacement. cancel()
+    // invalidates its generation synchronously; the next send resumes the same
+    // provider Session under the new prompt rather than deleting its history.
+    if (record.agentRuntime === 'copilot' && !isRestingStatus(record.state.status)) {
+      await agentRuntimes?.get(record.agentRuntime)?.cancel(record)
+    }
+    const changed = await store.applySystemPrompt(record.sessionId, prompt)
+    // Close the resting→running race between the pre-fence and durable commit.
+    // The prompt-generation check already rejects late output; this also stops
+    // provider work that entered during that narrow window.
+    if (changed && record.agentRuntime === 'copilot' && !isRestingStatus(record.state.status)) {
+      await agentRuntimes?.get(record.agentRuntime)?.cancel(record)
+    }
+    if (changed) publishSystemPromptChanged(record)
+    return changed
+  }
+  const synchronizeOrganizationPrompt = async (actor: DashboardActor): Promise<void> => {
+    const organizationId = organizationIdForActor(actor)
+    let ids: string[]
+    try {
+      ids = await store.listSessionIdsForOrganization(organizationId)
+    } catch (error) {
+      startupPromptDiscoveryPending = true
+      const pending = new AggregateError([error], 'Agent prompt settings were saved, but Session discovery is pending background retry') as AggregateError & { status: number; settingsSaved?: boolean }
+      pending.status = 503
+      pending.settingsSaved = true
+      schedulePromptSynchronizationRetry()
+      throw pending
+    }
+    const failures: unknown[] = []
+    for (const sessionId of ids) {
+      try {
+        const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false, runtimeConfig: getDefaultConfig(actor) })
+        await ensureEffectiveSystemPrompt(record)
+        pendingPromptSynchronizations.delete(sessionId)
+      } catch (error) {
+        pendingPromptSynchronizations.add(sessionId)
+        failures.push(error)
+      }
+    }
+    if (failures.length > 0) {
+      const pending = new AggregateError(
+        failures,
+        `Agent prompt settings were saved, but ${failures.length} Session system prompt(s) are pending background retry`,
+      ) as AggregateError & { status: number; settingsSaved?: boolean }
+      pending.status = 503
+      pending.settingsSaved = true
+      schedulePromptSynchronizationRetry()
+      throw pending
+    }
+  }
+  function schedulePromptSynchronizationRetry(): void {
+    if (closed || promptSynchronizationTimer) return
+    promptSynchronizationTimer = setTimeout(() => {
+      promptSynchronizationTimer = undefined
+      void retryPromptSynchronizations()
+    }, options.promptSynchronizationRetryMs ?? 1_000)
+    promptSynchronizationTimer.unref?.()
+  }
+  const retryPromptSynchronizations = async (): Promise<void> => {
+    if (closed || promptSynchronizationRunning) return
+    // A blue/green candidate must not load (and recover) or mutate the
+    // incumbent's Sessions until the supervisor admits this slot for writes.
+    if (options.mutableReady?.() === false) {
+      schedulePromptSynchronizationRetry()
+      return
+    }
+    promptSynchronizationRunning = true
+    try {
+      if (startupPromptDiscoveryPending) {
+        try {
+          for (const sessionId of await store.listSessionIds()) pendingPromptSynchronizations.add(sessionId)
+          startupPromptDiscoveryPending = false
+        } catch {
+          // Session storage may not be mounted yet. Keep discovery pending.
+        }
+      }
+      for (const sessionId of [...pendingPromptSynchronizations]) {
+        try {
+          const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
+          await ensureEffectiveSystemPrompt(record)
+          pendingPromptSynchronizations.delete(sessionId)
+        } catch {
+          // Settings or Session storage may be temporarily unreadable. Retain it.
+        }
+      }
+    } finally {
+      promptSynchronizationRunning = false
+      if (startupPromptDiscoveryPending || pendingPromptSynchronizations.size > 0) {
+        schedulePromptSynchronizationRetry()
+      }
     }
   }
 
@@ -564,13 +684,32 @@ export async function startHostServer(
   attachJsonRoutes(http, {
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
-    ...(options.settings ? { settings: () => ({ ...settingsWithSkills(options.settings!)(), deployment: { product, deployment, capabilities } }) } : {}),
+    ...(options.settings ? { settings: async (actor: DashboardActor) => ({ ...await settingsWithSkills(options.settings!)(actor), deployment: { product, deployment, capabilities } }) } : {}),
     ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
     ...(options.addManualProvider ? { addManualProvider: options.addManualProvider } : {}),
     ...(options.deleteManualProvider ? { deleteManualProvider: options.deleteManualProvider } : {}),
     ...(options.setDefaultModel ? { setDefaultModel: options.setDefaultModel } : {}),
-    ...(options.updateAgentPrompt ? { updateAgentPrompt: options.updateAgentPrompt } : {}),
+    ...(options.updateAgentPrompt ? {
+      updateAgentPrompt: (input, actor) => {
+        const organizationId = organizationIdForActor(actor)
+        const key = organizationId === undefined ? 'portable' : `org:${organizationId}`
+        const previous = promptSettingUpdateTails.get(key)
+        const update = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
+          if (options.mutableReady?.() === false) {
+            throw Object.assign(new Error('Host is not ready to update agent prompt settings'), { status: 503 })
+          }
+          const result = await options.updateAgentPrompt!(input, actor)
+          await synchronizeOrganizationPrompt(actor)
+          return result
+        })
+        promptSettingUpdateTails.set(key, update)
+        void update.finally(() => {
+          if (promptSettingUpdateTails.get(key) === update) promptSettingUpdateTails.delete(key)
+        }).catch(() => undefined)
+        return update
+      },
+    } : {}),
     ...(options.initializeSocketAdmin ? { initializeSocketAdmin: (input: { password: string; mode?: 'development' | 'production' }) => options.initializeSocketAdmin!({ ...input, activate: activateSocketAdmin }) } : {}),
     ...(options.updateSocketAdminMode ? { updateSocketAdminMode: options.updateSocketAdminMode } : {}),
     ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
@@ -713,6 +852,21 @@ export async function startHostServer(
 
   const dashboardNs: DashboardNs = io.of('/dashboard') as unknown as DashboardNs
   const executorNs: ExecutorNs = io.of('/executor') as unknown as ExecutorNs
+  publishSystemPromptChanged = (record) => {
+    const model = effectiveModelForSession(record.sessionId)
+    dashboardNs.to(sessionRoom(record.sessionId)).emit('state:changed', {
+      sessionId: record.sessionId,
+      cursor: record.state.cursor,
+      state: record.state,
+      contextSnapshot: record.runtimeContextSnapshot ?? snapshotFromConfig(
+        record.config,
+        record.state.messages,
+        contextWindowForModel(model),
+        model,
+      ),
+      ...(record.turnStartedAt ? { turnStartedAt: record.turnStartedAt } : {}),
+    })
+  }
 
   let loop: LoopHandle
   const queueSnapshot = (sessionId: string): ServerMessageQueueEvent => {
@@ -1082,6 +1236,10 @@ export async function startHostServer(
               return
             }
           }
+          // Also serves as restart recovery: a saved organization setting is
+          // reconciled before any subsequent model turn, even if an earlier
+          // bulk update was interrupted or one Session write failed.
+          await ensureEffectiveSystemPrompt(record)
           if (record.agentRuntime !== 'kernel') {
             record = await store.load(sessionId)
             if (!isRestingStatus(record.state.status)) return
@@ -1501,6 +1659,7 @@ export async function startHostServer(
   agentRuntimes.register(new KernelAgentRuntime(loop))
   const runtimeController: SubAgentRuntimeController = {
     async send(record, text, model) {
+      await ensureEffectiveSystemPrompt(record)
       await agentRuntimes!.require(record.agentRuntime).send(record, {
         text,
         ...(model ? { model } : {}),
@@ -1689,7 +1848,9 @@ export async function startHostServer(
           pendingMessages: messageQueues.pending(sessionId), mode: 'queue',
         })
       }
-      const config = deriveSessionConfig(getDefaultConfig(), undefined, 'chat')
+      const config = deriveSessionConfig(getDefaultConfig(organizationId
+        ? { kind: 'ingress', organizationId, principal: task.createdBy, role: 'member' }
+        : undefined), undefined, 'chat')
       const { record, created } = await store.ensure({
         sessionId, agentRuntime: 'kernel', executionMode: 'chat', defaultConfig: config, runtimeConfig: config,
         workspaceId: target.workspaceId,
@@ -1789,7 +1950,9 @@ export async function startHostServer(
           sessionId: input.sessionId,
         })
       }
-      const config = deriveSessionConfig(getDefaultConfig(), undefined, executionMode)
+      const config = deriveSessionConfig(getDefaultConfig(actor.organizationId && actor.role
+        ? { kind: 'ingress', organizationId: actor.organizationId, principal: actor.principal, role: actor.role }
+        : undefined), undefined, executionMode)
       const { record, created } = await store.ensure({
         sessionId: input.sessionId,
         agentRuntime: 'kernel',
@@ -2039,6 +2202,10 @@ export async function startHostServer(
   // Dashboard mutation remains fenced by mutableReady until the Supervisor's
   // final route commit, while the Executor namespace can settle continuation.
   await restart.resumeMarkedSessions()
+
+  // Reconcile persisted Sessions only after the listener and runtime services
+  // are available. Residual failures remain pending until storage recovers.
+  void retryPromptSynchronizations()
 
   return {
     io,

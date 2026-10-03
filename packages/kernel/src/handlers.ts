@@ -379,12 +379,15 @@ export function onCancel(state: AgentState): HandlerResult {
 }
 
 export function onClear(state: AgentState): HandlerResult {
+  const messages = state.systemPromptOverride
+    ? messagesWithSystemPrompt([], state.systemPromptOverride.prompt)
+    : []
   return {
     next: transitionAgentState(
       state,
       { status: 'idle', pendingCalls: [] },
       {
-        messages: [],
+        messages,
         usage: {
         inputTokens: 0,
           outputTokens: 0,
@@ -413,15 +416,18 @@ export function onMessagesReplaced(
     ...event.replacementMessages,
     ...state.messages.slice(end),
   ]
+  const effectiveMessages = state.systemPromptOverride
+    ? messagesWithSystemPrompt(messages, state.systemPromptOverride.prompt)
+    : messages
   if (event.resume && (state.status === 'idle' || state.status === 'done' || state.status === 'error')) {
-    const next = transitionAgentState(state, { status: 'thinking', pendingCalls: [] }, { messages })
+    const next = transitionAgentState(state, { status: 'thinking', pendingCalls: [] }, { messages: effectiveMessages })
     return {
       next,
-      effects: [{ kind: 'call_llm', messages, tools: config.tools }],
+      effects: [{ kind: 'call_llm', messages: effectiveMessages, tools: config.tools }],
     }
   }
   return {
-    next: { ...state, messages },
+    next: { ...state, messages: effectiveMessages },
     effects: [],
   }
 }
@@ -447,6 +453,27 @@ export function onApprovalModeChanged(
 ): HandlerResult {
   if (state.approvalMode === mode) return noop(state)
   return { next: { ...state, approvalMode: mode }, effects: [] }
+}
+
+export function onSystemPromptChanged(
+  state: AgentState,
+  prompt: string,
+  version?: string | number,
+): HandlerResult {
+  return {
+    next: {
+      ...state,
+      messages: messagesWithSystemPrompt(state.messages, prompt),
+      systemPromptOverride: { prompt, ...(version !== undefined ? { version } : {}) },
+    },
+    effects: [],
+  }
+}
+
+function messagesWithSystemPrompt(messages: readonly Message[], prompt: string): readonly Message[] {
+  const remaining = messages[0]?.role === 'system' ? messages.slice(1) : messages
+  if (!prompt) return remaining
+  return [{ role: 'system', content: [{ type: 'text', text: prompt }] }, ...remaining]
 }
 
 export function onCwdChanged(state: AgentState, cwd: string): HandlerResult {

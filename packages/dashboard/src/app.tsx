@@ -1543,11 +1543,8 @@ export function App(): JSX.Element {
     connectionStatus: session.status,
     pendingApprovals: session.pendingApprovals,
     lastError: session.lastError,
+    systemPromptOverride: session.state?.systemPromptOverride,
     approvalMode: session.state?.approvalMode,
-  })
-  useInactiveSessionSummaryToasts({
-    sessions: control.sessions,
-    activeSessionId,
   })
   useBackgroundShellToasts(backgroundTasks)
 
@@ -1556,6 +1553,18 @@ export function App(): JSX.Element {
   }
 
   const [section, setSection] = useAppSection()
+  useInactiveSessionSummaryToasts({
+    sessions: control.sessions,
+    activeSessionId,
+    onOpenSession: (sessionId) => {
+      selectSession(sessionId)
+      setExplorerDrawerOpen(false)
+      setAccountCenterOpen(false)
+      setAdminCenterOpen(false)
+      setSettingsOpen(false)
+      setSection('agent')
+    },
+  })
   const nativeSessions = useMemo(() => control.sessions.map((summary): SessionSummary => {
     if (summary.sessionId !== activeSessionId || !sessionHydrated) return summary
     return {
@@ -2759,6 +2768,8 @@ export function App(): JSX.Element {
       {settingsOpen ? (
         <Suspense fallback={<PageLoadingFallback compact />}>
           <SettingsDialog
+            key={cacheNamespace}
+            cacheNamespace={cacheNamespace}
             open={settingsOpen}
             onOpenChange={(open) => {
               setSettingsOpen(open)
@@ -3719,7 +3730,11 @@ export function ConnectionStatusProvider({ socket, status, transport, cursor, wo
             <Button size="sm" variant="ghost" className="h-7 flex-none" onClick={copy} title={t('connectionHealth.diagnostics')}>{t(copied ? 'common.copied' : 'common.copy')}</Button>
           </div>
           </div>,
-          document.body,
+          // Radix disables pointer events outside the modal drawer. Keep this
+          // portal inside its content so the health controls receive touches.
+          triggerId === 'mobile-drawer'
+            ? document.querySelector('[data-testid="explorer-drawer"]') ?? document.body
+            : document.body,
         ) : null}
       </div>
     )

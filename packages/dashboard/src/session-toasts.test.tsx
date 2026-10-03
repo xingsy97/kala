@@ -32,6 +32,7 @@ beforeEach(() => {
   mockedNotify.success.mockClear()
   mockedNotify.warning.mockClear()
   mockedNotify.error.mockClear()
+  mockedNotify.dismiss.mockClear()
 })
 
 function SessionToastHarness(props: Parameters<typeof useSessionToasts>[0]): React.ReactElement {
@@ -209,7 +210,56 @@ describe('useSessionToasts', () => {
     }
   })
 
-  it('fires warning + success on disconnect / reconnect transitions', () => {
+  it('announces a changed persisted system prompt once without exposing its content', () => {
+    const base = {
+      sessionId: 's',
+      sessionLabel: 'Existing session',
+      connectionStatus: 'ready',
+      pendingApprovals: [],
+      lastError: null,
+    } as const
+    const { rerender } = render(
+      <SessionToastHarness {...base} systemPromptOverride={{ prompt: 'old tenant secret' }} />,
+    )
+    mockedNotify.info.mockClear()
+
+    rerender(<SessionToastHarness {...base} systemPromptOverride={{ prompt: 'new tenant secret' }} />)
+    rerender(<SessionToastHarness {...base} systemPromptOverride={{ prompt: 'new tenant secret' }} />)
+
+    expect(mockedNotify.info).toHaveBeenCalledTimes(1)
+    const [title, options] = mockedNotify.info.mock.calls[0]!
+    expect(title).toBe('System prompt updated')
+    expect(options.id).toBe('system-prompt-changed-s')
+    expect(options.description).toContain('administrator or user settings change')
+    expect(JSON.stringify(mockedNotify.info.mock.calls)).not.toContain('tenant secret')
+  })
+
+  it('announces a prompt changed while disconnected from the reconnect baseline without duplicate toast', () => {
+    const base = {
+      sessionId: 's',
+      sessionLabel: 'Existing session',
+      pendingApprovals: [],
+      lastError: null,
+    } as const
+    const { rerender } = render(
+      <SessionToastHarness {...base} connectionStatus="ready" />,
+    )
+    rerender(<SessionToastHarness {...base} connectionStatus="disconnected" />)
+    rerender(
+      <SessionToastHarness
+        {...base}
+        connectionStatus="ready"
+        systemPromptOverride={{ prompt: 'updated while offline', version: 2 }}
+      />,
+    )
+    rerender(<SessionToastHarness {...base} connectionStatus="disconnected" systemPromptOverride={{ prompt: 'updated while offline', version: 2 }} />)
+    rerender(<SessionToastHarness {...base} connectionStatus="ready" systemPromptOverride={{ prompt: 'updated while offline', version: 2 }} />)
+
+    expect(mockedNotify.info).toHaveBeenCalledTimes(1)
+    expect(mockedNotify.info.mock.calls[0]![1].description).toContain('Existing session')
+  })
+
+  it('keeps connection loss inline without a second warning, but confirms reconnection', () => {
     const { rerender } = render(
       <SessionToastHarness
         sessionId="s"
@@ -237,10 +287,17 @@ describe('useSessionToasts', () => {
         lastError={null}
       />,
     )
-    expect(mockedNotify.warning).toHaveBeenCalledTimes(1)
+    expect(mockedNotify.warning).not.toHaveBeenCalled()
     expect(mockedNotify.success).toHaveBeenCalledTimes(1)
-    expect(mockedNotify.warning.mock.calls[0][0]).toBe('Disconnected — trying to reconnect')
     expect(mockedNotify.success.mock.calls[0][0]).toBe('Reconnected')
+  })
+
+  it('does not toast a failed subscribe when the active Session already has an inline error', () => {
+    const { rerender } = render(<SessionToastHarness sessionId="s" sessionLabel="Session" connectionStatus="ready" pendingApprovals={[]} lastError={null} />)
+    rerender(<SessionToastHarness sessionId="s" sessionLabel="Session" connectionStatus="error" pendingApprovals={[]}
+      lastError={{ sessionId: 's', scope: 'host', message: 'Unable to subscribe to this Session: unavailable' }} />)
+    expect(mockedNotify.warning).not.toHaveBeenCalled()
+    expect(mockedNotify.error).not.toHaveBeenCalled()
   })
 
   it('does not fire toast for focused session errors (banner surfaces them)', () => {
@@ -308,6 +365,33 @@ describe('useInactiveSessionSummaryToasts', () => {
       expect(mockedNotify.success).toHaveBeenCalledTimes(1)
       expect(mockedNotify.success.mock.calls[0][0]).toBe('Session finished — background task')
       expect(mockedNotify.success.mock.calls[0][1].id).toBe('inactive-session-finished-b')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('opens the finished session, not the session currently focused, and ignores deleted sessions', () => {
+    vi.useFakeTimers()
+    try {
+      const open = vi.fn()
+      const { rerender } = render(
+        <InactiveSummaryHarness activeSessionId="a" onOpenSession={open} sessions={[summary('a', 'idle'), summary('b', 'thinking', 'background task')]} />,
+      )
+      rerender(
+        <InactiveSummaryHarness activeSessionId="a" onOpenSession={open} sessions={[summary('a', 'idle'), summary('b', 'done', 'background task')]} />,
+      )
+      act(() => vi.advanceTimersByTime(1600))
+      const onClick = mockedNotify.success.mock.calls[0]?.[1]?.onClick as (() => void) | undefined
+      expect(onClick).toBeTypeOf('function')
+      rerender(
+        <InactiveSummaryHarness activeSessionId="a" onOpenSession={open} sessions={[summary('a', 'idle'), summary('b', 'done', 'background task')]} />,
+      )
+      act(() => onClick?.())
+      expect(open).toHaveBeenCalledExactlyOnceWith('b')
+      expect(mockedNotify.dismiss).toHaveBeenCalledWith('inactive-session-finished-b')
+      rerender(<InactiveSummaryHarness activeSessionId="a" onOpenSession={open} sessions={[summary('a', 'idle')]} />)
+      act(() => onClick?.())
+      expect(open).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }

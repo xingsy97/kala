@@ -194,6 +194,9 @@ function compactSnapshotContent(content: MessageContent, aggressive: boolean): M
 }
 
 function compactSnapshotMessage(message: Message, aggressive: boolean): Message {
+  // The active system prompt is an execution input, not disposable transcript
+  // history. Truncating it would silently change behavior after a restart.
+  if (message.role === 'system') return message
   return {
     ...message,
     content: message.content.map((content) => compactSnapshotContent(content, aggressive)),
@@ -312,6 +315,8 @@ export function compactExternalRuntimeSnapshotState(state: AgentState): AgentSta
       for (const relatedIndex of closure) rejected.add(relatedIndex)
     }
   }
+  const leadingSystemIndex = messages[0]?.role === 'system' ? 0 : -1
+  if (leadingSystemIndex >= 0) trySelect(leadingSystemIndex, true)
   if (firstUserIndex >= 0) trySelect(firstUserIndex, true)
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -331,6 +336,20 @@ export function compactExternalRuntimeSnapshotState(state: AgentState): AgentSta
 async function optionalSnapshot(path: string): Promise<SnapshotEntry[]> {
   const snapshot = await readLastSessionSnapshot(path)
   return snapshot ? [snapshot] : []
+}
+
+function configWithPersistedSystemPrompt(config: AgentConfig, state: AgentState): AgentConfig {
+  const override = state.systemPromptOverride
+  return override ? { ...config, systemPrompt: override.prompt } : config
+}
+
+function leadingSystemPrompt(state: AgentState): string {
+  const first = state.messages[0]
+  if (first?.role !== 'system') return ''
+  return first.content
+    .filter((content): content is Extract<MessageContent, { type: 'text' }> => content.type === 'text')
+    .map((content) => content.text)
+    .join('')
 }
 
 export type CreateSessionParams = {
@@ -913,7 +932,7 @@ export class SessionStore {
 
   private applyRuntimeConfig(record: SessionRecord, runtimeConfig: AgentConfig | undefined): void {
     if (!runtimeConfig) return
-    ;(record as { config: AgentConfig }).config = runtimeConfig
+    ;(record as { config: AgentConfig }).config = configWithPersistedSystemPrompt(runtimeConfig, record.state)
   }
 
   private resolveRuntimeConfig(
@@ -1078,6 +1097,91 @@ export class SessionStore {
     this.recordTails.set(sessionId, commit)
     try {
       await commit
+    } finally {
+      if (this.recordTails.get(sessionId) === commit) this.recordTails.delete(sessionId)
+    }
+  }
+
+  /**
+   * Durably replace one Session's effective system prompt.
+   *
+   * Kernel Sessions append a replayable reducer event. External Runtime
+   * Sessions commit the same projected state to their snapshot sidecar and
+   * only append Runtime metadata, so their JSONL never receives Kernel events.
+   * All paths share recordTails and publish config/state only after the durable
+   * state write succeeds.
+   */
+  async applySystemPrompt(
+    sessionId: string,
+    prompt: string,
+    version?: string | number,
+  ): Promise<boolean> {
+    this.assertStorageWritable(sessionId)
+    if (!this.records.has(sessionId)) await this.load(sessionId)
+    // load() can yield; re-check admission before installing the commit tail.
+    this.assertStorageWritable(sessionId)
+    const previous = this.recordTails.get(sessionId) ?? Promise.resolve()
+    let changed = false
+    const commit = previous.catch(() => undefined).then(async () => {
+      const rec = this.records.get(sessionId)
+      if (!rec) throw new Error(`Cannot update system prompt on unknown session: ${sessionId}`)
+
+      const persisted = rec.state.systemPromptOverride
+      const sameVersion = version === undefined || persisted?.version === version
+      const samePrompt = persisted
+        ? persisted.prompt === prompt
+        : rec.config.systemPrompt === prompt && leadingSystemPrompt(rec.state) === prompt
+      if (samePrompt && sameVersion) return
+
+      const event: AgentEvent = {
+        kind: 'system_prompt_changed',
+        prompt,
+        ...(version !== undefined ? { version } : {}),
+      }
+      const transition = step(rec.state, event, rec.config)
+      if (transition.transition.outcome !== 'applied') {
+        throw new Error(`System prompt update was not applied for ${sessionId}`)
+      }
+
+      let committedAt: string
+      if (rec.agentRuntime === 'kernel') {
+        const entry = await appendEventEntry({
+          path: rec.logPath,
+          seq: transition.next.cursor,
+          event,
+          effects: transition.effects,
+        })
+        committedAt = entry.ts
+      } else {
+        const compacted = compactExternalRuntimeSnapshotState(transition.next)
+        await appendRuntimeMetadataEntry(rec.logPath, {
+          sessionId,
+          action: 'runtime.system_prompt_changed',
+          payload: {
+            projectionCursor: transition.next.cursor,
+            ...(version !== undefined ? { version } : {}),
+          },
+        })
+        const snapshot = await appendSnapshotEntry(rec.logPath, transition.next.cursor, compacted)
+        committedAt = snapshot.ts
+        this.locallyProjectedExternalSessions.add(sessionId)
+      }
+
+      // The event/snapshot is now durable. Only now expose either projection.
+      rec.state = transition.next
+      ;(rec as { config: AgentConfig }).config = {
+        ...rec.config,
+        systemPrompt: prompt,
+      }
+      rec.lastEventAt = committedAt
+      this.summaryCache.delete(rec.logPath)
+      this.notifyStorageChanged(sessionId)
+      changed = true
+    })
+    this.recordTails.set(sessionId, commit)
+    try {
+      await commit
+      return changed
     } finally {
       if (this.recordTails.get(sessionId) === commit) this.recordTails.delete(sessionId)
     }
@@ -1318,6 +1422,60 @@ export class SessionStore {
       (b.lastEventAt ?? b.createdAt).localeCompare(a.lastEventAt ?? a.createdAt),
     )
     return out
+  }
+
+  /** Enumerate one tenant without loading or mutating records from any other tenant. */
+  async listSessionIdsForOrganization(organizationId: string | undefined): Promise<string[]> {
+    if (!existsSync(this.sessionsDir)) return []
+    const ids: string[] = []
+    const failures: Error[] = []
+    for (const file of readdirSync(this.sessionsDir)) {
+      if (!file.endsWith('.jsonl')) continue
+      const path = join(this.sessionsDir, file)
+      try {
+        const loaded = loadedRecordForPath(this.records, path)
+        if (loaded) {
+          if (loaded.organizationId === organizationId) ids.push(loaded.sessionId)
+          continue
+        }
+        const header = await readSessionHeader(path)
+        const metadata = header.organizationId === undefined
+          ? await readRecentSessionMetadata(path)
+          : []
+        let attributedOrganizationId = header.organizationId
+        for (let index = metadata.length - 1; attributedOrganizationId === undefined && index >= 0; index -= 1) {
+          attributedOrganizationId = metadata[index]?.organizationId
+        }
+        if (attributedOrganizationId === organizationId) ids.push(header.sessionId)
+      } catch (error) {
+        // An unreadable log might belong to this organization. Never report
+        // synchronization as complete until every persisted Session is checked.
+        failures.push(error instanceof Error ? error : new Error(String(error)))
+      }
+    }
+    if (failures.length) throw new AggregateError(failures, `Could not determine ownership for ${failures.length} Session log(s)`)
+    return ids
+  }
+
+  /** Enumerate every valid persisted Session without loading it into memory. */
+  async listSessionIds(): Promise<string[]> {
+    if (!existsSync(this.sessionsDir)) return []
+    const ids: string[] = []
+    const failures: Error[] = []
+    for (const file of readdirSync(this.sessionsDir)) {
+      if (!file.endsWith('.jsonl')) continue
+      const path = join(this.sessionsDir, file)
+      try {
+        const loaded = loadedRecordForPath(this.records, path)
+        ids.push(loaded?.sessionId ?? (await readSessionHeader(path)).sessionId)
+      } catch (error) {
+        // Keep discovery pending; silently skipping a log would permanently
+        // leave its Session under the old prompt after the storage recovers.
+        failures.push(error instanceof Error ? error : new Error(String(error)))
+      }
+    }
+    if (failures.length) throw new AggregateError(failures, `Could not discover ${failures.length} Session log(s)`)
+    return ids
   }
 
   private async cachedSummaryFor(path: string): Promise<SessionSummary> {
@@ -1667,9 +1825,12 @@ export class SessionStore {
       ...(parsed.header.externalSessionId ? { externalSessionId: parsed.header.externalSessionId } : {}),
       logPath: path,
       createdAt: parsed.header.ts,
-      config: options.runtimeConfig
-        ?? this.resolveRuntimeConfig(undefined, parsed.header.executionMode ?? 'chat')
-        ?? parsed.header.config,
+      config: configWithPersistedSystemPrompt(
+        options.runtimeConfig
+          ?? this.resolveRuntimeConfig(undefined, parsed.header.executionMode ?? 'chat')
+          ?? parsed.header.config,
+        finalState,
+      ),
       toolLock: toolLockFor(parsed.header.config),
       preferences,
       ...(runtimeContextSnapshot ? { runtimeContextSnapshot } : {}),

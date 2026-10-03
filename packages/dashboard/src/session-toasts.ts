@@ -11,9 +11,8 @@
  *
  *   - Approval: dedup by `callId`; sonner replaces in-place so re-renders
  *     while the same approval is pending don't stack toasts.
- *   - Connection: only fire on transitions (disconnected→connected fires
- *     `Reconnected`, connected→disconnected fires `Disconnected — trying
- *     to reconnect`), not on the first mount.
+ *   - Connection: the focused session uses its inline connection state, not a
+ *     second corner warning. A recovery toast fires on reconnect.
  *   - Session error: dedup on `scope:message` so repeated identical errors
  *     don't stack, but a distinct new error still fires.
  *   - Sub-agent lifecycle stays inside the parent transcript/card. It must not
@@ -23,7 +22,9 @@
  */
 
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 
+import type { AgentState } from '@agent-kernel/kernel'
 import type { ApprovalRequiredEvent, SessionErrorEvent, SessionSummary } from '@agent-kernel/shared'
 
 import type { BackgroundTerminalTask } from './background-terminal.js'
@@ -37,6 +38,8 @@ export type SessionToastInput = {
   connectionStatus: string
   pendingApprovals: readonly ApprovalRequiredEvent[]
   lastError: SessionErrorEvent | null
+  /** Durable marker installed when Settings changes this existing Session's prompt. */
+  systemPromptOverride?: AgentState['systemPromptOverride']
   /**
    * Current approval mode of the session. When `'allow_all'`, incoming tool
    * calls are auto-dispatched by the kernel and the operator never needs to
@@ -60,9 +63,11 @@ export function useSessionToasts({
   connectionStatus,
   pendingApprovals,
   lastError,
+  systemPromptOverride,
   approvalMode,
   onFocusApprovals,
 }: SessionToastInput): void {
+  const { t } = useTranslation()
   const firstApproval = pendingApprovals[0]
   const suppressApprovalToast = approvalMode === 'allow_all'
   const approvalSig = firstApproval
@@ -71,6 +76,7 @@ export function useSessionToasts({
   const errorSig = lastError ? `${sessionId}:${lastError.scope}:${lastError.message}` : `${sessionId}:none`
 
   const prev = useRef<{ approvalSig: string; errorSig: string; connectionStatus: string } | null>(null)
+  const seenSystemPromptChanges = useRef<Map<string, string>>(new Map())
   const focusRef = useRef(onFocusApprovals)
   focusRef.current = onFocusApprovals
 
@@ -113,15 +119,28 @@ export function useSessionToasts({
       // backgrounded) come from useInterventionDesktopNotifications.
     }
 
+    if (systemPromptOverride) {
+      // The Host sends this durable state both live and in the reconnect
+      // session baseline. Keep the prompt itself out of the toast/id and only
+      // retain its signature in memory so tenant content is never persisted by
+      // the notification layer.
+      const promptChangeSignature = systemPromptOverride.version === undefined
+        ? systemPromptOverride.prompt
+        : `${typeof systemPromptOverride.version}:${systemPromptOverride.version}:${systemPromptOverride.prompt}`
+      if (seenSystemPromptChanges.current.get(sessionId) !== promptChangeSignature) {
+        seenSystemPromptChanges.current.set(sessionId, promptChangeSignature)
+        notify.info(t('settings.agent.systemPromptChangedTitle'), {
+          id: `system-prompt-changed-${sessionId}`,
+          description: t('settings.agent.systemPromptChangedDescription', { session: sessionLabel }),
+          duration: 10_000,
+        })
+      }
+    }
+
     const wasLost = previous?.connectionStatus === 'disconnected' || previous?.connectionStatus === 'error'
     const nowLost = connectionStatus === 'disconnected' || connectionStatus === 'error'
     if (previous && wasLost !== nowLost) {
-      if (nowLost) {
-        notify.warning('Disconnected — trying to reconnect', {
-          id: `connection-${sessionId}`,
-          description: sessionLabel,
-        })
-      } else if (connectionStatus === 'ready') {
+      if (!nowLost && connectionStatus === 'ready') {
         notify.success('Reconnected', {
           id: `connection-${sessionId}`,
           description: sessionLabel,
@@ -139,17 +158,25 @@ export function useSessionToasts({
     sessionId,
     sessionLabel,
     suppressApprovalToast,
+    systemPromptOverride,
+    t,
   ])
 }
 
 export function useInactiveSessionSummaryToasts({
   sessions,
   activeSessionId,
+  onOpenSession,
 }: {
   sessions: readonly SessionSummary[]
   activeSessionId: string | null
+  onOpenSession?: (sessionId: string) => void
 }): void {
   const previous = useRef<Map<string, SessionSummary['status'] | undefined>>(new Map())
+  const sessionsRef = useRef(sessions)
+  const openRef = useRef(onOpenSession)
+  sessionsRef.current = sessions
+  openRef.current = onOpenSession
   // Pending "session finished" toasts, keyed by sessionId. A completion toast is
   // DEBOUNCED (not fired immediately): during a single autonomous turn the kernel
   // status can briefly flip to `done`/`idle` between steps (e.g. a tool-less LLM
@@ -213,9 +240,17 @@ export function useInactiveSessionSummaryToasts({
         if (existing !== undefined) clearTimeout(existing)
         const timer = setTimeout(() => {
           finishTimers.current.delete(session.sessionId)
+          if (!sessionsRef.current.some((current) => current.sessionId === session.sessionId)) return
           notify.success(`Session finished — ${label}`, {
             id: `inactive-session-finished-${session.sessionId}`,
             duration: 6000,
+            ...(openRef.current ? { onClick: () => {
+              notify.dismiss(`inactive-session-finished-${session.sessionId}`)
+              // The toast can outlive its session; never navigate to a stale id.
+              if (sessionsRef.current.some((current) => current.sessionId === session.sessionId)) {
+                openRef.current?.(session.sessionId)
+              }
+            } } : {}),
           })
         }, FINISH_NOTIFY_DEBOUNCE_MS)
         finishTimers.current.set(session.sessionId, timer)

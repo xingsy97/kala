@@ -44,6 +44,7 @@ const events: EventFixtures = {
   },
   approval_mode_changed: { kind: 'approval_mode_changed', mode: 'ask' },
   cwd_changed: { kind: 'cwd_changed', cwd: '/workspace' },
+  system_prompt_changed: { kind: 'system_prompt_changed', prompt: 'updated system', version: 2 },
 }
 
 function stateFor(status: AgentStatus): AgentState {

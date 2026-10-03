@@ -13,6 +13,7 @@ test('slot service shares one logical state root and one write lease', async () 
   assert.match(unit, /Restart=on-failure/)
   assert.match(unit, /RuntimeDirectory=kala/)
   assert.match(unit, /RuntimeDirectoryPreserve=yes/)
+  assert.match(unit, /ReadWritePaths=.*\/var\/lib\/kala\/\.config\/kala/)
   assert.match(unit, /ExecStopPost=\/usr\/bin\/rm -f \/run\/kala\/unit-%i-readiness\.json \/run\/kala\/unit-%i-process-ready\.json/)
 })
 
