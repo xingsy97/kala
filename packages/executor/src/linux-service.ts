@@ -76,6 +76,7 @@ export function renderLinuxServiceFiles(session: InstallerSession, home: string)
     ...(session.profile ? { profile: session.profile } : {}),
     ...(session.name ? { name: session.name } : {}),
     sandboxRoots: session.sandboxRoots,
+    privilegeMode: session.privilegeMode,
     credentialFile: paths.credential,
     ...(session.installationId ? { installationId: session.installationId } : {}),
     installationSource: 'dashboard-native',
@@ -105,7 +106,7 @@ MemoryAccounting=yes
 MemoryMax=8G
 TasksMax=512
 LimitFSIZE=1073741824
-NoNewPrivileges=yes
+NoNewPrivileges=${session.privilegeMode === 'restricted' ? 'yes' : 'no'}
 
 [Install]
 WantedBy=${session.mode === 'system' ? 'multi-user.target' : 'default.target'}

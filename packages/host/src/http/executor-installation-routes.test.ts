@@ -44,7 +44,7 @@ describe('executor installation routes', () => {
     for (const platform of ['linux', 'macos']) {
       const response = await fetch(`${url}/api/executor-installs`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ platform, mode: 'service', workspaceRoot: '/work/example', label: `${platform}-fixture` }),
+        body: JSON.stringify({ platform, mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work/example', label: `${platform}-fixture` }),
       })
       expect(response.status).toBe(201)
       const created = await response.json() as { command: string; setupCode: string }
@@ -55,7 +55,7 @@ describe('executor installation routes', () => {
     for (const mode of ['temporary', 'service']) {
       const response = await fetch(`${url}/api/executor-installs`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ platform: 'windows', mode, workspaceRoot: 'C:\\work\\example', label: 'windows-fixture' }),
+        body: JSON.stringify({ platform: 'windows', mode, privilegeMode: 'privileged', workspaceRoot: 'C:\\work\\example', label: 'windows-fixture' }),
       })
       expect(response.status).toBe(422)
       expect(await response.json()).toEqual({ error: 'windows_installation_unsupported' })
@@ -71,14 +71,14 @@ describe('executor installation routes', () => {
     expect(invalid.status).toBe(400)
     expect(await invalid.json()).toEqual({ error: 'invalid_request' })
     vi.spyOn(store, 'create').mockImplementation(() => { throw new Error('private filesystem location should never leave the server') })
-    const broken = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'macos', mode: 'temporary', workspaceRoot: '/work/example' }) })
+    const broken = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'macos', mode: 'temporary', privilegeMode: 'privileged', workspaceRoot: '/work/example' }) })
     expect(broken.status).toBe(500)
     expect(await broken.json()).toEqual({ error: 'internal_error' })
   })
 
   it('creates, patches, reports progress, approves, redeems, and short-polls', async () => {
     const { url, dir } = await start()
-    const createdResponse = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'temporary', workspaceRoot: '/work' }) })
+    const createdResponse = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'temporary', privilegeMode: 'privileged', workspaceRoot: '/work' }) })
     expect(createdResponse.status).toBe(201)
     const created = await createdResponse.json() as { id: string; command: string; setupCode: string }
     expect(created.command).toBe(`curl -fsSL '${url}/install' | KALA_SETUP_CODE='${created.setupCode}' KALA_INSTALL_MODE='temporary' sh`)
@@ -102,9 +102,10 @@ describe('executor installation routes', () => {
     expect(installerScript).not.toContain('curl -fSL')
     const claimed = await fetch(`${url}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }) })
     expect(claimed.status).toBe(200)
-    const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string; KALA_RELEASE_BASE_URL: string; KALA_RELEASE_TRUST: string; KALA_RELEASE_ASSETS_URL: string; KALA_INSTALLER_ALLOW_UNSIGNED?: string } }
+    const claim = await claimed.json() as { env: { EXECUTOR_INSTALL_BOOTSTRAP: string; EXECUTOR_PRIVILEGE_MODE: string; KALA_RELEASE_BASE_URL: string; KALA_RELEASE_TRUST: string; KALA_RELEASE_ASSETS_URL: string; KALA_INSTALLER_ALLOW_UNSIGNED?: string } }
     const bootstrap = claim.env.EXECUTOR_INSTALL_BOOTSTRAP
     expect(bootstrap).toMatch(/^ak_install_/u)
+    expect(claim.env.EXECUTOR_PRIVILEGE_MODE).toBe('privileged')
     expect(claim.env.KALA_RELEASE_BASE_URL).toBe(`${url}/install/assets`)
     expect(claim.env.KALA_RELEASE_TRUST).toBe('host')
     expect(claim.env.KALA_RELEASE_ASSETS_URL).toBe(`${url}/install/assets`)
@@ -124,7 +125,7 @@ describe('executor installation routes', () => {
     const { url } = await start()
     const created = await fetch(`${url}/api/executor-installs`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ platform: 'linux', mode: 'temporary', workspaceRoot: '/work' }),
+      body: JSON.stringify({ platform: 'linux', mode: 'temporary', privilegeMode: 'privileged', workspaceRoot: '/work' }),
     }).then((response) => response.json()) as { setupCode: string }
     const insecureHeaders = { 'x-forwarded-proto': 'http', 'x-forwarded-host': 'downloads.example.test' }
     const bootstrap = await fetch(`${url}/install`, { headers: insecureHeaders })
@@ -138,9 +139,9 @@ describe('executor installation routes', () => {
 
   it('requires ingress admin for multi-tenant Platform while single-tenant no-auth remains explicitly usable', async () => {
     const dedicated = await start('single-tenant')
-    expect((await fetch(`${dedicated.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' }) })).status).toBe(201)
+    expect((await fetch(`${dedicated.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' }) })).status).toBe(201)
     const privateCloud = await start('multi-tenant')
-    const body = JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' })
+    const body = JSON.stringify({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' })
     expect((await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })).status).toBe(403)
     expect((await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'admin' }, body })).status).toBe(201)
   })
@@ -162,7 +163,7 @@ describe('executor installation routes', () => {
     const created = await fetch(`${privateCloud.url}/api/executor-installs`, {
       method: 'POST',
       headers: orgAHeaders,
-      body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '/work' }),
+      body: JSON.stringify({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' }),
     }).then((response) => response.json()) as { id: string; organizationId: string; principal: string; organizationRole: string }
     expect(created).toMatchObject({ organizationId: 'org_a', principal: 'admin-a@example.test', organizationRole: 'admin' })
 

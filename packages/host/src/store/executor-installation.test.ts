@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -9,7 +9,7 @@ describe('ExecutorInstallationStore', () => {
   it('persists only a bootstrap hash and resumes status after reload', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'executor-installs-')), 'installs.json')
     const store = new ExecutorInstallationStore(path)
-    const created = store.create({ platform: 'linux', mode: 'service', workspaceRoot: '/work' })
+    const created = store.create({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' })
     expect(readFileSync(path, 'utf8')).not.toContain(created.setupCode)
     expect(readFileSync(path, 'utf8')).toContain('sha256:')
 
@@ -26,9 +26,24 @@ describe('ExecutorInstallationStore', () => {
     expect(reloaded.get(created.install.id)?.status).toBe('starting')
   })
 
+  it('loads legacy records without escalating missing privilege modes and rejects invalid explicit modes', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'executor-installs-')), 'installs.json')
+    const store = new ExecutorInstallationStore(path)
+    const created = store.create({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' })
+    const value = JSON.parse(readFileSync(path, 'utf8')) as { installations: Array<Record<string, unknown>> }
+    delete value.installations[0]!.privilegeMode
+    writeFileSync(path, JSON.stringify(value))
+    const migrated = new ExecutorInstallationStore(path)
+    migrated.load()
+    expect(migrated.get(created.install.id)?.privilegeMode).toBe('restricted')
+    value.installations[0]!.privilegeMode = 'root'
+    writeFileSync(path, JSON.stringify(value))
+    expect(() => new ExecutorInstallationStore(path).load()).toThrow('requires a valid privilegeMode')
+  })
+
   it('redeems once and only host observation can complete', () => {
     const store = new ExecutorInstallationStore(join(mkdtempSync(join(tmpdir(), 'executor-installs-')), 'installs.json'))
-    const created = store.create({ platform: 'macos', mode: 'temporary', workspaceRoot: '/work' })
+    const created = store.create({ platform: 'macos', mode: 'temporary', privilegeMode: 'privileged', workspaceRoot: '/work' })
     const bootstrap = store.claim(created.setupCode)!.bootstrap
     store.reportClient(created.install.id, bootstrap, 'asset_verified')
     expect(store.reportClient(created.install.id, bootstrap, 'pairing_pending').status).toBe('paired')

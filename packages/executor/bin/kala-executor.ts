@@ -48,7 +48,7 @@ import { readExecutorCredential, readExecutorRuntimeConfig } from '../src/execut
 import { parseSandboxRootsEnv } from '../src/sandbox-roots-env.js'
 import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile } from '../src/workspace-id.js'
 import { acquireExecutorLock } from '../src/local-lock.js'
-import { bootstrapEnvironment, defaultManagedRoot, downloadExecutorUpdateAssets, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
+import { assertSupportedInstallerPrivileges, bootstrapEnvironment, defaultManagedRoot, downloadExecutorUpdateAssets, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
 import { assertManagedWindowsInstallation, createWindowsServicePlan, executeWindowsServicePlan, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
@@ -244,11 +244,17 @@ async function acquireLocalLock(
 
 async function runInternalInstaller(): Promise<void> {
   const env = bootstrapEnvironment(process.env)
+  assertSupportedInstallerPrivileges(env, process.getuid?.() === 0)
   await reportInstallation(env, 'asset_verified')
   await reportInstallation(env, 'pairing_pending')
   await waitForApproval(env)
   const workspaceId = loadOrCreateWorkspaceId()
   const redeemed = await redeemInstallation(env, workspaceId)
+  // The bootstrap is no longer needed. Workspace tools and service installer
+  // subprocesses must not inherit installation credentials from this process.
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('EXECUTOR_INSTALL_') || key === 'EXECUTOR_TOKEN') delete process.env[key]
+  }
   const workspaceRoot = env.EXECUTOR_INSTALL_ROOT === '__KALA_CURRENT_DIRECTORY__' ? resolve(process.cwd()) : resolve(env.EXECUTOR_INSTALL_ROOT)
   process.stdout.write(`Kala workspace root: ${workspaceRoot}\n`)
   const service = env.EXECUTOR_INSTALL_MODE === 'service'
@@ -267,6 +273,7 @@ async function runInternalInstaller(): Promise<void> {
   }
   const installerSession: InstallerSession = {
     version: 1, mode: service && process.getuid?.() === 0 ? 'system' : 'user', executable,
+    privilegeMode: env.EXECUTOR_PRIVILEGE_MODE,
     host: env.HOST_URL, ...(env.EXECUTOR_INSTALL_LABEL ? { name: env.EXECUTOR_INSTALL_LABEL } : {}),
     sandboxRoots: [workspaceRoot], credential: { token: redeemed.token }, installationId: env.EXECUTOR_INSTALL_ID,
     ...(service ? {
@@ -281,9 +288,6 @@ async function runInternalInstaller(): Promise<void> {
   }
   if (!service) {
     await reportInstallation(env, 'starting')
-    process.env.EXECUTOR_TOKEN = redeemed.token
-    process.env.HOST_URL = env.HOST_URL
-    process.env.SANDBOX_ROOTS = workspaceRoot
     return await main(['--host', env.HOST_URL, '--sandbox-root', workspaceRoot, '--config', writeTemporaryConfig(installerSession)])
   }
   if (updateAssets) writeFileSync(join(managedRoot, 'update-public-key.pem'), updateAssets.publicKey, { mode: 0o600 })
@@ -312,6 +316,7 @@ async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment
   const credentialPath = join(plan.layout.dataDir, 'credential')
   const config = {
     version: 1, host: env.HOST_URL, ...(env.EXECUTOR_INSTALL_LABEL ? { name: env.EXECUTOR_INSTALL_LABEL } : {}),
+    privilegeMode: env.EXECUTOR_PRIVILEGE_MODE,
     sandboxRoots: [workspaceRoot], credentialFile: credentialPath, installationId: env.EXECUTOR_INSTALL_ID,
     installationSource: 'dashboard-native', managedRoot: plan.layout.dataDir, serviceMode: 'system',
   }
@@ -347,7 +352,7 @@ function writeTemporaryConfig(session: InstallerSession): string {
   mkdirSync(root, { recursive: true, mode: 0o700 })
   writeFileSync(credential, `${session.credential.token}\n`, { mode: 0o600 })
   const config = join(root, 'temporary-config.json')
-  writeFileSync(config, `${JSON.stringify({ version: 1, host: session.host, sandboxRoots: session.sandboxRoots, credentialFile: credential, installationId: session.installationId })}\n`, { mode: 0o600 })
+  writeFileSync(config, `${JSON.stringify({ version: 1, host: session.host, privilegeMode: session.privilegeMode, sandboxRoots: session.sandboxRoots, credentialFile: credential, installationId: session.installationId })}\n`, { mode: 0o600 })
   return config
 }
 

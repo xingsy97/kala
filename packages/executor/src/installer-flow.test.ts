@@ -1,22 +1,76 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { bootstrapEnvironment, downloadExecutorUpdateAssets, reportInstallation, waitForApproval, writeInstallerSession } from './installer-flow.js'
+import { assertSupportedInstallerPrivileges, bootstrapEnvironment, downloadExecutorUpdateAssets, reportInstallation, waitForApproval, writeInstallerSession } from './installer-flow.js'
+import { readExecutorRuntimeConfig } from './executor-config.js'
+import { readInstallerSession } from './installer-session.js'
 
 const roots: string[] = []
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('installer flow', () => {
   it('validates environment and writes private sessions atomically', () => {
-    const env = bootstrapEnvironment({ HOST_URL: 'https://host', EXECUTOR_INSTALL_ID: 'inst', EXECUTOR_INSTALL_BOOTSTRAP: 'boot', EXECUTOR_INSTALL_MODE: 'service', EXECUTOR_INSTALL_ROOT: '/repo' })
+    const env = bootstrapEnvironment({ HOST_URL: 'https://host', EXECUTOR_INSTALL_ID: 'inst', EXECUTOR_INSTALL_BOOTSTRAP: 'boot', EXECUTOR_INSTALL_MODE: 'service', EXECUTOR_INSTALL_ROOT: '/repo', EXECUTOR_PRIVILEGE_MODE: 'privileged' })
     expect(env.EXECUTOR_INSTALL_MODE).toBe('service')
+    expect(env.EXECUTOR_PRIVILEGE_MODE).toBe('privileged')
     const root = mkdtempSync(join(tmpdir(), 'installer-flow-')); roots.push(root)
     const path = join(root, 'private', 'session.json')
-    writeInstallerSession(path, { version: 1, mode: 'user', executable: '/bin/kala-executor', host: 'https://host', sandboxRoots: ['/repo'], credential: { token: 'ak_exec_test' } })
+    writeInstallerSession(path, { version: 1, mode: 'user', privilegeMode: 'privileged', executable: '/bin/kala-executor', host: 'https://host', sandboxRoots: ['/repo'], credential: { token: 'ak_exec_test' } })
     expect(JSON.parse(readFileSync(path, 'utf8')).host).toBe('https://host')
     if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600)
+  })
+
+  it('accepts both privilege modes and rejects unknown values', () => {
+    expect(bootstrapEnvironment({
+      HOST_URL: 'https://host', EXECUTOR_INSTALL_ID: 'inst', EXECUTOR_INSTALL_BOOTSTRAP: 'boot',
+      EXECUTOR_INSTALL_MODE: 'service', EXECUTOR_INSTALL_ROOT: '/repo', EXECUTOR_PRIVILEGE_MODE: 'restricted',
+    }).EXECUTOR_PRIVILEGE_MODE).toBe('restricted')
+    expect(() => bootstrapEnvironment({
+      HOST_URL: 'https://host', EXECUTOR_INSTALL_ID: 'inst', EXECUTOR_INSTALL_BOOTSTRAP: 'boot',
+      EXECUTOR_INSTALL_MODE: 'service', EXECUTOR_INSTALL_ROOT: '/repo', EXECUTOR_PRIVILEGE_MODE: 'root',
+    })).toThrow('Invalid EXECUTOR_PRIVILEGE_MODE')
+  })
+
+  it('rejects restricted root system services before pairing but permits user services and explicit privileged root services', () => {
+    const restricted = bootstrapEnvironment({
+      HOST_URL: 'https://host', EXECUTOR_INSTALL_ID: 'inst', EXECUTOR_INSTALL_BOOTSTRAP: 'boot',
+      EXECUTOR_INSTALL_MODE: 'service', EXECUTOR_INSTALL_ROOT: '/repo', EXECUTOR_PRIVILEGE_MODE: 'restricted',
+    })
+    expect(() => assertSupportedInstallerPrivileges(restricted, true)).toThrow('cannot run as a root system service')
+    expect(() => assertSupportedInstallerPrivileges(restricted, false)).not.toThrow()
+    expect(() => assertSupportedInstallerPrivileges({ ...restricted, EXECUTOR_PRIVILEGE_MODE: 'privileged' }, true)).not.toThrow()
+    expect(() => assertSupportedInstallerPrivileges({ ...restricted, EXECUTOR_INSTALL_MODE: 'temporary' }, true)).not.toThrow()
+  })
+
+  it('migrates legacy installer sessions and runtime configs without changing existing rights', () => {
+    const root = mkdtempSync(join(tmpdir(), 'installer-privilege-mode-')); roots.push(root)
+    const sessionPath = join(root, 'session.json')
+    writeFileSync(sessionPath, JSON.stringify({
+      version: 1, mode: 'user', executable: '/bin/kala-executor', host: 'https://host',
+      sandboxRoots: ['/repo'], credential: { token: 'ak_exec_test' },
+    }), { mode: 0o600 })
+    expect(readInstallerSession(sessionPath).privilegeMode).toBe('restricted')
+    writeFileSync(sessionPath, JSON.stringify({
+      version: 1, mode: 'system', executable: '/bin/kala-executor', host: 'https://host',
+      sandboxRoots: ['/repo'], credential: { token: 'ak_exec_test' },
+    }), { mode: 0o600 })
+    expect(readInstallerSession(sessionPath).privilegeMode).toBe('privileged')
+
+    const configPath = join(root, 'config.json')
+    writeFileSync(configPath, JSON.stringify({
+      version: 1, host: 'https://host', sandboxRoots: ['/repo'], credentialFile: '/credential',
+    }), { mode: 0o600 })
+    expect(readExecutorRuntimeConfig(configPath).privilegeMode).toBe('restricted')
+    writeFileSync(configPath, JSON.stringify({
+      version: 1, host: 'https://host', sandboxRoots: ['/repo'], credentialFile: '/credential', serviceMode: 'system',
+    }), { mode: 0o600 })
+    expect(readExecutorRuntimeConfig(configPath).privilegeMode).toBe('privileged')
+    writeFileSync(configPath, JSON.stringify({
+      version: 1, host: 'https://host', sandboxRoots: ['/repo'], credentialFile: '/credential', privilegeMode: 'root',
+    }))
+    expect(() => readExecutorRuntimeConfig(configPath)).toThrow('Invalid Executor privilege mode')
   })
 
   it('allows deployments without managed update assets and rejects partial publication', async () => {
@@ -45,7 +99,7 @@ describe('installer flow', () => {
   })
 
   it('reports status without exposing bootstrap in body and waits for approval', async () => {
-    const env = bootstrapEnvironment({ HOST_URL: 'https://host', EXECUTOR_INSTALL_ID: 'inst', EXECUTOR_INSTALL_BOOTSTRAP: 'boot', EXECUTOR_INSTALL_MODE: 'temporary', EXECUTOR_INSTALL_ROOT: '/repo' })
+    const env = bootstrapEnvironment({ HOST_URL: 'https://host', EXECUTOR_INSTALL_ID: 'inst', EXECUTOR_INSTALL_BOOTSTRAP: 'boot', EXECUTOR_INSTALL_MODE: 'temporary', EXECUTOR_INSTALL_ROOT: '/repo', EXECUTOR_PRIVILEGE_MODE: 'privileged' })
     let reads = 0
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ status: 'asset_verified' }), { status: 200 })

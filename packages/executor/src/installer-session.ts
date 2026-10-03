@@ -1,10 +1,12 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs'
 
 import type { ServiceMode } from './cli-args.js'
+import type { ExecutorPrivilegeMode } from '@agent-kernel/shared'
 
 export type InstallerSession = {
   version: 1
   mode: ServiceMode
+  privilegeMode: ExecutorPrivilegeMode
   executable: string
   host: string
   profile?: string
@@ -49,6 +51,13 @@ export function readInstallerSession(path: string): InstallerSession {
   const input = value as Record<string, unknown>
   if (input.version !== 1) throw new Error('Unsupported installer session version')
   if (input.mode !== 'system' && input.mode !== 'user') throw new Error('Invalid installer session mode')
+  // Legacy system services were already root-run before this field existed.
+  const privilegeMode = input.privilegeMode === undefined
+    ? (input.mode === 'system' ? 'privileged' : 'restricted')
+    : input.privilegeMode
+  if (privilegeMode !== 'restricted' && privilegeMode !== 'privileged') {
+    throw new Error('Invalid installer session privilegeMode')
+  }
   const executable = optionalString(input.executable, 'executable')
   const host = optionalString(input.host, 'host')
   if (!executable || !host) throw new Error('Installer session requires executable and host')
@@ -67,6 +76,7 @@ export function readInstallerSession(path: string): InstallerSession {
   return {
     version: 1,
     mode: input.mode,
+    privilegeMode,
     executable,
     host,
     ...(optionalString(input.profile, 'profile') ? { profile: input.profile as string } : {}),

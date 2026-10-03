@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ConnectWorkspaceDialog } from './ConnectWorkspaceDialog.js'
 
 const base = {
-  id: 'inst_1', platform: 'linux', mode: 'service', workspaceRoot: '__KALA_CURRENT_DIRECTORY__',
+  id: 'inst_1', platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '__KALA_CURRENT_DIRECTORY__',
   status: 'created', seq: 0, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:15:00Z',
   command: "curl -fsSL 'http://localhost:3000/install' | KALA_SETUP_CODE='A1B2C3D4E5' KALA_INSTALL_MODE='service' sh", setupCode: 'A1B2C3D4E5',
 }
@@ -37,7 +37,7 @@ describe('ConnectWorkspaceDialog', () => {
             setupCode: 'F6E7D8C9B0',
           })
         }
-        return response(base)
+        return response({ ...base, ...input })
       }
       if (url.endsWith('/events?after=0')) return response({ events: [] })
       if (url === '/api/executor-installs/inst_1' && init?.method === 'DELETE') return response({ ok: true })
@@ -48,10 +48,14 @@ describe('ConnectWorkspaceDialog', () => {
     }))
   })
 
-  it('defaults to Linux service mode, shows platform icons, and displays one physical command', async () => {
+  it('defaults to Linux Service and Privileged modes while keeping expert options hidden', async () => {
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
     await screen.findByText(/curl -fsSL/)
-    expect(screen.getByTestId('connect-workspace-service').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('connect-workspace-expert-mode').getAttribute('aria-checked')).toBe('false')
+    expect(screen.queryByTestId('connect-workspace-service')).toBeNull()
+    expect(screen.queryByTestId('connect-workspace-privileged')).toBeNull()
+    const createCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({ mode: 'service', privilegeMode: 'privileged' })
     expect(screen.getByTestId('connect-workspace-linux').getAttribute('aria-pressed')).toBe('true')
     expect(screen.queryByLabelText(/workspace root/i)).toBeNull()
     expect(screen.queryByText(/no sudo required/i)).toBeNull()
@@ -61,11 +65,6 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByTestId('connect-workspace-macos').querySelector('img')?.getAttribute('src')).toBe('/icons/macos.svg')
     expect(screen.getByTestId('connect-workspace-windows').hasAttribute('disabled')).toBe(true)
     expect(screen.getByTestId('connect-workspace-windows-notice').textContent).toContain('not available in this release')
-    expect(screen.getByTestId('connect-workspace-service').className).toContain('bg-background')
-    expect(screen.getByTestId('connect-workspace-service').className).toContain('flex-col')
-    expect(screen.getByTestId('connect-workspace-service').querySelector('.truncate')).toBeNull()
-    expect(screen.getByTestId('connect-workspace-service').textContent).toContain('Recommended')
-    expect(screen.getByTestId('connect-workspace-service').textContent).toContain('Install as service')
     expect(screen.getByTestId('installation-status').querySelector('svg')).toBeTruthy()
     const dialog = screen.getByTestId('connect-workspace-dialog')
     expect(dialog.className).toContain('rounded-t-2xl')
@@ -90,6 +89,7 @@ describe('ConnectWorkspaceDialog', () => {
     const write = vi.mocked(navigator.clipboard.writeText)
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
     await screen.findByText(/curl -fsSL/)
+    fireEvent.click(screen.getByTestId('connect-workspace-expert-mode'))
     fireEvent.click(screen.getByTestId('connect-workspace-macos'))
     fireEvent.click(screen.getByTestId('connect-workspace-temporary'))
     await waitFor(() => expect(screen.getByText(/F6E7D8C9B0/)).toBeTruthy())
@@ -119,6 +119,7 @@ describe('ConnectWorkspaceDialog', () => {
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
     await screen.findByText(/curl -fsSL/)
 
+    fireEvent.click(screen.getByTestId('connect-workspace-expert-mode'))
     fireEvent.click(screen.getByTestId('connect-workspace-temporary'))
 
     const terminal = screen.getByTestId('executor-terminal-command')
@@ -132,6 +133,28 @@ describe('ConnectWorkspaceDialog', () => {
     expect(terminal.getAttribute('aria-busy')).toBe('false')
     expect(screen.queryByTestId('executor-command-transition')).toBeNull()
     expect(screen.getByTestId('copy-executor-command').hasAttribute('disabled')).toBe(false)
+  })
+
+  it('shows permission choices only in Expert Service mode and resets defaults when Expert mode closes', async () => {
+    render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
+    await screen.findByText(/curl -fsSL/)
+    fireEvent.click(screen.getByTestId('connect-workspace-expert-mode'))
+    expect(screen.getByTestId('connect-workspace-service').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('connect-workspace-privileged').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('connect-workspace-service').textContent).toContain('Recommended')
+    expect(screen.getByTestId('connect-workspace-privileged').textContent).toContain('Recommended')
+
+    fireEvent.click(screen.getByTestId('connect-workspace-restricted'))
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST' && String(init.body).includes('"privilegeMode":"restricted"'))).toBe(true))
+    fireEvent.click(screen.getByTestId('connect-workspace-temporary'))
+    expect(screen.queryByTestId('connect-workspace-privileged')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('connect-workspace-expert-mode'))
+    expect(screen.queryByTestId('connect-workspace-expert-options')).toBeNull()
+    await waitFor(() => {
+      const latestCreate = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST').at(-1)
+      expect(JSON.parse(String(latestCreate?.[1]?.body))).toMatchObject({ mode: 'service', privilegeMode: 'privileged' })
+    })
   })
 
   it('uses the active host endpoint for install APIs when provided', async () => {

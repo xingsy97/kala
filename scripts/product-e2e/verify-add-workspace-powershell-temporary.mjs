@@ -31,7 +31,7 @@ try {
 
   const createdResponse = await fetch(`${origin}/api/executor-installs`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ platform: 'windows', mode: 'temporary', workspaceRoot: '__KALA_CURRENT_DIRECTORY__', label: 'powershell-e2e' }),
+    body: JSON.stringify({ platform: 'windows', mode: 'temporary', privilegeMode: 'privileged', workspaceRoot: '__KALA_CURRENT_DIRECTORY__', label: 'powershell-e2e' }),
   })
   if (!createdResponse.ok) throw new Error(`create installation failed: ${createdResponse.status}`)
   const created = await createdResponse.json()

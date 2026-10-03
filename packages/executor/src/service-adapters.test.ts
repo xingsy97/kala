@@ -13,6 +13,7 @@ import type { InstallerSession } from './installer-session.js'
 const session: InstallerSession = {
   version: 1,
   mode: 'system',
+  privilegeMode: 'privileged',
   executable: '/opt/kala/executor/current/kala-executor',
   host: 'https://agent.example.test',
   name: 'Build Box',
@@ -54,6 +55,8 @@ describe('Linux service adapter', () => {
     expect(rendered.unit).toContain('CPUQuota=400%')
     expect(rendered.unit).toContain('MemoryMax=8G')
     expect(rendered.unit).toContain('TasksMax=512')
+    expect(rendered.unit).toContain('NoNewPrivileges=no')
+    expect(JSON.parse(rendered.config).privilegeMode).toBe('privileged')
     expect(rendered.credential).toContain('secret-value')
 
     const plan = createLinuxServicePlan('install', 'system', '/home/example', session)
@@ -68,6 +71,12 @@ describe('Linux service adapter', () => {
     }
     await expect(executeLinuxServicePlan(plan, runner)).rejects.toThrow('boom')
     expect(seen.some((value) => value.includes('disable --now'))).toBe(true)
+  })
+
+  it('enables no-new-privileges only in Restricted Mode', () => {
+    const rendered = renderLinuxServiceFiles({ ...session, privilegeMode: 'restricted' }, '/home/example')
+    expect(rendered.unit).toContain('NoNewPrivileges=yes')
+    expect(JSON.parse(rendered.config).privilegeMode).toBe('restricted')
   })
 
   it('exposes status, logs, start, stop, restart, and uninstall service controls', () => {

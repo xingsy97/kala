@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-import type { ExecutorInstallMode, ExecutorInstallStatusSnapshot } from '@agent-kernel/shared'
+import type { ExecutorInstallMode, ExecutorInstallStatusSnapshot, ExecutorPrivilegeMode } from '@agent-kernel/shared'
 
 import type { InstallerSession } from './installer-session.js'
 
@@ -10,6 +10,7 @@ export type BootstrapEnvironment = {
   EXECUTOR_INSTALL_ID: string
   EXECUTOR_INSTALL_BOOTSTRAP: string
   EXECUTOR_INSTALL_MODE: ExecutorInstallMode
+  EXECUTOR_PRIVILEGE_MODE: ExecutorPrivilegeMode
   EXECUTOR_INSTALL_ROOT: string
   EXECUTOR_INSTALL_LABEL?: string
 }
@@ -27,11 +28,20 @@ export function bootstrapEnvironment(env: NodeJS.ProcessEnv): BootstrapEnvironme
   }
   const mode = required('EXECUTOR_INSTALL_MODE')
   if (mode !== 'service' && mode !== 'temporary') throw new Error('Invalid EXECUTOR_INSTALL_MODE')
+  const privilegeMode = required('EXECUTOR_PRIVILEGE_MODE')
+  if (privilegeMode !== 'restricted' && privilegeMode !== 'privileged') throw new Error('Invalid EXECUTOR_PRIVILEGE_MODE')
   return {
     HOST_URL: required('HOST_URL'), EXECUTOR_INSTALL_ID: required('EXECUTOR_INSTALL_ID'),
     EXECUTOR_INSTALL_BOOTSTRAP: required('EXECUTOR_INSTALL_BOOTSTRAP'), EXECUTOR_INSTALL_MODE: mode,
+    EXECUTOR_PRIVILEGE_MODE: privilegeMode,
     EXECUTOR_INSTALL_ROOT: required('EXECUTOR_INSTALL_ROOT'),
     ...(env.EXECUTOR_INSTALL_LABEL?.trim() ? { EXECUTOR_INSTALL_LABEL: env.EXECUTOR_INSTALL_LABEL.trim() } : {}),
+  }
+}
+
+export function assertSupportedInstallerPrivileges(env: BootstrapEnvironment, isRoot: boolean): void {
+  if (env.EXECUTOR_INSTALL_MODE === 'service' && isRoot && env.EXECUTOR_PRIVILEGE_MODE === 'restricted') {
+    throw new Error('Restricted installations cannot run as a root system service; use a non-root user service or explicitly choose privileged mode')
   }
 }
 

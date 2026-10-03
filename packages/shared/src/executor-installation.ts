@@ -3,6 +3,7 @@ export const EXECUTOR_INSTALL_LABEL_MAX_LENGTH = 128
 
 export type ExecutorInstallPlatform = 'linux' | 'macos' | 'windows'
 export type ExecutorInstallMode = 'service' | 'temporary'
+export type ExecutorPrivilegeMode = 'restricted' | 'privileged'
 
 export type ExecutorInstallStatus =
   | 'created'
@@ -21,6 +22,7 @@ export type ExecutorInstallStatus =
 export interface CreateExecutorInstall {
   platform: ExecutorInstallPlatform
   mode: ExecutorInstallMode
+  privilegeMode: ExecutorPrivilegeMode
   workspaceRoot: string
   label?: string
 }
@@ -28,6 +30,7 @@ export interface CreateExecutorInstall {
 export interface UpdateExecutorInstall {
   platform?: ExecutorInstallPlatform
   mode?: ExecutorInstallMode
+  privilegeMode?: ExecutorPrivilegeMode
   workspaceRoot?: string
   label?: string
 }
@@ -39,6 +42,7 @@ export interface ExecutorInstallStatusSnapshot {
   organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
   platform: ExecutorInstallPlatform
   mode: ExecutorInstallMode
+  privilegeMode: ExecutorPrivilegeMode
   workspaceRoot: string
   label?: string
   status: ExecutorInstallStatus

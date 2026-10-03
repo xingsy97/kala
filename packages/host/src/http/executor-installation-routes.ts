@@ -208,12 +208,13 @@ function authorizeManagement(req: IncomingMessage, tenancy: PlatformTenancy, aut
   return result
 }
 
-function bootstrapEnvironment(origin: string, snapshot: { id: string; mode: string; platform: string; workspaceRoot: string; label?: string }, bootstrap: string): Record<string, string> {
+function bootstrapEnvironment(origin: string, snapshot: { id: string; mode: string; platform: string; privilegeMode: string; workspaceRoot: string; label?: string }, bootstrap: string): Record<string, string> {
   return {
     HOST_URL: origin,
     EXECUTOR_INSTALL_ID: snapshot.id,
     EXECUTOR_INSTALL_BOOTSTRAP: bootstrap,
     EXECUTOR_INSTALL_MODE: snapshot.mode,
+    EXECUTOR_PRIVILEGE_MODE: snapshot.privilegeMode,
     EXECUTOR_INSTALL_PLATFORM: snapshot.platform,
     EXECUTOR_INSTALL_ROOT: snapshot.workspaceRoot,
     KALA_RELEASE_BASE_URL: `${origin}/install/assets`,

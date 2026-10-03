@@ -14,6 +14,7 @@ const snapshot = {
   id: 'install-1',
   platform: 'linux',
   mode: 'service',
+  privilegeMode: 'privileged',
   workspaceRoot: '/srv/workspace',
   label: 'Build workspace',
   status: 'pairing_pending',
@@ -28,11 +29,13 @@ describe('executor installation contracts', () => {
     expect(schema.CreateExecutorInstallSchema.safeParse({
       platform: 'windows',
       mode: 'temporary',
+      privilegeMode: 'privileged',
       workspaceRoot: 'x'.repeat(EXECUTOR_INSTALL_WORKSPACE_ROOT_MAX_LENGTH),
       label: 'x'.repeat(EXECUTOR_INSTALL_LABEL_MAX_LENGTH),
     }).success).toBe(true)
 
     expect(schema.UpdateExecutorInstallSchema.safeParse({ mode: 'service' }).success).toBe(true)
+    expect(schema.UpdateExecutorInstallSchema.safeParse({ privilegeMode: 'restricted' }).success).toBe(true)
   })
 
   it('rejects invalid, empty, oversized, and unknown request fields', () => {
@@ -58,6 +61,12 @@ describe('executor installation contracts', () => {
       label: 'x'.repeat(EXECUTOR_INSTALL_LABEL_MAX_LENGTH + 1),
     }).success).toBe(false)
     expect(schema.UpdateExecutorInstallSchema.safeParse({}).success).toBe(false)
+    expect(schema.CreateExecutorInstallSchema.safeParse({
+      platform: 'linux',
+      mode: 'service',
+      privilegeMode: 'root',
+      workspaceRoot: '/workspace',
+    }).success).toBe(false)
     expect(schema.UpdateExecutorInstallSchema.safeParse({ label: 'workspace', bootstrapToken: 'secret' }).success).toBe(false)
   })
 

@@ -39,7 +39,15 @@ export class ExecutorInstallationStore {
     if (!existsSync(this.path)) return
     const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as FileShape
     if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.installations)) return
-    this.records = new Map(parsed.installations.filter(validRecord).map((record) => [record.id, record]))
+    // Legacy pending installations had no privilegeMode. Resume them with the
+    // least privileged option; never infer privileged access from an old file.
+    const installations = parsed.installations.map((record) => record.privilegeMode === undefined
+      ? { ...record, privilegeMode: 'restricted' as const }
+      : record)
+    if (installations.some((record) => record.privilegeMode !== 'restricted' && record.privilegeMode !== 'privileged')) {
+      throw new Error('Executor installation record requires a valid privilegeMode')
+    }
+    this.records = new Map(installations.filter(validRecord).map((record) => [record.id, record]))
     this.idempotency = new Map(Object.entries(parsed.idempotency ?? {}).filter(([, id]) => this.records.has(id)))
   }
 
@@ -230,4 +238,9 @@ function createSetupCode(): string { return randomBytes(5).toString('hex').toUpp
 function normalizeSetupCode(value: string): string | undefined { const code = value.replaceAll('-', '').trim().toUpperCase(); return /^[A-F0-9]{10}$/u.test(code) ? code : undefined }
 function hashToken(token: string): string { return `sha256:${createHash('sha256').update(token).digest('hex')}` }
 function safeHashEqual(left: string, right: string): boolean { const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b) }
-function validRecord(value: InstallationRecord): boolean { return typeof value?.id === 'string' && typeof value.bootstrapHash === 'string' && Array.isArray(value.events) }
+function validRecord(value: InstallationRecord): boolean {
+  return typeof value?.id === 'string' &&
+    typeof value.bootstrapHash === 'string' &&
+    (value.privilegeMode === 'restricted' || value.privilegeMode === 'privileged') &&
+    Array.isArray(value.events)
+}

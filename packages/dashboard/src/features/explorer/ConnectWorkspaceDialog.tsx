@@ -7,6 +7,7 @@ import type {
   ExecutorInstallEvent,
   ExecutorInstallMode,
   ExecutorInstallPlatform,
+  ExecutorPrivilegeMode,
   ExecutorInstallStatusSnapshot,
 } from '@agent-kernel/shared'
 
@@ -29,18 +30,21 @@ type Props = {
 }
 
 type InstallResponse = ExecutorInstallStatusSnapshot & { command?: string; setupCode?: string }
-type FormState = Pick<CreateExecutorInstall, 'platform' | 'mode'>
+type FormState = Pick<CreateExecutorInstall, 'platform' | 'mode' | 'privilegeMode'>
 
 const POLL_INTERVAL_MS = 2_000
 const PLATFORMS = ['linux', 'macos'] as const satisfies readonly ExecutorInstallPlatform[]
 const MODES: ExecutorInstallMode[] = ['service', 'temporary']
+const PRIVILEGE_MODES: ExecutorPrivilegeMode[] = ['privileged', 'restricted']
 
 export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX.Element {
   const { t } = useTranslation()
   const [form, setForm] = useState<FormState>(() => ({
     platform: detectCurrentPlatform(),
     mode: 'service',
+    privilegeMode: 'privileged',
   }))
+  const [expertMode, setExpertMode] = useState(false)
   const [installation, setInstallation] = useState<InstallResponse | null>(null)
   const [command, setCommand] = useState('')
   const [pairingCode, setPairingCode] = useState<string | null>(null)
@@ -182,6 +186,11 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
     if (createdFormRef.current) setCommandTransitioning(!sameForm(nextForm(form, patch), createdFormRef.current))
   }
 
+  const toggleExpertMode = (): void => {
+    if (expertMode) updateForm({ mode: 'service', privilegeMode: 'privileged' })
+    setExpertMode((current) => !current)
+  }
+
   const copy = async (): Promise<void> => {
     if (commandTransitioning) return
     try {
@@ -225,8 +234,29 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
             <section className="min-w-0 space-y-5" aria-label={t('executorPairing.installationOptions')}>
               <SectionLabel index="1" label={t('explorer.connectDialog.platform')} />
               <PlatformGroup label={t('explorer.connectDialog.platform')} selected={form.platform} labelFor={(value) => t(`explorer.connectDialog.platforms.${value}`)} onChange={(platform) => updateForm({ platform })} />
-              <ChoiceGroup label={t('explorer.connectDialog.runMode')} values={MODES} selected={form.mode} labelFor={(value) => t(`explorer.connectDialog.modes.${value}`)} onChange={(mode) => updateForm({ mode })} />
-              <p className="rounded-xl bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground" data-testid="connect-workspace-mode-description">{t(`explorer.connectDialog.modeDescriptions.${form.mode}`)}</p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={expertMode}
+                data-testid="connect-workspace-expert-mode"
+                onClick={toggleExpertMode}
+                className="flex w-full items-center justify-between gap-4 rounded-xl bg-muted/25 px-3 py-2.5 text-left transition-colors hover:bg-muted/45"
+              >
+                <span className="min-w-0"><span className="block text-xs font-medium text-foreground">{t('explorer.connectDialog.expertMode')}</span><span className="mt-0.5 block text-caption leading-4 text-muted-foreground">{t('explorer.connectDialog.expertModeDescription')}</span></span>
+                <span className={cn('relative h-5 w-9 flex-none rounded-full transition-colors', expertMode ? 'bg-primary' : 'bg-muted-foreground/25')} aria-hidden="true"><span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-background shadow-sm transition-transform', expertMode ? 'translate-x-[1.125rem]' : 'translate-x-0.5')} /></span>
+              </button>
+              {expertMode ? (
+                <div className="space-y-4" data-testid="connect-workspace-expert-options">
+                  <ChoiceGroup label={t('explorer.connectDialog.runMode')} values={MODES} selected={form.mode} recommended="service" labelFor={(value) => t(`explorer.connectDialog.modes.${value}`)} onChange={(mode) => updateForm({ mode })} />
+                  <p className="rounded-xl bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground" data-testid="connect-workspace-mode-description">{t(`explorer.connectDialog.modeDescriptions.${form.mode}`)}</p>
+                  {form.mode === 'service' ? (
+                    <>
+                      <ChoiceGroup label={t('explorer.connectDialog.privilegeMode')} values={PRIVILEGE_MODES} selected={form.privilegeMode} recommended="privileged" labelFor={(value) => t(`explorer.connectDialog.privilegeModes.${value}`)} onChange={(privilegeMode) => updateForm({ privilegeMode })} />
+                      <p className="rounded-xl bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground" data-testid="connect-workspace-privilege-description">{t(`explorer.connectDialog.privilegeModeDescriptions.${form.privilegeMode}`)}</p>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
             <section className="min-w-0 space-y-3 lg:border-l lg:border-border/35 lg:pl-8">
               <div className="flex items-center justify-between gap-3">
@@ -273,9 +303,9 @@ function PlatformGroup({ label, selected, labelFor, onChange }: { label: string;
   return <fieldset className="min-w-0"><legend className="sr-only">{label}</legend><div className="grid grid-cols-3 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-medium transition-[background-color,color,box-shadow,transform] active:scale-[0.98] ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.5)]' : 'bg-muted/20 text-muted-foreground hover:bg-accent/55 hover:text-foreground'}`}>{icons[value]}<span className="text-center">{labelFor(value)}</span></button>)}<button type="button" disabled data-testid="connect-workspace-windows" className="flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl bg-muted/20 px-2 text-xs font-medium text-muted-foreground opacity-60"><img src={staticAssetUrl('/icons/windows.svg')} alt="" className="h-7 w-7 object-contain" aria-hidden="true" /><span>{t('explorer.connectDialog.platforms.windows')}</span><span className="text-center text-[0.625rem]">{t('explorer.connectDialog.windowsUnavailableShort')}</span></button></div><p className="mt-2 text-xs text-muted-foreground" data-testid="connect-workspace-windows-notice">{t('explorer.connectDialog.windowsUnavailable')}</p></fieldset>
 }
 
-function ChoiceGroup<T extends string>({ label, values, selected, labelFor, onChange }: { label: string; values: readonly T[]; selected: T; labelFor(value: T): string; onChange(value: T): void }): JSX.Element {
+function ChoiceGroup<T extends string>({ label, values, selected, recommended, labelFor, onChange }: { label: string; values: readonly T[]; selected: T; recommended?: T; labelFor(value: T): string; onChange(value: T): void }): JSX.Element {
   const { t } = useTranslation()
-  return <fieldset className="min-w-0 space-y-2.5"><legend className="text-xs font-medium text-muted-foreground">{label}</legend><div className="grid min-w-0 grid-cols-2 rounded-xl bg-muted/30 p-1">{values.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-center text-xs font-medium transition-colors ${selected === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}><span className="min-w-0 break-words">{labelFor(value)}</span>{value === 'service' ? <span className="max-w-full rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}</button>)}</div></fieldset>
+  return <fieldset className="min-w-0 space-y-2.5"><legend className="text-xs font-medium text-muted-foreground">{label}</legend><div className="grid min-w-0 grid-cols-2 rounded-xl bg-muted/30 p-1">{values.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-center text-xs font-medium transition-colors ${selected === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}><span className="min-w-0 break-words">{labelFor(value)}</span>{value === recommended ? <span className="max-w-full rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">{t('dialogs.runtime.recommended')}</span> : null}</button>)}</div></fieldset>
 }
 
 function TerminalCommand({ command, copied, mode, modeLabel, transitioning, onCopy }: { command: string; copied: boolean; mode: ExecutorInstallMode; modeLabel: string; transitioning: boolean; onCopy(): void }): JSX.Element {
@@ -318,7 +348,7 @@ function InstallStatus({ status, label }: { status: string; label: string }): JS
 }
 
 function toApiInput(form: FormState): CreateExecutorInstall {
-  return { platform: form.platform, mode: form.mode, workspaceRoot: '__KALA_CURRENT_DIRECTORY__' }
+  return { platform: form.platform, mode: form.mode, privilegeMode: form.privilegeMode, workspaceRoot: '__KALA_CURRENT_DIRECTORY__' }
 }
 
 function sameForm(left: FormState, right: FormState): boolean {

@@ -9,6 +9,7 @@ import type {
   ExecutorInstallEvent,
   ExecutorInstallMode,
   ExecutorInstallPlatform,
+  ExecutorPrivilegeMode,
   ExecutorInstallStatus,
   ExecutorInstallStatusSnapshot,
   UpdateExecutorInstall,
@@ -31,6 +32,11 @@ export const ExecutorInstallModeSchema = z.enum([
   'temporary',
 ]) satisfies z.ZodType<ExecutorInstallMode>
 
+export const ExecutorPrivilegeModeSchema = z.enum([
+  'restricted',
+  'privileged',
+]) satisfies z.ZodType<ExecutorPrivilegeMode>
+
 export const ExecutorInstallStatusSchema = z.enum([
   'created',
   'bootstrap_downloaded',
@@ -49,6 +55,7 @@ export const ExecutorInstallStatusSchema = z.enum([
 export const CreateExecutorInstallSchema = z.object({
   platform: ExecutorInstallPlatformSchema,
   mode: ExecutorInstallModeSchema,
+  privilegeMode: ExecutorPrivilegeModeSchema,
   workspaceRoot: WorkspaceRootSchema,
   label: LabelSchema.optional(),
 }).strict() satisfies z.ZodType<CreateExecutorInstall>
@@ -56,6 +63,7 @@ export const CreateExecutorInstallSchema = z.object({
 export const UpdateExecutorInstallSchema = z.object({
   platform: ExecutorInstallPlatformSchema.optional(),
   mode: ExecutorInstallModeSchema.optional(),
+  privilegeMode: ExecutorPrivilegeModeSchema.optional(),
   workspaceRoot: WorkspaceRootSchema.optional(),
   label: LabelSchema.optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, {
@@ -69,6 +77,7 @@ export const ExecutorInstallStatusSnapshotSchema = z.object({
   organizationRole: z.enum(['owner', 'admin', 'member', 'viewer']).optional(),
   platform: ExecutorInstallPlatformSchema,
   mode: ExecutorInstallModeSchema,
+  privilegeMode: ExecutorPrivilegeModeSchema,
   workspaceRoot: WorkspaceRootSchema,
   label: LabelSchema.optional(),
   status: ExecutorInstallStatusSchema,

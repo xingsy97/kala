@@ -171,7 +171,7 @@ try {
       const response = await fetch('/api/executor-installs', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ platform: 'linux', mode: 'service', workspaceRoot: '__KALA_CURRENT_DIRECTORY__' }),
+        body: JSON.stringify({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '__KALA_CURRENT_DIRECTORY__' }),
       })
       if (!response.ok) throw new Error(await response.text())
       return await response.json()

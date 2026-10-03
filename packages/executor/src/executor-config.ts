@@ -1,4 +1,5 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs'
+import type { ExecutorPrivilegeMode } from '@agent-kernel/shared'
 
 export type ExecutorRuntimeConfig = {
   version: 1
@@ -11,6 +12,7 @@ export type ExecutorRuntimeConfig = {
   installationSource?: 'dashboard-native' | 'package-manager' | 'container' | 'legacy-cjs'
   managedRoot?: string
   serviceMode?: 'system' | 'user'
+  privilegeMode: ExecutorPrivilegeMode
   update?: {
     enabled: boolean
     manifestUrl: string
@@ -39,7 +41,15 @@ export function readExecutorRuntimeConfig(path: string): ExecutorRuntimeConfig {
       !['stable', 'beta', 'nightly'].includes(value.update.channel) || !Number.isSafeInteger(value.update.intervalMinutes) || value.update.intervalMinutes < 5)) {
     throw new Error('Invalid Executor update config')
   }
-  return value as ExecutorRuntimeConfig
+  // An existing system service already ran as root before privilegeMode
+  // existed. Label it honestly; user services remain restricted by default.
+  const privilegeMode = value.privilegeMode === undefined
+    ? (value.serviceMode === 'system' ? 'privileged' : 'restricted')
+    : value.privilegeMode
+  if (privilegeMode !== 'restricted' && privilegeMode !== 'privileged') {
+    throw new Error('Invalid Executor privilege mode')
+  }
+  return { ...value, privilegeMode } as ExecutorRuntimeConfig
 }
 
 export function readExecutorCredential(path: string): string {
