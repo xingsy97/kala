@@ -107,6 +107,7 @@ describe('SubAgentCard', () => {
         scrollWidth: { configurable: true, value: 420 },
       })
       act(() => resize([], {} as ResizeObserver))
+      fireEvent.click(screen.getByTestId('sub-agent-toggle-c-truncated'))
       const task = screen.getByTestId('sub-agent-task-c-truncated')
       expect(task.textContent).toContain('Inspect every clipboard surface across browser and desktop layouts.')
       expect(task.textContent).not.toContain('Fresh context')
@@ -163,6 +164,12 @@ describe('SubAgentCard', () => {
     expect(screen.getByTestId('sub-agent-role-c1').classList.contains('ak-thinking-text')).toBe(true)
     expect(runningRow.querySelector('.animate-spin')).toBeNull()
     expect(runningRow.textContent).not.toContain('Child session is starting')
+    expect(socket.emit.mock.calls.some(([event]) => event === 'client:subscribe_channels')).toBe(false)
+
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
+    await waitFor(() => expect(socket.emit.mock.calls.some(([event]) => event === 'client:subscribe_channels')).toBe(true))
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
+    await waitFor(() => expect(socket.emit.mock.calls.some(([event]) => event === 'client:unsubscribe_channels')).toBe(true))
 
     act(() => {
       socket.emitFinished({
@@ -453,6 +460,8 @@ describe('SubAgentCard', () => {
     )
 
     await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-live').getAttribute('data-sub-agent-status')).toBe('running'))
+    expect(screen.queryByTestId('sub-agent-transcript-frame-c-live')).toBeNull()
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c-live'))
     await waitFor(() => expect(screen.getByText(/child is still working/)).toBeTruthy())
     expect(screen.getByTestId('sub-agent-transcript-frame-c-live').getAttribute('data-layout')).toBe('content')
     expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('false')
@@ -546,6 +555,8 @@ describe('SubAgentCard', () => {
     )
 
     await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-compact-live').getAttribute('data-sub-agent-status')).toBe('running'))
+    expect(screen.queryByTestId('sub-agent-transcript-frame-c-compact-live')).toBeNull()
+    fireEvent.click(screen.getByTestId('sub-agent-toggle-c-compact-live'))
     const frame = await screen.findByTestId('sub-agent-transcript-frame-c-compact-live')
     expect(frame.getAttribute('data-layout')).toBe('viewport')
     expect(frame.style.height).toBe('256px')
@@ -870,6 +881,7 @@ function makeControlledSocket(): {
     return socket
   })
   const socket = {
+    connected: true,
     on(event: string, listener: (payload: unknown) => void) {
       const set = listeners.get(event) ?? new Set()
       set.add(listener)

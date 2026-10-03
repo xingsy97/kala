@@ -13,28 +13,30 @@ import {
 } from './ui/dialog.js'
 
 type ImageSize = { width: number; height: number }
+type PreviewMedia =
+  | { kind: 'image'; src: string; imageTestId?: string }
+  | { kind: 'svg'; svg: string; size: ImageSize; imageTestId?: string }
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 4
 const ZOOM_STEP = 0.25
 
-export function ReadonlyImageCanvas({
-  src,
+function ReadonlyMediaCanvas({
+  media,
   alt,
   className,
-  imageTestId,
   stageTestId = 'readonly-image-preview-stage',
 }: {
-  src: string
+  media: PreviewMedia
   alt: string
   className?: string
-  imageTestId?: string
   stageTestId?: string
 }): JSX.Element {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const [stageSize, setStageSize] = useState<ImageSize>({ width: 0, height: 0 })
-  const [naturalSize, setNaturalSize] = useState<ImageSize>({ width: 0, height: 0 })
+  const [imageSize, setImageSize] = useState<ImageSize>({ width: 0, height: 0 })
   const [zoom, setZoom] = useState(1)
+  const naturalSize = media.kind === 'svg' ? media.size : imageSize
 
   useEffect(() => {
     const stage = stageRef.current
@@ -50,7 +52,7 @@ export function ReadonlyImageCanvas({
     }
   }, [])
 
-  useEffect(() => setZoom(1), [src])
+  useEffect(() => setZoom(1), [media])
 
   const fitScale = useMemo(() => {
     if (!stageSize.width || !stageSize.height || !naturalSize.width || !naturalSize.height) return 1
@@ -86,15 +88,26 @@ export function ReadonlyImageCanvas({
           }}
           data-testid="readonly-image-preview-scroll-content"
         >
-          <img
-            src={src}
-            alt={alt}
-            draggable={false}
-            className="block max-w-none select-none object-contain shadow-2xl shadow-black/25"
-            style={{ width: renderedWidth, height: renderedHeight }}
-            onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-            data-testid={imageTestId}
-          />
+          {media.kind === 'image' ? (
+            <img
+              src={media.src}
+              alt={alt}
+              draggable={false}
+              className="block max-w-none select-none object-contain shadow-2xl shadow-black/25"
+              style={{ width: renderedWidth, height: renderedHeight }}
+              onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+              data-testid={media.imageTestId}
+            />
+          ) : (
+            <div
+              role="img"
+              aria-label={alt}
+              className="block max-w-none select-none [&>svg]:block [&>svg]:h-full [&>svg]:w-full [&>svg]:max-w-none"
+              style={{ width: renderedWidth, height: renderedHeight }}
+              dangerouslySetInnerHTML={{ __html: media.svg }}
+              data-testid={media.imageTestId}
+            />
+          )}
         </div>
       </div>
       <div className="flex min-h-12 items-center justify-center gap-1 border-t border-white/10 bg-black/92 px-2 pb-[env(safe-area-inset-bottom)] text-white sm:min-h-11 sm:pb-0" data-testid="readonly-image-preview-controls">
@@ -106,6 +119,30 @@ export function ReadonlyImageCanvas({
       </div>
     </div>
   )
+}
+
+export function ReadonlyImageCanvas({
+  src,
+  alt,
+  className,
+  imageTestId,
+  stageTestId,
+}: {
+  src: string
+  alt: string
+  className?: string
+  imageTestId?: string
+  stageTestId?: string
+}): JSX.Element {
+  const media = useMemo<PreviewMedia>(() => ({ kind: 'image', src, imageTestId }), [imageTestId, src])
+  return <ReadonlyMediaCanvas media={media} alt={alt} className={className} stageTestId={stageTestId} />
+}
+
+function getSvgSize(svg: string): ImageSize {
+  const viewBox = /\bviewBox\s*=\s*["']\s*([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s*["']/iu.exec(svg)
+  const width = viewBox ? Number(viewBox[3]) : 0
+  const height = viewBox ? Number(viewBox[4]) : 0
+  return width > 0 && height > 0 ? { width, height } : { width: 800, height: 600 }
 }
 
 function PreviewControl({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick(): void; children: JSX.Element }): JSX.Element {
@@ -137,6 +174,73 @@ export function ReadonlyImagePreviewDialog({
   closeTestId?: string
   imageTestId?: string
 }): JSX.Element {
+  const media = useMemo<PreviewMedia>(() => ({ kind: 'image', src, imageTestId }), [imageTestId, src])
+  return (
+    <ReadonlyMediaPreviewDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      media={media}
+      alt={alt}
+      title={title}
+      description={description}
+      dialogTestId={dialogTestId}
+      closeTestId={closeTestId}
+    />
+  )
+}
+
+export function ReadonlySvgPreviewDialog({
+  open,
+  onOpenChange,
+  svg,
+  alt,
+  title,
+  dialogTestId,
+  closeTestId,
+  imageTestId,
+}: {
+  open: boolean
+  onOpenChange(open: boolean): void
+  svg: string
+  alt: string
+  title: string
+  dialogTestId?: string
+  closeTestId?: string
+  imageTestId?: string
+}): JSX.Element {
+  const media = useMemo<PreviewMedia>(() => ({ kind: 'svg', svg, size: getSvgSize(svg), imageTestId }), [imageTestId, svg])
+  return (
+    <ReadonlyMediaPreviewDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      media={media}
+      alt={alt}
+      title={title}
+      dialogTestId={dialogTestId}
+      closeTestId={closeTestId}
+    />
+  )
+}
+
+function ReadonlyMediaPreviewDialog({
+  open,
+  onOpenChange,
+  media,
+  alt,
+  title,
+  description,
+  dialogTestId,
+  closeTestId,
+}: {
+  open: boolean
+  onOpenChange(open: boolean): void
+  media: PreviewMedia
+  alt: string
+  title: string
+  description?: string
+  dialogTestId?: string
+  closeTestId?: string
+}): JSX.Element {
   const { t } = useTranslation()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -151,7 +255,7 @@ export function ReadonlyImagePreviewDialog({
             <X className="h-5 w-5" aria-hidden="true" />
           </DialogClose>
         </DialogHeader>
-        <ReadonlyImageCanvas src={src} alt={alt} imageTestId={imageTestId} />
+        <ReadonlyMediaCanvas media={media} alt={alt} />
       </DialogContent>
     </Dialog>
   )

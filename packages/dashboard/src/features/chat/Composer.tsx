@@ -59,6 +59,7 @@ type Props = {
   workspaceUnavailable?: boolean
   onReconnectService?(): void
   onSubmit(text: string, mode: SendMode, attachments: readonly (ImageContent | FileContent)[] | undefined, extraBlocks: readonly TextContent[] | undefined, intent: MessageIntent): void | Promise<void>
+  onExecuteShell?(command: string): Promise<string>
   onUploadFiles?(files: readonly File[]): Promise<readonly ReferencedFileContent[]>
   onReleaseFiles?(files: readonly ReferencedFileContent[]): Promise<void>
   onCompact?(): void
@@ -192,12 +193,14 @@ function writeStoredDraft(sessionId: string | null, text: string): void {
 }
 
 function readStoredDraftIntent(sessionId: string | null, text: string): MessageIntent {
-  if (!text.startsWith('!')) return 'text'
-  if (!sessionId || typeof window === 'undefined') return 'shell'
+  if (!sessionId || typeof window === 'undefined') return text.startsWith('!') ? 'shell' : 'text'
   try {
-    return window.localStorage.getItem(`${DRAFT_INTENT_STORAGE_PREFIX}${sessionId}`) === 'text' ? 'text' : 'shell'
+    const stored = window.localStorage.getItem(`${DRAFT_INTENT_STORAGE_PREFIX}${sessionId}`)
+    if (stored === 'shell') return 'shell'
+    if (stored === 'text') return 'text'
+    return text.startsWith('!') ? 'shell' : 'text'
   } catch {
-    return 'shell'
+    return text.startsWith('!') ? 'shell' : 'text'
   }
 }
 
@@ -205,7 +208,8 @@ function writeStoredDraftIntent(sessionId: string | null, text: string, intent: 
   if (!sessionId || typeof window === 'undefined') return
   try {
     const key = `${DRAFT_INTENT_STORAGE_PREFIX}${sessionId}`
-    if (text.startsWith('!') && intent === 'text') window.localStorage.setItem(key, 'text')
+    if (intent === 'shell') window.localStorage.setItem(key, 'shell')
+    else if (text.startsWith('!')) window.localStorage.setItem(key, 'text')
     else window.localStorage.removeItem(key)
   } catch {
     // Draft mode persistence is best effort, matching draft text persistence.
@@ -238,6 +242,7 @@ export function Composer({
   workspaceUnavailable = false,
   onReconnectService,
   onSubmit,
+  onExecuteShell,
   onUploadFiles,
   onReleaseFiles,
   onCompact,
@@ -360,13 +365,15 @@ export function Composer({
   const [mentionActive, setMentionActive] = useState(0)
   const [mentionLoading, setMentionLoading] = useState(false)
   const [pendingToast, setPendingToast] = useState<string | null>(null)
-  const shellMode = messageIntent === 'shell' && text.startsWith('!')
+  const shellMode = messageIntent === 'shell'
   const inputPlaceholder = shellMode && !disabled && workspaceOnline !== false
     ? 'Enter a shell command…'
     : placeholderText
   const exitShellMode = (): void => {
     setMessageIntent('text')
-    writeStoredDraftIntent(sessionId, text, 'text')
+    const literalText = `!${text}`
+    setText(literalText)
+    writeStoredDraftIntent(sessionId, literalText, 'text')
   }
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const simpleCaretRef = useRef(0)
@@ -549,10 +556,16 @@ export function Composer({
   }, [pendingToast])
 
   const updateText = (next: string, caret: number): void => {
+    if (messageIntent !== 'shell' && text.length === 0 && next.startsWith('!')) {
+      const command = next.slice(1)
+      setMessageIntent('shell')
+      setText(command)
+      setMentionState(null)
+      mentionRequestId.current += 1
+      return
+    }
     setMessageIntent((current) => {
-      if (!next.startsWith('!')) return 'text'
-      if (text.length === 0 || !text.startsWith('!')) return 'shell'
-      return current
+      return current === 'shell' ? 'shell' : 'text'
     })
     setText(next)
     const found = detectMention(next, caret)
@@ -583,19 +596,42 @@ export function Composer({
     if (disabled || workspaceOnline === false || submitting || submitInFlight.current) return
     const sourceText = textOverride ?? text
     const trimmed = sourceText.trim()
-    const isBangShell = messageIntent === 'shell' && sourceText.startsWith('!')
-    if (trimmed.length === 0 && pastedImages.length === 0 && attachedFiles.length === 0) return
-    if (isBangShell && sourceText.slice(1).trim().length === 0) {
+    const isBangShell = messageIntent === 'shell'
+    if (isBangShell && sourceText.trim().length === 0) {
       setPendingToast('Shell command is empty. Usage: !command')
       return
     }
+    if (isBangShell && new TextEncoder().encode(sourceText).byteLength > 16 * 1024) {
+      setPendingToast('Shell command exceeds 16384 bytes')
+      return
+    }
+    if (trimmed.length === 0 && pastedImages.length === 0 && attachedFiles.length === 0) return
     if (isBangShell && (pastedImages.length > 0 || attachedFiles.length > 0)) {
       setPendingToast('Shell commands cannot include attachments')
       return
     }
-    // Preserve leading whitespace before a bang so the Host can enforce the
-    // same first-character rule instead of seeing a trimmed false positive.
-    const submittedMessageText = isBangShell || sourceText.trimStart().startsWith('!') ? sourceText : trimmed
+    if (isBangShell) {
+      if (!onExecuteShell) {
+        setPendingToast('Shell execution is unavailable')
+        return
+      }
+      submitInFlight.current = true
+      setSubmitting(true)
+      try {
+        const draft = await onExecuteShell(sourceText)
+        setText(draft)
+        setMessageIntent('text')
+        setMentionState(null)
+        setMentionFiles([])
+      } catch (error) {
+        setPendingToast(error instanceof Error ? error.message : String(error))
+      } finally {
+        submitInFlight.current = false
+        setSubmitting(false)
+      }
+      return
+    }
+    const submittedMessageText = sourceText.trimStart().startsWith('!') ? sourceText : trimmed
     const parsedCommand = parseSlashCommand(trimmed)
     const command = parsedCommand
       ? slashCommands.find((c) => c.command === parsedCommand.name)
@@ -643,7 +679,7 @@ export function Composer({
       }
     }
     const submittedText = sourceText
-    const submittedIntent = isBangShell ? 'shell' as const : 'text' as const
+    const submittedIntent = 'text' as const
     const submittedImages = pastedImages
     const submittedFiles = attachedFiles
     // Clear optimistically while raw File objects remain only in this
@@ -1033,7 +1069,7 @@ export function Composer({
                     <SimpleComposerInput
                       text={text}
                       images={[]}
-                      disabled={disabled}
+                      disabled={disabled || (shellMode && submitting)}
                       placeholder={inputPlaceholder}
                       ariaLabel={t('composer.placeholder')}
                       onTextChange={(next) => updateText(next, next.length)}
@@ -1091,7 +1127,7 @@ export function Composer({
                 }
               }}
               rows={1}
-              disabled={disabled}
+              disabled={disabled || (shellMode && submitting)}
               placeholder={inputPlaceholder}
               className="max-h-[min(240px,35vh)] min-h-12 w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-2.5 text-[1.125rem] leading-7 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
               data-testid="composer-input"

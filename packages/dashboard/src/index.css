@@ -880,13 +880,16 @@
 }
 
 .ak-context-usage-active-fill {
-  stroke: hsl(var(--background) / 0.34);
-  animation: ak-context-usage-active-fill 3.2s linear infinite;
-  will-change: stroke-dashoffset;
+  opacity: 1;
 }
 
-@keyframes ak-context-usage-active-fill {
-  to { stroke-dashoffset: -16; }
+.ak-context-usage-active-stripes {
+  animation: ak-context-usage-active-stripes 3.2s linear infinite;
+  will-change: transform;
+}
+
+@keyframes ak-context-usage-active-stripes {
+  to { transform: translateX(8px); }
 }
 
 @container (max-width: 22rem) {
@@ -943,6 +946,7 @@
   .ak-voice-recorder-listening::after,
   .ak-session-status-spinner,
   .ak-context-usage-active-fill,
+  .ak-context-usage-active-stripes,
   .ak-explorer-loading-row,
   .ak-loading-spinner {
     animation: none !important;

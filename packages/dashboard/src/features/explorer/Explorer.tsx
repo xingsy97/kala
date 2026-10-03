@@ -480,7 +480,7 @@ function ExplorerImpl({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {deleteConfirmationStep === 'review' ? t('explorer.deleteTitle') : 'Final deletion confirmation'}
+              {deleteConfirmationStep === 'review' ? t('explorer.deleteTitle') : t('explorer.deleteFinalTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription>
               <span className="font-mono text-foreground">
@@ -499,8 +499,8 @@ function ExplorerImpl({
               {deleteConfirmationStep === 'final' ? (
                 <>
                   <br />
-                  <span className="mt-2 block font-medium text-destructive">
-                    Confirm again to permanently delete this Session tree.
+                  <span className="mt-2 block font-medium text-foreground">
+                    {t('explorer.deleteFinalDescription')}
                   </span>
                 </>
               ) : null}
@@ -516,7 +516,7 @@ function ExplorerImpl({
                   setDeleteConfirmationStep('final')
                 }}
               >
-                Continue
+                {t('common.continue')}
               </AlertDialogAction>
             ) : (
               <AlertDialogAction
@@ -1378,7 +1378,7 @@ function SessionRow({
                 <button type="button" data-testid="session-menu-rename" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); if (!renameDisabled) onStartEdit(s) }}><Pencil className="h-4 w-4" />{t('explorer.renameSession')}</button>
                 {onOpenSessionInfo ? <button type="button" data-testid="session-menu-info" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onOpenSessionInfo(s.sessionId) }}><Info className="h-4 w-4" />{t('explorer.sessionInfoTitle')}</button> : null}
                 <button type="button" data-testid="session-menu-hide" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onHideSession(s.sessionId) }}><EyeOff className="h-4 w-4" />{t('explorer.hideSession')}</button>
-                <button type="button" data-testid="session-menu-delete" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10" onClick={() => { setTouchMenuPosition(null); onDeleteRequest(s) }}><Trash2 className="h-4 w-4" />{t('explorer.deleteSessionTitle')}</button>
+                <button type="button" data-testid="session-menu-delete" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-muted" onClick={() => { setTouchMenuPosition(null); onDeleteRequest(s) }}><Trash2 className="h-4 w-4" />{t('explorer.deleteSessionTitle')}</button>
               </div>
             </>,
             document.body,

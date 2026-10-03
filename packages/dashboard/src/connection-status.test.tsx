@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ConnectionStatus, ConnectionStatusEntry, ConnectionStatusProvider } from './app.js'
 import { SidebarBrand } from './app-shell/AppShellNav.js'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './components/ui/dialog.js'
 
 function socketWithRtt(hostRttMs = 12, executorRttMs: number | null = 34) {
   let now = 0
@@ -244,6 +245,30 @@ describe('ConnectionStatus', () => {
     expect(within(popover).getByText('Connection health')).toBeTruthy()
     expect(popover.className).toContain('sm:w-[22.5rem]')
     expect(screen.getAllByTestId('connection-status-popover')).toHaveLength(1)
+  })
+
+  it('keeps mobile drawer health controls inside the modal pointer-event and focus boundary', () => {
+    const onResync = vi.fn()
+    render(
+      <ConnectionStatusProvider socket={socketWithRtt() as never} status="ready" cursor={0} executorConnected={false} onResync={onResync}>
+        <Dialog open>
+          <DialogContent data-testid="explorer-drawer">
+            <DialogTitle>Sessions</DialogTitle>
+            <DialogDescription>Choose a session</DialogDescription>
+            <SidebarBrand connectionStatus={<ConnectionStatusEntry appearance="brand" triggerId="mobile-drawer" />} />
+            <button type="button" data-testid="session-behind-health">A session</button>
+          </DialogContent>
+        </Dialog>
+      </ConnectionStatusProvider>,
+    )
+    fireEvent.click(screen.getByTestId('sidebar-connection-status'))
+    const popover = screen.getByTestId('connection-status-popover')
+    const drawer = screen.getByTestId('explorer-drawer')
+    expect(popover.parentElement).toBe(drawer)
+    expect(within(popover).getByRole('button', { name: 'Resync' })).toBeTruthy()
+    fireEvent.click(within(popover).getByRole('button', { name: 'Resync' }))
+    expect(onResync).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('session-behind-health')).toBeTruthy()
   })
 
   it('keeps an unselected sidebar brand free of a replacement status entry', () => {

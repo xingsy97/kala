@@ -4,7 +4,7 @@ import type { Socket } from 'socket.io-client'
 export type ManagedDashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 export type ChannelWireState = 'desired' | 'subscribing' | 'active' | 'rejected'
 type ChannelRecord = { refs: number; generation: number; baselineGeneration?: number; cursor?: number; state: ChannelWireState; error?: string; errorListeners: Set<(code: string) => void>; warmUntil?: number; warmTimer?: number; lastUsed: number }
-type AcquireOptions = { freshBaseline?: boolean; onError?(code: string): void }
+type AcquireOptions = { freshBaseline?: boolean; retainWarm?: boolean; onError?(code: string): void }
 type DashboardConnectionManagerOptions = { sessionWarmthMs?: () => number; maxWarmSessions?: number }
 
 const DEFAULT_SESSION_WARMTH_MS = 60 * 60_000
@@ -58,7 +58,10 @@ export class DashboardConnectionManager {
       const record = this.channels.get(channel)
       if (options.onError) record?.errorListeners.delete(options.onError)
       if (!record || --record.refs > 0) return
-      if (channel.startsWith('session:') && record.state !== 'rejected' && this.retainWarm(channel, record)) return
+      if (options.retainWarm !== false
+        && channel.startsWith('session:')
+        && record.state !== 'rejected'
+        && this.retainWarm(channel, record)) return
       this.remove(channel, record)
     }
   }

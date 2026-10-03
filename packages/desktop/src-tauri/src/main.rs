@@ -17,6 +17,7 @@ struct ConnectionOrigin(std::sync::Mutex<String>);
 enum Shortcut {
     Reconnect,
     Reload,
+    ForceRefresh,
     Quit,
 }
 
@@ -25,10 +26,12 @@ fn shortcut(key: gtk::gdk::keys::Key, modifiers: gtk::gdk::ModifierType) -> Opti
     let modifiers = modifiers
         & (ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK | ModifierType::MOD1_MASK
             | ModifierType::SUPER_MASK | ModifierType::META_MASK | ModifierType::HYPER_MASK);
-    if modifiers == (ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK)
-        && matches!(key, constants::o | constants::O)
-    {
-        Some(Shortcut::Reconnect)
+    if modifiers == (ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK) {
+        match key {
+            constants::o | constants::O => Some(Shortcut::Reconnect),
+            constants::r | constants::R => Some(Shortcut::ForceRefresh),
+            _ => None,
+        }
     } else if modifiers == ModifierType::CONTROL_MASK {
         match key {
             constants::r | constants::R => Some(Shortcut::Reload),
@@ -60,6 +63,11 @@ fn install_shortcuts(window: &tauri::WebviewWindow) -> tauri::Result<()> {
             Some(Shortcut::Reload) if dashboard_window => {
                 if let Some(dashboard) = app.get_webview_window("dashboard") {
                     let _ = dashboard.reload();
+                }
+            }
+            Some(Shortcut::ForceRefresh) if dashboard_window => {
+                if let Some(dashboard) = app.get_webview_window("dashboard") {
+                    let _ = force_refresh_dashboard(&app, &dashboard);
                 }
             }
             Some(Shortcut::Quit) => { placement::capture(&app); app.exit(0); }
@@ -172,6 +180,42 @@ async fn desktop_clipboard_image(app: tauri::AppHandle, window: tauri::WebviewWi
     }).await
 }
 
+fn force_refresh_dashboard(app: &tauri::AppHandle, window: &tauri::WebviewWindow) -> Result<(), String> {
+    use webkit2gtk::{WebViewExt, WebsiteDataManagerExtManual, WebsiteDataTypes};
+
+    desktop::authorize_selected_dashboard(app, window)?;
+    let mut url = window.url().map_err(|error| error.to_string())?;
+    url.query_pairs_mut()
+        .append_pair("__kala_desktop_refresh", &std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis().to_string());
+    let dashboard = window.clone();
+    window.with_webview(move |platform| {
+        let Some(manager) = platform.inner().website_data_manager() else {
+            let _ = dashboard.navigate(url);
+            return;
+        };
+        let types = WebsiteDataTypes::MEMORY_CACHE
+            | WebsiteDataTypes::DISK_CACHE
+            | WebsiteDataTypes::OFFLINE_APPLICATION_CACHE
+            | WebsiteDataTypes::SERVICE_WORKER_REGISTRATIONS
+            | WebsiteDataTypes::DOM_CACHE;
+        manager.clear(types, gtk::glib::TimeSpan::from_microseconds(0), None::<&gtk::gio::Cancellable>, move |result| {
+            if let Err(error) = result {
+                eprintln!("Unable to fully clear the Dashboard WebKit cache: {error}");
+            }
+            if let Err(error) = dashboard.navigate(url) {
+                eprintln!("Unable to force-refresh the Dashboard: {error}");
+                let _ = dashboard.reload();
+            }
+        });
+    }).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn desktop_force_refresh(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    desktop::on_ui(app, move |app| force_refresh_dashboard(app, &window)).await
+}
+
 fn connect_dashboard(app: tauri::AppHandle, window: tauri::WebviewWindow, endpoint: String) -> Result<String, String> {
     let url = endpoint_url(&endpoint)?;
     let origin = url.origin().ascii_serialization();
@@ -275,7 +319,7 @@ fn main() {
         .manage(desktop::State::default())
         .manage(connection::State::default())
         .manage(media_permissions::State::default())
-        .invoke_handler(tauri::generate_handler![connect, desktop_window, desktop_clipboard_image, connection::launcher_bootstrap, desktop::desktop_ui, desktop::desktop_status, desktop::desktop_notify, desktop::desktop_connection_ready])
+        .invoke_handler(tauri::generate_handler![connect, desktop_window, desktop_clipboard_image, desktop_force_refresh, connection::launcher_bootstrap, desktop::desktop_ui, desktop::desktop_status, desktop::desktop_notify, desktop::desktop_connection_ready])
         .setup(|app| {
             if let Some(launcher) = app.get_webview_window("launcher") {
                 install_shortcuts(&launcher)?;
@@ -319,12 +363,12 @@ mod tests {
         assert_eq!(shortcut(constants::O, M::CONTROL_MASK | M::SHIFT_MASK), Some(Shortcut::Reconnect));
         assert_eq!(shortcut(constants::o, M::CONTROL_MASK | M::SHIFT_MASK | M::LOCK_MASK | M::MOD2_MASK), Some(Shortcut::Reconnect));
         assert_eq!(shortcut(constants::r, M::CONTROL_MASK), Some(Shortcut::Reload));
+        assert_eq!(shortcut(constants::r, M::CONTROL_MASK | M::SHIFT_MASK), Some(Shortcut::ForceRefresh));
         assert_eq!(shortcut(constants::Q, M::CONTROL_MASK | M::LOCK_MASK), Some(Shortcut::Quit));
         for (key, modifiers) in [
             (constants::o, M::CONTROL_MASK),
             (constants::O, M::SHIFT_MASK),
             (constants::q, M::empty()),
-            (constants::r, M::CONTROL_MASK | M::SHIFT_MASK),
             (constants::q, M::CONTROL_MASK | M::MOD1_MASK),
             (constants::O, M::CONTROL_MASK | M::SHIFT_MASK | M::SUPER_MASK),
             (constants::Left, M::MOD1_MASK),

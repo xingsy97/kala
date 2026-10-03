@@ -75,6 +75,12 @@ type Params = {
   parentSessionId: string
   parentCallId: string
   /**
+   * Child transcripts are expensive full-state projections. Keep lifecycle
+   * discovery on the parent room, but only join the child room while its
+   * transcript is visible.
+   */
+  mirrorMessages?: boolean
+  /**
    * Present when the row is being replayed from a pre-existing envelope; the
    * hook skips waiting for a `_started` push and subscribes immediately.
    */
@@ -98,6 +104,7 @@ export function useSubAgentSession({
   initialLifecycle,
   initialAgentType,
   initialIntention,
+  mirrorMessages = true,
 }: Params): SubAgentView {
   const [lifecycle, setLifecycle] = useState<SubAgentLifecycle>(
     initialLifecycle ??
@@ -230,10 +237,9 @@ export function useSubAgentSession({
     lifecycle.status !== 'idle' ? lifecycle.childSessionId : initialChildSessionId
 
   useEffect(() => {
-    if (!socket || !childSessionId) return
+    if (!socket || !childSessionId || !mirrorMessages) return
     let cancelled = false
 
-    setMessages([])
     const onReady = (payload: SessionReadyEvent): void => {
       if (cancelled || payload.sessionId !== childSessionId) return
       setMessages(payload.state.messages)
@@ -245,7 +251,11 @@ export function useSubAgentSession({
 
     socket.on('session:ready', onReady)
     socket.on('state:changed', onStateChanged)
-    const releaseChannel = dashboardConnectionManager(socket).acquire(`session:${childSessionId}`)
+    const releaseChannel = dashboardConnectionManager(socket).acquire(
+      `session:${childSessionId}`,
+      undefined,
+      { retainWarm: false },
+    )
 
     return () => {
       cancelled = true
@@ -253,7 +263,7 @@ export function useSubAgentSession({
       socket.off('state:changed', onStateChanged)
       releaseChannel()
     }
-  }, [socket, childSessionId])
+  }, [socket, childSessionId, mirrorMessages])
 
   return {
     lifecycle,

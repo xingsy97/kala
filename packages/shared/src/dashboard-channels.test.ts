@@ -12,4 +12,23 @@ describe('dashboard channel contracts', () => {
     expect(schema.ClientDeleteSessionSchema.safeParse({ operationId: 'delete-op', sessionId: 'root-session' }).success).toBe(true)
     expect(schema.ClientDeleteSessionSchema.safeParse({ operationId: 'delete-op', sessionId: 'root-session', cascade: false }).success).toBe(false)
   })
+
+  it('validates incremental Session summary control updates', () => {
+    const update = {
+      kind: 'session_summary_changed',
+      session: {
+        sessionId: 'session-1',
+        agentRuntime: 'copilot',
+        executionMode: 'chat',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        eventCount: 4,
+        status: 'thinking',
+      },
+    }
+    expect(schema.ControlUpdateSchema.parse(update)).toEqual(update)
+    expect(schema.ControlUpdateSchema.safeParse({
+      kind: 'session_summary_changed',
+      session: { sessionId: 'session-1', eventCount: -1 },
+    }).success).toBe(false)
+  })
 })

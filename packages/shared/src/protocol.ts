@@ -278,6 +278,7 @@ export type ClientUpdatePreferences = {
  */
 export type ControlUpdate =
   | ({ kind: 'session_meta_changed' } & SessionMetaChanged)
+  | { kind: 'session_summary_changed'; session: SessionSummary }
   | ({ kind: 'workspace_meta_changed' } & WorkspaceMetaChanged)
   | ({ kind: 'executor_changed' } & ServerExecutorChangedPayload)
   | ({ kind: 'host_restart' } & HostRestartEvent)

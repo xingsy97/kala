@@ -22,6 +22,7 @@ const HOST_HTTP_ROUTES = [
   '/auth',
   '/models',
   '/settings',
+  '/runtime',
   '/docs',
   '/artifacts',
   '/eval',
@@ -98,6 +99,13 @@ export default defineConfig({
         target: HOST_URL,
         ws: true,
         changeOrigin: true,
+        configure(proxy) {
+          const useHostOrigin = (request: import('node:http').ClientRequest): void => {
+            request.setHeader('origin', HOST_URL)
+          }
+          proxy.on('proxyReq', useHostOrigin)
+          proxy.on('proxyReqWs', useHostOrigin)
+        },
       },
       ...Object.fromEntries(
         HOST_HTTP_ROUTES.map((route) => [

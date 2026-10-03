@@ -1056,91 +1056,91 @@ impl FromGlib<ffi::GTimeType> for TimeType {
 #[non_exhaustive]
 #[doc(alias = "GUnicodeBreakType")]
 pub enum UnicodeBreakType {
-    #[doc(alias = "G_UNICODE_BREKALA_MANDATORY")]
+    #[doc(alias = "G_UNICODE_BREAK_MANDATORY")]
     Mandatory,
-    #[doc(alias = "G_UNICODE_BREKALA_CARRIAGE_RETURN")]
+    #[doc(alias = "G_UNICODE_BREAK_CARRIAGE_RETURN")]
     CarriageReturn,
-    #[doc(alias = "G_UNICODE_BREKALA_LINE_FEED")]
+    #[doc(alias = "G_UNICODE_BREAK_LINE_FEED")]
     LineFeed,
-    #[doc(alias = "G_UNICODE_BREKALA_COMBINING_MARK")]
+    #[doc(alias = "G_UNICODE_BREAK_COMBINING_MARK")]
     CombiningMark,
-    #[doc(alias = "G_UNICODE_BREKALA_SURROGATE")]
+    #[doc(alias = "G_UNICODE_BREAK_SURROGATE")]
     Surrogate,
-    #[doc(alias = "G_UNICODE_BREKALA_ZERO_WIDTH_SPACE")]
+    #[doc(alias = "G_UNICODE_BREAK_ZERO_WIDTH_SPACE")]
     ZeroWidthSpace,
-    #[doc(alias = "G_UNICODE_BREKALA_INSEPARABLE")]
+    #[doc(alias = "G_UNICODE_BREAK_INSEPARABLE")]
     Inseparable,
-    #[doc(alias = "G_UNICODE_BREKALA_NON_BREAKING_GLUE")]
+    #[doc(alias = "G_UNICODE_BREAK_NON_BREAKING_GLUE")]
     NonBreakingGlue,
-    #[doc(alias = "G_UNICODE_BREKALA_CONTINGENT")]
+    #[doc(alias = "G_UNICODE_BREAK_CONTINGENT")]
     Contingent,
-    #[doc(alias = "G_UNICODE_BREKALA_SPACE")]
+    #[doc(alias = "G_UNICODE_BREAK_SPACE")]
     Space,
-    #[doc(alias = "G_UNICODE_BREKALA_AFTER")]
+    #[doc(alias = "G_UNICODE_BREAK_AFTER")]
     After,
-    #[doc(alias = "G_UNICODE_BREKALA_BEFORE")]
+    #[doc(alias = "G_UNICODE_BREAK_BEFORE")]
     Before,
-    #[doc(alias = "G_UNICODE_BREKALA_BEFORE_AND_AFTER")]
+    #[doc(alias = "G_UNICODE_BREAK_BEFORE_AND_AFTER")]
     BeforeAndAfter,
-    #[doc(alias = "G_UNICODE_BREKALA_HYPHEN")]
+    #[doc(alias = "G_UNICODE_BREAK_HYPHEN")]
     Hyphen,
-    #[doc(alias = "G_UNICODE_BREKALA_NON_STARTER")]
+    #[doc(alias = "G_UNICODE_BREAK_NON_STARTER")]
     NonStarter,
-    #[doc(alias = "G_UNICODE_BREKALA_OPEN_PUNCTUATION")]
+    #[doc(alias = "G_UNICODE_BREAK_OPEN_PUNCTUATION")]
     OpenPunctuation,
-    #[doc(alias = "G_UNICODE_BREKALA_CLOSE_PUNCTUATION")]
+    #[doc(alias = "G_UNICODE_BREAK_CLOSE_PUNCTUATION")]
     ClosePunctuation,
-    #[doc(alias = "G_UNICODE_BREKALA_QUOTATION")]
+    #[doc(alias = "G_UNICODE_BREAK_QUOTATION")]
     Quotation,
-    #[doc(alias = "G_UNICODE_BREKALA_EXCLAMATION")]
+    #[doc(alias = "G_UNICODE_BREAK_EXCLAMATION")]
     Exclamation,
-    #[doc(alias = "G_UNICODE_BREKALA_IDEOGRAPHIC")]
+    #[doc(alias = "G_UNICODE_BREAK_IDEOGRAPHIC")]
     Ideographic,
-    #[doc(alias = "G_UNICODE_BREKALA_NUMERIC")]
+    #[doc(alias = "G_UNICODE_BREAK_NUMERIC")]
     Numeric,
-    #[doc(alias = "G_UNICODE_BREKALA_INFIX_SEPARATOR")]
+    #[doc(alias = "G_UNICODE_BREAK_INFIX_SEPARATOR")]
     InfixSeparator,
-    #[doc(alias = "G_UNICODE_BREKALA_SYMBOL")]
+    #[doc(alias = "G_UNICODE_BREAK_SYMBOL")]
     Symbol,
-    #[doc(alias = "G_UNICODE_BREKALA_ALPHABETIC")]
+    #[doc(alias = "G_UNICODE_BREAK_ALPHABETIC")]
     Alphabetic,
-    #[doc(alias = "G_UNICODE_BREKALA_PREFIX")]
+    #[doc(alias = "G_UNICODE_BREAK_PREFIX")]
     Prefix,
-    #[doc(alias = "G_UNICODE_BREKALA_POSTFIX")]
+    #[doc(alias = "G_UNICODE_BREAK_POSTFIX")]
     Postfix,
-    #[doc(alias = "G_UNICODE_BREKALA_COMPLEX_CONTEXT")]
+    #[doc(alias = "G_UNICODE_BREAK_COMPLEX_CONTEXT")]
     ComplexContext,
-    #[doc(alias = "G_UNICODE_BREKALA_AMBIGUOUS")]
+    #[doc(alias = "G_UNICODE_BREAK_AMBIGUOUS")]
     Ambiguous,
-    #[doc(alias = "G_UNICODE_BREKALA_UNKNOWN")]
+    #[doc(alias = "G_UNICODE_BREAK_UNKNOWN")]
     Unknown,
-    #[doc(alias = "G_UNICODE_BREKALA_NEXT_LINE")]
+    #[doc(alias = "G_UNICODE_BREAK_NEXT_LINE")]
     NextLine,
-    #[doc(alias = "G_UNICODE_BREKALA_WORD_JOINER")]
+    #[doc(alias = "G_UNICODE_BREAK_WORD_JOINER")]
     WordJoiner,
-    #[doc(alias = "G_UNICODE_BREKALA_HANGUL_L_JAMO")]
+    #[doc(alias = "G_UNICODE_BREAK_HANGUL_L_JAMO")]
     HangulLJamo,
-    #[doc(alias = "G_UNICODE_BREKALA_HANGUL_V_JAMO")]
+    #[doc(alias = "G_UNICODE_BREAK_HANGUL_V_JAMO")]
     HangulVJamo,
-    #[doc(alias = "G_UNICODE_BREKALA_HANGUL_T_JAMO")]
+    #[doc(alias = "G_UNICODE_BREAK_HANGUL_T_JAMO")]
     HangulTJamo,
-    #[doc(alias = "G_UNICODE_BREKALA_HANGUL_LV_SYLLABLE")]
+    #[doc(alias = "G_UNICODE_BREAK_HANGUL_LV_SYLLABLE")]
     HangulLvSyllable,
-    #[doc(alias = "G_UNICODE_BREKALA_HANGUL_LVT_SYLLABLE")]
+    #[doc(alias = "G_UNICODE_BREAK_HANGUL_LVT_SYLLABLE")]
     HangulLvtSyllable,
-    #[doc(alias = "G_UNICODE_BREKALA_CLOSE_PARENTHESIS")]
+    #[doc(alias = "G_UNICODE_BREAK_CLOSE_PARENTHESIS")]
     CloseParenthesis,
-    #[doc(alias = "G_UNICODE_BREKALA_CONDITIONAL_JAPANESE_STARTER")]
+    #[doc(alias = "G_UNICODE_BREAK_CONDITIONAL_JAPANESE_STARTER")]
     ConditionalJapaneseStarter,
-    #[doc(alias = "G_UNICODE_BREKALA_HEBREW_LETTER")]
+    #[doc(alias = "G_UNICODE_BREAK_HEBREW_LETTER")]
     HebrewLetter,
-    #[doc(alias = "G_UNICODE_BREKALA_REGIONAL_INDICATOR")]
+    #[doc(alias = "G_UNICODE_BREAK_REGIONAL_INDICATOR")]
     RegionalIndicator,
-    #[doc(alias = "G_UNICODE_BREKALA_EMOJI_BASE")]
+    #[doc(alias = "G_UNICODE_BREAK_EMOJI_BASE")]
     EmojiBase,
-    #[doc(alias = "G_UNICODE_BREKALA_EMOJI_MODIFIER")]
+    #[doc(alias = "G_UNICODE_BREAK_EMOJI_MODIFIER")]
     EmojiModifier,
-    #[doc(alias = "G_UNICODE_BREKALA_ZERO_WIDTH_JOINER")]
+    #[doc(alias = "G_UNICODE_BREAK_ZERO_WIDTH_JOINER")]
     ZeroWidthJoiner,
     #[doc(hidden)]
     __Unknown(i32),
@@ -1207,49 +1207,49 @@ impl IntoGlib for UnicodeBreakType {
 
     fn into_glib(self) -> ffi::GUnicodeBreakType {
         match self {
-            Self::Mandatory => ffi::G_UNICODE_BREKALA_MANDATORY,
-            Self::CarriageReturn => ffi::G_UNICODE_BREKALA_CARRIAGE_RETURN,
-            Self::LineFeed => ffi::G_UNICODE_BREKALA_LINE_FEED,
-            Self::CombiningMark => ffi::G_UNICODE_BREKALA_COMBINING_MARK,
-            Self::Surrogate => ffi::G_UNICODE_BREKALA_SURROGATE,
-            Self::ZeroWidthSpace => ffi::G_UNICODE_BREKALA_ZERO_WIDTH_SPACE,
-            Self::Inseparable => ffi::G_UNICODE_BREKALA_INSEPARABLE,
-            Self::NonBreakingGlue => ffi::G_UNICODE_BREKALA_NON_BREAKING_GLUE,
-            Self::Contingent => ffi::G_UNICODE_BREKALA_CONTINGENT,
-            Self::Space => ffi::G_UNICODE_BREKALA_SPACE,
-            Self::After => ffi::G_UNICODE_BREKALA_AFTER,
-            Self::Before => ffi::G_UNICODE_BREKALA_BEFORE,
-            Self::BeforeAndAfter => ffi::G_UNICODE_BREKALA_BEFORE_AND_AFTER,
-            Self::Hyphen => ffi::G_UNICODE_BREKALA_HYPHEN,
-            Self::NonStarter => ffi::G_UNICODE_BREKALA_NON_STARTER,
-            Self::OpenPunctuation => ffi::G_UNICODE_BREKALA_OPEN_PUNCTUATION,
-            Self::ClosePunctuation => ffi::G_UNICODE_BREKALA_CLOSE_PUNCTUATION,
-            Self::Quotation => ffi::G_UNICODE_BREKALA_QUOTATION,
-            Self::Exclamation => ffi::G_UNICODE_BREKALA_EXCLAMATION,
-            Self::Ideographic => ffi::G_UNICODE_BREKALA_IDEOGRAPHIC,
-            Self::Numeric => ffi::G_UNICODE_BREKALA_NUMERIC,
-            Self::InfixSeparator => ffi::G_UNICODE_BREKALA_INFIX_SEPARATOR,
-            Self::Symbol => ffi::G_UNICODE_BREKALA_SYMBOL,
-            Self::Alphabetic => ffi::G_UNICODE_BREKALA_ALPHABETIC,
-            Self::Prefix => ffi::G_UNICODE_BREKALA_PREFIX,
-            Self::Postfix => ffi::G_UNICODE_BREKALA_POSTFIX,
-            Self::ComplexContext => ffi::G_UNICODE_BREKALA_COMPLEX_CONTEXT,
-            Self::Ambiguous => ffi::G_UNICODE_BREKALA_AMBIGUOUS,
-            Self::Unknown => ffi::G_UNICODE_BREKALA_UNKNOWN,
-            Self::NextLine => ffi::G_UNICODE_BREKALA_NEXT_LINE,
-            Self::WordJoiner => ffi::G_UNICODE_BREKALA_WORD_JOINER,
-            Self::HangulLJamo => ffi::G_UNICODE_BREKALA_HANGUL_L_JAMO,
-            Self::HangulVJamo => ffi::G_UNICODE_BREKALA_HANGUL_V_JAMO,
-            Self::HangulTJamo => ffi::G_UNICODE_BREKALA_HANGUL_T_JAMO,
-            Self::HangulLvSyllable => ffi::G_UNICODE_BREKALA_HANGUL_LV_SYLLABLE,
-            Self::HangulLvtSyllable => ffi::G_UNICODE_BREKALA_HANGUL_LVT_SYLLABLE,
-            Self::CloseParenthesis => ffi::G_UNICODE_BREKALA_CLOSE_PARENTHESIS,
-            Self::ConditionalJapaneseStarter => ffi::G_UNICODE_BREKALA_CONDITIONAL_JAPANESE_STARTER,
-            Self::HebrewLetter => ffi::G_UNICODE_BREKALA_HEBREW_LETTER,
-            Self::RegionalIndicator => ffi::G_UNICODE_BREKALA_REGIONAL_INDICATOR,
-            Self::EmojiBase => ffi::G_UNICODE_BREKALA_EMOJI_BASE,
-            Self::EmojiModifier => ffi::G_UNICODE_BREKALA_EMOJI_MODIFIER,
-            Self::ZeroWidthJoiner => ffi::G_UNICODE_BREKALA_ZERO_WIDTH_JOINER,
+            Self::Mandatory => ffi::G_UNICODE_BREAK_MANDATORY,
+            Self::CarriageReturn => ffi::G_UNICODE_BREAK_CARRIAGE_RETURN,
+            Self::LineFeed => ffi::G_UNICODE_BREAK_LINE_FEED,
+            Self::CombiningMark => ffi::G_UNICODE_BREAK_COMBINING_MARK,
+            Self::Surrogate => ffi::G_UNICODE_BREAK_SURROGATE,
+            Self::ZeroWidthSpace => ffi::G_UNICODE_BREAK_ZERO_WIDTH_SPACE,
+            Self::Inseparable => ffi::G_UNICODE_BREAK_INSEPARABLE,
+            Self::NonBreakingGlue => ffi::G_UNICODE_BREAK_NON_BREAKING_GLUE,
+            Self::Contingent => ffi::G_UNICODE_BREAK_CONTINGENT,
+            Self::Space => ffi::G_UNICODE_BREAK_SPACE,
+            Self::After => ffi::G_UNICODE_BREAK_AFTER,
+            Self::Before => ffi::G_UNICODE_BREAK_BEFORE,
+            Self::BeforeAndAfter => ffi::G_UNICODE_BREAK_BEFORE_AND_AFTER,
+            Self::Hyphen => ffi::G_UNICODE_BREAK_HYPHEN,
+            Self::NonStarter => ffi::G_UNICODE_BREAK_NON_STARTER,
+            Self::OpenPunctuation => ffi::G_UNICODE_BREAK_OPEN_PUNCTUATION,
+            Self::ClosePunctuation => ffi::G_UNICODE_BREAK_CLOSE_PUNCTUATION,
+            Self::Quotation => ffi::G_UNICODE_BREAK_QUOTATION,
+            Self::Exclamation => ffi::G_UNICODE_BREAK_EXCLAMATION,
+            Self::Ideographic => ffi::G_UNICODE_BREAK_IDEOGRAPHIC,
+            Self::Numeric => ffi::G_UNICODE_BREAK_NUMERIC,
+            Self::InfixSeparator => ffi::G_UNICODE_BREAK_INFIX_SEPARATOR,
+            Self::Symbol => ffi::G_UNICODE_BREAK_SYMBOL,
+            Self::Alphabetic => ffi::G_UNICODE_BREAK_ALPHABETIC,
+            Self::Prefix => ffi::G_UNICODE_BREAK_PREFIX,
+            Self::Postfix => ffi::G_UNICODE_BREAK_POSTFIX,
+            Self::ComplexContext => ffi::G_UNICODE_BREAK_COMPLEX_CONTEXT,
+            Self::Ambiguous => ffi::G_UNICODE_BREAK_AMBIGUOUS,
+            Self::Unknown => ffi::G_UNICODE_BREAK_UNKNOWN,
+            Self::NextLine => ffi::G_UNICODE_BREAK_NEXT_LINE,
+            Self::WordJoiner => ffi::G_UNICODE_BREAK_WORD_JOINER,
+            Self::HangulLJamo => ffi::G_UNICODE_BREAK_HANGUL_L_JAMO,
+            Self::HangulVJamo => ffi::G_UNICODE_BREAK_HANGUL_V_JAMO,
+            Self::HangulTJamo => ffi::G_UNICODE_BREAK_HANGUL_T_JAMO,
+            Self::HangulLvSyllable => ffi::G_UNICODE_BREAK_HANGUL_LV_SYLLABLE,
+            Self::HangulLvtSyllable => ffi::G_UNICODE_BREAK_HANGUL_LVT_SYLLABLE,
+            Self::CloseParenthesis => ffi::G_UNICODE_BREAK_CLOSE_PARENTHESIS,
+            Self::ConditionalJapaneseStarter => ffi::G_UNICODE_BREAK_CONDITIONAL_JAPANESE_STARTER,
+            Self::HebrewLetter => ffi::G_UNICODE_BREAK_HEBREW_LETTER,
+            Self::RegionalIndicator => ffi::G_UNICODE_BREAK_REGIONAL_INDICATOR,
+            Self::EmojiBase => ffi::G_UNICODE_BREAK_EMOJI_BASE,
+            Self::EmojiModifier => ffi::G_UNICODE_BREAK_EMOJI_MODIFIER,
+            Self::ZeroWidthJoiner => ffi::G_UNICODE_BREAK_ZERO_WIDTH_JOINER,
             Self::__Unknown(value) => value,
         }
     }
@@ -1259,49 +1259,49 @@ impl IntoGlib for UnicodeBreakType {
 impl FromGlib<ffi::GUnicodeBreakType> for UnicodeBreakType {
     unsafe fn from_glib(value: ffi::GUnicodeBreakType) -> Self {
         match value {
-            ffi::G_UNICODE_BREKALA_MANDATORY => Self::Mandatory,
-            ffi::G_UNICODE_BREKALA_CARRIAGE_RETURN => Self::CarriageReturn,
-            ffi::G_UNICODE_BREKALA_LINE_FEED => Self::LineFeed,
-            ffi::G_UNICODE_BREKALA_COMBINING_MARK => Self::CombiningMark,
-            ffi::G_UNICODE_BREKALA_SURROGATE => Self::Surrogate,
-            ffi::G_UNICODE_BREKALA_ZERO_WIDTH_SPACE => Self::ZeroWidthSpace,
-            ffi::G_UNICODE_BREKALA_INSEPARABLE => Self::Inseparable,
-            ffi::G_UNICODE_BREKALA_NON_BREAKING_GLUE => Self::NonBreakingGlue,
-            ffi::G_UNICODE_BREKALA_CONTINGENT => Self::Contingent,
-            ffi::G_UNICODE_BREKALA_SPACE => Self::Space,
-            ffi::G_UNICODE_BREKALA_AFTER => Self::After,
-            ffi::G_UNICODE_BREKALA_BEFORE => Self::Before,
-            ffi::G_UNICODE_BREKALA_BEFORE_AND_AFTER => Self::BeforeAndAfter,
-            ffi::G_UNICODE_BREKALA_HYPHEN => Self::Hyphen,
-            ffi::G_UNICODE_BREKALA_NON_STARTER => Self::NonStarter,
-            ffi::G_UNICODE_BREKALA_OPEN_PUNCTUATION => Self::OpenPunctuation,
-            ffi::G_UNICODE_BREKALA_CLOSE_PUNCTUATION => Self::ClosePunctuation,
-            ffi::G_UNICODE_BREKALA_QUOTATION => Self::Quotation,
-            ffi::G_UNICODE_BREKALA_EXCLAMATION => Self::Exclamation,
-            ffi::G_UNICODE_BREKALA_IDEOGRAPHIC => Self::Ideographic,
-            ffi::G_UNICODE_BREKALA_NUMERIC => Self::Numeric,
-            ffi::G_UNICODE_BREKALA_INFIX_SEPARATOR => Self::InfixSeparator,
-            ffi::G_UNICODE_BREKALA_SYMBOL => Self::Symbol,
-            ffi::G_UNICODE_BREKALA_ALPHABETIC => Self::Alphabetic,
-            ffi::G_UNICODE_BREKALA_PREFIX => Self::Prefix,
-            ffi::G_UNICODE_BREKALA_POSTFIX => Self::Postfix,
-            ffi::G_UNICODE_BREKALA_COMPLEX_CONTEXT => Self::ComplexContext,
-            ffi::G_UNICODE_BREKALA_AMBIGUOUS => Self::Ambiguous,
-            ffi::G_UNICODE_BREKALA_UNKNOWN => Self::Unknown,
-            ffi::G_UNICODE_BREKALA_NEXT_LINE => Self::NextLine,
-            ffi::G_UNICODE_BREKALA_WORD_JOINER => Self::WordJoiner,
-            ffi::G_UNICODE_BREKALA_HANGUL_L_JAMO => Self::HangulLJamo,
-            ffi::G_UNICODE_BREKALA_HANGUL_V_JAMO => Self::HangulVJamo,
-            ffi::G_UNICODE_BREKALA_HANGUL_T_JAMO => Self::HangulTJamo,
-            ffi::G_UNICODE_BREKALA_HANGUL_LV_SYLLABLE => Self::HangulLvSyllable,
-            ffi::G_UNICODE_BREKALA_HANGUL_LVT_SYLLABLE => Self::HangulLvtSyllable,
-            ffi::G_UNICODE_BREKALA_CLOSE_PARENTHESIS => Self::CloseParenthesis,
-            ffi::G_UNICODE_BREKALA_CONDITIONAL_JAPANESE_STARTER => Self::ConditionalJapaneseStarter,
-            ffi::G_UNICODE_BREKALA_HEBREW_LETTER => Self::HebrewLetter,
-            ffi::G_UNICODE_BREKALA_REGIONAL_INDICATOR => Self::RegionalIndicator,
-            ffi::G_UNICODE_BREKALA_EMOJI_BASE => Self::EmojiBase,
-            ffi::G_UNICODE_BREKALA_EMOJI_MODIFIER => Self::EmojiModifier,
-            ffi::G_UNICODE_BREKALA_ZERO_WIDTH_JOINER => Self::ZeroWidthJoiner,
+            ffi::G_UNICODE_BREAK_MANDATORY => Self::Mandatory,
+            ffi::G_UNICODE_BREAK_CARRIAGE_RETURN => Self::CarriageReturn,
+            ffi::G_UNICODE_BREAK_LINE_FEED => Self::LineFeed,
+            ffi::G_UNICODE_BREAK_COMBINING_MARK => Self::CombiningMark,
+            ffi::G_UNICODE_BREAK_SURROGATE => Self::Surrogate,
+            ffi::G_UNICODE_BREAK_ZERO_WIDTH_SPACE => Self::ZeroWidthSpace,
+            ffi::G_UNICODE_BREAK_INSEPARABLE => Self::Inseparable,
+            ffi::G_UNICODE_BREAK_NON_BREAKING_GLUE => Self::NonBreakingGlue,
+            ffi::G_UNICODE_BREAK_CONTINGENT => Self::Contingent,
+            ffi::G_UNICODE_BREAK_SPACE => Self::Space,
+            ffi::G_UNICODE_BREAK_AFTER => Self::After,
+            ffi::G_UNICODE_BREAK_BEFORE => Self::Before,
+            ffi::G_UNICODE_BREAK_BEFORE_AND_AFTER => Self::BeforeAndAfter,
+            ffi::G_UNICODE_BREAK_HYPHEN => Self::Hyphen,
+            ffi::G_UNICODE_BREAK_NON_STARTER => Self::NonStarter,
+            ffi::G_UNICODE_BREAK_OPEN_PUNCTUATION => Self::OpenPunctuation,
+            ffi::G_UNICODE_BREAK_CLOSE_PUNCTUATION => Self::ClosePunctuation,
+            ffi::G_UNICODE_BREAK_QUOTATION => Self::Quotation,
+            ffi::G_UNICODE_BREAK_EXCLAMATION => Self::Exclamation,
+            ffi::G_UNICODE_BREAK_IDEOGRAPHIC => Self::Ideographic,
+            ffi::G_UNICODE_BREAK_NUMERIC => Self::Numeric,
+            ffi::G_UNICODE_BREAK_INFIX_SEPARATOR => Self::InfixSeparator,
+            ffi::G_UNICODE_BREAK_SYMBOL => Self::Symbol,
+            ffi::G_UNICODE_BREAK_ALPHABETIC => Self::Alphabetic,
+            ffi::G_UNICODE_BREAK_PREFIX => Self::Prefix,
+            ffi::G_UNICODE_BREAK_POSTFIX => Self::Postfix,
+            ffi::G_UNICODE_BREAK_COMPLEX_CONTEXT => Self::ComplexContext,
+            ffi::G_UNICODE_BREAK_AMBIGUOUS => Self::Ambiguous,
+            ffi::G_UNICODE_BREAK_UNKNOWN => Self::Unknown,
+            ffi::G_UNICODE_BREAK_NEXT_LINE => Self::NextLine,
+            ffi::G_UNICODE_BREAK_WORD_JOINER => Self::WordJoiner,
+            ffi::G_UNICODE_BREAK_HANGUL_L_JAMO => Self::HangulLJamo,
+            ffi::G_UNICODE_BREAK_HANGUL_V_JAMO => Self::HangulVJamo,
+            ffi::G_UNICODE_BREAK_HANGUL_T_JAMO => Self::HangulTJamo,
+            ffi::G_UNICODE_BREAK_HANGUL_LV_SYLLABLE => Self::HangulLvSyllable,
+            ffi::G_UNICODE_BREAK_HANGUL_LVT_SYLLABLE => Self::HangulLvtSyllable,
+            ffi::G_UNICODE_BREAK_CLOSE_PARENTHESIS => Self::CloseParenthesis,
+            ffi::G_UNICODE_BREAK_CONDITIONAL_JAPANESE_STARTER => Self::ConditionalJapaneseStarter,
+            ffi::G_UNICODE_BREAK_HEBREW_LETTER => Self::HebrewLetter,
+            ffi::G_UNICODE_BREAK_REGIONAL_INDICATOR => Self::RegionalIndicator,
+            ffi::G_UNICODE_BREAK_EMOJI_BASE => Self::EmojiBase,
+            ffi::G_UNICODE_BREAK_EMOJI_MODIFIER => Self::EmojiModifier,
+            ffi::G_UNICODE_BREAK_ZERO_WIDTH_JOINER => Self::ZeroWidthJoiner,
             value => Self::__Unknown(value),
         }
     }

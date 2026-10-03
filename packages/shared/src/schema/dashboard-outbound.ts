@@ -501,12 +501,31 @@ export const ServerSubAgentFinishedEventSchema = z.object({
   error: z.string().optional(),
 }) satisfies z.ZodType<ServerSubAgentFinishedEvent>
 
+export const SessionSummarySchema = z.object({
+  sessionId: z.string(),
+  agentRuntime: z.enum(['kernel', 'copilot']),
+  executionMode: z.enum(['chat', 'dag']),
+  agentRuntimeVersion: z.string().optional(),
+  createdAt: z.string(),
+  lastEventAt: z.string().optional(),
+  eventCount: z.number().int().nonnegative(),
+  parentSessionId: z.string().optional(),
+  workspaceId: z.string().optional(),
+  workspaceName: z.string().optional(),
+  status: AgentStatusSchema.optional(),
+  currentCwd: z.string().optional(),
+  firstUserMessage: z.string().optional(),
+  label: z.string().optional(),
+  preferences: SessionPreferencesSchema.optional(),
+}) satisfies z.ZodType<SessionSummary>
+
 // ============================================================================
-// Unified control update (discriminated union)
+// Unified control update
 // ============================================================================
 
-export const ControlUpdateSchema = z.discriminatedUnion('kind', [
+export const ControlUpdateSchema = z.union([
   z.object({ kind: z.literal('session_meta_changed') }).extend(SessionMetaChangedSchema.shape),
+  z.object({ kind: z.literal('session_summary_changed'), session: SessionSummarySchema }),
   z.object({ kind: z.literal('workspace_meta_changed') }).extend(WorkspaceMetaChangedSchema.shape),
   z.object({ kind: z.literal('executor_changed'), executorId: z.string(), change: z.literal('detached') }),
   z.object({ kind: z.literal('executor_changed'), executorId: z.string(), change: z.literal('attached'), executor: AttachedExecutorSchema }),
@@ -538,24 +557,6 @@ export const ServerMessageQueueEventSchema = z.object({
 // ============================================================================
 // Sessions & history
 // ============================================================================
-
-export const SessionSummarySchema = z.object({
-  sessionId: z.string(),
-  agentRuntime: z.enum(['kernel', 'copilot']),
-  executionMode: z.enum(['chat', 'dag']),
-  agentRuntimeVersion: z.string().optional(),
-  createdAt: z.string(),
-  lastEventAt: z.string().optional(),
-  eventCount: z.number().int().nonnegative(),
-  parentSessionId: z.string().optional(),
-  workspaceId: z.string().optional(),
-  workspaceName: z.string().optional(),
-  status: AgentStatusSchema.optional(),
-  currentCwd: z.string().optional(),
-  firstUserMessage: z.string().optional(),
-  label: z.string().optional(),
-  preferences: SessionPreferencesSchema.optional(),
-}) satisfies z.ZodType<SessionSummary>
 
 export const DagNodeSchema = z.object({
   id: z.string(),

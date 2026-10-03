@@ -18,6 +18,7 @@ function renderComposer(props?: {
     extraBlocks: readonly TextContent[] | undefined,
     intent: 'text' | 'shell',
   ) => void
+  onExecuteShell?: (command: string) => Promise<string>
   onUploadFiles?: (files: readonly File[]) => Promise<readonly ReferencedFileContent[]>
   onReleaseFiles?: (files: readonly ReferencedFileContent[]) => Promise<void>
   onCompact?: () => void
@@ -67,6 +68,7 @@ function renderComposer(props?: {
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
       {...(props?.onQueuedUpdate ? { onQueuedUpdate: props.onQueuedUpdate } : {})}
       onSubmit={props?.onSubmit ?? (() => {})}
+      {...(props?.onExecuteShell ? { onExecuteShell: props.onExecuteShell } : {})}
       {...(props?.onUploadFiles ? { onUploadFiles: props.onUploadFiles } : {})}
       {...(props?.onReleaseFiles ? { onReleaseFiles: props.onReleaseFiles } : {})}
       onCompact={props?.onCompact ?? (() => {})}
@@ -473,17 +475,38 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('later', 'queue', undefined, undefined, 'text')
   })
 
-  it('submits a leading bang as a shell command while preserving command whitespace', () => {
+  it('consumes a leading bang, executes separately, and only sends the returned draft on confirmation', async () => {
     const onSubmit = vi.fn()
-    renderComposer({ onSubmit })
+    const onExecuteShell = vi.fn().mockResolvedValue('Shell command:\n\n`printf` output')
+    renderComposer({ onSubmit, onExecuteShell })
 
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '!printf "a b"  ' } })
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'printf "a b"  ')
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
-    expect(onSubmit).toHaveBeenCalledWith('!printf "a b"  ', 'steer', undefined, undefined, 'shell')
+    await waitFor(() => expect(onExecuteShell).toHaveBeenCalledWith('printf "a b"  '))
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'Shell command:\n\n`printf` output')
+    expect(screen.queryByTestId('composer-shell-mode')).toBeNull()
+
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+    expect(onSubmit).toHaveBeenCalledWith('Shell command:\n\n`printf` output', 'steer', undefined, undefined, 'text')
   })
 
-  it('shows shell mode immediately and exits to safe literal text without deleting the bang', () => {
+  it('keeps the command visible and locked while shell execution is pending', () => {
+    const onExecuteShell = vi.fn(() => new Promise<string>(() => {}))
+    renderComposer({ onExecuteShell })
+    const input = screen.getByTestId('composer-input')
+
+    fireEvent.change(input, { target: { value: '!sleep 1' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(input).toHaveProperty('value', 'sleep 1')
+    expect(input).toHaveProperty('disabled', true)
+    expect(screen.queryByTestId('composer-shell-mode')).toBeTruthy()
+  })
+
+  it('shows shell mode without displaying its trigger and restores a literal bang on exit', () => {
     const onSubmit = vi.fn()
     renderComposer({ onSubmit })
 
@@ -491,6 +514,7 @@ describe('Composer', () => {
     fireEvent.change(input, { target: { value: '!echo visible' } })
 
     expect(screen.getByTestId('composer-shell-mode').textContent).toContain('Shell · workspace')
+    expect(input).toHaveProperty('value', 'echo visible')
     expect(screen.getByTestId('composer-full-shell').querySelector('.border-amber-400\\/80')).toBeTruthy()
     expect(screen.getByTestId('composer-file-input')).toHaveProperty('disabled', true)
 
@@ -512,9 +536,11 @@ describe('Composer', () => {
     expect(onSubmit).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Exit shell mode and keep as text' }))
+    expect(input).toHaveProperty('value', '!')
     fireEvent.change(input, { target: { value: '' } })
     fireEvent.change(input, { target: { value: '!pwd' } })
     expect(screen.getByTestId('composer-shell-mode')).toBeTruthy()
+    expect(input).toHaveProperty('value', 'pwd')
 
     fireEvent.click(screen.getByRole('button', { name: 'Exit shell mode and keep as text' }))
     fireEvent.change(input, { target: { value: '!' } })
@@ -529,6 +555,7 @@ describe('Composer', () => {
 
     fireEvent.change(input, { target: { value: '!pwd' } })
     expect(screen.getByTestId('composer-shell-mode')).toBeTruthy()
+    expect(input).toHaveProperty('value', 'pwd')
     expect(screen.getByTestId('composer-send')).toHaveProperty('disabled', true)
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(onSubmit).not.toHaveBeenCalled()
@@ -553,7 +580,20 @@ describe('Composer', () => {
 
     await screen.findByText('Shell command is empty. Usage: !command')
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(screen.getByTestId('composer-input')).toHaveProperty('value', '!  ')
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', '  ')
+  })
+
+  it('restores the consumed-trigger shell mode when switching sessions', () => {
+    const state = createInitialState({ sessionId: 'shell-draft-session' })
+    window.localStorage.removeItem('agent-kernel:composer:draft:shell-draft-session')
+    window.localStorage.removeItem('ak-composer-draft-intent:shell-draft-session')
+    const first = renderComposer({ state })
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '!echo persisted' } })
+    first.unmount()
+
+    renderComposer({ state })
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'echo persisted')
+    expect(screen.getByTestId('composer-shell-mode')).toBeTruthy()
   })
 
   it('clears the submitted draft before the reliable acknowledgement resolves', () => {
@@ -604,6 +644,7 @@ describe('Composer', () => {
 
       expect(screen.getByTestId('composer-shell-mode').textContent).toContain('Shell · workspace')
       expect(screen.getByTestId('composer-simple-shell').className).toContain('border-amber-400/80')
+      expect(input.textContent).toBe('echo simple')
       fireEvent.click(screen.getByRole('button', { name: 'Exit shell mode and keep as text' }))
       expect(input.textContent).toBe('!echo simple')
       fireEvent.click(screen.getByTestId('composer-send'))

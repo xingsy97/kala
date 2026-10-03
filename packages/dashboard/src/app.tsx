@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
 import { notify } from './notify.js'
 import { writeTextToClipboard } from './lib/clipboard.js'
+import { executeShellDraft, formatShellDraft } from './lib/shell-draft.js'
 
 import type { Message, MessageContent, ReferencedFileContent } from '@agent-kernel/kernel'
 
@@ -65,7 +66,7 @@ import { BackgroundShellsButton } from './features/chat/BackgroundTerminalPanel.
 import { ChatPanel, type WorkspaceFileTarget } from './features/chat/ChatPanel.js'
 import { recentEmptyStateSessions } from './features/chat/recent-empty-sessions.js'
 import { APPROVAL_MODES, Composer } from './features/chat/Composer.js'
-import { SimpleChatDraft } from './features/chat/SimpleChatDraft.js'
+import { SimpleChatDraft, type SimpleChatSubmission } from './features/chat/SimpleChatDraft.js'
 import { ComposerFlipContainer } from './features/chat/ComposerFlipContainer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { BannerStack, BannerSlot } from './features/chat/BannerStack.js'
@@ -120,6 +121,14 @@ export function workspaceTerminalDialogSizeClass(expanded: boolean): string {
       ? 'sm:h-[calc(var(--ak-viewport-h,100dvh)-2rem)] sm:max-h-[calc(var(--ak-viewport-h,100dvh)-2rem)] sm:w-[calc(100vw-2rem)]'
       : 'sm:h-[min(calc(var(--ak-viewport-h,100dvh)-2rem),720px)] sm:max-h-[calc(var(--ak-viewport-h,100dvh)-2rem)] sm:w-[min(calc(100vw-2rem),1100px)]',
   )
+}
+
+export function workspaceTerminalSessionId(ownerSessionId: string): string {
+  return `workspace-terminal:${ownerSessionId}:primary`
+}
+
+export function workspaceTerminalCloseNeedsConfirmation(keepRunning: boolean, status: string): boolean {
+  return !keepRunning && status === 'running'
 }
 
 import {
@@ -297,6 +306,8 @@ export function App(): JSX.Element {
   const [workspaceTerminal, setWorkspaceTerminal] = useState<{ workspaceId: string; workspaceName: string; ownerSessionId: string; sessionId: string; cwd?: string } | null>(null)
   const [workspaceTerminalReady, setWorkspaceTerminalReady] = useState(false)
   const [workspaceTerminalExpanded, setWorkspaceTerminalExpanded] = useState(false)
+  const [workspaceTerminalKeepRunning, setWorkspaceTerminalKeepRunning] = useState(true)
+  const [workspaceTerminalStatus, setWorkspaceTerminalStatus] = useState<'idle' | 'starting' | 'running' | 'exited' | 'error'>('idle')
   const [workspaceFileViewTarget, setWorkspaceFileViewTarget] = useState<WorkspaceFileTarget | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const [awaitingAck, setAwaitingAck] = useState(false)
@@ -317,6 +328,7 @@ export function App(): JSX.Element {
   const inferredCompactSeq = useRef<number | null>(null)
   const suppressNextAutoSessionSelection = useRef(false)
   const pendingCreatedSessionId = useRef<string | null>(null)
+  const pendingSimpleChatHandoff = useRef<{ sessionId: string; submission: SimpleChatSubmission } | null>(null)
   const suppressNextWaitingNotification = useRef(false)
   const [themePreference, toggleTheme, , effectiveTheme] = useTheme()
   // Drives the app shell, drawers, and dialogs from one visible-viewport
@@ -488,6 +500,89 @@ export function App(): JSX.Element {
   const currentRuntimeDescriptor = control.agentRuntimes.find(
     (runtime) => runtime.id === (currentSession?.agentRuntime ?? 'kernel'),
   )
+  const deliverUserMessage = useCallback(async ({
+    sessionId,
+    text,
+    mode,
+    intent,
+    content,
+    operationId = newPendingMessageId(),
+    agentStatus,
+    afterSeq,
+  }: {
+    sessionId: string
+    text: string
+    mode: 'steer' | 'queue'
+    intent: 'text' | 'shell'
+    content?: readonly MessageContent[]
+    operationId?: string
+    agentStatus?: string
+    afterSeq: number
+  }): Promise<void> => {
+    const createdAt = new Date().toISOString()
+    const agentBusy =
+      agentStatus === 'thinking' ||
+      agentStatus === 'executing_tools' ||
+      agentStatus === 'awaiting_approval'
+    const effectiveOptimisticMode: typeof mode = mode === 'queue' && !agentBusy ? 'steer' : mode
+    if (effectiveOptimisticMode === 'queue') {
+      setOptimisticQueuedMessages((previous) => [
+        ...previous,
+        { id: operationId, text, mode, createdAt, ...(content ? { content } : {}) },
+      ])
+    } else {
+      setPendingUserMessages((previous) => [
+        ...previous,
+        {
+          id: operationId,
+          text,
+          mode: effectiveOptimisticMode,
+          ...(content ? { content } : {}),
+          createdAt,
+          afterSeq,
+        },
+      ])
+    }
+    setAwaitingAck(true)
+    setMessageDeliveryError(null)
+    try {
+      await admitUserMessage({
+        host: hostEndpoint.url,
+        ...(config.token ? { token: config.token } : {}),
+        sessionId,
+        text,
+        intent,
+        mode,
+        operationId,
+        ...(content ? { content } : {}),
+      })
+      if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
+    } catch (error) {
+      setPendingUserMessages((previous) => previous.filter((item) => item.id !== operationId))
+      if (!(error instanceof AdmissionDeliveryPendingError && effectiveOptimisticMode === 'queue')) {
+        setOptimisticQueuedMessages((previous) => previous.filter((item) => item.id !== operationId))
+      }
+      if (error instanceof AdmissionDeliveryPendingError) {
+        setMessageDeliveryError({
+          message: error.lastError
+            ? t('composer.delivery.pendingDetail', { reason: error.lastError, attempts: error.attempts })
+            : t('composer.delivery.pending'),
+          operationId: error.operationId,
+        })
+      } else if (error instanceof AdmissionDeliveryFailedError) {
+        setMessageDeliveryError({
+          message: error.lastError ?? t('composer.delivery.failed'),
+          operationId: error.operationId,
+        })
+      } else {
+        setMessageDeliveryError({ message: error instanceof Error ? error.message : String(error) })
+      }
+      throw error
+    } finally {
+      setAwaitingAck(false)
+    }
+    if (!config.explicit) setConfig((previous) => ({ ...previous, explicit: true }))
+  }, [config.explicit, config.token, hostEndpoint.url, t])
   const currentAgentRuntimeCapabilities = currentRuntimeDescriptor?.capabilities ?? KERNEL_AGENT_RUNTIME_CAPABILITIES
   const availableModels = currentRuntimeDescriptor?.models ?? models
   const selectedModelKey = resolveModelKey(availableModels, session.selectedModel) || session.selectedModel || ''
@@ -652,6 +747,23 @@ export function App(): JSX.Element {
     setForkingFromSeq(null)
     suppressNextWaitingNotification.current = false
   }, [config.sessionId])
+
+  useEffect(() => {
+    const handoff = pendingSimpleChatHandoff.current
+    if (handoff?.sessionId === config.sessionId && currentSession?.sessionId === handoff.sessionId) {
+      pendingSimpleChatHandoff.current = null
+      void deliverUserMessage({
+        sessionId: handoff.sessionId,
+        text: handoff.submission.text,
+        mode: 'steer',
+        intent: 'text',
+        ...(handoff.submission.content ? { content: handoff.submission.content } : {}),
+        operationId: handoff.submission.operationId,
+        agentStatus: 'idle',
+        afterSeq: 0,
+      }).catch(() => {})
+    }
+  }, [config.sessionId, currentSession?.sessionId, deliverUserMessage])
 
   useEffect(() => {
     if (forkingFromSeq === null) return
@@ -1482,10 +1594,14 @@ export function App(): JSX.Element {
     onOpen: () => setExplorerDrawerOpen(true),
     ...(explorerDrawerOpen ? { onClose: () => setExplorerDrawerOpen(false) } : {}),
   })
-  const handleSectionSelect = (next: AppSection): void => {
+  const handleSectionSelect = useCallback((next: AppSection): void => {
     setSection(next)
     // Operations, Artifacts, Pipeline, and Docs are real pages rendered inline below.
-  }
+  }, [])
+  const explorerHeaderLeading = useMemo(
+    () => <ProductSwitcher section={section} onSelect={handleSectionSelect} adaptive />,
+    [handleSectionSelect, section],
+  )
 
   const commandPaletteCommands = useMemo<readonly CommandPaletteItem[]>(() => {
     const cmds: CommandPaletteItem[] = []
@@ -1811,6 +1927,25 @@ export function App(): JSX.Element {
     },
     [session.socket, activeSessionId],
   )
+  const openWorkspaceTerminal = useCallback((workspace: WorkspaceNode): void => {
+    if (!workspace.workspaceId || !workspace.online) return
+    const owner = workspace.children[0]
+    if (!owner) return
+    setWorkspaceTerminalExpanded(false)
+    setWorkspaceTerminalKeepRunning(true)
+    setWorkspaceTerminalStatus('idle')
+    setWorkspaceTerminal({
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.name,
+      ownerSessionId: owner.sessionId,
+      sessionId: workspaceTerminalSessionId(owner.sessionId),
+      cwd: owner.currentCwd ?? workspace.workingDir,
+    })
+  }, [])
+  const openWorkspaceTerminalFromExplorerDrawer = useCallback((workspace: WorkspaceNode): void => {
+    openWorkspaceTerminal(workspace)
+    setExplorerDrawerOpen(false)
+  }, [openWorkspaceTerminal])
 
   if (!runtimeDeployment.loaded || (privateCloudMode && authSession.loading && !authSession.checked)) {
     return <PageLoadingFallback compact />
@@ -1838,23 +1973,6 @@ export function App(): JSX.Element {
     void sessionViewCache.clearDurable()
   } : undefined
   const evaluationUrl = runtimeCapabilities.pipeline ? runtimeDeployment.evaluationUrl : undefined
-  const openWorkspaceTerminal = (workspace: WorkspaceNode): void => {
-    if (!workspace.workspaceId || !workspace.online) return
-    const owner = workspace.children[0]
-    if (!owner) return
-    setWorkspaceTerminalExpanded(false)
-    setWorkspaceTerminal({
-      workspaceId: workspace.workspaceId,
-      workspaceName: workspace.name,
-      ownerSessionId: owner.sessionId,
-      sessionId: `workspace-terminal:${owner.sessionId}:${randomId()}`,
-      cwd: owner.currentCwd ?? workspace.workingDir,
-    })
-  }
-  const openWorkspaceTerminalFromExplorerDrawer = (workspace: WorkspaceNode): void => {
-    openWorkspaceTerminal(workspace)
-    setExplorerDrawerOpen(false)
-  }
 
   return (
     <PwaLifecycleHost>
@@ -1932,7 +2050,7 @@ export function App(): JSX.Element {
                         </div>
                       </div>
                       <div className="min-h-0 flex-1 overflow-hidden">
-                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader headerLeading={<ProductSwitcher section={section} onSelect={handleSectionSelect} adaptive />} fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} onOpenWorkspaceTerminal={openWorkspaceTerminal} />
+                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader headerLeading={explorerHeaderLeading} fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} onOpenWorkspaceTerminal={openWorkspaceTerminal} />
                       </div>
                       <div className="flex flex-none justify-end border-t border-border/35 px-3 py-2" data-testid="desktop-sidebar-footer">
                         <SidebarGlobalActions accountPlacement="footer" onOpenSettings={() => setSettingsOpen(true)} account={account} accountLoading={privateCloudMode && authSession.loading} onOpenAccount={openAccount} onOpenAdmin={openAdmin} onSignOut={announceSignOut} evaluationUrl={evaluationUrl} />
@@ -2000,7 +2118,10 @@ export function App(): JSX.Element {
                 models={models}
                 preferredModel={preferredModel}
                 displayPrefs={chatDisplayPrefs}
-                onCreated={selectCreatedSession}
+                onCreated={(sessionId, submission) => {
+                  pendingSimpleChatHandoff.current = { sessionId, submission }
+                  selectCreatedSession(sessionId)
+                }}
               />
             ) : sessionListLoading && !hasSelectedSession ? (
               <SessionDirectoryPendingArea active={sessionDirectoryLoadingOwner === 'workbench'} />
@@ -2139,7 +2260,7 @@ export function App(): JSX.Element {
                           if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
                         }}
                         footerSlot={
-                          selectedHistorySessionLoading ? null : <>
+                          <>
                             <InlineStatusRow
                               state={session.state}
                               fallbackStatus={currentSession?.status}
@@ -2339,6 +2460,20 @@ export function App(): JSX.Element {
                               files,
                             })
                           }}
+                          onExecuteShell={async (command) => {
+                            if (!controlSocket || !currentSession?.workspaceId) {
+                              throw new Error('Dashboard is not connected to the workspace')
+                            }
+                            return formatShellDraft(await executeShellDraft(
+                              controlSocket,
+                              currentSession.workspaceId,
+                              command,
+                              {
+                                ...(session.state?.cwd ? { cwd: session.state.cwd } : {}),
+                                ...(currentWorkspaceExecutor?.os ? { os: currentWorkspaceExecutor.os } : {}),
+                              },
+                            ))
+                          }}
                           onSubmit={async (text, mode, images, extraBlocks, intent) => {
                             if (activeSessionId === null) return
                             const imageBlocks = images ?? []
@@ -2353,94 +2488,21 @@ export function App(): JSX.Element {
                                   ...imageBlocks,
                                 ] satisfies readonly MessageContent[]
                               : undefined
-                            const createdAt = new Date().toISOString()
-                            // Use one identity from the optimistic row through
-                            // admission, Host queueing, and the committed event.
-                            // A successful admission can then retire only this
-                            // local placeholder without relying on wall clocks.
-                            const operationId = newPendingMessageId()
-                            // When the operator picked "queue" but the agent
-                            // is currently idle, the server will drain the
-                            // queue immediately — routing the message through
-                            // the queued-messages dock would just animate it
-                            // in and back out within a round-trip. Treat it
-                            // as a normal pending message in that case; the
-                            // wire `mode` stays `queue` because the server
-                            // path is equivalent.
-                            const agentStatus = session.state?.status
-                            const agentBusy =
-                              agentStatus === 'thinking' ||
-                              agentStatus === 'executing_tools' ||
-                              agentStatus === 'awaiting_approval'
-                            const effectiveOptimisticMode: typeof mode = mode === 'queue' && !agentBusy ? 'steer' : mode
-                            if (effectiveOptimisticMode === 'queue') {
-                              setOptimisticQueuedMessages((prev) => [
-                                ...prev,
-                                { id: operationId, text, mode, createdAt, ...(content ? { content } : {}) },
-                              ])
-                            } else {
-                              setPendingUserMessages((prev) => [
-                                ...prev,
-                                {
-                                  id: operationId,
-                                  text,
-                                  mode: effectiveOptimisticMode,
-                                  ...(content ? { content } : {}),
-                                  createdAt,
-                                  afterSeq: session.timeline.at(-1)?.seq ?? 0,
-                                },
-                              ])
-                            }
-                            setAwaitingAck(true)
-                            setMessageDeliveryError(null)
-                            try {
-                              await admitUserMessage({
-                                host: hostEndpoint.url,
-                                ...(config.token ? { token: config.token } : {}),
-                                sessionId: activeSessionId,
-                                text,
-                                intent,
-                                mode,
-                                operationId,
-                                ...(content ? { content } : {}),
-                              })
-                              if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
-                              // Keep shell work visible until Host queue/transcript projection replaces
-                              // this stable operation identity. ACK is acceptance, not completion.
-                            } catch (error) {
-                              setPendingUserMessages((prev) => prev.filter((item) => item.id !== operationId))
-                              // A delivery-pending error means the Queue operation is
-                              // already durable. Keep its row until Host publication;
-                              // terminal rejection/expiry can remove it.
-                              if (!(error instanceof AdmissionDeliveryPendingError && effectiveOptimisticMode === 'queue')) {
-                                setOptimisticQueuedMessages((prev) => prev.filter((item) => item.id !== operationId))
-                              }
-                              if (error instanceof AdmissionDeliveryPendingError) {
-                                setMessageDeliveryError({
-                                  message: error.lastError
-                                    ? t('composer.delivery.pendingDetail', { reason: error.lastError, attempts: error.attempts })
-                                    : t('composer.delivery.pending'),
-                                  operationId: error.operationId,
-                                })
-                              } else if (error instanceof AdmissionDeliveryFailedError) {
-                                setMessageDeliveryError({
-                                  message: error.lastError ?? t('composer.delivery.failed'),
-                                  operationId: error.operationId,
-                                })
-                              } else {
-                                setMessageDeliveryError({ message: error instanceof Error ? error.message : String(error) })
-                              }
-                              throw error
-                            } finally {
-                              setAwaitingAck(false)
-                            }
+                            await deliverUserMessage({
+                              sessionId: activeSessionId,
+                              text,
+                              mode,
+                              intent,
+                              ...(content ? { content } : {}),
+                              agentStatus: session.state?.status,
+                              afterSeq: session.timeline.at(-1)?.seq ?? 0,
+                            })
                             // Sending is an explicit "I'm at the end" signal:
                             // re-pin and force a jump even if the user had
                             // scrolled up (or was never pinned because the
                             // composer took most of the viewport on load).
                             setChatPinnedToBottom(true)
                             setChatScrollToBottomToken((t) => t + 1)
-                            if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
                           }}
                           />
                         }
@@ -2518,7 +2580,7 @@ export function App(): JSX.Element {
                       />}
                         files={<Suspense fallback={<PageLoadingFallback compact />}><SessionFilesPanel mode="sidebar" socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} fontSizePx={fileExplorerFontSizePx} /></Suspense>}
                         git={<Suspense fallback={<PageLoadingFallback compact />}><SourceControlPanel socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} /></Suspense>}
-                        terminal={activeSessionId && currentSession?.workspaceId ? <Suspense fallback={<PageLoadingFallback compact />}><SessionTerminalPanel socket={session.socket} workspaceId={currentSession.workspaceId} sessionId={activeSessionId} cwd={currentCwd} online={sessionWorkspaceOnline} visible={rightPanelTab === 'terminal'} /></Suspense> : <div className="p-4 text-xs text-muted-foreground">{t('terminal.workspaceRequired')}</div>}
+                        terminal={activeSessionId && currentSession?.workspaceId ? <Suspense fallback={<PageLoadingFallback compact />}><SessionTerminalPanel key={`${currentSession.workspaceId}:${activeSessionId}`} socket={session.socket} workspaceId={currentSession.workspaceId} sessionId={activeSessionId} cwd={currentCwd} online={sessionWorkspaceOnline} visible={rightPanelTab === 'terminal'} /></Suspense> : <div className="p-4 text-xs text-muted-foreground">{t('terminal.workspaceRequired')}</div>}
                         scheduledTasks={<ScheduledTasksPanel
                           target={activeSessionId ? { kind: 'session', sessionId: activeSessionId } : null}
                           onOpen={() => {
@@ -2613,7 +2675,7 @@ export function App(): JSX.Element {
             />}
               files={<Suspense fallback={<PageLoadingFallback compact />}><SessionFilesPanel mode="sidebar" socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} fontSizePx={fileExplorerFontSizePx} /></Suspense>}
               git={<Suspense fallback={<PageLoadingFallback compact />}><SourceControlPanel socket={workspaceExplorerBinding.socket} workspaceId={fileExplorerWorkspaceId} sessionId={workspaceExplorerBinding.sessionId} cwd={currentCwd} /></Suspense>}
-              terminal={activeSessionId && currentSession?.workspaceId ? <Suspense fallback={<PageLoadingFallback compact />}><SessionTerminalPanel socket={session.socket} workspaceId={currentSession.workspaceId} sessionId={activeSessionId} cwd={currentCwd} online={sessionWorkspaceOnline} visible={rightPanelTab === 'terminal'} /></Suspense> : <div className="p-4 text-xs text-muted-foreground">{t('terminal.workspaceRequired')}</div>}
+              terminal={activeSessionId && currentSession?.workspaceId ? <Suspense fallback={<PageLoadingFallback compact />}><SessionTerminalPanel key={`${currentSession.workspaceId}:${activeSessionId}`} socket={session.socket} workspaceId={currentSession.workspaceId} sessionId={activeSessionId} cwd={currentCwd} online={sessionWorkspaceOnline} visible={rightPanelTab === 'terminal'} /></Suspense> : <div className="p-4 text-xs text-muted-foreground">{t('terminal.workspaceRequired')}</div>}
               scheduledTasks={<ScheduledTasksPanel
                 target={activeSessionId ? { kind: 'session', sessionId: activeSessionId } : null}
                 onOpen={() => {
@@ -2633,7 +2695,7 @@ export function App(): JSX.Element {
         <AlertDialogContent className="max-w-[min(92vw,34rem)]">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {slashDeleteConfirmationStep === 'phrase' ? t('app.slashDelete.confirmTitle') : 'Final deletion confirmation'}
+              {slashDeleteConfirmationStep === 'phrase' ? t('app.slashDelete.confirmTitle') : t('app.slashDelete.finalTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
@@ -2651,7 +2713,7 @@ export function App(): JSX.Element {
                 </label>
                 {slashDeleteConfirmationStep === 'final' ? (
                   <p className="font-medium text-destructive">
-                    Confirm again to permanently delete this Session tree. This is the second and final confirmation.
+                    {t('app.slashDelete.finalDescription')}
                   </p>
                 ) : null}
               </div>
@@ -2669,7 +2731,7 @@ export function App(): JSX.Element {
                 }}
                 data-testid="slash-delete-confirm-button"
               >
-                Continue
+                {t('common.continue')}
               </AlertDialogAction>
             ) : (
               <AlertDialogAction
@@ -2804,6 +2866,7 @@ export function App(): JSX.Element {
       />
       <Dialog open={workspaceTerminal !== null} onOpenChange={(open) => {
         if (!open) {
+          if (workspaceTerminalCloseNeedsConfirmation(workspaceTerminalKeepRunning, workspaceTerminalStatus) && !window.confirm(t('terminal.closeAndStopConfirm'))) return
           setWorkspaceTerminal(null)
           setWorkspaceTerminalExpanded(false)
         }
@@ -2845,7 +2908,9 @@ export function App(): JSX.Element {
                   cwd={workspaceTerminal.cwd}
                   online
                   autoStart
-                  destroyOnUnmount
+                  preferenceScope="workspace"
+                  onKeepRunningChange={setWorkspaceTerminalKeepRunning}
+                  onStatusChange={setWorkspaceTerminalStatus}
                 />
               </Suspense>
             ) : <PageLoadingFallback />}

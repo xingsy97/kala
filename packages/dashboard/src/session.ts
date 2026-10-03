@@ -1283,6 +1283,12 @@ export function useControlPlane(
     }
     const onControlUpdate = (payload: ControlUpdate): void => {
       if (!isActive()) return
+      if (payload.kind === 'session_summary_changed') {
+        enqueueSummaryUpdate(() => summaryStore.update(
+          payload.session.sessionId,
+          () => payload.session,
+        ))
+      }
       if (payload.kind === 'session_meta_changed') {
         setSessions((current) => summaryStore.replace(current.map((summary) =>
           summary.sessionId === payload.sessionId

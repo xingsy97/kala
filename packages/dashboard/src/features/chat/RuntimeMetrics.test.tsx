@@ -229,8 +229,11 @@ describe('RuntimeMetrics', () => {
     expect(screen.getByTestId('context-usage-fill').getAttribute('data-running')).toBe('true')
     expect(screen.getByTestId('context-usage-fill').getAttribute('stroke-dasharray')).toBe('30 71')
     expect(screen.getByTestId('context-usage-running-flow').getAttribute('class')).toContain('ak-context-usage-active-fill')
-    expect(screen.getByTestId('context-usage-running-flow').getAttribute('stroke-dasharray')).toBe('5 11')
+    expect(screen.getByTestId('context-usage-running-flow').getAttribute('stroke')).toMatch(/^url\(#.+\)$/)
+    expect(screen.getByTestId('context-usage-running-flow').getAttribute('stroke-dasharray')).toBeNull()
     expect(screen.getByTestId('context-usage-running-flow').getAttribute('mask')).toMatch(/^url\(#.+\)$/)
+    const stripePath = screen.getByTestId('context-usage-track').querySelector('.ak-context-usage-active-stripes path')
+    expect(stripePath?.getAttribute('d')).toContain('L')
 
     rerender(<RuntimeMetrics {...props} state={{ ...base, status: 'awaiting_approval', pendingCalls: [{ callId: 'call-1', name: 'bash', input: {}, status: 'awaiting_approval' }] } as never} />)
     expect(screen.getByTestId('context-usage-bar').getAttribute('data-running')).toBe('false')

@@ -112,7 +112,12 @@ the endpoint or adopt remote page titles. Use **Change server** to view or edit
 the saved address. The desktop's mint octopus and dock underline distinguish it
 from the coral web/PWA icon.
 Press **Ctrl+Shift+O** to open the local connection screen, **Ctrl+R** to reload
-the Dashboard, or **Ctrl+Q** to quit. With a supported system tray, closing or
+the Dashboard, **Ctrl+Shift+R** (or the native title-bar recovery button) to
+clear cached interface data and force-reload without deleting authentication
+cookies, or **Ctrl+Q** to quit. The native shell automatically attempts this
+recovery once when it detects the Dashboard's fatal interface screen, then
+leaves the recovery button available instead of entering a reload loop. With a
+supported system tray, closing or
 minimizing a native window hides the app in the tray. Click its icon or choose
 **Open Kala** to restore the existing window without a reload;
 **Change server…** opens the local launcher and **Quit** exits the process.

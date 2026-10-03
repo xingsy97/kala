@@ -50,6 +50,7 @@ export function RuntimeMetrics({
   const { t } = useTranslation()
   const ringGradientId = useId()
   const contextFlowMaskId = useId()
+  const contextFlowPatternId = useId()
   const [open, setOpen] = useState(false)
   const [breakdownExpanded, setBreakdownExpanded] = useState(false)
   const [simpleGeometry, setSimpleGeometry] = useState({ width: 100, height: 56 })
@@ -183,6 +184,16 @@ export function RuntimeMetrics({
                 strokeDasharray={`${usedPercent} ${contextUsageGap}`}
               />
             </mask>
+            <pattern id={contextFlowPatternId} width="8" height="8" patternUnits="userSpaceOnUse">
+              <g className="ak-context-usage-active-stripes">
+                <path
+                  d="M -10 8 L 8 -10 M -2 10 L 10 -2 M 6 10 L 18 -2"
+                  fill="none"
+                  stroke="hsl(var(--background) / 0.34)"
+                  strokeWidth="3"
+                />
+              </g>
+            </pattern>
           </defs>
           <path d={contextBorderPath} pathLength="100" fill="none" className="stroke-border/80" strokeWidth="2" />
           {usedPercent > 0 ? (
@@ -204,9 +215,9 @@ export function RuntimeMetrics({
               d={contextBorderPath}
               fill="none"
               className="ak-context-usage-active-fill"
+              stroke={`url(#${contextFlowPatternId})`}
               strokeWidth="3.25"
               strokeLinecap="butt"
-              strokeDasharray="5 11"
               mask={`url(#${contextFlowMaskId})`}
               data-testid="context-usage-running-flow"
             />

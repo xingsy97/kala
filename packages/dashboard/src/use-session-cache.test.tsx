@@ -621,6 +621,30 @@ describe('useSession session view cache', () => {
     expect(result.current.sessions[0]?.status).toBe('thinking')
   })
 
+  it('merges one incremental Session summary without replacing the full list', async () => {
+    const { result } = renderHook(() => {
+      const controlSocket = useDashboardControlSocket('http://host.test')
+      return useControlPlane(controlSocket)
+    })
+    await waitFor(() => expect(sockets).toHaveLength(1))
+    const controlSocket = sockets[0]!
+    act(() => controlSocket.serverEmit('server:sessions', {
+      sessions: [
+        { sessionId: 's1', createdAt: 't0', eventCount: 0, status: 'idle' },
+        { sessionId: 's2', createdAt: 't0', eventCount: 3, status: 'done' },
+      ],
+    }))
+    act(() => controlSocket.serverEmit('server:control_update', {
+      kind: 'session_summary_changed',
+      session: { sessionId: 's1', createdAt: 't0', eventCount: 4, status: 'thinking' },
+    }))
+
+    await waitFor(() => expect(result.current.sessions[0]?.eventCount).toBe(4))
+    expect(result.current.sessions.map((session) => session.sessionId)).toEqual(['s1', 's2'])
+    expect(result.current.sessions[0]?.status).toBe('thinking')
+    expect(result.current.sessions[1]?.eventCount).toBe(3)
+  })
+
   it('checkpoints cache updates instead of writing on every projection commit', async () => {
     vi.useFakeTimers()
     try {

@@ -12,6 +12,7 @@ const fitMock = vi.fn()
 const inputListeners: Array<(data: string) => void> = []
 let fitCols = 100
 let fitRows = 12
+let terminalOptions: { fontSize: number } | null = null
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class TerminalMock {
@@ -25,6 +26,7 @@ vi.mock('@xterm/xterm', () => ({
     loadAddon(addon: { activate?(terminal: TerminalMock): void }): void { addon.activate?.(this) }
     open(): void {}
     dispose(): void {}
+    constructor() { terminalOptions = this.options }
     onData(listener: (data: string) => void): { dispose(): void } { inputListeners.push(listener); return { dispose() {} } }
   },
 }))
@@ -69,6 +71,8 @@ describe('SessionTerminalPanel', () => {
     writeMock.mockClear(); clearMock.mockClear(); focusMock.mockClear(); fitMock.mockClear(); inputListeners.length = 0
     fitCols = 100
     fitRows = 12
+    terminalOptions = null
+    localStorage.clear()
     vi.stubGlobal('ResizeObserver', class ResizeObserverMock {
       constructor(private readonly callback: ResizeObserverCallback) {}
       observe(): void { this.callback([], this as unknown as ResizeObserver) }
@@ -174,13 +178,36 @@ describe('SessionTerminalPanel', () => {
     expect(screen.getByTestId('terminal-toolbar').querySelector('.ak-terminal-connecting')).toBeTruthy()
   })
 
-  it('auto-starts a temporary terminal and kills it when the modal unmounts', async () => {
+  it('keeps an auto-started terminal alive by default when the modal unmounts', async () => {
     const mock = makeSocket()
-    const { unmount } = render(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" autoStart destroyOnUnmount />)
+    const { unmount } = render(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" autoStart />)
     await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:create', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', cwd: '/repo' }), expect.any(Function)))
     await screen.findByText('Running')
     unmount()
-    await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:kill', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', terminalId: 'term-1' }), expect.any(Function)))
+    expect(mock.emit.mock.calls.filter(([event]) => event === 'terminal:kill')).toHaveLength(0)
+  })
+
+  it('kills the terminal on unmount when keep-running is disabled', async () => {
+    const mock = makeSocket()
+    const { unmount } = render(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" autoStart />)
+    await screen.findByText('Running')
+    fireEvent.click(screen.getByTestId('terminal-keep-running'))
+    expect(screen.getByTestId('terminal-keep-running').getAttribute('aria-pressed')).toBe('false')
+    expect(localStorage.getItem('ak-terminal:keep-running:session:sess-1')).toBe('0')
+    unmount()
+    await waitFor(() => expect(mock.emit).toHaveBeenCalledWith('terminal:kill', expect.objectContaining({ terminalId: 'term-1' }), expect.any(Function)))
+  })
+
+  it('persists and applies independent terminal font controls', async () => {
+    const mock = makeSocket()
+    render(<SessionTerminalPanel socket={mock.socket} workspaceId="ws-1" sessionId="sess-1" />)
+    expect(terminalOptions?.fontSize).toBe(12)
+    fireEvent.click(screen.getByTestId('terminal-font-increase'))
+    expect(screen.getByTestId('terminal-font-size').textContent).toBe('13')
+    await waitFor(() => expect(terminalOptions?.fontSize).toBe(13))
+    expect(localStorage.getItem('ak-terminal:font-size:session:sess-1')).toBe('13')
+    fireEvent.click(screen.getByTestId('terminal-font-size'))
+    await waitFor(() => expect(terminalOptions?.fontSize).toBe(12))
   })
 
   it('kills explicitly and can restart with a new create request', async () => {

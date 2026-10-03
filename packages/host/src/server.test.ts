@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createConfig } from '@agent-kernel/kernel'
 import type { AgentConfig } from '@agent-kernel/kernel'
 import type {
+  ControlUpdate,
   DashboardServerToClientEvents,
   ClientListDirs,
   DirListResult,
@@ -3119,6 +3120,36 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('broadcasts one Session summary instead of the full Session list after runtime events', async () => {
+    const sessionId = 'wire-incremental-session-summary'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    let fullListBroadcasts = 0
+    dashboard.on('server:sessions', () => {
+      fullListBroadcasts += 1
+    })
+    const summaryChanged = new Promise<Extract<ControlUpdate, { kind: 'session_summary_changed' }>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('session_summary_changed never emitted')), 1500)
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind !== 'session_summary_changed' || payload.session.sessionId !== sessionId) return
+        clearTimeout(timer)
+        resolve(payload)
+      })
+    })
+
+    dashboard.emit('client:user_message', { intent: 'text', sessionId, text: 'hello' })
+
+    const payload = await summaryChanged
+    expect(payload.session.eventCount).toBeGreaterThan(0)
+    expect(fullListBroadcasts).toBe(0)
+    dashboard.close()
+  })
+
   it('persists selected model preferences and restores them on a new host instance', async () => {
     await server.close()
     const http = createServer()
@@ -4776,11 +4807,12 @@ describe('wire protocol', () => {
     })
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
 
-    const doneSummary = new Promise<ServerSessionsPayload>((resolve, reject) => {
+    const doneSummary = new Promise<Extract<ControlUpdate, { kind: 'session_summary_changed' }>>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('inactive session summary was not broadcast')), 4000)
-      dashboard.on('server:sessions', (payload) => {
-        const inactive = payload.sessions.find((s) => s.sessionId === 'inactive-session')
-        if (inactive?.status !== 'done') return
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind !== 'session_summary_changed'
+          || payload.session.sessionId !== 'inactive-session'
+          || payload.session.status !== 'done') return
         clearTimeout(timer)
         resolve(payload)
       })
@@ -4789,7 +4821,7 @@ describe('wire protocol', () => {
     await server.loop.dispatch('inactive-session', { kind: 'user_message', text: 'run in background' })
     const payload = await doneSummary
 
-    expect(payload.sessions.find((s) => s.sessionId === 'inactive-session')?.status).toBe('done')
+    expect(payload.session.status).toBe('done')
     dashboard.close()
   })
 

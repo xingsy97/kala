@@ -723,6 +723,7 @@ export function ChatPanel({
         {loading ? (
           <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
             <TranscriptLoadingState />
+            {renderedFooterSlot ? <div className="pl-0 pt-2 sm:pl-10">{renderedFooterSlot}</div> : null}
           </div>
         ) : isEmpty ? (
           <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
@@ -1476,15 +1477,10 @@ function ToolActivityTranscriptRow({
       >
         <AssistantAvatarRail hidden={hideHeader} label={t('chat.transcript.searchCategories.assistant')} />
         <div className="relative min-w-0 flex-1">
-          {hideHeader ? null : (
-            <div className="mb-1 text-meta font-medium uppercase tracking-wider text-muted-foreground">
-              {t('chat.transcript.searchCategories.assistant')}
-            </div>
-          )}
-          <InlineTimestamp ts={item.ts} className="absolute right-0 top-0 text-muted-foreground" />
           <ToolCallGroupBlock
             group={item.group}
             messageIndex={item.firstMessageIndex}
+            timestamp={item.ts}
             approvalByCallId={approvalByCallId}
             onApprovalDecision={onApprovalDecision}
             liveToolActivityTailCount={liveToolActivityTailCount}
@@ -1565,20 +1561,28 @@ function InlineTimestamp({
   className?: string
 }): JSX.Element | null {
   const visibility = useContext(MessageTimestampContext)
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const formatted = useMemo(() => {
+    if (!ts) return null
+    const parsed = Date.parse(ts)
+    if (!Number.isFinite(parsed)) return null
+    const date = new Date(parsed)
+    const today = new Date(todayStart)
+    const label = date.toLocaleString()
+    const sameDay =
+      date.getFullYear() === today.getFullYear()
+      && date.getMonth() === today.getMonth()
+      && date.getDate() === today.getDate()
+    return {
+      label,
+      short: sameDay
+        ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    }
+  }, [todayStart, ts])
   if (visibility === 'hidden') return null
-  if (!ts) return null
-  const parsed = Date.parse(ts)
-  if (!Number.isFinite(parsed)) return null
-  const date = new Date(parsed)
-  const label = date.toLocaleString()
-  const today = new Date()
-  const sameDay =
-    date.getFullYear() === today.getFullYear()
-    && date.getMonth() === today.getMonth()
-    && date.getDate() === today.getDate()
-  const short = sameDay
-    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  if (!formatted) return null
   return (
     <span
       className={cn(
@@ -1588,11 +1592,11 @@ function InlineTimestamp({
           : 'opacity-55 sm:opacity-0 sm:group-hover:opacity-65 sm:group-focus-within:opacity-65',
         className,
       )}
-      title={label}
-      aria-label={label}
+      title={formatted.label}
+      aria-label={formatted.label}
       data-testid="message-timestamp"
     >
-      {short}
+      {formatted.short}
     </span>
   )
 }
@@ -2027,17 +2031,44 @@ function MessageRow({
 
   if (message.role === 'user') {
     if (parseShellResultView(messageText)) return <ShellResultMessage text={messageText} ts={ts} />
+    const cancelledUserTurn = turnTiming?.status === 'cancelled'
+    const metadata = (
+      <div className={cn(
+        'pointer-events-auto z-10 flex items-center gap-1.5',
+        cancelledUserTurn
+          ? 'relative max-w-full flex-wrap justify-end text-muted-foreground'
+          : 'absolute bottom-1 left-2 max-w-[calc(100%-1rem)] rounded-md bg-primary/85 px-1 backdrop-blur-sm sm:bottom-0 sm:left-auto sm:right-full sm:mr-2 sm:max-w-[18rem] sm:bg-transparent sm:px-0 sm:backdrop-blur-none',
+      )} data-testid="user-message-metadata">
+        <MessageActions
+          align="end"
+          copyText={messageText}
+          editAction={editable ? {
+            label: t('chat.transcript.editMessage'),
+            onClick: () => {
+              setDraft(initialText)
+              setEditing(true)
+            },
+            testId: `edit-message-${index}`,
+          } : undefined}
+        />
+        {turnTiming ? <TurnTimingFooter summary={turnTiming} userMessage cancelledUserMessage={cancelledUserTurn} /> : null}
+        <InlineTimestamp ts={ts} className={cancelledUserTurn
+          ? 'min-w-0'
+          : 'absolute bottom-full left-0 mb-0.5 rounded bg-primary/90 px-1 text-primary-foreground sm:bottom-1/2 sm:left-auto sm:right-full sm:mb-0 sm:mr-2 sm:translate-y-1/2 sm:bg-background/90 sm:text-muted-foreground'} />
+      </div>
+    )
     return (
       <div
         id={`msg-${index}`}
         data-message-index={index}
         className={cn(
           'group relative flex min-w-0 max-w-full justify-end gap-2',
+          cancelledUserTurn && 'flex-col items-end gap-1',
           highlighted ? 'rounded-2xl bg-amber-50/60 p-1 dark:bg-amber-950/20' : '',
         )}
       >
         <div className="relative min-w-0 max-w-[92%] sm:max-w-[85%]">
-          <div className="relative max-w-full overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 pb-9 text-primary-foreground shadow-sm sm:pb-2.5" data-testid="user-message-surface">
+          <div className={cn('relative max-w-full overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:pb-2.5', cancelledUserTurn ? 'pb-2.5' : 'pb-9')} data-testid="user-message-surface">
             <div className="flex min-w-0 flex-col gap-2">
               {message.content.map((c, i) => (
                 <ContentBlock
@@ -2052,23 +2083,9 @@ function MessageRow({
               ))}
             </div>
           </div>
-          <div className="pointer-events-auto absolute bottom-1 left-2 z-10 flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-md bg-primary/85 px-1 backdrop-blur-sm sm:bottom-0 sm:left-auto sm:right-full sm:mr-2 sm:max-w-[18rem] sm:bg-transparent sm:px-0 sm:backdrop-blur-none" data-testid="user-message-metadata">
-            <MessageActions
-              align="end"
-              copyText={messageText}
-              editAction={editable ? {
-                label: t('chat.transcript.editMessage'),
-                onClick: () => {
-                  setDraft(initialText)
-                  setEditing(true)
-                },
-                testId: `edit-message-${index}`,
-              } : undefined}
-            />
-            {turnTiming ? <TurnTimingFooter summary={turnTiming} /> : null}
-            <InlineTimestamp ts={ts} className="absolute bottom-full left-0 mb-0.5 rounded bg-primary/90 px-1 text-primary-foreground sm:bottom-1/2 sm:left-auto sm:right-full sm:mb-0 sm:mr-2 sm:translate-y-1/2 sm:bg-background/90 sm:text-muted-foreground" />
-          </div>
+          {!cancelledUserTurn ? metadata : null}
         </div>
+        {cancelledUserTurn ? metadata : null}
       </div>
     )
   }
@@ -2184,7 +2201,7 @@ function MessageRow({
   )
 }
 
-function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared').TurnTimingSummary }): JSX.Element {
+function TurnTimingFooter({ summary, userMessage = false, cancelledUserMessage = false }: { summary: import('@agent-kernel/shared').TurnTimingSummary; userMessage?: boolean; cancelledUserMessage?: boolean }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -2213,7 +2230,7 @@ function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared')
   return (
     <div
       ref={rootRef}
-      className="flex flex-none items-center whitespace-nowrap"
+      className={cn('flex flex-none items-center whitespace-nowrap', userMessage && 'relative', cancelledUserMessage && 'max-w-full flex-wrap justify-end whitespace-normal')}
       data-testid={`turn-timing-${summary.turnId}`}
     >
       <button
@@ -2236,7 +2253,14 @@ function TurnTimingFooter({ summary }: { summary: import('@agent-kernel/shared')
           id={detailsId}
           role="group"
           aria-label={`${statusLabel} · ${formatTurnDuration(summary.wallDurationMs)}`}
-          className="flex h-7 flex-none animate-in items-center whitespace-nowrap text-meta text-muted-foreground fade-in slide-in-from-left-1"
+          className={cn(
+            'flex min-w-0 animate-in items-center text-meta text-muted-foreground fade-in slide-in-from-left-1',
+            cancelledUserMessage
+              ? 'order-first max-w-full flex-wrap justify-end whitespace-normal'
+              : userMessage
+                ? 'absolute bottom-full right-0 z-20 mb-1 w-max max-w-[min(18rem,calc(100vw-2rem))] flex-wrap rounded-lg border border-border bg-popover px-2 py-1.5 shadow-md'
+                : 'h-7 flex-none whitespace-nowrap',
+          )}
           data-testid={detailsId}
         >
           <span className="px-1.5 text-border" aria-hidden="true">·</span>
@@ -3888,6 +3912,7 @@ function detectOverflowMarker(content: string): boolean {
 function ToolCallGroupBlock({
   group,
   messageIndex,
+  timestamp,
   approvalByCallId,
   onApprovalDecision,
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -3898,6 +3923,7 @@ function ToolCallGroupBlock({
 }: {
   group: ToolCallGroup
   messageIndex: number
+  timestamp?: string
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   liveToolActivityTailCount?: number
@@ -4144,15 +4170,18 @@ function ToolCallGroupBlock({
               })}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={toggleOpen}
-            className="col-start-3 row-start-1 flex h-8 w-8 flex-none items-center justify-center rounded text-muted-foreground/65 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-sm:col-start-2"
-            aria-label={t('chatCommon.expandToolActivity')}
-            data-testid="tool-activity-direction"
-          >
-            <ArrowRight className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
-          </button>
+          <div className="col-start-3 row-start-1 flex min-w-0 items-center justify-end gap-1 max-sm:col-start-2" data-testid="tool-activity-actions">
+            <InlineTimestamp ts={timestamp} className="flex-none opacity-65" />
+            <button
+              type="button"
+              onClick={toggleOpen}
+              className="flex h-8 w-8 flex-none items-center justify-center rounded text-muted-foreground/65 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              aria-label={t('chatCommon.expandToolActivity')}
+              data-testid="tool-activity-direction"
+            >
+              <ArrowRight className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
+            </button>
+          </div>
           {displayedIntent ? (
             <p
               className="col-start-2 row-start-1 min-w-0 whitespace-normal break-words text-[0.9375rem] leading-6 text-foreground/85 max-sm:col-span-2 max-sm:col-start-1 max-sm:row-start-2 max-sm:pr-1"

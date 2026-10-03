@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import type { AgentRuntimeDescriptor, AgentRuntimeId, ModelInfo } from '@agent-kernel/shared'
 import { HelpHint } from '../../components/ui/help-hint.js'
 import type { MessageContent, ReferencedFileContent } from '@agent-kernel/kernel'
-import { AdmissionDeliveryFailedError, AdmissionDeliveryPendingError, admitUserMessage, releaseMessageAttachments, uploadMessageAttachment } from '../../admission-client.js'
+import { releaseMessageAttachments, uploadMessageAttachment } from '../../admission-client.js'
 import { createSessionWithAck, type DashboardSocket } from '../../session.js'
 import { randomId } from '../../lib/random-id.js'
 import { PREF_AGENT_RUNTIME, readStringPref, writeStringPref } from '../../lib/prefs.js'
@@ -16,7 +16,7 @@ import type { ChatDisplayPrefs } from './chatDisplayPrefs.js'
 const SIMPLE_CHAT_TOOLS = ['todo_graph', 'agent', 'websearch', 'memory'] as const
 const EMPTY_ATTENTION = { sessionId: '', points: [], latest: null } as const
 
-type Submission = {
+export type SimpleChatSubmission = {
   operationId: string
   text: string
   content?: readonly MessageContent[]
@@ -32,7 +32,7 @@ export function SimpleChatDraft({
   models: readonly ModelInfo[]
   preferredModel: string
   displayPrefs: ChatDisplayPrefs
-  onCreated(sessionId: string): void
+  onCreated(sessionId: string, submission: SimpleChatSubmission): void
   onOpenVoiceSettings?(): void
 }): JSX.Element {
   const { t } = useTranslation()
@@ -51,7 +51,6 @@ export function SimpleChatDraft({
   const [started, setStarted] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState<Submission | null>(null)
   const address = { host, ...(token ? { token } : {}), sessionId }
 
   useEffect(() => {
@@ -89,30 +88,24 @@ export function SimpleChatDraft({
     }
   }
 
-  const deliver = (submission: Submission): Promise<void> => {
+  const deliver = (submission: SimpleChatSubmission): Promise<void> => {
     if (inFlight.current) return inFlight.current
     setBusy(true)
     setError(null)
     const operation = (async () => {
       try {
         await ensureSession()
-        await admitUserMessage({ ...address, ...submission, intent: 'text', mode: 'steer' })
-        if (mounted.current) onCreated(sessionId)
+        if (mounted.current) onCreated(sessionId, submission)
       } catch (cause) {
         if (mounted.current) {
           setError(cause instanceof Error ? cause.message : String(cause))
-          if (cause instanceof AdmissionDeliveryPendingError) {
-            // Keep the exact payload, uploaded references and operation id.
-            // An uncertain acceptance is not permission to send it again.
-            setPending(submission)
-          } else if (cause instanceof AdmissionDeliveryFailedError) {
-            setPending({ ...submission, operationId: randomId() })
-          }
         }
         throw cause
       } finally {
         inFlight.current = null
-        if (mounted.current) setBusy(false)
+        if (mounted.current) {
+          setBusy(false)
+        }
       }
     })()
     inFlight.current = operation
@@ -161,16 +154,11 @@ export function SimpleChatDraft({
       </div>
       {error ? (
         <div role="alert" className="mx-4 mb-2 rounded-lg border border-border bg-muted/50 p-3 text-sm" data-testid="draft-send-error">
-          <p>{pending ? t('chat.draft.deliveryUncertain') : error}</p>
-          {pending ? <Button
-            variant="outline" size="sm" className="mt-2" disabled={busy}
-            data-testid="draft-retry-send"
-            onClick={() => { void deliver(pending).catch(() => {}) }}
-          >{t('chat.draft.retryDelivery')}</Button> : null}
+          <p>{error}</p>
         </div>
       ) : null}
       <Composer
-        disabled={!socket?.connected || !descriptor || busy || pending !== null}
+        disabled={!socket?.connected || !descriptor || busy}
         serviceUnavailable={!socket?.connected}
         onReconnectService={() => socket?.connect()}
         onOpenVoiceSettings={onOpenVoiceSettings}

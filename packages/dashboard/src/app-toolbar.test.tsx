@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NarrowContextualRow, NoSessionArea, TopbarRestoreButton, WorkbenchToolbar, connectionStatusForTransport, readInitialConfig, resolveSessionDirectoryLoadingOwner, selectedSessionHistoryIsLoading, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar, workspaceTerminalDialogSizeClass } from './app.js'
+import { NarrowContextualRow, NoSessionArea, TopbarRestoreButton, WorkbenchToolbar, connectionStatusForTransport, readInitialConfig, resolveSessionDirectoryLoadingOwner, selectedSessionHistoryIsLoading, sessionDirectoryIsLoading, shouldRenderWorkbenchToolbar, workspaceTerminalCloseNeedsConfirmation, workspaceTerminalDialogSizeClass, workspaceTerminalSessionId } from './app.js'
 import { DesktopSessionRail } from './app-shell/AppShellNav.js'
 import { coarseStatusForIndicator, deriveSelectedSessionActivity } from './app-logic/session-activity.js'
 
@@ -32,6 +32,13 @@ describe('bounded busy-indicator rendering', () => {
     expect(workspaceTerminalDialogSizeClass(false)).toContain('720px')
     expect(workspaceTerminalDialogSizeClass(true)).toContain('sm:w-[calc(100vw-2rem)]')
     expect(workspaceTerminalDialogSizeClass(true)).toContain('sm:h-[calc(var(--ak-viewport-h,100dvh)-2rem)]')
+  })
+
+  it('uses a stable workspace terminal identity and confirms only destructive closes', () => {
+    expect(workspaceTerminalSessionId('session-1')).toBe('workspace-terminal:session-1:primary')
+    expect(workspaceTerminalCloseNeedsConfirmation(false, 'running')).toBe(true)
+    expect(workspaceTerminalCloseNeedsConfirmation(true, 'running')).toBe(false)
+    expect(workspaceTerminalCloseNeedsConfirmation(false, 'exited')).toBe(false)
   })
 
   it('stops the history spinner if a selected session subscription or replay fails', () => {

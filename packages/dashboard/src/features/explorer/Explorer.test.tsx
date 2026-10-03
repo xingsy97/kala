@@ -1037,9 +1037,14 @@ describe('Explorer', () => {
         onRename={() => {}}
       />,
     )
-    fireEvent.click(screen.getByTestId('session-delete-button'))
+    const deleteButton = screen.getByTestId('session-delete-button')
+    expect(deleteButton.getAttribute('title')).toBe('Delete this session')
+    fireEvent.click(deleteButton)
+    expect(screen.getByText(/This cannot be undone/i)).toBeTruthy()
     fireEvent.click(screen.getByTestId('confirm-delete-button'))
     expect(onDelete).not.toHaveBeenCalled()
+    const finalWarning = screen.getByText(/Confirm again to permanently delete this Session tree/i)
+    expect(finalWarning.className).not.toContain('text-destructive')
     fireEvent.click(screen.getByTestId('confirm-delete-final-button'))
     expect(onDelete).toHaveBeenCalledWith(sessionSummary.sessionId)
   })

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MermaidBlock } from './MermaidBlock.js'
@@ -23,6 +23,17 @@ describe('MermaidBlock', () => {
     render(<MermaidBlock code="flowchart LR\nA-->B" />)
     expect(screen.getByTestId('code-block-raw')).toBeTruthy()
     await waitFor(() => expect(screen.getByTestId('mermaid-diagram').querySelector('svg')).toBeTruthy())
+  })
+
+  it('opens rendered diagrams in the zoomable image viewer', async () => {
+    render(<MermaidBlock code="flowchart LR\nA-->B" />)
+    const diagram = await screen.findByRole('button', { name: 'Open Mermaid diagram' })
+    fireEvent.click(diagram)
+    expect(screen.getByTestId('mermaid-preview-dialog')).toBeTruthy()
+    expect(screen.getByTestId('mermaid-preview-image').querySelector('svg')).toBeTruthy()
+    expect(screen.getByTestId('mermaid-preview-dialog').querySelector('img')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeTruthy()
   })
 
   it('does not repeatedly render an incomplete streaming diagram', () => {

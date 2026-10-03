@@ -160,10 +160,17 @@ const SubAgentRow = memo(function SubAgentRow({
         }
     : undefined
 
+  // A running child can project hundreds of kilobytes on every state change.
+  // Keep the summary live from the parent room and join the child room only
+  // after the user asks to inspect its transcript.
+  const [open, setOpen] = useState(
+    seededLifecycle?.status === 'failed' || seededLifecycle?.status === 'cancelled',
+  )
   const view = useSubAgentSession({
     socket,
     parentSessionId,
     parentCallId: call.callId,
+    mirrorMessages: open,
     ...(envelope ? { initialChildSessionId: envelope.sessionId } : {}),
     ...(seededLifecycle ? { initialLifecycle: seededLifecycle } : {}),
     ...(envelope?.agentType ? { initialAgentType: envelope.agentType } : {}),
@@ -190,11 +197,10 @@ const SubAgentRow = memo(function SubAgentRow({
     ?? t('chat.subAgent.fallbackIntention', { type: agentType ?? roleInput ?? t('chat.subAgent.label').toLowerCase() })
 
   const startedAtMs = startedAtOf(view.lifecycle)
-  const elapsedMs = useElapsedMs(status === 'running' ? startedAtMs : null)
-  const totalMs =
+  const settledDurationMs =
     status === 'completed' || status === 'failed' || status === 'cancelled'
       ? view.lifecycle.durationMs
-      : elapsedMs
+      : 0
   const turns =
     status === 'completed' || status === 'failed' || status === 'cancelled'
       ? view.lifecycle.turns
@@ -224,16 +230,6 @@ const SubAgentRow = memo(function SubAgentRow({
       )
     : undefined
 
-  // Grouped rows always start collapsed so a new fan-out remains
-  // skimmable and expansion is user-controlled. Standalone live/failed
-  // rows keep the existing eager detail behavior.
-  const [open, setOpen] = useState(
-    grouped
-      ? false
-      : compact
-        ? status === 'running'
-        : status === 'running' || status === 'idle' || status === 'failed' || status === 'cancelled',
-  )
   const intentionRef = useRef<HTMLSpanElement>(null)
   const [intentionTruncated, setIntentionTruncated] = useState(false)
   useLayoutEffect(() => {
@@ -250,9 +246,7 @@ const SubAgentRow = memo(function SubAgentRow({
     return () => window.removeEventListener('resize', measure)
   }, [intention])
   useEffect(() => {
-    if (grouped) return
-    if (!compact && (status === 'running' || status === 'failed' || status === 'cancelled')) setOpen(true)
-    if (compact && status === 'running') setOpen(true)
+    if (!grouped && (status === 'failed' || status === 'cancelled')) setOpen(true)
     if (compact && terminal) setOpen(false)
   }, [status, compact, grouped])
 
@@ -299,12 +293,12 @@ const SubAgentRow = memo(function SubAgentRow({
           <span ref={intentionRef} className="min-w-0 flex-1 truncate text-meta text-muted-foreground" title={intention} data-testid={`sub-agent-header-intention-${call.callId}`}>
             {intention}
           </span>
-          {totalMs > 0 ? (
-            <span className="ak-sub-agent-duration hidden flex-none items-center gap-1 text-caption tabular-nums text-muted-foreground" data-testid={`sub-agent-duration-${call.callId}`} title={t('chat.subAgent.duration')}>
-              <Clock3 className="h-3.5 w-3.5" data-testid="sub-agent-duration-icon" aria-hidden="true" />
-              {formatDuration(totalMs)}
-            </span>
-          ) : null}
+          <SubAgentDuration
+            callId={call.callId}
+            durationMs={settledDurationMs}
+            startedAtMs={status === 'running' ? startedAtMs : null}
+            title={t('chat.subAgent.duration')}
+          />
           {open ? (
             <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           ) : (
@@ -321,7 +315,8 @@ const SubAgentRow = memo(function SubAgentRow({
           role={roleInput}
           status={status}
           turns={turns}
-          durationMs={totalMs}
+          durationMs={settledDurationMs}
+          startedAtMs={status === 'running' ? startedAtMs : null}
           childSessionId={childSessionId}
           policy={policy}
         />
@@ -506,12 +501,34 @@ function useElapsedMs(startedAtMs: number | null): number {
     let handle: number | undefined
     const tick = (): void => {
       setNow(Date.now())
-      handle = window.setTimeout(tick, 500)
+      handle = window.setTimeout(tick, 1_000)
     }
-    handle = window.setTimeout(tick, 500)
+    handle = window.setTimeout(tick, 1_000)
     return () => { if (handle !== undefined) window.clearTimeout(handle) }
   }, [startedAtMs])
-  return startedAtMs === null ? 0 : Math.max(0, now - startedAtMs)
+  return startedAtMs === null ? 0 : Math.max(0, Math.max(now, Date.now()) - startedAtMs)
+}
+
+function SubAgentDuration({
+  callId,
+  durationMs,
+  startedAtMs,
+  title,
+}: {
+  callId: string
+  durationMs: number
+  startedAtMs: number | null
+  title: string
+}): JSX.Element | null {
+  const elapsedMs = useElapsedMs(startedAtMs)
+  const displayedDurationMs = startedAtMs === null ? durationMs : elapsedMs
+  if (displayedDurationMs <= 0) return null
+  return (
+    <span className="ak-sub-agent-duration hidden flex-none items-center gap-1 text-caption tabular-nums text-muted-foreground" data-testid={`sub-agent-duration-${callId}`} title={title}>
+      <Clock3 className="h-3.5 w-3.5" data-testid="sub-agent-duration-icon" aria-hidden="true" />
+      {formatDuration(displayedDurationMs)}
+    </span>
+  )
 }
 
 function readPrompt(call: ToolCallContent): string | undefined {
@@ -565,6 +582,7 @@ function SubAgentDetails({
   status,
   turns,
   durationMs,
+  startedAtMs,
   childSessionId,
   policy,
   callId,
@@ -575,15 +593,20 @@ function SubAgentDetails({
   status: SubAgentLifecycle['status']
   turns: number
   durationMs: number
+  startedAtMs: number | null
   childSessionId?: string
   policy: SubAgentPolicyView | null
   callId: string
 }): JSX.Element {
   const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const elapsedMs = useElapsedMs(open ? startedAtMs : null)
+  const displayedDurationMs = startedAtMs === null ? durationMs : elapsedMs
   return (
     <details
       className="relative flex-none"
       data-testid={`sub-agent-details-${callId}`}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary
         className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground opacity-55 transition hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
@@ -607,7 +630,7 @@ function SubAgentDetails({
           <DetailRow label={t('chat.subAgent.status')} value={statusLabel(status, t)} />
           <DetailRow label={t('chat.subAgent.context')} value={t('chat.subAgent.freshContext')} />
           {turns > 0 ? <DetailRow label={t('chat.subAgent.turns')} value={String(turns)} /> : null}
-          {durationMs > 0 ? <DetailRow label={t('chat.subAgent.duration')} value={formatDuration(durationMs)} /> : null}
+          {displayedDurationMs > 0 ? <DetailRow label={t('chat.subAgent.duration')} value={formatDuration(displayedDurationMs)} /> : null}
           {childSessionId ? <DetailRow label={t('chat.subAgent.childSession')} value={childSessionId} mono /> : null}
           {policy?.maxTurns !== undefined ? <DetailRow label={t('chat.subAgent.maxTurns')} value={String(policy.maxTurns)} /> : null}
           {policy?.idleTimeoutMs !== undefined ? <DetailRow label="Idle timeout" value={formatPolicyDuration(policy.idleTimeoutMs)} /> : null}

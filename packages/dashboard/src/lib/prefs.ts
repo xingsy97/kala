@@ -86,6 +86,8 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   composerMode: { key: 'ak-composer-mode', type: 'string', defaultValue: 'full' },
   composerSendModePrefix: { key: 'agent-kernel:composer:send-mode:', type: 'string', defaultValue: '' },
   composerDraftPrefix: { key: 'agent-kernel:composer:draft:', type: 'string', defaultValue: '' },
+  terminalKeepRunningPrefix: { key: 'ak-terminal:keep-running:', type: 'string', defaultValue: '' },
+  terminalFontSizePrefix: { key: 'ak-terminal:font-size:', type: 'string', defaultValue: '' },
   hiddenWorkspaces: { key: 'ak-hidden-workspaces', type: 'json' },
   hiddenSessions: { key: 'ak-hidden-sessions', type: 'json' },
   workspaceOrder: { key: 'agent-kernel:explorer:workspace-order:v1', type: 'json' },

@@ -79,6 +79,9 @@ describe('dashboard i18n', () => {
       'artifacts.ops.stats.reliabilityIssues',
       'inspector.llm.messagesTab',
       'inspector.llm.descriptionBytesLabel',
+      'common.continue',
+      'app.slashDelete.finalTitle',
+      'app.slashDelete.finalDescription',
     ]
 
     for (const lang of ['en', 'zh'] as const) {
@@ -99,6 +102,9 @@ describe('dashboard i18n', () => {
       'chatCommon.approvalNeeded',
       'memo.title',
       'sourceControl.repository',
+      'common.continue',
+      'app.slashDelete.finalTitle',
+      'app.slashDelete.finalDescription',
     ]
     await i18n.changeLanguage('zh')
     for (const key of keys) {

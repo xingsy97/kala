@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { ProductState } from './components/ui/product-state.js'
 import { dashboardBootIdentity, isStaleDashboardAssetError, recoverStaleDashboard } from './lib/dashboard-version-recovery.js'
 import { writeTextToClipboard } from './lib/clipboard.js'
+import { forcePwaRefresh } from './lib/pwa.js'
 
 type Props = {
   children: ReactNode
@@ -63,7 +64,17 @@ export function ErrorBoundaryFallback({ error }: { error: Error }): JSX.Element 
         kind="fatal"
         title={t('errorBoundary.title')}
         description={t('errorBoundary.body')}
-        primary={{ label: t('common.reload'), onClick: () => window.location.reload() }}
+        primary={{
+          label: t('pwa.forceRefresh'),
+          onClick: () => {
+            setRecovery('checking')
+            void forcePwaRefresh().catch(() => {
+              const url = new URL(window.location.href)
+              url.searchParams.set('__kala_refresh', String(Date.now()))
+              window.location.replace(url.toString())
+            })
+          },
+        }}
         secondary={{
           label: copyState === 'copied' ? t('common.copied') : copyState === 'failed' ? t('common.copyFailed') : t('errorBoundary.copyDiagnostics'),
           onClick: () => {

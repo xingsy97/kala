@@ -4,7 +4,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as XTerm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { Eraser, Loader2, Play, RefreshCw, Square } from 'lucide-react'
+import { Eraser, Loader2, Minus, Pin, PinOff, Play, Plus, RefreshCw, Square } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { ServerTerminalExit, ServerTerminalOutput, TerminalCreateResult, TerminalKillResult } from '@agent-kernel/shared'
@@ -12,8 +12,14 @@ import { Button } from '../../components/ui/button.js'
 import { randomId } from '../../lib/random-id.js'
 import type { DashboardSocket } from '../../session.js'
 import { useInterfaceScale } from '../../lib/interface-scale.js'
+import { DASHBOARD_PREFERENCES, useBooleanPref, useNumberPref } from '../../lib/prefs.js'
 
 type TerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error'
+type TerminalPreferenceScope = 'session' | 'workspace'
+
+const DEFAULT_TERMINAL_FONT_SIZE = 12
+const MIN_TERMINAL_FONT_SIZE = 10
+const MAX_TERMINAL_FONT_SIZE = 24
 
 export function SessionTerminalPanel({
   socket,
@@ -22,8 +28,10 @@ export function SessionTerminalPanel({
   cwd,
   online = true,
   autoStart = false,
-  destroyOnUnmount = false,
   visible = true,
+  preferenceScope = 'session',
+  onKeepRunningChange,
+  onStatusChange,
 }: {
   socket: DashboardSocket | null
   workspaceId?: string
@@ -31,11 +39,24 @@ export function SessionTerminalPanel({
   cwd?: string
   online?: boolean
   autoStart?: boolean
-  destroyOnUnmount?: boolean
   visible?: boolean
+  preferenceScope?: TerminalPreferenceScope
+  onKeepRunningChange?(keepRunning: boolean): void
+  onStatusChange?(status: TerminalStatus): void
 }): JSX.Element {
   const { t } = useTranslation()
   const interfaceScale = useInterfaceScale()
+  const preferenceIdentity = preferenceScope === 'workspace' ? workspaceId ?? sessionId : sessionId
+  const preferenceSuffix = `${preferenceScope}:${encodeURIComponent(preferenceIdentity)}`
+  const [keepRunning, setKeepRunning] = useBooleanPref(
+    `${DASHBOARD_PREFERENCES.terminalKeepRunningPrefix.key}${preferenceSuffix}`,
+    true,
+  )
+  const [fontSize, setFontSize] = useNumberPref(
+    `${DASHBOARD_PREFERENCES.terminalFontSizePrefix.key}${preferenceSuffix}`,
+    DEFAULT_TERMINAL_FONT_SIZE,
+    { min: MIN_TERMINAL_FONT_SIZE, max: MAX_TERMINAL_FONT_SIZE },
+  )
   const hostRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -47,9 +68,11 @@ export function SessionTerminalPanel({
   const inputContextRef = useRef({ socket, workspaceId, sessionId, status })
   const autoStartedRef = useRef(false)
   const disposedRef = useRef(false)
+  const keepRunningRef = useRef(keepRunning)
   const fitFrameRef = useRef<number | null>(null)
   const lastSizeRef = useRef<{ terminalId: string; cols: number; rows: number } | null>(null)
   inputContextRef.current = { socket, workspaceId, sessionId, status }
+  keepRunningRef.current = keepRunning
 
   const setTerminalId = useCallback((value: string | null): void => {
     terminalIdRef.current = value
@@ -103,8 +126,6 @@ export function SessionTerminalPanel({
       fit.fit()
     }
     return () => {
-      // A panel detach must not kill the Session PTY. Explicit Kill and Session
-      // deletion are the only terminal-destruction paths.
       inputDisposable.dispose()
       term.dispose()
       terminalRef.current = null
@@ -114,9 +135,17 @@ export function SessionTerminalPanel({
   }, [])
 
   useEffect(() => {
-    if (terminalRef.current) terminalRef.current.options.fontSize = Math.round(12 * interfaceScale)
+    if (terminalRef.current) terminalRef.current.options.fontSize = Math.round(fontSize * interfaceScale)
     scheduleFitAndResize()
-  }, [interfaceScale, scheduleFitAndResize])
+  }, [fontSize, interfaceScale, scheduleFitAndResize])
+
+  useEffect(() => {
+    onKeepRunningChange?.(keepRunning)
+  }, [keepRunning, onKeepRunningChange])
+
+  useEffect(() => {
+    onStatusChange?.(status)
+  }, [onStatusChange, status])
 
   useEffect(() => {
     if (visible) scheduleFitAndResize()
@@ -186,7 +215,7 @@ export function SessionTerminalPanel({
     const term = terminalRef.current
     const result = await createTerminal(socket, { workspaceId, sessionId, cwd, cols: term?.cols ?? 100, rows: term?.rows ?? 12 })
     if (disposedRef.current) {
-      if (result.terminalId && destroyOnUnmount) {
+      if (result.terminalId && !keepRunningRef.current) {
         void killTerminal(socket, { workspaceId, sessionId, terminalId: result.terminalId })
       }
       return
@@ -202,7 +231,7 @@ export function SessionTerminalPanel({
     if (!result.reused && result.cwd) term?.writeln(t('terminal.connected', { cwd: result.cwd }))
     scheduleFitAndResize(result.terminalId)
     term?.focus()
-  }, [cwd, destroyOnUnmount, online, scheduleFitAndResize, sessionId, setTerminalId, socket, t, workspaceId])
+  }, [cwd, online, scheduleFitAndResize, sessionId, setTerminalId, socket, t, workspaceId])
 
   useEffect(() => {
     if (!autoStart || autoStartedRef.current || !socket || !workspaceId || !online) return
@@ -215,11 +244,11 @@ export function SessionTerminalPanel({
     return () => {
       disposedRef.current = true
       const id = terminalIdRef.current
-      if (destroyOnUnmount && socket && workspaceId && id) {
+      if (!keepRunningRef.current && socket && workspaceId && id) {
         void killTerminal(socket, { workspaceId, sessionId, terminalId: id })
       }
     }
-  }, [destroyOnUnmount, sessionId, socket, workspaceId])
+  }, [sessionId, socket, workspaceId])
 
   const kill = useCallback(async (): Promise<boolean> => {
     if (!socket || !workspaceId || !terminalIdRef.current) return false
@@ -252,6 +281,24 @@ export function SessionTerminalPanel({
     <div className="flex h-full min-h-0 flex-col bg-[#0b0f14] text-white" data-testid="session-terminal-panel" data-terminal-status={status}>
       <div className="relative flex min-h-10 flex-none flex-nowrap items-center gap-1.5 overflow-hidden border-b border-border/35 bg-card/95 px-2 py-1 text-card-foreground sm:px-3" data-testid="terminal-toolbar">
         <span className="inline-flex min-w-0 flex-1 items-center gap-2 truncate text-xs text-muted-foreground" data-testid="terminal-status"><span className={`h-1.5 w-1.5 flex-none rounded-full ${!online || status === 'error' ? 'bg-rose-500' : status === 'running' ? 'bg-emerald-500' : status === 'starting' ? 'animate-pulse bg-amber-500' : 'bg-muted-foreground/50'}`} />{statusLabel}</span>
+        <div className="flex flex-none items-center rounded-lg border border-border/45 bg-background/35" data-testid="terminal-font-controls">
+          <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-r-none" disabled={fontSize <= MIN_TERMINAL_FONT_SIZE} onClick={() => setFontSize(fontSize - 1)} title={t('terminal.decreaseFont')} aria-label={t('terminal.decreaseFont')} data-testid="terminal-font-decrease"><Minus className="h-3.5 w-3.5" /></Button>
+          <Button type="button" variant="ghost" className="h-8 min-w-8 rounded-none px-1 font-mono text-[11px] tabular-nums" onClick={() => setFontSize(DEFAULT_TERMINAL_FONT_SIZE)} title={t('terminal.resetFont')} aria-label={t('terminal.resetFont')} data-testid="terminal-font-size">{fontSize}</Button>
+          <Button type="button" size="icon" variant="ghost" className="h-8 w-8 rounded-l-none" disabled={fontSize >= MAX_TERMINAL_FONT_SIZE} onClick={() => setFontSize(fontSize + 1)} title={t('terminal.increaseFont')} aria-label={t('terminal.increaseFont')} data-testid="terminal-font-increase"><Plus className="h-3.5 w-3.5" /></Button>
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant={keepRunning ? 'outline' : 'ghost'}
+          className={`h-11 w-11 flex-none rounded-lg sm:h-8 sm:w-8 ${keepRunning ? 'border-primary/40 bg-primary/10 text-primary' : ''}`}
+          onClick={() => setKeepRunning(!keepRunning)}
+          title={keepRunning ? t('terminal.keepRunningOn') : t('terminal.keepRunningOff')}
+          aria-label={t('terminal.keepRunning')}
+          aria-pressed={keepRunning}
+          data-testid="terminal-keep-running"
+        >
+          {keepRunning ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
+        </Button>
         <Button type="button" size="sm" className="h-11 flex-none gap-1.5 rounded-lg px-3 sm:h-8" disabled={disabled || status === 'starting' || status === 'running'} onClick={() => void start()} data-testid="terminal-start">
           {status === 'starting' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}{t('terminal.start')}
         </Button>

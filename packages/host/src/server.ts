@@ -1224,14 +1224,35 @@ export async function startHostServer(
   let sessionsBroadcastTimer: ReturnType<typeof setTimeout> | null = null
   let sessionsBroadcastLastMs = 0
   let sessionsBroadcastPending = false
+  let sessionsBroadcastAll = false
+  const pendingSessionSummaryIds = new Set<string>()
   const flushSessionsBroadcast = (): void => {
     sessionsBroadcastLastMs = Date.now()
     sessionsBroadcastPending = false
+    const broadcastAll = sessionsBroadcastAll
+    const sessionIds = new Set(pendingSessionSummaryIds)
+    sessionsBroadcastAll = false
+    pendingSessionSummaryIds.clear()
     void store.listSummaries()
-      .then((sessions) => io.of('/dashboard').emit('server:sessions', { sessions }))
+      .then((sessions) => {
+        if (broadcastAll) {
+          io.of('/dashboard').emit('server:sessions', { sessions })
+          return
+        }
+        const byId = new Map(sessions.map((session) => [session.sessionId, session]))
+        for (const sessionId of sessionIds) {
+          const session = byId.get(sessionId)
+          if (session) io.of('/dashboard').emit('server:control_update', {
+            kind: 'session_summary_changed',
+            session,
+          })
+        }
+      })
       .catch(() => {})
   }
-  const scheduleSessionsBroadcast = (): void => {
+  const scheduleSessionsBroadcast = (sessionId?: string): void => {
+    if (sessionId) pendingSessionSummaryIds.add(sessionId)
+    else sessionsBroadcastAll = true
     const now = Date.now()
     const elapsed = now - sessionsBroadcastLastMs
     if (elapsed >= SESSIONS_BROADCAST_MIN_MS && sessionsBroadcastTimer === null) {
@@ -1270,7 +1291,7 @@ export async function startHostServer(
       const room = sessionRoom(sessionId)
       const slimEffects = effects.map(slimEffect)
       const hasEffectsArtifact = effects.some((effect) => effect.kind === 'call_llm')
-      scheduleSessionsBroadcast()
+      scheduleSessionsBroadcast(sessionId)
       io.of('/dashboard').to(room).emit('event:appended', {
         sessionId,
         seq,
@@ -1497,7 +1518,7 @@ export async function startHostServer(
     publishLocalImages,
     broadcast: {
       onState(record, state, runtimeContextSnapshot) {
-        scheduleSessionsBroadcast()
+        scheduleSessionsBroadcast(record.sessionId)
         const room = sessionRoom(record.sessionId)
         if (runtimeContextSnapshot) {
           void store.updateRuntimeContextSnapshot(record, runtimeContextSnapshot).catch((error) => {

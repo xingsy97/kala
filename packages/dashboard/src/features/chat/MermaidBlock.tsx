@@ -1,6 +1,8 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
+import { Maximize2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { ReadonlySvgPreviewDialog } from '../../components/ReadonlyImagePreview.js'
 import { CodeBlock } from './CodeBlock.js'
 
 let mermaidModule: Promise<(typeof import('mermaid'))['default']> | null = null
@@ -18,6 +20,7 @@ export const MermaidBlock = memo(function MermaidBlock({ code, deferRender = fal
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [nearViewport, setNearViewport] = useState(() => typeof IntersectionObserver === 'undefined')
   const [result, setResult] = useState<{ svg: string } | { error: true } | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined' || !rootRef.current) {
@@ -68,13 +71,29 @@ export const MermaidBlock = memo(function MermaidBlock({ code, deferRender = fal
 
   if (result && 'svg' in result) {
     return (
-      <div
-        className="my-3 max-w-full overflow-x-auto rounded-lg border border-border/60 bg-card p-3 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
-        data-testid="mermaid-diagram"
-        role="img"
-        aria-label={t('chatCommon.mermaidDiagram')}
-        dangerouslySetInnerHTML={{ __html: result.svg }}
-      />
+      <>
+        <button
+          type="button"
+          className="group relative my-3 block w-full max-w-full cursor-zoom-in overflow-x-auto rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+          data-testid="mermaid-diagram"
+          aria-label={t('chatCommon.openMermaidDiagram')}
+          onClick={() => setPreviewOpen(true)}
+        >
+          <span className="pointer-events-none absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+            <Maximize2 className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <span role="img" aria-label={t('chatCommon.mermaidDiagram')} dangerouslySetInnerHTML={{ __html: result.svg }} />
+        </button>
+        <ReadonlySvgPreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          svg={result.svg}
+          alt={t('chatCommon.mermaidDiagram')}
+          title={t('chatCommon.mermaidDiagram')}
+          dialogTestId="mermaid-preview-dialog"
+          imageTestId="mermaid-preview-image"
+        />
+      </>
     )
   }
 

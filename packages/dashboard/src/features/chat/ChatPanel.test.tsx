@@ -106,6 +106,45 @@ describe('ChatPanel', () => {
     expect(metadata.className).toContain('sm:right-full')
     expect(metadata.className).toContain('pointer-events-auto')
     expect(within(metadata).getByTestId('copy-message').tabIndex).toBe(0)
+    fireEvent.click(timing.querySelector('button')!)
+    const details = screen.getByTestId('turn-timing-details-turn-failed')
+    expect(details.className).toContain('absolute')
+    expect(details.className).toContain('bottom-full')
+    expect(details.className).toContain('right-0')
+    expect(details.className).toContain('flex-wrap')
+    expect(details.className).not.toContain('whitespace-nowrap')
+    expect(details.textContent).toContain('→')
+  })
+
+  it('places cancelled user turn timing below the bubble, before the timestamp, and expands left without an overlay', () => {
+    const summary = {
+      turnId: 'turn-cancelled', status: 'cancelled' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:04Z', wallDurationMs: 4000, estimated: false,
+      queueDurationMs: 0, activeDurationMs: 4000, approvalWaitMs: 0,
+      llm: { wallDurationMs: 4000, requestCount: 1, firstTokenMs: 0 },
+      tools: { wallDurationMs: 0, aggregateDurationMs: 0, callCount: 0, peakConcurrency: 0, partial: false },
+      compactionDurationMs: 0, retryDurationMs: 0, recoveryDurationMs: 0,
+    }
+    render(<DashboardChatPanel items={[{
+      kind: 'message', seq: 1, ts: '2026-01-01T00:00:00Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'Cancel this request.' }] }, turnTiming: summary,
+    }]} messages={[]} />)
+    const surface = screen.getByTestId('user-message-surface')
+    const metadata = screen.getByTestId('user-message-metadata')
+    const timing = screen.getByTestId('turn-timing-turn-cancelled')
+    const timestamp = screen.getByTestId('message-timestamp')
+    expect(surface.parentElement?.nextElementSibling).toBe(metadata)
+    expect(metadata.className).not.toContain('absolute')
+    expect(metadata.contains(timing)).toBe(true)
+    expect(metadata.contains(timestamp)).toBe(true)
+    expect(timing.compareDocumentPosition(timestamp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(timing.textContent).toContain('Cancelled · 4s')
+    fireEvent.click(timing.querySelector('button')!)
+    const details = screen.getByTestId('turn-timing-details-turn-cancelled')
+    expect(details.className).toContain('order-first')
+    expect(details.className).not.toContain('absolute')
+    expect(details.className).not.toContain('whitespace-nowrap')
+    expect(timing.className).toContain('flex-wrap')
+    expect(details.textContent).toContain('→')
   })
 
   it('keeps auto timestamps out of message action layout slots', () => {
@@ -124,6 +163,44 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('user-message-metadata').className).toContain('absolute')
     expect(screen.getByTestId('assistant-message-footer').className).toContain('min-h-7')
     expect(screen.getByTestId('assistant-message-footer').querySelector('[data-testid="message-timestamp"]')?.className).toContain('absolute')
+  })
+
+  it('places Dot Line timestamps immediately before the expand control without adding a metadata row', () => {
+    render(
+      <DashboardChatPanel
+        items={[
+          { kind: 'message', seq: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'Checking now.' }] } },
+          {
+            kind: 'message',
+            seq: 2,
+            ts: '2026-10-03T10:30:00.000Z',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_call', callId: 'timestamped-dot', name: 'read', input: { path: '/repo/a.ts' } }],
+            },
+          },
+          {
+            kind: 'message',
+            seq: 3,
+            message: {
+              role: 'tool',
+              content: [{ type: 'tool_result', callId: 'timestamped-dot', ok: true, content: 'contents' }],
+            },
+          },
+        ]}
+        messages={[]}
+      />,
+    )
+
+    const actions = screen.getByTestId('tool-activity-actions')
+    const timestamp = within(actions).getByTestId('message-timestamp')
+    const expand = within(actions).getByTestId('tool-activity-direction')
+    const dotLine = screen.getByTestId('tool-card-dots-timestamped-dot')
+    expect(timestamp.className).not.toContain('absolute')
+    expect(timestamp.className).toContain('opacity-65')
+    expect(timestamp.nextElementSibling).toBe(expand)
+    expect(dotLine.contains(timestamp)).toBe(true)
+    expect(screen.queryByTestId('tool-activity-metadata')).toBeNull()
   })
 
   it('shows a readable placeholder for legacy local markdown images instead of a broken browser image', () => {
@@ -499,7 +576,7 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
   })
 
-  it('suppresses planning status until authoritative conversation history is loaded', () => {
+  it('keeps planning status visible while authoritative conversation history is loading', () => {
     render(
       <ChatPanel
         loading
@@ -513,7 +590,7 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(screen.queryByTestId('inline-status-thinking')).toBeNull()
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
     expect(screen.getByTestId('transcript-history-loading-indicator').textContent).toContain('Loading conversation history')
     expect(screen.getByTestId('transcript-history-loading-indicator').querySelector('.ak-session-status-spinner')).toBeTruthy()
     expect(screen.getByTestId('transcript-history-loading-indicator').querySelector('.animate-spin')).toBeNull()
