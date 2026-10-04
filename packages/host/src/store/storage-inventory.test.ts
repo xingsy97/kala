@@ -148,6 +148,26 @@ describe('StorageInventory', () => {
     inventory.close()
   })
 
+  it('does not offer artifacts owned by an unreadable session record for cleanup', async () => {
+    const { sessionsDir, indexPath } = fixture()
+    writeFileSync(join(sessionsDir, 'claimed.jsonl'), '{"kind":"header","sessionId":"unterminated')
+    const claimed = join(sessionsDir, 'artifacts', 'claimed')
+    mkdirSync(claimed, { recursive: true })
+    writeFileSync(join(claimed, 'one.json'), '1234')
+    const inventory = new StorageInventory(sessionsDir, { indexPath })
+
+    const global = await inventory.reconcile()
+
+    expect(global.categories.corrupt.files).toBe(1)
+    expect(global.categories['session-artifacts']).toEqual({ bytes: 4, files: 1 })
+    expect(global.categories['orphan-artifacts']).toEqual({ bytes: 0, files: 0 })
+    expect(global.orphanCandidates).not.toContainEqual(expect.objectContaining({
+      id: 'claimed',
+      category: 'orphan-artifacts',
+    }))
+    inventory.close()
+  })
+
   it('shows dirty deltas immediately and persists them only when flushed', async () => {
     const { sessionsDir, indexPath } = fixture()
     log(sessionsDir, 'session_slug', 'session')

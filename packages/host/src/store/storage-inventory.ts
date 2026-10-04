@@ -304,6 +304,7 @@ export class StorageInventory {
     const orphans: StorageOrphanCandidate[] = []
     const rootFiles: RootFile[] = []
     const validSlugs = new Map<string, string>()
+    const occupiedSlugs = new Set<string>()
     let operations = 0
     const tick = async (): Promise<void> => {
       operations += 1
@@ -332,9 +333,10 @@ export class StorageInventory {
     for (const file of rootFiles) {
       if (!file.name.endsWith('.jsonl')) continue
       const path = join(this.sessionsDir, file.name)
+      const slug = file.name.slice(0, -'.jsonl'.length)
+      occupiedSlugs.add(slug)
       try {
         const header = await readHeaderLine(path)
-        const slug = file.name.slice(0, -'.jsonl'.length)
         validSlugs.set(slug, header.sessionId)
         const entry = sessions.get(header.sessionId) ?? { sessionId: header.sessionId, categories: {} }
         entry.parentSessionId = header.parentSessionId
@@ -374,11 +376,11 @@ export class StorageInventory {
           await tick()
           if (slugStats.isSymbolicLink()) continue
           const sessionId = validSlugs.get(slug)
-          const category: StorageCategory = sessionId ? 'session-artifacts' : 'orphan-artifacts'
+          const category: StorageCategory = occupiedSlugs.has(slug) ? 'session-artifacts' : 'orphan-artifacts'
           const totals = await walkFiles(slugPath, this.indexPath, tick)
           mergeStat(global[category], totals)
           if (sessionId) mergeStatForCategory(sessions.get(sessionId)?.categories, category, totals)
-          else if (totals.files > 0) {
+          else if (!occupiedSlugs.has(slug) && totals.files > 0) {
             orphans.push({ id: slug, category: 'orphan-artifacts', bytes: totals.bytes, files: totals.files })
           }
         }

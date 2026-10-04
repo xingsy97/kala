@@ -72,6 +72,7 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
     setCleanupBusy(true)
     setCleanupError(null)
     let completed = 0
+    let failed = false
     for (const plan of cleanupPlans) {
       const result = await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
         socket.emit('client:execute_storage_cleanup', { planId: plan.planId }, (value) => {
@@ -85,15 +86,18 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
             ? `${completed} cleanup ${completed === 1 ? 'plan completed' : 'plans completed'} before the remaining operation failed: ${result.error}`
             : result.error,
         })
+        failed = true
         break
       }
       completed += 1
     }
-    setCleanupPlans([])
-    setConfirmationStep('review')
-    setSelectedIds(new Set())
     setCleanupBusy(false)
-    load(true)
+    if (!failed) {
+      setCleanupPlans([])
+      setConfirmationStep('review')
+      setSelectedIds(new Set())
+      load(true)
+    }
   }
 
   useEffect(() => {
@@ -143,6 +147,15 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
     }))
   }
 
+  const openCleanupView = (): void => {
+    setView('cleanup')
+    setSelectedIds(new Set())
+    setCleanupPlans([])
+    setCleanupError(null)
+    setConfirmationStep('review')
+    load(true)
+  }
+
   return (
     <div data-testid="settings-storage">
       <SectionHeader
@@ -170,7 +183,7 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
 
           <div className="flex gap-1 border-b border-border/50 pb-2" role="tablist" aria-label="Storage views">
             <StorageViewTab active={view === 'overview'} testId="settings-storage-overview-tab" onClick={() => setView('overview')}>Overview</StorageViewTab>
-            <StorageViewTab active={view === 'cleanup'} testId="settings-storage-cleanup-tab" onClick={() => setView('cleanup')}>Cleanup</StorageViewTab>
+            <StorageViewTab active={view === 'cleanup'} testId="settings-storage-cleanup-tab" onClick={openCleanupView}>Cleanup</StorageViewTab>
           </div>
 
           {view === 'overview' ? (
@@ -260,53 +273,65 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
                   These artifact directories no longer match any stored session. Selection never includes active session records. The Host creates and revalidates an exact cleanup plan before moving anything to quarantine.
                 </HelpHint>
               </h3>
-              {cleanupError ? <CleanupErrorNotice error={cleanupError} /> : null}
               {cleanupCandidates.length > 0 ? (
                 <div className="overflow-hidden rounded-md border border-border/50">
-                  <label className="grid min-h-10 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/50 bg-muted/20 px-3 py-2 text-sm">
-                    <input
-                      type="checkbox"
-                      aria-label="Select all cleanup candidates"
-                      checked={allSelected}
-                      ref={(input) => { if (input) input.indeterminate = someSelected }}
-                      disabled={cleanupBusy || cleanupPlans.length > 0}
-                      onChange={(event) => setSelectedIds(event.target.checked ? new Set(cleanupCandidates.map((candidate) => candidate.id)) : new Set())}
-                    />
-                    <span className="font-medium">Select all</span>
-                    <span className="text-xs text-muted-foreground">Stored size</span>
-                  </label>
-                  <div className="divide-y divide-border/40">
-                    {cleanupCandidates.slice(0, 50).map((candidate) => (
-                      <label key={candidate.id} className="grid min-h-12 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 hover:bg-muted/20">
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${candidate.id}`}
-                          checked={selectedIds.has(candidate.id)}
-                          disabled={cleanupBusy || cleanupPlans.length > 0}
-                          onChange={(event) => {
-                            setSelectedIds((current) => {
-                              const next = new Set(current)
-                              if (event.target.checked) next.add(candidate.id)
-                              else next.delete(candidate.id)
-                              return next
-                            })
-                          }}
-                        />
-                        <div className="min-w-0">
-                          <div className="truncate font-mono text-xs" title={candidate.id}>{candidate.id}</div>
-                          <div className="text-caption text-muted-foreground">{candidate.files} artifact {candidate.files === 1 ? 'file' : 'files'} · no matching session</div>
-                        </div>
-                        <span className="text-xs">{formatBytes(candidate.bytes)}</span>
-                      </label>
-                    ))}
-                  </div>
+                  <table className="w-full table-fixed text-sm">
+                    <thead className="border-b border-border/50 bg-muted/20 text-xs text-muted-foreground">
+                      <tr>
+                        <th className="w-10 px-3 py-2 text-left">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all cleanup candidates"
+                            checked={allSelected}
+                            ref={(input) => { if (input) input.indeterminate = someSelected }}
+                            disabled={loading || cleanupBusy || cleanupPlans.length > 0}
+                            onChange={(event) => setSelectedIds(event.target.checked ? new Set(cleanupCandidates.map((candidate) => candidate.id)) : new Set())}
+                          />
+                        </th>
+                        <th className="px-1 py-2 text-left font-medium">Artifact directory</th>
+                        <th className="w-16 px-2 py-2 text-right font-medium">Files</th>
+                        <th className="w-24 px-3 py-2 text-right font-medium">Stored size</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {cleanupCandidates.slice(0, 50).map((candidate) => (
+                        <tr key={candidate.id} className="hover:bg-muted/20">
+                          <td className="px-3 py-2 align-middle">
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${candidate.id}`}
+                              checked={selectedIds.has(candidate.id)}
+                              disabled={loading || cleanupBusy || cleanupPlans.length > 0}
+                              onChange={(event) => {
+                                setSelectedIds((current) => {
+                                  const next = new Set(current)
+                                  if (event.target.checked) next.add(candidate.id)
+                                  else next.delete(candidate.id)
+                                  return next
+                                })
+                              }}
+                            />
+                          </td>
+                          <td className="min-w-0 px-1 py-2">
+                            <div className="truncate font-mono text-xs" title={candidate.id}>{candidate.id}</div>
+                            <div className="text-caption text-muted-foreground">Directory has no matching session record</div>
+                          </td>
+                          <td className="px-2 py-2 text-right text-xs tabular-nums">{candidate.files}</td>
+                          <td className="px-3 py-2 text-right text-xs tabular-nums">{formatBytes(candidate.bytes)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                   {selectedIds.size > 0 && cleanupPlans.length === 0 ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-muted/20 px-3 py-2" data-testid="settings-storage-selection-bar">
-                      <span className="text-xs">{selectedIds.size} selected · {formatBytes(selectedBytes)}</span>
-                      <Button type="button" size="sm" variant="destructive" disabled={cleanupBusy} onClick={() => void prepareCleanup()}>
-                        <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                        Review cleanup…
-                      </Button>
+                    <div className="space-y-2 border-t border-border/50 bg-muted/20 px-3 py-2" data-testid="settings-storage-selection-bar">
+                      {cleanupError?.phase === 'prepare' ? <CleanupErrorNotice error={cleanupError} /> : null}
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span className="text-xs">{selectedIds.size} selected · {formatBytes(selectedBytes)}</span>
+                        <Button type="button" size="sm" variant="destructive" disabled={loading || cleanupBusy} onClick={() => void prepareCleanup()}>
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                          Review cleanup…
+                        </Button>
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -330,6 +355,7 @@ export function StorageSection({ socket }: { socket?: DashboardSocket }): JSX.El
                     {cleanupPlans.length} artifact {cleanupPlans.length === 1 ? 'directory' : 'directories'}, {plannedItems} exact filesystem {plannedItems === 1 ? 'entry' : 'entries'}, and approximately {formatBytes(plannedBytes)} will be quarantined after Host revalidation.
                   </p>
                   {confirmationStep === 'final' ? <p className="mt-2 font-medium text-destructive">Confirm again. This operation cannot be undone from the Kala UI.</p> : null}
+                  {cleanupError?.phase === 'execute' ? <div className="mt-3"><CleanupErrorNotice error={cleanupError} /></div> : null}
                   <div className="mt-3 flex flex-wrap gap-2">
                     {confirmationStep === 'review' ? (
                       <Button type="button" size="sm" variant="destructive" data-testid="settings-storage-cleanup-first-confirm" disabled={cleanupBusy} onClick={() => setConfirmationStep('final')}>Continue</Button>
