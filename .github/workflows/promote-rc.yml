@@ -71,6 +71,20 @@ jobs:
           CANDIDATE=$(mktemp -d)
           gh release download "$TAG" --dir "$CANDIDATE"
           REVISION=$(git rev-parse HEAD)
+          # The core release owns the exact 27-asset manifest. Verify the separately
+          # signed Private Cloud assets before removing them from this disposable
+          # download directory so core manifest closure remains strict.
+          for target in linux-x64 linux-arm64; do
+            archive="$CANDIDATE/kala-private-cloud-${TAG#v}-$target.tar.gz"
+            signature="$CANDIDATE/private-cloud-$target.sigstore.json"
+            test -s "$archive" && test -s "$signature"
+            cosign verify-blob --bundle "$signature" \
+              --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/private-cloud-release.yml@refs/tags/$TAG" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$archive"
+            tar -xOzf "$archive" ./manifest.json | jq -e --arg revision "$REVISION" --arg version "${TAG#v}" \
+              '.revision == $revision and .version == $version' >/dev/null
+            rm -- "$archive" "$signature"
+          done
           node scripts/release/verify-promotion-candidate.mjs \
             --directory "$CANDIDATE" --evidence acceptance/evidence \
             --aggregate release-evidence/rc-evidence.json --tag "$TAG" --revision "$REVISION"

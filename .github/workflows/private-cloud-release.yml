@@ -8,6 +8,9 @@ on:
       tag:
         description: Product release tag
         required: true
+      predecessor_tag:
+        description: Previously released Private Cloud version for clean upgrade and rollback acceptance
+        required: false
 
 permissions:
   contents: read
@@ -238,12 +241,133 @@ jobs:
       - uses: actions/attest-build-provenance@v3
         with:
           subject-path: release/kala-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz
-      - name: Add bundle to draft release
+      - name: Transfer exact signed bundle to clean acceptance runner
+        uses: actions/upload-artifact@v5
+        with:
+          name: private-cloud-acceptance-input-${{ github.run_id }}-${{ matrix.target }}
+          path: |
+            release/kala-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz
+            release/private-cloud-${{ matrix.target }}.sigstore.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload and verify owned Private Cloud release assets
         env: { GH_TOKEN: '${{ github.token }}', TAG: '${{ needs.resolve.outputs.tag }}' }
         run: |
+          set -euo pipefail
+          archive="release/kala-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz"
+          signature="release/private-cloud-${{ matrix.target }}.sigstore.json"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "$TAG" --notes "Release assets are still being assembled." || gh release view "$TAG" >/dev/null
           fi
-          gh release upload "$TAG" \
-            "release/kala-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz" \
-            "release/private-cloud-${{ matrix.target }}.sigstore.json" --clobber
+          gh release upload "$TAG" "$archive" "$signature" --clobber
+          published="$(mktemp -d)"
+          trap 'rm -rf "$published"' EXIT
+          gh release download "$TAG" --dir "$published" \
+            --pattern "$(basename "$archive")" --pattern "$(basename "$signature")"
+          cmp "$archive" "$published/$(basename "$archive")"
+          cmp "$signature" "$published/$(basename "$signature")"
+
+  clean-compose-acceptance:
+    name: Clean Compose install, isolation, upgrade and restore (exact signed release)
+    needs: [resolve, bundle]
+    if: vars.KALA_PRIVATE_CLOUD_RUNNER_ENABLED == 'true' && startsWith(github.ref, 'refs/tags/')
+    runs-on: [self-hosted, linux, x64, private-cloud-clean]
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KALA_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE: ${{ vars.KALA_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE }}
+      PRIVATE_CLOUD_TEST_ALICE_EMAIL: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_EMAIL }}
+      PRIVATE_CLOUD_TEST_ALICE_PASSWORD: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_PASSWORD }}
+      PRIVATE_CLOUD_TEST_BOB_EMAIL: ${{ secrets.PRIVATE_CLOUD_TEST_BOB_EMAIL }}
+      PRIVATE_CLOUD_TEST_BOB_PASSWORD: ${{ secrets.PRIVATE_CLOUD_TEST_BOB_PASSWORD }}
+      PRIVATE_CLOUD_TEST_ALICE_OIDC_ISSUER: ${{ vars.PRIVATE_CLOUD_TEST_ALICE_OIDC_ISSUER }}
+      PRIVATE_CLOUD_TEST_ALICE_OIDC_SUBJECT: ${{ secrets.PRIVATE_CLOUD_TEST_ALICE_OIDC_SUBJECT }}
+      PRIVATE_CLOUD_TEST_BOB_OIDC_ISSUER: ${{ vars.PRIVATE_CLOUD_TEST_BOB_OIDC_ISSUER }}
+      PRIVATE_CLOUD_TEST_BOB_OIDC_SUBJECT: ${{ secrets.PRIVATE_CLOUD_TEST_BOB_OIDC_SUBJECT }}
+      PREDECESSOR_TAG: ${{ inputs.predecessor_tag || vars.KALA_PRIVATE_CLOUD_PREDECESSOR_TAG }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Require the release tag to identify the checked-out candidate
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/tags/$TAG"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate && pnpm install --frozen-lockfile
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
+      - uses: actions/download-artifact@v5
+        with:
+          name: private-cloud-acceptance-input-${{ github.run_id }}-linux-x64
+          path: candidate
+      - uses: sigstore/cosign-installer@v3
+      - name: Verify isolated runner, predecessor and test identities
+        run: |
+          set -euo pipefail
+          [[ "$PREDECESSOR_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] && test "$PREDECESSOR_TAG" != "$TAG" || { echo 'Configure a distinct released predecessor tag' >&2; exit 1; }
+          test -d "$KALA_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE"
+          test -x "${CHROME_PATH:-/snap/bin/chromium}"
+          for key in PRIVATE_CLOUD_TEST_ALICE_EMAIL PRIVATE_CLOUD_TEST_ALICE_PASSWORD PRIVATE_CLOUD_TEST_ALICE_OIDC_ISSUER PRIVATE_CLOUD_TEST_ALICE_OIDC_SUBJECT PRIVATE_CLOUD_TEST_BOB_EMAIL PRIVATE_CLOUD_TEST_BOB_PASSWORD PRIVATE_CLOUD_TEST_BOB_OIDC_ISSUER PRIVATE_CLOUD_TEST_BOB_OIDC_SUBJECT; do
+            test -n "${!key}" || { echo "Missing acceptance account: $key" >&2; exit 1; }
+          done
+          command -v gh && command -v docker && command -v cosign
+          docker info >/dev/null
+          node -e 'const s=require("node:net").createServer(); s.once("error",()=>process.exit(1)); s.listen(13001,"127.0.0.1",()=>s.close())'
+          git fetch --no-tags origin "refs/tags/$TAG:refs/tags/$TAG" "refs/tags/$PREDECESSOR_TAG:refs/tags/$PREDECESSOR_TAG"
+          test "$(git rev-parse "$TAG^{commit}")" = "$GITHUB_SHA" || { echo 'Candidate tag and workflow revision differ' >&2; exit 1; }
+          echo "PREDECESSOR_REVISION=$(git rev-parse "$PREDECESSOR_TAG^{commit}")" >> "$GITHUB_ENV"
+          mkdir -p predecessor executor
+          gh release download "$PREDECESSOR_TAG" \
+            -p "kala-private-cloud-${PREDECESSOR_TAG#v}-linux-x64.tar.gz" \
+            -p private-cloud-linux-x64.sigstore.json -D predecessor
+          candidate="candidate/kala-private-cloud-${VERSION}-linux-x64.tar.gz"
+          predecessor="predecessor/kala-private-cloud-${PREDECESSOR_TAG#v}-linux-x64.tar.gz"
+          test -s "$candidate" && test -s "$predecessor"
+          cosign verify-blob --bundle candidate/private-cloud-linux-x64.sigstore.json \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/private-cloud-release.yml@$GITHUB_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$candidate"
+          cosign verify-blob --bundle predecessor/private-cloud-linux-x64.sigstore.json \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/private-cloud-release.yml@refs/tags/$PREDECESSOR_TAG" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$predecessor"
+      - name: Fetch the matching published Executor binary
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 40); do
+            gh release download "$TAG" -p kala-executor-linux-x64 -D executor && test -s executor/kala-executor-linux-x64 && break
+            sleep 15
+          done
+          test -s executor/kala-executor-linux-x64 || { echo 'Current release Executor binary is unavailable' >&2; exit 1; }
+          for attempt in $(seq 1 40); do
+            gh release download "$TAG" -p SHA256SUMS -p SHA256SUMS.sigstore.json -D executor && test -s executor/SHA256SUMS && test -s executor/SHA256SUMS.sigstore.json && break
+            sleep 15
+          done
+          test -s executor/SHA256SUMS && test -s executor/SHA256SUMS.sigstore.json || { echo 'Signed release checksums are unavailable' >&2; exit 1; }
+          cosign verify-blob --bundle executor/SHA256SUMS.sigstore.json \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com executor/SHA256SUMS
+          (cd executor && sha256sum --check --ignore-missing SHA256SUMS)
+      - name: Run complete clean Compose acceptance against signed candidate
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/private-cloud-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.rc-evidence.json"
+          node scripts/release/verify-private-cloud-clean-compose.mjs \
+            --candidate-archive "candidate/kala-private-cloud-${VERSION}-linux-x64.tar.gz" \
+            --predecessor-archive "predecessor/kala-private-cloud-${PREDECESSOR_TAG#v}-linux-x64.tar.gz" \
+            --executor executor/kala-executor-linux-x64 \
+            --tag "$TAG" --revision "$GITHUB_SHA" \
+            --predecessor-revision "$PREDECESSOR_REVISION" --output "$evidence"
+          node -e 'const fs=require("node:fs");const e=JSON.parse(fs.readFileSync(process.argv[1]));if(!e.ok||Object.values(e.checks).some(v=>v!==true))process.exit(1)' "$evidence"
+      - name: Archive digest-bound acceptance result
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: private-cloud-clean-compose-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/private-cloud-${{ github.run_id }}-${{ github.run_attempt }}.rc-evidence.json
+          if-no-files-found: warn
+          retention-days: 30

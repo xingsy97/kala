@@ -164,7 +164,7 @@ jobs:
               --title "$TAG" \
               --notes-file "$metadata/RELEASE_NOTES.md"
           fi
-          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release
+          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release --preserve-private-cloud-assets
 
   native-release:
     needs: [resolve, cjs-release, native-assets]
@@ -244,4 +244,4 @@ jobs:
           trap 'rm -rf "$metadata"' EXIT
           node scripts/release/extract-release-metadata.mjs release/kala-release-metadata.tar.gz "$metadata"
           gh release edit "$TAG" --draft --notes-file "$metadata/RELEASE_NOTES.md"
-          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release
+          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release --preserve-private-cloud-assets

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { build } from 'esbuild'
 import { executorNativeAssetName } from './executor-installer.mjs'
@@ -92,6 +92,10 @@ if (!nativeOnly && !skipPackageBuild) {
   await run('pnpm', ['--filter', '@agent-kernel/shared', 'build'])
   await run('pnpm', ['--filter', '@agent-kernel/executor', 'build'])
   await run('pnpm', ['--filter', '@agent-kernel/host', 'build'])
+}
+const { PROTOCOL_VERSION } = await import(pathToFileURL(join(root, 'packages/shared/dist/index.js')).href)
+if (typeof PROTOCOL_VERSION !== 'string' || !/^\d+\.\d+\.\d+$/u.test(PROTOCOL_VERSION)) {
+  throw new Error('shared protocol version is unavailable or invalid')
 }
 
 // Dashboard imports generated declarations from kernel/shared. Build those
@@ -441,7 +445,7 @@ function writeDashboardReleaseManifest(dir) {
     version: packageJson.version,
     builtAt: releaseBuiltAt,
     source: sourceIdentity,
-    protocol: { min: '1.0.0', max: '1.0.0' },
+    protocol: { min: PROTOCOL_VERSION, max: PROTOCOL_VERSION },
     assetDigest,
     files,
   }, null, 2)}\n`)

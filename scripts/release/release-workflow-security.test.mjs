@@ -55,12 +55,29 @@ test('Private Cloud scanner preserves failure while collecting all three image r
   assert.match(workflow, /trivy image [^\n]+\|\| return 1/u)
 })
 
+test('Private Cloud release retains image publishing and accepts the exact signed Compose candidate', () => {
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/private-cloud-release.yml'), 'utf8')
+  for (const image of ['runtime-image:', 'ingress-image:', 'dashboard-image:']) assert.ok(workflow.includes(image))
+  assert.match(workflow, /gh release upload "\$TAG" "\$archive" "\$signature" --clobber/u)
+  assert.match(workflow, /gh release download "\$TAG"[\s\S]*cmp "\$archive"[\s\S]*cmp "\$signature"/u)
+  assert.match(workflow, /Transfer exact signed bundle[\s\S]*actions\/upload-artifact@v5[\s\S]*private-cloud-acceptance-input-/u)
+  const acceptance = workflow.slice(workflow.indexOf('  clean-compose-acceptance:'))
+  assert.match(acceptance, /needs: \[resolve, bundle\]/u)
+  assert.match(acceptance, /runs-on: \[self-hosted, linux, x64, private-cloud-clean\]/u)
+  assert.match(acceptance, /actions\/download-artifact@v5/u)
+  assert.equal((acceptance.match(/cosign verify-blob/g) ?? []).length, 3)
+  assert.match(acceptance, /git rev-parse "\$TAG\^\{commit\}"/u)
+  assert.match(acceptance, /verify-private-cloud-clean-compose\.mjs[\s\S]*--candidate-archive[\s\S]*--predecessor-archive[\s\S]*--predecessor-revision/u)
+  assert.match(acceptance, /private-cloud-clean-compose-evidence-/u)
+})
+
 test('release workflow publishes archived metadata and verifies the signed 27-asset set', () => {
   const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/release.yml'), 'utf8')
   assert.equal(workflow.match(/extract-release-metadata\.mjs release\/kala-release-metadata\.tar\.gz/g)?.length, 2)
   assert.match(workflow, /Verify exact signed 27-asset inventory[\s\S]*pnpm run verify:release-assets -- --require-signed/u)
   assert.match(workflow, /Verify exact signed 27-asset inventory[\s\S]*cosign verify-blob[\s\S]*certificate-oidc-issuer/u)
   assert.match(workflow, /subject-path:[\s\S]*release\/kala-release-metadata\.tar\.gz/u)
+  assert.equal(workflow.match(/reconcile-github-release-assets\.mjs[^\n]+--preserve-private-cloud-assets/g)?.length, 2)
   assert.doesNotMatch(workflow, /notes-file release\/RELEASE_NOTES\.md/u)
   assert.doesNotMatch(workflow, /release\/sbom\.cdx\.json/u)
 })
@@ -70,6 +87,7 @@ test('RC promotion binds acceptance to the tag ref exposed by the Actions API', 
   assert.match(workflow, /--jq \.head_branch\)" = "\$TAG"/u)
   assert.doesNotMatch(workflow, /--jq \.inputs\.tag/u)
   assert.match(workflow, /verify-rc-evidence\.mjs[\s\S]*--tag "\$TAG" --revision/u)
+  assert.match(workflow, /for target in linux-x64 linux-arm64; do[\s\S]*cosign verify-blob[\s\S]*tar -xOzf "\$archive" \.\/manifest\.json[\s\S]*rm -- "\$archive" "\$signature"[\s\S]*verify-promotion-candidate\.mjs/u)
 })
 
 test('release reconciliation deletes unrelated remote assets and proves exact local closure', () => {

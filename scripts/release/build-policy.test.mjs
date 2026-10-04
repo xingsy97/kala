@@ -80,6 +80,13 @@ test('Dashboard release manifest materializes the file iterator before mapping a
   assert.ok(!builder.includes('const files = walkFiles(dir).map'))
 })
 
+test('Dashboard release protocol range follows the shared wire protocol version', () => {
+  const builder = read('scripts/release/build-release-assets.mjs')
+  assert.match(builder, /await import\(pathToFileURL\(join\(root, 'packages\/shared\/dist\/index\.js'\)\)\.href\)/)
+  assert.match(builder, /protocol: \{ min: PROTOCOL_VERSION, max: PROTOCOL_VERSION \}/)
+  assert.doesNotMatch(builder, /protocol: \{ min: '1\.0\.0', max: '1\.0\.0' \}/)
+})
+
 test('release verification rejects embedded Dashboard assignment without rejecting runtime feature detection', () => {
   const verifier = read('scripts/release/verify-release-assets.mjs')
   assert.ok(verifier.includes("platformRuntime.includes('globalThis.__KALA_EMBEDDED_DASHBOARD__=')"))

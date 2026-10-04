@@ -25,11 +25,13 @@ without release signature verification. A one-time install issued by an
 authenticated Host verifies the Host-served SHA-256 index, but trusts that Host
 and its transport; it does not independently verify a release signature.
 Do not enable the unsigned override for downloads from untrusted hosts.
-Dedicated bundles
-and Private Cloud images are packaged and scanned as preview artifacts; their
+Dedicated bundles and Private Cloud images are built and published through their
+normal signed distribution workflows. Publishing is **not** certification:
 upgrade, rollback, backup/restore, tenant isolation, and systemd/Compose
-lifecycles are **not** certified without independent clean-environment evidence.
-Do not represent these previews as supported deployments. Browser support targets
+lifecycles require independent clean-environment evidence tied to the exact
+release. Do not promise production support for a Dedicated or Private Cloud
+candidate without that evidence. See the [Private Cloud first-install guide](./private-cloud-first-install.md)
+for the operator-assisted onboarding path. Browser support targets
 the current and previous major Chromium releases.
 
 Report vulnerabilities privately through `SECURITY.md`. General defects use the

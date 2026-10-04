@@ -13,6 +13,14 @@ test('requires exactly three Linux and macOS Portable targets', () => {
   assert.throws(() => verifyRcEvidenceSet(portable.slice(1), { tag, revision }), /matrix is incomplete/u)
 })
 
+test('requires mTLS, cross-Unit limits and restart recovery in Private Cloud acceptance', () => {
+  const record = create('private-cloud', 'linux-x64-compose')
+  assert.equal(record.checks.mtlsClientRejection, true)
+  for (const check of ['mtlsClientRejection', 'unitResourceIsolation', 'runtimeRestartRecovery']) {
+    assert.throws(() => validateRcEvidence({ ...record, checks: { ...record.checks, [check]: false } }), new RegExp(`did not prove ${check}`, 'u'))
+  }
+})
+
 test('rejects missing checks, duplicate targets, and mismatched revisions', () => {
   const portable = create('portable', 'linux-x64')
   assert.throws(() => validateRcEvidence({ ...portable, checks: { ...portable.checks, reinstall: false } }), /did not prove reinstall/u)

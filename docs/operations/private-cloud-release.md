@@ -2,6 +2,9 @@
 
 **Status:** normative
 
+New deployments should follow the [signed-release first-install guide](./private-cloud-first-install.md)
+for the complete operator, identity, first owner, Executor and backup journey.
+
 Private Cloud is the multi-tenant configuration of the self-hosted Platform. Its
 public distribution is a signed, versioned Compose bundle plus three independent
 multi-architecture OCI images: Runtime, Stable Ingress, and Dashboard. An operator
@@ -92,6 +95,41 @@ Runtime share a binary lifecycle.
 Release CI builds `linux/amd64` and `linux/arm64` images, merges each component into
 one manifest-list digest, signs those digests with keyless Sigstore identity, emits
 OCI provenance and CycloneDX SBOMs, and then builds the Compose bundle from those
-digests. The draft GitHub Release remains unpublished until clean install, tenant
-isolation, full upgrade, Dashboard-only upgrade, rollback, backup/restore, Browser,
-and Executor acceptance all pass.
+digests. The tag workflow still publishes the three images and uploads signed
+Compose bundles to the GitHub Release; publishing alone is **not** proof that a
+specific bundle passed production acceptance. Do not promise a production-ready
+Private Cloud release without a successful clean acceptance artifact for its exact
+archive SHA-256 and commit.
+
+The optional `clean-compose-acceptance` job uses the `linux-x64` signed bundle
+transferred from the same `bundle` job, and verifies its Sigstore identity. It
+fetches a previously released, signed predecessor bundle, checks both bundles'
+embedded revisions against their tags, then installs into an isolated Compose
+project, tests two tenants, the Browser and Executor, mTLS, Unit quotas, restart
+recovery, Dashboard-only/full upgrade, rollback, and backup/restore. On success it
+uploads a minimal digest-bound `rc-evidence.json` Actions artifact. A skipped,
+queued, or failed job produces **no passing evidence**; the existing optional
+product E2E on a preinstalled deployment is not a substitute.
+
+To enable this job, register a dedicated self-hosted runner with labels
+`self-hosted`, `linux`, `x64`, `private-cloud-clean` and Docker Compose, `gh`, a
+working Chromium (`CHROME_PATH`, default `/snap/bin/chromium`), access to GHCR and
+the test IdP, and a free port 13001. Configure repository variable
+`KALA_PRIVATE_CLOUD_RUNNER_ENABLED=true`, variable
+`KALA_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE` pointing to the local private config
+directory (`deployment.env`, provider catalog, secrets), and variable
+`KALA_PRIVATE_CLOUD_PREDECESSOR_TAG` pointing to the previously signed release;
+manual dispatch may instead provide `predecessor_tag`. Configure secrets
+`PRIVATE_CLOUD_TEST_ALICE_EMAIL`, `PRIVATE_CLOUD_TEST_ALICE_PASSWORD`,
+`PRIVATE_CLOUD_TEST_ALICE_OIDC_ISSUER`, `PRIVATE_CLOUD_TEST_ALICE_OIDC_SUBJECT`,
+`PRIVATE_CLOUD_TEST_BOB_EMAIL`, `PRIVATE_CLOUD_TEST_BOB_PASSWORD`,
+`PRIVATE_CLOUD_TEST_BOB_OIDC_ISSUER`, and `PRIVATE_CLOUD_TEST_BOB_OIDC_SUBJECT`.
+Obtain each exact issuer and `sub` from that independent test identity's verified
+ID token or IdP administrative record; never derive or guess `sub` from email.
+After installing the predecessor bundle, the clean acceptance uses the current
+worktree Operator to provision each identity as owner of a different Organization
+before either login. This exercises the new command without replacing or silently
+initializing the predecessor deployment as the candidate version. The runner must
+be exclusive while acceptance runs; do not reuse a customer's
+installation or rely on a dirty persistent deployment. The GitHub release upload
+is not gated on this optional job: check its evidence before customer delivery.

@@ -31,7 +31,7 @@ function stage() {
   const releaseDir = resolve(option('--release-dir') ?? join(repositoryRoot, 'release'))
   if (!args.includes('--skip-build')) run(process.execPath, ['scripts/release/build-release-assets.mjs', '--no-native', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab'])
   const release = inspectRelease(releaseDir)
-  const releaseId = identity(option('--release-id') ?? `dashboard-${release.manifest.assetDigest.slice(0, 20)}`)
+  const releaseId = identity(option('--release-id') ?? `dashboard-${release.manifestSha256.slice(0, 20)}`)
   const deploymentId = identity(option('--deployment-id') ?? `deployment-dashboard-${randomUUID()}`)
   const state = readJson(join(deployRoot, 'route-state.json'))
   if (state.releaseId === releaseId) {
