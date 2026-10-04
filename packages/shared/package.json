@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/shared",
-  "version": "0.2.0",
+  "version": "0.3.0-beta.18",
   "description": "Shared protocol types between core, executor, and dashboard.",
   "repository": { "type": "git", "url": "git+https://github.com/xingsy97/kala.git" },
   "homepage": "https://github.com/xingsy97/kala#readme",
@@ -57,7 +57,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/dist/**'",
     "typecheck": "tsc --noEmit",
     "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },

@@ -1,4 +1,28 @@
 {
+  "v0.3.0-beta.18": {
+    "previousTag": "v0.2.0",
+    "improvements": [
+      "Private Cloud installs from its signed Compose bundle with a Node.js 22+ JavaScript Operator, bundled identity option, and single-host local-volume storage by default.",
+      "Windows x64 Portable Host uses the Node.js 22+ CJS asset with matching Copilot runtime files; Windows x64 Executor ships as a separate native binary with the ConPTY companion and PowerShell installer.",
+      "Linux x64 Portable container distribution packages one Host and embedded Dashboard, independent of the three-service Private Cloud deployment.",
+      "Linux x64 and macOS x64/arm64 Executors remain native by default; self-contained native Host and Dedicated binaries are manual qualification artifacts only."
+    ],
+    "fixes": [
+      "Private Cloud fresh-install acceptance now proves the candidate from the exact signed draft bundle rather than using the previous release as initial-install evidence.",
+      "Windows installation sessions require the exact Executor, ConPTY, and installer assets with matching release checksums; the Windows workspace build now selects real packages rather than silently building none.",
+      "The bundled Private Cloud Operator waits for its identity proxy and application healthchecks without falsely requiring a Zitadel binary healthcheck; fresh acceptance starts its authenticated model fixture only after the real installation owns the egress network.",
+      "Portable OCI verifies GitHub's real OCI SLSA provenance with the GitHub attestation verifier, and independently verifies its Cosign-signed SPDX SBOM after installing candidate dependencies.",
+      "Private Cloud restart acceptance verifies an external Runtime's persisted Session projection, hydrated queue and completed authenticated model reply rather than assuming Kernel-only replay history exists."
+    ],
+    "knownIssues": [
+      "This is a beta: a draft release is not certification; Private Cloud and Portable OCI require exact-tag isolated-VM evidence before public promotion.",
+      "NFS remains an explicit experimental Private Cloud option and has no full-stack acceptance evidence; use local-volume by default.",
+      "Linux arm64 Executor is not in the default matrix. Windows Portable Host needs Node.js 22+ and adjacent Copilot runtime files; Host CJS alone cannot serve a Windows Executor installer.",
+      "GHCR Portable and Private Cloud package visibility must be reviewed before public promotion; image tags are not substitutes for signed immutable digests.",
+      "The beta temporarily accepts only Grype CVE-2026-95619 in gcc-14-base, libgcc-s1 and libstdc++6 version 14.2.0-19 until 2026-10-14; the Debian advisory has no fix and the residual risk remains."
+    ],
+    "desktopViaDashboard": true
+  },
   "v0.2.0": {
     "previousTag": "v0.2.0-rc.20",
     "improvements": [

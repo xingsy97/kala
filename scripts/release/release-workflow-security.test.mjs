@@ -12,6 +12,16 @@ const reconcile = join(import.meta.dirname, 'reconcile-github-release-assets.mjs
 const verifyPromotion = join(import.meta.dirname, 'verify-promotion-candidate.mjs')
 const digest = (value) => createHash('sha256').update(value).digest('hex')
 
+test('Windows acceptance builds real workspace dependencies instead of a quoted empty pnpm filter', () => {
+  const scripts = JSON.parse(readFileSync(join(import.meta.dirname, '../../package.json'), 'utf8')).scripts
+  for (const name of ['build', 'typecheck']) {
+    assert.match(scripts[name], /pnpm -r --filter=!@agent-kernel\/desktop run build/u)
+    assert.doesNotMatch(scripts[name], /--filter ['"]!@agent-kernel\/desktop['"]/u)
+  }
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/rc-acceptance.yml'), 'utf8')
+  assert.match(workflow, /windows-portable-conpty:[\s\S]*pnpm --filter @agent-kernel\/shared\.\.\. run build[\s\S]*Prove Windows Node\.js 22 Host/u)
+})
+
 test('gitless Private Cloud runtime context includes tracked release bootstrap inputs', () => {
   const dockerfile = readFileSync(join(import.meta.dirname, '../../deploy/private-cloud/images/Dockerfile.runtime-service'), 'utf8')
   for (const directory of ['docs', 'deploy/dedicated-systemd', 'scripts/deploy', 'scripts/release']) {
@@ -67,23 +77,29 @@ test('Private Cloud release retains image publishing and accepts the exact signe
   assert.match(staging, /private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
   assert.doesNotMatch(staging, /PRIVATE_CLOUD_TEST_ALICE_PASSWORD/u)
   const fresh = workflow.slice(workflow.indexOf('  fresh_beta_candidate_acceptance:'), workflow.indexOf('  clean-compose-acceptance:'))
-  assert.match(fresh, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.1'/u)
+  assert.match(fresh, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.18'/u)
   assert.doesNotMatch(fresh, /KALA_PRIVATE_CLOUD_RUNNER_ENABLED/u)
-  assert.match(fresh, /runs-on: \[self-hosted, linux, x64, private-cloud-clean\]/u)
+  assert.match(fresh, /runs-on: ubuntu-24\.04/u)
+  assert.match(fresh, /RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}[\s\S]*test "\$RUNNER_ENVIRONMENT" = github-hosted/u)
+  assert.doesNotMatch(fresh, /\b(?:secrets|vars)\.|KALA_RC_PRIVATE_CLOUD_CONFIG_ARCHIVE_B64|PRIVATE_CLOUD_TEST_(?:ALICE|BOB)/u)
+  assert.match(fresh, /Reserve disk for the signed candidate[\s\S]*available_kib >= 10485760/u)
   assert.match(fresh, /needs: \[resolve, bundle, fresh_beta_candidate_assets\][\s\S]*contents: read[\s\S]*actions: read/u)
   assert.match(fresh, /actions\/download-artifact@v5[\s\S]*private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
   assert.doesNotMatch(fresh, /contents: write|gh release download "\$TAG"/u)
   assert.match(fresh, /cosign verify-blob[\s\S]*while IFS= read -r image; do[\s\S]*cosign verify/u)
-  assert.match(fresh, /--fresh-candidate --candidate-archive/u)
+  assert.match(fresh, /--fresh-candidate --ephemeral-bundled-acceptance --candidate-archive/u)
   assert.doesNotMatch(fresh, /--predecessor-archive|--predecessor-revision/u)
   assert.match(fresh, /verify-private-cloud-fresh-evidence\.mjs/u)
   assert.match(fresh, /private-cloud-fresh-beta-evidence-/u)
 
   const acceptance = workflow.slice(workflow.indexOf('  clean-compose-acceptance:'))
   assert.match(acceptance, /needs: \[resolve, bundle, fresh_beta_candidate_acceptance, fresh_beta_candidate_assets\]/u)
-  assert.match(acceptance, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.1'[\s\S]*private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
+  assert.match(acceptance, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.18'[\s\S]*private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
   assert.match(acceptance, /needs\.fresh_beta_candidate_acceptance\.result == 'success'/u)
-  assert.match(acceptance, /runs-on: \[self-hosted, linux, x64, private-cloud-clean\]/u)
+  assert.match(acceptance, /runs-on: ubuntu-24\.04/u)
+  assert.match(acceptance, /vars\.KALA_PRIVATE_CLOUD_UPGRADE_ACCEPTANCE_ENABLED == 'true'/u)
+  assert.match(acceptance, /RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}[\s\S]*test "\$RUNNER_ENVIRONMENT" = github-hosted/u)
+  assert.match(acceptance, /secrets\.KALA_RC_PRIVATE_CLOUD_CONFIG_ARCHIVE_B64[\s\S]*base64 -d \| tar -xz/u)
   assert.match(acceptance, /actions\/download-artifact@v5/u)
   assert.equal((acceptance.match(/cosign verify-blob/g) ?? []).length, 3)
   assert.match(acceptance, /git rev-parse "\$TAG\^\{commit\}"/u)
@@ -97,6 +113,7 @@ test('release workflow publishes archived metadata and verifies the signed Execu
   assert.match(workflow, /test "\$GITHUB_REF" = "refs\/tags\/\$TAG"/u)
   assert.match(workflow, /optional-host-native:[\s\S]*workflow_dispatch[\s\S]*--component host[\s\S]*name: optional-host-qualification-/u)
   assert.match(workflow, /native-assets:[\s\S]*--component executor[\s\S]*name: native-/u)
+  assert.match(workflow, /test -f release\/kala-executor-service-host-win32-x64\.exe[\s\S]*-name 'kala-executor-\*' ! -name 'kala-executor-service-host-\*'[\s\S]*-eq 4/u)
   assert.match(workflow, /windows-assets:[\s\S]*runs-on: windows-latest[\s\S]*Require GNU tar and gzip from Git for Windows[\s\S]*--component all[\s\S]*--native-target win32-x64/u)
   assert.match(workflow, /TAR_OPTIONS=--force-local/u)
   assert.match(workflow, /windows-capture-manifest\.json[\s\S]*Windows capture checksum mismatch/u)
@@ -123,6 +140,7 @@ test('RC promotion binds acceptance to the tag ref exposed by the Actions API', 
   assert.match(workflow, /portable-isolated-vm-acceptance-\$PORTABLE_RUN_ID-\$PORTABLE_RUN_ATTEMPT/u)
   const portableWorkflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/portable-image-release.yml'), 'utf8')
   assert.match(portableWorkflow, /name: portable-isolated-vm-acceptance-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
+  assert.match(workflow, /for component in runtime ingress dashboard; do[\s\S]*tar -xOzf "\$archive" \.\/image-lock\.json[\s\S]*DOCKER_CONFIG="\$anonymous_config" docker pull --quiet "\$image"/u)
   assert.match(workflow, /anonymous_docker_config=\$\(mktemp -d\)[\s\S]*DOCKER_CONFIG="\$anonymous_docker_config" docker pull "\$public_image"/u)
 })
 

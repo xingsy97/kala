@@ -1,6 +1,6 @@
 {
   "name": "agent-kernel",
-  "version": "0.2.0",
+  "version": "0.3.0-beta.18",
   "private": true,
   "description": "Kala backend and dashboard for replayable agent sessions and RL rollout integration.",
   "packageManager": "pnpm@11.3.0",
@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "pnpm -r --filter '!@agent-kernel/desktop' run build",
+    "build": "pnpm -r --filter=!@agent-kernel/desktop run build",
     "desktop:build": "pnpm --filter @agent-kernel/desktop build",
     "prepare:socket-admin-ui": "node scripts/release/fetch-socket-admin-ui.mjs",
     "build:release-assets": "node scripts/release/build-release-assets.mjs",
@@ -40,7 +40,7 @@
     "test:scripts": "node scripts/testing/run-script-tests.mjs",
     "test:task-packs": "node scripts/testing/run-task-pack-tests.mjs",
     "test:python": "python3 scripts/testing/run-python-tests.py",
-    "typecheck": "pnpm -r --filter '!@agent-kernel/desktop' run build && pnpm -r --parallel run typecheck && pnpm run typecheck:eval-sdk-templates && pnpm run verify:typescript-safety",
+    "typecheck": "pnpm -r --filter=!@agent-kernel/desktop run build && pnpm -r --parallel run typecheck && pnpm run typecheck:eval-sdk-templates && pnpm run verify:typescript-safety",
     "typecheck:eval-sdk-templates": "tsc -p packages/eval-sdk/templates/agent-adapter/tsconfig.json --noEmit && tsc -p packages/eval-sdk/templates/detector/tsconfig.json --noEmit && tsc -p packages/eval-sdk/templates/sandbox-provider/tsconfig.json --noEmit && tsc -p packages/eval-sdk/templates/task-pack/tsconfig.json --noEmit",
     "verify:typescript-safety": "node scripts/security/verify-typescript-safety.mjs",
     "ci:fast": "pnpm run typecheck && pnpm run test:fast && pnpm run verify:evaluation-boundaries && pnpm run test:workflows",

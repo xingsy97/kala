@@ -5,22 +5,38 @@ import { spawnSync } from 'node:child_process'
 
 const tag = required('--tag')
 const directory = resolve(required('--directory'))
+const preservePrivateCloudAssets = process.argv.includes('--preserve-private-cloud-assets')
 const entries = readdirSync(directory, { withFileTypes: true })
 if (entries.length === 0) fail('local release inventory is empty')
 if (entries.some((entry) => !entry.isFile())) fail('local release inventory contains a non-file')
 const expected = entries.map((entry) => entry.name).sort()
 assertUnique(expected, 'local release inventory')
+const owned = new Set(expected)
+const preserved = preservePrivateCloudAssets ? privateCloudAssetNames(tag) : new Set()
 
 for (const name of remoteAssetNames()) {
-  if (!expected.includes(name)) run(['release', 'delete-asset', tag, name, '--yes'])
+  if (!owned.has(name) && !preserved.has(name)) run(['release', 'delete-asset', tag, name, '--yes'])
 }
 run(['release', 'upload', tag, ...expected.map((name) => join(directory, name)), '--clobber'])
 
 const actual = remoteAssetNames().sort()
-if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-  fail(`GitHub release asset inventory mismatch; expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`)
+const missing = expected.filter((name) => !actual.includes(name))
+const unowned = actual.filter((name) => !owned.has(name) && !preserved.has(name))
+if (missing.length > 0 || unowned.length > 0) {
+  fail(`GitHub release asset ownership mismatch; missing local assets ${JSON.stringify(missing)}, unowned remote assets ${JSON.stringify(unowned)}`)
 }
-console.log(`reconciled ${expected.length} release assets for ${tag}`)
+const preservedCount = actual.filter((name) => preserved.has(name)).length
+console.log(`reconciled ${expected.length} release assets and preserved ${preservedCount} Private Cloud assets for ${tag}`)
+
+function privateCloudAssetNames(releaseTag) {
+  const match = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/u.exec(releaseTag)
+  if (!match) fail(`cannot derive Private Cloud asset names from invalid release tag ${releaseTag}`)
+  const version = match[1]
+  return new Set(['linux-x64', 'linux-arm64'].flatMap((target) => [
+    `kala-private-cloud-${version}-${target}.tar.gz`,
+    `private-cloud-${target}.sigstore.json`,
+  ]))
+}
 
 function remoteAssetNames() {
   const value = JSON.parse(run(['release', 'view', tag, '--json', 'assets']))

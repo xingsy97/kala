@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-analyzer",
-  "version": "0.2.0",
+  "version": "0.3.0-beta.18",
   "description": "Deterministic defect detection, trace alignment, clustering, and reproduction minimization for the standalone evaluation platform.",
   "repository": { "type": "git", "url": "git+https://github.com/xingsy97/kala.git" },
   "homepage": "https://github.com/xingsy97/kala#readme",
@@ -11,7 +11,7 @@
   "types": "./dist/src/index.d.ts",
   "exports": { ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" } },
   "files": ["dist", "src", "bin", "fixtures", "README.md"],
-  "scripts": { "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "scripts": { "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run --exclude '**/dist/**'" },
   "dependencies": {
     "@agent-kernel/eval-protocol": "workspace:*",
     "@agent-kernel/eval-sdk": "workspace:*"

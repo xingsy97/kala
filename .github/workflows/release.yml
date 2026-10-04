@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Product release tag, for example v0.3.0-beta.1'
+        description: 'Product release tag, for example v0.3.0-beta.18'
         required: true
       optional_host_native:
         description: 'Manually build self-contained Host/Dedicated binaries for qualification only; never add them to the default release'
@@ -327,7 +327,8 @@ jobs:
           test -f release/install-executor.ps1
           test -f release/kala-copilot-runtime-win32-x64
           test -f release/kala-copilot-runtime-node-win32-x64.node
-          test "$(find release -maxdepth 1 -type f -name 'kala-executor-*' | wc -l)" -eq 4
+          # The Windows service host is an additional required asset, not a fifth Executor binary.
+          test "$(find release -maxdepth 1 -type f -name 'kala-executor-*' ! -name 'kala-executor-service-host-*' | wc -l)" -eq 4
           ! find release -maxdepth 1 -type f \( -iname '*.msi' -o -iname '*.dll' -o -iname '*win32-arm64*' -o -iname '*windows-arm64*' -o -iname '*linux-arm64*' \) -print -quit | grep -q .
       - run: pnpm run verify:release-assets
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }} --manifest release/manifest.json

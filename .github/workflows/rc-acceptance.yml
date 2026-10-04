@@ -96,7 +96,7 @@ jobs:
         with: { node-version: 22, package-manager-cache: false }
       - run: corepack enable; corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
+      - run: pnpm --filter @agent-kernel/shared... run build
       - uses: sigstore/cosign-installer@v3
       - name: Download, attest, and checksum the exact Windows candidate set
         shell: pwsh

@@ -338,7 +338,19 @@ export async function loginWithPassword(page, { productOrigin, loginName, passwo
   await page.waitForSelector('input[name=password]')
   await typeStableValue(page, 'input[name=password]', password)
   await submitVisibleForm(page, 'input[name=password]')
-  await new Promise((resolve) => setTimeout(resolve, 800))
+  try {
+    await page.waitForFunction(async (origin) => {
+      if (location.pathname.includes('/password/change')) return true
+      if (location.origin !== new URL(origin).origin) return false
+      const response = await fetch('/auth/me')
+      return response.ok && (await response.json()).authenticated === true
+    }, { timeout: 45_000 }, productOrigin)
+  } catch {
+    const location = new URL(page.url())
+    const stage = location.pathname.includes('/password/change') ? 'password-change' : location.pathname.startsWith('/ui/v2/login') ? 'identity-login' : location.origin === new URL(productOrigin).origin ? 'product' : 'unknown'
+    const passwordForm = Boolean(await page.$('input[name=password]'))
+    throw new Error(`login did not reach an authenticated session or password change (stage=${stage}, passwordForm=${passwordForm})`)
+  }
   let effectivePassword = password
   if (page.url().includes('/password/change')) {
     effectivePassword = `${password}N2!`

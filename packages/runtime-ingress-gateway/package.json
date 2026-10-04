@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/runtime-ingress-gateway",
-  "version": "0.2.0",
+  "version": "0.3.0-beta.18",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/dist/**'",
     "migrate": "node dist/src/bin/migrate-control-plane.js",
     "import:json": "node dist/src/bin/import-json-control.js"
   },

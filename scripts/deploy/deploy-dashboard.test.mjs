@@ -21,7 +21,7 @@ function fixture() {
   writeFileSync(join(root, 'assets', 'dashboard-release.json'), JSON.stringify(manifest))
   execFileSync('tar', ['--format=ustar', '-czf', join(release, 'kala-dashboard.tar.gz'), '-C', join(root, 'assets'), 'assets/app.12345678.js', 'index.html', 'dashboard-release.json'])
   writeFileSync(join(deploy, 'route-state.json'), JSON.stringify({ schemaVersion: 1, generation: 7, releaseId: 'old', releaseDigest: 'c'.repeat(64), assetDigest: 'd'.repeat(64), version: '0.9.0', protocol: { min: '1.0.0', max: '1.0.0' }, activatedAt: new Date().toISOString() }))
-  return { root, release, deploy }
+  return { root, release, deploy, manifest }
 }
 
 describe('deploy:dashboard client', () => {
@@ -37,6 +37,25 @@ describe('deploy:dashboard client', () => {
     expect(request.archiveSha256).toBe(sha(stagedBytes))
     expect(execFileSync('tar', ['-tzf', stagedArchive], { encoding: 'utf8' }).trim().split('\n').sort()).toEqual(['assets/app.12345678.js', 'index.html'])
     expect(JSON.parse(readFileSync(join(request.stagedReleaseDir, 'manifest.json'), 'utf8')).product).toBe('kala-dashboard')
+  })
+  it('derives the default immutable release id from the complete manifest', () => {
+    const value = fixture()
+    const output = JSON.parse(execFileSync(process.execPath, [
+      script,
+      'stage',
+      '--local',
+      '--skip-build',
+      '--release-dir',
+      value.release,
+      '--deploy-root',
+      value.deploy,
+      '--operation-id',
+      'operation-dashboard-default-id',
+      '--deployment-id',
+      'deployment-dashboard-default-id',
+    ], { encoding: 'utf8' }))
+
+    expect(output.releaseId).toBe(`dashboard-${sha(JSON.stringify(value.manifest)).slice(0, 20)}`)
   })
   it('no-ops an already-current immutable release and rejects digest conflicts', () => {
     const value = fixture()
