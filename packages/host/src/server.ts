@@ -88,7 +88,6 @@ import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinat
 import { inspectUnitQuiescence } from './tenant-runtime/quiescence.js'
 import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
 import { loadPersistedMessageQueueState, persistMessageQueueSnapshot, type PersistedMessageQueueState } from './message-queue-store.js'
-import { readSessionLog } from './store/log.js'
 import { bangShellCallId, bangShellResultOperationId, bangShellResultState, formatBangShellResult, isBangShellResultForCommand, parseBangShellRequest } from './bang-shell.js'
 import { modelIdFromRef, resolveModelContextWindow } from './model-capabilities.js'
 import type { WebSearchCredentialStore } from './web-search/index.js'
@@ -742,9 +741,8 @@ export async function startHostServer(
     toolResultPersisted: async (sessionId, callId) => {
       const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
       if (!record) return false
-      if (record.agentRuntime !== 'kernel') return false
-      const parsed = await readSessionLog(record.logPath)
-      return parsed.events.some((entry) => entry.event.kind === 'tool_result' && entry.event.callId === callId)
+      const runtime = agentRuntimes?.get(record.agentRuntime)
+      return runtime ? await runtime.toolResultPersisted(record, callId) : false
     },
     restartStatus: () => restart?.status() ?? {
       pid: process.pid,
@@ -2054,6 +2052,9 @@ export async function startHostServer(
       pause: async (actor, taskId, paused) => await scheduledTaskStore.setPaused(scheduleOwnerKey(actor), taskId, paused),
       delete: async (actor, taskId) => await scheduledTaskStore.delete(scheduleOwnerKey(actor), taskId),
       history: async (actor, taskId) => await scheduledTaskStore.history(scheduleOwnerKey(actor), taskId),
+      origins: async (actor, sessionId) => await scheduledTaskStore.origins(scheduleOwnerKey(actor), sessionId),
+      inbox: async (actor) => await scheduledTaskStore.inbox(scheduleOwnerKey(actor), actor.principal),
+      markInboxSeen: async (actor, occurrenceIds) => await scheduledTaskStore.markInboxSeen(scheduleOwnerKey(actor), actor.principal, occurrenceIds),
     },
     onInternalError(error, requestId) {
       options.logger?.warn({

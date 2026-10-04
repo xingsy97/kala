@@ -2,6 +2,8 @@ export type ScheduleSpec =
   | { kind: 'once'; at: string }
   | { kind: 'daily'; timezone: string; hour: number; minute: number }
   | { kind: 'weekly'; timezone: string; daysOfWeek: number[]; hour: number; minute: number }
+  | { kind: 'interval'; timezone: string; hour: number; minute: number; everyDays: number; startDate: string }
+  | { kind: 'monthly'; timezone: string; hour: number; minute: number; daysOfMonth: number[] }
 
 export type ScheduledTaskTarget =
   | { kind: 'session'; sessionId: string }
@@ -39,6 +41,26 @@ export type ScheduledRun = {
   task: ScheduledTaskSnapshot
   sessionId?: string
   error?: string
+}
+
+export type ScheduledInboxItem = {
+  occurrenceId: string
+  taskId: string
+  status: Extract<ScheduledRunStatus, 'enqueued' | 'failed' | 'needs_review'>
+  scheduledFor: string
+  updatedAt: string
+  seen: boolean
+  sessionId?: string
+}
+
+export type ScheduledInbox = {
+  items: ScheduledInboxItem[]
+  unreadCount: number
+}
+
+export type ScheduledInboxSeenResult = {
+  acknowledged: string[]
+  unreadCount: number
 }
 
 export type CreateScheduledTask = {

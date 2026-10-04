@@ -44,6 +44,7 @@ import {
   Eye,
   Brain,
   Bot,
+  CalendarClock,
   Wrench,
   X,
   XCircle,
@@ -121,6 +122,9 @@ type Props = {
   activeToolCallIds?: readonly string[]
   /** Tool Intention currently owned by the persistent Agent activity Badge. */
   badgeIntentionCallId?: string
+  /** Persisted scheduled-run provenance keyed by user_message operationId. */
+  scheduledMessageTasks?: Readonly<Record<string, string>>
+  onOpenScheduledTask?: (taskId: string) => void
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   onReadOverflow?: (callId: string) => Promise<{ content?: string; error?: string }>
   footerSlot?: JSX.Element | null
@@ -239,6 +243,8 @@ export function ChatPanel({
   pendingApprovals,
   activeToolCallIds,
   badgeIntentionCallId,
+  scheduledMessageTasks,
+  onOpenScheduledTask,
   onApprovalDecision,
   onReadOverflow,
   footerSlot,
@@ -571,6 +577,8 @@ export function ChatPanel({
           badgeIntentionCallId={badgeIntentionCallId}
           assistantRerunTarget={assistantRerunTarget}
           turnTiming={item.turnTiming}
+          scheduledTaskId={item.operationId ? scheduledMessageTasks?.[item.operationId] : undefined}
+          onOpenScheduledTask={onOpenScheduledTask}
         />
       )
     },
@@ -592,6 +600,8 @@ export function ChatPanel({
       toolCardMode,
       activeToolCallIdSet,
       badgeIntentionCallId,
+      scheduledMessageTasks,
+      onOpenScheduledTask,
       searchItemIndex,
     ],
   )
@@ -1946,6 +1956,8 @@ function MessageRow({
   badgeIntentionCallId,
   assistantRerunTarget,
   turnTiming,
+  scheduledTaskId,
+  onOpenScheduledTask,
 }: {
   index: number
   message: Message
@@ -1969,6 +1981,8 @@ function MessageRow({
   badgeIntentionCallId?: string
   assistantRerunTarget?: MessageRerunTarget | null
   turnTiming?: import('@agent-kernel/shared').TurnTimingSummary
+  scheduledTaskId?: string
+  onOpenScheduledTask?: (taskId: string) => void
 }): JSX.Element | null {
   const { t } = useTranslation()
   const messageText = messagePlainText(message.content)
@@ -2039,6 +2053,19 @@ function MessageRow({
           ? 'relative max-w-full flex-wrap justify-end text-muted-foreground'
           : 'absolute bottom-1 left-2 max-w-[calc(100%-1rem)] rounded-md bg-primary/85 px-1 backdrop-blur-sm sm:bottom-0 sm:left-auto sm:right-full sm:mr-2 sm:max-w-[18rem] sm:bg-transparent sm:px-0 sm:backdrop-blur-none',
       )} data-testid="user-message-metadata">
+        {scheduledTaskId ? (
+          <button
+            type="button"
+            className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-inherit transition-colors hover:bg-primary-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label="Open scheduled task details"
+            title="Open scheduled task details"
+            data-testid="scheduled-message-badge"
+            onClick={() => onOpenScheduledTask?.(scheduledTaskId)}
+          >
+            <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Scheduled</span>
+          </button>
+        ) : null}
         <MessageActions
           align="end"
           copyText={messageText}

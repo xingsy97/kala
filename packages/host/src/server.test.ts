@@ -36,7 +36,7 @@ import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import { startHostServer, type HostServer } from './server.js'
-import { appendRuntimeMetadataEntry, readSessionLog } from './store/log.js'
+import { appendEventEntry, appendRuntimeMetadataEntry, readSessionLog } from './store/log.js'
 import { persistMessageQueueSnapshot } from './message-queue-store.js'
 import { ExecutorIdentityStore } from './store/executor-identity.js'
 import { UnitResourceGovernor } from './tenant-runtime/resource-governor.js'
@@ -1584,6 +1584,21 @@ describe('wire protocol', () => {
       const response = await fetch(path, { headers: { 'x-agent-runlab-ingress-handoff': 'origin-barrier-test-secret' } })
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ persisted: false })
+
+      const copilot = await server.store.create({ sessionId: 'origin-copilot', agentRuntime: 'copilot', config })
+      await server.store.recordRuntimeProjection(copilot.sessionId, {
+        ...copilot.state, cursor: 1,
+        messages: [{ role: 'tool', content: [{ type: 'tool_result', callId: 'call-copilot', ok: true, content: 'accepted' }] }],
+      }, 'copilot.tool_result', { callId: 'call-copilot', ok: true })
+      const headers = { 'x-agent-runlab-ingress-handoff': 'origin-barrier-test-secret' }
+      const copilotResult = await fetch(`${url}/internal/runtime/tool-result/origin-copilot/call-copilot`, { headers })
+      expect(copilotResult.status).toBe(200)
+      expect(await copilotResult.json()).toEqual({ persisted: true })
+      expect(await (await fetch(`${url}/internal/runtime/tool-result/origin-copilot/other-call`, { headers })).json()).toEqual({ persisted: false })
+
+      const kernel = await server.store.create({ sessionId: 'origin-kernel', config })
+      await appendEventEntry({ path: kernel.logPath, seq: 1, event: { kind: 'tool_result', callId: 'call-kernel', ok: true, content: 'accepted' }, effects: [] })
+      expect(await (await fetch(`${url}/internal/runtime/tool-result/origin-kernel/call-kernel`, { headers })).json()).toEqual({ persisted: true })
     } finally {
       if (previous === undefined) delete process.env.KALA_INGRESS_HANDOFF_SECRET
       else process.env.KALA_INGRESS_HANDOFF_SECRET = previous

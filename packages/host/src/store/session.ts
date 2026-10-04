@@ -1086,6 +1086,8 @@ export class SessionStore {
         payload: { ...payload, projectionCursor: nextState.cursor },
       })
       const entry = await appendSnapshotEntry(rec.logPath, nextState.cursor, compactExternalRuntimeSnapshotState(nextState))
+      // The sidecar is authoritative now. If the subsequent receipt append
+      // fails, the next projection must not reuse this cursor and overwrite it.
       rec.state = nextState
       rec.lastEventAt = entry.ts
       if (action === 'copilot.user_message') rec.turnStartedAt = metadataEntry.ts
@@ -1093,6 +1095,15 @@ export class SessionStore {
       if (!rec.firstUserMessage) rec.firstUserMessage = firstUserMessageFromState(nextState)
       this.summaryCache.delete(rec.logPath)
       this.notifyStorageChanged(sessionId)
+      // The projection metadata is written before the durable snapshot. A separate
+      // receipt after it prevents deployment from mistaking an uncommitted tool
+      // result for a successfully projected Copilot Tool call.
+      if (action === 'copilot.tool_result' && typeof payload.callId === 'string') {
+        await appendRuntimeMetadataEntry(rec.logPath, {
+          sessionId, action: 'copilot.tool_result_committed',
+          payload: { callId: payload.callId, projectionCursor: nextState.cursor },
+        })
+      }
     })
     this.recordTails.set(sessionId, commit)
     try {

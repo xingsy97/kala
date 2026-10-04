@@ -13,7 +13,7 @@ import { createConfig, step } from '@agent-kernel/kernel'
 
 import { readyEventFor } from '../connection/dashboard-ns.js'
 import { SessionStore } from './session.js'
-import { appendEventEntry, appendSnapshotEntry, readSessionLog, snapshotSidecarPath, writeHeader } from './log.js'
+import { appendEventEntry, appendSnapshotEntry, findPersistedToolResult, readSessionLog, snapshotSidecarPath, writeHeader } from './log.js'
 import { createInitialState } from '@agent-kernel/kernel'
 
 const contextWriteTest = vi.hoisted(() => ({
@@ -239,6 +239,41 @@ describe('SessionStore.ensure', () => {
     const reloaded = await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })
     expect(reloaded.state.cursor).toBe(2)
     expect(reloaded.state.messages[0]?.content).toEqual([{ type: 'text', text: 'serialized system' }])
+  })
+
+  it('records a Copilot deployment receipt only after the Tool result snapshot commits', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'copilot-deploy-result', agentRuntime: 'copilot', config })
+    const projected = { ...record.state, cursor: 1, messages: [
+      { role: 'assistant' as const, content: [{ type: 'tool_call' as const, callId: 'deploy-call', name: 'shell', input: {} }] },
+      { role: 'tool' as const, content: [{ type: 'tool_result' as const, callId: 'deploy-call', ok: true, content: 'accepted' }] },
+    ] }
+    await store.recordRuntimeProjection(record.sessionId, projected, 'copilot.tool_result', { callId: 'deploy-call', ok: true })
+    const log = await readSessionLog(record.logPath, { allowExternalRuntime: true })
+    expect(log.runtimeMetadata.map((entry) => entry.action)).toEqual(['copilot.tool_result', 'copilot.tool_result_committed'])
+    expect(await findPersistedToolResult(record.logPath, 'deploy-call', 'copilot')).toBe(true)
+    expect((await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })).state.messages).toEqual(projected.messages)
+  })
+
+  it('does not regress the committed Copilot cursor when receipt publication fails', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'receipt-failure', agentRuntime: 'copilot', config })
+    const projected = { ...record.state, cursor: 1, messages: [
+      { role: 'assistant' as const, content: [{ type: 'tool_call' as const, callId: 'first', name: 'shell', input: {} }] },
+      { role: 'tool' as const, content: [{ type: 'tool_result' as const, callId: 'first', ok: true, content: 'persisted' }] },
+    ] }
+    let reads = 0
+    const payload: Record<string, unknown> = {}
+    Object.defineProperty(payload, 'callId', { enumerable: true, get() {
+      if (++reads > 1) throw new Error('receipt publication failed')
+      return 'first'
+    } })
+    await expect(store.recordRuntimeProjection(record.sessionId, projected, 'copilot.tool_result', payload))
+      .rejects.toThrow('receipt publication failed')
+    expect(record.state.cursor).toBe(1)
+    await store.recordRuntimeProjection(record.sessionId, { ...projected, cursor: 2 }, 'copilot.turn_end', {})
+    expect((await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })).state.messages)
+      .toEqual(projected.messages)
   })
 
   it('locks observable tool versions and schema hashes at session creation', async () => {

@@ -37,6 +37,8 @@ export type AgentRuntimeSendInput = {
 export interface AgentRuntime {
   readonly id: AgentRuntimeId
   descriptor(): AgentRuntimeDescriptor
+  /** Used by a deployment initiated inside a Session; must only report durable Tool results. */
+  toolResultPersisted(record: SessionRecord, callId: string): Promise<boolean>
   send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void>
   cancel(record: SessionRecord): Promise<void>
   approve(record: SessionRecord, callId: string): Promise<void>

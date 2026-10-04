@@ -41,6 +41,23 @@ describe('transcriptTimelineForRuntime', () => {
     })
   })
 
+  it('retains operationId provenance on historical user messages', () => {
+    const timeline: TimelineEntry[] = [{
+      seq: 7,
+      ts: '2026-10-01T09:00:00.000Z',
+      event: { kind: 'user_message', operationId: 'schedule-op-1', text: 'historical scheduled prompt' },
+      effects: [],
+    }]
+
+    expect(transcriptBaseItems([], timeline)).toEqual([{
+      kind: 'message',
+      seq: 7,
+      ts: '2026-10-01T09:00:00.000Z',
+      operationId: 'schedule-op-1',
+      message: { role: 'user', content: [{ type: 'text', text: 'historical scheduled prompt' }] },
+    }])
+  })
+
   it('renders persisted external Runtime model changes without exposing system prompts', () => {
     const messages: Message[] = [
       system,

@@ -15,7 +15,15 @@ import {
   type ApiSession,
   type SessionSummary,
 } from '@agent-kernel/shared'
-import type { CreateScheduledTask, ScheduledRun, ScheduledTask, UpdateScheduledTask } from '../scheduled-tasks/types.js'
+import { validateSchedule } from '../scheduled-tasks/recurrence.js'
+import type {
+  CreateScheduledTask,
+  ScheduledInbox,
+  ScheduledInboxSeenResult,
+  ScheduledRun,
+  ScheduledTask,
+  UpdateScheduledTask,
+} from '../scheduled-tasks/types.js'
 
 export type PublicApiActor = {
   principal: string
@@ -41,6 +49,9 @@ export type PublicApiDependencies = {
     pause(actor: PublicApiActor, taskId: string, paused: boolean): Promise<ScheduledTask>
     delete(actor: PublicApiActor, taskId: string): Promise<boolean>
     history(actor: PublicApiActor, taskId: string): Promise<readonly ScheduledRun[] | undefined>
+    origins(actor: PublicApiActor, sessionId: string): Promise<Record<string, string>>
+    inbox(actor: PublicApiActor): Promise<ScheduledInbox>
+    markInboxSeen(actor: PublicApiActor, occurrenceIds: readonly string[]): Promise<ScheduledInboxSeenResult>
   }
   onInternalError?(error: unknown, requestId: string): void
 }
@@ -75,6 +86,24 @@ export function createPublicApiHandler(deps: PublicApiDependencies) {
       const scheduledTaskMatch = url.pathname.match(/^\/api\/v1\/scheduled-tasks\/([^/]+)$/u)
       const scheduledActionMatch = url.pathname.match(/^\/api\/v1\/scheduled-tasks\/([^/]+)\/(pause|resume|history)$/u)
 
+      if (url.pathname === '/api/v1/scheduled-tasks/origins' && request.method === 'GET') {
+        requireScheduledTasks(deps)
+        const sessionId = requiredIdentifier(url.searchParams.get('sessionId'), 'sessionId')
+        if (!await deps.getSession(actor, sessionId)) throw new ApiHttpError(404, 'not_found', 'session not found')
+        sendJson(response, 200, { origins: await deps.scheduledTasks.origins(actor, sessionId) })
+        return true
+      }
+      if (url.pathname === '/api/v1/scheduled-tasks/inbox' && request.method === 'GET') {
+        requireScheduledTasks(deps)
+        sendJson(response, 200, await deps.scheduledTasks.inbox(actor))
+        return true
+      }
+      if (url.pathname === '/api/v1/scheduled-tasks/inbox/seen' && request.method === 'POST') {
+        requireScheduledTasks(deps)
+        const occurrenceIds = validateInboxSeen(await readJson(request))
+        sendJson(response, 200, await deps.scheduledTasks.markInboxSeen(actor, occurrenceIds))
+        return true
+      }
       if (url.pathname === '/api/v1/scheduled-tasks' && request.method === 'GET') {
         requireScheduledTasks(deps)
         sendJson(response, 200, { items: (await deps.scheduledTasks.list(actor)).map(publicScheduledTask) })
@@ -288,6 +317,15 @@ function validateScheduledTaskPatch(raw: unknown): UpdateScheduledTask {
   return patch
 }
 
+function validateInboxSeen(raw: unknown): string[] {
+  const value = record(raw)
+  if (!Array.isArray(value.occurrenceIds)) throw new ApiHttpError(400, 'invalid_request', 'occurrenceIds must be an array')
+  if (value.occurrenceIds.length > MAX_PAGE_SIZE) throw new ApiHttpError(400, 'invalid_request', `occurrenceIds must contain at most ${MAX_PAGE_SIZE} items`)
+  const occurrenceIds = value.occurrenceIds.map((item) => requiredIdentifier(item, 'occurrenceIds'))
+  if (new Set(occurrenceIds).size !== occurrenceIds.length) throw new ApiHttpError(400, 'invalid_request', 'occurrenceIds must be unique')
+  return occurrenceIds
+}
+
 function scheduledPrompt(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 100_000) throw new ApiHttpError(400, 'invalid_request', 'prompt is required and must not exceed 100000 characters')
   return value
@@ -306,13 +344,34 @@ function scheduledTarget(raw: unknown): CreateScheduledTask['target'] {
 
 function scheduledSchedule(raw: unknown): CreateScheduledTask['schedule'] {
   const value = record(raw)
-  if (value.kind === 'once') return { kind: 'once', at: requiredString(value.at, 'schedule.at') }
-  if (value.kind === 'daily') return { kind: 'daily', timezone: requiredString(value.timezone, 'schedule.timezone'), hour: integer(value.hour, 'schedule.hour'), minute: integer(value.minute, 'schedule.minute') }
-  if (value.kind === 'weekly') {
-    if (!Array.isArray(value.daysOfWeek)) throw new ApiHttpError(400, 'invalid_request', 'schedule.daysOfWeek must be an array')
-    return { kind: 'weekly', timezone: requiredString(value.timezone, 'schedule.timezone'), daysOfWeek: value.daysOfWeek.map((day) => integer(day, 'schedule.daysOfWeek')), hour: integer(value.hour, 'schedule.hour'), minute: integer(value.minute, 'schedule.minute') }
+  let schedule: CreateScheduledTask['schedule']
+  if (value.kind === 'once') schedule = { kind: 'once', at: requiredString(value.at, 'schedule.at') }
+  else if (value.kind === 'daily') schedule = { kind: 'daily', ...scheduledWallClock(value) }
+  else if (value.kind === 'weekly') {
+    schedule = { kind: 'weekly', ...scheduledWallClock(value), daysOfWeek: integerArray(value.daysOfWeek, 'schedule.daysOfWeek') }
+  } else if (value.kind === 'interval') {
+    schedule = {
+      kind: 'interval', ...scheduledWallClock(value), everyDays: integer(value.everyDays, 'schedule.everyDays'),
+      startDate: requiredString(value.startDate, 'schedule.startDate'),
+    }
+  } else if (value.kind === 'monthly') {
+    schedule = { kind: 'monthly', ...scheduledWallClock(value), daysOfMonth: integerArray(value.daysOfMonth, 'schedule.daysOfMonth') }
+  } else {
+    throw new ApiHttpError(400, 'invalid_request', 'schedule.kind must be once, daily, weekly, interval, or monthly')
   }
-  throw new ApiHttpError(400, 'invalid_request', 'schedule.kind must be once, daily, or weekly')
+  try { validateSchedule(schedule) } catch (error) {
+    throw new ApiHttpError(400, 'invalid_request', error instanceof Error ? error.message : 'schedule is invalid')
+  }
+  return schedule
+}
+
+function scheduledWallClock(value: Record<string, unknown>): { timezone: string; hour: number; minute: number } {
+  return { timezone: requiredString(value.timezone, 'schedule.timezone'), hour: integer(value.hour, 'schedule.hour'), minute: integer(value.minute, 'schedule.minute') }
+}
+
+function integerArray(value: unknown, name: string): number[] {
+  if (!Array.isArray(value)) throw new ApiHttpError(400, 'invalid_request', `${name} must be an array`)
+  return value.map((item) => integer(item, name))
 }
 
 function integer(value: unknown, name: string): number {

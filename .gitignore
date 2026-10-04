@@ -73,6 +73,7 @@ references/
 .agent-home/
 .claude-home/
 .artifacts/
+/artifacts/
 .chrome-cdp/
 
 # Experiment-local heavy/raw evidence. Small summaries, reports, diagnostics,

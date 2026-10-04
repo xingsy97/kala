@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -38,6 +38,35 @@ describe('scheduled task recurrence', () => {
       new Date('2026-10-02T00:00:00.000Z'),
     )?.toISOString()).toBe('2026-10-04T23:00:00.000Z')
   })
+
+  it('anchors every-N-days schedules to local calendar dates and skips a DST gap', () => {
+    const schedule = { kind: 'interval' as const, timezone: 'America/New_York', hour: 2, minute: 30, everyDays: 2, startDate: '2026-03-08' }
+    expect(nextOccurrence(schedule, new Date('2026-03-07T12:00:00.000Z'))?.toISOString()).toBe('2026-03-10T06:30:00.000Z')
+    expect(nextOccurrence(schedule, new Date('2026-03-10T06:30:00.000Z'))?.toISOString()).toBe('2026-03-12T06:30:00.000Z')
+  })
+
+  it('skips nonexistent month dates and emits a repeated fall-back wall minute only once', () => {
+    expect(nextOccurrence(
+      { kind: 'monthly', timezone: 'UTC', hour: 10, minute: 0, daysOfMonth: [31] },
+      new Date('2026-01-31T10:00:00.000Z'),
+    )?.toISOString()).toBe('2026-03-31T10:00:00.000Z')
+    expect(nextOccurrence(
+      { kind: 'monthly', timezone: 'America/New_York', hour: 1, minute: 30, daysOfMonth: [1] },
+      new Date('2026-11-01T05:30:00.000Z'),
+    )?.toISOString()).toBe('2026-12-01T06:30:00.000Z')
+  })
+
+  it('strictly validates interval anchors and monthly date selections', () => {
+    expect(() => nextOccurrence(
+      { kind: 'interval', timezone: 'UTC', hour: 0, minute: 0, everyDays: 0, startDate: '2026-01-01' }, new Date(),
+    )).toThrow('everyDays')
+    expect(() => nextOccurrence(
+      { kind: 'interval', timezone: 'UTC', hour: 0, minute: 0, everyDays: 2, startDate: '2026-02-30' }, new Date(),
+    )).toThrow('YYYY-MM-DD')
+    expect(() => nextOccurrence(
+      { kind: 'monthly', timezone: 'UTC', hour: 0, minute: 0, daysOfMonth: [1, 1] }, new Date(),
+    )).toThrow('unique integers')
+  })
 })
 
 describe('Unit scheduler durability and isolation', () => {
@@ -56,6 +85,30 @@ describe('Unit scheduler durability and isolation', () => {
     await store.setPaused('organization:a', task.id, true)
     expect(await store.delete('organization:a', task.id)).toBe(true)
     await store.close()
+  })
+
+  it('loads existing schema-v1 tasks and run snapshots without runtime legacy branches or rewriting state', async () => {
+    const path = await directory()
+    const state = {
+      schemaVersion: 1, revision: 7,
+      tasks: [{
+        id: 'legacy-task', generation: 1, ownerKey: 'principal:p', createdBy: 'p', status: 'active', prompt: 'existing daily',
+        target: { kind: 'session', sessionId: 's1' }, schedule: { kind: 'daily', timezone: 'UTC', hour: 10, minute: 0 },
+        nextRunAt: '2026-10-03T10:00:00.000Z', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-02T10:00:00.000Z',
+      }],
+      runs: [{
+        occurrenceId: 'occ_existing', taskId: 'legacy-task', operationId: 'schedule_existing', scheduledFor: '2026-10-02T10:00:00.000Z',
+        status: 'enqueued', claimedAt: '2026-10-02T10:00:00.000Z', updatedAt: '2026-10-02T10:00:01.000Z',
+        task: { id: 'legacy-task', generation: 1, ownerKey: 'principal:p', createdBy: 'p', prompt: 'historical prompt', target: { kind: 'session', sessionId: 's1' } },
+      }],
+    }
+    await writeFile(join(path, 'state.json'), JSON.stringify(state))
+    const store = new ScheduledTaskStore(path)
+    await store.start('u')
+    expect(await store.listTasks('principal:p')).toMatchObject([{ id: 'legacy-task', schedule: { kind: 'daily' } }])
+    expect(await store.history('principal:p', 'legacy-task')).toMatchObject([{ task: { prompt: 'historical prompt' } }])
+    await store.close()
+    expect(JSON.parse(await readFile(join(path, 'state.json'), 'utf8'))).toEqual(state)
   })
 
   it('claims each stable occurrence once and advances recurring definitions atomically', async () => {

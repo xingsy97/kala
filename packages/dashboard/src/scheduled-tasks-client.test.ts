@@ -57,6 +57,71 @@ describe('createScheduledTasksClient', () => {
     expect(fetchMock.mock.calls[7]![1]?.method).toBe('DELETE')
   })
 
+  it('sends interval and monthly schedule fields unchanged', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ task }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ task }), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createScheduledTasksClient({ host: 'https://runlab.example' })
+
+    await client.create({
+      prompt: 'Interval report',
+      target: { kind: 'session', sessionId: 'session-1' },
+      schedule: { kind: 'interval', timezone: 'America/New_York', hour: 9, minute: 15, everyDays: 3, startDate: '2026-10-04' },
+    })
+    await client.create({
+      prompt: 'Monthly report',
+      target: { kind: 'workspace', workspaceId: 'workspace-1' },
+      schedule: { kind: 'monthly', timezone: 'Asia/Shanghai', hour: 10, minute: 30, daysOfMonth: [1, 15, 31] },
+    })
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)).schedule).toEqual({ kind: 'interval', timezone: 'America/New_York', hour: 9, minute: 15, everyDays: 3, startDate: '2026-10-04' })
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body)).schedule).toEqual({ kind: 'monthly', timezone: 'Asia/Shanghai', hour: 10, minute: 30, daysOfMonth: [1, 15, 31] })
+  })
+
+  it('fetches minimal scheduled message origins for one encoded session', async () => {
+    const origins = { 'schedule-op-1': 'task-1' }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ origins }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await expect(createScheduledTasksClient({ host: 'https://runlab.example/', token: 'secret' })
+      .origins('session / 1', { signal: controller.signal })).resolves.toEqual(origins)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://runlab.example/api/v1/scheduled-tasks/origins?sessionId=session%20%2F%201',
+      expect.objectContaining({ credentials: 'include', signal: controller.signal }),
+    )
+  })
+
+  it('fetches the inbox without acknowledging and acknowledges only supplied occurrence IDs', async () => {
+    const inbox = {
+      items: [{ occurrenceId: 'occ-1', taskId: 'task-1', status: 'needs_review' as const, scheduledFor: '2026-10-04T09:00:00.000Z', updatedAt: '2026-10-04T09:01:00.000Z', seen: false }],
+      unreadCount: 2,
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(inbox), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ acknowledged: ['occ-1'], unreadCount: 1 }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createScheduledTasksClient({ host: 'https://runlab.example/', token: 'secret' })
+    const getController = new AbortController()
+    const seenController = new AbortController()
+
+    await expect(client.inbox({ signal: getController.signal })).resolves.toEqual(inbox)
+    await expect(client.markInboxSeen(['occ-1'], { signal: seenController.signal })).resolves.toEqual({ acknowledged: ['occ-1'], unreadCount: 1 })
+
+    expect(fetchMock.mock.calls[0]).toEqual([
+      'https://runlab.example/api/v1/scheduled-tasks/inbox',
+      expect.objectContaining({ credentials: 'include', signal: getController.signal }),
+    ])
+    expect(fetchMock.mock.calls[0]![1]?.method).toBeUndefined()
+    expect(fetchMock.mock.calls[1]).toEqual([
+      'https://runlab.example/api/v1/scheduled-tasks/inbox/seen',
+      expect.objectContaining({ method: 'POST', credentials: 'include', signal: seenController.signal }),
+    ])
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({ occurrenceIds: ['occ-1'] })
+  })
+
   it('surfaces API errors', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ error: 'scheduler unavailable' }), { status: 503 })))
     await expect(createScheduledTasksClient({ host: '' }).list()).rejects.toThrow('scheduler unavailable')

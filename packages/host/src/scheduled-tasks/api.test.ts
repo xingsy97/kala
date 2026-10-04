@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -22,9 +22,9 @@ type ScheduledRun = {
   status: string
 }
 
-const headers = (organizationId: string, role = 'member') => ({
+const headers = (organizationId: string, role = 'member', principal = `${organizationId}-user`) => ({
   'content-type': 'application/json',
-  'x-agent-runlab-principal': `${organizationId}-user`,
+  'x-agent-runlab-principal': principal,
   'x-agent-runlab-organization-id': organizationId,
   'x-agent-runlab-organization-role': role,
 })
@@ -120,6 +120,141 @@ describe('scheduled task product API', () => {
     const history = await fetch(`${base}/scheduled-tasks/${task.id}/history`, { headers: headers('org-a') })
     expect(await history.json()).toEqual({ items: [] })
     expect((await fetch(`${base}/scheduled-tasks/${task.id}`, { method: 'DELETE', headers: headers('org-a') })).status).toBe(204)
+  })
+
+  it('serves old deleted-task runs through a durable principal-isolated inbox and only marks displayed IDs seen', async () => {
+    root = await mkdtemp(join(tmpdir(), 'kala-scheduled-inbox-'))
+    const scheduledDirectory = join(root, '.scheduled-tasks')
+    await mkdir(scheduledDirectory, { recursive: true })
+    const run = (input: { occurrenceId: string; ownerKey: string; principal: string; status: string; updatedAt: string }) => ({
+      occurrenceId: input.occurrenceId,
+      taskId: `deleted-${input.occurrenceId}`,
+      operationId: `schedule-${input.occurrenceId}`,
+      scheduledFor: '2026-09-30T12:00:00.000Z',
+      status: input.status,
+      claimedAt: '2026-09-30T12:00:00.000Z',
+      updatedAt: input.updatedAt,
+      task: {
+        id: `deleted-${input.occurrenceId}`,
+        generation: 1,
+        ownerKey: input.ownerKey,
+        createdBy: input.principal,
+        prompt: `private prompt for ${input.principal}`,
+        target: { kind: 'session', sessionId: `session-${input.occurrenceId}` },
+      },
+      sessionId: `session-${input.occurrenceId}`,
+    })
+    await writeFile(join(scheduledDirectory, 'state.json'), JSON.stringify({
+      schemaVersion: 1,
+      revision: 4,
+      tasks: [],
+      runs: [
+        run({ occurrenceId: 'occ_alice_enqueued', ownerKey: 'organization:org-a', principal: 'alice', status: 'enqueued', updatedAt: '2026-10-01T12:01:00.000Z' }),
+        run({ occurrenceId: 'occ_alice_failed', ownerKey: 'organization:org-a', principal: 'alice', status: 'failed', updatedAt: '2026-10-01T12:02:00.000Z' }),
+        run({ occurrenceId: 'occ_alice_review', ownerKey: 'organization:org-a', principal: 'alice', status: 'needs_review', updatedAt: '2026-10-01T12:03:00.000Z' }),
+        run({ occurrenceId: 'occ_alice_skipped', ownerKey: 'organization:org-a', principal: 'alice', status: 'skipped', updatedAt: '2026-10-01T12:04:00.000Z' }),
+        run({ occurrenceId: 'occ_bob_failed', ownerKey: 'organization:org-a', principal: 'bob', status: 'failed', updatedAt: '2026-10-01T12:05:00.000Z' }),
+        run({ occurrenceId: 'occ_other_tenant', ownerKey: 'organization:org-b', principal: 'alice', status: 'enqueued', updatedAt: '2026-10-01T12:06:00.000Z' }),
+      ],
+    }))
+    const start = async () => await startHostServer({
+      port: 0,
+      sessionsDir: root!,
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }),
+      llm: { name: 'test', async call() { return { message: { role: 'assistant', content: [] } } } },
+    })
+    server = await start()
+    let base = `http://127.0.0.1:${server.port}/api/v1`
+    expect((await fetch(`${base}/sessions`, {
+      method: 'POST', headers: headers('org-a', 'member', 'alice'),
+      body: JSON.stringify({ operationId: 'create-origin-a', sessionId: 'session-occ_alice_enqueued' }),
+    })).status).toBe(201)
+    expect((await fetch(`${base}/sessions`, {
+      method: 'POST', headers: headers('org-b', 'member', 'alice'),
+      body: JSON.stringify({ operationId: 'create-origin-b', sessionId: 'session-occ_other_tenant' }),
+    })).status).toBe(201)
+
+    const origins = await fetch(`${base}/scheduled-tasks/origins?sessionId=session-occ_alice_enqueued`, { headers: headers('org-a', 'member', 'alice') })
+    expect(origins.status).toBe(200)
+    const originBody = await origins.json()
+    expect(originBody).toEqual({ origins: { 'schedule-occ_alice_enqueued': 'deleted-occ_alice_enqueued' } })
+    expect(JSON.stringify(originBody)).not.toContain('private prompt')
+    expect((await fetch(`${base}/scheduled-tasks/origins?sessionId=session-occ_alice_enqueued`, { headers: headers('org-b', 'member', 'alice') })).status).toBe(404)
+    expect((await fetch(`${base}/scheduled-tasks/origins?sessionId=session-occ_other_tenant`, { headers: headers('org-a', 'member', 'alice') })).status).toBe(404)
+
+    const first = await (await fetch(`${base}/scheduled-tasks/inbox`, { headers: headers('org-a', 'member', 'alice') })).json()
+    expect(first).toEqual({
+      items: [
+        { occurrenceId: 'occ_alice_review', taskId: 'deleted-occ_alice_review', status: 'needs_review', scheduledFor: '2026-09-30T12:00:00.000Z', updatedAt: '2026-10-01T12:03:00.000Z', seen: false, sessionId: 'session-occ_alice_review' },
+        { occurrenceId: 'occ_alice_failed', taskId: 'deleted-occ_alice_failed', status: 'failed', scheduledFor: '2026-09-30T12:00:00.000Z', updatedAt: '2026-10-01T12:02:00.000Z', seen: false, sessionId: 'session-occ_alice_failed' },
+        { occurrenceId: 'occ_alice_enqueued', taskId: 'deleted-occ_alice_enqueued', status: 'enqueued', scheduledFor: '2026-09-30T12:00:00.000Z', updatedAt: '2026-10-01T12:01:00.000Z', seen: false, sessionId: 'session-occ_alice_enqueued' },
+      ],
+      unreadCount: 3,
+    })
+    expect(JSON.stringify(first)).not.toContain('private prompt')
+    await expect((await fetch(`${base}/scheduled-tasks/inbox`, { headers: headers('org-a', 'member', 'alice') })).json()).resolves.toEqual(first)
+    await expect((await fetch(`${base}/scheduled-tasks/inbox`, { headers: headers('org-a', 'member', 'bob') })).json()).resolves.toMatchObject({
+      items: [{ occurrenceId: 'occ_bob_failed', seen: false }], unreadCount: 1,
+    })
+    await expect((await fetch(`${base}/scheduled-tasks/inbox`, { headers: headers('org-b', 'member', 'alice') })).json()).resolves.toMatchObject({
+      items: [{ occurrenceId: 'occ_other_tenant', seen: false }], unreadCount: 1,
+    })
+
+    const seen = await fetch(`${base}/scheduled-tasks/inbox/seen`, {
+      method: 'POST',
+      headers: headers('org-a', 'viewer', 'alice'),
+      body: JSON.stringify({ occurrenceIds: ['occ_alice_review', 'occ_alice_enqueued', 'occ_bob_failed', 'occ_other_tenant'] }),
+    })
+    expect(seen.status).toBe(200)
+    await expect(seen.json()).resolves.toEqual({ acknowledged: ['occ_alice_enqueued', 'occ_alice_review'], unreadCount: 1 })
+
+    await server.close()
+    server = await start()
+    base = `http://127.0.0.1:${server.port}/api/v1`
+    await expect((await fetch(`${base}/scheduled-tasks/inbox`, { headers: headers('org-a', 'member', 'alice') })).json()).resolves.toMatchObject({
+      items: [
+        { occurrenceId: 'occ_alice_review', seen: true },
+        { occurrenceId: 'occ_alice_failed', seen: false },
+        { occurrenceId: 'occ_alice_enqueued', seen: true },
+      ],
+      unreadCount: 1,
+    })
+    await expect((await fetch(`${base}/scheduled-tasks/inbox`, { headers: headers('org-a', 'member', 'bob') })).json()).resolves.toMatchObject({
+      items: [{ occurrenceId: 'occ_bob_failed', seen: false }], unreadCount: 1,
+    })
+  })
+
+  it('accepts interval and monthly JSON schedules and rejects invalid calendar fields', async () => {
+    root = await mkdtemp(join(tmpdir(), 'kala-scheduled-api-shapes-'))
+    server = await startHostServer({
+      port: 0,
+      sessionsDir: root,
+      deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      defaultConfig: createConfig({ systemPrompt: 'test', tools: [] }),
+      llm: { name: 'test', async call() { return { message: { role: 'assistant', content: [] } } } },
+    })
+    const base = `http://127.0.0.1:${server.port}/api/v1`
+    await fetch(`${base}/sessions`, {
+      method: 'POST', headers: headers('org-a'), body: JSON.stringify({ operationId: 'create-s', sessionId: 's1' }),
+    })
+    const create = async (schedule: Record<string, unknown>) => await fetch(`${base}/scheduled-tasks`, {
+      method: 'POST', headers: headers('org-a'), body: JSON.stringify({ prompt: 'calendar task', target: { kind: 'session', sessionId: 's1' }, schedule }),
+    })
+
+    const interval = await create({ kind: 'interval', timezone: 'America/New_York', hour: 9, minute: 15, everyDays: 3, startDate: '2098-12-31' })
+    expect(interval.status).toBe(201)
+    await expect(interval.json()).resolves.toMatchObject({ task: { schedule: { kind: 'interval', everyDays: 3, startDate: '2098-12-31' } } })
+    const monthly = await create({ kind: 'monthly', timezone: 'UTC', hour: 8, minute: 0, daysOfMonth: [1, 15, 31] })
+    expect(monthly.status).toBe(201)
+    await expect(monthly.json()).resolves.toMatchObject({ task: { schedule: { kind: 'monthly', daysOfMonth: [1, 15, 31] } } })
+
+    const badDate = await create({ kind: 'interval', timezone: 'UTC', hour: 8, minute: 0, everyDays: 2, startDate: '2099-02-29' })
+    expect(badDate.status).toBe(400)
+    await expect(badDate.json()).resolves.toMatchObject({ error: { code: 'invalid_request', message: expect.stringContaining('YYYY-MM-DD') } })
+    const duplicateDay = await create({ kind: 'monthly', timezone: 'UTC', hour: 8, minute: 0, daysOfMonth: [15, 15] })
+    expect(duplicateDay.status).toBe(400)
+    await expect(duplicateDay.json()).resolves.toMatchObject({ error: { code: 'invalid_request', message: expect.stringContaining('unique integers') } })
   })
 
   it('triggers a once task through the Host and leaves its prompt queued behind an active Session turn', async () => {

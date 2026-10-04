@@ -1,4 +1,5 @@
-import { act, render } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
+import { webcrypto } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type React from 'react'
 
@@ -28,6 +29,8 @@ const mockedNotify = notify as unknown as Record<
 >
 
 beforeEach(() => {
+  vi.stubGlobal('crypto', webcrypto)
+  localStorage.clear()
   mockedNotify.info.mockClear()
   mockedNotify.success.mockClear()
   mockedNotify.warning.mockClear()
@@ -210,7 +213,7 @@ describe('useSessionToasts', () => {
     }
   })
 
-  it('announces a changed persisted system prompt once without exposing its content', () => {
+  it('announces an unversioned historical change once, even after remount, then a new Settings change', async () => {
     const base = {
       sessionId: 's',
       sessionLabel: 'Existing session',
@@ -218,23 +221,69 @@ describe('useSessionToasts', () => {
       pendingApprovals: [],
       lastError: null,
     } as const
-    const { rerender } = render(
-      <SessionToastHarness {...base} systemPromptOverride={{ prompt: 'old tenant secret' }} />,
-    )
-    mockedNotify.info.mockClear()
-
-    rerender(<SessionToastHarness {...base} systemPromptOverride={{ prompt: 'new tenant secret' }} />)
-    rerender(<SessionToastHarness {...base} systemPromptOverride={{ prompt: 'new tenant secret' }} />)
-
+    const first = render(<SessionToastHarness {...base} systemPromptOverride={{ prompt: 'old tenant secret' }} />)
+    await waitFor(() => expect(mockedNotify.info).toHaveBeenCalledTimes(1))
+    first.unmount()
+    const { rerender } = render(<SessionToastHarness {...base} systemPromptOverride={{ prompt: 'old tenant secret' }} />)
+    await waitFor(() => expect(localStorage.getItem('kala:system-prompt-notice:v1:local-operator:s')).toMatch(/^[a-f0-9]{64}$/))
     expect(mockedNotify.info).toHaveBeenCalledTimes(1)
-    const [title, options] = mockedNotify.info.mock.calls[0]!
+
+    rerender(<SessionToastHarness {...base} systemPromptOverride={{ prompt: 'new tenant secret', version: 'settings-v2' }} />)
+    await waitFor(() => expect(mockedNotify.info).toHaveBeenCalledTimes(2))
+    rerender(<SessionToastHarness {...base} systemPromptOverride={{ prompt: 'new tenant secret', version: 'settings-v2' }} />)
+    expect(mockedNotify.info).toHaveBeenCalledTimes(2)
+    const [title, options] = mockedNotify.info.mock.calls[1]!
     expect(title).toBe('System prompt updated')
     expect(options.id).toBe('system-prompt-changed-s')
     expect(options.description).toContain('administrator or user settings change')
     expect(JSON.stringify(mockedNotify.info.mock.calls)).not.toContain('tenant secret')
   })
 
-  it('announces a prompt changed while disconnected from the reconnect baseline without duplicate toast', () => {
+  it('does not acknowledge a stale prompt when the user switches sessions before hashing finishes', async () => {
+    let resolveDigest!: (value: ArrayBuffer) => void
+    const pending = new Promise<ArrayBuffer>((resolve) => { resolveDigest = resolve })
+    vi.stubGlobal('crypto', { subtle: { digest: vi.fn(() => pending) } })
+    const base = { sessionLabel: 'Session', connectionStatus: 'ready', pendingApprovals: [], lastError: null } as const
+    const { rerender } = render(<SessionToastHarness {...base} sessionId="old" systemPromptOverride={{ prompt: 'old prompt' }} />)
+    rerender(<SessionToastHarness {...base} sessionId="new" systemPromptOverride={{ prompt: 'new prompt' }} />)
+    await act(async () => { resolveDigest(new Uint8Array(32).buffer); await pending })
+    expect(mockedNotify.info).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem('kala:system-prompt-notice:v1:local-operator:old')).toBeNull()
+    expect(localStorage.getItem('kala:system-prompt-notice:v1:local-operator:new')).toBe('00'.repeat(32))
+  })
+
+  it('isolates acknowledgment by logged-in user and Host namespace', async () => {
+    const base = { sessionId: 'shared', sessionLabel: 'Shared session', connectionStatus: 'ready', pendingApprovals: [], lastError: null, systemPromptOverride: { prompt: 'shared system text' } } as const
+    const first = render(<SessionToastHarness {...base} cacheNamespace="host-a:user-a" />)
+    await waitFor(() => expect(mockedNotify.info).toHaveBeenCalledTimes(1))
+    first.unmount()
+    const second = render(<SessionToastHarness {...base} cacheNamespace="host-a:user-b" />)
+    await waitFor(() => expect(mockedNotify.info).toHaveBeenCalledTimes(2))
+    second.unmount()
+    render(<SessionToastHarness {...base} cacheNamespace="host-a:user-a" />)
+    await act(async () => { await webcrypto.subtle.digest('SHA-256', new TextEncoder().encode(base.systemPromptOverride.prompt)) })
+    expect(mockedNotify.info).toHaveBeenCalledTimes(2)
+  })
+
+  it('announces a versioned Settings change first observed when an existing session is opened', async () => {
+    const props = {
+      sessionId: 'persisted-change',
+      sessionLabel: 'Previously inactive session',
+      connectionStatus: 'ready',
+      pendingApprovals: [],
+      lastError: null,
+      systemPromptOverride: { prompt: 'private managed prompt', version: 'settings-v3' },
+    } as const
+
+    const { rerender } = render(<SessionToastHarness {...props} />)
+    rerender(<SessionToastHarness {...props} />)
+
+    await waitFor(() => expect(mockedNotify.info).toHaveBeenCalledTimes(1))
+    expect(mockedNotify.info.mock.calls[0]![1].description).toContain('Previously inactive session')
+    expect(JSON.stringify(mockedNotify.info.mock.calls)).not.toContain('private managed prompt')
+  })
+
+  it('announces a prompt changed while disconnected from the reconnect baseline without duplicate toast', async () => {
     const base = {
       sessionId: 's',
       sessionLabel: 'Existing session',
@@ -255,7 +304,7 @@ describe('useSessionToasts', () => {
     rerender(<SessionToastHarness {...base} connectionStatus="disconnected" systemPromptOverride={{ prompt: 'updated while offline', version: 2 }} />)
     rerender(<SessionToastHarness {...base} connectionStatus="ready" systemPromptOverride={{ prompt: 'updated while offline', version: 2 }} />)
 
-    expect(mockedNotify.info).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(mockedNotify.info).toHaveBeenCalledTimes(1))
     expect(mockedNotify.info.mock.calls[0]![1].description).toContain('Existing session')
   })
 

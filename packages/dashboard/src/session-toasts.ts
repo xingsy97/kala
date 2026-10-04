@@ -34,6 +34,7 @@ import type { DashboardSocket } from './session.js'
 
 export type SessionToastInput = {
   sessionId: string | null
+  cacheNamespace?: string
   sessionLabel: string
   connectionStatus: string
   pendingApprovals: readonly ApprovalRequiredEvent[]
@@ -59,6 +60,7 @@ export type SessionToastInput = {
  */
 export function useSessionToasts({
   sessionId,
+  cacheNamespace = 'local-operator',
   sessionLabel,
   connectionStatus,
   pendingApprovals,
@@ -119,24 +121,6 @@ export function useSessionToasts({
       // backgrounded) come from useInterventionDesktopNotifications.
     }
 
-    if (systemPromptOverride) {
-      // The Host sends this durable state both live and in the reconnect
-      // session baseline. Keep the prompt itself out of the toast/id and only
-      // retain its signature in memory so tenant content is never persisted by
-      // the notification layer.
-      const promptChangeSignature = systemPromptOverride.version === undefined
-        ? systemPromptOverride.prompt
-        : `${typeof systemPromptOverride.version}:${systemPromptOverride.version}:${systemPromptOverride.prompt}`
-      if (seenSystemPromptChanges.current.get(sessionId) !== promptChangeSignature) {
-        seenSystemPromptChanges.current.set(sessionId, promptChangeSignature)
-        notify.info(t('settings.agent.systemPromptChangedTitle'), {
-          id: `system-prompt-changed-${sessionId}`,
-          description: t('settings.agent.systemPromptChangedDescription', { session: sessionLabel }),
-          duration: 10_000,
-        })
-      }
-    }
-
     const wasLost = previous?.connectionStatus === 'disconnected' || previous?.connectionStatus === 'error'
     const nowLost = connectionStatus === 'disconnected' || connectionStatus === 'error'
     if (previous && wasLost !== nowLost) {
@@ -158,9 +142,41 @@ export function useSessionToasts({
     sessionId,
     sessionLabel,
     suppressApprovalToast,
-    systemPromptOverride,
     t,
   ])
+
+  const systemPromptText = systemPromptOverride?.prompt
+  useEffect(() => {
+    if (sessionId === null || systemPromptText === undefined) return
+    // Older Hosts send unversioned overrides; the prompt's digest works for
+    // both historical repairs and future Settings changes. Persist only the
+    // last acknowledged digest, never the administrator's prompt content.
+    let cancelled = false
+    const key = `kala:system-prompt-notice:v1:${cacheNamespace}:${sessionId}`
+    void (async () => {
+      let digest: string | undefined
+      try {
+        const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(systemPromptText))
+        digest = Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+      } catch { /* Web Crypto is unavailable on an insecure origin. */ }
+      if (cancelled) return
+      const signature = digest ?? systemPromptText
+      if (seenSystemPromptChanges.current.get(key) === signature) return
+      seenSystemPromptChanges.current.set(key, signature)
+      if (digest) {
+        try { if (localStorage.getItem(key) === digest) return } catch { /* Storage may be disabled. */ }
+      }
+      notify.info(t('settings.agent.systemPromptChangedTitle'), {
+        id: `system-prompt-changed-${sessionId}`,
+        description: t('settings.agent.systemPromptChangedDescription', { session: sessionLabel }),
+        duration: 10_000,
+      })
+      if (digest) {
+        try { localStorage.setItem(key, digest) } catch { /* In-memory dedup still applies. */ }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [cacheNamespace, sessionId, sessionLabel, systemPromptText, t])
 }
 
 export function useInactiveSessionSummaryToasts({

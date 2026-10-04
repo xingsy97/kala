@@ -80,7 +80,8 @@ import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDial
 import { ExecutorPairingPrompt } from './features/explorer/ExecutorPairingPrompt.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
 import { ScheduledTasksDialog, ScheduledTasksPanel } from './features/scheduled-tasks/ScheduledTasksDialog.js'
-import type { ScheduledTaskTarget } from './scheduled-tasks-client.js'
+import { ScheduledTaskInbox } from './features/scheduled-tasks/ScheduledTaskInbox.js'
+import { createScheduledTasksClient, type ScheduledTaskTarget } from './scheduled-tasks-client.js'
 import { taskGraphFromMessages, taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
 import { TaskGraphButton } from './features/chat/TaskGraphButton.js'
 import { DagRunPanel } from './features/dag/DagRunPanel.js'
@@ -303,6 +304,9 @@ export function App(): JSX.Element {
   const [userMessageNavigationPortalTarget, setUserMessageNavigationPortalTarget] = useState<HTMLDivElement | null>(null)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [scheduledTasksTarget, setScheduledTasksTarget] = useState<ScheduledTaskTarget | null>(null)
+  const [scheduledTaskId, setScheduledTaskId] = useState<string | null>(null)
+  const [scheduledTasksRevision, setScheduledTasksRevision] = useState(0)
+  const [scheduledMessageOrigins, setScheduledMessageOrigins] = useState<{ sessionId: string; tasks: Readonly<Record<string, string>> } | null>(null)
   const [workspaceTerminal, setWorkspaceTerminal] = useState<{ workspaceId: string; workspaceName: string; ownerSessionId: string; sessionId: string; cwd?: string } | null>(null)
   const [workspaceTerminalReady, setWorkspaceTerminalReady] = useState(false)
   const [workspaceTerminalExpanded, setWorkspaceTerminalExpanded] = useState(false)
@@ -1244,6 +1248,50 @@ export function App(): JSX.Element {
   // Executor. File, Git, and Terminal stay unavailable until the user creates
   // or selects a workspace-bound Session.
   const fileExplorerWorkspaceId = currentSession?.workspaceId
+  useEffect(() => {
+    if (!activeSessionId) { setScheduledMessageOrigins(null); return }
+    const sessionId = activeSessionId
+    const client = createScheduledTasksClient({ host: hostEndpoint.url, ...(config.token ? { token: config.token } : {}) })
+    const controller = new AbortController()
+    const refresh = async (): Promise<void> => {
+      try {
+        const tasks = await client.origins(sessionId, { signal: controller.signal })
+        if (!controller.signal.aborted) setScheduledMessageOrigins({ sessionId, tasks })
+      } catch { /* Badge provenance is optional; never infer it from message text. */ }
+    }
+    setScheduledMessageOrigins(null)
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 30_000)
+    return () => { controller.abort(); window.clearInterval(timer) }
+  }, [activeSessionId, hostEndpoint.url, config.token])
+  const workspaceScheduledTarget: Extract<ScheduledTaskTarget, { kind: 'workspace' }> | null = currentSession?.workspaceId
+    ? { kind: 'workspace', workspaceId: currentSession.workspaceId,
+      ...(currentSession.workspaceName ? { workspaceName: currentSession.workspaceName } : {}) }
+    : null
+  const openScheduledTask = (taskId: string, target: ScheduledTaskTarget): void => {
+    setScheduledTaskId(taskId)
+    setScheduledTasksTarget(target)
+  }
+  const scheduledLookupIdentity = `${hostEndpoint.url}\u0000${config.token ?? ''}`
+  const scheduledLookupIdentityRef = useRef(scheduledLookupIdentity)
+  scheduledLookupIdentityRef.current = scheduledLookupIdentity
+  const openScheduledTaskFromInbox = async (taskId: string): Promise<void> => {
+    const identity = scheduledLookupIdentity
+    try {
+      const client = createScheduledTasksClient({ host: hostEndpoint.url, ...(config.token ? { token: config.token } : {}) })
+      const task = (await client.list()).find((item) => item.id === taskId)
+      if (scheduledLookupIdentityRef.current !== identity) return
+      if (task) { openScheduledTask(taskId, task.target); return }
+      // Deleted plans still have immutable run snapshots; the modal shows these read-only.
+      const history = await client.history(taskId)
+      if (scheduledLookupIdentityRef.current !== identity) return
+      const snapshot = history.find((run) => run.task.id === taskId)?.task
+      if (snapshot) openScheduledTask(taskId, snapshot.target)
+      else notify.warning('这条定时任务的历史记录已不可用')
+    } catch {
+      if (scheduledLookupIdentityRef.current === identity) notify.error('无法打开定时任务记录')
+    }
+  }
   const workspaceExplorerBinding = resolveWorkspaceExplorerBinding({
     activeSessionId,
     sessionSocket: session.socket,
@@ -1539,11 +1587,12 @@ export function App(): JSX.Element {
 
   useSessionToasts({
     sessionId: activeSessionId,
+    cacheNamespace,
     sessionLabel,
     connectionStatus: session.status,
     pendingApprovals: session.pendingApprovals,
     lastError: session.lastError,
-    systemPromptOverride: session.state?.systemPromptOverride,
+    systemPromptOverride: sessionHydrated ? session.state?.systemPromptOverride : undefined,
     approvalMode: session.state?.approvalMode,
   })
   useBackgroundShellToasts(backgroundTasks)
@@ -2186,6 +2235,8 @@ export function App(): JSX.Element {
                       ) : (
                         <ChatPanel
                         sessionId={activeSessionId}
+                        scheduledMessageTasks={scheduledMessageOrigins?.sessionId === activeSessionId ? scheduledMessageOrigins.tasks : undefined}
+                        onOpenScheduledTask={(taskId) => { void openScheduledTaskFromInbox(taskId) }}
                         attachmentHost={hostEndpoint.url}
                         attachmentToken={config.token}
                         items={visibleChatItems}
@@ -2566,6 +2617,7 @@ export function App(): JSX.Element {
                         activeTab={rightPanelTab}
                         onTabChange={setRightPanelTab}
                         onCollapse={() => setInspectorOpen(false)}
+                        headerHelp={<ScheduledTaskInbox host={hostEndpoint.url} {...(config.token ? { token: config.token } : {})} onOpenTask={(taskId) => { void openScheduledTaskFromInbox(taskId) }} />}
                         inspector={<InspectorPanel
                         state={session.state}
                         config={session.config}
@@ -2592,9 +2644,12 @@ export function App(): JSX.Element {
                         terminal={activeSessionId && currentSession?.workspaceId ? <Suspense fallback={<PageLoadingFallback compact />}><SessionTerminalPanel key={`${currentSession.workspaceId}:${activeSessionId}`} socket={session.socket} workspaceId={currentSession.workspaceId} sessionId={activeSessionId} cwd={currentCwd} online={sessionWorkspaceOnline} visible={rightPanelTab === 'terminal'} /></Suspense> : <div className="p-4 text-xs text-muted-foreground">{t('terminal.workspaceRequired')}</div>}
                         scheduledTasks={<ScheduledTasksPanel
                           target={activeSessionId ? { kind: 'session', sessionId: activeSessionId } : null}
-                          onOpen={() => {
-                            if (activeSessionId) setScheduledTasksTarget({ kind: 'session', sessionId: activeSessionId })
-                          }}
+                          workspaceTarget={workspaceScheduledTarget}
+                          host={hostEndpoint.url}
+                          {...(config.token ? { token: config.token } : {})}
+                          reloadKey={scheduledTasksRevision}
+                          onOpen={(target) => { setScheduledTaskId(null); setScheduledTasksTarget(target) }}
+                          onTaskOpen={openScheduledTask}
                         />}
                       />
                     </div>
@@ -2655,7 +2710,7 @@ export function App(): JSX.Element {
           </DialogHeader>
           <div className="h-full min-h-0 pb-[env(safe-area-inset-bottom)]">
             <RightPanel
-              headerHelp={<HelpHint label={t('app.openInspector')}>{t('app.inspectorDescription')}</HelpHint>}
+              headerHelp={<ScheduledTaskInbox host={hostEndpoint.url} {...(config.token ? { token: config.token } : {})} onOpenTask={(taskId) => { void openScheduledTaskFromInbox(taskId) }} />}
               activeTab={rightPanelTab}
               onTabChange={setRightPanelTab}
               onCollapse={() => setInspectorDrawerOpen(false)}
@@ -2687,9 +2742,12 @@ export function App(): JSX.Element {
               terminal={activeSessionId && currentSession?.workspaceId ? <Suspense fallback={<PageLoadingFallback compact />}><SessionTerminalPanel key={`${currentSession.workspaceId}:${activeSessionId}`} socket={session.socket} workspaceId={currentSession.workspaceId} sessionId={activeSessionId} cwd={currentCwd} online={sessionWorkspaceOnline} visible={rightPanelTab === 'terminal'} /></Suspense> : <div className="p-4 text-xs text-muted-foreground">{t('terminal.workspaceRequired')}</div>}
               scheduledTasks={<ScheduledTasksPanel
                 target={activeSessionId ? { kind: 'session', sessionId: activeSessionId } : null}
-                onOpen={() => {
-                  if (activeSessionId) setScheduledTasksTarget({ kind: 'session', sessionId: activeSessionId })
-                }}
+                workspaceTarget={workspaceScheduledTarget}
+                host={hostEndpoint.url}
+                {...(config.token ? { token: config.token } : {})}
+                reloadKey={scheduledTasksRevision}
+                onOpen={(target) => { setScheduledTaskId(null); setScheduledTasksTarget(target) }}
+                onTaskOpen={openScheduledTask}
               />}
             />
           </div>
@@ -2855,6 +2913,7 @@ export function App(): JSX.Element {
           const workspaceName = workspaceInfoExecutor?.workspaceName ?? workspaceInfoSessions[0]?.workspaceName
           const cwd = workspaceInfoExecutor?.defaultCwd
           setWorkspaceInfoId(null)
+          setScheduledTaskId(null)
           setScheduledTasksTarget({
             kind: 'workspace',
             workspaceId: workspaceInfoId,
@@ -2865,10 +2924,12 @@ export function App(): JSX.Element {
       />
       <ScheduledTasksDialog
         open={scheduledTasksTarget !== null}
-        onOpenChange={(open) => { if (!open) setScheduledTasksTarget(null) }}
+        onOpenChange={(open) => { if (!open) { setScheduledTasksTarget(null); setScheduledTaskId(null) } }}
         host={hostEndpoint.url}
         {...(config.token ? { token: config.token } : {})}
         target={scheduledTasksTarget}
+        taskId={scheduledTaskId}
+        onTasksChange={() => setScheduledTasksRevision((revision) => revision + 1)}
         onOpenSession={(sessionId) => {
           setScheduledTasksTarget(null)
           selectSession(sessionId)

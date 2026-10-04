@@ -33,6 +33,7 @@ import {
 } from '@github/copilot-sdk'
 
 import type { SessionRecord } from '../store/session.js'
+import { findPersistedToolResult } from '../store/log.js'
 import type {
   AgentRuntime,
   AgentRuntimeContext,
@@ -185,6 +186,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
       scope: active.scope,
       ...(active.startSnapshot ? { startSnapshot: active.startSnapshot } : {}),
     }
+  }
+
+  async toolResultPersisted(record: SessionRecord, callId: string): Promise<boolean> {
+    return await findPersistedToolResult(record.logPath, callId, this.id)
   }
 
   async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {

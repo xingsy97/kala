@@ -9,4 +9,8 @@ if (!url.searchParams.has('sessionId')) {
   window.history.replaceState(null, '', url)
 }
 
-void import('../main.js')
+if (url.searchParams.get('preview') === 'scheduled-tasks') {
+  void import('./scheduled-tasks-preview.js')
+} else {
+  void import('../main.js')
+}

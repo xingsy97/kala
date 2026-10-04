@@ -8,6 +8,7 @@ import {
 
 import type { LoopHandle } from '../loop-types.js'
 import type { SessionRecord } from '../store/session.js'
+import { findPersistedToolResult } from '../store/log.js'
 import type { AgentRuntime, AgentRuntimeSendInput } from './types.js'
 import { currentKernelCompactStatus } from '../extensions/compaction.js'
 
@@ -30,6 +31,10 @@ export class KernelAgentRuntime implements AgentRuntime {
 
   currentCompactStatus(sessionId: string): CompactStatusEvent | undefined {
     return currentKernelCompactStatus(sessionId)
+  }
+
+  async toolResultPersisted(record: SessionRecord, callId: string): Promise<boolean> {
+    return await findPersistedToolResult(record.logPath, callId, this.id)
   }
 
   async send(record: SessionRecord, input: AgentRuntimeSendInput): Promise<void> {

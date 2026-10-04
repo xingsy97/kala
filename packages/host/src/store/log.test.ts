@@ -20,6 +20,7 @@ import {
   appendRuntimeMetadataEntry,
   appendSnapshotEntry,
   findLatestRuntimeMetadata,
+  findPersistedToolResult,
   findSessionOperation,
   readSessionHistory,
   readSessionHeader,
@@ -139,6 +140,17 @@ describe('readSessionLog', () => {
 
     expect(snapshot?.seq).toBe(2)
     expect(snapshot?.state.status).toBe('done')
+  })
+
+  it('returns a committed sidecar when only Tool receipt metadata was appended afterwards', async () => {
+    const path = join(dir, 'receipt-after-sidecar.jsonl')
+    await writeHeader({ path, sessionId: 'receipt-after-sidecar', agentRuntime: 'copilot', config, initialState })
+    await appendSnapshotEntry(path, 1, { ...initialState, cursor: 1, status: 'done' })
+    await appendRuntimeMetadataEntry(path, {
+      sessionId: 'receipt-after-sidecar', action: 'copilot.tool_result_committed',
+      payload: { callId: 'deploy-call', projectionCursor: 1 },
+    })
+    await expect(readLastSessionSnapshot(path)).resolves.toMatchObject({ seq: 1, state: { status: 'done' } })
   })
 
   it('round-trips header + events + snapshots cleanly', async () => {
@@ -465,6 +477,66 @@ describe('readSessionLog', () => {
     await expect(findLatestRuntimeMetadata(path, 'copilot.user_message', {
       committedProjection: { cursor: 1, ts: '2026-01-02T00:00:00.000Z' },
     })).resolves.toMatchObject({ payload: { text: 'committed' } })
+  })
+
+  it('checks Kernel results by call identity without accepting a Copilot metadata entry', async () => {
+    const path = join(dir, 'kernel-tool-result.jsonl')
+    await writeHeader({ path, sessionId: 'kernel-result', config, initialState })
+    await appendRuntimeMetadataEntry(path, { sessionId: 'kernel-result', action: 'copilot.tool_result_committed', payload: { callId: 'other', projectionCursor: 1 } })
+    await appendEventEntry({ path, seq: 1, event: { kind: 'tool_result', callId: 'expected', ok: false, content: 'failed' }, effects: [] })
+    await expect(findPersistedToolResult(path, 'expected', 'kernel')).resolves.toBe(true)
+    await expect(findPersistedToolResult(path, 'other', 'kernel')).resolves.toBe(false)
+  })
+
+  it('requires a committed Copilot snapshot, not just a pre-projection result', async () => {
+    const path = join(dir, 'copilot-result.jsonl')
+    await writeHeader({ path, sessionId: 'copilot-result', agentRuntime: 'copilot', config, initialState })
+    await appendRuntimeMetadataEntry(path, { sessionId: 'copilot-result', action: 'copilot.tool_result', payload: { callId: 'pending', ok: true, projectionCursor: 1 } })
+    await expect(findPersistedToolResult(path, 'pending', 'copilot')).resolves.toBe(false)
+    await appendSnapshotEntry(path, 1, { ...initialState, cursor: 1, messages: [] })
+    await expect(findPersistedToolResult(path, 'pending', 'copilot')).resolves.toBe(false)
+
+    const withResult = { ...initialState, cursor: 2, messages: [{ role: 'tool' as const, content: [{ type: 'tool_result' as const, callId: 'legacy', ok: true, content: 'ok' }] }] }
+    await appendRuntimeMetadataEntry(path, { sessionId: 'copilot-result', action: 'copilot.tool_result', payload: { callId: 'legacy', ok: true, projectionCursor: 2 } })
+    await appendSnapshotEntry(path, 2, withResult)
+    await expect(findPersistedToolResult(path, 'legacy', 'copilot')).resolves.toBe(true)
+    await expect(findPersistedToolResult(path, 'pending', 'copilot')).resolves.toBe(false)
+
+    await appendRuntimeMetadataEntry(path, { sessionId: 'copilot-result', action: 'copilot.tool_result_committed', payload: { callId: 'new', projectionCursor: 2 } })
+    await expect(findPersistedToolResult(path, 'new', 'copilot')).resolves.toBe(true)
+    await expect(findPersistedToolResult(path, 'missing', 'copilot')).resolves.toBe(false)
+    await expect(findPersistedToolResult(path, 'legacy', 'kernel')).resolves.toBe(false)
+  })
+
+  it('rejects historical results after a newer invocation reuses the call ID', async () => {
+    const copilot = join(dir, 'reused-copilot.jsonl')
+    await writeHeader({ path: copilot, sessionId: 'reused-copilot', agentRuntime: 'copilot', config, initialState })
+    await appendRuntimeMetadataEntry(copilot, { sessionId: 'reused-copilot', action: 'copilot.tool_result', payload: { callId: 'again', projectionCursor: 1 } })
+    await appendSnapshotEntry(copilot, 1, { ...initialState, cursor: 1, messages: [{ role: 'tool', content: [{ type: 'tool_result', callId: 'again', ok: true, content: 'old' }] }] })
+    await appendRuntimeMetadataEntry(copilot, { sessionId: 'reused-copilot', action: 'copilot.tool_call', payload: { callId: 'again', projectionCursor: 2 } })
+    expect(await findPersistedToolResult(copilot, 'again', 'copilot')).toBe(false)
+
+    const kernel = join(dir, 'reused-kernel.jsonl')
+    await writeHeader({ path: kernel, sessionId: 'reused-kernel', config, initialState })
+    await appendEventEntry({ path: kernel, seq: 1, event: { kind: 'tool_result', callId: 'again', ok: true, content: 'old' }, effects: [] })
+    await appendEventEntry({ path: kernel, seq: 2, event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'again', name: 'shell', input: {} }] } }, effects: [] })
+    expect(await findPersistedToolResult(kernel, 'again', 'kernel')).toBe(false)
+  })
+
+  it('ignores a giant embedded snapshot containing the call ID without materializing it', async () => {
+    const path = join(dir, 'giant-snapshot.jsonl')
+    await writeHeader({ path, sessionId: 'giant-snapshot', config, initialState })
+    await appendFile(path, `${JSON.stringify({ kind: 'snapshot', callId: 'probe', padding: 'x'.repeat(3 * 1024 * 1024) })}\n`, 'utf8')
+    expect(await findPersistedToolResult(path, 'probe', 'kernel')).toBe(false)
+  })
+
+  it('does not accept an old result outside the bounded recent log tail', async () => {
+    const path = join(dir, 'old-result.jsonl')
+    await writeHeader({ path, sessionId: 'old-result', config, initialState })
+    await appendEventEntry({ path, seq: 1, event: { kind: 'tool_result', callId: 'old', ok: true, content: 'old' }, effects: [] })
+    await truncate(path, 140 * 1024 * 1024)
+    await appendFile(path, '\n', 'utf8')
+    await expect(findPersistedToolResult(path, 'old', 'kernel')).resolves.toBe(false)
   })
 
   it('keeps queue and operation lookups bounded on a 1.4 GiB Session log', async () => {

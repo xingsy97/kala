@@ -1,7 +1,9 @@
 export type ScheduleSpec =
   | { kind: 'once'; at: string }
   | { kind: 'daily'; timezone: string; hour: number; minute: number }
+  | { kind: 'interval'; timezone: string; hour: number; minute: number; everyDays: number; startDate: string }
   | { kind: 'weekly'; timezone: string; daysOfWeek: number[]; hour: number; minute: number }
+  | { kind: 'monthly'; timezone: string; hour: number; minute: number; daysOfMonth: number[] }
 
 export type ScheduledTaskTarget =
   | { kind: 'session'; sessionId: string }
@@ -19,15 +21,47 @@ export type ScheduledTask = {
   updatedAt?: string
 }
 
+export type ScheduledTaskSnapshot = {
+  id: string
+  generation: number
+  ownerKey: string
+  createdBy: string
+  prompt: string
+  target: ScheduledTaskTarget
+}
+
 export type ScheduledRun = {
   occurrenceId: string
   taskId: string
   operationId: string
   scheduledFor: string
   status: 'claimed' | 'enqueued' | 'failed' | 'needs_review' | 'skipped'
+  task: ScheduledTaskSnapshot
   sessionId?: string
   error?: string
 }
+
+export type ScheduledTaskInboxItem = {
+  occurrenceId: string
+  taskId: string
+  status: 'enqueued' | 'failed' | 'needs_review'
+  scheduledFor: string
+  updatedAt: string
+  seen: boolean
+  sessionId?: string
+}
+
+export type ScheduledTaskInbox = {
+  items: ScheduledTaskInboxItem[]
+  unreadCount: number
+}
+
+export type ScheduledTaskInboxAcknowledgement = {
+  acknowledged: string[]
+  unreadCount: number
+}
+
+export type ScheduledMessageTasks = Readonly<Record<string, string>>
 
 export type ScheduledTaskDraft = Pick<ScheduledTask, 'prompt' | 'target' | 'schedule'>
 export type ScheduledTaskPatch = Partial<ScheduledTaskDraft>
@@ -40,6 +74,9 @@ export type ScheduledTasksClient = {
   resume(taskId: string): Promise<ScheduledTask>
   delete(taskId: string): Promise<void>
   history(taskId: string): Promise<readonly ScheduledRun[]>
+  origins(sessionId: string, options?: { signal?: AbortSignal }): Promise<ScheduledMessageTasks>
+  inbox(options?: { signal?: AbortSignal }): Promise<ScheduledTaskInbox>
+  markInboxSeen(occurrenceIds: readonly string[], options?: { signal?: AbortSignal }): Promise<ScheduledTaskInboxAcknowledgement>
 }
 
 export function createScheduledTasksClient(input: { host: string; token?: string }): ScheduledTasksClient {
@@ -71,5 +108,16 @@ export function createScheduledTasksClient(input: { host: string; token?: string
     async resume(taskId) { return (await request<{ task: ScheduledTask }>(`/${encodeURIComponent(taskId)}/resume`, { method: 'POST' })).task },
     async delete(taskId) { await request<void>(`/${encodeURIComponent(taskId)}`, { method: 'DELETE' }) },
     async history(taskId) { return (await request<{ items: ScheduledRun[] }>(`/${encodeURIComponent(taskId)}/history`)).items },
+    async origins(sessionId, options) {
+      return (await request<{ origins: Record<string, string> }>(`/origins?sessionId=${encodeURIComponent(sessionId)}`, { signal: options?.signal })).origins
+    },
+    async inbox(options) { return await request<ScheduledTaskInbox>('/inbox', { signal: options?.signal }) },
+    async markInboxSeen(occurrenceIds, options) {
+      return await request<ScheduledTaskInboxAcknowledgement>('/inbox/seen', {
+        method: 'POST',
+        body: JSON.stringify({ occurrenceIds }),
+        signal: options?.signal,
+      })
+    },
   }
 }

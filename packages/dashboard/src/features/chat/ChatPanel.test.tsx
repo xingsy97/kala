@@ -14,6 +14,24 @@ function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Elemen
 }
 
 describe('ChatPanel', () => {
+  it('renders a compact scheduled badge from operation provenance and opens its task', () => {
+    const onOpenScheduledTask = vi.fn()
+    render(<ChatPanel
+      items={[
+        { kind: 'message', operationId: 'schedule-op-1', message: { role: 'user', content: [{ type: 'text', text: 'Scheduled report' }] } },
+        { kind: 'message', operationId: 'ordinary-op', message: { role: 'user', content: [{ type: 'text', text: 'Ordinary request' }] } },
+      ]}
+      scheduledMessageTasks={{ 'schedule-op-1': 'deleted-task-1' }}
+      onOpenScheduledTask={onOpenScheduledTask}
+    />)
+
+    const badge = screen.getByRole('button', { name: 'Open scheduled task details' })
+    expect(badge.textContent).toContain('Scheduled')
+    expect(screen.getAllByTestId('scheduled-message-badge')).toHaveLength(1)
+    fireEvent.click(badge)
+    expect(onOpenScheduledTask).toHaveBeenCalledWith('deleted-task-1')
+  })
+
   it('expands timing details inline after message actions and timestamp', () => {
     const summary = {
       turnId: 'turn-1', status: 'completed' as const, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:01:42Z', wallDurationMs: 102000, estimated: false,

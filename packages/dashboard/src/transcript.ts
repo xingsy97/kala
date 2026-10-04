@@ -32,7 +32,7 @@ export type CompactProgress = {
 }
 
 export type TranscriptItem =
-  | { kind: 'message'; message: Message; seq?: number; ts?: string; streaming?: boolean; turnTiming?: import('@agent-kernel/shared').TurnTimingSummary }
+  | { kind: 'message'; message: Message; seq?: number; ts?: string; operationId?: string; streaming?: boolean; turnTiming?: import('@agent-kernel/shared').TurnTimingSummary }
   | { kind: 'model_changed'; from?: string; to: string }
   | {
       kind: 'pending_user_message'
@@ -195,6 +195,7 @@ export function transcriptBaseItems(
         kind: 'message',
         seq: entry.seq,
         ts: entry.ts,
+        ...(event.operationId ? { operationId: event.operationId } : {}),
         message: {
           role: 'user',
           content: event.content

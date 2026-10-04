@@ -5,9 +5,18 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { writeJsonFile } from '../tenant-runtime/atomic-json-file.js'
 import { nextOccurrence, validateSchedule } from './recurrence.js'
-import type { CreateScheduledTask, ScheduledRun, ScheduledTask, UpdateScheduledTask } from './types.js'
+import type {
+  CreateScheduledTask,
+  ScheduledInbox,
+  ScheduledInboxItem,
+  ScheduledInboxSeenResult,
+  ScheduledRun,
+  ScheduledTask,
+  UpdateScheduledTask,
+} from './types.js'
 
-type State = { schemaVersion: 1; revision: number; tasks: ScheduledTask[]; runs: ScheduledRun[] }
+type InboxReceipt = { ownerKey: string; principal: string; occurrenceIds: string[]; updatedAt: string }
+type State = { schemaVersion: 1; revision: number; tasks: ScheduledTask[]; runs: ScheduledRun[]; inboxReceipts?: InboxReceipt[] }
 const MAX_RUNS = 10_000
 
 export class ScheduledTaskStore {
@@ -73,6 +82,41 @@ export class ScheduledTaskStore {
       || state.runs.some((run) => run.taskId === taskId && run.task.ownerKey === ownerKey)
     if (!owned) return undefined
     return state.runs.filter((run) => run.taskId === taskId).sort((a, b) => b.scheduledFor.localeCompare(a.scheduledFor)).map(clone)
+  }
+
+  async origins(ownerKey: string, sessionId: string): Promise<Record<string, string>> {
+    const origins: Record<string, string> = Object.create(null) as Record<string, string>
+    for (const run of (await this.read()).runs) {
+      if (run.task.ownerKey === ownerKey && run.sessionId === sessionId) origins[run.operationId] = run.taskId
+    }
+    return origins
+  }
+
+  async inbox(ownerKey: string, principal: string): Promise<ScheduledInbox> {
+    return inboxFor(await this.read(), ownerKey, principal)
+  }
+
+  async markInboxSeen(ownerKey: string, principal: string, occurrenceIds: readonly string[]): Promise<ScheduledInboxSeenResult> {
+    return await this.serialize(async (state) => {
+      const requested = new Set(occurrenceIds)
+      const acknowledged = inboxRuns(state, ownerKey, principal)
+        .filter((run) => requested.has(run.occurrenceId))
+        .map((run) => run.occurrenceId)
+      if (acknowledged.length > 0) {
+        state.inboxReceipts ??= []
+        let receipt = state.inboxReceipts.find((item) => item.ownerKey === ownerKey && item.principal === principal)
+        if (!receipt) {
+          receipt = { ownerKey, principal, occurrenceIds: [], updatedAt: this.now().toISOString() }
+          state.inboxReceipts.push(receipt)
+        }
+        const seen = new Set(receipt.occurrenceIds)
+        for (const occurrenceId of acknowledged) seen.add(occurrenceId)
+        receipt.occurrenceIds = [...seen]
+        receipt.updatedAt = this.now().toISOString()
+      }
+      const inbox = inboxFor(state, ownerKey, principal)
+      return { acknowledged, unreadCount: inbox.unreadCount }
+    })
   }
 
   async create(input: CreateScheduledTask): Promise<ScheduledTask> {
@@ -259,6 +303,34 @@ function trimRuns(state: State): void {
   const removable = state.runs.filter((run) => run.status !== 'claimed').sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
   const remove = new Set(removable.slice(0, state.runs.length - MAX_RUNS).map((run) => run.occurrenceId))
   state.runs = state.runs.filter((run) => !remove.has(run.occurrenceId))
+  for (const receipt of state.inboxReceipts ?? []) {
+    receipt.occurrenceIds = receipt.occurrenceIds.filter((occurrenceId) => !remove.has(occurrenceId))
+  }
+}
+
+function inboxRuns(state: State, ownerKey: string, principal: string): Array<ScheduledRun & { status: ScheduledInboxItem['status'] }> {
+  return state.runs.filter((run): run is ScheduledRun & { status: ScheduledInboxItem['status'] } =>
+    run.task.ownerKey === ownerKey
+    && run.task.createdBy === principal
+    && (run.status === 'enqueued' || run.status === 'failed' || run.status === 'needs_review'))
+}
+
+function inboxFor(state: State, ownerKey: string, principal: string): ScheduledInbox {
+  const seen = new Set(state.inboxReceipts
+    ?.find((receipt) => receipt.ownerKey === ownerKey && receipt.principal === principal)
+    ?.occurrenceIds ?? [])
+  const items = inboxRuns(state, ownerKey, principal)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.occurrenceId.localeCompare(a.occurrenceId))
+    .map((run): ScheduledInboxItem => ({
+      occurrenceId: run.occurrenceId,
+      taskId: run.taskId,
+      status: run.status,
+      scheduledFor: run.scheduledFor,
+      updatedAt: run.updatedAt,
+      seen: seen.has(run.occurrenceId),
+      ...(run.sessionId ? { sessionId: run.sessionId } : {}),
+    }))
+  return { items, unreadCount: items.reduce((count, item) => count + (item.seen ? 0 : 1), 0) }
 }
 
 function snapshot(task: ScheduledTask): ScheduledRun['task'] {

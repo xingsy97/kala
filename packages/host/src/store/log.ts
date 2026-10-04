@@ -509,10 +509,71 @@ export async function findSessionOperation(
   return undefined
 }
 
+/** Check the durable result in the event format owned by the selected Agent Runtime.
+ * Scan backwards in bounded chunks instead of materializing a large Session log.
+ */
+export async function findPersistedToolResult(path: string, callId: string, runtime: AgentRuntimeId): Promise<boolean> {
+  if (!callId) return false
+  // Copilot commits snapshots to its sidecar. A post-commit receipt appends to
+  // the JSONL afterwards, so the sidecar's logSize intentionally trails the log;
+  // avoid readLastSessionSnapshot's legacy embedded-snapshot scan on large logs.
+  const snapshot = runtime === 'copilot' ? (await readSnapshotSidecar(path))?.snapshot : undefined
+  if (runtime === 'copilot' && !snapshot) return false
+  // Older Copilot projections have no post-snapshot receipt. They count only
+  // while the committed snapshot still contains their actual Tool result.
+  const projectedResult = snapshot?.state.messages.some((message) => message.role === 'tool'
+    && message.content.some((content) => content.type === 'tool_result' && content.callId === callId)) ?? false
+  const handle = await open(path, 'r')
+  const needle = Buffer.from(`"callId":${JSON.stringify(callId)}`)
+  const chunkSize = 4 * 1024 * 1024
+  // Deployment results are written immediately after the originating call.
+  // Fail closed rather than repeatedly rereading an entire multi-GiB history.
+  const maxScanBytes = 128 * 1024 * 1024
+  let carry = Buffer.alloc(0)
+  try {
+    const size = (await handle.stat()).size
+    const minimumOffset = Math.max(0, size - maxScanBytes)
+    let end = size
+    while (end > minimumOffset) {
+      const start = Math.max(minimumOffset, end - chunkSize)
+      const chunk = Buffer.allocUnsafe(end - start)
+      await handle.read(chunk, 0, chunk.length, start)
+      const data = carry.length ? Buffer.concat([chunk, carry]) : chunk
+      let match = data.lastIndexOf(needle)
+      while (match >= 0 && match < chunk.length) {
+        const line = await readLineContaining(handle, start + match, size, 2 * 1024 * 1024)
+        if (line.startsWith('{"kind":"event"') || line.startsWith('{"kind":"runtime_metadata"')) {
+          let entry: LogEntry | undefined
+          try { entry = JSON.parse(line) as LogEntry } catch { /* A concurrent append can leave an incomplete last line. */ }
+          if (runtime === 'kernel' && entry?.kind === 'event') {
+            if (entry.event.kind === 'tool_result' && entry.event.callId === callId) return true
+            if (entry.event.kind === 'llm_response' && entry.event.message.content.some(
+              (content) => content.type === 'tool_call' && content.callId === callId,
+            )) return false // An older result cannot satisfy this newer invocation.
+          }
+          if (runtime === 'copilot' && entry?.kind === 'runtime_metadata') {
+            if (entry.action === 'copilot.tool_call' && entry.payload.callId === callId) return false
+            if ((entry.action === 'copilot.tool_result_committed' || (entry.action === 'copilot.tool_result' && projectedResult))
+              && entry.payload.callId === callId && Number.isSafeInteger(entry.payload.projectionCursor)
+              && (entry.payload.projectionCursor as number) <= snapshot!.seq) return true
+          }
+        }
+        match = data.lastIndexOf(needle, match - 1)
+      }
+      carry = chunk.subarray(0, Math.min(needle.length - 1, chunk.length))
+      end = start
+    }
+    return false
+  } finally {
+    await handle.close()
+  }
+}
+
 async function readLineContaining(
   handle: Awaited<ReturnType<typeof open>>,
   offset: number,
   fileSize: number,
+  maxLineBytes = Number.POSITIVE_INFINITY,
 ): Promise<string> {
   const blockSize = 64 * 1024
   let lineStart = offset
@@ -526,6 +587,7 @@ async function readLineContaining(
       break
     }
     lineStart = start
+    if (offset - lineStart > maxLineBytes) return ''
   }
 
   let lineEnd = offset
@@ -539,8 +601,12 @@ async function readLineContaining(
       break
     }
     lineEnd += length
+    if (lineEnd - lineStart > maxLineBytes) return ''
   }
 
+  // Legacy embedded snapshots and large provider traces may be a single
+  // enormous line. They are not valid barrier evidence; never allocate them.
+  if (lineEnd - lineStart > maxLineBytes) return ''
   const line = Buffer.allocUnsafe(lineEnd - lineStart)
   await handle.read(line, 0, line.length, lineStart)
   return line.toString('utf8')
@@ -699,21 +765,25 @@ export async function readSessionState(path: string, options?: FullSessionReadOp
 
 export async function readLastSessionSnapshot(path: string): Promise<SnapshotEntry | undefined> {
   const sidecar = await readSnapshotSidecar(path)
-  if (sidecar?.logSize === (await stat(path)).size) return sidecar.snapshot
-  const embedded = await readLastEmbeddedSessionSnapshot(path)
+  const size = (await stat(path)).size
+  if (sidecar?.logSize === size) return sidecar.snapshot
+  // A sidecar records the log size at its commit. Later metadata need not force
+  // a full historical scan: only a newer embedded snapshot in the appended tail
+  // could supersede it.
+  const embedded = await readLastEmbeddedSessionSnapshot(path, sidecar?.logSize !== undefined && sidecar.logSize <= size ? sidecar.logSize : 0)
   if (!embedded) return sidecar?.snapshot
   if (!sidecar) return embedded
   return sidecar.snapshot.seq >= embedded.seq ? sidecar.snapshot : embedded
 }
 
-async function readLastEmbeddedSessionSnapshot(path: string): Promise<SnapshotEntry | undefined> {
+async function readLastEmbeddedSessionSnapshot(path: string, minimumOffset = 0): Promise<SnapshotEntry | undefined> {
   const handle = await open(path, 'r')
   try {
     const stat = await handle.stat()
     let position = stat.size
     let carry = Buffer.alloc(0)
-    while (position > 0) {
-      const length = Math.min(64 * 1024, position)
+    while (position > minimumOffset) {
+      const length = Math.min(64 * 1024, position - minimumOffset)
       position -= length
       const chunk = Buffer.allocUnsafe(length)
       await handle.read(chunk, 0, length, position)
