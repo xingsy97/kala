@@ -36,6 +36,7 @@ export type ExecutorIdentity = {
   accepted: boolean
   label?: string
   workspaceId?: string
+  installId?: string
   inviteToken?: string
   token?: string
   reason?: string
@@ -80,7 +81,7 @@ export function authenticateExecutorToken(
   const token = auth?.token
   if (auth?.invite) return { accepted: true, inviteToken: auth.invite }
   const stored = config?.executorIdentityStore?.resolveToken(token)
-  if (stored) return { accepted: true, workspaceId: stored.workspaceId, ...(stored.label ? { label: stored.label } : {}), ...(token ? { token } : {}) }
+  if (stored) return { accepted: true, workspaceId: stored.workspaceId, ...(stored.installId ? { installId: stored.installId } : {}), ...(stored.label ? { label: stored.label } : {}), ...(token ? { token } : {}) }
   const scoped = config?.executorTokens ?? []
   if (scoped.length > 0) {
     const match = scoped.find((entry) => token !== undefined && safeEqual(entry.token, token))

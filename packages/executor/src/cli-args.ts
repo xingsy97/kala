@@ -1,3 +1,5 @@
+import { parseMcpServerDeclaration, type McpServerConfig } from './mcp-config.js'
+
 export type ServiceAction = 'install' | 'status' | 'logs' | 'start' | 'stop' | 'restart' | 'uninstall'
 export type ServiceMode = 'system' | 'user'
 
@@ -18,13 +20,14 @@ export type ExecutorCliArgs = {
   autoUpdate?: boolean
   noUpdateCheck?: boolean
   updateRepo?: string
+  mcpServers: McpServerConfig[]
 }
 
 const SERVICE_ACTIONS = new Set<ServiceAction>(['install', 'status', 'logs', 'start', 'stop', 'restart', 'uninstall'])
 
 /** Parses both the daemon flags and the kala-executor service surface. */
 export function parseExecutorCliArgs(argv: readonly string[]): ExecutorCliArgs {
-  const out: ExecutorCliArgs = { command: 'run', sandboxRoots: [] }
+  const out: ExecutorCliArgs = { command: 'run', sandboxRoots: [], mcpServers: [] }
   let start = 0
   if (argv[0] === 'service') {
     const action = argv[1]
@@ -67,6 +70,7 @@ export function parseExecutorCliArgs(argv: readonly string[]): ExecutorCliArgs {
       case '--id': out.id = value(); break
       case '--profile': out.profile = value(); break
       case '--update-repo': out.updateRepo = value(); break
+      case '--mcp': out.mcpServers.push(parseMcpServerDeclaration(value())); break
       default:
         // Historical CLI silently ignored unknown arguments. Preserve that behavior.
         break

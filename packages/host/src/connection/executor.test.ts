@@ -29,6 +29,8 @@ type EmittedCall = {
     | 'session:error'
     | 'executor:host_reject'
     | 'executor:health_ping'
+    | 'executor:mcp_config_status'
+    | 'executor:mcp_configure'
     | 'terminal:create'
     | 'terminal:kill'
     | 'terminal:close_session'
@@ -43,6 +45,7 @@ type FakeSocket = {
   id: string
   emitted: EmittedCall[]
   connected: boolean
+  data: Record<string, unknown>
   emit: (event: string, payload: unknown, ack?: (r: ToolResultAck) => void) => void
   disconnect: (close?: boolean) => void
 }
@@ -53,6 +56,7 @@ function makeFakeSocket(id: string): FakeSocket {
     id,
     emitted,
     connected: true,
+    data: {},
     emit(event, payload, ack) {
       emitted.push({
         event: event as EmittedCall['event'],
@@ -124,6 +128,39 @@ describe('ExecutorRegistry', () => {
     registry.attach(socket as never, announceOf('exec-latency', 'ws-latency'))
     await expect(registry.measureLatency('ws-latency')).resolves.toEqual({ rttMs: expect.any(Number) })
     await expect(registry.measureLatency('missing')).resolves.toEqual({ error: 'workspace offline' })
+  })
+
+  it('allows MCP management only when the authenticated identity matches workspace and announced installation', async () => {
+    const registry = createExecutorRegistry(fakeIo() as never, makeResolver(), 5_000, undefined, 0)
+    const announcement = { ...announceOf('managed', 'ws-managed'), installId: 'install-real' }
+
+    const legacy = makeFakeSocket('legacy')
+    registry.attach(legacy as never, announcement)
+    expect(registry.hasTrustedManagedExecutor('ws-managed', 'install-real')).toBe(false)
+    await expect(registry.mcpConfigStatus('ws-managed', 'install-real', 'status-legacy')).resolves.toMatchObject({ ok: false })
+    expect(legacy.emitted).toHaveLength(0)
+    registry.detach(legacy as never)
+
+    const forged = makeFakeSocket('forged')
+    forged.data.executorIdentity = { accepted: true, workspaceId: 'ws-managed', installId: 'install-other' }
+    registry.attach(forged as never, announcement)
+    expect(registry.hasTrustedManagedExecutor('ws-managed', 'install-real')).toBe(false)
+    await expect(registry.configureMcp('ws-managed', 'install-real', { requestId: 'configure-forged', servers: [] })).resolves.toMatchObject({ ok: false })
+    expect(forged.emitted).toHaveLength(0)
+    registry.detach(forged as never)
+
+    const redeemed = makeFakeSocket('redeemed')
+    redeemed.data.executorIdentity = { accepted: true, workspaceId: 'ws-managed', installId: 'install-real' }
+    registry.attach(redeemed as never, announcement)
+    expect(registry.hasTrustedManagedExecutor('ws-managed', 'install-real')).toBe(true)
+    const status = registry.mcpConfigStatus('ws-managed', 'install-real', 'status-real')
+    expect(redeemed.emitted[0]?.event).toBe('executor:mcp_config_status')
+    redeemed.emitted[0]!.ack!({ ok: true, servers: [] } as never)
+    await expect(status).resolves.toEqual({ ok: true, servers: [] })
+    const configure = registry.configureMcp('ws-managed', 'install-real', { requestId: 'configure-real', servers: [] })
+    expect(redeemed.emitted[1]?.event).toBe('executor:mcp_configure')
+    redeemed.emitted[1]!.ack!({ ok: true } as never)
+    await expect(configure).resolves.toEqual({ ok: true })
   })
 
   it('dispatches a tool call and resolves on ack', async () => {
@@ -685,5 +722,97 @@ describe('ExecutorRegistry', () => {
     expect(b.emitted).toHaveLength(1)
     b.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'ok' })
     return expect(p).resolves.toEqual({ ok: true, content: 'ok' })
+  })
+
+  it('does not classify legacy double-underscore internal tools as MCP tools', async () => {
+    const reg = createExecutorRegistry(fakeIo() as never, makeResolver({ session: 'ws' }), 5_000)
+    const socket = makeFakeSocket('legacy-internal')
+    reg.attach(socket as never, announceOf('legacy', 'ws'))
+
+    const pending = reg.callTool('session', callEffect('internal', '__fs_list_dirs'))
+    expect(socket.emitted).toHaveLength(1)
+    socket.emitted[0]!.ack!({ callId: 'internal', ok: true, content: 'ok' })
+    await expect(pending).resolves.toEqual({ ok: true, content: 'ok' })
+  })
+
+  it('fails active-session MCP calls closed when reannounce removes a crashed service', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-mcp': 'ws-mcp' }),
+      5_000,
+    )
+    const socket = makeFakeSocket('mcp')
+    const available = {
+      ...announceOf('e-mcp', 'ws-mcp'),
+      tools: ['bash', 'docs__search'],
+      mcpTools: [{
+        name: 'docs__search',
+        description: 'Search docs',
+        inputSchema: { type: 'object' },
+        schemaHash: '0'.repeat(64),
+      }],
+    }
+    reg.attach(socket as never, available)
+    const pending = reg.callTool('sess-mcp', callEffect('mcp-running', 'docs__search'))
+    expect(socket.emitted.filter((entry) => entry.event === 'tool:call')).toHaveLength(1)
+
+    // The Executor uses a same-socket reannounce when the backing MCP server exits.
+    reg.attach(socket as never, announceOf('e-mcp', 'ws-mcp'))
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      failure: { code: 'mcp_tool_unavailable', outcome: 'blocked' },
+    })
+    expect(socket.emitted.filter((entry) => entry.event === 'tool:call')).toHaveLength(1)
+
+    await expect(reg.callTool('sess-mcp', callEffect('mcp-stale', 'docs__search'))).resolves.toMatchObject({
+      ok: false,
+      failure: { code: 'mcp_tool_unavailable', outcome: 'blocked' },
+    })
+    expect(socket.emitted.filter((entry) => entry.event === 'tool:call')).toHaveLength(1)
+  })
+
+  it('rejects a same-name MCP schema change for an active session and its in-flight call', async () => {
+    const oldHash = 'a'.repeat(64)
+    const newHash = 'b'.repeat(64)
+    const reg = createExecutorRegistry(fakeIo() as never, {
+      workspaceIdFor: () => 'ws-versioned',
+      mcpSchemaHashFor: () => oldHash,
+    }, 5_000)
+    const socket = makeFakeSocket('versioned')
+    const announcement = (hash: string) => ({
+      ...announceOf('e-versioned', 'ws-versioned'),
+      tools: ['bash', 'docs__search'],
+      mcpTools: [{ name: 'docs__search', description: 'Search docs', inputSchema: { type: 'object' }, schemaHash: hash }],
+    })
+    reg.attach(socket as never, announcement(oldHash))
+    const pending = reg.callTool('session', callEffect('old-in-flight', 'docs__search'))
+    expect(socket.emitted.filter((entry) => entry.event === 'tool:call')).toHaveLength(1)
+    reg.attach(socket as never, announcement(newHash))
+    await expect(pending).resolves.toMatchObject({ ok: false, failure: { code: 'mcp_tool_unavailable' } })
+    await expect(reg.callTool('session', callEffect('old-again', 'docs__search'))).resolves.toMatchObject({ ok: false, failure: { code: 'mcp_tool_unavailable' } })
+    expect(socket.emitted.filter((entry) => entry.event === 'tool:call')).toHaveLength(1)
+  })
+
+  it('never dispatches one workspace MCP tool to another workspace executor', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-a': 'ws-a', 'sess-b': 'ws-b' }),
+      5_000,
+    )
+    const first = makeFakeSocket('workspace-a')
+    const second = makeFakeSocket('workspace-b')
+    reg.attach(first as never, {
+      ...announceOf('e-a', 'ws-a'),
+      tools: ['bash', 'docs__search'],
+      mcpTools: [{ name: 'docs__search', description: '', inputSchema: { type: 'object' }, schemaHash: '0'.repeat(64) }],
+    })
+    reg.attach(second as never, announceOf('e-b', 'ws-b'))
+
+    await expect(reg.callTool('sess-b', callEffect('wrong-workspace', 'docs__search'))).resolves.toMatchObject({
+      ok: false,
+      failure: { code: 'mcp_tool_unavailable' },
+    })
+    expect(first.emitted).toHaveLength(0)
+    expect(second.emitted).toHaveLength(0)
   })
 })

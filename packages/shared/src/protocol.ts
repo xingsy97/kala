@@ -832,6 +832,43 @@ export type ExecutorCapabilities = {
   }
 }
 
+/** A model-visible third-party tool discovered by the workspace Executor. */
+export type McpToolDescriptor = {
+  name: string
+  description: string
+  inputSchema: Record<string, unknown>
+  /** SHA-256 of the descriptor's recursively key-sorted inputSchema JSON. */
+  schemaHash: string
+}
+
+/** Privileged Dashboard-managed stdio MCP configuration; args may contain secrets. Never log or echo it to the browser. */
+export type ManagedMcpServer = {
+  name: string
+  command: string
+  args: string[]
+}
+
+export type ExecutorMcpConfigureRequest = {
+  requestId: string
+  servers: ManagedMcpServer[]
+}
+
+export type ExecutorMcpConfigureAck = {
+  ok: boolean
+  error?: string
+}
+
+export type ExecutorMcpConfigStatusRequest = {
+  requestId: string
+}
+
+export type ExecutorMcpConfigStatusAck = {
+  ok: boolean
+  /** Names only; do not send command or arguments back to the Host. */
+  servers?: Array<{ name: string }>
+  error?: string
+}
+
 export type ExecutorAnnounce = {
   executorId: string
   installId?: string
@@ -855,6 +892,8 @@ export type ExecutorAnnounce = {
    */
   workspaceName: string
   tools: string[]
+  /** Optional for compatibility with Executors predating MCP discovery. */
+  mcpTools?: McpToolDescriptor[]
   toolImplementations?: Record<string, { version: string }>
   /** Optional filesystem jail. Empty/missing = executor trusts whole machine. */
   sandboxRoots?: string[]
@@ -1913,7 +1952,7 @@ export type ServerSettingsPayload = {
     sessionsDir: string
   }
   mcp: {
-    supported: false
+    supported: boolean
     note: string
   }
   skills?: SettingsSkillSummary
@@ -2139,6 +2178,8 @@ export type ExecutorClientToServerEvents = {
  */
 export type ExecutorServerToClientEvents = {
   'executor:health_ping': (sentAt: number, ack: (executorAt: number) => void) => void
+  'executor:mcp_configure': (payload: ExecutorMcpConfigureRequest, ack: (result: ExecutorMcpConfigureAck) => void) => void
+  'executor:mcp_config_status': (payload: ExecutorMcpConfigStatusRequest, ack: (result: ExecutorMcpConfigStatusAck) => void) => void
   'tool:call': (
     payload: ToolCallMessage,
     ack: (result: ToolResultAck) => void,

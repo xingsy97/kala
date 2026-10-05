@@ -1,5 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs'
 import type { ExecutorPrivilegeMode } from '@agent-kernel/shared'
+import { parseMcpServers, type McpServerConfig } from './mcp-config.js'
 
 export type ExecutorRuntimeConfig = {
   version: 1
@@ -13,6 +14,7 @@ export type ExecutorRuntimeConfig = {
   managedRoot?: string
   serviceMode?: 'system' | 'user'
   privilegeMode: ExecutorPrivilegeMode
+  mcpServers?: McpServerConfig[]
   update?: {
     enabled: boolean
     manifestUrl: string
@@ -49,7 +51,8 @@ export function readExecutorRuntimeConfig(path: string): ExecutorRuntimeConfig {
   if (privilegeMode !== 'restricted' && privilegeMode !== 'privileged') {
     throw new Error('Invalid Executor privilege mode')
   }
-  return { ...value, privilegeMode } as ExecutorRuntimeConfig
+  const mcpServers = parseMcpServers(value.mcpServers, 'Executor config mcpServers')
+  return { ...value, privilegeMode, ...(mcpServers.length > 0 ? { mcpServers } : {}) } as ExecutorRuntimeConfig
 }
 
 export function readExecutorCredential(path: string): string {

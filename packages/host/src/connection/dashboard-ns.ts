@@ -142,6 +142,7 @@ import type { StorageInventory } from '../store/storage-inventory.js'
 import type { SafeCleanupEngine } from '../store/safe-cleanup.js'
 import { DAG_PLANNER_INSTRUCTION, DAG_PLAN_TOOL } from '../dag/tool.js'
 import { parseBangShellRequest } from '../bang-shell.js'
+import { mcpToolsForWorkspace, mergeMcpTools } from '../mcp-tools.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -1728,14 +1729,19 @@ export function configureDashboardNamespace(
             sessionId: p.sessionId,
           })
         }
+        const sessionBaseConfig = mergeMcpTools(
+          getDefaultConfig(actor),
+          mcpToolsForWorkspace(executorSnapshotFor(deps), p.workspaceId),
+        )
+        const sessionConfig = deriveSessionConfig(sessionBaseConfig, p.tools, executionMode)
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
           agentRuntime,
           executionMode,
           ...(runtime.descriptor().version ? { agentRuntimeVersion: runtime.descriptor().version } : {}),
           ...(agentRuntime === 'copilot' ? { externalSessionId: p.sessionId } : {}),
-          defaultConfig: deriveSessionConfig(getDefaultConfig(actor), p.tools, executionMode),
-          runtimeConfig: deriveSessionConfig(getDefaultConfig(actor), p.tools, executionMode),
+          defaultConfig: sessionConfig,
+          runtimeConfig: sessionConfig,
           ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }

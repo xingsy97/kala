@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   authenticateExecutorToken,
@@ -16,6 +16,28 @@ describe('auth-control', () => {
     expect(identity).toMatchObject({ accepted: true, workspaceId: 'ws-1', label: 'prod' })
     expect(validateExecutorAnnouncement(identity, 'ws-1')).toEqual({ ok: true })
     expect(validateExecutorAnnouncement(identity, 'ws-2')).toEqual({ ok: false, reason: 'workspace_identity_mismatch' })
+  })
+
+  it('propagates only a stored credential installation binding', () => {
+    const store = new ExecutorIdentityStore('/tmp/not-used.json')
+    vi.spyOn(store, 'resolveToken').mockImplementation((token) => token === 'bound-token'
+      ? { tokenHash: 'hash', workspaceId: 'ws-bound', installId: 'install-bound', label: 'managed', createdAt: new Date(0).toISOString() }
+      : token === 'legacy-token'
+        ? { tokenHash: 'hash', workspaceId: 'ws-legacy', label: 'legacy', createdAt: new Date(0).toISOString() }
+        : undefined)
+
+    expect(authenticateExecutorToken(
+      { role: 'executor', clientVersion: '0.1.0', token: 'bound-token' },
+      { executorIdentityStore: store },
+    )).toMatchObject({ accepted: true, workspaceId: 'ws-bound', installId: 'install-bound' })
+    expect(authenticateExecutorToken(
+      { role: 'executor', clientVersion: '0.1.0', token: 'legacy-token' },
+      { executorIdentityStore: store },
+    )).toMatchObject({ accepted: true, workspaceId: 'ws-legacy' })
+    expect(authenticateExecutorToken(
+      { role: 'executor', clientVersion: '0.1.0', token: 'legacy-token' },
+      { executorIdentityStore: store },
+    )).not.toHaveProperty('installId')
   })
 
   it('rejects unknown executor tokens when scopes are configured', () => {

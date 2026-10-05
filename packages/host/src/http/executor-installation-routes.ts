@@ -191,13 +191,17 @@ async function handleRedeem(req: IncomingMessage, res: ServerResponse, store: Ex
     const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId.trim() : ''
     if (!bootstrap || !workspaceId) throw new ExecutorInstallationError('invalid_redeem_request', 400)
     const snapshot = store.redeem(id, bootstrap, workspaceId)
-    const token = identities.provisionWorkspace(workspaceId, typeof body.label === 'string' ? body.label.trim() : undefined)
+    const token = identities.provisionWorkspace(workspaceId, typeof body.label === 'string' ? body.label.trim() : undefined, snapshot.id)
     sendJson(res, 200, { installationId: snapshot.id, workspaceId, token })
   } catch (error) { handleError(res, error) }
 }
 
 export function authorizeSensitiveExecutorManagement(req: IncomingMessage, tenancy: PlatformTenancy, auth: AuthConfig | undefined): { ok: true; actor: DashboardActor } | { ok: false; status: number; error: string } {
-  return authorizeManagement(req, tenancy, auth)
+  const result = authorizeManagement(req, tenancy, auth)
+  if (!result.ok) return result
+  if (result.actor.kind === 'anonymous') return { ok: false, status: 401, error: 'operator_authentication_required' }
+  if (result.actor.kind === 'ingress' && !['owner', 'admin'].includes(result.actor.role)) return { ok: false, status: 403, error: 'admin_required' }
+  return result
 }
 
 function authorizeManagement(req: IncomingMessage, tenancy: PlatformTenancy, auth: AuthConfig | undefined): { ok: true; actor: DashboardActor } | { ok: false; status: number; error: string } {

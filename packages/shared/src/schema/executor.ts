@@ -29,6 +29,7 @@ import type {
   HandshakeAuth,
   ClientRole,
   ExecutorCapabilities,
+  McpToolDescriptor,
 } from '../protocol.js'
 
 const NonEmptyStringSchema = z.string().trim().min(1)
@@ -90,6 +91,22 @@ export const ExecutorCapabilitiesSchema = z.object({
   }),
 }) satisfies z.ZodType<ExecutorCapabilities>
 
+const JsonValueSchema: z.ZodType<unknown> = z.lazy(() => z.union([
+  z.string(),
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+  z.array(JsonValueSchema),
+  z.record(z.string(), JsonValueSchema),
+]))
+
+export const McpToolDescriptorSchema = z.object({
+  name: z.string().max(64).regex(/^[A-Za-z][A-Za-z0-9_-]*__[A-Za-z0-9_-]+$/u),
+  description: z.string().max(4_096),
+  inputSchema: z.record(z.string(), JsonValueSchema),
+  schemaHash: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict() satisfies z.ZodType<McpToolDescriptor>
+
 export const ExecutorAnnounceSchema = z.object({
   executorId: WireIdSchema,
   installId: WireIdSchema.optional(),
@@ -99,6 +116,7 @@ export const ExecutorAnnounceSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   workspaceName: z.string(),
   tools: z.array(z.string()),
+  mcpTools: z.array(McpToolDescriptorSchema).max(512).optional(),
   toolImplementations: z.record(z.string(), z.object({ version: z.string() })).optional(),
   sandboxRoots: z.array(z.string()).optional(),
   defaultCwd: z.string().optional(),

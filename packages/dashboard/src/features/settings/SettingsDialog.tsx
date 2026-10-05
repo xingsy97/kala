@@ -47,6 +47,7 @@ import { DeploymentSection } from './sections/DeploymentSection.js'
 import { ExecutorAccessSection } from './sections/ExecutorAccessSection.js'
 import { HooksSection } from './sections/HooksSection.js'
 import { InterfaceSection } from './sections/InterfaceSection.js'
+import { McpSection } from './sections/McpSection.js'
 import { ModelsSection } from './sections/ModelsSection.js'
 import { NotificationsSection } from './sections/NotificationsSection.js'
 import { RuntimeSection } from './sections/RuntimeSection.js'
@@ -71,7 +72,7 @@ type Props = {
   storageSocket?: Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 }
 
-type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'speech' | 'security' | 'socketAdmin' | 'executorAccess' | 'hooks' | 'interface' | 'deployment' | 'notifications' | 'storage'
+type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'webSearch' | 'speech' | 'security' | 'socketAdmin' | 'executorAccess' | 'mcp' | 'hooks' | 'interface' | 'deployment' | 'notifications' | 'storage'
 
 type SectionGroup = 'personal' | 'workspace' | 'agent' | 'administration'
 const SECTION_GROUPS: readonly SectionGroup[] = ['personal', 'workspace', 'agent', 'administration']
@@ -79,6 +80,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint', icon: Palette, group: 'personal' },
   { key: 'notifications', label: 'settings.sections.notifications.label', hint: 'settings.sections.notifications.hint', icon: Bell, group: 'personal' },
   { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint', icon: TerminalSquare, group: 'workspace' },
+  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint', icon: PlugZap, group: 'workspace' },
   { key: 'agent', label: 'settings.sections.agent.label', hint: 'settings.sections.agent.hint', icon: Bot, group: 'agent' },
   { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint', icon: Cpu, group: 'agent' },
   { key: 'webSearch', label: 'settings.sections.webSearch.label', hint: 'settings.sections.webSearch.hint', icon: Search, group: 'agent' },
@@ -203,6 +205,8 @@ export function SettingsDialog({ open, cacheNamespace = 'default', onOpenChange,
                 <SocketAdminSection payload={payload} onPayloadChange={applyPayload} />
               ) : section === 'executorAccess' ? (
                 <ExecutorAccessSection executors={executors} />
+              ) : section === 'mcp' ? (
+                <McpSection executors={executors} token={token} />
               ) : section === 'hooks' ? (
                 <HooksSection payload={payload} />
               ) : section === 'interface' ? (

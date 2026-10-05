@@ -56,10 +56,10 @@ describe('ExecutorIdentityStore invite expiry', () => {
 
   it('rotates and revokes long-lived credentials without accepting old tokens', () => {
     const file = path(), store = new ExecutorIdentityStore(file)
-    const first = store.provisionWorkspace('workspace', 'Executor')
+    const first = store.provisionWorkspace('workspace', 'Executor', 'install-1')
     const second = store.rotateWorkspaceCredential('workspace')
     expect(store.resolveToken(first)).toBeUndefined()
-    expect(store.resolveToken(second)?.credentialVersion).toBe(2)
+    expect(store.resolveToken(second)).toMatchObject({ credentialVersion: 2, installId: 'install-1' })
     expect(store.revokeWorkspace('workspace')).toBe(true)
     expect(store.resolveToken(second)).toBeUndefined()
   })

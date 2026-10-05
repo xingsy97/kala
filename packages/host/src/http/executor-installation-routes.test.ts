@@ -20,7 +20,7 @@ describe('executor installation routes', () => {
     attachExecutorInstallationRoutes(server, { store, identities, tenancy })
     await new Promise<void>((resolve) => server.listen(0, resolve))
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('missing address')
-    return { url: `http://localhost:${address.port}`, dir, store }
+    return { url: `http://localhost:${address.port}`, dir, store, identities }
   }
 
   it('does not emit permissive CORS headers without a validated public access gate', async () => {
@@ -77,7 +77,7 @@ describe('executor installation routes', () => {
   })
 
   it('creates, patches, reports progress, approves, redeems, and short-polls', async () => {
-    const { url, dir } = await start()
+    const { url, dir, identities } = await start()
     const createdResponse = await fetch(`${url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'temporary', privilegeMode: 'privileged', workspaceRoot: '/work' }) })
     expect(createdResponse.status).toBe(201)
     const created = await createdResponse.json() as { id: string; command: string; setupCode: string }
@@ -115,7 +115,9 @@ describe('executor installation routes', () => {
       expect((await fetch(`${url}/api/executor-installs/${created.id}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap, status }) })).status).toBe(200)
     }
     const redeemed = await fetch(`${url}/api/executor-installs/${created.id}/redeem`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap, workspaceId: 'ws-api' }) })
-    expect((await redeemed.json() as { token: string }).token).toMatch(/^ak_exec_/)
+    const redeemedBody = await redeemed.json() as { token: string }
+    expect(redeemedBody.token).toMatch(/^ak_exec_/)
+    expect(identities.resolveToken(redeemedBody.token)).toMatchObject({ workspaceId: 'ws-api', installId: created.id })
     expect((await fetch(`${url}/api/executor-installs/${created.id}/redeem`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap, workspaceId: 'ws-api' }) })).status).toBe(409)
     const events = await fetch(`${url}/api/executor-installs/${created.id}/events?after=1`).then((response) => response.json()) as { events: Array<{ seq: number }> }
     expect(events.events.every((event) => event.seq > 1)).toBe(true)

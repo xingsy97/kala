@@ -711,12 +711,14 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('post_tool_use')).toBeTruthy()
   })
 
-  it('does not expose unimplemented MCP settings', async () => {
+  it('exposes MCP settings in the workspace group', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
 
-    expect(screen.queryByTestId('settings-tab-mcp')).toBeNull()
+    const workspaceItems = screen.getByTestId('settings-group-items-workspace')
+    expect(screen.getByTestId('settings-tab-mcp')).toBeTruthy()
+    expect(workspaceItems.contains(screen.getByTestId('settings-tab-mcp'))).toBe(true)
   })
 
   it('surfaces a fetch failure without crashing', async () => {

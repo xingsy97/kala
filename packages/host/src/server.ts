@@ -68,6 +68,7 @@ import {
   type TenantExecutorQuotaEnforcer,
 } from './connection/executor-ns.js'
 import { sessionRoom } from './connection/rooms.js'
+import { mcpToolsForWorkspace, mergeMcpTools } from './mcp-tools.js'
 import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, claimRoute, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount, type TenantStorageQuotaEnforcer } from './http/routes.js'
 import { SessionArtifactRegistry } from './session-artifact-registry.js'
 import { MessageAttachmentStore } from './message-attachment-store.js'
@@ -95,6 +96,7 @@ import type { WebSearchCredentialStatus } from './web-search/credential-store.js
 import type { AzureSpeechCredentialStore } from './speech/credential-store.js'
 import { ExecutorInstallationStore } from './store/executor-installation.js'
 import { attachExecutorInstallationRoutes } from './http/executor-installation-routes.js'
+import { attachMcpSettingsRoutes } from './http/mcp-settings-routes.js'
 import { AgentRuntimeRegistry } from './agent-runtime/types.js'
 import { KernelAgentRuntime } from './agent-runtime/kernel-runtime.js'
 import { CopilotAgentRuntime } from './agent-runtime/copilot-runtime.js'
@@ -445,11 +447,21 @@ export async function startHostServer(
 
   const executors = createExecutorRegistry(
     io,
-    { workspaceIdFor: (sid) => store.get(sid)?.workspaceId },
+    {
+      workspaceIdFor: (sid) => store.get(sid)?.workspaceId,
+      mcpSchemaHashFor: (sid, name) => store.get(sid)?.config.tools.find((tool) => tool.name === name && tool.name.includes('__') && !tool.name.startsWith('__') && tool.schemaHash && tool.version === tool.schemaHash)?.schemaHash,
+    },
     options.toolTimeoutMs ?? DEFAULT_TOOL_ACK_TIMEOUT_MS,
     audit,
     options.detachGraceMs,
   )
+  attachMcpSettingsRoutes(http, {
+    installations: executorInstallations,
+    executors,
+    tenancy,
+    ...(auth ? { auth } : {}),
+    audit,
+  })
 
   let restart: RestartCoordinator | undefined
   const settingsWithSkills = (settings: NonNullable<HostServerOptions['settings']>) => async (actor: DashboardActor): Promise<ServerSettingsPayload> => {
@@ -458,6 +470,10 @@ export async function startHostServer(
       : settings
     return {
       ...base,
+      mcp: {
+        supported: actor.kind === 'ingress' ? actor.role === 'owner' || actor.role === 'admin' : actor.kind !== 'anonymous',
+        note: 'Managed MCP settings require authenticated operator access and an online Dashboard-installed Executor.',
+      },
       skills: {
         count: defaultSkillRegistry.skills.length,
         roots: defaultSkillRootsList,
@@ -1846,9 +1862,9 @@ export async function startHostServer(
           pendingMessages: messageQueues.pending(sessionId), mode: 'queue',
         })
       }
-      const config = deriveSessionConfig(getDefaultConfig(organizationId
+      const config = deriveSessionConfig(mergeMcpTools(getDefaultConfig(organizationId
         ? { kind: 'ingress', organizationId, principal: task.createdBy, role: 'member' }
-        : undefined), undefined, 'chat')
+        : undefined), mcpToolsForWorkspace(executors.snapshot(), target.workspaceId)), undefined, 'chat')
       const { record, created } = await store.ensure({
         sessionId, agentRuntime: 'kernel', executionMode: 'chat', defaultConfig: config, runtimeConfig: config,
         workspaceId: target.workspaceId,
@@ -1948,9 +1964,9 @@ export async function startHostServer(
           sessionId: input.sessionId,
         })
       }
-      const config = deriveSessionConfig(getDefaultConfig(actor.organizationId && actor.role
+      const config = deriveSessionConfig(mergeMcpTools(getDefaultConfig(actor.organizationId && actor.role
         ? { kind: 'ingress', organizationId: actor.organizationId, principal: actor.principal, role: actor.role }
-        : undefined), undefined, executionMode)
+        : undefined), mcpToolsForWorkspace(executors.snapshot(), input.workspaceId)), undefined, executionMode)
       const { record, created } = await store.ensure({
         sessionId: input.sessionId,
         agentRuntime: 'kernel',

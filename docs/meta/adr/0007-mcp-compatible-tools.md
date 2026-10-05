@@ -1,57 +1,28 @@
-# ADR 0007: Tools use MCP-compatible schemas
+# ADR 0007: JSON-Schema tool contracts and MCP adapter boundary
 
-**Status**: accepted
-**Date**: 2026-07-04
+**Status:** accepted (updated to reflect the current codebase)
+**Date:** 2026-07-04; clarified 2026-10-05
 
 ## Context
 
-Every coding-agent project defines its own tool schema: input shape, output shape, error convention, discovery mechanism. Historically these were bespoke — Claude Code's tools look nothing like Codex's, which look nothing like opencode's.
+Kala has a native tool protocol between Host and Executor, and a growing ecosystem of third-party Model Context Protocol (MCP) servers. Aligning the *shape* of input definitions with JSON Schema makes tools adaptable to MCP, but does not turn our native tool wire contract into MCP.
 
-In late 2024 Anthropic published the Model Context Protocol (MCP) [1], a JSON-Schema-based standard for describing tools and a transport-agnostic call convention (`tools/list`, `tools/call`). It's now supported natively by Claude Desktop, Claude Code, and a growing list of clients (Cursor, Zed, some IDE plugins).
-
-For `agent-kernel`, this raised a question: define our own tool schema, or align with MCP?
+The older wording of this ADR claimed that native tool output was structured MCP content and that schemas were owned by the Executor. Neither is true of current code: the Host constructs model-facing `ToolSchema` definitions in `packages/host/src/builtin-tools.ts` and records them in session configuration; Executor `name → runner` does not include schemas. Native `tool:result` is `{ ok: boolean, content: string }`. `docs/executor/tools.md` is documentation, not the authoritative full schema catalog.
 
 ## Decision
 
-**Tool input/output schemas conform to MCP conventions.** Specifically:
+1. **Keep native transport.** Host ⇄ Executor uses the existing Socket.IO reverse connection and current tool effects/results. Native string results are **not** lossless MCP content blocks; do not describe them as a one-to-one protocol mapping.
+2. **Use JSON-Schema-shaped model-facing inputs.** The Host's `ToolSchema.inputSchema` and tool name/description can be adapted to MCP `Tool` input declarations, subject to validation of the MCP server's schema. This is a compatibility *boundary*, not a guarantee that every internal tool or MCP feature is already supported. Do not treat the separately maintained `docs/executor/tools.md` as runtime authority.
+3. **First MCP direction is client integration.** The Executor hosts stdio MCP clients; the Host continues to own schema exposure and approval. The `executor:announce` wire contract must be extended to provide validated, versioned third-party tool descriptors; reporting names alone is insufficient. A Host `ToolSchema` created from a generic MCP tool must require approval by default, regardless of MCP annotations. Existing Kernel event/effect shapes remain unchanged.
+4. **Explicit content limits.** Translate supported MCP text results to the native string result. Reject or clearly mark unsupported content types and `isError`; never silently drop blocks. An eventual MCP-server adapter for external clients, non-text results or richer bidirectional transport is a separate decision.
+5. **Security and compatibility.** Server configuration belongs to the Executor operator, not model-generated instructions. Do not use shell interpretation of server commands. Host validates catalog ownership against the announcing workspace Executor; do not allow remote descriptors to override built-ins or downgrade approval. Old Executors without descriptors continue to work with built-ins.
 
-- Tool schemas in [`docs/executor/tools.md`](../../executor/tools.md) are expressed as JSON Schema, matching MCP's `Tool` type.
-- The Executor's `tool:call` / `tool:result` semantics (name + arguments in, structured content out) map 1-to-1 onto MCP's `tools/call` semantics.
-- **Transport is our own** — Socket.IO over the reverse-WebSocket described in [ADR 0002](0002-reverse-websocket.md), not MCP's stdio or SSE transports. We're MCP-compatible at the *schema* layer, not the wire layer.
+The operational design, lifecycle, tests and first-slice limits are specified in [MCP runtime integration](../../host/mcp.md), which is the source of truth for implementing this adapter.
 
-Consequence: it should be a small amount of adapter code (not a rewrite) to expose the Executor as an MCP server for stdio clients, or to consume third-party MCP servers as if they were Executor tools.
+## Consequences and verification
 
-## Alternatives considered
-
-**Invent our own schema.**
-
-*Rejected*. Nothing to gain, real costs: users can't easily reuse tools they've already written for MCP; we can't easily consume the growing ecosystem of MCP servers; the project has to justify a bespoke standard.
-
-**Adopt MCP fully, transport included** (stdio / SSE).
-
-*Rejected*. MCP's stdio transport is not a good fit for the browser-executor scenario (WebContainer, [ADR 0002](0002-reverse-websocket.md)); its SSE transport doesn't handle reconnection as cleanly as Socket.IO ([ADR 0003](0003-socket-io.md)). We keep our own transport and only adopt what buys us ecosystem — the schema.
-
-**Adopt MCP but hide it as an implementation detail.**
-
-*Rejected*. The interoperability is worth surfacing. Someone reading `docs/executor/tools.md` benefits from noticing "these are MCP tools" — it makes the shape obvious and the ecosystem accessible.
-
-## Consequences
-
-**Good**:
-- Executor can, with a small stdio adapter, be launched by any MCP client (Claude Desktop, Cursor, VS Code). We haven't built the shim in v1, but the design leaves it as a one-file addition, not a redesign.
-- Third-party MCP servers can be plugged in as tool providers with a thin translation layer at the Executor.
-- Documenting tools is less work — we point at MCP's spec for the schema conventions instead of re-deriving them.
-- "This is MCP-compatible" is a legible signal in a competitive landscape where interop matters.
-
-**Bad**:
-- We inherit MCP's design decisions, some of which are quirky (e.g., content blocks vs. plain strings for tool output). We express those choices in our schemas even where a simpler shape would suffice.
-- If MCP evolves in a breaking way, `agent-kernel` has a small compatibility problem to track. Mitigation: pin to a stated MCP version in `docs/executor/tools.md` and only bump deliberately.
-
-## Verification
-
-- `docs/executor/tools.md` §Tool schemas is expressed in JSON Schema matching MCP's `Tool` type.
-- If a future PR introduces a tool with a bespoke schema shape that doesn't fit MCP, that PR should either (a) round-trip the shape through MCP conventions or (b) update this ADR with an argued exception.
-
-## References
-
-[1] https://modelcontextprotocol.io/
+- Schema discovery and execution require changes to **shared, Host and Executor**; the SDK only belongs in Executor. Dashboard need not introduce a parallel approval policy.
+- Third-party tools must be visible to new model sessions with the correct schema, while missing or crashed servers must fail closed. Active-session refresh/historical replay must not be advertised without specific tests.
+- Dashboard-managed settings are a separate, authenticated operator control plane for a credential-bound, Dashboard-installed Executor. The Executor alone executes and persists the configuration; Host settings return server names, not executable arguments or environment values. CLI/environment-based and legacy installations remain locally configured.
+- Verify valid and invalid schema announcements, prefix collisions, approval semantics, text/result conversion, crash/cancellation and normal built-in paths with fixture-server tests.
+- MCP server exposure to external clients remains **not implemented**; this ADR does not make an interoperability or full MCP-conformance claim.

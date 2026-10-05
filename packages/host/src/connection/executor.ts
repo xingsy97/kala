@@ -50,6 +50,9 @@ import type {
   DirListResult,
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
+  ExecutorMcpConfigStatusAck,
+  ExecutorMcpConfigureAck,
+  ExecutorMcpConfigureRequest,
   ExecutorServerToClientEvents,
   FileListResult,
   OverflowContentsResult,
@@ -61,9 +64,12 @@ import type {
 
 import type { ToolDispatcher } from '../loop.js'
 import type { AuditLogger } from '../audit-log.js'
+import { isUnavailableMcpTool } from '../mcp-tools.js'
 
 export const DEFAULT_TOOL_ACK_TIMEOUT_MS = 60_000
 export const TERMINAL_ACK_TIMEOUT_MS = 5_000
+// Executor bounds a candidate configuration to 30 seconds; allow transport and cleanup slack.
+export const MCP_MANAGEMENT_ACK_TIMEOUT_MS = 45_000
 
 /**
  * How long to hold a detached executor's pending calls and its "attached"
@@ -95,6 +101,8 @@ export type ExecutorChangeListener = (change: ServerExecutorChangedPayload) => v
  */
 export type WorkspaceResolver = {
   workspaceIdFor(sessionId: string): string | undefined
+  /** Session-snapshotted MCP input schema; never substitute a new same-name tool. */
+  mcpSchemaHashFor?(sessionId: string, toolName: string): string | undefined
 }
 
 type PublishLocalImageRequest = { requestId: string; path: string; cwd?: string }
@@ -138,7 +146,10 @@ export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
   ): void
   activeSessions(): string[]
   snapshot(): AttachedExecutor[]
+  hasTrustedManagedExecutor(workspaceId: string, installId: string): boolean
   measureLatency(workspaceId: string): Promise<{ rttMs?: number; error?: string }>
+  mcpConfigStatus(workspaceId: string, installId: string, requestId: string): Promise<ExecutorMcpConfigStatusAck>
+  configureMcp(workspaceId: string, installId: string, payload: ExecutorMcpConfigureRequest): Promise<ExecutorMcpConfigureAck>
   renameWorkspace(workspaceId: string, workspaceName: string): AttachedExecutor | undefined
   onChange(listener: ExecutorChangeListener): () => void
   /** Wait at a planned pre-dispatch checkpoint until its bound Executor is online. */
@@ -166,6 +177,10 @@ export function createExecutorRegistry(
   const byExecutor = new Map<string, Bind>()
   const socketToExecutor = new Map<string, string>()
   const listeners = new Set<ExecutorChangeListener>()
+  // Retain names after removal so active Session snapshots fail before dispatch.
+  // This is process-local by design; after a Host restart an unknown stale call
+  // still goes only to its bound workspace Executor, which rejects it.
+  const knownMcpToolNames = new Set<string>()
   type ExecutorWaiter = { resolve(online: boolean): void; timer: NodeJS.Timeout }
   const executorWaiters = new Map<string, Set<ExecutorWaiter>>()
 
@@ -224,6 +239,14 @@ export function createExecutorRegistry(
   function redispatchPending(oldBind: Bind, newBind: Bind): void {
     for (const p of oldBind.pending.values()) {
       clearTimeout(p.timer)
+      if (isUnavailableMcpTool(newBind.announcement, p.name, knownMcpToolNames, resolver.mcpSchemaHashFor?.(p.sessionId, p.name))) {
+        p.resolve({
+          ok: false,
+          content: `MCP tool ${p.name} is no longer available in this workspace`,
+          failure: { code: 'mcp_tool_unavailable', category: 'precondition', outcome: 'blocked', retryable: true, responsibility: 'workspace' },
+        })
+        continue
+      }
       const ackTimeoutMs = ackTimeoutMsFor(p.name, p.input, toolAckTimeoutMs)
       // Preserve the original absolute deadline. A reconnect must not grant a
       // fresh timeout window; repeated network flaps would otherwise keep an
@@ -274,6 +297,13 @@ export function createExecutorRegistry(
       if (bind.announcement.workspaceId === workspaceId) return bind
     }
     return undefined
+  }
+
+  function findManagedBind(workspaceId: string, installId: string): Bind | undefined {
+    const bind = findBindByWorkspace(workspaceId)
+    if (bind?.announcement.installId !== installId) return undefined
+    const identity = bind.socket.data.executorIdentity as { workspaceId?: unknown; installId?: unknown } | undefined
+    return identity?.workspaceId === workspaceId && identity.installId === installId ? bind : undefined
   }
 
   function allPendingBinds(): Iterable<Bind> {
@@ -376,7 +406,41 @@ export function createExecutorRegistry(
     })
   }
 
+  function emitMcpManagement<T>(
+    bind: Bind,
+    event: 'executor:mcp_configure' | 'executor:mcp_config_status',
+    payload: ExecutorMcpConfigureRequest | { requestId: string },
+    onUnavailable: () => T,
+  ): Promise<T> {
+    return new Promise<T>((resolve) => {
+      let settled = false
+      const finish = (value: T): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(value)
+      }
+      const timer = setTimeout(() => finish(onUnavailable()), MCP_MANAGEMENT_ACK_TIMEOUT_MS)
+      const ack = (result: ExecutorMcpConfigureAck | ExecutorMcpConfigStatusAck): void => {
+        const current = byExecutor.get(bind.announcement.executorId)
+        if (current !== bind || !bind.socket.connected) {
+          finish(onUnavailable())
+          return
+        }
+        finish(result as T)
+      }
+      if (event === 'executor:mcp_configure') {
+        bind.socket.emit(event, payload as ExecutorMcpConfigureRequest, ack)
+      } else {
+        bind.socket.emit(event, payload as { requestId: string }, ack)
+      }
+    })
+  }
+
   return {
+    hasTrustedManagedExecutor(workspaceId, installId) {
+      return findManagedBind(workspaceId, installId) !== undefined
+    },
     async measureLatency(workspaceId) {
       const bind = findBindByWorkspace(workspaceId)
       if (!bind) return { error: 'workspace offline' }
@@ -392,9 +456,30 @@ export function createExecutorRegistry(
         })
       })
     },
+    async mcpConfigStatus(workspaceId, installId, requestId) {
+      const bind = findManagedBind(workspaceId, installId)
+      if (!bind) return { ok: false, error: 'managed executor offline' }
+      return await emitMcpManagement<ExecutorMcpConfigStatusAck>(
+        bind,
+        'executor:mcp_config_status',
+        { requestId },
+        () => ({ ok: false, error: 'managed executor unavailable' }),
+      )
+    },
+    async configureMcp(workspaceId, installId, payload) {
+      const bind = findManagedBind(workspaceId, installId)
+      if (!bind) return { ok: false, error: 'managed executor offline' }
+      return await emitMcpManagement<ExecutorMcpConfigureAck>(
+        bind,
+        'executor:mcp_configure',
+        payload,
+        () => ({ ok: false, error: 'managed executor unavailable' }),
+      )
+    },
     attach(socket, announcement, clientVersion) {
       const executorId = announcement.executorId
       const workspaceId = announcement.workspaceId
+      for (const tool of announcement.mcpTools ?? []) knownMcpToolNames.add(tool.name)
       const newBind: Bind = {
         socket,
         announcement,
@@ -526,6 +611,13 @@ export function createExecutorRegistry(
       const picked = pickBindFor(sessionId)
       if (!picked.ok) return { ok: false, content: picked.reason, failure: { code: 'workspace_offline', category: 'precondition', outcome: 'blocked', retryable: true, responsibility: 'workspace' } }
       const bind = picked.bind
+      if (isUnavailableMcpTool(bind.announcement, eff.name, knownMcpToolNames, resolver.mcpSchemaHashFor?.(sessionId, eff.name))) {
+        return {
+          ok: false,
+          content: `MCP tool ${eff.name} is no longer available in this workspace`,
+          failure: { code: 'mcp_tool_unavailable', category: 'precondition' as const, outcome: 'blocked' as const, retryable: true, responsibility: 'workspace' as const },
+        }
+      }
       const ackTimeoutMs = ackTimeoutMsFor(eff.name, eff.input, toolAckTimeoutMs)
       audit?.log({ action: 'tool.dispatch', actor: { kind: 'system' }, target: { sessionId, workspaceId: bind.announcement.workspaceId, callId: eff.callId, toolName: eff.name }, outcome: 'ok', metadata: { cwd: eff.cwd } })
       return await new Promise<{ ok: boolean; content: string; failure?: import('@agent-kernel/kernel').ToolFailure; durationMs?: number }>((resolve) => {

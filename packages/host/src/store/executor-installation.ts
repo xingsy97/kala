@@ -28,6 +28,11 @@ type FileShape = { schemaVersion: 1; installations: InstallationRecord[]; idempo
 export type CreatedExecutorInstallation = { install: ExecutorInstallStatusSnapshot; setupCode: string }
 export type ClaimedExecutorInstallation = { install: ExecutorInstallStatusSnapshot; bootstrap: string }
 export type ExecutorInstallationTenantAttribution = Pick<ExecutorInstallStatusSnapshot, 'organizationId' | 'principal' | 'organizationRole'>
+export type ManagedExecutorInstallationBinding = {
+  id: string
+  workspaceId: string
+  organizationId?: string
+}
 
 export class ExecutorInstallationStore {
   private records = new Map<string, InstallationRecord>()
@@ -98,6 +103,24 @@ export class ExecutorInstallationStore {
   get(id: string): ExecutorInstallStatusSnapshot | undefined {
     const record = this.activeRecord(id)
     return record ? this.snapshot(record) : undefined
+  }
+
+  /** Dashboard-native installation binding used by sensitive managed settings. */
+  managedBinding(id: string): ManagedExecutorInstallationBinding | undefined {
+    const record = this.activeRecord(id)
+    return record?.workspaceId
+      ? { id: record.id, workspaceId: record.workspaceId, ...(record.organizationId ? { organizationId: record.organizationId } : {}) }
+      : undefined
+  }
+
+  managedBindingsForWorkspace(workspaceId: string): ManagedExecutorInstallationBinding[] {
+    const bindings: ManagedExecutorInstallationBinding[] = []
+    for (const record of this.records.values()) {
+      const active = this.activeRecord(record.id)
+      if (!active || active.workspaceId !== workspaceId) continue
+      bindings.push({ id: active.id, workspaceId, ...(active.organizationId ? { organizationId: active.organizationId } : {}) })
+    }
+    return bindings
   }
 
   events(id: string, afterSeq = -1): readonly ExecutorInstallEvent[] | undefined {

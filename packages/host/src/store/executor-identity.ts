@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 export type StoredExecutorIdentity = {
   tokenHash: string
   workspaceId: string
+  installId?: string
   label?: string
   createdAt: string
   lastSeenAt?: string
@@ -89,11 +90,12 @@ export class ExecutorIdentityStore {
     return this.identities.filter((entry) => !entry.revokedAt)
   }
 
-  provisionWorkspace(workspaceId: string, label?: string): string {
+  provisionWorkspace(workspaceId: string, label?: string, installId?: string): string {
     const token = `ak_exec_${randomBytes(32).toString('base64url')}`
     const identity: StoredExecutorIdentity = {
       tokenHash: hashToken(token),
       workspaceId,
+      ...(installId ? { installId } : {}),
       ...(label ? { label } : {}),
       createdAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString(),
@@ -225,7 +227,7 @@ export class ExecutorIdentityStore {
     if (!current) throw new Error('executor identity not found')
     current.revokedAt = new Date().toISOString()
     const token = `ak_exec_${randomBytes(32).toString('base64url')}`
-    this.identities.push({ tokenHash: hashToken(token), workspaceId, ...(current.label ? { label: current.label } : {}), createdAt: new Date().toISOString(), credentialVersion: (current.credentialVersion ?? 1) + 1 })
+    this.identities.push({ tokenHash: hashToken(token), workspaceId, ...(current.installId ? { installId: current.installId } : {}), ...(current.label ? { label: current.label } : {}), createdAt: new Date().toISOString(), credentialVersion: (current.credentialVersion ?? 1) + 1 })
     this.save()
     return token
   }

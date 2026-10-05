@@ -47,6 +47,9 @@ import { ExecutionReceiptStore } from './execution-receipts.js'
 import type { RuntimeLogger } from './logger.js'
 import { executorReleaseVersion } from './build-info.js'
 import { failureForToolError } from './tool-failure.js'
+import { McpClientManager, type McpToolDescriptor } from './mcp-client.js'
+import { parseDashboardMcpServers, type DashboardMcpServerConfig, type McpServerConfig } from './mcp-config.js'
+import { readDashboardMcpServers, writeDashboardMcpServers } from './mcp-managed-config.js'
 
 const noopLogger: Pick<RuntimeLogger, 'debug' | 'info' | 'warn'> = {
   debug() {},
@@ -133,6 +136,16 @@ export type ExecutorOptions = {
   ioFactory?: typeof clientIO
   receiptStorePath?: string | false
   networkPolicy?: import('@agent-kernel/shared').NetworkPolicy
+  mcpServers?: readonly McpServerConfig[]
+  /** Capability supplied only by the CLI after parsing a native managed config. */
+  managedMcpConfig?: {
+    path: string
+    installationSource: 'dashboard-native'
+    installationId: string
+    configurationSource: 'managed-config'
+  }
+  mcpInitializeTimeoutMs?: number
+  mcpCallTimeoutMs?: number
 }
 
 export type PermanentError = {
@@ -163,7 +176,23 @@ export type ExecutorHandle = {
   readonly draining: () => boolean
   beginDrain(): void
   resume(): void
-  close(): void
+  close(): Promise<void>
+}
+
+function strictRequest(value: unknown, allowed: readonly string[]): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('request must be an object')
+  const request = value as Record<string, unknown>
+  const unknown = Object.keys(request).find((key) => !allowed.includes(key))
+  if (unknown) throw new Error(`request contains unknown field: ${unknown}`)
+  if (typeof request.requestId !== 'string' || request.requestId.length < 1 || request.requestId.length > 128 || /[\0\r\n]/u.test(request.requestId)) {
+    throw new Error('requestId must be a non-empty string of at most 128 characters')
+  }
+  return request
+}
+
+function dashboardServersRequest(value: unknown): DashboardMcpServerConfig[] {
+  const request = strictRequest(value, ['requestId', 'servers'])
+  return parseDashboardMcpServers(request.servers)
 }
 
 export function startExecutor(options: ExecutorOptions): ExecutorHandle {
@@ -222,7 +251,12 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     }
   }
 
-  const announcement: ExecutorAnnounce = {
+  let mcpDescriptors: readonly McpToolDescriptor[] = []
+  let mcpInitialized = false
+  const mcpToolNames = new Set<string>()
+  const knownMcpToolNames = new Set<string>()
+  type AnnounceWithMcp = ExecutorAnnounce & { mcpTools?: McpToolDescriptor[] }
+  const createAnnouncement = (): AnnounceWithMcp => ({
     executorId,
     ...(options.installId ? { installId: options.installId } : {}),
     executorVersion: executorReleaseVersion(),
@@ -232,6 +266,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     workspaceName,
     tools: [...tools.keys()],
     toolImplementations: Object.fromEntries([...tools.keys()].map((name) => [name, { version: '1.0.0' }])),
+    ...(mcpDescriptors.length > 0 ? { mcpTools: [...mcpDescriptors] } : {}),
     ...(sandboxRoots.length > 0 ? { sandboxRoots: [...sandboxRoots] } : {}),
     defaultCwd: workspaceRoot,
     runtime: 'node',
@@ -241,10 +276,49 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     ipAddresses: collectIpAddresses(),
     pid: process.pid,
     startedAt: new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString(),
+  })
+  const applyMcpCatalog = (nextTools: readonly Tool[], descriptors: readonly McpToolDescriptor[]): void => {
+    for (const name of mcpToolNames) tools.delete(name)
+    mcpToolNames.clear()
+    for (const tool of nextTools) {
+      tools.set(tool.name, tool)
+      mcpToolNames.add(tool.name)
+      knownMcpToolNames.add(tool.name)
+    }
+    mcpDescriptors = descriptors
+    if (mcpInitialized && socket.connected) socket.emit('executor:announce', createAnnouncement())
   }
 
+  type McpCatalog = { tools: readonly Tool[]; descriptors: readonly McpToolDescriptor[] }
+  let activeMcp: McpClientManager
+  const allMcpManagers = new Set<McpClientManager>()
+  const createMcpManager = (servers: readonly McpServerConfig[], requireAllServers: boolean): { manager: McpClientManager; catalog: () => McpCatalog } => {
+    let latest: McpCatalog = { tools: [], descriptors: [] }
+    let manager: McpClientManager
+    manager = new McpClientManager({
+      servers,
+      reservedToolNames: new Set([...tools.keys()].filter((name) => !mcpToolNames.has(name))),
+      ...(options.mcpInitializeTimeoutMs !== undefined ? { initializeTimeoutMs: options.mcpInitializeTimeoutMs } : {}),
+      ...(options.mcpCallTimeoutMs !== undefined ? { callTimeoutMs: options.mcpCallTimeoutMs } : {}),
+      ...(requireAllServers ? { requireAllServers: true } : {}),
+      logger,
+      onCatalogChanged(nextTools, descriptors) {
+        latest = { tools: nextTools, descriptors }
+        if (manager === activeMcp) applyMcpCatalog(nextTools, descriptors)
+      },
+    })
+    allMcpManagers.add(manager)
+    return { manager, catalog: () => latest }
+  }
+  const initialMcp = createMcpManager(options.mcpServers ?? [], false)
+  activeMcp = initialMcp.manager
+  const mcpReady = activeMcp.initialize().then(() => { mcpInitialized = true })
+
   const ready = new Promise<void>((resolve) => {
-    socket.on('connect', () => {
+    socket.on('connect', async () => {
+      await mcpReady
+      if (!socket.connected) return
+      const announcement = createAnnouncement()
       logger.info({ socketId: socket.id, workspaceId, workspaceName, ...(options.installId ? { installId: options.installId } : {}), executorVersion: announcement.executorVersion }, 'socket connected; announcing workspace')
       socket.emit('executor:announce', announcement)
       resolve()
@@ -348,7 +422,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     inFlight.set(key, controller)
     inFlightAcks.set(key, [ack])
     const started = performance.now()
-    logger.info({ sessionId: payload.sessionId, callId: payload.callId, tool: payload.name, internal, input: safeToolInput(payload.input), ...(payload.cwd ? { cwd: payload.cwd } : {}) }, 'tool execution started')
+    logger.info({ sessionId: payload.sessionId, callId: payload.callId, tool: payload.name, internal, ...(!knownMcpToolNames.has(payload.name) ? { input: safeToolInput(payload.input) } : {}), ...(payload.cwd ? { cwd: payload.cwd } : {}) }, 'tool execution started')
     const rawResult = await runOne(tools, sandbox, controller.signal, payload, overflowConfig, options.networkPolicy, async (event) => {
       await new Promise<void>((resolve, reject) => socket.timeout(5_000).emit('executor:network_audit', event, (error, result) => error || !result?.accepted ? reject(error ?? new Error('network audit rejected')) : resolve()))
     })
@@ -382,6 +456,97 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   })
 
   socket.on('executor:health_ping', (_sentAt, ack) => ack(Date.now()))
+
+  const managedMcp = options.managedMcpConfig
+  const dashboardMcpAllowed = Boolean(
+    managedMcp &&
+    managedMcp.installationSource === 'dashboard-native' &&
+    managedMcp.configurationSource === 'managed-config' &&
+    managedMcp.installationId.length > 0 &&
+    managedMcp.installationId === options.installId &&
+    managedMcp.path.length > 0,
+  )
+  let mcpConfigQueue: Promise<void> = Promise.resolve()
+  let executorClosing = false
+  const serializedMcpConfig = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = mcpConfigQueue.then(operation, operation)
+    mcpConfigQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  // The source protocol may be newer than a stale built shared declaration in
+  // source checkouts, so keep this narrow runtime cast aligned to protocol.ts.
+  const mcpControlSocket = socket as unknown as {
+    on(event: 'executor:mcp_configure', handler: (payload: unknown, ack: (result: { ok: boolean; error?: string }) => void) => void): void
+    on(event: 'executor:mcp_config_status', handler: (payload: unknown, ack: (result: { ok: boolean; servers?: Array<{ name: string }>; error?: string }) => void) => void): void
+  }
+
+  mcpControlSocket.on('executor:mcp_config_status', (payload, ack) => {
+    void serializedMcpConfig(async () => {
+      if (!dashboardMcpAllowed || !managedMcp || executorClosing) {
+        ack({ ok: false, error: 'Dashboard MCP configuration is unavailable for this Executor' })
+        return
+      }
+      try {
+        strictRequest(payload, ['requestId'])
+        const servers = readDashboardMcpServers(managedMcp.path)
+        ack({ ok: true, servers: servers.map(({ name }) => ({ name })) })
+      } catch {
+        ack({ ok: false, error: 'managed Executor MCP config is invalid or unsafe' })
+      }
+    })
+  })
+
+  mcpControlSocket.on('executor:mcp_configure', (payload, ack) => {
+    void serializedMcpConfig(async () => {
+      if (!dashboardMcpAllowed || !managedMcp || executorClosing) {
+        ack({ ok: false, error: 'Dashboard MCP configuration is unavailable for this Executor' })
+        return
+      }
+
+      let servers: DashboardMcpServerConfig[]
+      try {
+        servers = dashboardServersRequest(payload)
+      } catch (error) {
+        ack({ ok: false, error: error instanceof Error ? error.message : 'invalid Dashboard MCP config' })
+        return
+      }
+
+      const candidate = createMcpManager(servers, true)
+      let initializationTimer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          candidate.manager.initialize(),
+          new Promise<never>((_resolve, reject) => {
+            initializationTimer = setTimeout(() => reject(new Error('MCP initialization deadline exceeded')), 30_000)
+          }),
+        ])
+      } catch {
+        allMcpManagers.delete(candidate.manager)
+        await candidate.manager.close()
+        ack({ ok: false, error: 'one or more MCP servers could not be initialized' })
+        return
+      } finally {
+        if (initializationTimer) clearTimeout(initializationTimer)
+      }
+
+      try {
+        writeDashboardMcpServers(managedMcp.path, servers)
+      } catch {
+        allMcpManagers.delete(candidate.manager)
+        await candidate.manager.close()
+        ack({ ok: false, error: 'managed Executor MCP config could not be persisted safely' })
+        return
+      }
+
+      const retired = activeMcp
+      activeMcp = candidate.manager
+      const catalog = candidate.catalog()
+      applyMcpCatalog(catalog.tools, catalog.descriptors)
+      void retired.closeWhenIdle().finally(() => allMcpManagers.delete(retired))
+      ack({ ok: true })
+    })
+  })
 
   const terminals = createTerminalManager({
     sandbox,
@@ -454,12 +619,16 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     draining: () => drainRequested,
     beginDrain() { drainRequested = true },
     resume() { drainRequested = false },
-    close() {
+    async close() {
+      executorClosing = true
       unsubscribeBg()
       terminals.closeAll()
       for (const c of inFlight.values()) c.abort()
       inFlight.clear()
       socket.disconnect()
+      await mcpConfigQueue
+      await Promise.allSettled([...allMcpManagers].map((manager) => manager.close()))
+      allMcpManagers.clear()
     },
   }
 }

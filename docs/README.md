@@ -25,7 +25,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [host/tool-output-overflow.md](host/tool-output-overflow.md) | Executor-side large-output spillover and preview pointers |
 | [host/skills.md](host/skills.md) | OpenCode-style `skill({ name })` tool loading |
 | [host/security-control-plane.md](host/security-control-plane.md) | **Normative.** Deployment-boundary credentials, authorization, audit, and security ownership |
-| [host/mcp.md](host/mcp.md) | MCP runtime integration design (planned, not yet implemented) |
+| [host/mcp.md](host/mcp.md) | **Source of truth.** Local stdio MCP client integration, Host catalog/approval ownership, deployment status, and limitations |
 
 ### Dashboard — React SPA (`packages/dashboard`)
 

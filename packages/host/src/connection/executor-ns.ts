@@ -32,6 +32,7 @@ import { parseWire } from '../wire-validation.js'
 import { sessionRoom, terminalOwnerSessionId, terminalSessionRoom } from './rooms.js'
 import { executorAnnouncedConnectionMeta, executorPendingConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
 import type { ExecutorInstallationStore } from '../store/executor-installation.js'
+import { validateMcpToolDescriptors } from '../mcp-tools.js'
 
 export type ExecutorNs = Namespace<
   ExecutorClientToServerEvents,
@@ -112,13 +113,25 @@ export function configureExecutorNamespace(
     const auth = socket.handshake.auth as HandshakeAuth
     // An executor is a daemon: no session binding at connect time. Host
     // routes each `tool:call` to it by sessionId when needed.
+    // Process updates in arrival order: an async quota check must never let an
+    // older catalog overwrite a newer server-crash reannouncement.
+    let announceTail: Promise<void> = Promise.resolve()
     socket.on('executor:announce', (rawPayload: ExecutorAnnounce) => {
-      void (async () => {
+      announceTail = announceTail.then(async () => {
+      if (!socket.connected) return
       const payload = parseWire(schema.ExecutorAnnounceSchema, rawPayload, {
         channel: 'executor:announce',
         peer: socket.id,
       })
-      if (!payload) return
+      if (!payload) {
+        socket.emit('executor:host_reject', { code: 'auth_failed', message: 'invalid executor announcement' })
+        socket.disconnect(true)
+        return
+      }
+      validateMcpToolDescriptors(
+        payload,
+        new Set((typeof deps.defaultConfig === 'function' ? deps.defaultConfig() : deps.defaultConfig).tools.map((tool) => tool.name)),
+      )
       const identity = executorIdentities.get(socket)
       const valid = validateExecutorAnnouncement(identity ?? { accepted: true }, payload.workspaceId)
       if (!valid.ok) {
@@ -150,6 +163,7 @@ export function configureExecutorNamespace(
         deps.auth?.executorIdentityStore?.markSeen(identity.token)
       }
       const installId = payload.installId ?? auth.installId
+      const trustedInstallId = identity?.installId === installId ? installId : undefined
       const installSnapshot = installId ? deps.installations?.get(installId) : undefined
       if (deps.executorQuota) {
         if (!installSnapshot?.organizationId) {
@@ -181,6 +195,7 @@ export function configureExecutorNamespace(
           ...(installId ? { installId } : {}),
         })
       }
+      if (!socket.connected) return
       const connectionMeta = executorAnnouncedConnectionMeta({
         current: socket.data.connectionMeta as ConnectionMeta | undefined,
         announcement: payload,
@@ -190,16 +205,16 @@ export function configureExecutorNamespace(
       deps.audit?.log({ action: 'executor.announce_accept', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'ok', metadata: { ...auditConnectionMeta(connectionMeta), workspaceName: payload.workspaceName } })
       executorAnnouncements.set(socket, payload)
       deps.executors.attach(socket, payload, auth.clientVersion)
-      if (installId && identity?.token) {
-        const completed = deps.installations?.markOnline(installId, payload.workspaceId, {
+      if (trustedInstallId && identity?.token) {
+        const completed = deps.installations?.markOnline(trustedInstallId, payload.workspaceId, {
           executorId: payload.executorId,
           ...(payload.executorVersion ? { executorVersion: payload.executorVersion } : {}),
           workspaceName: payload.workspaceName,
         })
-        deps.audit?.log({ action: 'executor_install.online', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: completed ? 'ok' : 'error', metadata: { installId }, ...(completed ? {} : { error: 'installation record did not accept online transition' }) })
-        if (!completed) deps.broadcastError(payload.workspaceId, 'host', `Executor connected, but installation ${installId} could not be marked complete. Re-open Add Workspace or reinstall this Executor.`)
+        deps.audit?.log({ action: 'executor_install.online', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: completed ? 'ok' : 'error', metadata: { installId: trustedInstallId }, ...(completed ? {} : { error: 'installation record did not accept online transition' }) })
+        if (!completed) deps.broadcastError(payload.workspaceId, 'host', `Executor connected, but installation ${trustedInstallId} could not be marked complete. Re-open Add Workspace or reinstall this Executor.`)
       }
-      })().catch((error: unknown) => {
+      }).catch((error: unknown) => {
         deps.audit?.log({ action: 'executor.announce_error', actor: { kind: 'anonymous' }, outcome: 'error', error: error instanceof Error ? error.message : String(error) })
         socket.emit('executor:host_reject', { code: 'auth_failed', message: error instanceof Error ? error.message : String(error) })
         socket.disconnect(true)
@@ -313,6 +328,7 @@ function publicExecutorIdentity(identity: ExecutorIdentity): Record<string, unkn
   return {
     accepted: identity.accepted,
     ...(identity.workspaceId ? { workspaceId: identity.workspaceId } : {}),
+    ...(identity.installId ? { installId: identity.installId } : {}),
     ...(identity.label ? { label: identity.label } : {}),
     ...(identity.reason ? { reason: identity.reason } : {}),
   }

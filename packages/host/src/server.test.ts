@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -2830,6 +2831,44 @@ describe('wire protocol', () => {
     executor.close()
   })
 
+  it('applies MCP reannouncements in socket arrival order across asynchronous tenant quota checks', async () => {
+    await server.close()
+    const identityStore = new ExecutorIdentityStore(join(dir, 'ordered-mcp-identities.json'))
+    identityStore.load()
+    const permits: Array<() => void> = []
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port, sessionsDir: dir, llm: scriptedLlm(), defaultConfig: config,
+      httpServer: http, deployment: PRIVATE_CLOUD_DEPLOYMENT,
+      auth: { executorIdentityStore: identityStore },
+      executorQuota: { async assertCanAttachExecutor() { await new Promise<void>((resolve) => permits.push(resolve)) } },
+    })
+    url = `http://localhost:${server.port}`
+    const install = await createRedeemedTenantExecutorInstall(url, 'org_mcp_order', 'ws-mcp-order')
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, token: install.token, installId: install.id },
+      reconnection: false,
+    })
+    try {
+      await new Promise<void>((resolve) => executor.on('connect', resolve))
+      const base = { executorId: 'exec-mcp-order', workspaceId: 'ws-mcp-order', workspaceName: 'mcp', runtime: 'node' as const, runtimeVersion: 'test' }
+      const inputSchema = { type: 'object' }
+      executor.emit('executor:announce', {
+        ...base, tools: ['bash', 'docs__search'],
+        mcpTools: [{ name: 'docs__search', description: 'Search docs', inputSchema, schemaHash: createHash('sha256').update(JSON.stringify(inputSchema)).digest('hex') }],
+      })
+      executor.emit('executor:announce', { ...base, tools: ['bash'], mcpTools: [] })
+      await vi.waitFor(() => expect(permits).toHaveLength(1))
+      permits.shift()!()
+      await vi.waitFor(() => expect(permits).toHaveLength(1))
+      permits.shift()!()
+      await vi.waitFor(() => expect(server.executorsSnapshot().find((item) => item.workspaceId === 'ws-mcp-order')?.mcpTools).toEqual([]))
+    } finally { executor.close() }
+  })
+
   it('records tenant executor runtime after quota-allowed installed executors disconnect', async () => {
     await server.close()
     const identityStore = new ExecutorIdentityStore(join(dir, 'runtime-executor-identities.json'))
@@ -4943,6 +4982,68 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('snapshots only the owning workspace live MCP tools into a new Session config', async () => {
+    const controlSessionId = 'wire-mcp-control'
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: controlSessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    const inputSchema = { type: 'object' }
+    const schemaHash = createHash('sha256').update(JSON.stringify(inputSchema)).digest('hex')
+    executor.emit('executor:announce', {
+      executorId: 'executor-mcp-session',
+      workspaceId: 'workspace-mcp-session',
+      workspaceName: 'mcp-workspace',
+      tools: ['write', 'docs__search'],
+      mcpTools: [{ name: 'docs__search', description: 'Search docs', inputSchema, schemaHash }],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+    await waitForWorkspace(dashboard, 'workspace-mcp-session')
+
+    await expect(dashboard.timeout(1_000).emitWithAck('client:create_session', {
+      sessionId: 'wire-mcp-owned',
+      workspaceId: 'workspace-mcp-session',
+      workspaceName: 'mcp-workspace',
+    })).resolves.toEqual({ ok: true })
+    expect(server.store.get('wire-mcp-owned')?.config.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'docs__search',
+        requiresApproval: true,
+        executionKind: 'executor',
+        executionHandler: 'docs__search',
+        schemaHash,
+      }),
+    ]))
+
+    await expect(dashboard.timeout(1_000).emitWithAck('client:create_session', {
+      sessionId: 'wire-mcp-other',
+      workspaceId: 'workspace-without-mcp',
+      workspaceName: 'other-workspace',
+    })).resolves.toEqual({ ok: true })
+    expect(server.store.get('wire-mcp-other')?.config.tools.some((tool) => tool.name === 'docs__search')).toBe(false)
+
+    const apiResponse = await fetch(`${url}/api/v1/sessions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ operationId: 'mcp-public-create', sessionId: 'mcp-public-owned', workspaceId: 'workspace-mcp-session' }),
+    })
+    expect(apiResponse.status).toBe(201)
+    expect(server.store.get('mcp-public-owned')?.config.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'docs__search', requiresApproval: true, schemaHash }),
+    ]))
+
+    executor.close()
+    dashboard.close()
+  })
+
   it('acknowledges a durably created Session before slow advisory lifecycle hooks finish', async () => {
     await server.close()
     const http = createServer()
@@ -5362,7 +5463,7 @@ describe('wire protocol', () => {
       runtime: 'node',
       runtimeVersion: '22',
     })
-    await waitForAnyExecutor(server)
+    await waitForWorkspace(dashboard, 'ws-list-dirs')
 
     const listed = new Promise<import('@agent-kernel/shared').DirListResult>((resolve) => {
       dashboard.on('server:dir_list', resolve)

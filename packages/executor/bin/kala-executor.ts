@@ -55,6 +55,7 @@ import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
 import { spawn } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
+import { parseMcpServerDeclaration, parseMcpServers, type McpServerConfig } from '../src/mcp-config.js'
 
 const logger = createRuntimeLogger('kala-executor')
 
@@ -76,10 +77,11 @@ type Args = {
   updateAction?: 'apply' | 'rollback'
   serviceAction?: Exclude<ServiceAction, 'install'>
   serviceMode?: ServiceMode
+  mcpServers: McpServerConfig[]
 }
 
 function parseArgs(argv: readonly string[]): Args {
-  const out: Args = { sandboxRoots: [], command: argv[0] === 'update' ? 'update' : argv[0] === 'service' ? 'service' : 'run' }
+  const out: Args = { sandboxRoots: [], mcpServers: [], command: argv[0] === 'update' ? 'update' : argv[0] === 'service' ? 'service' : 'run' }
   let start = 0
   if (out.command === 'update') {
     if (argv[1] !== 'apply' && argv[1] !== 'rollback') throw new Error('Usage: kala-executor update apply|rollback --config <path>')
@@ -140,6 +142,12 @@ function parseArgs(argv: readonly string[]): Args {
         else out.updateRepo = value
         break
       }
+      case '--mcp': {
+        const value = inline ?? argv[++i]
+        if (value === undefined) throw new Error('Missing value for --mcp')
+        out.mcpServers.push(parseMcpServerDeclaration(value))
+        break
+      }
       default:
         break
     }
@@ -169,6 +177,7 @@ Options:
   --no-update-check          Disable release update check.
   --update-repo <owner/repo> GitHub release repo. Defaults to KALA_UPDATE_REPO.
   --config <path>             Managed service JSON config; credentials are loaded from its protected file.
+  --mcp <json>                Structured MCP server {name,command,args,env}; repeatable.
   --system                    Manage the system service.
   --user                      Manage the current user's service.
 
@@ -178,6 +187,7 @@ Common environment:
   SANDBOX_ROOTS              Colon-separated sandbox roots.
   EXECUTOR_TOKEN             Long-term executor token.
   EXECUTOR_INVITE            One-time invite token.
+  MCP_SERVERS                JSON array of structured MCP server declarations.
   KALA_EXECUTOR_PROFILE
                              Local profile. Example: dev.
   LOG_LEVEL                  trace, debug, info, warn, error. Default: info.
@@ -424,6 +434,21 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   const autoUpdate = args.autoUpdate === true || process.env.KALA_AUTO_UPDATE === '1'
   const noUpdateCheck = args.noUpdateCheck === true || process.env.KALA_NO_UPDATE_CHECK === '1'
   const updateRepo = args.updateRepo ?? process.env.KALA_UPDATE_REPO
+  const mcpServers = args.mcpServers.length > 0
+    ? parseMcpServers(args.mcpServers, '--mcp')
+    : managed
+      ? managed.mcpServers ?? []
+      : parseMcpServers(process.env.MCP_SERVERS)
+  const managedMcpConfig = args.config && managed?.installationSource === 'dashboard-native' &&
+    typeof managed.installationId === 'string' && managed.installationId.length > 0 &&
+    args.mcpServers.length === 0 && process.env.MCP_SERVERS === undefined
+    ? {
+        path: resolve(args.config),
+        installationSource: 'dashboard-native' as const,
+        installationId: managed.installationId,
+        configurationSource: 'managed-config' as const,
+      }
+    : undefined
 
   if (!host) {
     logger.error(
@@ -496,6 +521,8 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     ...(invite !== undefined ? { invite } : {}),
     ...(executorId !== undefined ? { executorId } : {}),
     ...(managed?.installationId ? { installId: managed.installationId } : {}),
+    ...(mcpServers.length > 0 ? { mcpServers } : {}),
+    ...(managedMcpConfig ? { managedMcpConfig } : {}),
     logger,
     onToken(nextToken) {
       saveExecutorToken(nextToken, undefined, profile)
@@ -515,10 +542,38 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     )
   })
 
-  await handle.ready
-  logger.info({ workspaceId: handle.workspaceId, workspaceName: handle.workspaceName, host, sandboxRoots }, 'executor announced; awaiting tool calls')
-  if (!managed?.serviceMode) printForegroundCommands()
-  const updateControl = managed?.managedRoot && process.platform !== 'win32'
+  // MCP subprocesses can start before the Host becomes reachable. Register
+  // cleanup immediately instead of leaving children behind during that wait.
+  let updateControl: Awaited<ReturnType<typeof startUpdateControlServer>> | null = null
+  let stopping = false
+  const shutdown = async (code = 0): Promise<void> => {
+    if (stopping) return
+    stopping = true
+    logger.info('shutting down')
+    await Promise.allSettled([handle.close(), updateControl?.close() ?? Promise.resolve()])
+    process.exit(code)
+  }
+  process.on('SIGINT', () => { void shutdown() })
+  process.on('SIGTERM', () => { void shutdown() })
+
+  const exitCodeByReason: Record<string, number> = {
+    workspace_id_conflict: 2,
+    workspace_identity_mismatch: 2,
+    version_incompatible: 3,
+    auth_failed: 4,
+  }
+  try {
+    // A handshake can permanently reject the socket before `ready` resolves.
+    // Race it now so authentication failures do not strand MCP subprocesses.
+    const initialFailure = await Promise.race([handle.ready.then(() => null), handle.permanentError])
+    if (initialFailure) {
+      logger.error({ failure: initialFailure }, 'executor rejected before announcement')
+      await shutdown(exitCodeByReason[initialFailure.code] ?? 1)
+      return
+    }
+    logger.info({ workspaceId: handle.workspaceId, workspaceName: handle.workspaceName, host, sandboxRoots }, 'executor announced; awaiting tool calls')
+    if (!managed?.serviceMode) printForegroundCommands()
+    updateControl = managed?.managedRoot && process.platform !== 'win32'
     ? await startUpdateControlServer({
         socketPath: join(managed.managedRoot, 'update-control.sock'),
         status: () => ({
@@ -531,33 +586,24 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
       })
     : null
 
-  const shutdown = (): void => {
-    logger.info('shutting down')
-    handle.close()
-    void updateControl?.close().finally(() => process.exit(0))
-    if (!updateControl) process.exit(0)
+    // Wait for a permanent error signal from the wire layer. This resolves
+    // only when the host explicitly rejects this executor's identity, auth, or
+    // protocol version. Transport failures are daemon-normal: socket.io keeps
+    // reconnecting with exponential backoff until the process is stopped.
+    const failure = await handle.permanentError
+    const code = exitCodeByReason[failure.code] ?? 1
+    logger.error(
+      { failure },
+      `executor stopping — this is a permanent failure that will not self-heal. ` +
+        `See message above for instructions.`,
+    )
+    await shutdown(code)
+  } catch (error) {
+    // The outer CLI error handler exits the process; release stdio children
+    // before that path runs too.
+    await Promise.allSettled([handle.close(), updateControl?.close() ?? Promise.resolve()])
+    throw error
   }
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
-
-  // Wait for a permanent error signal from the wire layer. This resolves
-  // only when the host explicitly rejects this executor's identity, auth, or
-  // protocol version. Transport failures are daemon-normal: socket.io keeps
-  // reconnecting with exponential backoff until the process is stopped.
-  const failure = await handle.permanentError
-  const exitCodeByReason: Record<string, number> = {
-    workspace_id_conflict: 2,
-    workspace_identity_mismatch: 2,
-    version_incompatible: 3,
-    auth_failed: 4,
-  }
-  const code = exitCodeByReason[failure.code] ?? 1
-  logger.error(
-    { failure },
-    `executor stopping — this is a permanent failure that will not self-heal. ` +
-      `See message above for instructions.`,
-  )
-  process.exit(code)
 }
 
 async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): Promise<void> {

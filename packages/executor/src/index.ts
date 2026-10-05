@@ -18,6 +18,9 @@ export {
 export type { Tool, ToolContext, ToolRunner } from './tools/index.js'
 export { startExecutor } from './client.js'
 export type { ExecutorOptions, ExecutorHandle } from './client.js'
+export { parseMcpServerConfig, parseMcpServerDeclaration, parseMcpServers } from './mcp-config.js'
+export type { McpServerConfig } from './mcp-config.js'
+export type { McpToolDescriptor } from './mcp-client.js'
 export {
   applyLegacyIdentityMigration,
   discoverLegacyExecutorProfiles,
