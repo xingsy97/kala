@@ -21,10 +21,13 @@ services:
       - -ec
       - |
         umask 077
+        # URI-encode every byte: randomly generated passwords can include '/' or '+'.
+        password_uri="$$(tr -d '\r\n' </run/secrets/postgres_password | od -An -tx1 | tr -d ' \n' | sed 's/../%&/g')"
+        test -n "$$password_uri"
         cat > /config/runtime.yaml <<EOF
         Database:
           postgres:
-            DSN: "postgresql://zitadel:$$(cat /run/secrets/postgres_password)@postgres:5432/zitadel?sslmode=disable"
+            DSN: "postgresql://zitadel:$$password_uri@postgres:5432/zitadel?sslmode=disable"
         EOF
         chown 1000:1000 /config/runtime.yaml
         chmod 400 /config/runtime.yaml

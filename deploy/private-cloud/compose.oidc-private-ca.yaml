@@ -1,0 +1,8 @@
+services:
+  init-app-secrets:
+    volumes:
+      - ${KALA_OIDC_CA_FILE:?KALA_OIDC_CA_FILE must point to the validated OIDC CA bundle}:/run/oidc-ca/ca.pem:ro
+
+  runtime-ingress:
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/kala-secrets/oidc_ca.pem

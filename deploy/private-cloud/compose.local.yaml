@@ -1,5 +1,5 @@
 services:
   runtime-ingress:
     environment:
-      KALA_PUBLIC_URLS: http://localhost:13001
+      KALA_PUBLIC_URLS: ${KALA_PUBLIC_URLS:-http://localhost:13001}
       KALA_INGRESS_ALLOW_INSECURE_HTTP: "1"

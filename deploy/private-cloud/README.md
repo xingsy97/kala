@@ -1,16 +1,17 @@
 # Kala Private Cloud
 
 Public installations use the versioned release bundle and its `kala-private-cloud`
-operator. See `docs/operations/private-cloud-release.md`. No source checkout or
-local application build is part of the supported production workflow.
+operator. Start with the [signed-bundle first-install guide](../../docs/operations/private-cloud-first-install.md),
+then consult [release and lifecycle details](../../docs/operations/private-cloud-release.md).
+No source checkout or local application build is part of the supported production workflow.
 
 The commands below are repository development and acceptance workflows only. They
 add `compose.dev.yaml`, which supplies local source builds over the production
 topology.
 
-The RunLab application and shared Identity service have independent Compose projects.
-No credential values belong in Git; only `*.env.example` metadata files are tracked.
-Start and verify the Identity project first; Private Cloud consumes it only as an OIDC client.
+The default **release candidate** uses bundled ZITADEL in the **same Compose project** as the three Kala application images and publishes only localhost HTTP endpoints. The installer checks both ports and chooses a different free localhost pair before saving configuration when the defaults are occupied; it does not touch an existing service on `13001`. The default local NFS port is checked separately (`12049`, falling back to `12149/12249`), and a Docker-valid storage subnet is used; `--storage local-volume` is an explicit alternative, not an automatic durability downgrade. For existing OIDC, select the app port before registering its redirect URI; it will not be changed automatically. The signed-bundle guide describes the single `setup` entry point and the alternative existing-OIDC mode. Cloudflare Tunnel is not part of Kala installation; publishing remotely requires a separate HTTPS identity-address migration, not just forwarding one port.
+
+The source-only shared Identity service below is a separate **development** Compose project, not a prerequisite for the bundled production flow. No credential values belong in Git; only `*.env.example` metadata files are tracked. For this development path, start and verify Identity first; Private Cloud consumes it as an OIDC client.
 
 Profiles:
 
