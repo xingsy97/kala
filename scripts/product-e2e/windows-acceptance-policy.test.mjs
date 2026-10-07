@@ -42,6 +42,8 @@ test('hosted Windows acceptance keeps Host CJS and native Executor targets separ
   assert.match(executor, /--component executor --native-only --native-target win32-x64/u)
   assert.match(executor, /kala-executor-win32-x64\.exe/u)
   assert.match(executor, /node-pty-win32-x64\.tar\.gz/u)
+  assert.match(executor, /worker\/conoutSocketWorker\.js/u)
+  assert.match(executor, /shared\/conout\.js/u)
   assert.match(executor, /prepare-windows-release-fixture\.mjs --host-release/u)
   assert.match(executor, /PRODUCT_E2E_WINDOWS_TARGET: executor/u)
   assert.match(executor, /PRODUCT_E2E_WINDOWS_SERVICE: '1'/u)

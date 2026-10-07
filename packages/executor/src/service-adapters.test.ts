@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createLinuxServicePlan, executeLinuxServicePlan, renderLinuxServiceFiles } from './linux-service.js'
 import { createMacosLaunchdService, executeLaunchdPlan } from './macos-launchd.js'
-import { assertManagedWindowsInstallation, createWindowsServicePlan, executeWindowsServicePlan } from './windows-service.js'
+import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, createWindowsServicePlan, executeWindowsServicePlan, WINDOWS_NODE_PTY_RUNTIME_FILES } from './windows-service.js'
 import type { InstallerSession } from './installer-session.js'
 
 const session: InstallerSession = {
@@ -161,6 +161,29 @@ describe('Windows service adapter', () => {
     const runner = vi.fn(async () => ({ exitCode: 0, stdout: 'ok', stderr: '' }))
     await executeWindowsServicePlan(plan, ['create', 'recovery', 'start'], { platform: 'win32', runner })
     expect(runner).toHaveBeenCalledTimes(3)
+  })
+
+  it('copies the exact native, worker, and shared runtime files for service startup', () => {
+    const root = mkdtempSync(join(tmpdir(), 'runlab-windows-runtime-copy-'))
+    const source = join(root, 'source')
+    const destination = join(root, 'destination')
+    try {
+      for (const relative of WINDOWS_NODE_PTY_RUNTIME_FILES) {
+        const path = join(source, ...relative.split('/'))
+        mkdirSync(dirname(path), { recursive: true })
+        writeFileSync(path, relative)
+      }
+      copyWindowsNodePtyRuntime(source, destination)
+      for (const relative of WINDOWS_NODE_PTY_RUNTIME_FILES) {
+        expect(readFileSync(join(destination, ...relative.split('/')), 'utf8')).toBe(relative)
+      }
+      rmSync(join(source, 'worker', 'conoutSocketWorker.js'))
+      const incomplete = join(root, 'incomplete')
+      expect(() => copyWindowsNodePtyRuntime(source, incomplete)).toThrow('missing worker/conoutSocketWorker.js')
+      expect(existsSync(incomplete)).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('binds uninstall to a recognized installation identity', () => {

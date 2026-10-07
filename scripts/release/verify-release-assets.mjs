@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process'
 import { verifyReleaseChecksums } from './release-checksums.mjs'
 import { inspectDedicatedSupportBundle, DEDICATED_SUPPORT_ARCHIVE } from './dedicated-support-bundle.mjs'
 import { dashboardArchiveName, releaseMetadataArchiveName, verifyDashboardArchive, verifyReleaseMetadataArchive } from './release-archives.mjs'
+import { verifyWindowsNodePtyCompanion } from './windows-executor-packager.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const releaseDir = join(root, 'release')
@@ -296,6 +297,13 @@ try {
   await verifyReleaseChecksums(releaseDir, [...manifest.assets, 'manifest.json'])
 } catch {
   fail('SHA256SUMS verification failed')
+}
+if (manifest.assets.includes('node-pty-win32-x64.tar.gz')) {
+  try {
+    verifyWindowsNodePtyCompanion(join(releaseDir, 'node-pty-win32-x64.tar.gz'))
+  } catch (error) {
+    fail(`Windows node-pty companion verification failed: ${error.message}`)
+  }
 }
 
 if (manifest.assets.includes('kala-executor.cjs')) {

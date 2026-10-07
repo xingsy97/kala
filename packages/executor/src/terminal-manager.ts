@@ -254,7 +254,7 @@ export function createTerminalManager(input: {
         const cwd = await input.sandbox.resolve(requestedCwd)
         terminalDiagnostic('sandbox cwd resolved')
         const terminalId = ulid()
-        const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh')
+        const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/sh')
         const terminal = await spawnTerminal({
           shell,
           cols: payload.cols ?? 80,

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { win32 } from 'node:path'
+import { copyFileSync, existsSync, lstatSync, mkdirSync } from 'node:fs'
+import { dirname, join, win32 } from 'node:path'
 
 export type WindowsServiceAction = 'create' | 'start' | 'query' | 'stop' | 'delete' | 'recovery'
 
@@ -59,6 +60,34 @@ export interface ManagedWindowsInstallation {
 
 const DEFAULT_VENDOR = 'Kala'
 const DEFAULT_PRODUCT = 'Executor'
+
+export const WINDOWS_NODE_PTY_RUNTIME_FILES = Object.freeze([
+  'prebuilds/win32-x64/conpty.node',
+  'prebuilds/win32-x64/conpty_console_list.node',
+  'prebuilds/win32-x64/pty.node',
+  'prebuilds/win32-x64/winpty-agent.exe',
+  'prebuilds/win32-x64/winpty.dll',
+  'worker/conoutSocketWorker.js',
+  'shared/conout.js',
+])
+
+/** Copy only the verified node-pty runtime closure needed beside a Windows SEA. */
+export function copyWindowsNodePtyRuntime(sourceRoot: string, destinationRoot: string): void {
+  const files = WINDOWS_NODE_PTY_RUNTIME_FILES.map((relative) => ({
+    relative,
+    source: join(sourceRoot, ...relative.split('/')),
+    destination: join(destinationRoot, ...relative.split('/')),
+  }))
+  for (const file of files) {
+    if (!existsSync(file.source) || !lstatSync(file.source).isFile() || lstatSync(file.source).size === 0) {
+      throw new Error(`Windows node-pty runtime is missing ${file.relative}`)
+    }
+  }
+  for (const file of files) {
+    mkdirSync(dirname(file.destination), { recursive: true, mode: 0o700 })
+    copyFileSync(file.source, file.destination)
+  }
+}
 
 function safeValue(value: string, label: string): string {
   if (!value || /[\0\r\n]/u.test(value)) throw new Error(`Invalid Windows service ${label}`)

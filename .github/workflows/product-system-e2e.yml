@@ -96,6 +96,8 @@ jobs:
           New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null
           Move-Item release/win32-x64 release/prebuilds/win32-x64 -Force
           if (-not (Test-Path release/prebuilds/win32-x64/conpty.node)) { throw 'ConPTY native was not installed beside Executor' }
+          if (-not (Test-Path release/worker/conoutSocketWorker.js)) { throw 'ConPTY worker was not installed beside Executor' }
+          if (-not (Test-Path release/shared/conout.js)) { throw 'ConPTY worker shared module was not installed beside Executor' }
           "PRODUCT_E2E_WINDOWS_EXECUTOR_RELEASE_DIR=$((Resolve-Path release).Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           node scripts/product-e2e/prepare-windows-release-fixture.mjs --host-release $env:PRODUCT_E2E_WINDOWS_HOST_RELEASE_DIR --executor-release release
           if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare Windows source-built Host/Executor fixture' }

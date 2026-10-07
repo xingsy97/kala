@@ -72,6 +72,10 @@ test('generates a signed-checksum Windows x64 installer with an exact ConPTY inv
     /Get-FileHash -Algorithm SHA256/,
     /node-pty-companion\.json/,
     /conpty\.node/,
+    /worker\/conoutSocketWorker\.js/,
+    /shared\/conout\.js/,
+    /manifest\.files\)\.Count -ne 7/,
+    /unexpected file inventory/,
     /--internal-installer/,
   ]) assert.match(ps1, marker)
   assert.match(ps1, /Host-mediated release trust requires a valid internal installation session/)
