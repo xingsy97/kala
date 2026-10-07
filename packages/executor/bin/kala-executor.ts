@@ -644,26 +644,45 @@ async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): 
   for (const result of results) { if (result.stdout) process.stdout.write(result.stdout); if (result.stderr) process.stderr.write(result.stderr) }
   if (action === 'uninstall') {
     rmSync(plan.layout.dataDir, { recursive: true, force: true })
-    if (resolve(process.execPath).startsWith(`${resolve(plan.layout.installDir)}${sep}`)) scheduleWindowsSelfRemoval(plan.layout.installDir)
+    if (resolve(process.execPath).startsWith(`${resolve(plan.layout.installDir)}${sep}`)) await scheduleWindowsSelfRemoval(plan.layout.installDir)
     else rmSync(plan.layout.installDir, { recursive: true, force: true })
     process.stdout.write('\nKala Executor Windows service and credentials were removed.\n')
   }
 }
 
-function scheduleWindowsSelfRemoval(installDir: string): void {
+async function scheduleWindowsSelfRemoval(installDir: string): Promise<void> {
   const script = join(tmpdir(), `kala-executor-uninstall-${process.pid}.ps1`)
   const status = join(tmpdir(), `kala-executor-uninstall-${process.pid}.status`)
   writeFileSync(script, `param([string]$Target,[int]$OwnerPid,[string]$Script,[string]$Status)\n[IO.File]::WriteAllText($Status, 'started')\n$ErrorActionPreference='Stop'\ntry {\n  $deadline=(Get-Date).AddSeconds(60)\n  while (Get-Process -Id $OwnerPid -ErrorAction SilentlyContinue) {\n    [IO.File]::WriteAllText($Status, 'waiting-for-parent')\n    if ((Get-Date) -ge $deadline) { throw 'owner_timeout' }\n    Start-Sleep -Milliseconds 100\n  }\n  [IO.File]::WriteAllText($Status, 'deleting')\n  for ($attempt=0; $attempt -lt 100; $attempt++) {\n    try { Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction Stop; break }\n    catch { if ($attempt -eq 99) { throw }; Start-Sleep -Milliseconds 200 }\n  }\n  [IO.File]::WriteAllText($Status, 'removed')\n  Remove-Item -LiteralPath $Script -Force\n} catch {\n  [IO.File]::WriteAllText($Status, ('failed:' + $_.Exception.GetType().Name))\n  exit 1\n}\n`, { mode: 0o600 })
   writeFileSync(status, 'queued', { mode: 0o600 })
   const outputLog = openSync(join(tmpdir(), `kala-executor-uninstall-${process.pid}.out`), 'w', 0o600)
   const errorLog = openSync(join(tmpdir(), `kala-executor-uninstall-${process.pid}.err`), 'w', 0o600)
+  let child: ReturnType<typeof spawn>
   try {
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installDir, String(process.pid), script, status], { detached: true, windowsHide: true, stdio: ['ignore', outputLog, errorLog] })
-    child.unref()
+    child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installDir, String(process.pid), script, status], { detached: true, windowsHide: true, stdio: ['ignore', outputLog, errorLog] })
   } finally {
     closeSync(outputLog)
     closeSync(errorLog)
   }
+  await new Promise<void>((resolveReady, rejectReady) => {
+    const finish = (error?: Error) => {
+      clearInterval(poll)
+      clearTimeout(timeout)
+      child.removeListener('exit', onExit)
+      child.removeListener('error', onError)
+      if (error) rejectReady(error)
+      else resolveReady()
+    }
+    const onExit = (code: number | null) => finish(new Error(`Windows removal helper exited before startup (code=${code ?? 'signal'})`))
+    const onError = () => finish(new Error('Windows removal helper could not start'))
+    const poll = setInterval(() => {
+      if (readFileSync(status, 'utf8') !== 'queued') finish()
+    }, 100)
+    const timeout = setTimeout(() => finish(new Error('Windows removal helper did not confirm startup')), 10_000)
+    child.once('exit', onExit)
+    child.once('error', onError)
+  })
+  child.unref()
 }
 
 main().catch((err) => {
