@@ -33,6 +33,7 @@ test('hosted Windows acceptance keeps Host CJS and native Executor targets separ
     assert.doesNotMatch(source, /if:\s*false|self-hosted|\bbox\b|docker|podman|playwright|chromium/iu)
     assert.match(source, /Require GNU tar and gzip from Git for Windows for reproducible archives/u)
     assert.match(source, /Git\\usr\\bin[\s\S]*GITHUB_PATH/u)
+    assert.match(source, /TAR_OPTIONS=--force-local/u)
   }
   assert.match(host, /--component host/u)
   assert.match(host, /PRODUCT_E2E_WINDOWS_TARGET: host/u)

@@ -42,6 +42,7 @@ jobs:
           }
           if ((& (Join-Path $tools 'tar.exe') --version | Select-Object -First 1) -notmatch 'GNU tar') { throw 'Git for Windows tar is not GNU tar' }
           $tools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          'TAR_OPTIONS=--force-local' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build Windows x64 Portable Host CJS and native Copilot runtime
         run: pnpm run build:release-assets -- --tag latest --repo xingsy97/kala --component host
       - name: Real Windows Host CJS boot and browser-accessible API
@@ -74,6 +75,7 @@ jobs:
           }
           if ((& (Join-Path $tools 'tar.exe') --version | Select-Object -First 1) -notmatch 'GNU tar') { throw 'Git for Windows tar is not GNU tar' }
           $tools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          'TAR_OPTIONS=--force-local' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build isolated Windows Host fixture
         shell: pwsh
         run: |
