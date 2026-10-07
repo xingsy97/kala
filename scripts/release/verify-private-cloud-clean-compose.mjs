@@ -58,12 +58,12 @@ try {
     'scripts/release/build-private-cloud-bundle.mjs', '--output', hybrid,
     '--runtime-image', predecessorLock.images.runtime, '--ingress-image', predecessorLock.images.ingress,
     '--dashboard-image', candidateLock.images.dashboard, '--revision', revision,
-    '--operator', join(candidate, 'kala-private-cloud'),
+    '--operator', bundleOperator(candidate),
   ])
   verify(hybrid)
 
-  const predecessorOperator = join(predecessor, 'kala-private-cloud')
-  const candidateOperator = join(candidate, 'kala-private-cloud')
+  const predecessorOperator = bundleOperator(predecessor)
+  const candidateOperator = bundleOperator(candidate)
   const env = { ...process.env, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot }
   const installedResult = operator(predecessorOperator, ['install', '--bundle', predecessor, '--config-dir', config], env)
   installed = true
@@ -161,7 +161,7 @@ try {
   if (installed) {
     try {
       const active = json(readFileSync(join(operatorRoot, 'installation.json'), 'utf8'))
-      operator(join(candidate, 'kala-private-cloud'), ['uninstall', '--confirm', 'UNINSTALL:' + active.installationId], { ...process.env, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot })
+      operator(bundleOperator(candidate), ['uninstall', '--confirm', 'UNINSTALL:' + active.installationId], { ...process.env, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot })
     } catch {}
   }
   cleanupProject(project)
@@ -353,7 +353,13 @@ function find(rootDir, name) { const queue = [rootDir]; while (queue.length) { c
 function verify(path) { const result = run(process.execPath, ['scripts/release/verify-private-cloud-bundle.mjs', path]); if (!json(result.stdout).ok) throw new Error('Private Cloud bundle verification failed') }
 function requirePrivateConfig(path) { for (const name of ['deployment.env', 'runtime-provider-catalog.json']) if (!existsSync(join(path, name))) throw new Error('Private Cloud config template is missing ' + name); if (!existsSync(join(path, 'secrets'))) throw new Error('Private Cloud config template is missing secrets') }
 function rewriteDeploymentEnv(path, project) { const lines = readFileSync(path, 'utf8').split(/\r?\n/u).filter((line) => line && !line.startsWith('COMPOSE_PROJECT_NAME=')); lines.push('COMPOSE_PROJECT_NAME=' + project); writeFileSync(path, lines.join('\n') + '\n', { mode: 0o600 }) }
-function operator(binary, args, env) { const result = run(binary, args, false, env); return json(result.stdout) }
+function bundleOperator(directory) {
+  const js = join(directory, 'kala-private-cloud.mjs')
+  const native = join(directory, 'kala-private-cloud')
+  if (existsSync(js) === existsSync(native)) throw new Error('Private Cloud bundle must contain exactly one Operator')
+  return existsSync(js) ? js : native
+}
+function operator(binary, args, env) { const result = run(binary.endsWith('.mjs') ? process.execPath : binary, binary.endsWith('.mjs') ? [binary, ...args] : args, false, env); return json(result.stdout) }
 function assertServicesReady(services) { for (const name of ['runtime-host', 'runtime-ingress', 'dashboard']) if (services?.[name]?.state !== 'running' || !['', 'healthy'].includes(services[name].health)) throw new Error('Private Cloud service is not ready: ' + name) }
 function inspectVolume(release, config, name) { const invocation = composeInvocation(release, config, ['config', '--format', 'json']); const value = json(run(invocation.command, invocation.args, false, invocation.env, invocation.cwd).stdout); return value.volumes?.[name]?.name ?? envFile(join(config, 'deployment.env')).COMPOSE_PROJECT_NAME + '_' + name }
 function composeInvocation(release, config, args) { const deployment = envFile(join(config, 'deployment.env')); const storage = deployment.KALA_STORAGE === 'local-volume' ? 'compose.storage-local.yaml' : deployment.KALA_STORAGE === 'external-nfs' ? 'compose.storage-external-nfs.yaml' : 'compose.storage-nfs.yaml'; const profile = deployment.KALA_PROFILE === 'local' ? 'compose.local.yaml' : 'compose.cloudflare.yaml'; const lock = json(readFileSync(join(release, 'image-lock.json'), 'utf8')); return { command: 'docker', cwd: release, env: { ...process.env, ...deployment, KALA_RUNTIME_IMAGE: lock.images.runtime, KALA_INGRESS_IMAGE: lock.images.ingress, KALA_DASHBOARD_IMAGE: lock.images.dashboard, KALA_SECRETS_DIR: join(config, 'secrets'), KALA_PROVIDER_CATALOG_FILE: join(config, 'runtime-provider-catalog.json'), KALA_DEPLOYMENT_CONFIG_FILE: join(release, 'deployment.json') }, args: ['compose', '--project-name', deployment.COMPOSE_PROJECT_NAME, '--env-file', join(config, 'deployment.env'), '-f', join(release, 'compose.yaml'), '-f', join(release, storage), '-f', join(release, profile), ...args] } }

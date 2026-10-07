@@ -159,7 +159,7 @@ async function initConfig() {
   const destination = bounded(required('--config-dir'), 'configuration directory')
   const profile = option('--profile') ?? 'local'
   const identity = option('--identity') ?? 'bundled'
-  const storage = option('--storage') ?? 'nfs'
+  const storage = option('--storage') ?? 'local-volume'
   if (!['nfs', 'local-volume', 'external-nfs'].includes(storage)) throw new Error('--storage must be nfs, local-volume, or external-nfs')
   if (storage !== 'nfs' && option('--nfs-port')) throw new Error('--nfs-port applies only to local NFS storage')
   if (!['local', 'cloudflare'].includes(profile)) throw new Error('--profile must be local or cloudflare')

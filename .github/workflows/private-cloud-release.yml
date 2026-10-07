@@ -11,6 +11,11 @@ on:
       predecessor_tag:
         description: Previously released Private Cloud version for clean upgrade and rollback acceptance
         required: false
+      native_operator:
+        description: Build an optional native Operator artifact for manual qualification, outside the default signed bundle
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -190,6 +195,7 @@ jobs:
 
   operator:
     needs: resolve
+    if: github.event_name == 'workflow_dispatch' && inputs.native_operator == true
     strategy:
       matrix:
         include:
@@ -210,7 +216,7 @@ jobs:
           if-no-files-found: error
 
   bundle:
-    needs: [resolve, runtime-image, ingress-image, dashboard-image, image-vulnerability-scan, operator]
+    needs: [resolve, runtime-image, ingress-image, dashboard-image, image-vulnerability-scan]
     strategy:
       matrix:
         # target: [linux-x64, linux-arm64] # Linux arm64 is paused for the current release.
@@ -222,10 +228,6 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
-        with:
-          name: private-cloud-operator-${{ matrix.target }}
-          path: release/operator
       - name: Build immutable Compose bundle
         run: |
           node scripts/release/build-private-cloud-bundle.mjs \
@@ -233,7 +235,6 @@ jobs:
             --ingress-image "ghcr.io/${{ github.repository }}-private-cloud-ingress@${{ needs.ingress-image.outputs.digest }}" \
             --dashboard-image "ghcr.io/${{ github.repository }}-private-cloud-dashboard@${{ needs.dashboard-image.outputs.digest }}" \
             --revision "${{ github.sha }}" \
-            --operator "release/operator/kala-private-cloud-${{ matrix.target }}" \
             --archive "release/kala-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz"
           node scripts/release/verify-private-cloud-bundle.mjs release/private-cloud
       - uses: sigstore/cosign-installer@v3

@@ -28,7 +28,7 @@ if(process.argv.includes('--version')||process.argv.includes('version')) console
   chmodSync(join(bin, 'openssl'), 0o755); chmodSync(join(bin, 'docker'), 0o755)
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: join(scratch, 'operator'), DOCKER_CAPTURE: dockerCapture }
   const cli = join(bundle, 'kala-private-cloud.mjs'); const config = join(scratch, 'config')
-  const initialized = run(process.execPath, [cli, 'init-config', '--bundle', bundle, '--config-dir', config, '--profile', 'cloudflare', '--identity', 'external', '--app-port', String(appPort)], { env })
+  const initialized = run(process.execPath, [cli, 'init-config', '--bundle', bundle, '--config-dir', config, '--profile', 'cloudflare', '--identity', 'external', '--storage', 'nfs', '--app-port', String(appPort)], { env })
   assert.equal(JSON.parse(initialized.stdout).ok, true)
   const nfsPort = JSON.parse(initialized.stdout).nfsPort
   assert.ok(Number.isInteger(nfsPort) && nfsPort >= 1024)
@@ -151,7 +151,7 @@ test('bundled initialization avoids an occupied default port and persists matchi
     const env = { ...process.env, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: join(scratch, 'operator') }
     const invalid = run(process.execPath, [join(bundle, 'kala-private-cloud.mjs'), 'init-config', '--bundle', bundle, '--config-dir', config, '--identity', 'bundled', '--app-port', '13101'], { env, allowFailure: true })
     assert.notEqual(invalid.status, 0)
-    const initialized = run(process.execPath, [join(bundle, 'kala-private-cloud.mjs'), 'init-config', '--bundle', bundle, '--config-dir', config, '--identity', 'bundled'], { env })
+    const initialized = run(process.execPath, [join(bundle, 'kala-private-cloud.mjs'), 'init-config', '--bundle', bundle, '--config-dir', config, '--identity', 'bundled', '--storage', 'nfs'], { env })
     const result = JSON.parse(initialized.stdout)
     assert.notEqual(result.kalaUrl, 'http://localhost:13001')
     assert.notEqual(result.nfsPort, 12049)
@@ -175,7 +175,7 @@ test('bundled initialization avoids an occupied default port and persists matchi
   }
 })
 
-test('explicit local-volume storage avoids NFS port selection and rejects a meaningless NFS override', async () => {
+test('default local-volume storage avoids NFS port selection and rejects a meaningless NFS override', async () => {
   const scratch = mkdtempSync(join(tmpdir(), 'kala-private-cloud-local-volume-'))
   const bundle = join(scratch, 'bundle'); build(bundle)
   const config = join(scratch, 'config')
@@ -184,7 +184,7 @@ test('explicit local-volume storage avoids NFS port selection and rejects a mean
   while (identityPort === appPort) identityPort = await freePort()
   const cli = join(bundle, 'kala-private-cloud.mjs')
   const env = { ...process.env, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: join(scratch, 'operator') }
-  const args = [cli, 'init-config', '--bundle', bundle, '--config-dir', config, '--identity', 'bundled', '--storage', 'local-volume', '--app-port', String(appPort), '--identity-port', String(identityPort)]
+  const args = [cli, 'init-config', '--bundle', bundle, '--config-dir', config, '--identity', 'bundled', '--app-port', String(appPort), '--identity-port', String(identityPort)]
   const bad = run(process.execPath, [...args, '--nfs-port', '12149'], { env, allowFailure: true })
   assert.notEqual(bad.status, 0)
   const created = JSON.parse(run(process.execPath, args, { env }).stdout)

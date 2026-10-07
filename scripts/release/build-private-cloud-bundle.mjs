@@ -14,7 +14,7 @@ const images = {
   dashboard: requiredImage('--dashboard-image'),
 }
 const operator = resolve(option('--operator') ?? join(root, 'scripts/deploy/kala-private-cloud.mjs'))
-const operatorName = option('--operator') ? 'kala-private-cloud' : 'kala-private-cloud.mjs'
+const operatorName = operator.endsWith('.mjs') ? 'kala-private-cloud.mjs' : 'kala-private-cloud'
 if (!/^[0-9a-f]{40}$/u.test(revision)) throw new Error('revision must be an exact 40-character Git revision')
 rmSync(output, { recursive: true, force: true })
 mkdirSync(output, { recursive: true, mode: 0o755 })

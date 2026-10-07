@@ -14,7 +14,7 @@ export const requiredReleaseEvidence = Object.freeze({
   }),
   'private-cloud': Object.freeze({
     targets: Object.freeze(['linux-x64-compose']),
-    checks: Object.freeze(['assetIntegrity', 'cleanInstall', 'tenantIsolation', 'browser', 'executor', 'fullUpgrade', 'mtlsClientRejection', 'unitResourceIsolation', 'runtimeRestartRecovery', 'dashboardUpgradeIsolation', 'rollback', 'backupRestore']),
+    checks: Object.freeze(['assetIntegrity', 'cleanInstall', 'organizationProvisioning', 'tenantIsolation', 'browser', 'executor', 'fullUpgrade', 'mtlsClientRejection', 'unitResourceIsolation', 'runtimeRestartRecovery', 'dashboardUpgradeIsolation', 'rollback', 'backupRestore']),
   }),
 })
 

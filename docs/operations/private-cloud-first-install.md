@@ -4,21 +4,21 @@ This is an **operator-assisted** Linux installation, not a source-checkout workf
 
 ## Intended quick path: one configuration, one check-and-install
 
-After verifying a compatible signed bundle (section 1) and granting the target Docker daemon access to the three immutable Kala images, prepare one version-1 provider catalog JSON with a real reachable model endpoint and one private (`0600`) file containing its API key. The installer supplies local PostgreSQL/NFS, internal mTLS, random secrets and bundled ZITADEL in the **same Compose project** as Runtime Host, Ingress and Dashboard. It does not require DNS, public HTTPS or Cloudflare Tunnel.
+After verifying a compatible signed bundle (section 1) and granting the target Docker daemon access to the three immutable Kala images, prepare one version-1 provider catalog JSON with a real reachable model endpoint and one private (`0600`) file containing its API key. The installer supplies local PostgreSQL, a single-host persistent Docker volume, internal mTLS, random secrets and bundled ZITADEL in the **same Compose project** as Runtime Host, Ingress and Dashboard. Install Node.js 22+ on the deployment machine to run the default signed JS Operator; Docker alone is not sufficient. It does not require DNS, public HTTPS or Cloudflare Tunnel.
 
 ```bash
-./private-cloud-bundle/kala-private-cloud setup \
+node ./private-cloud-bundle/kala-private-cloud.mjs setup \
   --bundle "$PWD/private-cloud-bundle" --config-dir "$PWD/private-cloud-config" \
   --provider-catalog "$PWD/my-model-catalog.json" \
   --llm-api-key-file "$HOME/private/model-api-key"
 ```
 
-`setup` validates inputs and permissions before generating configuration, then checks Compose and deploys automatically. Errors stop with a nonzero exit code; run the **same** command after correcting the cause. Existing identity secrets and registered OIDC credentials are retained, not regenerated. The bootstrap administrator password is in the owner-only `private-cloud-config/identity-secrets/initial_human_password` file: never print it into logs or send it through tickets, and change it on first ZITADEL sign-in. The bundled installer prefers Kala `http://localhost:13001` and identity `http://localhost:13002`, but if either port is occupied it selects an available loopback pair (currently `13101/13102`, then `13201/13202`) **before** persisting the configuration. Read the actual `kalaUrl` and `identityUrl` from the command output and `deployment.env`; never stop an existing service (for example a documentation site already on `13001`). You may instead choose both ports at first installation with `--app-port 13101 --identity-port 13102`. The local NFS listener also stays on loopback: it prefers `12049`, then `12149/12249` when occupied; read the saved `nfsPort` rather than disrupting another project's NFS server. You can choose `--nfs-port` at first setup, or explicitly use `--storage local-volume` when that storage profile is appropriate for your durability plan. An already configured issuer, redirect URI, or storage mode cannot silently move. Both loopback endpoints are accessible only from the installation machine (or a trusted local port forward), not from another user's browser. A successful container health check is **not** proof of a working browser login.
+`setup` validates inputs and permissions before generating configuration, then checks Compose and deploys automatically. Errors stop with a nonzero exit code; run the **same** command after correcting the cause. Existing identity secrets and registered OIDC credentials are retained, not regenerated. The bootstrap administrator password is in the owner-only `private-cloud-config/identity-secrets/initial_human_password` file: never print it into logs or send it through tickets, and change it on first ZITADEL sign-in. The bundled installer prefers Kala `http://localhost:13001` and identity `http://localhost:13002`, but if either port is occupied it selects an available loopback pair (currently `13101/13102`, then `13201/13202`) **before** persisting the configuration. Read the actual `kalaUrl` and `identityUrl` from the command output and `deployment.env`; never stop an existing service (for example a documentation site already on `13001`). You may instead choose both ports at first installation with `--app-port 13101 --identity-port 13102`. The beta default `local-volume` keeps data on this one Docker host: arrange durable backups and do not treat it as replicated storage. NFS is an explicit experimental `--storage nfs` choice, not covered by full-stack acceptance. If selected, its listener stays on loopback and prefers `12049`, then `12149/12249` when occupied; read the saved `nfsPort` rather than disrupting another project's NFS server. You can choose `--nfs-port` only with NFS. An already configured issuer, redirect URI, or storage mode cannot silently move. Both loopback endpoints are accessible only from the installation machine (or a trusted local port forward), not from another user's browser. A successful container health check is **not** proof of a working browser login.
 
 For an existing OIDC provider, register `http://localhost:13001/auth/callback` for **local** usage only when `13001` is genuinely free. If occupied, choose a free `--app-port` **before** registering the external IdP client and use `http://localhost:<app-port>/auth/callback` instead; external OIDC setup never changes this callback automatically. Supply the provider's exact HTTPS issuer, discovery origin, client ID and secret once. Store both client values in owner-only files; for remote HTTPS deployment use the separately registered public callback and explicitly reviewed origin/configuration instead. The same installation entry point accepts:
 
 ```bash
-./private-cloud-bundle/kala-private-cloud setup \
+node ./private-cloud-bundle/kala-private-cloud.mjs setup \
   --identity external --bundle "$PWD/private-cloud-bundle" \
   --config-dir "$PWD/private-cloud-config" \
   --provider-catalog "$PWD/my-model-catalog.json" \
@@ -33,7 +33,7 @@ For an existing OIDC provider, register `http://localhost:13001/auth/callback` f
 
 **Do not forward only Kala's port to other users.** Bundled identity has a persisted `localhost` issuer (with the chosen port), so a remote browser would point at *its own* machine. Kala does not install or manage Cloudflare Tunnel/Nginx; external publishing requires a separately designed HTTPS address for **both** Kala and identity, correct OIDC redirect registration and an identity/issuer migration that preserves `(issuer, sub)` membership. Automatic migration has **not** been implemented. Do not expose the loopback HTTP listener publicly or assume wrapping one port in TLS is sufficient.
 
-`backup` now includes the bundled ZITADEL PostgreSQL dump and its bootstrap/config volumes along with Kala's data; keep the full `private-cloud-config` (especially `identity-secrets`, OIDC client credentials and internal CA) securely backed up **separately** and restore it with the same identity database. Existing backups made without an identity dump cannot restore bundled users. An isolated local-volume candidate passed real browser login, first-owner confirmation, backup/restore and Dashboard-only upgrade/rollback; the corrected default NFS subnet, server, initialization and tenant-data mount were tested separately. A combined fresh default-NFS installation, real external OIDC login, approved model inference, clean-VM acceptance and signed release remain unverified gates.
+`backup` now includes the bundled ZITADEL PostgreSQL dump and its bootstrap/config volumes along with Kala's data; keep the full `private-cloud-config` (especially `identity-secrets`, OIDC client credentials and internal CA) securely backed up **separately** and restore it with the same identity database. Existing backups made without an identity dump cannot restore bundled users. An isolated local-volume candidate passed real browser login, first-owner confirmation, backup/restore and Dashboard-only upgrade/rollback; the experimental NFS subnet, server, initialization and tenant-data mount were tested separately. A combined fresh NFS installation, real external OIDC login, approved model inference, clean-VM acceptance and signed release remain unverified gates.
 
 The sections below document the advanced, operator-assisted **external OIDC / published HTTPS** workflow and its legacy individual commands; they are not prerequisites for the default local path.
 
@@ -70,10 +70,10 @@ Do not proceed if any asset is absent, the signature identity differs, or the lo
 
 ## 2. Prepare configuration and external services
 
-Run the bundled native operator from an independent administrative terminal:
+Run the bundled JS Operator with Node.js 22+ from an independent administrative terminal:
 
 ```bash
-./private-cloud-bundle/kala-private-cloud init-config \
+node ./private-cloud-bundle/kala-private-cloud.mjs init-config \
   --bundle "$PWD/private-cloud-bundle" --config-dir "$PWD/private-cloud-config" --profile cloudflare --identity external
 ```
 
@@ -83,7 +83,7 @@ By default, OIDC HTTPS uses the system CA set in the Ingress image and no extra 
 
 ```bash
 install -m 0600 '<approved-public-ca-chain.pem>' private-cloud-config/oidc-ca.pem
-./private-cloud-bundle/kala-private-cloud preflight \
+node ./private-cloud-bundle/kala-private-cloud.mjs preflight \
   --bundle "$PWD/private-cloud-bundle" --config-dir "$PWD/private-cloud-config"
 ```
 
@@ -92,14 +92,14 @@ install -m 0600 '<approved-public-ca-chain.pem>' private-cloud-config/oidc-ca.pe
 If your IdP is itself deployed on this machine, bring it up and verify its public issuer and callback first. Its lifecycle and backups are independent of Kala. Local HTTP and local storage modes are for a deliberately local environment, not a shortcut to an internet-exposed deployment. For external NFS, provide an actual operator-managed endpoint and test its permissions and recovery separately.
 
 ```bash
-./private-cloud-bundle/kala-private-cloud preflight \
+node ./private-cloud-bundle/kala-private-cloud.mjs preflight \
   --bundle "$PWD/private-cloud-bundle" --config-dir "$PWD/private-cloud-config"
-./private-cloud-bundle/kala-private-cloud doctor \
+node ./private-cloud-bundle/kala-private-cloud.mjs doctor \
   --bundle "$PWD/private-cloud-bundle" --config-dir "$PWD/private-cloud-config" \
   > private-cloud-doctor.json
 
 # Only after reviewing an intentional enterprise-internal endpoint, repeat once per exact origin:
-./private-cloud-bundle/kala-private-cloud doctor \
+node ./private-cloud-bundle/kala-private-cloud.mjs doctor \
   --bundle "$PWD/private-cloud-bundle" --config-dir "$PWD/private-cloud-config" \
   --allow-private-origin 'https://idp.internal.example' \
   --allow-private-origin 'https://models.internal.example' \
@@ -119,15 +119,15 @@ Neither preflight nor doctor proves the OIDC client registration, redirect URI/c
 ## 3. Install, provision owner, and prove login
 
 ```bash
-./private-cloud-bundle/kala-private-cloud install \
+node ./private-cloud-bundle/kala-private-cloud.mjs install \
   --bundle "$PWD/private-cloud-bundle" --config-dir "$PWD/private-cloud-config"
-./private-cloud-bundle/kala-private-cloud status
+node ./private-cloud-bundle/kala-private-cloud.mjs status
 ```
 
 Only after the application reports healthy services, provision the first organization. Two paths are supported. The optional trusted-operator bootstrap avoids manually transcribing `sub`, but it **never makes the first person to sign in an owner**. On the installation host, create a 15-minute authorization bound to the configured issuer, expected verified email, organization, and contract:
 
 ```bash
-./private-cloud-bundle/kala-private-cloud create-owner-bootstrap \
+node ./private-cloud-bundle/kala-private-cloud.mjs create-owner-bootstrap \
   --owner-issuer 'https://<idp-issuer>' --owner-email 'owner@example.com' \
   --organization-name '<organization>' --contract-reference '<contract-reference>' \
   --ends-at '<future-ISO-8601-timestamp>' --operation-id '<stable-unique-operation-id>'
@@ -138,9 +138,9 @@ Deliver the returned one-time URL only to the expected owner. It is a bearer aut
 The trusted operator then inspects the candidate locally and compares issuer, email, opaque subject, authorization ID, and the code read from the owner's result page:
 
 ```bash
-./private-cloud-bundle/kala-private-cloud owner-bootstrap-status \
+node ./private-cloud-bundle/kala-private-cloud.mjs owner-bootstrap-status \
   --authorization-id '<ob_...>'
-./private-cloud-bundle/kala-private-cloud confirm-owner-bootstrap \
+node ./private-cloud-bundle/kala-private-cloud.mjs confirm-owner-bootstrap \
   --authorization-id '<ob_...>' --confirmation-code '<code-from-owner-page>'
 ```
 
@@ -149,7 +149,7 @@ Confirm only after the expected person and candidate details have been independe
 The original exact-sub path remains supported and is appropriate when the IdP administrator can securely obtain claims. Obtain the **exact subject** (`sub`) from the IdP administrative record or a verified ID token. The issuer must exactly equal `OIDC_ISSUER` in `deployment.env`; email is not a substitute:
 
 ```bash
-./private-cloud-bundle/kala-private-cloud provision-organization \
+node ./private-cloud-bundle/kala-private-cloud.mjs provision-organization \
   --owner-issuer 'https://<idp-issuer>' --owner-subject '<exact-idp-sub>' \
   --owner-email 'owner@example.com' --organization-name '<organization>' \
   --contract-reference '<contract-reference>' --ends-at '<future-ISO-8601-timestamp>' \
@@ -170,10 +170,10 @@ Before declaring onboarding complete, start a real Session, send a prompt using 
 
 ## 5. Operate and recover
 
-Check `kala-private-cloud status` and the retained operation receipts. Backups require a persistent **empty** destination outside the installation and private configuration:
+Check `node ./private-cloud-bundle/kala-private-cloud.mjs status` and the retained operation receipts. Backups require a persistent **empty** destination outside the installation and private configuration:
 
 ```bash
-./private-cloud-bundle/kala-private-cloud backup --output '<persistent-empty-backup-directory>'
+node ./private-cloud-bundle/kala-private-cloud.mjs backup --output '<persistent-empty-backup-directory>'
 ```
 
 Keep backups encrypted, access-controlled and off the application host; periodically verify restore on an isolated host/project. `restore` is disruptive and requires the exact `RESTORE:<backup-id>` confirmation shown by the backup result. A full upgrade uses another verified immutable bundle; a Dashboard-only upgrade and a one-step rollback are separate operator operations (see [lifecycle contract](./private-cloud-release.md#supported-lifecycle)). Do not run them from a Session hosted by the target Runtime.
