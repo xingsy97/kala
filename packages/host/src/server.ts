@@ -91,6 +91,7 @@ import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinat
 import { inspectUnitQuiescence } from './tenant-runtime/quiescence.js'
 import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
 import { loadPersistedMessageQueueState, persistMessageQueueSnapshot, type PersistedMessageQueueState } from './message-queue-store.js'
+import { messageOperationFingerprint } from './message-operation-fingerprint.js'
 import { bangShellCallId, bangShellResultOperationId, bangShellResultState, formatBangShellResult, isBangShellResultForCommand, parseBangShellRequest } from './bang-shell.js'
 import { modelIdFromRef, resolveModelContextWindow } from './model-capabilities.js'
 import type { WebSearchCredentialStore } from './web-search/index.js'
@@ -636,14 +637,22 @@ export async function startHostServer(
         }
         return { accepted: true, committed: true, cursor: existingResult.cursor }
       }
-      if (existingResult?.kind === 'runtime_metadata') return { accepted: true, committed: true, cursor: record.state.cursor }
+      if (existingResult?.kind === 'runtime_metadata') {
+        if (existingResult.action !== 'copilot.user_message' || !isBangShellResultForCommand(existingResult.text ?? '', shell.command)) {
+          throw new Error(`operationId ${operationId} was already used for a different shell command`)
+        }
+        return { accepted: true, committed: true, cursor: record.state.cursor }
+      }
     }
     const existingOperation = await findSessionOperation(record.logPath, operationId, operationScan)
     if (existingOperation?.kind === 'event') {
       assertMessageOperationCompatible(existingOperation.event, text, content)
       return { accepted: true, committed: true, cursor: existingOperation.cursor }
     }
-    if (existingOperation?.kind === 'runtime_metadata') return { accepted: true, committed: true, cursor: record.state.cursor }
+    if (existingOperation?.kind === 'runtime_metadata') {
+      assertCopilotOperationCompatible(existingOperation, text, content)
+      return { accepted: true, committed: true, cursor: record.state.cursor }
+    }
     if (record.agentRuntime !== 'kernel') {
       const resting = isRestingStatus(record.state.status)
       await messageQueues.enqueue(sessionId, {
@@ -1114,9 +1123,27 @@ export async function startHostServer(
             }
             return
           }
-          if (committed?.kind === 'runtime_metadata') return
-        } else if (await sessionUserOperationCursor(store, sessionId, committedOperationId) !== undefined) {
-          return
+          if (committed?.kind === 'runtime_metadata') {
+            if (committed.action !== 'copilot.user_message' || !isBangShellResultForCommand(committed.text ?? '', msg.shell.command)) {
+              throw new Error(`operationId ${msg.operationId} was already used for a different shell command`)
+            }
+            return
+          }
+        } else {
+          const record = store.get(sessionId) ?? await store.load(sessionId, { recoverDangling: false })
+          const committed = await findSessionOperation(
+            record.logPath,
+            committedOperationId,
+            record.agentRuntime === 'kernel' ? {} : { maxScanBytes: 64 * 1024 * 1024 },
+          )
+          if (committed?.kind === 'event') {
+            assertMessageOperationCompatible(committed.event, msg.text, msg.content)
+            return
+          }
+          if (committed?.kind === 'runtime_metadata') {
+            assertCopilotOperationCompatible(committed, msg.text, msg.content)
+            return
+          }
         }
         const admission = resourceGovernor && resourceUnitId
           ? resourceGovernor.tryEnqueue(resourceUnitId)
@@ -1375,6 +1402,19 @@ export async function startHostServer(
     )
     if (operation?.kind === 'event') return operation.cursor
     return operation?.kind === 'runtime_metadata' ? record.state.cursor : undefined
+  }
+
+  function assertCopilotOperationCompatible(
+    existing: Extract<NonNullable<Awaited<ReturnType<typeof findSessionOperation>>>, { kind: 'runtime_metadata' }>,
+    text: string,
+    content: readonly import('@agent-kernel/kernel').MessageContent[] | undefined,
+  ): void {
+    if (existing.action !== 'copilot.user_message'
+      || existing.requestFingerprint !== messageOperationFingerprint(text, content)) {
+      // Legacy Copilot logs contain no content identity. A matching text cannot
+      // prove whether the original request also included structured content.
+      throw new Error('message operation ID conflict')
+    }
   }
 
   function assertMessageOperationCompatible(

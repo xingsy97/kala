@@ -431,7 +431,7 @@ describe('readSessionLog', () => {
     await appendRuntimeMetadataEntry(path, {
       sessionId: 'operation-lookup',
       action: 'copilot.user_message',
-      payload: { operationId: 'runtime-operation' },
+      payload: { operationId: 'runtime-operation', text: 'hello', requestFingerprint: 'synthetic-fingerprint' },
     })
     await appendEventEntry({
       path,
@@ -440,7 +440,9 @@ describe('readSessionLog', () => {
       effects: [],
     })
 
-    await expect(findSessionOperation(path, 'runtime-operation')).resolves.toEqual({ kind: 'runtime_metadata' })
+    await expect(findSessionOperation(path, 'runtime-operation')).resolves.toEqual({
+      kind: 'runtime_metadata', action: 'copilot.user_message', text: 'hello', requestFingerprint: 'synthetic-fingerprint',
+    })
     await expect(findSessionOperation(path, 'event-operation')).resolves.toEqual({
       kind: 'event',
       cursor: 7,

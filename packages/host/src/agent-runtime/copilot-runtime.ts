@@ -34,6 +34,7 @@ import {
 
 import type { SessionRecord } from '../store/session.js'
 import { findPersistedToolResult } from '../store/log.js'
+import { messageOperationFingerprint } from '../message-operation-fingerprint.js'
 import type {
   AgentRuntime,
   AgentRuntimeContext,
@@ -211,7 +212,10 @@ export class CopilotAgentRuntime implements AgentRuntime {
     this.requestGenerations.set(approvalKey(record.sessionId, requestId), generation)
     await this.project(record, 'copilot.user_message', {
       text: input.text,
-      ...(input.operationId ? { operationId: input.operationId } : {}),
+      ...(input.operationId ? {
+        operationId: input.operationId,
+        requestFingerprint: messageOperationFingerprint(input.text, input.content),
+      } : {}),
       ...(input.queuedAt ? { queuedAt: input.queuedAt } : {}),
     }, (state) => ({
       ...state,
