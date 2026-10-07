@@ -74,6 +74,9 @@ test('Private Cloud release retains image publishing and accepts the exact signe
 test('release workflow publishes archived metadata and verifies the signed Executor-native inventory', () => {
   const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/release.yml'), 'utf8')
   assert.equal(workflow.match(/extract-release-metadata\.mjs release\/kala-release-metadata\.tar\.gz/g)?.length, 2)
+  assert.match(workflow, /test "\$GITHUB_REF" = "refs\/tags\/\$TAG"/u)
+  assert.match(workflow, /optional-host-native:[\s\S]*workflow_dispatch[\s\S]*--component host[\s\S]*name: optional-host-qualification-/u)
+  assert.match(workflow, /native-assets:[\s\S]*--component executor[\s\S]*name: native-/u)
   assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*pnpm run verify:release-assets -- --require-signed/u)
   assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*cosign verify-blob[\s\S]*certificate-oidc-issuer/u)
   assert.match(workflow, /subject-path:[\s\S]*release\/kala-release-metadata\.tar\.gz/u)

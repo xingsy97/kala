@@ -9,6 +9,11 @@ on:
       tag:
         description: 'Product release tag, for example v0.2.0'
         required: true
+      optional_host_native:
+        description: 'Manually build self-contained Host/Dedicated binaries for qualification only; never add them to the default release'
+        required: false
+        type: boolean
+        default: false
       native_targets:
         description: 'Comma-separated native targets. Empty builds Linux x64 and macOS x64/arm64.'
         required: false
@@ -31,6 +36,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
+            test "$GITHUB_REF" = "refs/tags/$TAG" || { echo 'Select the exact release tag as the workflow dispatch ref' >&2; exit 1; }
             NATIVE_TARGETS="${{ inputs.native_targets }}"
           else
             TAG="${GITHUB_REF#refs/tags/}"
@@ -87,6 +93,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.tag }}' }
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -105,6 +112,29 @@ jobs:
           path: release/kala-*-${{ matrix.target }}*
           if-no-files-found: error
 
+  optional-host-native:
+    needs: resolve
+    if: github.event_name == 'workflow_dispatch' && inputs.optional_host_native == true
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.native_matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.tag }}' }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
+      - run: pnpm run build
+      - run: pnpm run build:release-assets -- --component host --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v5
+        with:
+          name: optional-host-qualification-${{ matrix.target }}
+          path: release/kala-*-${{ matrix.target }}*
+          if-no-files-found: error
+
   cjs-release:
     needs: resolve
     runs-on: ubuntu-latest
@@ -112,6 +142,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.tag }}' }
 
       - uses: actions/setup-node@v5
         with:
@@ -176,6 +207,7 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.tag }}' }
 
       - uses: actions/setup-node@v5
         with:
