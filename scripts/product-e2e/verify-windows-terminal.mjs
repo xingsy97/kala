@@ -205,10 +205,10 @@ async function verifyExecutorLifecycle() {
       const helperScript = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.ps1`)
       let syntaxErrors = 'helper-missing'
       if (existsSync(helperScript)) {
+        const safePath = helperScript.replaceAll("'", "''")
         const parsed = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-          '$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$tokens,[ref]$errors)|Out-Null;Write-Output $errors.Count',
-          helperScript])
-        syntaxErrors = parsed.code === 0 ? parsed.stdout.trim() : 'parser-failed'
+          `$tokens=$null;$parseErrors=$null;[System.Management.Automation.Language.Parser]::ParseFile('${safePath}',[ref]$tokens,[ref]$parseErrors)|Out-Null;foreach($entry in $parseErrors){Write-Output ($entry.ErrorId + ':line-' + $entry.Extent.StartLineNumber)}`])
+        syntaxErrors = parsed.code === 0 ? (parsed.stdout.trim() || 'none') : 'parser-failed'
       }
       throw new Error(`Windows service uninstall left managed installation data; self-removal=${outcome}; syntaxErrors=${syntaxErrors}; installDir=${existsSync(installDir)}; dataDir=${existsSync(dataDir)}`)
     }
