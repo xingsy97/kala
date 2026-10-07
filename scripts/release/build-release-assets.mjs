@@ -8,7 +8,11 @@ import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { build } from 'esbuild'
-import { executorNativeAssetName } from './executor-installer.mjs'
+import {
+  executorNativeAssetName,
+  generateExecutorInstallerPowerShell,
+  windowsExecutorInstallerAssetName,
+} from './executor-installer.mjs'
 import { buildDedicatedSupportBundle, DEDICATED_SUPPORT_ARCHIVE } from './dedicated-support-bundle.mjs'
 import {
   createDashboardArchive,
@@ -16,6 +20,11 @@ import {
   dashboardArchiveName,
   releaseMetadataArchiveName,
 } from './release-archives.mjs'
+import {
+  packageWindowsNodePtyCompanion,
+  WINDOWS_EXECUTOR_TARGET,
+  windowsNodePtyCompanionAssetName,
+} from './windows-executor-packager.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
@@ -80,6 +89,7 @@ const allEntries = [
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
 const nativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64']
+const supportedNativeBuildTargets = [...nativeTargets, WINDOWS_EXECUTOR_TARGET]
 const copilotRuntimeTargets = nativeTargets
 if (finalizeOnly) {
   finalizeRelease()
@@ -88,6 +98,9 @@ if (finalizeOnly) {
 
 if (wantsNativeBuild && nativeTarget !== currentNativeTarget) {
   throw new Error(`native target ${nativeTarget} does not match this runner (${currentNativeTarget}); Node SEA builds are not cross-compiled`)
+}
+if (wantsNativeBuild && nativeTarget === WINDOWS_EXECUTOR_TARGET && component !== 'executor') {
+  throw new Error('Windows native release builds are Executor-only; Portable Host remains a Node.js 22+ CJS asset')
 }
 
 if (!nativeOnly && !skipPackageBuild) {
@@ -171,11 +184,32 @@ for (const item of buildEntries) {
   }
 }
 
+// Host CJS still needs the platform Copilot SDK runtime files for agent turns.
+// Stage those dependencies without building a self-contained native Host.
+if (nativeOnly && component === 'executor' && copilotRuntimeTargets.includes(nativeTarget)) {
+  stageCopilotRuntime(nativeTarget)
+}
+
+if (nativeOnly && nativeTarget === WINDOWS_EXECUTOR_TARGET && entries.some((entry) => entry.role === 'executor')) {
+  const executorRequire = createRequire(join(root, 'packages/executor/package.json'))
+  const nodePtyRoot = dirname(executorRequire.resolve('node-pty/package.json'))
+  packageWindowsNodePtyCompanion({
+    nodePtyRoot,
+    outputPath: join(outDir, windowsNodePtyCompanionAssetName(nativeTarget)),
+    target: nativeTarget,
+  })
+}
+
 if (nativeOnly) {
   removeNativeBuildWorkspace()
   console.log(`native release assets written to ${outDir} for ${nativeTarget}`)
   for (const item of entries) console.log(` - ${basename(nativeAssetName(item.name, nativeTarget))}`)
-  for (const asset of copilotRuntimeAssetNames(nativeTarget)) console.log(` - ${asset}`)
+  if (nativeTarget === WINDOWS_EXECUTOR_TARGET && entries.some((entry) => entry.role === 'executor')) {
+    console.log(` - ${windowsNodePtyCompanionAssetName(nativeTarget)}`)
+  }
+  if (copilotRuntimeTargets.includes(nativeTarget)) {
+    for (const asset of copilotRuntimeAssetNames(nativeTarget)) console.log(` - ${asset}`)
+  }
   process.exit(0)
 }
 
@@ -345,6 +379,18 @@ function prepareBootstrapAssets() {
   writeFileSync(runPath, unifiedBootstrap({ repo, tag, component }))
   chmodSync(runPath, 0o755)
   bootstrapAssets.push('run.sh')
+  if (component === 'all' || component === 'executor') {
+    const windowsExecutable = executorNativeAssetName(WINDOWS_EXECUTOR_TARGET)
+    const windowsCompanion = windowsNodePtyCompanionAssetName(WINDOWS_EXECUTOR_TARGET)
+    if (exists(windowsExecutable) || exists(windowsCompanion)) {
+      if (!exists(windowsExecutable) || !exists(windowsCompanion)) {
+        throw new Error('Windows Executor and ConPTY companion must be staged together')
+      }
+      const installer = windowsExecutorInstallerAssetName()
+      writeFileSync(join(outDir, installer), generateExecutorInstallerPowerShell({ repo, tag }))
+      bootstrapAssets.push(installer, windowsCompanion)
+    }
+  }
   return bootstrapAssets
 }
 
@@ -386,20 +432,20 @@ function keepSingleShebang(text) {
 function detectNativeTarget() {
   const os = process.platform
   const arch = process.arch
-  const normalizedOs = os === 'darwin' ? 'darwin' : os === 'linux' ? 'linux' : os
+  const normalizedOs = os === 'win32' ? 'win32' : os === 'darwin' ? 'darwin' : os === 'linux' ? 'linux' : os
   const normalizedArch = arch === 'x64' ? 'x64' : arch === 'arm64' ? 'arm64' : arch
-  if (!['linux', 'darwin'].includes(normalizedOs)) {
+  if (!['linux', 'darwin', 'win32'].includes(normalizedOs)) {
     throw new Error(`unsupported native release os ${os}`)
   }
-  if (!['x64', 'arm64'].includes(normalizedArch)) {
+  if (!['x64', 'arm64'].includes(normalizedArch) || (normalizedOs === 'win32' && normalizedArch !== 'x64')) {
     throw new Error(`unsupported native release arch ${arch}`)
   }
   return `${normalizedOs}-${normalizedArch}`
 }
 
 function nativeAssetName(name, target) {
-  if (!nativeTargets.includes(target)) throw new Error(`unsupported native release target ${target}`)
-  return `${name}-${target}`
+  if (!supportedNativeBuildTargets.includes(target)) throw new Error(`unsupported native release target ${target}`)
+  return `${name}-${target}${target === WINDOWS_EXECUTOR_TARGET ? '.exe' : ''}`
 }
 
 function copilotRuntimeAssetNames(target) {

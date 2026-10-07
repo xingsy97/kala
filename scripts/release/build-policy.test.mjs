@@ -52,6 +52,7 @@ test('release builders remove native scratch files and verification rejects unde
 test('only explicitly requested SEA Executor builds resolve adjacent native addons', () => {
   const builder = read('scripts/release/build-release-assets.mjs')
   assert.match(builder, /const wantsNativeBuild = !finalizeOnly && nativeOnly/)
+  assert.match(builder, /nativeOnly && component === 'executor' && copilotRuntimeTargets\.includes\(nativeTarget\)[\s\S]*stageCopilotRuntime\(nativeTarget\)/)
   assert.match(builder, /const nativeRequire = wantsNativeBuild && item\.role === 'executor'/)
   assert.match(builder, /createRequire\(__filename\)/)
   assert.match(builder, /\$\{nativeRequire\}\$\{buildInfo\}/)
