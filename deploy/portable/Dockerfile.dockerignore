@@ -1,0 +1,6 @@
+**
+!release/
+!release/kala-dashboard-with-runtime.cjs
+!deploy/
+!deploy/portable/
+!deploy/portable/Dockerfile
