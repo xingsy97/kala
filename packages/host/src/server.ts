@@ -9,6 +9,8 @@
  * a single `close()` for shutdown.
  */
 
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
 
@@ -402,12 +404,14 @@ export async function startHostServer(
   await workspaceAliases.load()
   const executorInstallations = new ExecutorInstallationStore(join(options.sessionsDir, '..', 'executor-installations.json'))
   executorInstallations.load()
+  const windowsReleaseAssetsReady = () => hasIntegrityCheckedWindowsReleaseAssets(options.releaseAssetsDir, options.embeddedReleaseAssets)
   attachExecutorInstallationRoutes(http, {
     store: executorInstallations,
     ...(auth?.executorIdentityStore ? { identities: auth.executorIdentityStore } : {}),
     ...(auth ? { auth } : {}),
     tenancy,
     audit,
+    windowsReleaseAssetsReady,
   })
 
   // Web Push (see docs/planning/roadmap-notes/pwa-mobile-and-push.md §5).
@@ -2234,4 +2238,46 @@ export async function startHostServer(
     port,
     close: closeServer,
   }
+}
+
+const WINDOWS_INSTALL_RELEASE_ASSETS = Object.freeze([
+  'kala-executor-win32-x64.exe',
+  'node-pty-win32-x64.tar.gz',
+  'install-executor.ps1',
+])
+
+function hasIntegrityCheckedWindowsReleaseAssets(
+  releaseAssetsDir: string | undefined,
+  embeddedReleaseAssets: readonly EmbeddedStaticAsset[] | undefined,
+): boolean {
+  const embedded = new Map((embeddedReleaseAssets ?? []).map((asset) => [asset.path.replaceAll('\\', '/').replace(/^\/+/, ''), asset]))
+  const assetBytes = (name: string): Buffer | undefined => {
+    if (releaseAssetsDir) {
+      const path = join(releaseAssetsDir, name)
+      try {
+        if (existsSync(path) && statSync(path).isFile()) return readFileSync(path)
+      } catch { return undefined }
+    }
+    const asset = embedded.get(name)
+    if (!asset) return undefined
+    try { return Buffer.from(asset.contentBase64, 'base64') } catch { return undefined }
+  }
+
+  const index = assetBytes('SHA256SUMS')?.toString('utf8')
+  if (!index) return false
+  const expected = new Map<string, string>()
+  for (const line of index.split(/\r?\n/u).filter(Boolean)) {
+    const match = line.match(/^([0-9a-fA-F]{64})  ([A-Za-z0-9][A-Za-z0-9._-]*)$/u)
+    if (!match) return false
+    const sha256 = match[1]!
+    const name = match[2]!
+    if (expected.has(name)) return false
+    expected.set(name, sha256.toLowerCase())
+  }
+  for (const name of WINDOWS_INSTALL_RELEASE_ASSETS) {
+    const bytes = assetBytes(name)
+    const sha256 = expected.get(name)
+    if (!bytes || !sha256 || createHash('sha256').update(bytes).digest('hex') !== sha256) return false
+  }
+  return true
 }

@@ -102,7 +102,7 @@ try {
   const actualInstaller = await installerRes.text()
   const expectedInstaller = readFileSync(join(releaseDir, installerAsset), 'utf8')
   if (actualInstaller !== expectedInstaller) fail(`GET /install/assets/${installerAsset} did not return the built release asset`)
-  for (const asset of ['install-executor.sh', 'install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json']) {
+  for (const asset of ['install-executor.sh', 'install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'kala-executor-service-host-win32-x64.exe', 'executor-update-manifest.json']) {
     const assetRes = await fetch(`${url}/install/assets/${asset}`)
     if (assetRes.status !== 404) fail(`GET /install/assets/${asset} returned ${assetRes.status}, expected unsupported or platform-ambiguous asset to be absent`)
   }

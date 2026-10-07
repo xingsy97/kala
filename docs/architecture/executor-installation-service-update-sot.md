@@ -33,7 +33,7 @@ curl -fsSL 'https://HOST/install' | KALA_SETUP_CODE='ONE_TIME_CODE' sh
 
 ### Windows PowerShell
 
-Windows installation is unavailable in the current release. `GET /install.ps1` and Windows installation-session creation fail explicitly; neither falls back to Node.js nor offers an unsigned artifact.
+The beta candidate supports Windows x64 native Executor in both temporary and SCM service modes through `GET /install.ps1`. The Host-issued one-time setup code is exchanged without embedding credentials in the command. The installer verifies the native SEA, the ConPTY companion and the separately pinned WinSW service host against the release checksum index before execution. Source-built Windows CI fixtures are **not** signed release evidence; formal RC acceptance must download and verify the tagged signed draft. No Windows beta has been promoted until that acceptance passes.
 
 The shell installer URL is stable and contains no Invite, bootstrap credential, installation ID, or query string. This is required so Cloudflare Access and other reverse proxies can allowlist exactly `/install`, and so credentials never enter browser history, proxy/CDN access logs, referrers, screenshots, or shell history.
 
@@ -53,7 +53,7 @@ Platform
 
 Run mode
 ● Install as service — Recommended
-  Starts automatically, restarts after failure, and stays updated.
+  Starts automatically and restarts after failure. Automatic updates require separate platform support; the Windows beta candidate does not yet provide managed updates.
 ○ Run temporarily
   Runs only while this terminal remains open.
 
@@ -157,7 +157,7 @@ The release publishes one shell installer, `run.sh`. Public installation and the
 The shell installer performs the following transaction:
 
 1. require HTTPS outside explicit loopback development;
-2. detect exact OS and architecture and reject Windows before downloading assets;
+2. detect exact OS and architecture; the separate PowerShell path requires Windows x64 and fails closed on unsupported targets;
 3. download the matching native `kala-executor` asset and `SHA256SUMS`;
 4. enforce response size and timeout limits;
 5. require a valid SHA-256 entry and reject a hash mismatch;
@@ -226,12 +226,11 @@ The legacy `kala-executor.cjs` command remains compatible for at least one relea
 
 ### 7.3 Windows
 
-- Windows Service registered through SCM with automatic start and recovery actions;
-- binary/config under Program Files/ProgramData;
-- long-term credential protected by DPAPI for the service identity;
-- arguments and paths with spaces are correctly quoted;
-- logs use Windows Event Log and a bounded diagnostic file;
-- installer is signed; MSI/winget and Dashboard bootstrap converge on the same service layout;
+- beta candidate: WinSW v2.12.0 is pinned by SHA-256 and acts as the SCM service host for the native Executor, with automatic start and recovery actions;
+- native binary, service host and XML are under Program Files; config and credential are under ProgramData with inherited user ACLs removed before credentials are written;
+- the installer persists the Workspace ID redeemed under the interactive account, so LocalSystem reconnects under the same identity;
+- arguments and paths with spaces are correctly quoted; WinSW writes bounded rolling files (`service logs` prints their paths), not the currently unimplemented Event Viewer sink;
+- DPAPI protection, native Authenticode/MSI/winget distribution and managed Windows updates remain requirements, **not** capabilities validated by checksum signing or source-built CI;
 - multiple profiles require unique service names, but the default UI creates one service only.
 
 ## 8. Identity and migration

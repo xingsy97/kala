@@ -8,8 +8,10 @@ import test from 'node:test'
 
 import {
   executorNativeAssetName,
+  generateExecutorInstallerPowerShell,
   generateExecutorInstallerSh,
   mapExecutorPlatform,
+  windowsExecutorInstallerAssetName,
 } from './executor-installer.mjs'
 
 test('maps supported executor OS and architecture aliases', () => {
@@ -17,7 +19,8 @@ test('maps supported executor OS and architecture aliases', () => {
   assert.equal(mapExecutorPlatform('Linux', 'aarch64'), 'linux-arm64')
   assert.equal(mapExecutorPlatform('darwin', 'x86_64'), 'darwin-x64')
   assert.equal(mapExecutorPlatform('macos', 'arm64'), 'darwin-arm64')
-  assert.equal(mapExecutorPlatform('windows', 'AMD64'), undefined)
+  assert.equal(mapExecutorPlatform('windows', 'AMD64'), 'win32-x64')
+  assert.equal(mapExecutorPlatform('mingw', 'x86_64'), 'win32-x64')
   assert.equal(mapExecutorPlatform('win32', 'arm64'), undefined)
   assert.equal(mapExecutorPlatform('freebsd', 'x64'), undefined)
   assert.equal(mapExecutorPlatform('linux', 'riscv64'), undefined)
@@ -28,11 +31,12 @@ test('uses one Kala namespace for native asset names', () => {
   assert.equal(executorNativeAssetName('linux-arm64'), 'kala-executor-linux-arm64')
   assert.equal(executorNativeAssetName('darwin-x64'), 'kala-executor-darwin-x64')
   assert.equal(executorNativeAssetName('darwin-arm64'), 'kala-executor-darwin-arm64')
+  assert.equal(executorNativeAssetName('win32-x64'), 'kala-executor-win32-x64.exe')
   assert.throws(() => executorNativeAssetName('win32-arm64'))
   assert.throws(() => executorNativeAssetName('freebsd-x64'))
 })
 
-test('generates HTTPS-only, checksummed installers with native or Node.js fallback', () => {
+test('generates HTTPS-only, checksummed Bash installer with native or Node.js fallback', () => {
   const sh = generateExecutorInstallerSh({ repo: 'owner/repo', tag: 'v1.2.3' })
   for (const marker of [/release asset URL must use HTTPS/, /--https-only/, /SHA256SUMS/, /kala-executor-/, /--internal-installer/]) assert.match(sh, marker)
   assert.doesNotMatch(sh, /ALLOW_UNSIGNED|unsigned install/)
@@ -56,16 +60,48 @@ test('generates HTTPS-only, checksummed installers with native or Node.js fallba
   }
 })
 
-test('release builder emits the three-target RC manifest while preserving installer platform capabilities', () => {
+test('generates a signed-checksum Windows x64 installer with an exact ConPTY inventory', () => {
+  const ps1 = generateExecutorInstallerPowerShell({ repo: 'owner/repo', tag: 'v1.2.3' })
+  assert.equal(windowsExecutorInstallerAssetName(), 'install-executor.ps1')
+  for (const marker of [
+    /Windows x64/,
+    /kala-executor-win32-x64\.exe/,
+    /node-pty-win32-x64\.tar\.gz/,
+    /kala-executor-service-host-win32-x64\.exe/,
+    /SHA256SUMS\.sigstore\.json/,
+    /cosign\.Source verify-blob/,
+    /Get-FileHash -Algorithm SHA256/,
+    /node-pty-companion\.json/,
+    /conpty\.node/,
+    /worker\/conoutSocketWorker\.js/,
+    /shared\/conout\.js/,
+    /manifest\.files\)\.Count -ne 7/,
+    /unexpected file inventory/,
+    /--internal-installer/,
+  ]) assert.match(ps1, marker)
+  assert.match(ps1, /Host-mediated release trust requires a valid internal installation session/)
+  assert.match(ps1, /Release downloads require HTTPS except for loopback URLs/)
+  assert.match(ps1, /SHA256SUMS must contain exactly one valid entry/)
+  assert.doesNotMatch(ps1, /ALLOW_UNSIGNED|winget|kala-executor\.cjs/iu)
+})
+
+test('release builder emits the four-target RC manifest with the Windows native installer', () => {
   const builder = readFileSync(new URL('./build-release-assets.mjs', import.meta.url), 'utf8')
   assert.match(builder, /sourceSnapshotSha256/u)
   assert.match(builder, /release source changed while assets were being built/u)
   assert.match(builder, /bootstrapAssets\.push\('run\.sh'\)/)
   assert.doesNotMatch(builder, /install-executor\.sh|generateExecutorInstallerSh/)
-  assert.match(builder, /const nativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
+  assert.match(builder, /const nativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64', WINDOWS_EXECUTOR_TARGET\]/)
   assert.match(builder, /name: 'kala-executor'/)
   assert.doesNotMatch(builder, /legacyExecutorNativeAssetName|runlab-executor/)
-  assert.doesNotMatch(builder, /generateExecutorInstallerPs1|node-pty-win32|writeExecutorUpdateManifest/)
+  assert.match(builder, /const supportedNativeBuildTargets = nativeTargets/)
+  assert.match(builder, /packageWindowsNodePtyCompanion/)
+  assert.match(builder, /stageWindowsServiceHost/)
+  assert.match(builder, /windowsServiceHostManifestMetadata/)
+  assert.match(builder, /generateExecutorInstallerPowerShell/)
+  assert.match(builder, /Windows native release builds are Executor-only; Portable Host remains a Node\.js 22\+ CJS asset/)
+  assert.match(builder, /Node SEA builds are not cross-compiled/)
+  assert.doesNotMatch(builder, /writeExecutorUpdateManifest/)
 })
 
 test('generated run.sh executes the checksummed Node fallback from a real release directory', () => {

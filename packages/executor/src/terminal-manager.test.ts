@@ -49,6 +49,37 @@ describe('TerminalManager', () => {
     manager.closeAll()
   })
 
+  it('terminates Windows ConPTY without a signal for kill and session cleanup', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    const originalShell = process.env.SHELL
+    delete process.env.SHELL
+    Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' })
+    try {
+      const native = {
+        write: vi.fn(), resize: vi.fn(), kill: vi.fn((signal?: NodeJS.Signals) => {
+          if (signal) throw new Error('Signals not supported on windows.')
+        }),
+        onData: vi.fn(), onExit: vi.fn(),
+      }
+      ptySpawn.mockReturnValue(native)
+      const manager = createTerminalManager({ sandbox: { roots: [], resolve: async (path) => path }, emitOutput: vi.fn(), emitExit: vi.fn() })
+      const first = await manager.create({ ...base, requestId: 'win-kill', cwd: 'C:\\workspace' })
+      expect(first.error).toBeUndefined()
+      expect(ptySpawn).toHaveBeenCalledWith('powershell.exe', [], expect.any(Object))
+      expect(manager.kill({ ...base, requestId: 'win-killed', terminalId: first.terminalId! }).killed).toBe(true)
+      expect(native.kill).toHaveBeenCalledWith()
+      const second = await manager.create({ ...base, requestId: 'win-close', cwd: 'C:\\workspace' })
+      expect(second.error).toBeUndefined()
+      manager.closeSession(base)
+      expect(native.kill).toHaveBeenCalledTimes(2)
+      expect(native.kill).toHaveBeenLastCalledWith()
+    } finally {
+      Object.defineProperty(process, 'platform', originalPlatform)
+      if (originalShell === undefined) delete process.env.SHELL
+      else process.env.SHELL = originalShell
+    }
+  })
+
   it('keeps one terminal per Session, replays a 1 MiB ring, and closes only that Session', async () => {
     process.env.KALA_TERMINAL_DISABLE_PTY = '1'
     const manager = createTerminalManager({

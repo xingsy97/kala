@@ -41,12 +41,26 @@ type NodePtyModule = {
   ): TerminalProcess
 }
 
+function terminalDiagnostic(phase: string): void {
+  if (process.env.KALA_TERMINAL_DIAGNOSTICS === '1') process.stderr.write(`[kala-terminal] ${phase}\n`)
+}
+
+function terminateTerminal(terminal: TerminalProcess): void {
+  // node-pty's Windows ConPTY implementation rejects every explicit signal.
+  // Unix PTYs and pipe-backed shells retain the existing SIGTERM behavior.
+  if (process.platform === 'win32') terminal.kill()
+  else terminal.kill('SIGTERM')
+}
+
 async function tryLoadNodePty(): Promise<NodePtyModule | undefined> {
   if (process.env.KALA_TERMINAL_DISABLE_PTY === '1') return undefined
   try {
+    terminalDiagnostic('loading node-pty')
     const mod = await import('node-pty') as NodePtyModule | { default?: NodePtyModule }
+    terminalDiagnostic('node-pty loaded')
     return 'spawn' in mod ? mod : mod.default
   } catch {
+    terminalDiagnostic('node-pty import unavailable')
     return undefined
   }
 }
@@ -143,20 +157,25 @@ async function spawnTerminal(input: {
   const nodePty = await tryLoadNodePty()
   if (nodePty) {
     try {
-      return nodePty.spawn(input.shell, [], {
+      terminalDiagnostic('starting native PTY')
+      const terminal = nodePty.spawn(input.shell, [], {
         name: 'xterm-256color',
         cols: input.cols,
         rows: input.rows,
         cwd: input.cwd,
         env: input.env,
       })
+      terminalDiagnostic('native PTY started')
+      return terminal
     } catch {
+      terminalDiagnostic('native PTY spawn unavailable')
       // node-pty's JavaScript can load from a single-file CJS release while its
       // platform native module (for example conpty.node on Windows) is absent.
       // That failure happens at spawn(), not import(), so fall back here instead
       // of surfacing a broken Terminal to the user.
     }
   }
+  terminalDiagnostic('starting fallback terminal')
   return createFallbackTerminal(input)
 }
 
@@ -205,7 +224,7 @@ export function createTerminalManager(input: {
   const sessionKeyOf = (workspaceId: string, sessionId: string): string => `${workspaceId}:${sessionId}`
 
   const closeRecord = (record: TerminalRecord): void => {
-    if (!record.exited) record.terminal.kill('SIGTERM')
+    if (!record.exited) terminateTerminal(record.terminal)
     terminals.delete(keyOf(record.workspaceId, record.sessionId, record.terminalId))
     if (sessionTerminals.get(sessionKeyOf(record.workspaceId, record.sessionId)) === record) {
       sessionTerminals.delete(sessionKeyOf(record.workspaceId, record.sessionId))
@@ -238,9 +257,11 @@ export function createTerminalManager(input: {
       const creating = (async (): Promise<TerminalCreateResult> => {
         const requestedCwd = payload.cwd?.trim() || process.cwd()
         try {
+        terminalDiagnostic('resolving sandbox cwd')
         const cwd = await input.sandbox.resolve(requestedCwd)
+        terminalDiagnostic('sandbox cwd resolved')
         const terminalId = ulid()
-        const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh')
+        const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/sh')
         const terminal = await spawnTerminal({
           shell,
           cols: payload.cols ?? 80,
@@ -264,7 +285,7 @@ export function createTerminalManager(input: {
               const marker = `\n[terminal output truncated after ${maxOutputBytes} bytes]\n`
               record.replay = appendReplay(record.replay, marker)
               input.emitOutput({ workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, data: marker })
-              record.terminal.kill('SIGTERM')
+              terminateTerminal(record.terminal)
             }
             return
           }
@@ -277,7 +298,7 @@ export function createTerminalManager(input: {
             const marker = `\n[terminal output truncated after ${maxOutputBytes} bytes]\n`
             record.replay = appendReplay(record.replay, marker)
             input.emitOutput({ workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, data: marker })
-            record.terminal.kill('SIGTERM')
+            terminateTerminal(record.terminal)
           }
         })
         terminal.onExit(({ exitCode, signal }) => {
@@ -324,7 +345,7 @@ export function createTerminalManager(input: {
       terminals.delete(key)
       const sessionKey = sessionKeyOf(payload.workspaceId, payload.sessionId)
       if (sessionTerminals.get(sessionKey) === record) sessionTerminals.delete(sessionKey)
-      record.terminal.kill('SIGTERM')
+      terminateTerminal(record.terminal)
       return { requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId: payload.terminalId, killed: true }
     },
     closeSession(payload) {

@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process'
-import { win32 } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, win32 } from 'node:path'
 
 export type WindowsServiceAction = 'create' | 'start' | 'query' | 'stop' | 'delete' | 'recovery'
 
@@ -7,6 +10,8 @@ export interface WindowsServiceLayout {
   installDir: string
   dataDir: string
   executablePath: string
+  serviceHostPath: string
+  serviceConfigPath: string
   configPath: string
 }
 
@@ -57,8 +62,202 @@ export interface ManagedWindowsInstallation {
   installationId: string
 }
 
+export interface WindowsSelfRemovalPlan {
+  taskName: string
+  taskXmlPath: string
+  statusPath: string
+  taskXml: string
+}
+
+export interface WindowsSelfRemovalPlanOptions {
+  installDir: string
+  dataDir: string
+  ownerPid: number
+  statusDir?: string
+  id?: string
+}
+
 const DEFAULT_VENDOR = 'Kala'
 const DEFAULT_PRODUCT = 'Executor'
+export const WINDOWS_SERVICE_HOST_ASSET = 'kala-executor-service-host-win32-x64.exe'
+const WINDOWS_SERVICE_HOST_SHA256 = '05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da'
+const WINDOWS_SERVICE_HOST_BYTES = 18_243_033
+
+/** Re-verify the pinned release asset at the privileged installation boundary. */
+export function copyWindowsServiceHost(sourceRoot: string, destinationRoot: string): void {
+  const source = join(sourceRoot, WINDOWS_SERVICE_HOST_ASSET)
+  if (!existsSync(source) || !lstatSync(source).isFile() || lstatSync(source).size !== WINDOWS_SERVICE_HOST_BYTES) {
+    throw new Error('Windows service host is missing or has the wrong size')
+  }
+  const bytes = readFileSync(source)
+  if (createHash('sha256').update(bytes).digest('hex') !== WINDOWS_SERVICE_HOST_SHA256) {
+    throw new Error('Windows service host SHA-256 mismatch')
+  }
+  copyFileSync(source, join(destinationRoot, 'kala-executor-service.exe'))
+}
+
+function xml(value: string): string {
+  return value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;').replace(/'/gu, '&apos;')
+}
+
+function powershellLiteral(value: string): string {
+  if (/[\0\r\n]/u.test(value)) throw new Error('Invalid Windows self-removal value')
+  return `'${value.replace(/'/gu, "''")}'`
+}
+
+function assertAbsoluteWindowsPath(value: string, label: string): string {
+  if (!win32.isAbsolute(value) || /[\0\r\n]/u.test(value)) throw new Error(`Invalid Windows self-removal ${label}`)
+  const resolved = win32.resolve(value)
+  if (win32.dirname(resolved) === resolved) throw new Error(`Unsafe Windows self-removal ${label}`)
+  return resolved
+}
+
+function pathContains(parent: string, child: string): boolean {
+  const relative = win32.relative(parent, child)
+  return relative === '' || (!relative.startsWith('..\\') && relative !== '..' && !win32.isAbsolute(relative))
+}
+
+/**
+ * Build an on-demand SYSTEM task whose action is self-contained. The XML is
+ * written under the already ACL-hardened service data directory; no script in
+ * a user-writable temporary directory is ever executed as SYSTEM.
+ */
+export function createWindowsSelfRemovalPlan(options: WindowsSelfRemovalPlanOptions): WindowsSelfRemovalPlan {
+  const installDir = assertAbsoluteWindowsPath(options.installDir, 'installation path')
+  const dataDir = assertAbsoluteWindowsPath(options.dataDir, 'data path')
+  const statusDir = assertAbsoluteWindowsPath(options.statusDir ?? tmpdir(), 'status path')
+  if (pathContains(installDir, dataDir) || pathContains(dataDir, installDir)) {
+    throw new Error('Windows self-removal installation and data paths must be separate')
+  }
+  if (pathContains(installDir, statusDir) || pathContains(dataDir, statusDir)) {
+    throw new Error('Windows self-removal status path must be outside removed directories')
+  }
+  if (!Number.isSafeInteger(options.ownerPid) || options.ownerPid <= 0) throw new Error('Invalid Windows self-removal owner PID')
+  const id = options.id ?? randomUUID().replace(/-/gu, '')
+  if (!/^[A-Za-z0-9]{16,64}$/u.test(id)) throw new Error('Invalid Windows self-removal identifier')
+
+  const taskName = `KalaExecutor-Uninstall-${id}`
+  const taskXmlPath = win32.join(dataDir, `.uninstall-${id}.xml`)
+  const statusPath = win32.join(statusDir, `kala-executor-uninstall-${id}.status`)
+  const script = `$ErrorActionPreference='Stop'\n` +
+    `$status=${powershellLiteral(statusPath)}\n` +
+    `function Set-Status([string]$value) { [IO.File]::WriteAllText($status,$value) }\n` +
+    `function Remove-Tree([string]$path) {\n` +
+    `  for ($attempt=0; $attempt -lt 100; $attempt++) {\n` +
+    `    try { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop; return }\n` +
+    `    catch { if ($attempt -eq 99) { throw }; Start-Sleep -Milliseconds 200 }\n` +
+    `  }\n` +
+    `}\n` +
+    `try {\n` +
+    `  Set-Status 'started'\n` +
+    `  & "$env:SystemRoot\\System32\\schtasks.exe" /Delete /TN ${powershellLiteral(taskName)} /F | Out-Null\n` +
+    `  if ($LASTEXITCODE -ne 0) { throw 'task_cleanup' }\n` +
+    `  $deadline=(Get-Date).AddSeconds(60)\n` +
+    `  while (Get-Process -Id ${options.ownerPid} -ErrorAction SilentlyContinue) {\n` +
+    `    Set-Status 'waiting-for-parent'\n` +
+    `    if ((Get-Date) -ge $deadline) { throw 'owner_timeout' }\n` +
+    `    Start-Sleep -Milliseconds 100\n` +
+    `  }\n` +
+    `  Set-Status 'deleting'\n` +
+    `  Remove-Tree ${powershellLiteral(installDir)}\n` +
+    `  Remove-Tree ${powershellLiteral(dataDir)}\n` +
+    `  if ((Test-Path -LiteralPath ${powershellLiteral(installDir)}) -or (Test-Path -LiteralPath ${powershellLiteral(dataDir)})) { throw 'path_remaining' }\n` +
+    `  Set-Status 'removed'\n` +
+    `} catch {\n` +
+    `  $kind=if ($_.Exception.Message -match '^(task_cleanup|owner_timeout|path_remaining)$') { $_.Exception.Message } else { $_.Exception.GetType().Name }\n` +
+    `  try { Set-Status ('failed:'+$kind) } catch {}\n` +
+    `  exit 1\n` +
+    `}\n`
+  const encodedCommand = Buffer.from(script, 'utf16le').toString('base64')
+  const taskXml = `<?xml version="1.0" encoding="UTF-16"?>\n` +
+    `<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n` +
+    `  <RegistrationInfo><Description>Kala Executor one-time removal</Description></RegistrationInfo>\n` +
+    `  <Triggers />\n` +
+    `  <Principals><Principal id="System"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\n` +
+    `  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable><AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><Hidden>true</Hidden><ExecutionTimeLimit>PT5M</ExecutionTimeLimit></Settings>\n` +
+    `  <Actions Context="System"><Exec><Command>powershell.exe</Command><Arguments>${xml(`-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`)}</Arguments></Exec></Actions>\n` +
+    `</Task>\n`
+  return { taskName, taskXmlPath, statusPath, taskXml }
+}
+
+/** schtasks imports the XML file as UTF-16LE with a matching declaration. */
+export function encodeWindowsTaskXml(taskXml: string): Buffer {
+  return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(taskXml, 'utf16le')])
+}
+
+export async function deleteWindowsSelfRemovalTask(
+  taskName: string,
+  options: WindowsServiceExecutorOptions = {},
+): Promise<void> {
+  if ((options.platform ?? process.platform) !== 'win32') throw new Error('Windows Task Scheduler is unavailable on this platform')
+  const result = await (options.runner ?? spawnWindowsCommand)('schtasks.exe', ['/Delete', '/TN', taskName, '/F'])
+  if (result.exitCode !== 0) throw new Error(`Unable to delete Windows removal task: ${result.stderr.trim() || result.stdout.trim()}`)
+}
+
+export async function registerWindowsSelfRemovalTask(
+  plan: WindowsSelfRemovalPlan,
+  options: WindowsServiceExecutorOptions = {},
+): Promise<void> {
+  if ((options.platform ?? process.platform) !== 'win32') throw new Error('Windows Task Scheduler is unavailable on this platform')
+  const runner = options.runner ?? spawnWindowsCommand
+  const create = await runner('schtasks.exe', ['/Create', '/XML', plan.taskXmlPath, '/TN', plan.taskName])
+  if (create.exitCode !== 0) throw new Error(`Unable to create Windows removal task: ${create.stderr.trim() || create.stdout.trim()}`)
+  let run: WindowsCommandResult
+  try {
+    run = await runner('schtasks.exe', ['/Run', '/TN', plan.taskName])
+  } catch (error) {
+    await deleteWindowsSelfRemovalTask(plan.taskName, { ...options, runner }).catch(() => undefined)
+    throw error
+  }
+  if (run.exitCode === 0) return
+  await deleteWindowsSelfRemovalTask(plan.taskName, { ...options, runner }).catch(() => undefined)
+  throw new Error(`Unable to start Windows removal task: ${run.stderr.trim() || run.stdout.trim()}`)
+}
+
+export function renderWindowsServiceConfig(layout: WindowsServiceLayout, serviceName: string, displayName: string): string {
+  return `<service>\n  <id>${xml(safeValue(serviceName, 'name'))}</id>\n  <name>${xml(safeValue(displayName, 'display name'))}</name>\n  <description>Kala native Executor</description>\n  <executable>%BASE%\\${xml(win32.basename(layout.executablePath))}</executable>\n  <arguments>--config ${xml(quoteWindowsArgument(layout.configPath))}</arguments>\n  <log mode="roll-by-size">\n    <sizeThreshold>10240</sizeThreshold>\n    <keepFiles>5</keepFiles>\n  </log>\n  <stoptimeout>15sec</stoptimeout>\n  <stopparentprocessfirst>true</stopparentprocessfirst>\n</service>\n`
+}
+
+export async function secureWindowsServiceDataDir(
+  dataDir: string,
+  options: WindowsServiceExecutorOptions = {},
+): Promise<void> {
+  if ((options.platform ?? process.platform) !== 'win32') throw new Error('Windows ACL hardening is unavailable on this platform')
+  // SID form is locale-independent: LocalSystem and built-in Administrators.
+  // Apply before writing any credential; strip inherited Users access.
+  const result = await (options.runner ?? spawnWindowsCommand)('icacls.exe', [
+    dataDir, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F',
+  ])
+  if (result.exitCode !== 0) throw new Error(`Unable to secure Windows Executor credentials directory: ${result.stderr.trim() || result.stdout.trim()}`)
+}
+
+export const WINDOWS_NODE_PTY_RUNTIME_FILES = Object.freeze([
+  'prebuilds/win32-x64/conpty.node',
+  'prebuilds/win32-x64/conpty_console_list.node',
+  'prebuilds/win32-x64/pty.node',
+  'prebuilds/win32-x64/winpty-agent.exe',
+  'prebuilds/win32-x64/winpty.dll',
+  'worker/conoutSocketWorker.js',
+  'shared/conout.js',
+])
+
+/** Copy only the verified node-pty runtime closure needed beside a Windows SEA. */
+export function copyWindowsNodePtyRuntime(sourceRoot: string, destinationRoot: string): void {
+  const files = WINDOWS_NODE_PTY_RUNTIME_FILES.map((relative) => ({
+    relative,
+    source: join(sourceRoot, ...relative.split('/')),
+    destination: join(destinationRoot, ...relative.split('/')),
+  }))
+  for (const file of files) {
+    if (!existsSync(file.source) || !lstatSync(file.source).isFile() || lstatSync(file.source).size === 0) {
+      throw new Error(`Windows node-pty runtime is missing ${file.relative}`)
+    }
+  }
+  for (const file of files) {
+    mkdirSync(dirname(file.destination), { recursive: true, mode: 0o700 })
+    copyFileSync(file.source, file.destination)
+  }
+}
 
 function safeValue(value: string, label: string): string {
   if (!value || /[\0\r\n]/u.test(value)) throw new Error(`Invalid Windows service ${label}`)
@@ -83,6 +282,8 @@ export function windowsServiceLayout(options: WindowsServicePlanOptions): Window
     installDir,
     dataDir,
     executablePath: win32.join(installDir, executableName),
+    serviceHostPath: win32.join(installDir, 'kala-executor-service.exe'),
+    serviceConfigPath: win32.join(installDir, 'kala-executor-service.xml'),
     configPath: win32.join(dataDir, 'config.json'),
   }
 }
@@ -102,9 +303,8 @@ export function createWindowsServicePlan(options: WindowsServicePlanOptions): Wi
   const serviceName = safeValue(options.serviceName, 'name')
   const displayName = safeValue(options.displayName ?? serviceName, 'display name')
   const layout = windowsServiceLayout(options)
-  const binaryPath = [layout.executablePath, '--config', layout.configPath]
-    .map(quoteWindowsArgument)
-    .join(' ')
+  // The Node SEA is a console program and cannot report SERVICE_RUNNING to SCM.
+  const binaryPath = quoteWindowsArgument(layout.serviceHostPath)
   const resetSeconds = options.recovery?.resetSeconds ?? 86_400
   const restartDelaysMs = options.recovery?.restartDelaysMs ?? [5_000, 30_000]
   if (!Number.isSafeInteger(resetSeconds) || resetSeconds < 0) throw new Error('Invalid recovery reset seconds')
@@ -155,6 +355,30 @@ export async function executeWindowsServicePlan(
     results.push(await executeWindowsServiceCommand(command, options))
   }
   return results
+}
+
+export async function waitForWindowsServiceStopped(
+  plan: WindowsServicePlan,
+  options: WindowsServiceExecutorOptions & { timeoutMs?: number; pollMs?: number } = {},
+): Promise<void> {
+  const deadline = Date.now() + (options.timeoutMs ?? 30_000)
+  const query = plan.commands.find((command) => command.action === 'query')
+  if (!query) throw new Error('Windows service plan does not contain query')
+  while (true) {
+    try {
+      const result = await executeWindowsServiceCommand(query, options)
+      const match = result.stdout.match(/\bSTATE\s*:\s*(\d+)\b/iu)
+      if (!match) throw new Error('Windows SCM query returned an unrecognized state')
+      if (Number(match[1]) === 1) return // STOPPED; pending stop is state 3.
+    } catch (error) {
+      // 1060 means the service was not registered (e.g. install failed before
+      // sc create). Do not interpret any other SCM error as a stopped process.
+      if (!(error instanceof Error) || !/SCM query failed \(1060\)|\[SC\] OpenService FAILED 1060/u.test(error.message)) throw error
+      return
+    }
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for Windows Executor service to stop')
+    await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 250))
+  }
 }
 
 export const spawnWindowsCommand: WindowsCommandRunner = (command, args, options = {}) =>

@@ -82,3 +82,76 @@ jobs:
           path: acceptance/evidence/*.rc-evidence.json
           if-no-files-found: error
           retention-days: 90
+
+  windows-portable-conpty:
+    needs: resolve
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: '${{ inputs.tag }}', fetch-depth: 0 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable; corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - uses: sigstore/cosign-installer@v3
+      - name: Download, attest, and checksum the exact Windows candidate set
+        shell: pwsh
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force acceptance/candidate, acceptance/evidence | Out-Null
+          $assets = @(
+            'kala-dashboard-with-runtime.cjs',
+            'kala-executor-win32-x64.exe',
+            'node-pty-win32-x64.tar.gz',
+            'kala-executor-service-host-win32-x64.exe',
+            'install-executor.ps1',
+            'kala-copilot-runtime-win32-x64',
+            'kala-copilot-runtime-node-win32-x64.node'
+          )
+          foreach ($asset in @($assets + 'SHA256SUMS' + 'manifest.json')) {
+            gh release download '${{ inputs.tag }}' --pattern $asset --dir acceptance/candidate
+            if ($LASTEXITCODE -ne 0) { throw "Failed to download required candidate asset $asset" }
+            gh attestation verify "acceptance/candidate/$asset" --repo $env:GITHUB_REPOSITORY
+            if ($LASTEXITCODE -ne 0) { throw "Failed to attest required candidate asset $asset" }
+          }
+          gh release download '${{ inputs.tag }}' --pattern SHA256SUMS.sigstore.json --dir acceptance/candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to download signed checksum bundle' }
+          cosign verify-blob --bundle acceptance/candidate/SHA256SUMS.sigstore.json `
+            --certificate-identity "https://github.com/$env:GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/${{ inputs.tag }}" `
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com acceptance/candidate/SHA256SUMS
+          if ($LASTEXITCODE -ne 0) { throw 'Checksum index is not signed by this tag release' }
+          node scripts/release/verify-checksum-index.mjs --index acceptance/candidate/SHA256SUMS --asset acceptance/candidate/manifest.json --revision '${{ needs.resolve.outputs.revision }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Signed checksum index does not cover the candidate manifest' }
+          foreach ($asset in $assets) {
+            node scripts/release/verify-checksum-index.mjs --index acceptance/candidate/SHA256SUMS --asset "acceptance/candidate/$asset" --manifest acceptance/candidate/manifest.json --revision '${{ needs.resolve.outputs.revision }}'
+            if ($LASTEXITCODE -ne 0) { throw "Failed to bind $asset to the candidate checksum index" }
+          }
+          node --input-type=module -e "import { verifyWindowsNodePtyCompanion } from './scripts/release/windows-executor-packager.mjs'; verifyWindowsNodePtyCompanion('acceptance/candidate/node-pty-win32-x64.tar.gz')"
+          if ($LASTEXITCODE -ne 0) { throw 'Accepted ConPTY companion inventory or digest is invalid' }
+          node --input-type=module -e "import { verifyWindowsServiceHost } from './scripts/release/windows-service-host.mjs'; verifyWindowsServiceHost('acceptance/candidate/kala-executor-service-host-win32-x64.exe')"
+          if ($LASTEXITCODE -ne 0) { throw 'Accepted Windows service host identity or digest is invalid' }
+          tar -xzf acceptance/candidate/node-pty-win32-x64.tar.gz -C acceptance/candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to extract the accepted ConPTY companion' }
+          New-Item -ItemType Directory -Force acceptance/candidate/prebuilds | Out-Null
+          Move-Item acceptance/candidate/win32-x64 acceptance/candidate/prebuilds/win32-x64
+      - name: Prove Windows Node.js 22 Host and native temporary/service ConPTY lifecycles
+        shell: pwsh
+        env:
+          KALA_RELEASE_ASSETS_DIR: '${{ github.workspace }}\acceptance\candidate'
+        run: |
+          node scripts/release/verify-portable-native.mjs `
+            --asset acceptance/candidate/kala-dashboard-with-runtime.cjs `
+            --release-dir acceptance/candidate --target win32-x64 `
+            --tag '${{ inputs.tag }}' --revision '${{ needs.resolve.outputs.revision }}' `
+            --output acceptance/evidence/portable-win32-x64.rc-evidence.json
+      - uses: actions/upload-artifact@v5
+        with:
+          name: rc-evidence-portable-win32-x64
+          path: acceptance/evidence/*.rc-evidence.json
+          if-no-files-found: error
+          retention-days: 90

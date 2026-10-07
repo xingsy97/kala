@@ -10,6 +10,7 @@ export type ExecutorRuntimeConfig = {
   sandboxRoots: string[]
   credentialFile: string
   installationId?: string
+  workspaceId?: string
   installationSource?: 'dashboard-native' | 'package-manager' | 'container' | 'legacy-cjs'
   managedRoot?: string
   serviceMode?: 'system' | 'user'
@@ -37,7 +38,8 @@ export function readExecutorRuntimeConfig(path: string): ExecutorRuntimeConfig {
   const value = JSON.parse(raw) as Partial<ExecutorRuntimeConfig>
   if (value.version !== 1 || typeof value.host !== 'string' || !/^https?:\/\//u.test(value.host) ||
       typeof value.credentialFile !== 'string' || !Array.isArray(value.sandboxRoots) ||
-      value.sandboxRoots.some((root) => typeof root !== 'string' || !root)) throw new Error('Invalid Executor config')
+      value.sandboxRoots.some((root) => typeof root !== 'string' || !root) ||
+      (value.workspaceId !== undefined && (typeof value.workspaceId !== 'string' || !/^[0-9A-HJKMNP-TV-Z]{26}$/u.test(value.workspaceId)))) throw new Error('Invalid Executor config')
   if (value.update && (typeof value.update.enabled !== 'boolean' || typeof value.update.manifestUrl !== 'string' ||
       !/^https?:\/\//u.test(value.update.manifestUrl) || typeof value.update.publicKeyFile !== 'string' ||
       !['stable', 'beta', 'nightly'].includes(value.update.channel) || !Number.isSafeInteger(value.update.intervalMinutes) || value.update.intervalMinutes < 5)) {
