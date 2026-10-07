@@ -12,12 +12,12 @@ describe('executor installation routes', () => {
   const servers: ReturnType<typeof createServer>[] = []
   afterEach(async () => { await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))) })
 
-  async function start(tenancy: 'single-tenant' | 'multi-tenant' = 'single-tenant') {
+  async function start(tenancy: 'single-tenant' | 'multi-tenant' = 'single-tenant', windowsReleaseAssetsReady = false) {
     const dir = mkdtempSync(join(tmpdir(), 'executor-install-api-'))
     const store = new ExecutorInstallationStore(join(dir, 'installs.json'))
     const identities = new ExecutorIdentityStore(join(dir, 'identities.json'))
     const server = createServer(); servers.push(server)
-    attachExecutorInstallationRoutes(server, { store, identities, tenancy })
+    attachExecutorInstallationRoutes(server, { store, identities, tenancy, windowsReleaseAssetsReady: () => windowsReleaseAssetsReady })
     await new Promise<void>((resolve) => server.listen(0, resolve))
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('missing address')
     return { url: `http://localhost:${address.port}`, dir, store, identities }
@@ -39,7 +39,7 @@ describe('executor installation routes', () => {
     expect(response.headers.get('access-control-allow-headers')).toContain('content-type')
   })
 
-  it('supports Linux and macOS installs but clearly rejects Windows install requests and downloads', async () => {
+  it('supports Linux and macOS installs but rejects Windows when trusted release assets are unavailable', async () => {
     const { url, dir } = await start()
     for (const platform of ['linux', 'macos']) {
       const response = await fetch(`${url}/api/executor-installs`, {
@@ -58,11 +58,31 @@ describe('executor installation routes', () => {
         body: JSON.stringify({ platform: 'windows', mode, privilegeMode: 'privileged', workspaceRoot: 'C:\\work\\example', label: 'windows-fixture' }),
       })
       expect(response.status).toBe(422)
-      expect(await response.json()).toEqual({ error: 'windows_installation_unsupported' })
+      expect(await response.json()).toEqual({ error: 'windows_release_assets_unavailable' })
     }
     const installer = await fetch(`${url}/install.ps1`)
     expect(installer.status).toBe(410)
-    expect(await installer.json()).toEqual({ error: 'windows_installation_unsupported' })
+    expect(await installer.json()).toEqual({ error: 'windows_release_assets_unavailable' })
+  })
+
+  it('creates Windows sessions and serves a native-only PowerShell bootstrap when trusted assets are ready', async () => {
+    const { url } = await start('single-tenant', true)
+    for (const mode of ['temporary', 'service']) {
+      const response = await fetch(`${url}/api/executor-installs`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ platform: 'windows', mode, privilegeMode: 'privileged', workspaceRoot: 'C:\\work\\example' }),
+      })
+      expect(response.status).toBe(201)
+      const created = await response.json() as { command: string; setupCode: string }
+      expect(created.command).toContain(`${url}/install.ps1`)
+      expect(created.command).toContain(`KALA_INSTALL_MODE='${mode}'`)
+    }
+    const installer = await fetch(`${url}/install.ps1`)
+    expect(installer.status).toBe(200)
+    const script = await installer.text()
+    expect(script).toContain('/install/assets/install-executor.ps1')
+    expect(script.indexOf('/install/assets/install-executor.ps1')).toBeLessThan(script.indexOf('/install/session'))
+    expect(script).not.toMatch(/winget|KALA_INSTALL_NODE|kala-executor\.cjs/iu)
   })
 
   it('rejects invalid input but never exposes server filesystem paths after a persistence fault', async () => {

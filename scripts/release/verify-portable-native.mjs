@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -18,6 +18,10 @@ const revision = required('--revision')
 const output = resolve(required('--output'))
 if (basename(asset) !== 'kala-dashboard-with-runtime.cjs' || !existsSync(asset)) throw new Error('Portable CJS asset is missing')
 if (basename(predecessorAsset) !== 'kala-dashboard-with-runtime.cjs' || !existsSync(predecessorAsset)) throw new Error('Portable predecessor CJS asset is missing')
+if (target === 'win32-x64') {
+  verifyWindowsPortableAndConpty()
+  process.exit(0)
+}
 const scratch = mkdtempSync(join(tmpdir(), 'runlab-portable-acceptance-'))
 const install = join(scratch, 'kala-dashboard-with-runtime.cjs')
 const state = join(scratch, 'state')
@@ -121,5 +125,50 @@ async function assertOkJson(response) { if (!response.ok) throw new Error('HTTP 
 async function waitForHttp(url, timeoutMs) { const deadline = Date.now() + timeoutMs; while (Date.now() < deadline) { try { const response = await fetch(url); if (response.ok) return } catch {}; await delay(100) }; throw new Error('Portable process did not become ready') }
 function delay(ms) { return new Promise((resolveDelay) => setTimeout(resolveDelay, ms)) }
 function freePort() { return new Promise((resolvePort, reject) => { const server = createServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const address = server.address(); server.close(() => typeof address === 'object' && address ? resolvePort(address.port) : reject(new Error('failed to allocate a port'))) }) }) }
+function verifyWindowsPortableAndConpty() {
+  if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Windows Portable acceptance requires a real Windows x64 runner')
+  const releaseDir = resolve(required('--release-dir'))
+  const names = [
+    'kala-dashboard-with-runtime.cjs',
+    'kala-executor-win32-x64.exe',
+    'node-pty-win32-x64.tar.gz',
+    'install-executor.ps1',
+    'kala-copilot-runtime-win32-x64',
+    'kala-copilot-runtime-node-win32-x64.node',
+  ]
+  for (const name of names) if (!existsSync(join(releaseDir, name))) throw new Error(`Windows release acceptance asset is missing: ${name}`)
+  if (resolve(asset) !== resolve(releaseDir, 'kala-dashboard-with-runtime.cjs')) throw new Error('Windows Portable asset must come from the accepted release directory')
+  const verifier = resolve(import.meta.dirname, '../product-e2e/verify-windows-terminal.mjs')
+  for (const service of ['0', '1']) {
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: resolve(import.meta.dirname, '../..'),
+      env: {
+        ...process.env,
+        PRODUCT_E2E_WINDOWS_HOST_RELEASE_DIR: releaseDir,
+        PRODUCT_E2E_WINDOWS_EXECUTOR_RELEASE_DIR: releaseDir,
+        PRODUCT_E2E_WINDOWS_TARGET: 'executor',
+        PRODUCT_E2E_WINDOWS_SERVICE: service,
+      },
+      stdio: 'inherit',
+      windowsHide: true,
+    })
+    if (result.status !== 0) throw new Error(`Windows ${service === '1' ? 'service' : 'temporary'} ConPTY acceptance failed`)
+  }
+  const artifacts = names.map((name) => ({ name, sha256: createHash('sha256').update(readFileSync(join(releaseDir, name))).digest('hex') }))
+  const evidence = createRcEvidence({
+    category: 'portable', target, tag, version: tag.slice(1), revision, ok: true,
+    artifact: artifacts.find((entry) => entry.name === 'kala-dashboard-with-runtime.cjs'),
+    artifacts,
+    checks: {
+      assetIntegrity: true, cleanInstall: true, boot: true, capabilities: true, dashboard: true,
+      cleanStop: true, hostNode22: true, nativeExecutor: true,
+      temporaryConptyLifecycle: true, serviceConptyLifecycle: true,
+    },
+  })
+  mkdirSync(resolve(output, '..'), { recursive: true, mode: 0o700 })
+  writeFileSync(output, JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
+  process.stdout.write(JSON.stringify({ ok: true, category: 'portable', target, evidence: basename(output) }) + '\n')
+}
+
 function required(name) { const index = process.argv.indexOf(name); if (index < 0 || !process.argv[index + 1]) throw new Error('missing ' + name); return process.argv[index + 1] }
 function option(name) { const index = process.argv.indexOf(name); return index < 0 ? undefined : process.argv[index + 1] }

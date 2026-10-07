@@ -2,17 +2,21 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { io } from 'socket.io-client'
+import { PROTOCOL_VERSION } from '../../packages/shared/dist/index.js'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
-const release = join(root, 'release')
-const hostBundle = join(release, 'kala-dashboard-with-runtime.cjs')
-const windowsTarget = process.arch === 'arm64' ? 'win32-arm64' : process.arch === 'x64' ? 'win32-x64' : ''
-if (!windowsTarget) throw new Error(`unsupported Windows architecture ${process.arch}`)
-const executor = join(release, `runlab-executor-${windowsTarget}.exe`)
-const stateRoot = mkdtempSync(join(tmpdir(), 'runlab-windows-terminal-'))
+const hostRelease = resolve(process.env.PRODUCT_E2E_WINDOWS_HOST_RELEASE_DIR ?? join(root, 'release'))
+const executorRelease = resolve(process.env.PRODUCT_E2E_WINDOWS_EXECUTOR_RELEASE_DIR ?? join(root, 'release'))
+const target = process.env.PRODUCT_E2E_WINDOWS_TARGET ?? 'executor'
+const hostBundle = join(hostRelease, 'kala-dashboard-with-runtime.cjs')
+const hostRuntime = join(hostRelease, 'kala-copilot-runtime-win32-x64')
+const hostRuntimeNode = join(hostRelease, 'kala-copilot-runtime-node-win32-x64.node')
+const executor = join(executorRelease, 'kala-executor-win32-x64.exe')
+const executorPrebuild = join(executorRelease, 'prebuilds', 'win32-x64')
+const stateRoot = mkdtempSync(join(tmpdir(), 'kala-windows-terminal-'))
 const port = Number(process.env.PRODUCT_E2E_WINDOWS_TERMINAL_PORT ?? 3325)
 const origin = `http://127.0.0.1:${port}`
 const sessionId = 'windows-terminal-e2e'
@@ -24,42 +28,85 @@ let executorProcess
 let dashboard
 
 try {
-  if (process.platform !== 'win32') throw new Error('verify-windows-terminal.mjs must run on a real Windows runner')
-  host = start('node', [hostBundle], {
+  if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('verify-windows-terminal.mjs requires a real Windows x64 runner')
+  if (!['host', 'executor'].includes(target)) throw new Error(`unsupported Windows acceptance target ${target}`)
+  assertFiles([hostBundle, hostRuntime, hostRuntimeNode], 'Windows Host CJS and native Copilot runtime')
+
+  host = start(process.execPath, [hostBundle], {
     KALA_BIND_HOST: '127.0.0.1', KALA_PORT: String(port), KALA_STATE_DIR: join(stateRoot, 'state'),
     KALA_SESSIONS_DIR: join(stateRoot, 'sessions'), KALA_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), ANTHROPIC_API_KEY: 'unused',
+    HOME: stateRoot, USERPROFILE: stateRoot,
   })
   await waitForHttp(`${origin}/models`)
-  const created = await fetch(`${origin}/api/executor-installs`, {
+  const dashboardResponse = await fetch(`${origin}/`)
+  if (!dashboardResponse.ok || !(dashboardResponse.headers.get('content-type') ?? '').includes('text/html')) {
+    throw new Error(`portable Host dashboard is not browser-accessible (${dashboardResponse.status})`)
+  }
+  if (target === 'host') {
+    console.log('PASS Windows x64 Portable Host CJS boot and browser-accessible API')
+  } else {
+    await verifyExecutorLifecycle()
+  }
+} catch (error) {
+  console.error(error)
+  console.error(logs.join(''))
+  process.exitCode = 1
+} finally {
+  dashboard?.close()
+  await Promise.all([stop(executorProcess), stop(host)])
+  rmSync(stateRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+}
+
+async function verifyExecutorLifecycle() {
+  assertFiles([
+    executor,
+    ...['conpty.node', 'conpty_console_list.node', 'pty.node', 'winpty-agent.exe', 'winpty.dll'].map((name) => join(executorPrebuild, name)),
+  ], 'Windows native Executor and complete node-pty companion')
+
+  const createResponse = await fetch(`${origin}/api/executor-installs`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ platform: 'windows', mode: serviceMode ? 'service' : 'temporary', workspaceRoot: stateRoot, label: 'windows-terminal-e2e' }),
-  }).then(async (response) => response.ok ? response.json() : Promise.reject(new Error(`create install failed: ${response.status}`)))
-  const claim = await fetch(`${origin}/install/session`, {
+    body: JSON.stringify({ platform: 'windows', mode: serviceMode ? 'service' : 'temporary', privilegeMode: 'privileged', workspaceRoot: stateRoot, label: 'windows-terminal-e2e' }),
+  })
+  if (!createResponse.ok) {
+    const detail = await createResponse.text()
+    if (createResponse.status === 422 && detail.includes('windows_installation_unsupported')) {
+      throw new Error('Windows Host/Executor lifecycle is blocked: the current Host API rejects Windows installation sessions; integrate the Windows assets into the global release inventory before accepting this target')
+    }
+    throw new Error(`create Windows install failed: ${createResponse.status} ${detail}`)
+  }
+  const created = await createResponse.json()
+  const claimResponse = await fetch(`${origin}/install/session`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }),
-  }).then(async (response) => response.ok ? response.json() : Promise.reject(new Error(`claim failed: ${response.status}`)))
-  executorProcess = start(executor, ['--internal-installer'], { ...claim.env, EXECUTOR_INSTALL_ROOT: stateRoot })
+  })
+  if (!claimResponse.ok) throw new Error(`claim failed: ${claimResponse.status}`)
+  const claim = await claimResponse.json()
+  executorProcess = start(executor, ['--internal-installer'], {
+    ...claim.env, EXECUTOR_INSTALL_ROOT: stateRoot, HOME: stateRoot, USERPROFILE: stateRoot,
+  })
   const completedDeadline = Date.now() + 30_000
   let installationCompleted = false
   while (Date.now() < completedDeadline) {
-    const snapshot = await fetch(`${origin}/api/executor-installs/${encodeURIComponent(created.id)}`).then((response) => response.json())
+    const response = await fetch(`${origin}/api/executor-installs/${encodeURIComponent(created.id)}`)
+    if (!response.ok) throw new Error(`install status failed: ${response.status}`)
+    const snapshot = await response.json()
     if (snapshot.status === 'completed') { installationCompleted = true; break }
     await sleep(100)
   }
   if (!installationCompleted) throw new Error('Windows Executor installation did not complete')
-  dashboard = io(`${origin}/dashboard`, { transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: '1' }, reconnection: false })
+
+  dashboard = io(`${origin}/dashboard`, { transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false })
   await once(dashboard, 'session:ready')
   let workspaceId
   const workspaceDeadline = Date.now() + 15_000
   while (Date.now() < workspaceDeadline && !workspaceId) {
     const listed = await emitAcklessResponse(dashboard, 'client:list_executors', 'server:executors', {})
-    workspaceId = listed.executors.find((candidate) => candidate.installId === created.id)?.workspaceId ?? listed.executors[0]?.workspaceId
+    workspaceId = listed.executors.find((candidate) => candidate.installId === created.id)?.workspaceId
     if (!workspaceId) await sleep(100)
   }
-  if (!workspaceId) throw new Error('installed Windows Executor did not announce a Workspace')
-  const sessionCreated = await emitAck(dashboard, 'client:create_session', { sessionId, workspaceId })
+  if (!workspaceId) throw new Error('installed Windows Executor did not announce its Workspace')
+  const sessionCreated = await emitAck(dashboard, 'client:create_session', { operationId: `session-${Date.now()}`, sessionId, workspaceId, cwd: stateRoot })
   if (!sessionCreated?.ok) throw new Error(`session create failed: ${sessionCreated?.error ?? 'missing success acknowledgement'}`)
-  const requestId = `create-${Date.now()}`
-  const createdTerminal = await emitAck(dashboard, 'terminal:create', { requestId, workspaceId, sessionId, cwd: stateRoot, cols: 100, rows: 30 })
+  const createdTerminal = await emitAck(dashboard, 'terminal:create', { requestId: `create-${Date.now()}`, workspaceId, sessionId, cwd: stateRoot, cols: 100, rows: 30 })
   if (createdTerminal.error || !createdTerminal.terminalId) throw new Error(`terminal create failed: ${createdTerminal.error ?? 'missing terminalId'}`)
   const output = []
   dashboard.on('server:terminal_output', (payload) => { if (payload.terminalId === createdTerminal.terminalId) output.push(payload.data) })
@@ -68,8 +115,7 @@ try {
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline && !output.join('').includes(marker)) await sleep(50)
   if (!output.join('').includes(marker)) throw new Error(`terminal did not echo marker; output=${output.join('').slice(-2000)}`)
-  // Pipe-backed PowerShell can also print the marker. Prove a real ConPTY
-  // console, whose stdout is not redirected, before accepting this lifecycle.
+
   const ptyProbe = `KALA_PTY_${Date.now()}_`
   dashboard.emit('terminal:input', { workspaceId, sessionId, terminalId: createdTerminal.terminalId, data: `Write-Output ("${ptyProbe}" + [Console]::IsOutputRedirected)\r` })
   const ptyDeadline = Date.now() + 15_000
@@ -78,38 +124,43 @@ try {
   const killed = await emitAck(dashboard, 'terminal:kill', { requestId: `kill-${Date.now()}`, workspaceId, sessionId, terminalId: createdTerminal.terminalId })
   if (!killed.killed) throw new Error(`terminal kill failed: ${killed.error ?? 'unknown'}`)
   if (logs.join('').includes('Failed to load native module: conpty.node')) throw new Error(`ConPTY native load failed:\n${logs.join('')}`)
+
   if (serviceMode) {
-    const installDir = join(process.env.ProgramFiles, 'Agent RunLab', 'Executor')
-    const dataDir = join(process.env.ProgramData, 'Agent RunLab', 'Executor')
-    const installedExecutor = join(installDir, 'runlab-executor.exe')
-    if (!existsSync(installedExecutor) || !existsSync(join(installDir, 'prebuilds', windowsTarget, 'conpty.node'))) throw new Error('Windows service installation omitted the executable or ConPTY companion')
+    const installDir = join(process.env.ProgramFiles, 'Kala', 'Executor')
+    const dataDir = join(process.env.ProgramData, 'Kala', 'Executor')
+    const installedExecutor = join(installDir, 'kala-executor.exe')
+    assertFiles([installedExecutor, join(installDir, 'prebuilds', 'win32-x64', 'conpty.node'), join(dataDir, 'config.json')], 'managed Windows service installation')
     const uninstall = await run(installedExecutor, ['service', 'uninstall'])
-    if (uninstall.code !== 0 || !uninstall.stdout.includes('Windows service and credentials were removed')) throw new Error(`Windows service uninstall failed: ${uninstall.stderr}`)
+    if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service and credentials were removed')) throw new Error(`Windows service uninstall failed: ${uninstall.stderr}`)
     const uninstallDeadline = Date.now() + 30_000
     while (Date.now() < uninstallDeadline && (existsSync(installDir) || existsSync(dataDir))) await sleep(100)
     if (existsSync(installDir) || existsSync(dataDir)) throw new Error('Windows service uninstall left managed installation data')
   }
-  console.log('PASS Windows Executor ConPTY Terminal create/input/resize/kill E2E')
-} catch (error) {
-  console.error(error)
-  console.error(logs.join(''))
-  process.exitCode = 1
-} finally {
-  dashboard?.close()
-  executorProcess?.kill()
-  host?.kill()
-  rmSync(stateRoot, { recursive: true, force: true })
+  console.log(`PASS Windows native Executor ${serviceMode ? 'service' : 'temporary'} ConPTY create/input/resize/kill lifecycle`)
 }
 
+function assertFiles(paths, label) {
+  const missing = paths.filter((path) => !existsSync(path))
+  if (missing.length > 0) throw new Error(`${label} is incomplete; missing: ${missing.join(', ')}`)
+}
 function start(file, args, env) {
   const child = spawn(file, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
   child.stdout.on('data', (chunk) => logs.push(chunk.toString()))
   child.stderr.on('data', (chunk) => logs.push(chunk.toString()))
+  child.once('error', (error) => logs.push(`${error.stack ?? error}\n`))
   return child
 }
-function run(file, args) { return new Promise((resolve, reject) => { const child = spawn(file, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', (chunk) => { stdout += chunk }); child.stderr.on('data', (chunk) => { stderr += chunk }); child.once('error', reject); child.once('exit', (code) => resolve({ code, stdout, stderr })) }) }
-async function waitForHttp(url) { const deadline = Date.now() + 30_000; while (Date.now() < deadline) { try { if ((await fetch(url)).ok) return } catch {} await sleep(100) } throw new Error(`Host unavailable: ${url}`) }
-function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }
-function once(socket, event) { return new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`${event} timed out`)), 15_000); socket.once(event, (payload) => { clearTimeout(timer); resolve(payload) }) }) }
-function emitAck(socket, event, payload) { return new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`${event} ack timed out`)), 15_000); socket.emit(event, payload, (result) => { clearTimeout(timer); resolve(result) }) }) }
-function emitAcklessResponse(socket, requestEvent, responseEvent, payload) { return new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`${responseEvent} timed out`)), 15_000); socket.once(responseEvent, (result) => { clearTimeout(timer); resolve(result) }); socket.emit(requestEvent, payload) }) }
+function stop(child) {
+  if (!child || child.exitCode !== null) return Promise.resolve()
+  return new Promise((resolvePromise) => {
+    const timer = setTimeout(resolvePromise, 5_000)
+    child.once('exit', () => { clearTimeout(timer); resolvePromise() })
+    child.kill()
+  })
+}
+function run(file, args) { return new Promise((resolvePromise, reject) => { const child = spawn(file, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', (chunk) => { stdout += chunk }); child.stderr.on('data', (chunk) => { stderr += chunk }); child.once('error', reject); child.once('exit', (code) => resolvePromise({ code, stdout, stderr })) }) }
+async function waitForHttp(url) { const deadline = Date.now() + 30_000; while (Date.now() < deadline) { try { if ((await fetch(url)).ok) return } catch {} if (host?.exitCode !== null) throw new Error(`Host exited before becoming available (${host.exitCode})`); await sleep(100) } throw new Error(`Host unavailable: ${url}`) }
+function sleep(ms) { return new Promise((resolvePromise) => setTimeout(resolvePromise, ms)) }
+function once(socket, event) { return new Promise((resolvePromise, reject) => { const timer = setTimeout(() => reject(new Error(`${event} timed out`)), 15_000); socket.once(event, (payload) => { clearTimeout(timer); resolvePromise(payload) }) }) }
+function emitAck(socket, event, payload) { return new Promise((resolvePromise, reject) => { const timer = setTimeout(() => reject(new Error(`${event} ack timed out`)), 15_000); socket.emit(event, payload, (result) => { clearTimeout(timer); resolvePromise(result) }) }) }
+function emitAcklessResponse(socket, requestEvent, responseEvent, payload) { return new Promise((resolvePromise, reject) => { const timer = setTimeout(() => reject(new Error(`${responseEvent} timed out`)), 15_000); socket.once(responseEvent, (result) => { clearTimeout(timer); resolvePromise(result) }); socket.emit(requestEvent, payload) }) }

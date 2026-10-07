@@ -17,11 +17,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  windows-terminal-e2e:
-    name: Windows Executor / ConPTY Terminal (not supported in this release)
-    # This RC ships no Windows assets. Keep the real ConPTY journey intact for
-    # the next Windows-enabled release, but do not report it as accepted here.
-    if: false
+  windows-host-cjs-e2e:
+    name: Windows x64 Portable Host CJS / Node.js 22
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -36,14 +33,42 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
-      - name: Build Windows production release artifacts
-        run: pnpm run build:release-assets -- --tag latest --repo xingsy97/kala
-      - name: Verify Windows release and ConPTY companion
+      - name: Build Windows x64 Portable Host CJS and native Copilot runtime
+        run: pnpm run build:release-assets -- --tag latest --repo xingsy97/kala --component host
+      - name: Real Windows Host CJS boot and browser-accessible API
+        env:
+          PRODUCT_E2E_WINDOWS_TARGET: host
+        run: node scripts/product-e2e/verify-windows-terminal.mjs
+
+  windows-executor-conpty-e2e:
+    name: Windows x64 native Executor / ConPTY lifecycle
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Enable pnpm
         shell: pwsh
         run: |
-          pnpm run verify:release-assets
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Build isolated Windows Host fixture
+        shell: pwsh
+        run: |
+          pnpm run build:release-assets -- --component host --tag latest --repo xingsy97/kala
           if ($LASTEXITCODE -ne 0) { throw 'Windows release asset verification failed' }
-          $null = [scriptblock]::Create((Get-Content -Raw release/install-executor.ps1))
+          $hostRelease = Join-Path $env:RUNNER_TEMP 'windows-host-release'
+          Copy-Item release $hostRelease -Recurse
+          "PRODUCT_E2E_WINDOWS_HOST_RELEASE_DIR=$hostRelease" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build Windows x64 native Executor and ConPTY companion
+        run: pnpm run build:release-assets -- --component executor --native-only --native-target win32-x64 --tag latest --repo xingsy97/kala
+      - name: Verify and stage isolated Windows Executor payload
+        shell: pwsh
+        run: |
           if (-not (Test-Path release/kala-executor-win32-x64.exe)) { throw 'missing Windows Executor' }
           if (-not (Test-Path release/node-pty-win32-x64.tar.gz)) { throw 'missing ConPTY companion' }
           tar -xzf release/node-pty-win32-x64.tar.gz -C release
@@ -51,10 +76,14 @@ jobs:
           New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null
           Move-Item release/win32-x64 release/prebuilds/win32-x64 -Force
           if (-not (Test-Path release/prebuilds/win32-x64/conpty.node)) { throw 'ConPTY native was not installed beside Executor' }
+          "PRODUCT_E2E_WINDOWS_EXECUTOR_RELEASE_DIR=$((Resolve-Path release).Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Real Windows temporary Terminal lifecycle E2E
+        env:
+          PRODUCT_E2E_WINDOWS_TARGET: executor
         run: node scripts/product-e2e/verify-windows-terminal.mjs
       - name: Real Windows service Terminal lifecycle E2E
         env:
+          PRODUCT_E2E_WINDOWS_TARGET: executor
           PRODUCT_E2E_WINDOWS_SERVICE: '1'
           PRODUCT_E2E_WINDOWS_TERMINAL_PORT: '3326'
         run: node scripts/product-e2e/verify-windows-terminal.mjs
