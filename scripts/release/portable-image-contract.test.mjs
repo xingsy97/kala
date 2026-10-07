@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { inspectPortableAsset, revisionsMatch, versionFromTag } from './verify-portable-container.mjs'
+import { verifyPortableAcceptanceEvidence } from './verify-portable-evidence.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 
@@ -60,4 +61,64 @@ test('Dockerfile keeps the release context narrow and declares the runtime safet
   assert.match(dockerfile, /sha256sum --check --strict/u)
   assert.equal(ignore.split('\n')[0], '**')
   assert.match(ignore, /!release\/kala-dashboard-with-runtime\.cjs/u)
+})
+
+test('portable candidate workflow binds the manual dispatch to signed tag assets and full revision', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/portable-image-release.yml'), 'utf8')
+  assert.match(workflow, /workflow_dispatch:/u)
+  assert.match(workflow, /ACCEPTED_TAG: v0\.3\.0-beta\.1/u)
+  assert.match(workflow, /test "\$TAG" = "\$ACCEPTED_TAG"/u)
+  assert.match(workflow, /test "\$GITHUB_REF" = "refs\/tags\/\$TAG"/u)
+  assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/portable-image-release\.yml@refs\/tags\/\$TAG"/u)
+  assert.match(workflow, /\^\[0-9a-f\]\{40\}\$/u)
+  assert.match(workflow, /refs\/tags\/\$TAG:refs\/tags\/\$TAG/u)
+  assert.match(workflow, /release\.draft !== true/u)
+  assert.match(workflow, /SHA256SUMS\.sigstore\.json/u)
+  assert.match(workflow, /release\.yml@refs\/tags\/\$TAG/u)
+  assert.match(workflow, /verify-checksum-index\.mjs[\s\S]*--revision "\$REVISION"/u)
+  assert.match(workflow, /--inspect-artifact/u)
+  assert.doesNotMatch(workflow, /(?:--asset|sha256sum) ["']?release\/kala-dashboard-with-runtime\.cjs/u, 'workflow must not consume the stale worktree release directory')
+})
+
+test('portable candidate workflow pins amd64 base, signs and verifies digests, and emits SBOM policy evidence', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/portable-image-release.yml'), 'utf8')
+  assert.match(workflow, /\^sha256:\[0-9a-f\]\{64\}\$/u)
+  assert.match(workflow, /platforms: linux\/amd64/u)
+  assert.match(workflow, /docker pull --platform linux\/amd64/u)
+  assert.match(workflow, /cosign sign --yes "\$IMAGE"/u)
+  assert.match(workflow, /cosign verify [\s\S]*"\$IMAGE"/u)
+  assert.match(workflow, /cosign attest --yes --type spdxjson/u)
+  assert.match(workflow, /cosign verify-attestation --type spdxjson/u)
+  assert.match(workflow, /provenance: mode=max/u)
+  assert.match(workflow, /sbom: true/u)
+  assert.match(workflow, /check-vulnerabilities\.mjs/u)
+  assert.doesNotMatch(workflow, /visibility.*public|gh api[^\n]*visibility/iu)
+})
+
+test('isolated VM acceptance is explicit, fail-closed when required, and never runs Box E2E', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/portable-image-release.yml'), 'utf8')
+  assert.match(workflow, /vars\.KALA_PORTABLE_CONTAINER_ACCEPTANCE_RUNNER_ENABLED == 'true'/u)
+  assert.match(workflow, /runs-on: \[self-hosted, linux, x64, portable-container-isolated\]/u)
+  assert.match(workflow, /KALA_PORTABLE_CONTAINER_ACCEPTANCE_VM: '1'/u)
+  assert.match(workflow, /--isolated-vm/u)
+  assert.match(workflow, /ACCEPTANCE_REQUIRED/u)
+  assert.match(workflow, /if \[\[ "\$RUNNER_ENABLED" != true \]\]/u)
+  assert.match(workflow, /public promotion is prohibited/u)
+  assert.doesNotMatch(workflow, /product-system-e2e|private-cloud-product-e2e|ci:product-e2e|runs-on:.*box/iu)
+})
+
+test('acceptance evidence allowlist rejects privacy-sensitive additions', () => {
+  const evidence = {
+    ok: true,
+    category: 'portable-container',
+    image: `ghcr.io/example/kala@sha256:${'a'.repeat(64)}`,
+    imageId: `sha256:${'b'.repeat(64)}`,
+    architecture: 'amd64',
+    tag: 'v0.3.0-beta.1',
+    version: '0.3.0-beta.1',
+    revision: 'c'.repeat(40),
+    checks: { nonRoot: true, persistentVolume: true, loopbackPublish: true, capabilities: true, dashboard: true, sessionPersistence: true },
+  }
+  assert.equal(verifyPortableAcceptanceEvidence(evidence, { image: evidence.image, tag: evidence.tag, revision: evidence.revision }), evidence)
+  assert.throws(() => verifyPortableAcceptanceEvidence({ ...evidence, runnerHost: 'box' }, { image: evidence.image, tag: evidence.tag, revision: evidence.revision }), /privacy-sensitive/u)
 })

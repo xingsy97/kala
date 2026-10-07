@@ -46,9 +46,22 @@ to a JS Operator (Node.js 22+ on the installation host) and single-host
 there is no full-stack NFS acceptance evidence. Windows x64 Portable Host CJS
 and OS-native Executor with ConPTY are separate pending runner gates and must
 not be advertised as shipped until both their actual assets and end-to-end
-results pass. The Linux x64 Portable OCI image has not yet been built, signed
-or accepted from an immutable GHCR digest in an isolated VM. None of these
-candidate policies retroactively alters the `v0.2.0` support claim above.
+results pass. For the candidate, Windows Host is **Node.js 22+ CJS**, not an
+OS-native Host `.exe`: its matching `kala-copilot-runtime-win32-x64` and
+`kala-copilot-runtime-node-win32-x64.node` must be distributed alongside it.
+Windows Executor is the default OS-native `kala-executor-win32-x64.exe`,
+with the matching `node-pty-win32-x64.tar.gz` ConPTY companion and
+`install-executor.ps1`. A standalone Host CJS download alone does **not**
+contain the signed Windows Executor/ConPTY installer: Host-mediated Windows
+installation stays disabled until the Host can serve these adjacent assets
+with matching SHA256SUMS entries from the exact release. Acceptance must
+cover both a fresh Windows Host and the native Executor temporary/service
+terminal lifecycles using the downloaded release assets, not merely a
+source checkout.
+
+The Linux x64 Portable OCI image has not yet been built, signed or accepted
+from an immutable GHCR digest in an isolated VM. None of these candidate
+policies retroactively alters the `v0.2.0` support claim above.
 
 Report vulnerabilities privately through `SECURITY.md`. General defects use the
 public issue templates and must contain synthetic, redacted evidence. Release assets use the repository, issue tracker, and documentation links
