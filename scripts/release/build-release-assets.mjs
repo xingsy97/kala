@@ -33,7 +33,10 @@ const repo = options.repo ?? repoFromPackageJson(packageJson)
 if (!repo && component !== 'dashboard') {
   throw new Error('release repo is required; pass --repo owner/name or set GITHUB_REPOSITORY')
 }
-const wantsNativeBuild = !finalizeOnly && (nativeOnly || !noNative)
+if (nativeOnly && noNative) throw new Error('--native-only and --no-native are mutually exclusive')
+// Self-contained SEA executables are opt-in. The release workflow invokes
+// --component executor --native-only explicitly for its required OS targets.
+const wantsNativeBuild = !finalizeOnly && nativeOnly
 const currentNativeTarget = wantsNativeBuild ? detectNativeTarget() : undefined
 const nativeTarget = wantsNativeBuild ? options.nativeTarget ?? currentNativeTarget : undefined
 
@@ -163,7 +166,7 @@ for (const item of buildEntries) {
   const bundled = readFileSync(outfile, 'utf8')
   writeFileSync(outfile, keepSingleShebang(bundled))
   if (!nativeOnly) chmodSync(outfile, 0o755)
-  if (!item.platformOnly && (nativeOnly || !noNative)) {
+  if (!item.platformOnly && nativeOnly) {
     await buildNativeSea(item.name, outfile, nativeTarget)
   }
 }
@@ -271,9 +274,9 @@ function finalizeRelease() {
     fallbackAssets: Object.fromEntries(builtEntries.map((entry) => [entry.name, entry.cjs]).filter(([, cjs]) => cjs)),
     notes: [
       hasNativeAssets
-        ? 'runtime releases include native binaries plus Node.js .cjs fallback assets'
-        : 'runtime releases include Node.js .cjs fallback assets; native binaries are added by the native release job',
-      'run.sh is a wget-only bash bootstrap that uses compact .cjs assets when Node.js 22+ is available and falls back to native binaries otherwise',
+        ? 'Executor is published as an OS-native binary; Portable Host and Dedicated components require Node.js 22+ .cjs assets by default'
+        : 'Node.js .cjs assets are the default; required OS-native Executor assets are added by the Executor release job',
+      'run.sh is a wget-only bash bootstrap that prefers .cjs assets with Node.js 22+ and can use a published native Executor otherwise',
       'Portable uses kala-dashboard-with-runtime.cjs with embedded dashboard assets; Self-hosted Platform uses kala-runtime.cjs plus an independently activated dashboard release',
     ],
   }
@@ -1103,8 +1106,8 @@ function releaseNotes(manifest) {
   lines.push(
     '## Supported platforms',
     '',
-    '- Native Host and Executor: Linux x64 and macOS x64/arm64.',
-    '- Node.js fallback: platforms with Node.js 22+.',
+    '- Native Executor: Linux x64 and macOS x64/arm64.',
+    '- Portable Host and Dedicated components: Node.js 22+ is required (Linux x64, macOS x64/arm64).',
     changes.desktopDeb || changes.desktopViaDashboard
       ? '- Desktop application: Debian/Ubuntu x64.'
       : '- No Desktop application package is included.',

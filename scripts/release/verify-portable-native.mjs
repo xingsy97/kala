@@ -16,10 +16,10 @@ const target = required('--target')
 const tag = required('--tag')
 const revision = required('--revision')
 const output = resolve(required('--output'))
-if (!existsSync(asset)) throw new Error('Portable native asset is missing')
-if (!existsSync(predecessorAsset)) throw new Error('Portable predecessor native asset is missing')
+if (basename(asset) !== 'kala-dashboard-with-runtime.cjs' || !existsSync(asset)) throw new Error('Portable CJS asset is missing')
+if (basename(predecessorAsset) !== 'kala-dashboard-with-runtime.cjs' || !existsSync(predecessorAsset)) throw new Error('Portable predecessor CJS asset is missing')
 const scratch = mkdtempSync(join(tmpdir(), 'runlab-portable-acceptance-'))
-const install = join(scratch, process.platform === 'win32' ? 'agent-runlab.exe' : 'agent-runlab')
+const install = join(scratch, 'kala-dashboard-with-runtime.cjs')
 const state = join(scratch, 'state')
 const sessions = join(state, 'sessions')
 const artifacts = join(state, 'artifacts')
@@ -33,9 +33,9 @@ let running
 try {
   const first = await startPortable()
   const capabilities = await fetch(first.origin + '/runtime/capabilities').then(assertOkJson)
-  if (capabilities.product !== 'portable' || capabilities.deployment?.architecture !== 'portable') throw new Error('native asset did not start in Portable mode')
+  if (capabilities.product !== 'portable' || capabilities.deployment?.architecture !== 'portable') throw new Error('CJS asset did not start in Portable mode')
   const dashboard = await fetch(first.origin + '/')
-  if (!dashboard.ok || !(await dashboard.text()).includes('<html')) throw new Error('native asset did not serve its embedded Dashboard')
+  if (!dashboard.ok || !(await dashboard.text()).includes('<html')) throw new Error('CJS asset did not serve its embedded Dashboard')
   const socket = await connect(first.origin)
   const created = await emitAck(socket, 'client:create_session', { operationId: 'operation-' + randomUUID(), sessionId })
   if (!created.ok) throw new Error('Portable Session creation failed: ' + String(created.error))
@@ -71,7 +71,7 @@ try {
 async function startPortable() {
   const port = await freePort()
   const logs = []
-  const child = spawn(install, [], {
+  const child = spawn(process.execPath, [install], {
     cwd: scratch,
     env: { ...process.env, KALA_BIND_HOST: '127.0.0.1', KALA_PORT: String(port), KALA_STATE_DIR: state, KALA_SESSIONS_DIR: sessions, KALA_ARTIFACTS_DIR: artifacts, ANTHROPIC_API_KEY: 'acceptance-key-not-used' },
     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
