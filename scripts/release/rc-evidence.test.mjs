@@ -26,9 +26,11 @@ test('fresh Private Cloud evidence requires candidate-first and digest-pinning c
   assert.equal(validateRcEvidence(record), record)
   assert.equal(record.checks.freshCandidateInstall, true)
   assert.equal(record.checks.imageDigestPinning, true)
+  assert.equal(record.checks.realBundledIdentities, true)
+  assert.equal(record.checks.authenticatedModelFixture, true)
   assert.equal(record.checks.fullUpgrade, undefined)
   assert.equal(record.checks.rollback, undefined)
-  for (const check of ['freshCandidateInstall', 'imageDigestPinning', 'browser', 'executor', 'tenantIsolation', 'backupRestore']) {
+  for (const check of ['freshCandidateInstall', 'imageDigestPinning', 'ephemeralBundledAcceptance', 'realBundledIdentities', 'authenticatedModelFixture', 'browser', 'executor', 'tenantIsolation', 'backupRestore']) {
     assert.throws(() => validateRcEvidence({ ...record, checks: { ...record.checks, [check]: false } }), new RegExp(`did not prove ${check}`, 'u'))
   }
 })

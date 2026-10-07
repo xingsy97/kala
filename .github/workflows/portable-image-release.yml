@@ -1,0 +1,403 @@
+name: Portable OCI Candidate Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact signed draft release tag (only v0.3.0-beta.1 is accepted)
+        required: true
+        type: string
+      revision:
+        description: Full 40-hex commit revision named by the tag and release manifest
+        required: true
+        type: string
+      node_22_amd64_digest:
+        description: Approved linux/amd64 digest for the official node:22-bookworm-slim image (sha256:...)
+        required: true
+        type: string
+      require_isolated_vm_acceptance:
+        description: Fail the final gate unless isolated-VM acceptance succeeds
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-oci-candidate-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  ACCEPTED_TAG: v0.3.0-beta.1
+  IMAGE_NAME: ghcr.io/${{ github.repository }}-portable
+
+jobs:
+  verify-candidate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # Draft releases require push-capable contents access; this job never edits the release.
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      revision: ${{ steps.resolve.outputs.revision }}
+      created: ${{ steps.resolve.outputs.created }}
+      asset_sha256: ${{ steps.asset.outputs.sha256 }}
+      workflow_identity: ${{ steps.resolve.outputs.workflow_identity }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - uses: sigstore/cosign-installer@v3
+      - id: resolve
+        name: Bind dispatch inputs to the one accepted tag and its exact commit
+        env:
+          TAG: ${{ inputs.tag }}
+          REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          test "$TAG" = "$ACCEPTED_TAG"
+          test "$GITHUB_REF" = "refs/tags/$TAG" || { echo 'Select the exact candidate tag as the workflow dispatch ref' >&2; exit 1; }
+          [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
+          node scripts/release/version-policy.mjs --tag "$TAG"
+          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          test "$(git rev-list -n1 "$TAG")" = "$REVISION"
+          test "$(git rev-parse "$TAG^{commit}")" = "$REVISION"
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/portable-image-release.yml@refs/tags/$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+          echo "created=$(git show -s --format=%cI "$REVISION")" >> "$GITHUB_OUTPUT"
+          echo "workflow_identity=https://github.com/$GITHUB_WORKFLOW_REF" >> "$GITHUB_OUTPUT"
+      - name: Download the exact draft release trust set into an empty directory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          RELEASE_JSON="$release_json" node --input-type=module -e '
+            const release = JSON.parse(process.env.RELEASE_JSON)
+            if (release.tag_name !== process.env.TAG || release.draft !== true) throw new Error("expected the exact draft release")
+          '
+          candidate="${RUNNER_TEMP}/portable-candidate"
+          rm -rf "$candidate"
+          mkdir -m 0700 "$candidate"
+          for asset in kala-dashboard-with-runtime.cjs SHA256SUMS SHA256SUMS.sigstore.json manifest.json; do
+            gh release download "$TAG" --dir "$candidate" --pattern "$asset"
+            test -f "$candidate/$asset"
+          done
+          test "$(find "$candidate" -maxdepth 1 -type f | wc -l)" -eq 4
+      - name: Verify release.yml Sigstore identity, signed index, manifest revision, and embedded CJS
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+          REVISION: ${{ steps.resolve.outputs.revision }}
+        run: |
+          set -euo pipefail
+          candidate="${RUNNER_TEMP}/portable-candidate"
+          cosign verify-blob \
+            --bundle "$candidate/SHA256SUMS.sigstore.json" \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$candidate/SHA256SUMS"
+          node scripts/release/verify-checksum-index.mjs \
+            --index "$candidate/SHA256SUMS" \
+            --asset "$candidate/kala-dashboard-with-runtime.cjs" \
+            --manifest "$candidate/manifest.json" \
+            --revision "$REVISION"
+          node scripts/release/verify-checksum-index.mjs \
+            --index "$candidate/SHA256SUMS" \
+            --asset "$candidate/manifest.json"
+          node scripts/release/verify-portable-container.mjs \
+            --inspect-artifact \
+            --asset "$candidate/kala-dashboard-with-runtime.cjs" \
+            --tag "$TAG" \
+            --revision "$REVISION"
+      - id: asset
+        name: Export the independently calculated CJS digest
+        run: echo "sha256=$(sha256sum "${RUNNER_TEMP}/portable-candidate/kala-dashboard-with-runtime.cjs" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: portable-cjs-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/portable-candidate/kala-dashboard-with-runtime.cjs
+          if-no-files-found: error
+          retention-days: 1
+
+  build-sign-and-policy:
+    needs: verify-candidate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      digest: ${{ steps.image.outputs.digest }}
+      tagged_image: ${{ steps.image.outputs.tagged_image }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: portable-cjs-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/context/release
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
+      - uses: sigstore/cosign-installer@v3
+      - name: Validate the manually approved official Node 22 linux/amd64 base digest
+        env:
+          NODE_DIGEST: ${{ inputs.node_22_amd64_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$NODE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          base="node:22-bookworm-slim@$NODE_DIGEST"
+          docker buildx imagetools inspect --raw "$base" > "${RUNNER_TEMP}/node-base-manifest.json"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const manifest = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/node-base-manifest.json`, 'utf8'))
+          if (Array.isArray(manifest.manifests)) throw new Error('Node base digest must name one linux/amd64 image manifest, not a multi-platform index')
+          if (!manifest.config?.digest?.match(/^sha256:[0-9a-f]{64}$/u)) throw new Error('Node base digest did not resolve to an image manifest')
+          NODE
+          docker pull --platform linux/amd64 "$base"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$base")" = linux/amd64
+      - name: Create a fresh minimal build context
+        run: |
+          set -euo pipefail
+          cp deploy/portable/Dockerfile "${RUNNER_TEMP}/context/Dockerfile"
+          cp deploy/portable/Dockerfile.dockerignore "${RUNNER_TEMP}/context/Dockerfile.dockerignore"
+          test "$(sha256sum "${RUNNER_TEMP}/context/release/kala-dashboard-with-runtime.cjs" | cut -d' ' -f1)" = '${{ needs.verify-candidate.outputs.asset_sha256 }}'
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ runner.temp }}/context
+          file: ${{ runner.temp }}/context/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.verify-candidate.outputs.version }}
+          build-args: |
+            NODE_IMAGE=node:22-bookworm-slim@${{ inputs.node_22_amd64_digest }}
+            KALA_VERSION=${{ needs.verify-candidate.outputs.version }}
+            KALA_REVISION=${{ needs.verify-candidate.outputs.revision }}
+            KALA_SOURCE=${{ github.server_url }}/${{ github.repository }}
+            KALA_CREATED=${{ needs.verify-candidate.outputs.created }}
+            KALA_ASSET_SHA256=${{ needs.verify-candidate.outputs.asset_sha256 }}
+          provenance: mode=max
+          sbom: true
+      - id: image
+        name: Export immutable image coordinates and reject a missing digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "image=$IMAGE_NAME@$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "tagged_image=$IMAGE_NAME:${{ needs.verify-candidate.outputs.version }}" >> "$GITHUB_OUTPUT"
+      - name: Sign and verify only the immutable image digest
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          IDENTITY: ${{ needs.verify-candidate.outputs.workflow_identity }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$IMAGE"
+          cosign verify \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE" > "${RUNNER_TEMP}/signature-verification.json"
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Generate and sign an explicit SPDX SBOM for the immutable digest
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          SYFT_VERSION: v1.30.0
+          SYFT_SHA256: f0cdcba0b6ce4c7a87050d524f732ba9fa2e711835f993a4ef108cfbf928ec13
+        run: |
+          set -euo pipefail
+          curl -sSfL --retry 3 -o /tmp/syft.tar.gz "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/syft_${SYFT_VERSION#v}_linux_amd64.tar.gz"
+          echo "${SYFT_SHA256}  /tmp/syft.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/syft.tar.gz -C /usr/local/bin syft
+          syft "$IMAGE" -o spdx-json="${RUNNER_TEMP}/portable.spdx.json"
+          cosign attest --yes --type spdxjson --predicate "${RUNNER_TEMP}/portable.spdx.json" "$IMAGE"
+      - name: Verify signed registry provenance and SPDX SBOM attestations
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          IDENTITY: ${{ needs.verify-candidate.outputs.workflow_identity }}
+        run: |
+          set -euo pipefail
+          cosign verify-attestation --type slsaprovenance \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE" > /dev/null
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE" > /dev/null
+      - name: Install pinned vulnerability scanners
+        env:
+          GRYPE_VERSION: v0.99.1
+          GRYPE_SHA256: 7fde4d45fe097daa2554078cd9e81faa43e51266a888337f5446c1ffc42d451f
+          TRIVY_VERSION: v0.74.0
+          TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+        run: |
+          set -euo pipefail
+          curl -sSfL --retry 3 -o /tmp/grype.tar.gz "https://github.com/anchore/grype/releases/download/${GRYPE_VERSION}/grype_${GRYPE_VERSION#v}_linux_amd64.tar.gz"
+          echo "${GRYPE_SHA256}  /tmp/grype.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/grype.tar.gz -C /usr/local/bin grype
+          curl -sSfL --retry 3 -o /tmp/trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}/trivy_${TRIVY_VERSION#v}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
+      - name: Apply the Private Cloud dual-scanner vulnerability policy to the digest
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -euo pipefail
+          mkdir -m 0700 "${RUNNER_TEMP}/vulnerability"
+          grype "$IMAGE" -o json > "${RUNNER_TEMP}/vulnerability/grype.json"
+          trivy image --scanners vuln --format json --output "${RUNNER_TEMP}/vulnerability/trivy.json" "$IMAGE"
+          node scripts/security/check-vulnerabilities.mjs \
+            --grype "${RUNNER_TEMP}/vulnerability/grype.json" \
+            --trivy "${RUNNER_TEMP}/vulnerability/trivy.json" \
+            --output "${RUNNER_TEMP}/vulnerability/normalized.json"
+      - name: Create, sign, and verify privacy-safe candidate metadata
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          TAG: ${{ needs.verify-candidate.outputs.tag }}
+          REVISION: ${{ needs.verify-candidate.outputs.revision }}
+          ASSET_SHA256: ${{ needs.verify-candidate.outputs.asset_sha256 }}
+          BASE_DIGEST: ${{ inputs.node_22_amd64_digest }}
+          IDENTITY: ${{ needs.verify-candidate.outputs.workflow_identity }}
+        run: |
+          set -euo pipefail
+          mkdir -m 0700 "${RUNNER_TEMP}/portable-evidence"
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs'
+          const evidence = {
+            schemaVersion: 1,
+            status: 'private-candidate-vm-acceptance-pending',
+            image: process.env.IMAGE,
+            platform: 'linux/amd64',
+            tag: process.env.TAG,
+            revision: process.env.REVISION,
+            portableAssetSha256: process.env.ASSET_SHA256,
+            nodeBaseDigest: process.env.BASE_DIGEST,
+            checks: { signedReleaseAsset: true, imageSignature: true, provenance: true, sbom: true, vulnerabilityPolicy: true, isolatedVmAcceptance: false },
+            publicPromotion: false,
+          }
+          writeFileSync(`${process.env.RUNNER_TEMP}/portable-evidence/candidate-metadata.json`, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 })
+          NODE
+          cosign sign-blob --yes --bundle "${RUNNER_TEMP}/portable-evidence/candidate-metadata.sigstore.json" "${RUNNER_TEMP}/portable-evidence/candidate-metadata.json"
+          cosign verify-blob --bundle "${RUNNER_TEMP}/portable-evidence/candidate-metadata.sigstore.json" \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${RUNNER_TEMP}/portable-evidence/candidate-metadata.json"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: portable-private-candidate-metadata-${{ github.run_id }}
+          path: ${{ runner.temp }}/portable-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  isolated-vm-acceptance:
+    needs: [verify-candidate, build-sign-and-policy]
+    if: inputs.require_isolated_vm_acceptance == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      KALA_PORTABLE_CONTAINER_ACCEPTANCE_VM: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Require a fresh GitHub-hosted Linux VM with Docker
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux && test "$RUNNER_ARCH" = X64
+          docker info >/dev/null
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
+      - uses: sigstore/cosign-installer@v3
+      - name: Verify signature and registry evidence before pulling the digest
+        env:
+          IMAGE: ${{ needs.build-sign-and-policy.outputs.image }}
+          IDENTITY: ${{ needs.verify-candidate.outputs.workflow_identity }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE" =~ ^ghcr\.io/[a-z0-9][a-z0-9./_-]+@sha256:[0-9a-f]{64}$ ]]
+          cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE" > /dev/null
+          cosign verify-attestation --type slsaprovenance --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE" > /dev/null
+          cosign verify-attestation --type spdxjson --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE" > /dev/null
+          docker pull --platform linux/amd64 "$IMAGE"
+      - name: Run explicitly isolated VM acceptance against the immutable digest
+        run: |
+          node scripts/release/verify-portable-container.mjs \
+            --isolated-vm \
+            --image '${{ needs.build-sign-and-policy.outputs.image }}' \
+            --tag '${{ needs.verify-candidate.outputs.tag }}' \
+            --revision '${{ needs.verify-candidate.outputs.revision }}' \
+            --output "${RUNNER_TEMP}/portable-container-acceptance.json"
+      - name: Create and sign acceptance metadata with no host, actor, path, or log data
+        env:
+          IMAGE: ${{ needs.build-sign-and-policy.outputs.image }}
+          TAG: ${{ needs.verify-candidate.outputs.tag }}
+          REVISION: ${{ needs.verify-candidate.outputs.revision }}
+          IDENTITY: ${{ needs.verify-candidate.outputs.workflow_identity }}
+        run: |
+          set -euo pipefail
+          mkdir -m 0700 "${RUNNER_TEMP}/portable-acceptance-evidence"
+          mv "${RUNNER_TEMP}/portable-container-acceptance.json" "${RUNNER_TEMP}/portable-acceptance-evidence/acceptance.json"
+          node scripts/release/verify-portable-evidence.mjs --acceptance "${RUNNER_TEMP}/portable-acceptance-evidence/acceptance.json" --image "$IMAGE" --tag "$TAG" --revision "$REVISION"
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs'
+          const metadata = {
+            schemaVersion: 1,
+            status: 'isolated-vm-accepted',
+            image: process.env.IMAGE,
+            platform: 'linux/amd64',
+            tag: process.env.TAG,
+            revision: process.env.REVISION,
+            checks: { imageSignature: true, provenance: true, sbom: true, isolatedVmAcceptance: true },
+            publicPromotion: false,
+          }
+          writeFileSync(`${process.env.RUNNER_TEMP}/portable-acceptance-evidence/metadata.json`, JSON.stringify(metadata, null, 2) + '\n', { mode: 0o600 })
+          NODE
+          cosign sign-blob --yes --bundle "${RUNNER_TEMP}/portable-acceptance-evidence/metadata.sigstore.json" "${RUNNER_TEMP}/portable-acceptance-evidence/metadata.json"
+          cosign verify-blob --bundle "${RUNNER_TEMP}/portable-acceptance-evidence/metadata.sigstore.json" \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${RUNNER_TEMP}/portable-acceptance-evidence/metadata.json"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: portable-isolated-vm-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/portable-acceptance-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  candidate-gate:
+    needs: [build-sign-and-policy, isolated-vm-acceptance]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Distinguish private candidate completion from isolated-VM acceptance
+        env:
+          BUILD_RESULT: ${{ needs.build-sign-and-policy.result }}
+          ACCEPTANCE_RESULT: ${{ needs.isolated-vm-acceptance.result }}
+          ACCEPTANCE_REQUIRED: ${{ inputs.require_isolated_vm_acceptance }}
+        run: |
+          set -euo pipefail
+          test "$BUILD_RESULT" = success
+          if [[ "$ACCEPTANCE_REQUIRED" = true ]]; then
+            test "$ACCEPTANCE_RESULT" = success
+            echo "Private candidate controls and isolated-VM acceptance passed; this workflow still does not make the package public."
+          else
+            echo "::warning::Private candidate controls passed with isolated-VM acceptance not required. Acceptance remains pending; public promotion is prohibited."
+          fi

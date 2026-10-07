@@ -109,6 +109,20 @@ jobs:
               node scripts/release/verify-private-cloud-fresh-evidence.mjs \
                 --evidence "${fresh_files[0]}" --archive "$archive" --tag "$TAG" --revision "$REVISION"
             fi
+            # The signed bundle must be usable without GitHub credentials. Verify
+            # full anonymous layer pulls, not just authenticated candidate E2E.
+            anonymous_config=$(mktemp -d)
+            for component in runtime ingress dashboard; do
+              image=$(tar -xOzf "$archive" ./image-lock.json | jq -er ".images.$component")
+              case "$image" in
+                "ghcr.io/$GITHUB_REPOSITORY-private-cloud-$component"@sha256:*) ;;
+                *) echo "Unexpected Private Cloud $component image ownership" >&2; exit 1 ;;
+              esac
+              [[ "${image##*@}" =~ ^sha256:[0-9a-f]{64}$ ]]
+              DOCKER_CONFIG="$anonymous_config" docker pull --quiet "$image" >/dev/null
+              DOCKER_CONFIG="$anonymous_config" docker image inspect "$image" >/dev/null
+            done
+            rm -rf -- "$anonymous_config"
             rm -- "$archive" "$signature"
           done
           node scripts/release/verify-promotion-candidate.mjs \

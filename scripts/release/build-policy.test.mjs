@@ -94,13 +94,14 @@ test('release verification rejects embedded Dashboard assignment without rejecti
   assert.ok(!verifier.includes("platformRuntime.includes('__KALA_EMBEDDED_DASHBOARD__')"))
 })
 
-test('release scripts enforce Linux and macOS assets and reject Windows offers', () => {
+test('release verifier enforces the exact four-platform default while builder exposes Windows build capability', () => {
   const builder = read('scripts/release/build-release-assets.mjs')
   const verifier = read('scripts/release/verify-release-assets.mjs')
-  const installSmoke = read('scripts/release/verify-release-install.mjs')
-  assert.match(builder, /Windows release assets are not included in this release/)
+  assert.match(builder, /const nativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64', WINDOWS_EXECUTOR_TARGET\]/)
+  assert.match(builder, /const supportedNativeBuildTargets = nativeTargets/)
+  assert.match(builder, /generateExecutorInstallerPowerShell/)
+  assert.match(builder, /packageWindowsNodePtyCompanion/)
   assert.doesNotMatch(builder, /name: '(?:agent-kernel|agent-runlab|runlab)-|cjsName: 'bundle-dashboard-with-runtime'/)
-  assert.doesNotMatch(builder, /install-executor\.ps1|node-pty-win32|writeExecutorUpdateManifest/)
   assert.match(builder, /stageCopilotRuntime/)
   assert.doesNotMatch(builder, /generateExecutorInstallerSh|COPILOT_CLI_PATH/)
   assert.match(builder, /Release downloads require HTTPS except for loopback URLs/)
@@ -110,21 +111,12 @@ test('release scripts enforce Linux and macOS assets and reject Windows offers',
   assert.match(builder, /\$\{1:-\}" != "--internal-installer"/)
   assert.match(builder, /\[ "\$BASE_URL" != "\$host_asset_base" \]/)
   assert.match(builder, /if \[ "\$VERIFY_SIGSTORE" = "1" \]; then require_cmd cosign; fi/)
-  for (const section of ['Improvements', 'Fixes', 'Known issues', 'Installation', 'Supported platforms', 'Verification', 'Full changelog']) {
-    assert.match(builder, new RegExp(section))
-  }
-  assert.match(builder, /Kala is a complete, self-hosted, cloud-native agent system for running agents/)
-  assert.match(builder, /Its three layers form a single system: the Agent Kernel defines behavior/)
-  assert.doesNotMatch(builder, /Kala is a self-hosted command center for coding agents across workspaces/)
-  assert.doesNotMatch(builder, /## Highlights/)
-  assert.match(verifier, /supportedNativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
-  assert.match(verifier, /linux-arm64\|win32\|windows/)
+  for (const section of ['Improvements', 'Fixes', 'Known issues', 'Installation', 'Supported platforms', 'Verification', 'Full changelog']) assert.match(builder, new RegExp(section))
+  assert.match(verifier, /supportedNativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64', 'win32-x64'\]/)
+  assert.match(verifier, /acceptedWindows/)
+  assert.match(verifier, /linux-arm64/)
   assert.match(verifier, /assertSupportedReleaseAssetName\(asset\?\.path, 'embedded Host assets'\)/)
   assert.match(verifier, /executor-update-/)
-  for (const forbidden of ['install-executor.ps1', 'node-pty-win32-x64.tar.gz', 'node-pty-win32-arm64.tar.gz', 'executor-update-manifest.json']) {
-    assert.match(installSmoke, new RegExp(forbidden.replaceAll('.', '\\.')))
-  }
-  assert.match(installSmoke, /expected unsupported or platform-ambiguous asset to be absent/)
 })
 
 test('root tests expose fast and extended aggregation without experiments', () => {

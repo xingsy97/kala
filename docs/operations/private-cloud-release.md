@@ -111,25 +111,53 @@ uploads a minimal digest-bound `rc-evidence.json` Actions artifact. A skipped,
 queued, or failed job produces **no passing evidence**; the existing optional
 product E2E on a preinstalled deployment is not a substitute.
 
-To enable this job, register a dedicated self-hosted runner with labels
-`self-hosted`, `linux`, `x64`, `private-cloud-clean` and Docker Compose, `gh`, a
-working Chromium (`CHROME_PATH`, default `/snap/bin/chromium`), access to GHCR and
-the test IdP, and a free port 13001. Configure repository variable
-`KALA_PRIVATE_CLOUD_RUNNER_ENABLED=true`, variable
-`KALA_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE` pointing to the local private config
-directory (`deployment.env`, provider catalog, secrets), and variable
-`KALA_PRIVATE_CLOUD_PREDECESSOR_TAG` pointing to the previously signed release;
-manual dispatch may instead provide `predecessor_tag`. Configure secrets
-`PRIVATE_CLOUD_TEST_ALICE_EMAIL`, `PRIVATE_CLOUD_TEST_ALICE_PASSWORD`,
-`PRIVATE_CLOUD_TEST_ALICE_OIDC_ISSUER`, `PRIVATE_CLOUD_TEST_ALICE_OIDC_SUBJECT`,
-`PRIVATE_CLOUD_TEST_BOB_EMAIL`, `PRIVATE_CLOUD_TEST_BOB_PASSWORD`,
-`PRIVATE_CLOUD_TEST_BOB_OIDC_ISSUER`, and `PRIVATE_CLOUD_TEST_BOB_OIDC_SUBJECT`.
-Obtain each exact issuer and `sub` from that independent test identity's verified
-ID token or IdP administrative record; never derive or guess `sub` from email.
-After installing the predecessor bundle, the clean acceptance uses the current
-worktree Operator to provision each identity as owner of a different Organization
-before either login. This exercises the new command without replacing or silently
-initializing the predecessor deployment as the candidate version. The runner must
-be exclusive while acceptance runs; do not reuse a customer's
-installation or rely on a dirty persistent deployment. The GitHub release upload
-is not gated on this optional job: check its evidence before customer delivery.
+Both beta fresh-install acceptance and the optional predecessor-upgrade job run
+on a new GitHub-hosted `ubuntu-24.04` VM; no self-hosted runner or persistent
+installation is needed. They check Docker, the browser and the VM environment
+before running the actual signed-asset, browser, Executor and restore tests.
+
+The `v0.3.0-beta.1` fresh job is self-contained and requires no repository
+Actions secrets or variables. Its explicit `--ephemeral-bundled-acceptance`
+path uses the verified candidate Operator to run `init-config` with bundled
+identity and local-volume storage. It starts only the signed candidate identity
+stack, uses the short-lived bootstrap PAT inside the signed identity helper to
+create two real verified password users, records each returned Zitadel `userId`
+as that user's exact OIDC `sub`, enrolls the web client, and deletes the PAT.
+The identity services are stopped without deleting their volumes; normal
+candidate installation then reuses the same identity database and enrollment
+files. Generated passwords, the model bearer credential, and bootstrap inputs
+exist only in process memory or mode-0600 files under the disposable scratch
+directory and are never uploaded.
+
+The same fresh job runs a minimal OpenAI-compatible fixture in the candidate's
+immutable digest-pinned Runtime image on the ephemeral Compose `egress` network.
+The fixture accepts only the random bearer credential mounted from the protected
+LLM key file, streams a real `write_file` tool call, and returns the final marker
+only after the Runtime sends the matching tool result. The Browser/Executor test
+still approves the tool, verifies the exact file on disk, verifies the final
+answer, and reloads the Session. The fixture container is always removed. The
+job also retains the two-tenant, unauthenticated-capability, mTLS rejection, Unit
+quota, Runtime restart/DAG recovery, and backup/restore assertions. It fails
+rather than emits passing evidence when the hosted VM has less than 10 GiB free
+after removing unused preinstalled SDKs. This threshold is a fail-fast guard,
+not proof of peak disk sufficiency; only a successful hosted run establishes
+that for the exact candidate image sizes.
+
+The optional predecessor-upgrade job continues to use externally managed
+configuration. Set `KALA_PRIVATE_CLOUD_UPGRADE_ACCEPTANCE_ENABLED=true` and
+`KALA_PRIVATE_CLOUD_PREDECESSOR_TAG` to the previously signed release; manual
+dispatch may instead provide `predecessor_tag`. Provide
+`KALA_RC_PRIVATE_CLOUD_CONFIG_ARCHIVE_B64` as a repository Actions secret
+containing a base64-encoded gzip tar archive with `deployment.env`,
+`runtime-provider-catalog.json` and `secrets/` at its root (and
+`identity-secrets/` when applicable). It must contain a working OIDC client,
+provider configuration and keys, not placeholders. Also configure the Alice and
+Bob email, password, and exact OIDC-subject secrets plus both issuer variables
+used by that job. Obtain each exact issuer and `sub` from a verified ID token or
+IdP administrative record; never derive or guess `sub` from email. After
+installing the predecessor bundle, acceptance uses the current worktree Operator
+to provision each identity as owner of a different Organization before login.
+Each job uses its own disposable VM; never reuse a customer's installation or
+treat preinstalled-deployment E2E as fresh acceptance. The GitHub release upload
+is not gated on the optional upgrade job: check its evidence before customer
+delivery.

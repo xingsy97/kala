@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/eval-protocol",
-  "version": "0.2.0",
+  "version": "0.3.0-beta.1",
   "description": "Browser-safe contracts for the standalone Agent Evaluation Platform.",
   "repository": { "type": "git", "url": "git+https://github.com/xingsy97/kala.git" },
   "homepage": "https://github.com/xingsy97/kala#readme",
@@ -17,7 +17,7 @@
   "files": ["dist", "src", "fixtures", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/dist/**'",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

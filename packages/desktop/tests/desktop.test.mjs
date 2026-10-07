@@ -187,10 +187,10 @@ test('explicit Change server/reloaded launcher stays editable without reconnecti
 
 test('desktop release versions stay in sync without changing dependencies', () => {
   const version = JSON.parse(read('../package.json')).version
-  assert.equal(version, '0.2.0')
+  assert.equal(version, JSON.parse(read('../../../package.json')).version)
   assert.equal(JSON.parse(read('../src-tauri/tauri.conf.json')).version, version)
-  assert.match(read('../src-tauri/Cargo.toml'), /name = "kala-desktop"[\s\S]*version = "0\.2\.0"/)
-  assert.match(read('../src-tauri/Cargo.lock'), /name = "kala-desktop"\nversion = "0\.2\.0"/)
+  assert.equal(read('../src-tauri/Cargo.toml').match(/^name = "kala-desktop"\nversion = "([^"]+)"/m)?.[1], version)
+  assert.equal(read('../src-tauri/Cargo.lock').match(/^name = "kala-desktop"\nversion = "([^"]+)"/m)?.[1], version)
 })
 
 test('connect remains local; selected-origin v1 UI hints get no general native privileges', () => {

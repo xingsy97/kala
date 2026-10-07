@@ -14,7 +14,7 @@ const version = manifest.version
 const releases = normalizeReleases(fallbackCatalog, notes)
 const catalog = {
   releases,
-  current: releases.find((release) => release.version === version),
+  current: releases.find((release) => release.version === version) ?? releases.find((release) => !release.prerelease) ?? releases[0],
   stable: releases.find((release) => !release.prerelease),
   preview: releases.find((release) => release.prerelease),
   source: 'fallback',
@@ -134,10 +134,12 @@ test('release catalog filters unpublished entries, parses public notes, and fall
   const fallback = await resolveReleaseCatalog({
     fallbackCatalog,
     releaseNotes: notes,
+    configuredVersion: version,
     fetchImpl: async () => { throw new Error('offline') },
   })
   assert.equal(fallback.source, 'fallback')
   assert.equal(fallback.stable.tag, 'v0.2.0')
+  assert.equal(fallback.current.tag, 'v0.2.0', 'unpublished beta versions must not replace the published stable release')
   assert.equal(fallback.releases.some((release) => release.tag === 'v0.2.0-rc.19'), false)
 })
 

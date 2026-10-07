@@ -93,8 +93,10 @@ const allEntries = [
 ]
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
-const nativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64']
-const supportedNativeBuildTargets = [...nativeTargets, WINDOWS_EXECUTOR_TARGET]
+const nativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64', WINDOWS_EXECUTOR_TARGET]
+const supportedNativeBuildTargets = nativeTargets
+// Portable Host CJS is platform-neutral, but each supported OS must contribute
+// its adjacent Copilot SDK wrapper and native runtime from a matching runner.
 const copilotRuntimeTargets = nativeTargets
 if (finalizeOnly) {
   finalizeRelease()
@@ -701,9 +703,22 @@ function gitlessSourceSnapshotSha256() {
 }
 
 function sourceSnapshotSha256() {
+  const hash = createHash('sha256')
+  // A clean release tag has exactly the checked-in Git index as its source.
+  // Hash its tracked mode, path, and content-addressed blob identity instead of
+  // OS stat modes/CRLF checkout bytes, which differ on Windows and Unix runners.
+  // Dirty local builds still hash every actual worktree file below.
+  if (gitText(['status', '--porcelain=v1', '--untracked-files=all']).trim() === '') {
+    const entries = gitBuffer(['ls-files', '--stage', '-z']).toString('utf8').split('\0').filter(Boolean).sort()
+    for (const entry of entries) {
+      const match = entry.match(/^(100644|100755|120000) ([0-9a-f]{40,64}) 0\t(.+)$/u)
+      if (!match) throw new Error('release Git index contains an unsupported or unresolved entry')
+      hash.update(`${match[1]}\0${match[3]}\0${match[2]}\0`)
+    }
+    return hash.digest('hex')
+  }
   const paths = gitBuffer(['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
     .toString('utf8').split('\0').filter(Boolean).filter((path) => existsSync(join(root, path))).sort()
-  const hash = createHash('sha256')
   for (const path of paths) {
     const absolute = join(root, path)
     const stat = lstatSync(absolute)
@@ -1181,13 +1196,13 @@ function releaseNotes(manifest) {
   lines.push(
     '## Supported platforms',
     '',
-    '- Native Executor: Linux x64 and macOS x64/arm64.',
-    '- Portable Host and Dedicated components: Node.js 22+ is required (Linux x64, macOS x64/arm64).',
+    '- Native Executor: Linux x64, macOS x64/arm64, and Windows x64 with the signed ConPTY companion.',
+    '- Portable Host and Dedicated components: Node.js 22+ is required on each accepted platform.',
     changes.desktopDeb || changes.desktopViaDashboard
       ? '- Desktop application: Debian/Ubuntu x64.'
       : '- No Desktop application package is included.',
     '- Dashboard: current Chromium, Firefox, and Safari releases.',
-    '- Linux arm64 and Windows release assets are not included in this release.',
+    '- Linux arm64 and Windows arm64 release assets are not included in this release.',
     '',
     `See the [release support policy](https://github.com/${manifest.repo}/blob/${manifest.tag}/docs/operations/release-support-policy.md) for the validated support scope.`,
     '',

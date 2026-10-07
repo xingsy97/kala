@@ -103,6 +103,49 @@ test('registers the fixed localhost OIDC client and atomically saves protected e
   }
 })
 
+test('creates two verified acceptance users before OIDC enrollment and returns their exact distinct subjects without passwords', async (t) => {
+  const { options, secretsDir, configDir } = await fixture(t)
+  await writeProtected(join(secretsDir, 'oidc_client_id'), 'REPLACE_WITH_LOCAL_OIDC_CLIENT_ID\n')
+  await writeProtected(join(secretsDir, 'oidc_client_secret'), 'REPLACE_WITH_LOCAL_OIDC_CLIENT_SECRET\n')
+  const usersFile = join(configDir, 'acceptance-users.json')
+  const users = [
+    { name: 'alice', email: 'alice@example.test', password: 'Alice-password-1!' },
+    { name: 'bob', email: 'bob@example.test', password: 'Bob-password-2!!' },
+  ]
+  await writeProtected(usersFile, JSON.stringify({ users }))
+  const calls = []
+  const responses = [
+    { userId: 'alice-subject' }, { userId: 'bob-subject' }, { id: 'project-users' },
+    { appId: 'application-users', clientId: 'client-users', clientSecret: CLIENT_SECRET },
+  ]
+
+  const result = await bootstrapPrivateCloudIdentity({ ...options, acceptanceUsersFile: usersFile }, {
+    runDocker: async (args) => args.includes('cat') ? PAT : '',
+    fetch: async (url, request) => { calls.push({ url, body: JSON.parse(request.body) }); return okJson(responses.shift()) },
+  })
+
+  assert.deepEqual(calls.map((call) => call.url), [
+    'http://127.0.0.1:13002/management/v1/users/human',
+    'http://127.0.0.1:13002/management/v1/users/human',
+    'http://127.0.0.1:13002/management/v1/projects',
+    'http://127.0.0.1:13002/management/v1/projects/project-users/apps/oidc',
+  ])
+  assert.deepEqual(calls.slice(0, 2).map((call) => ({
+    userName: call.body.userName,
+    verified: call.body.email.isEmailVerified,
+    initialPassword: call.body.initialPassword,
+    hasUnsupportedPasswordField: Object.hasOwn(call.body, 'password'),
+  })), [
+    { userName: users[0].email, verified: true, initialPassword: users[0].password, hasUnsupportedPasswordField: false },
+    { userName: users[1].email, verified: true, initialPassword: users[1].password, hasUnsupportedPasswordField: false },
+  ])
+  assert.deepEqual(result.acceptanceUsers, [
+    { name: 'alice', email: users[0].email, subject: 'alice-subject' },
+    { name: 'bob', email: users[1].email, subject: 'bob-subject' },
+  ])
+  assert.doesNotMatch(JSON.stringify(result), /Alice-password|Bob-password/u)
+})
+
 test('reuses only credentials whose protected enrollment metadata is consistent', async (t) => {
   const { options, secretsDir } = await fixture(t)
   let dockerCount = 0
@@ -290,6 +333,10 @@ test('CLI contract rejects relative config paths, mutable images, and arbitrary 
   assert.deepEqual(parsed, {
     configDir: '/operator/config', bootstrapVolume: 'project_bootstrap', identityImage: IMAGE,
   })
+  assert.equal(parseCliArgs([
+    '--config-dir', '/operator/config', '--bootstrap-volume', 'project_bootstrap', '--identity-image', IMAGE,
+    '--acceptance-users-file', '/private/users.json',
+  ]).acceptanceUsersFile, '/private/users.json')
   await assert.rejects(bootstrapPrivateCloudIdentity({ ...parsed, configDir: 'relative' }), /absolute path/u)
   await assert.rejects(bootstrapPrivateCloudIdentity({ ...parsed, identityImage: 'alpine:3.22' }), /immutable Alpine image digest/u)
   assert.throws(() => parseCliArgs([...[

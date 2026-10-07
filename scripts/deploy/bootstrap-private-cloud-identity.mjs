@@ -18,7 +18,8 @@ const IMAGE_PATTERN = /^(?:[a-z0-9.-]+(?::[0-9]+)?\/)?(?:[a-z0-9._-]+\/)*alpine(
 // be backed up and restored together. Populated credentials are reused only when
 // the metadata's client ID and secret hash prove that all three files agree.
 export function parseCliArgs(argv) {
-  const allowed = new Set(['--config-dir', '--bootstrap-volume', '--identity-image'])
+  const requiredOptions = new Set(['--config-dir', '--bootstrap-volume', '--identity-image'])
+  const allowed = new Set([...requiredOptions, '--acceptance-users-file'])
   const values = new Map()
   for (let index = 0; index < argv.length; index += 2) {
     const option = argv[index]
@@ -28,13 +29,14 @@ export function parseCliArgs(argv) {
     if (values.has(option)) throw new Error(`Duplicate option: ${option}`)
     values.set(option, argv[index + 1])
   }
-  if (values.size !== allowed.size) {
-    throw new Error('Usage: node bootstrap-private-cloud-identity.mjs --config-dir ABSOLUTE_DIR --bootstrap-volume VOLUME_NAME --identity-image IMMUTABLE_ALPINE_DIGEST')
+  if ([...requiredOptions].some((option) => !values.has(option))) {
+    throw new Error('Usage: node bootstrap-private-cloud-identity.mjs --config-dir ABSOLUTE_DIR --bootstrap-volume VOLUME_NAME --identity-image IMMUTABLE_ALPINE_DIGEST [--acceptance-users-file PRIVATE_JSON]')
   }
   return {
     configDir: values.get('--config-dir'),
     bootstrapVolume: values.get('--bootstrap-volume'),
     identityImage: values.get('--identity-image'),
+    ...(values.has('--acceptance-users-file') ? { acceptanceUsersFile: values.get('--acceptance-users-file') } : {}),
   }
 }
 
@@ -45,6 +47,7 @@ export async function bootstrapPrivateCloudIdentity(options, dependencies = {}) 
   const runDocker = dependencies.runDocker ?? defaultRunDocker
   const createAttemptId = dependencies.randomUUID ?? randomUUID
   if (typeof fetchImpl !== 'function') throw new Error('This command requires a Node.js runtime with fetch support')
+  const acceptanceUsers = options.acceptanceUsersFile ? await readAcceptanceUsers(options.acceptanceUsersFile) : []
 
   const secretsDir = join(options.configDir, 'secrets')
   const clientIdPath = join(secretsDir, 'oidc_client_id')
@@ -59,6 +62,7 @@ export async function bootstrapPrivateCloudIdentity(options, dependencies = {}) 
   ])
   const credentialState = classifyCredentials(clientIdFile, clientSecretFile)
   if (credentialState === 'populated') {
+    if (acceptanceUsers.length) throw new Error('Acceptance users can only be created during the initial bundled identity enrollment')
     const metadata = parseMetadata(metadataFile, metadataPath)
     validateEnrolledMetadata(metadata, clientIdFile.value, clientSecretFile.value, local)
     await removeBootstrapPat(runDocker, options)
@@ -120,6 +124,21 @@ export async function bootstrapPrivateCloudIdentity(options, dependencies = {}) 
   }
 
   try {
+    const enrolledUsers = []
+    for (const user of acceptanceUsers) {
+      phase = `${user.name} acceptance user creation`
+      const created = await post('/management/v1/users/human', {
+        userName: user.email,
+        profile: { firstName: user.name === 'alice' ? 'Alice' : 'Bob', lastName: 'Acceptance', displayName: `${user.name === 'alice' ? 'Alice' : 'Bob'} Acceptance` },
+        email: { email: user.email, isEmailVerified: true },
+        initialPassword: user.password,
+      })
+      const subject = requireApiValue(created?.userId, `${user.name} user id`)
+      enrolledUsers.push({ name: user.name, email: user.email, subject })
+      metadata = { ...metadata, acceptanceUsers: enrolledUsers.map(({ name, subject: userSubject }) => ({ name, subject: userSubject })) }
+      await atomicWriteJson(metadataPath, metadata)
+    }
+
     phase = 'project creation'
     const project = await post('/management/v1/projects', {
       name: PROJECT_NAME,
@@ -165,7 +184,7 @@ export async function bootstrapPrivateCloudIdentity(options, dependencies = {}) 
     })
     phase = 'bootstrap PAT removal'
     await removeBootstrapPat(runDocker, options)
-    return { ok: true, reused: false, projectId, applicationId }
+    return { ok: true, reused: false, projectId, applicationId, ...(enrolledUsers.length ? { acceptanceUsers: enrolledUsers } : {}) }
   } catch (error) {
     throw recoveryError(`registration stopped during ${phase}: ${safeCause(error)}`)
   } finally {
@@ -195,6 +214,24 @@ function validateOptions(options) {
   if (typeof options.identityImage !== 'string' || !IMAGE_PATTERN.test(options.identityImage)) {
     throw new Error('--identity-image must be an immutable Alpine image digest')
   }
+  if (options.acceptanceUsersFile !== undefined && (typeof options.acceptanceUsersFile !== 'string' || !isAbsolute(options.acceptanceUsersFile))) throw new Error('--acceptance-users-file must be an absolute path')
+}
+
+async function readAcceptanceUsers(path) {
+  const file = await readStateFile(path)
+  if (!file.exists) throw new Error('The acceptance users file does not exist')
+  let parsed
+  try { parsed = JSON.parse(file.value) } catch { throw new Error('The acceptance users file is not valid JSON') }
+  if (!Array.isArray(parsed?.users) || parsed.users.length !== 2) throw new Error('The acceptance users file must contain exactly Alice and Bob')
+  const users = parsed.users.map((user) => ({
+    name: typeof user?.name === 'string' ? user.name.trim().toLowerCase() : '',
+    email: typeof user?.email === 'string' ? user.email.trim() : '',
+    password: typeof user?.password === 'string' ? user.password : '',
+  }))
+  if (users.map((user) => user.name).sort().join(',') !== 'alice,bob') throw new Error('The acceptance users file must name exactly Alice and Bob')
+  if (users.some((user) => !/^[^\s@]+@[^\s@]+$/u.test(user.email) || user.password.length < 16 || /[\r\n\0]/u.test(user.password))) throw new Error('Each acceptance user requires a valid email and a password of at least 16 characters')
+  if (new Set(users.map((user) => user.email.toLowerCase())).size !== 2 || new Set(users.map((user) => user.password)).size !== 2) throw new Error('Acceptance users must have distinct emails and passwords')
+  return users
 }
 
 async function readLocalDeployment(configDir) {

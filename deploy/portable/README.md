@@ -68,16 +68,16 @@ node scripts/release/verify-portable-container.mjs \
 
 It verifies the `linux/amd64` image metadata, non-root user, persistent volume declaration, loopback-only publication, `/runtime/capabilities` Portable identity, embedded Dashboard HTML, and Session survival across container replacement. It creates a randomly named network, volume, and two containers labeled with its own project ID; cleanup addresses only those exact resources. It uses a synthetic, nonfunctional model key and sends no model request.
 
-## Release CI integration
+## Candidate release workflow and gate distinctions
 
-After native/CJS release assets for the exact tag and revision exist, the parent release workflow should:
+`.github/workflows/portable-image-release.yml` is a separate manual workflow for the **private candidate only**. Dispatch it with the workflow ref set to the **same `v0.3.0-beta.1` tag** (not `main`). It accepts exactly that tag, a full 40-hex revision, and an operator-approved official `node:22-bookworm-slim` `linux/amd64` digest. It does not use the workspace `release/` directory: it downloads the CJS, `SHA256SUMS`, `SHA256SUMS.sigstore.json`, and `manifest.json` from the exact draft release into a new temporary directory.
 
-1. Run the artifact inspection command above.
-2. Resolve and policy-approve the Node 22 Debian slim digest for `linux/amd64`.
-3. Build exactly one `linux/amd64` image with all build arguments above. Do not advertise arm64 until it has equivalent acceptance evidence.
-4. Push the immutable version tag, capture the registry digest, and use `name@sha256:...` for every later step.
-5. Run the guarded acceptance script against that digest on an isolated VM/runner.
-6. Generate an SPDX or CycloneDX SBOM for the digest and attach/attest it.
-7. Sign the digest (not a mutable tag), verify the signature and identity policy, then publish the digest, SBOM reference, signature verification result, CJS SHA-256, revision, and acceptance evidence in release metadata.
+The workflow has three distinct states:
 
-No workflow files are changed by this infrastructure; the parent release owner must wire these steps into the release and promotion gates.
+1. **Private candidate controls passed:** the `release.yml` Sigstore identity and signed checksum index, exact manifest/tag revision, embedded CJS metadata, pinned base, one `linux/amd64` image, immutable image signature, provenance, BuildKit SPDX SBOM attestation, and the Private Cloud dual-scanner vulnerability policy passed. Candidate metadata still says `private-candidate-vm-acceptance-pending`.
+2. **Isolated-VM accepted:** repository variable `KALA_PORTABLE_CONTAINER_ACCEPTANCE_RUNNER_ENABLED` is exactly `true`, the labeled self-hosted isolated runner is available, and digest signature/evidence verification plus the two-part acceptance guard succeed. Only allowlisted acceptance JSON and signed metadata are uploaded. This is container acceptance, not product/model E2E.
+3. **Public promotion:** this private-candidate workflow never changes GHCR visibility and always records `publicPromotion: false`. After state 2 and a separate review of the image layers, metadata and privacy, an authorized package owner must set the exact `xingsy97/kala-portable` GHCR package to **Public** in GitHub package settings. The beta release promotion workflow then independently verifies the signed VM acceptance metadata, package ownership/visibility and an **anonymous** pull of the same immutable digest; it rejects a private or substituted image. Do not make the package public before the review or mistake a published tag for an accepted digest.
+
+`require_isolated_vm_acceptance` defaults to `true`. With that input true, the final job fails explicitly when the repository variable is absent/false or acceptance reports failure. GitHub Actions cannot reliably preflight whether a matching self-hosted runner is online: when the variable is true but no runner accepts the job, the run can remain queued until GitHub expires it, and no accepted evidence exists. Setting the input false permits production of a private candidate only; the warning and signed candidate metadata continue to identify VM acceptance as pending. Availability and administration of the `portable-container-isolated` runner, and whether the repository token can create a new private GHCR package, remain unresolved operator prerequisites.
+
+Do not run this acceptance on Box or a developer host. Do not interpret a skipped acceptance job or a successfully built image as E2E acceptance.
