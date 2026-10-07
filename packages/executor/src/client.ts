@@ -476,14 +476,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     return result
   }
 
-  // The source protocol may be newer than a stale built shared declaration in
-  // source checkouts, so keep this narrow runtime cast aligned to protocol.ts.
-  const mcpControlSocket = socket as unknown as {
-    on(event: 'executor:mcp_configure', handler: (payload: unknown, ack: (result: { ok: boolean; error?: string }) => void) => void): void
-    on(event: 'executor:mcp_config_status', handler: (payload: unknown, ack: (result: { ok: boolean; servers?: Array<{ name: string }>; error?: string }) => void) => void): void
-  }
-
-  mcpControlSocket.on('executor:mcp_config_status', (payload, ack) => {
+  socket.on('executor:mcp_config_status', (payload, ack) => {
     void serializedMcpConfig(async () => {
       if (!dashboardMcpAllowed || !managedMcp || executorClosing) {
         ack({ ok: false, error: 'Dashboard MCP configuration is unavailable for this Executor' })
@@ -499,7 +492,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     })
   })
 
-  mcpControlSocket.on('executor:mcp_configure', (payload, ack) => {
+  socket.on('executor:mcp_configure', (payload, ack) => {
     void serializedMcpConfig(async () => {
       if (!dashboardMcpAllowed || !managedMcp || executorClosing) {
         ack({ ok: false, error: 'Dashboard MCP configuration is unavailable for this Executor' })

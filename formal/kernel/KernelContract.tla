@@ -21,7 +21,8 @@ EventKinds == {
   "clear",
   "messages_replaced",
   "approval_mode_changed",
-  "cwd_changed"
+  "cwd_changed",
+  "system_prompt_changed"
 }
 
 LegalEvents(status) ==
@@ -31,7 +32,8 @@ LegalEvents(status) ==
          "clear",
          "messages_replaced",
          "approval_mode_changed",
-         "cwd_changed"
+         "cwd_changed",
+         "system_prompt_changed"
        }
     [] status = "thinking" -> {
          "llm_response",
@@ -39,7 +41,8 @@ LegalEvents(status) ==
          "cancel",
          "clear",
          "messages_replaced",
-         "approval_mode_changed"
+         "approval_mode_changed",
+         "system_prompt_changed"
        }
     [] status = "awaiting_approval" -> {
          "user_approve",
@@ -47,27 +50,31 @@ LegalEvents(status) ==
          "tool_result",
          "cancel",
          "clear",
-         "approval_mode_changed"
+         "approval_mode_changed",
+         "system_prompt_changed"
        }
     [] status = "executing_tools" -> {
          "tool_result",
          "cancel",
          "clear",
          "messages_replaced",
-         "approval_mode_changed"
+         "approval_mode_changed",
+         "system_prompt_changed"
        }
     [] status = "done" -> {
          "user_message",
          "clear",
          "messages_replaced",
          "approval_mode_changed",
-         "cwd_changed"
+         "cwd_changed",
+         "system_prompt_changed"
        }
     [] status = "error" -> {
          "user_message",
          "clear",
          "messages_replaced",
-         "approval_mode_changed"
+         "approval_mode_changed",
+         "system_prompt_changed"
        }
 
 =============================================================================
