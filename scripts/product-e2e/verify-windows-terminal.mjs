@@ -198,10 +198,10 @@ async function verifyExecutorLifecycle() {
     const uninstall = await run(installedExecutor, ['service', 'uninstall'])
     if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service and credentials were removed')) {
       const helperScript = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.ps1`)
-      const probeTarget = mkdtempSync(join(tmpdir(), 'kala-uninstall-probe-'))
+      const probeTarget = mkdtempSync(join(tmpdir(), 'kala uninstall probe-'))
       const probeStatus = join(tmpdir(), `kala-executor-probe-${uninstall.pid}.status`)
       let probe = { code: -1, stdout: '', stderr: '' }
-      if (existsSync(helperScript)) probe = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperScript, probeTarget, '0', helperScript, probeStatus])
+      if (existsSync(helperScript)) probe = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperScript, '-Target', probeTarget, '-OwnerPid', '2147483647', '-Script', helperScript, '-Status', probeStatus])
       const outcome = existsSync(probeStatus) ? readFileSync(probeStatus, 'utf8') : 'no-status'
       rmSync(probeTarget, { force: true, recursive: true })
       rmSync(probeStatus, { force: true })

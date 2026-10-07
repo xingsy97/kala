@@ -659,7 +659,7 @@ async function scheduleWindowsSelfRemoval(installDir: string): Promise<void> {
   const errorLog = openSync(join(tmpdir(), `kala-executor-uninstall-${process.pid}.err`), 'w', 0o600)
   let child: ReturnType<typeof spawn>
   try {
-    child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installDir, String(process.pid), script, status], { detached: true, windowsHide: true, stdio: ['ignore', outputLog, errorLog] })
+    child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-Target', installDir, '-OwnerPid', String(process.pid), '-Script', script, '-Status', status], { detached: true, windowsHide: true, stdio: ['ignore', outputLog, errorLog] })
   } finally {
     closeSync(outputLog)
     closeSync(errorLog)
