@@ -3,7 +3,7 @@
 This directory packages the **existing Portable CJS release asset** in a minimal Node.js 22 runtime. It does not rebuild application code. Always build from the repository root so `COPY release/kala-dashboard-with-runtime.cjs` and this Dockerfile come from the same checked-out revision:
 
 ```sh
-TAG=v0.3.0-beta.1
+TAG=v0.3.0-beta.2
 VERSION=${TAG#v}
 REVISION=$(git rev-parse HEAD)
 ASSET=release/kala-dashboard-with-runtime.cjs
@@ -41,7 +41,7 @@ docker volume create kala-portable-state
 docker run --rm --name kala-portable \
   --publish 127.0.0.1:3000:3000 \
   --mount type=volume,source=kala-portable-state,target=/var/lib/kala \
-  ghcr.io/<owner>/<repository>-portable:v0.3.0-beta.1
+  ghcr.io/<owner>/<repository>-portable:v0.3.0-beta.2
 ```
 
 Do not publish on all host interfaces without separately designing authentication and network policy.
@@ -61,7 +61,7 @@ KALA_PORTABLE_CONTAINER_ACCEPTANCE_VM=1 \
 node scripts/release/verify-portable-container.mjs \
   --isolated-vm \
   --image "ghcr.io/<owner>/<repository>-portable@sha256:<published-digest>" \
-  --tag v0.3.0-beta.1 \
+  --tag v0.3.0-beta.2 \
   --revision "$(git rev-parse HEAD)" \
   --output portable-container-evidence.json
 ```
@@ -70,7 +70,7 @@ It verifies the `linux/amd64` image metadata, non-root user, persistent volume d
 
 ## Candidate release workflow and gate distinctions
 
-`.github/workflows/portable-image-release.yml` is a separate manual workflow for the **private candidate only**. Dispatch it with the workflow ref set to the **same `v0.3.0-beta.1` tag** (not `main`). It accepts exactly that tag, a full 40-hex revision, and an operator-approved official `node:22-bookworm-slim` `linux/amd64` digest. It does not use the workspace `release/` directory: it downloads the CJS, `SHA256SUMS`, `SHA256SUMS.sigstore.json`, and `manifest.json` from the exact draft release into a new temporary directory.
+`.github/workflows/portable-image-release.yml` is a separate manual workflow for the **private candidate only**. Dispatch it with the workflow ref set to the **same `v0.3.0-beta.2` tag** (not `main`). It accepts exactly that tag, a full 40-hex revision, and an operator-approved official `node:22-bookworm-slim` `linux/amd64` digest. It does not use the workspace `release/` directory: it downloads the CJS, `SHA256SUMS`, `SHA256SUMS.sigstore.json`, and `manifest.json` from the exact draft release into a new temporary directory.
 
 The workflow has three distinct states:
 

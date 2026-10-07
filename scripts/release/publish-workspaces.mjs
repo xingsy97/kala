@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = resolve(new URL('../..', import.meta.url).pathname)
+const root = fileURLToPath(new URL('../..', import.meta.url))
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
 const tag = option('--tag')
 if (tag !== `v${version}`) fail(`tag ${tag ?? '(missing)'} does not match v${version}`)

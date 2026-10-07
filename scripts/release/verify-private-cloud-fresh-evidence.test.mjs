@@ -9,12 +9,12 @@ import { createRcEvidence, requiredReleaseEvidence } from './rc-evidence.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const script = 'scripts/release/verify-private-cloud-fresh-evidence.mjs'
-const tag = 'v0.3.0-beta.1'
+const tag = 'v0.3.0-beta.2'
 const revision = 'a'.repeat(40)
 
 test('binds fresh candidate evidence to the exact accepted archive bytes', () => {
   const scratch = mkdtempSync(join(tmpdir(), 'private-cloud-fresh-evidence-'))
-  const archive = join(scratch, 'kala-private-cloud-0.3.0-beta.1-linux-x64.tar.gz')
+  const archive = join(scratch, 'kala-private-cloud-0.3.0-beta.2-linux-x64.tar.gz')
   const evidence = join(scratch, 'fresh.rc-evidence.json')
   writeFileSync(archive, 'signed draft bundle bytes')
   writeFileSync(evidence, JSON.stringify(freshEvidence(archive)))
@@ -31,7 +31,7 @@ test('binds fresh candidate evidence to the exact accepted archive bytes', () =>
 
 test('rejects predecessor lifecycle evidence as a fresh candidate result', () => {
   const scratch = mkdtempSync(join(tmpdir(), 'private-cloud-fresh-evidence-'))
-  const archive = join(scratch, 'kala-private-cloud-0.3.0-beta.1-linux-x64.tar.gz')
+  const archive = join(scratch, 'kala-private-cloud-0.3.0-beta.2-linux-x64.tar.gz')
   const evidence = join(scratch, 'lifecycle.rc-evidence.json')
   writeFileSync(archive, 'signed draft bundle bytes')
   writeFileSync(evidence, JSON.stringify(createRcEvidence({

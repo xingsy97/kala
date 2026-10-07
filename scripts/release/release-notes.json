@@ -1,5 +1,5 @@
 {
-  "v0.3.0-beta.1": {
+  "v0.3.0-beta.2": {
     "previousTag": "v0.2.0",
     "improvements": [
       "Private Cloud installs from its signed Compose bundle with a Node.js 22+ JavaScript Operator, bundled identity option, and single-host local-volume storage by default.",

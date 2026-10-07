@@ -34,9 +34,12 @@ candidate without that evidence. See the [Private Cloud first-install guide](./p
 for the operator-assisted onboarding path. Browser support targets
 the current and previous major Chromium releases.
 
-## Unreleased v0.3.0-beta.1 candidate policy
+## Unreleased v0.3.0-beta.2 candidate policy
 
-The beta candidate is not yet a supported public release. Its proposed default
+The immutable `v0.3.0-beta.1` tag remains a failed candidate: its hosted Windows
+version-policy check failed before a public GitHub Release, so it is unsupported
+and must not be promoted. The `v0.3.0-beta.2` follow-up candidate is not yet a
+supported public release. Its proposed default
 asset contract is Linux x64 and macOS x64/arm64 OS-native Executor plus Node.js
 22+ CJS Portable Host and Dedicated components. Host and Dedicated
 self-contained native binaries are only manual qualification artifacts, not

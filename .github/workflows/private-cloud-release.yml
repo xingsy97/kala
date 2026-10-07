@@ -272,7 +272,7 @@ jobs:
   fresh_beta_candidate_assets:
     name: Stage exact signed beta draft assets on hosted runner
     needs: [resolve, bundle]
-    if: needs.resolve.outputs.tag == 'v0.3.0-beta.1'
+    if: needs.resolve.outputs.tag == 'v0.3.0-beta.2'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -325,7 +325,7 @@ jobs:
   fresh_beta_candidate_acceptance:
     name: Fresh beta candidate install and restore (exact signed draft release)
     needs: [resolve, bundle, fresh_beta_candidate_assets]
-    if: needs.resolve.outputs.tag == 'v0.3.0-beta.1'
+    if: needs.resolve.outputs.tag == 'v0.3.0-beta.2'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -353,7 +353,7 @@ jobs:
       - name: Require the exact beta tag and clean acceptance prerequisites
         run: |
           set -euo pipefail
-          test "$TAG" = v0.3.0-beta.1
+          test "$TAG" = v0.3.0-beta.2
           test "$GITHUB_REF" = "refs/tags/$TAG"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -x "${CHROME_PATH:-/snap/bin/chromium}"
@@ -427,7 +427,7 @@ jobs:
   clean-compose-acceptance:
     name: Clean Compose install, isolation, upgrade and restore (exact signed release)
     needs: [resolve, bundle, fresh_beta_candidate_acceptance, fresh_beta_candidate_assets]
-    if: always() && needs.resolve.result == 'success' && needs.bundle.result == 'success' && (needs.resolve.outputs.tag != 'v0.3.0-beta.1' || needs.fresh_beta_candidate_acceptance.result == 'success') && vars.KALA_PRIVATE_CLOUD_UPGRADE_ACCEPTANCE_ENABLED == 'true' && startsWith(github.ref, 'refs/tags/')
+    if: always() && needs.resolve.result == 'success' && needs.bundle.result == 'success' && (needs.resolve.outputs.tag != 'v0.3.0-beta.2' || needs.fresh_beta_candidate_acceptance.result == 'success') && vars.KALA_PRIVATE_CLOUD_UPGRADE_ACCEPTANCE_ENABLED == 'true' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -465,7 +465,7 @@ jobs:
           name: private-cloud-acceptance-input-${{ github.run_id }}-linux-x64
           path: candidate
       - uses: actions/download-artifact@v5
-        if: needs.resolve.outputs.tag == 'v0.3.0-beta.1'
+        if: needs.resolve.outputs.tag == 'v0.3.0-beta.2'
         with:
           name: private-cloud-beta-draft-assets-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: sigstore/cosign-installer@v3
@@ -516,7 +516,7 @@ jobs:
       - name: Verify the exact signed release Executor binary
         run: |
           set -euo pipefail
-          if [[ "$TAG" != v0.3.0-beta.1 ]]; then
+          if [[ "$TAG" != v0.3.0-beta.2 ]]; then
             for attempt in $(seq 1 40); do
               gh release download "$TAG" -p kala-executor-linux-x64 -D executor && test -s executor/kala-executor-linux-x64 && break
               sleep 15

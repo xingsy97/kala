@@ -67,7 +67,7 @@ test('Private Cloud release retains image publishing and accepts the exact signe
   assert.match(staging, /private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
   assert.doesNotMatch(staging, /PRIVATE_CLOUD_TEST_ALICE_PASSWORD/u)
   const fresh = workflow.slice(workflow.indexOf('  fresh_beta_candidate_acceptance:'), workflow.indexOf('  clean-compose-acceptance:'))
-  assert.match(fresh, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.1'/u)
+  assert.match(fresh, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.2'/u)
   assert.doesNotMatch(fresh, /KALA_PRIVATE_CLOUD_RUNNER_ENABLED/u)
   assert.match(fresh, /runs-on: ubuntu-24\.04/u)
   assert.match(fresh, /RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}[\s\S]*test "\$RUNNER_ENVIRONMENT" = github-hosted/u)
@@ -84,7 +84,7 @@ test('Private Cloud release retains image publishing and accepts the exact signe
 
   const acceptance = workflow.slice(workflow.indexOf('  clean-compose-acceptance:'))
   assert.match(acceptance, /needs: \[resolve, bundle, fresh_beta_candidate_acceptance, fresh_beta_candidate_assets\]/u)
-  assert.match(acceptance, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.1'[\s\S]*private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
+  assert.match(acceptance, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.2'[\s\S]*private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
   assert.match(acceptance, /needs\.fresh_beta_candidate_acceptance\.result == 'success'/u)
   assert.match(acceptance, /runs-on: ubuntu-24\.04/u)
   assert.match(acceptance, /vars\.KALA_PRIVATE_CLOUD_UPGRADE_ACCEPTANCE_ENABLED == 'true'/u)

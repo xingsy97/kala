@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = resolve(new URL('../..', import.meta.url).pathname)
+const root = fileURLToPath(new URL('../..', import.meta.url))
 const product = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const expected = product.version
 const tag = option('--tag') ?? process.env.RELEASE_TAG

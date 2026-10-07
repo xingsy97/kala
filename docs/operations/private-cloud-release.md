@@ -116,7 +116,7 @@ on a new GitHub-hosted `ubuntu-24.04` VM; no self-hosted runner or persistent
 installation is needed. They check Docker, the browser and the VM environment
 before running the actual signed-asset, browser, Executor and restore tests.
 
-The `v0.3.0-beta.1` fresh job is self-contained and requires no repository
+The `v0.3.0-beta.2` fresh job is self-contained and requires no repository
 Actions secrets or variables. Its explicit `--ephemeral-bundled-acceptance`
 path uses the verified candidate Operator to run `init-config` with bundled
 identity and local-volume storage. It starts only the signed candidate identity

@@ -41,7 +41,7 @@ jobs:
               -f branch="$TAG" -f event=push -f status=success -f per_page=100 \
               --jq '.workflow_runs[].head_sha' | awk -v revision="$REVISION" '$0 == revision { found=1 } END { exit !found }'
           done
-          if [[ "$TAG" == v0.3.0-beta.1 ]]; then
+          if [[ "$TAG" == v0.3.0-beta.2 ]]; then
             # A successful image/bundle job is not fresh-install evidence: require
             # the exact candidate-first Private Cloud VM job and the independent
             # Portable OCI digest VM job on this same tag and source revision.
@@ -100,7 +100,7 @@ jobs:
               --certificate-oidc-issuer https://token.actions.githubusercontent.com "$archive"
             tar -xOzf "$archive" ./manifest.json | jq -e --arg revision "$REVISION" --arg version "${TAG#v}" \
               '.revision == $revision and .version == $version' >/dev/null
-            if [[ "$TAG" == v0.3.0-beta.1 ]]; then
+            if [[ "$TAG" == v0.3.0-beta.2 ]]; then
               fresh_dir=$(mktemp -d)
               gh run download "$FRESH_RUN_ID" \
                 --pattern "private-cloud-fresh-beta-evidence-$FRESH_RUN_ID-$FRESH_RUN_ATTEMPT" --dir "$fresh_dir"
@@ -142,7 +142,7 @@ jobs:
             --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$CANDIDATE/SHA256SUMS"
-          if [[ "$TAG" == v0.3.0-beta.1 ]]; then
+          if [[ "$TAG" == v0.3.0-beta.2 ]]; then
             portable_dir=$(mktemp -d)
             gh run download "$PORTABLE_RUN_ID" \
               --pattern "portable-isolated-vm-acceptance-$PORTABLE_RUN_ID-$PORTABLE_RUN_ATTEMPT" --dir "$portable_dir"
