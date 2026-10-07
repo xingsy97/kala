@@ -211,11 +211,16 @@ async function verifyExecutorLifecycle() {
         syntaxErrors = parsed.code === 0 ? (parsed.stdout.trim() || 'none') : 'parser-failed'
       }
       const errorPath = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.err`)
+      const outputPath = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.out`)
       const helperError = existsSync(errorPath) ? readFileSync(errorPath, 'utf8') : ''
+      const helperOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : ''
       const errorKinds = ['ParameterBindingException', 'UnauthorizedAccessException', 'ParserError', 'CommandNotFoundException', 'IOException', 'MethodException', 'ArgumentException'].filter((kind) => helperError.includes(kind))
-      throw new Error(`Windows service uninstall left managed installation data; self-removal=${outcome}; syntaxErrors=${syntaxErrors}; helperErrorBytes=${Buffer.byteLength(helperError)}; helperErrorKinds=${errorKinds.join(',') || 'none'}; installDir=${existsSync(installDir)}; dataDir=${existsSync(dataDir)}`)
+      const processes = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `(Get-CimInstance Win32_Process -Filter \"name='powershell.exe'\" | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*kala-executor-uninstall-${uninstall.pid}.ps1*' }).Count`])
+      throw new Error(`Windows service uninstall left managed installation data; self-removal=${outcome}; syntaxErrors=${syntaxErrors}; helperErrorBytes=${Buffer.byteLength(helperError)}; helperOutputBytes=${Buffer.byteLength(helperOutput)}; helperErrorKinds=${errorKinds.join(',') || 'none'}; helperProcessCount=${processes.code === 0 ? processes.stdout.trim() : 'unknown'}; installDir=${existsSync(installDir)}; dataDir=${existsSync(dataDir)}`)
     }
     rmSync(removalStatus, { force: true })
+    rmSync(join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.out`), { force: true })
     rmSync(join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.err`), { force: true })
   }
   console.log(`PASS Windows native Executor ${serviceMode ? 'service' : 'temporary'} ConPTY create/input/resize/kill lifecycle`)
