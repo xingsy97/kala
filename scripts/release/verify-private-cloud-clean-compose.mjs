@@ -19,12 +19,15 @@ if (process.argv.includes('--internal-inspect-organization-provisioning')) {
   process.stdout.write(JSON.stringify(inspectOrganizationProvisioning(acceptanceOrganizationRequests('runlab-rc-test'))) + '\n')
   process.exit(0)
 }
+const freshCandidate = process.argv.includes('--fresh-candidate')
 const candidateArchive = resolve(required('--candidate-archive'))
-const predecessorArchive = resolve(required('--predecessor-archive'))
+const predecessorArchive = freshCandidate ? undefined : resolve(required('--predecessor-archive'))
 const executorAsset = resolve(required('--executor'))
 const tag = required('--tag')
 const revision = required('--revision')
-const predecessorRevision = required('--predecessor-revision')
+const predecessorRevision = freshCandidate ? undefined : required('--predecessor-revision')
+const predecessorTag = freshCandidate ? undefined : required('--predecessor-tag')
+if (predecessorTag && (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/u.test(predecessorTag) || predecessorTag === tag)) throw new Error('Private Cloud predecessor tag must be valid and distinct')
 const output = resolve(required('--output'))
 const configTemplate = resolve(requiredEnv('KALA_RC_PRIVATE_CLOUD_CONFIG_TEMPLATE'))
 const scratch = mkdtempSync(join(tmpdir(), 'runlab-rc-private-cloud-'))
@@ -32,7 +35,7 @@ const operatorRoot = join(scratch, 'operator')
 const config = join(scratch, 'config')
 const backup = join(scratch, 'backup')
 const candidate = extract(candidateArchive, join(scratch, 'candidate'))
-const predecessor = extract(predecessorArchive, join(scratch, 'predecessor'))
+const predecessor = predecessorArchive ? extract(predecessorArchive, join(scratch, 'predecessor')) : undefined
 const project = 'runlab-rc-' + randomBytes(6).toString('hex')
 const organizationRequests = acceptanceOrganizationRequests(project)
 const worktreeOperator = join(root, 'scripts/deploy/kala-private-cloud.mjs')
@@ -45,29 +48,35 @@ try {
   requirePrivateConfig(config)
   rewriteDeploymentEnv(join(config, 'deployment.env'), project)
   verify(candidate)
-  verify(predecessor)
+  if (predecessor) verify(predecessor)
   const candidateManifest = json(readFileSync(join(candidate, 'manifest.json'), 'utf8'))
   if (candidateManifest.revision !== revision) throw new Error('Private Cloud candidate revision mismatch')
-  const predecessorManifest = json(readFileSync(join(predecessor, 'manifest.json'), 'utf8'))
-  if (predecessorManifest.revision !== predecessorRevision) throw new Error('Private Cloud predecessor revision mismatch')
   if (candidateManifest.version !== tag.slice(1)) throw new Error('Private Cloud candidate version mismatch')
   const candidateLock = json(readFileSync(join(candidate, 'image-lock.json'), 'utf8'))
-  const predecessorLock = json(readFileSync(join(predecessor, 'image-lock.json'), 'utf8'))
-  const hybrid = join(scratch, 'dashboard-candidate')
-  run(process.execPath, [
-    'scripts/release/build-private-cloud-bundle.mjs', '--output', hybrid,
-    '--runtime-image', predecessorLock.images.runtime, '--ingress-image', predecessorLock.images.ingress,
-    '--dashboard-image', candidateLock.images.dashboard, '--revision', revision,
-    '--operator', bundleOperator(candidate),
-  ])
-  verify(hybrid)
+  assertDigestPinnedImages(candidateLock)
+  const predecessorManifest = predecessor ? json(readFileSync(join(predecessor, 'manifest.json'), 'utf8')) : undefined
+  if (predecessorManifest && predecessorManifest.revision !== predecessorRevision) throw new Error('Private Cloud predecessor revision mismatch')
+  if (predecessorManifest && predecessorManifest.version !== predecessorTag.slice(1)) throw new Error('Private Cloud predecessor version mismatch')
+  const predecessorLock = predecessor ? json(readFileSync(join(predecessor, 'image-lock.json'), 'utf8')) : undefined
+  const hybrid = freshCandidate ? undefined : join(scratch, 'dashboard-candidate')
+  if (hybrid) {
+    run(process.execPath, [
+      'scripts/release/build-private-cloud-bundle.mjs', '--output', hybrid,
+      '--runtime-image', predecessorLock.images.runtime, '--ingress-image', predecessorLock.images.ingress,
+      '--dashboard-image', candidateLock.images.dashboard, '--revision', revision,
+      '--operator', bundleOperator(candidate),
+    ])
+    verify(hybrid)
+  }
 
-  const predecessorOperator = bundleOperator(predecessor)
   const candidateOperator = bundleOperator(candidate)
   const env = { ...process.env, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: operatorRoot }
-  const installedResult = operator(predecessorOperator, ['install', '--bundle', predecessor, '--config-dir', config], env)
+  if (freshCandidate) configureRuntimeGateLimits(join(config, 'deployment.env'))
+  const initialBundle = freshCandidate ? candidate : predecessor
+  const initialOperator = freshCandidate ? candidateOperator : bundleOperator(predecessor)
+  const installedResult = operator(initialOperator, ['install', '--bundle', initialBundle, '--config-dir', config], env)
   installed = true
-  if (!installedResult.ok || installedResult.receipt?.phase !== 'completed') throw new Error('Private Cloud clean install did not complete')
+  if (!installedResult.ok || installedResult.receipt?.phase !== 'completed') throw new Error(`Private Cloud ${freshCandidate ? 'fresh candidate' : 'predecessor'} install did not complete`)
   assertServicesReady(installedResult.services)
   await waitForHttp('http://localhost:13001/healthz', 90_000)
   if ((await fetch('http://localhost:13001/runtime/capabilities')).status !== 401) throw new Error('Private Cloud exposed tenant capabilities without authentication')
@@ -117,45 +126,45 @@ try {
   })
   if (!workspace.stdout.trim()) throw new Error('Private Cloud Browser/Executor flow produced no result')
 
-  const beforeDashboard = operator(candidateOperator, ['status'], env).services
-  const dashboardUpgrade = operator(candidateOperator, ['upgrade-dashboard', '--bundle', hybrid], env)
-  if (dashboardUpgrade.receipt?.phase !== 'completed') throw new Error('Private Cloud Dashboard-only upgrade did not complete')
-  if (beforeDashboard['runtime-host'].containerId !== dashboardUpgrade.services['runtime-host'].containerId || beforeDashboard['runtime-ingress'].containerId !== dashboardUpgrade.services['runtime-ingress'].containerId || beforeDashboard.dashboard.containerId === dashboardUpgrade.services.dashboard.containerId) throw new Error('Dashboard-only update did not preserve Runtime and Ingress identity')
-  const dashboardRollback = operator(candidateOperator, ['rollback'], env)
-  if (dashboardRollback.receipt?.phase !== 'completed' || dashboardRollback.active.images.runtime !== predecessorLock.images.runtime || dashboardRollback.active.images.ingress !== predecessorLock.images.ingress || dashboardRollback.active.images.dashboard !== predecessorLock.images.dashboard) throw new Error('Private Cloud Dashboard rollback did not restore the predecessor release')
-  const dashboardUpgradeAgain = operator(candidateOperator, ['upgrade-dashboard', '--bundle', hybrid], env)
-  if (dashboardUpgradeAgain.receipt?.phase !== 'completed') throw new Error('Private Cloud Dashboard-only upgrade could not be repeated after rollback')
+  if (freshCandidate) {
+    verifyMtlsClientRejection(candidate, config)
+    const runtimeGates = await verifyCandidateRuntimeGates({ candidate, config, alicePassword, bobPassword: credentials.bob })
+    assertRuntimeGateReport(runtimeGates)
+    await verifyBackupRestore({ operatorBinary: candidateOperator, release: candidate, config, backup, env })
+  } else {
+    const beforeDashboard = operator(candidateOperator, ['status'], env).services
+    const dashboardUpgrade = operator(candidateOperator, ['upgrade-dashboard', '--bundle', hybrid], env)
+    if (dashboardUpgrade.receipt?.phase !== 'completed') throw new Error('Private Cloud Dashboard-only upgrade did not complete')
+    if (beforeDashboard['runtime-host'].containerId !== dashboardUpgrade.services['runtime-host'].containerId || beforeDashboard['runtime-ingress'].containerId !== dashboardUpgrade.services['runtime-ingress'].containerId || beforeDashboard.dashboard.containerId === dashboardUpgrade.services.dashboard.containerId) throw new Error('Dashboard-only update did not preserve Runtime and Ingress identity')
+    const dashboardRollback = operator(candidateOperator, ['rollback'], env)
+    if (dashboardRollback.receipt?.phase !== 'completed' || dashboardRollback.active.images.runtime !== predecessorLock.images.runtime || dashboardRollback.active.images.ingress !== predecessorLock.images.ingress || dashboardRollback.active.images.dashboard !== predecessorLock.images.dashboard) throw new Error('Private Cloud Dashboard rollback did not restore the predecessor release')
+    const dashboardUpgradeAgain = operator(candidateOperator, ['upgrade-dashboard', '--bundle', hybrid], env)
+    if (dashboardUpgradeAgain.receipt?.phase !== 'completed') throw new Error('Private Cloud Dashboard-only upgrade could not be repeated after rollback')
 
-  configureRuntimeGateLimits(join(config, 'deployment.env'))
-  const fullUpgrade = operator(candidateOperator, ['upgrade', '--bundle', candidate], env)
-  if (fullUpgrade.receipt?.phase !== 'completed') throw new Error('Private Cloud full upgrade did not complete')
-  assertServicesReady(fullUpgrade.services)
-  await waitForHttp('http://localhost:13001/healthz', 90_000)
-  verifyMtlsClientRejection(candidate, config)
-  const runtimeGates = await verifyCandidateRuntimeGates({ candidate, config, alicePassword, bobPassword: credentials.bob })
-  assertRuntimeGateReport(runtimeGates)
-  const fullRollback = operator(candidateOperator, ['rollback'], env)
-  if (fullRollback.receipt?.phase !== 'completed' || fullRollback.active.images.runtime !== predecessorLock.images.runtime || fullRollback.active.images.ingress !== predecessorLock.images.ingress || fullRollback.active.images.dashboard !== candidateLock.images.dashboard) throw new Error('Private Cloud full rollback did not restore the persisted mixed predecessor')
+    configureRuntimeGateLimits(join(config, 'deployment.env'))
+    const fullUpgrade = operator(candidateOperator, ['upgrade', '--bundle', candidate], env)
+    if (fullUpgrade.receipt?.phase !== 'completed') throw new Error('Private Cloud full upgrade did not complete')
+    assertServicesReady(fullUpgrade.services)
+    await waitForHttp('http://localhost:13001/healthz', 90_000)
+    verifyMtlsClientRejection(candidate, config)
+    const runtimeGates = await verifyCandidateRuntimeGates({ candidate, config, alicePassword, bobPassword: credentials.bob })
+    assertRuntimeGateReport(runtimeGates)
+    const fullRollback = operator(candidateOperator, ['rollback'], env)
+    if (fullRollback.receipt?.phase !== 'completed' || fullRollback.active.images.runtime !== predecessorLock.images.runtime || fullRollback.active.images.ingress !== predecessorLock.images.ingress || fullRollback.active.images.dashboard !== candidateLock.images.dashboard) throw new Error('Private Cloud full rollback did not restore the persisted mixed predecessor')
+    await verifyBackupRestore({ operatorBinary: candidateOperator, release: predecessor, config, backup, env })
+  }
 
-  mkdirSync(backup, { mode: 0o700 })
-  const backedUp = operator(candidateOperator, ['backup', '--output', backup], env)
-  if (backedUp.receipt?.phase !== 'completed') throw new Error('Private Cloud backup did not complete')
-  const tenantVolume = inspectVolume(predecessor, config, 'tenant-data')
-  run('docker', ['run', '--rm', '--network', 'none', '-v', tenantVolume + ':/data', infrastructureImage(predecessor, 'alpine'), 'sh', '-ceu', "printf 'mutated' > /data/rc-restore-marker"])
-  const restored = operator(candidateOperator, ['restore', '--backup', backup, '--confirm', 'RESTORE:' + backedUp.backupId], env)
-  if (restored.receipt?.phase !== 'completed') throw new Error('Private Cloud restore did not complete')
-  const marker = run('docker', ['run', '--rm', '--network', 'none', '-v', tenantVolume + ':/data:ro', infrastructureImage(predecessor, 'alpine'), 'sh', '-ceu', 'test ! -e /data/rc-restore-marker']).status
-  if (marker !== 0) throw new Error('Private Cloud restore did not replace mutated tenant data')
-  await waitForHttp('http://localhost:13001/healthz', 90_000)
-
+  const target = freshCandidate ? 'linux-x64-compose-fresh' : 'linux-x64-compose'
   const evidence = createRcEvidence({
-    category: 'private-cloud', target: 'linux-x64-compose', tag, version: tag.slice(1), revision, ok: true,
+    category: 'private-cloud', target, tag, version: tag.slice(1), revision, ok: true,
     artifact: { name: basename(candidateArchive), sha256: digest(readFileSync(candidateArchive)) },
-    checks: { assetIntegrity: true, cleanInstall: true, organizationProvisioning: true, tenantIsolation: true, browser: true, executor: true, fullUpgrade: true, mtlsClientRejection: true, unitResourceIsolation: true, runtimeRestartRecovery: true, dashboardUpgradeIsolation: true, rollback: true, backupRestore: true },
+    checks: freshCandidate
+      ? { assetIntegrity: true, imageDigestPinning: true, freshCandidateInstall: true, organizationProvisioning: true, tenantIsolation: true, browser: true, executor: true, mtlsClientRejection: true, unitResourceIsolation: true, runtimeRestartRecovery: true, backupRestore: true }
+      : { assetIntegrity: true, cleanInstall: true, organizationProvisioning: true, tenantIsolation: true, browser: true, executor: true, fullUpgrade: true, mtlsClientRejection: true, unitResourceIsolation: true, runtimeRestartRecovery: true, dashboardUpgradeIsolation: true, rollback: true, backupRestore: true },
   })
   mkdirSync(resolve(output, '..'), { recursive: true, mode: 0o700 })
   writeFileSync(output, JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
-  process.stdout.write(JSON.stringify({ ok: true, category: 'private-cloud', target: 'linux-x64-compose', evidence: basename(output) }) + '\n')
+  process.stdout.write(JSON.stringify({ ok: true, category: 'private-cloud', target, evidence: basename(output) }) + '\n')
 } finally {
   if (executor) { executor.kill('SIGTERM'); await new Promise((resolveExit) => { const timer = setTimeout(() => { executor.kill('SIGKILL'); resolveExit() }, 5_000); executor.once('exit', () => { clearTimeout(timer); resolveExit() }) }) }
   if (installed) {
@@ -207,6 +216,25 @@ function configureRuntimeGateLimits(path) {
   const lines = readFileSync(path, 'utf8').split(/\r?\n/u).filter((line) => line && !names.has(line.split('=', 1)[0]))
   lines.push('KALA_RUNTIME_UNIT_MAX_QUEUED_MESSAGES=1', 'KALA_RUNTIME_UNIT_MAX_ARTIFACT_BYTES=1048576')
   writeFileSync(path, lines.join('\n') + '\n', { mode: 0o600 })
+}
+
+function assertDigestPinnedImages(lock) {
+  for (const name of ['runtime', 'ingress', 'dashboard']) {
+    if (typeof lock?.images?.[name] !== 'string' || !/@sha256:[0-9a-f]{64}$/u.test(lock.images[name])) throw new Error('Private Cloud candidate image is not digest-pinned: ' + name)
+  }
+}
+
+function verifyBackupRestore({ operatorBinary, release, config, backup, env }) {
+  mkdirSync(backup, { mode: 0o700 })
+  const backedUp = operator(operatorBinary, ['backup', '--output', backup], env)
+  if (backedUp.receipt?.phase !== 'completed') throw new Error('Private Cloud backup did not complete')
+  const tenantVolume = inspectVolume(release, config, 'tenant-data')
+  run('docker', ['run', '--rm', '--network', 'none', '-v', tenantVolume + ':/data', infrastructureImage(release, 'alpine'), 'sh', '-ceu', "printf 'mutated' > /data/rc-restore-marker"])
+  const restored = operator(operatorBinary, ['restore', '--backup', backup, '--confirm', 'RESTORE:' + backedUp.backupId], env)
+  if (restored.receipt?.phase !== 'completed') throw new Error('Private Cloud restore did not complete')
+  const marker = run('docker', ['run', '--rm', '--network', 'none', '-v', tenantVolume + ':/data:ro', infrastructureImage(release, 'alpine'), 'sh', '-ceu', 'test ! -e /data/rc-restore-marker']).status
+  if (marker !== 0) throw new Error('Private Cloud restore did not replace mutated tenant data')
+  return waitForHttp('http://localhost:13001/healthz', 90_000)
 }
 
 function verifyMtlsClientRejection(release, config) {

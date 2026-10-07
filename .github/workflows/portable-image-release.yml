@@ -369,7 +369,7 @@ jobs:
             "${RUNNER_TEMP}/portable-acceptance-evidence/metadata.json"
       - uses: actions/upload-artifact@v5
         with:
-          name: portable-isolated-vm-acceptance-${{ github.run_id }}
+          name: portable-isolated-vm-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/portable-acceptance-evidence
           if-no-files-found: error
           retention-days: 90

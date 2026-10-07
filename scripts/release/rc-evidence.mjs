@@ -16,8 +16,11 @@ export const requiredReleaseEvidence = Object.freeze({
     checks: Object.freeze(['assetIntegrity', 'stagedDisabled', 'cleanInstall', 'browser', 'executor', 'gracefulCutover', 'selfDeployment', 'reboot', 'backupRestore', 'rollback']),
   }),
   'private-cloud': Object.freeze({
-    targets: Object.freeze(['linux-x64-compose']),
+    targets: Object.freeze(['linux-x64-compose', 'linux-x64-compose-fresh']),
     checks: Object.freeze(['assetIntegrity', 'cleanInstall', 'organizationProvisioning', 'tenantIsolation', 'browser', 'executor', 'fullUpgrade', 'mtlsClientRejection', 'unitResourceIsolation', 'runtimeRestartRecovery', 'dashboardUpgradeIsolation', 'rollback', 'backupRestore']),
+    targetChecks: Object.freeze({
+      'linux-x64-compose-fresh': Object.freeze(['assetIntegrity', 'imageDigestPinning', 'freshCandidateInstall', 'organizationProvisioning', 'tenantIsolation', 'browser', 'executor', 'mtlsClientRejection', 'unitResourceIsolation', 'runtimeRestartRecovery', 'backupRestore']),
+    }),
   }),
 })
 

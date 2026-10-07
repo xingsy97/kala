@@ -21,6 +21,18 @@ test('requires mTLS, cross-Unit limits and restart recovery in Private Cloud acc
   }
 })
 
+test('fresh Private Cloud evidence requires candidate-first and digest-pinning checks without lifecycle claims', () => {
+  const record = create('private-cloud', 'linux-x64-compose-fresh')
+  assert.equal(validateRcEvidence(record), record)
+  assert.equal(record.checks.freshCandidateInstall, true)
+  assert.equal(record.checks.imageDigestPinning, true)
+  assert.equal(record.checks.fullUpgrade, undefined)
+  assert.equal(record.checks.rollback, undefined)
+  for (const check of ['freshCandidateInstall', 'imageDigestPinning', 'browser', 'executor', 'tenantIsolation', 'backupRestore']) {
+    assert.throws(() => validateRcEvidence({ ...record, checks: { ...record.checks, [check]: false } }), new RegExp(`did not prove ${check}`, 'u'))
+  }
+})
+
 test('rejects missing checks, duplicate targets, and mismatched revisions', () => {
   const portable = create('portable', 'linux-x64')
   assert.throws(() => validateRcEvidence({ ...portable, checks: { ...portable.checks, reinstall: false } }), /did not prove reinstall/u)
@@ -42,9 +54,7 @@ function create(category, target) {
   ]
   const windows = category === 'portable' && target === 'win32-x64'
   const artifact = windows ? { name: windowsNames[0], sha256: 'b'.repeat(64) } : { name: category + '-' + target + '.tar.gz', sha256: 'b'.repeat(64) }
-  const checks = windows
-    ? requiredReleaseEvidence.portable.targetChecks[target]
-    : requiredReleaseEvidence[category].checks
+  const checks = requiredReleaseEvidence[category].targetChecks?.[target] ?? requiredReleaseEvidence[category].checks
   return createRcEvidence({
     category, target, tag, version: tag.slice(1), revision, ok: true,
     artifact,

@@ -58,13 +58,34 @@ test('requires independent exact OIDC subjects and never falls back to owner ema
   assert.match(duplicate.stderr, /distinct exact OIDC issuer\/sub identities/u)
 })
 
-test('uses the worktree Operator to provision the predecessor installation before the first login', () => {
+test('installs either the candidate or predecessor before provisioning and first login', () => {
   const source = readFileSync(resolve(root, script), 'utf8')
-  const install = source.indexOf("operator(predecessorOperator, ['install'")
+  const selection = source.indexOf('const initialBundle = freshCandidate ? candidate : predecessor')
+  const install = source.indexOf("operator(initialOperator, ['install'")
   const provision = source.indexOf('provisionAcceptanceOrganizations(worktreeOperator, env, organizationRequests)')
   const login = source.indexOf('const browser = await puppeteer.launch')
-  assert.ok(install >= 0 && provision > install && login > provision)
+  assert.ok(selection >= 0 && install > selection && provision > install && login > provision)
+  assert.match(source, /const initialOperator = freshCandidate \? candidateOperator : bundleOperator\(predecessor\)/u)
   assert.match(source, /worktreeOperator = join\(root, 'scripts\/deploy\/kala-private-cloud\.mjs'\)/u)
+})
+
+test('predecessor lifecycle binds signed archive version and revision to the selected tag', () => {
+  const source = readFileSync(resolve(root, script), 'utf8')
+  assert.match(source, /predecessorTag = freshCandidate \? undefined : required\('--predecessor-tag'\)/u)
+  assert.match(source, /predecessorManifest\.revision !== predecessorRevision/u)
+  assert.match(source, /predecessorManifest\.version !== predecessorTag\.slice\(1\)/u)
+})
+
+test('fresh mode requires no predecessor and proves candidate checks without upgrade or rollback claims', () => {
+  const source = readFileSync(resolve(root, script), 'utf8')
+  assert.match(source, /predecessorArchive = freshCandidate \? undefined/u)
+  assert.match(source, /target = freshCandidate \? 'linux-x64-compose-fresh'/u)
+  assert.match(source, /freshCandidateInstall: true/u)
+  assert.match(source, /imageDigestPinning: true/u)
+  const freshBranch = source.slice(source.indexOf('if (freshCandidate) {', source.indexOf("if (!workspace.stdout.trim())")), source.indexOf('} else {', source.indexOf("if (!workspace.stdout.trim())")))
+  assert.match(freshBranch, /verifyCandidateRuntimeGates/u)
+  assert.match(freshBranch, /verifyBackupRestore/u)
+  assert.doesNotMatch(freshBranch, /upgrade|rollback/u)
 })
 
 test('keeps tenant capabilities protected until a browser has authenticated', () => {
