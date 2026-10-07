@@ -28,7 +28,7 @@
  * `workspaceId` matches this executor's stored workspace id.
  */
 
-import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, resolve, join, sep } from 'node:path'
 import process from 'node:process'
 
@@ -50,7 +50,7 @@ import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile }
 import { acquireExecutorLock } from '../src/local-lock.js'
 import { assertSupportedInstallerPrivileges, bootstrapEnvironment, defaultManagedRoot, downloadExecutorUpdateAssets, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
-import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsServicePlan, executeWindowsServicePlan, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, type WindowsServiceAction } from '../src/windows-service.js'
+import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, deleteWindowsSelfRemovalTask, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
 import { spawn } from 'node:child_process'
@@ -643,46 +643,44 @@ async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): 
   }
   for (const result of results) { if (result.stdout) process.stdout.write(result.stdout); if (result.stderr) process.stderr.write(result.stderr) }
   if (action === 'uninstall') {
-    rmSync(plan.layout.dataDir, { recursive: true, force: true })
-    if (resolve(process.execPath).startsWith(`${resolve(plan.layout.installDir)}${sep}`)) await scheduleWindowsSelfRemoval(plan.layout.installDir)
-    else rmSync(plan.layout.installDir, { recursive: true, force: true })
-    process.stdout.write('\nKala Executor Windows service and credentials were removed.\n')
+    if (resolve(process.execPath).startsWith(`${resolve(plan.layout.installDir)}${sep}`)) {
+      const statusFile = await scheduleWindowsSelfRemoval(plan.layout.installDir, plan.layout.dataDir)
+      process.stdout.write('\nKala Executor Windows service removal was scheduled. Program files and credentials will be removed after this process exits.\n')
+      process.stdout.write(`Removal status file: ${statusFile}\n`)
+    } else {
+      rmSync(plan.layout.dataDir, { recursive: true, force: true })
+      rmSync(plan.layout.installDir, { recursive: true, force: true })
+      process.stdout.write('\nKala Executor Windows service and credentials were removed.\n')
+    }
   }
 }
 
-async function scheduleWindowsSelfRemoval(installDir: string): Promise<void> {
-  const script = join(tmpdir(), `kala-executor-uninstall-${process.pid}.ps1`)
-  const status = join(tmpdir(), `kala-executor-uninstall-${process.pid}.status`)
-  writeFileSync(script, `param([string]$Target,[int]$OwnerPid,[string]$Script,[string]$Status)\n[IO.File]::WriteAllText($Status, 'started')\n$ErrorActionPreference='Stop'\ntry {\n  $deadline=(Get-Date).AddSeconds(60)\n  while (Get-Process -Id $OwnerPid -ErrorAction SilentlyContinue) {\n    [IO.File]::WriteAllText($Status, 'waiting-for-parent')\n    if ((Get-Date) -ge $deadline) { throw 'owner_timeout' }\n    Start-Sleep -Milliseconds 100\n  }\n  [IO.File]::WriteAllText($Status, 'deleting')\n  for ($attempt=0; $attempt -lt 100; $attempt++) {\n    try { Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction Stop; break }\n    catch { if ($attempt -eq 99) { throw }; Start-Sleep -Milliseconds 200 }\n  }\n  [IO.File]::WriteAllText($Status, 'removed')\n  Remove-Item -LiteralPath $Script -Force\n} catch {\n  [IO.File]::WriteAllText($Status, ('failed:' + $_.Exception.GetType().Name))\n  exit 1\n}\n`, { mode: 0o600 })
-  writeFileSync(status, 'queued', { mode: 0o600 })
-  const outputLog = openSync(join(tmpdir(), `kala-executor-uninstall-${process.pid}.out`), 'w', 0o600)
-  const errorLog = openSync(join(tmpdir(), `kala-executor-uninstall-${process.pid}.err`), 'w', 0o600)
-  let child: ReturnType<typeof spawn>
+async function scheduleWindowsSelfRemoval(installDir: string, dataDir: string): Promise<string> {
+  const removal = createWindowsSelfRemovalPlan({ installDir, dataDir, ownerPid: process.pid, statusDir: tmpdir() })
+  let registered = false
   try {
-    child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', script, '-Target', installDir, '-OwnerPid', String(process.pid), '-Script', script, '-Status', status], { detached: true, stdio: ['ignore', outputLog, errorLog] })
-  } finally {
-    closeSync(outputLog)
-    closeSync(errorLog)
-  }
-  await new Promise<void>((resolveReady, rejectReady) => {
-    const finish = (error?: Error) => {
-      clearInterval(poll)
-      clearTimeout(timeout)
-      child.removeListener('exit', onExit)
-      child.removeListener('error', onError)
-      if (error) rejectReady(error)
-      else resolveReady()
+    writeFileSync(removal.statusPath, 'queued', { mode: 0o600, flag: 'wx' })
+    // dataDir was ACL-hardened to SYSTEM and Administrators before credentials
+    // were installed. Keep the privileged task definition inside that boundary.
+    writeFileSync(removal.taskXmlPath, removal.taskXml, { mode: 0o600, flag: 'wx' })
+    await registerWindowsSelfRemovalTask(removal)
+    registered = true
+    const deadline = Date.now() + 10_000
+    while (Date.now() < deadline) {
+      const status = readFileSync(removal.statusPath, 'utf8')
+      if (status.startsWith('failed:')) throw new Error(`Windows removal task failed during startup (${status.slice('failed:'.length)})`)
+      if (status !== 'queued') return basename(removal.statusPath)
+      await new Promise((resolveReady) => setTimeout(resolveReady, 100))
     }
-    const onExit = (code: number | null) => finish(new Error(`Windows removal helper exited before startup (code=${code ?? 'signal'})`))
-    const onError = () => finish(new Error('Windows removal helper could not start'))
-    const poll = setInterval(() => {
-      if (readFileSync(status, 'utf8') !== 'queued') finish()
-    }, 100)
-    const timeout = setTimeout(() => finish(new Error('Windows removal helper did not confirm startup')), 10_000)
-    child.once('exit', onExit)
-    child.once('error', onError)
-  })
-  child.unref()
+    throw new Error('Windows removal task did not confirm startup')
+  } catch (error) {
+    if (registered) await deleteWindowsSelfRemovalTask(removal.taskName).catch(() => undefined)
+    throw error
+  } finally {
+    // Task Scheduler has copied the definition by this point. The encoded task
+    // action remains registered/running and does not read this XML at runtime.
+    rmSync(removal.taskXmlPath, { force: true })
+  }
 }
 
 main().catch((err) => {

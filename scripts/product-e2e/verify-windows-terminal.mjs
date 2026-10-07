@@ -196,42 +196,22 @@ async function verifyExecutorLifecycle() {
       join(installDir, 'worker', 'conoutSocketWorker.js'), join(installDir, 'shared', 'conout.js'),
       join(dataDir, 'config.json')], 'managed Windows service installation')
     const uninstall = await run(installedExecutor, ['service', 'uninstall'])
-    if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service and credentials were removed')) {
-      const helperScript = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.ps1`)
-      const probeTarget = mkdtempSync(join(tmpdir(), 'kala uninstall probe-'))
-      const probeStatus = join(tmpdir(), `kala-executor-probe-${uninstall.pid}.status`)
-      let probe = { code: -1, stdout: '', stderr: '' }
-      if (existsSync(helperScript)) probe = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperScript, '-Target', probeTarget, '-OwnerPid', '2147483647', '-Script', helperScript, '-Status', probeStatus])
-      const outcome = existsSync(probeStatus) ? readFileSync(probeStatus, 'utf8') : 'no-status'
-      rmSync(probeTarget, { force: true, recursive: true })
-      rmSync(probeStatus, { force: true })
-      throw new Error(`Windows service uninstall helper exited without executing; code=${uninstall.code}; directProbeCode=${probe.code}; directProbeStatus=${outcome}; directProbeOutBytes=${Buffer.byteLength(probe.stdout)}; directProbeErrBytes=${Buffer.byteLength(probe.stderr)}`)
+    const statusName = uninstall.stdout.match(/Removal status file: (kala-executor-uninstall-[A-Za-z0-9]+\.status)/u)?.[1]
+    if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service removal was scheduled') || !statusName) {
+      throw new Error(`Windows service uninstall was not scheduled; code=${uninstall.code}; stdoutBytes=${Buffer.byteLength(uninstall.stdout)}; stderrBytes=${Buffer.byteLength(uninstall.stderr)}`)
     }
-    const uninstallDeadline = Date.now() + 30_000
-    while (Date.now() < uninstallDeadline && (existsSync(installDir) || existsSync(dataDir))) await sleep(100)
-    const removalStatus = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.status`)
-    if (existsSync(installDir) || existsSync(dataDir)) {
-      const outcome = existsSync(removalStatus) ? readFileSync(removalStatus, 'utf8') : 'helper-not-started-or-still-waiting'
-      const helperScript = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.ps1`)
-      let syntaxErrors = 'helper-missing'
-      if (existsSync(helperScript)) {
-        const safePath = helperScript.replaceAll("'", "''")
-        const parsed = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-          `$tokens=$null;$parseErrors=$null;[System.Management.Automation.Language.Parser]::ParseFile('${safePath}',[ref]$tokens,[ref]$parseErrors)|Out-Null;foreach($entry in $parseErrors){Write-Output ($entry.ErrorId + ':line-' + $entry.Extent.StartLineNumber)}`])
-        syntaxErrors = parsed.code === 0 ? (parsed.stdout.trim() || 'none') : 'parser-failed'
-      }
-      const errorPath = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.err`)
-      const outputPath = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.out`)
-      const helperError = existsSync(errorPath) ? readFileSync(errorPath, 'utf8') : ''
-      const helperOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : ''
-      const errorKinds = ['ParameterBindingException', 'UnauthorizedAccessException', 'ParserError', 'CommandNotFoundException', 'IOException', 'MethodException', 'ArgumentException'].filter((kind) => helperError.includes(kind))
-      const processes = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-        `(Get-CimInstance Win32_Process -Filter \"name='powershell.exe'\" | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*kala-executor-uninstall-${uninstall.pid}.ps1*' }).Count`])
-      throw new Error(`Windows service uninstall left managed installation data; self-removal=${outcome}; syntaxErrors=${syntaxErrors}; helperErrorBytes=${Buffer.byteLength(helperError)}; helperOutputBytes=${Buffer.byteLength(helperOutput)}; helperErrorKinds=${errorKinds.join(',') || 'none'}; helperProcessCount=${processes.code === 0 ? processes.stdout.trim() : 'unknown'}; installDir=${existsSync(installDir)}; dataDir=${existsSync(dataDir)}`)
+    const removalStatus = join(tmpdir(), statusName)
+    const uninstallDeadline = Date.now() + 60_000
+    let outcome = existsSync(removalStatus) ? readFileSync(removalStatus, 'utf8') : 'status-missing'
+    while (Date.now() < uninstallDeadline && (existsSync(installDir) || existsSync(dataDir) || outcome !== 'removed')) {
+      if (outcome.startsWith('failed:')) break
+      await sleep(100)
+      outcome = existsSync(removalStatus) ? readFileSync(removalStatus, 'utf8') : 'status-missing'
+    }
+    if (existsSync(installDir) || existsSync(dataDir) || outcome !== 'removed') {
+      throw new Error(`Windows service uninstall left managed installation data; self-removal=${outcome}; installDir=${existsSync(installDir)}; dataDir=${existsSync(dataDir)}`)
     }
     rmSync(removalStatus, { force: true })
-    rmSync(join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.out`), { force: true })
-    rmSync(join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.err`), { force: true })
   }
   console.log(`PASS Windows native Executor ${serviceMode ? 'service' : 'temporary'} ConPTY create/input/resize/kill lifecycle`)
 }
