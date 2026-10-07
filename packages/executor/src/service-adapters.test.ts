@@ -223,7 +223,7 @@ describe('Windows service adapter', () => {
     expect(xmlBytes.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xfe]))
     expect(xmlBytes.subarray(2).toString('utf16le')).toBe(removal.taskXml)
     expect(removal.taskXml).toContain('<UserId>S-1-5-18</UserId>')
-    expect(removal.taskXml).toContain('<LogonType>ServiceAccount</LogonType>')
+    expect(removal.taskXml).not.toContain('<LogonType>ServiceAccount</LogonType>')
     expect(removal.taskXml).not.toContain('.ps1')
     expect(removal.taskXml).not.toContain('Program Files')
     const encoded = removal.taskXml.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/u)?.[1]

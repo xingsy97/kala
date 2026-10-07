@@ -173,7 +173,7 @@ export function createWindowsSelfRemovalPlan(options: WindowsSelfRemovalPlanOpti
     `<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n` +
     `  <RegistrationInfo><Description>Kala Executor one-time removal</Description></RegistrationInfo>\n` +
     `  <Triggers />\n` +
-    `  <Principals><Principal id="System"><UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\n` +
+    `  <Principals><Principal id="System"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\n` +
     `  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable><AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><Hidden>true</Hidden><ExecutionTimeLimit>PT5M</ExecutionTimeLimit></Settings>\n` +
     `  <Actions Context="System"><Exec><Command>powershell.exe</Command><Arguments>${xml(`-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`)}</Arguments></Exec></Actions>\n` +
     `</Task>\n`
