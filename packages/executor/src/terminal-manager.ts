@@ -45,6 +45,13 @@ function terminalDiagnostic(phase: string): void {
   if (process.env.KALA_TERMINAL_DIAGNOSTICS === '1') process.stderr.write(`[kala-terminal] ${phase}\n`)
 }
 
+function terminateTerminal(terminal: TerminalProcess): void {
+  // node-pty's Windows ConPTY implementation rejects every explicit signal.
+  // Unix PTYs and pipe-backed shells retain the existing SIGTERM behavior.
+  if (process.platform === 'win32') terminal.kill()
+  else terminal.kill('SIGTERM')
+}
+
 async function tryLoadNodePty(): Promise<NodePtyModule | undefined> {
   if (process.env.KALA_TERMINAL_DISABLE_PTY === '1') return undefined
   try {
@@ -217,7 +224,7 @@ export function createTerminalManager(input: {
   const sessionKeyOf = (workspaceId: string, sessionId: string): string => `${workspaceId}:${sessionId}`
 
   const closeRecord = (record: TerminalRecord): void => {
-    if (!record.exited) record.terminal.kill('SIGTERM')
+    if (!record.exited) terminateTerminal(record.terminal)
     terminals.delete(keyOf(record.workspaceId, record.sessionId, record.terminalId))
     if (sessionTerminals.get(sessionKeyOf(record.workspaceId, record.sessionId)) === record) {
       sessionTerminals.delete(sessionKeyOf(record.workspaceId, record.sessionId))
@@ -278,7 +285,7 @@ export function createTerminalManager(input: {
               const marker = `\n[terminal output truncated after ${maxOutputBytes} bytes]\n`
               record.replay = appendReplay(record.replay, marker)
               input.emitOutput({ workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, data: marker })
-              record.terminal.kill('SIGTERM')
+              terminateTerminal(record.terminal)
             }
             return
           }
@@ -291,7 +298,7 @@ export function createTerminalManager(input: {
             const marker = `\n[terminal output truncated after ${maxOutputBytes} bytes]\n`
             record.replay = appendReplay(record.replay, marker)
             input.emitOutput({ workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId, data: marker })
-            record.terminal.kill('SIGTERM')
+            terminateTerminal(record.terminal)
           }
         })
         terminal.onExit(({ exitCode, signal }) => {
@@ -338,7 +345,7 @@ export function createTerminalManager(input: {
       terminals.delete(key)
       const sessionKey = sessionKeyOf(payload.workspaceId, payload.sessionId)
       if (sessionTerminals.get(sessionKey) === record) sessionTerminals.delete(sessionKey)
-      record.terminal.kill('SIGTERM')
+      terminateTerminal(record.terminal)
       return { requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, terminalId: payload.terminalId, killed: true }
     },
     closeSession(payload) {

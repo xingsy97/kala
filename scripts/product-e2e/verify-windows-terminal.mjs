@@ -62,6 +62,8 @@ async function verifyExecutorLifecycle() {
   assertFiles([
     executor,
     ...['conpty.node', 'conpty_console_list.node', 'pty.node', 'winpty-agent.exe', 'winpty.dll'].map((name) => join(executorPrebuild, name)),
+    join(executorRelease, 'worker', 'conoutSocketWorker.js'),
+    join(executorRelease, 'shared', 'conout.js'),
   ], 'Windows native Executor and complete node-pty companion')
 
   const createResponse = await fetch(`${origin}/api/executor-installs`, {
@@ -131,7 +133,9 @@ async function verifyExecutorLifecycle() {
     const installDir = join(process.env.ProgramFiles, 'Kala', 'Executor')
     const dataDir = join(process.env.ProgramData, 'Kala', 'Executor')
     const installedExecutor = join(installDir, 'kala-executor.exe')
-    assertFiles([installedExecutor, join(installDir, 'prebuilds', 'win32-x64', 'conpty.node'), join(dataDir, 'config.json')], 'managed Windows service installation')
+    assertFiles([installedExecutor, join(installDir, 'prebuilds', 'win32-x64', 'conpty.node'),
+      join(installDir, 'worker', 'conoutSocketWorker.js'), join(installDir, 'shared', 'conout.js'),
+      join(dataDir, 'config.json')], 'managed Windows service installation')
     const uninstall = await run(installedExecutor, ['service', 'uninstall'])
     if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service and credentials were removed')) throw new Error(`Windows service uninstall failed: ${uninstall.stderr}`)
     const uninstallDeadline = Date.now() + 30_000

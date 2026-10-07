@@ -130,9 +130,12 @@ jobs:
             node scripts/release/verify-checksum-index.mjs --index acceptance/candidate/SHA256SUMS --asset "acceptance/candidate/$asset" --manifest acceptance/candidate/manifest.json --revision '${{ needs.resolve.outputs.revision }}'
             if ($LASTEXITCODE -ne 0) { throw "Failed to bind $asset to the candidate checksum index" }
           }
-          New-Item -ItemType Directory -Force acceptance/candidate/prebuilds | Out-Null
-          tar -xzf acceptance/candidate/node-pty-win32-x64.tar.gz -C acceptance/candidate/prebuilds
+          node --input-type=module -e "import { verifyWindowsNodePtyCompanion } from './scripts/release/windows-executor-packager.mjs'; verifyWindowsNodePtyCompanion('acceptance/candidate/node-pty-win32-x64.tar.gz')"
+          if ($LASTEXITCODE -ne 0) { throw 'Accepted ConPTY companion inventory or digest is invalid' }
+          tar -xzf acceptance/candidate/node-pty-win32-x64.tar.gz -C acceptance/candidate
           if ($LASTEXITCODE -ne 0) { throw 'Failed to extract the accepted ConPTY companion' }
+          New-Item -ItemType Directory -Force acceptance/candidate/prebuilds | Out-Null
+          Move-Item acceptance/candidate/win32-x64 acceptance/candidate/prebuilds/win32-x64
       - name: Prove Windows Node.js 22 Host and native temporary/service ConPTY lifecycles
         shell: pwsh
         env:

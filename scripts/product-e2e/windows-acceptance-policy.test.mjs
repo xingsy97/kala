@@ -63,6 +63,8 @@ test('Windows verifier fails closed on missing payloads, missing ConPTY, and uns
     'pty.node',
     'winpty-agent.exe',
     'winpty.dll',
+    'conoutSocketWorker.js',
+    'conout.js',
   ]) assert.match(verifier, new RegExp(required.replaceAll('.', '\\.'), 'u'))
   assert.match(verifier, /platform: 'windows'/u)
   assert.match(verifier, /windows_installation_unsupported/u)
