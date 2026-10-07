@@ -160,6 +160,20 @@ async function verifyExecutorLifecycle() {
   const output = []
   dashboard.on('server:terminal_output', (payload) => { if (payload.terminalId === createdTerminal.terminalId) output.push(payload.data) })
   dashboard.emit('terminal:resize', { workspaceId, sessionId, terminalId: createdTerminal.terminalId, cols: 120, rows: 40 })
+  // ConPTY creation can ACK before PowerShell is ready to consume input. A
+  // command's echoed source is not proof of execution; require a result that
+  // cannot occur in the source text before testing the real user input once.
+  const readyToken = `KALA_READY_${Date.now()}_`
+  const readyDeadline = Date.now() + 40_000
+  let nextReadyProbe = 0
+  while (Date.now() < readyDeadline && !output.join('').includes(`${readyToken}True`)) {
+    if (Date.now() >= nextReadyProbe) {
+      dashboard.emit('terminal:input', { workspaceId, sessionId, terminalId: createdTerminal.terminalId, data: `Write-Output ("${readyToken}" + (2 -eq 2))\r` })
+      nextReadyProbe = Date.now() + 3_000
+    }
+    await sleep(50)
+  }
+  if (!output.join('').includes(`${readyToken}True`)) throw new Error(`PowerShell was not ready after ConPTY create; output=${output.join('').slice(-2000)}`)
   dashboard.emit('terminal:input', { workspaceId, sessionId, terminalId: createdTerminal.terminalId, data: `Write-Output ${marker}\r` })
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline && !output.join('').includes(marker)) await sleep(50)
