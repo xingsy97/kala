@@ -196,7 +196,17 @@ async function verifyExecutorLifecycle() {
       join(installDir, 'worker', 'conoutSocketWorker.js'), join(installDir, 'shared', 'conout.js'),
       join(dataDir, 'config.json')], 'managed Windows service installation')
     const uninstall = await run(installedExecutor, ['service', 'uninstall'])
-    if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service and credentials were removed')) throw new Error(`Windows service uninstall failed: ${uninstall.stderr}`)
+    if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service and credentials were removed')) {
+      const helperScript = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.ps1`)
+      const probeTarget = mkdtempSync(join(tmpdir(), 'kala-uninstall-probe-'))
+      const probeStatus = join(tmpdir(), `kala-executor-probe-${uninstall.pid}.status`)
+      let probe = { code: -1, stdout: '', stderr: '' }
+      if (existsSync(helperScript)) probe = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperScript, probeTarget, '0', helperScript, probeStatus])
+      const outcome = existsSync(probeStatus) ? readFileSync(probeStatus, 'utf8') : 'no-status'
+      rmSync(probeTarget, { force: true, recursive: true })
+      rmSync(probeStatus, { force: true })
+      throw new Error(`Windows service uninstall helper exited without executing; code=${uninstall.code}; directProbeCode=${probe.code}; directProbeStatus=${outcome}; directProbeOutBytes=${Buffer.byteLength(probe.stdout)}; directProbeErrBytes=${Buffer.byteLength(probe.stderr)}`)
+    }
     const uninstallDeadline = Date.now() + 30_000
     while (Date.now() < uninstallDeadline && (existsSync(installDir) || existsSync(dataDir))) await sleep(100)
     const removalStatus = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.status`)
