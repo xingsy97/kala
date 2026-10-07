@@ -40,6 +40,7 @@ import type { LLMAdapter } from './llm/adapter.js'
 import { startHostServer, type HostServer } from './server.js'
 import { appendEventEntry, appendRuntimeMetadataEntry, readSessionLog } from './store/log.js'
 import { persistMessageQueueSnapshot } from './message-queue-store.js'
+import { messageOperationFingerprint } from './message-operation-fingerprint.js'
 import { ExecutorIdentityStore } from './store/executor-identity.js'
 import { UnitResourceGovernor } from './tenant-runtime/resource-governor.js'
 import { bangShellResultOperationId } from './bang-shell.js'
@@ -6701,7 +6702,7 @@ describe('wire protocol', () => {
         await appendRuntimeMetadataEntry(server.store.get(sessionId)!.logPath, {
           sessionId,
           action: 'copilot.user_message',
-          payload: { operationId, text: 'already committed text' },
+          payload: { operationId, text: 'already committed text', requestFingerprint: messageOperationFingerprint('already committed text') },
         })
       }
 
