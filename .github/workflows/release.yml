@@ -207,6 +207,15 @@ jobs:
         with: { node-version: 22, package-manager-cache: false }
       - run: corepack enable; corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
+      - name: Require GNU tar and gzip from Git for Windows for reproducible archives
+        shell: pwsh
+        run: |
+          $tools = Join-Path $env:ProgramFiles 'Git\usr\bin'
+          foreach ($name in @('tar.exe', 'gzip.exe')) {
+            if (-not (Test-Path (Join-Path $tools $name))) { throw "Missing Git for Windows GNU archive tool $name" }
+          }
+          if ((& (Join-Path $tools 'tar.exe') --version | Select-Object -First 1) -notmatch 'GNU tar') { throw 'Git for Windows tar is not GNU tar' }
+          $tools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
       - run: pnpm run build
       - name: Build the platform-neutral Portable Host on Windows Node.js 22

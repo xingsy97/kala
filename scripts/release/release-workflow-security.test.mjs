@@ -77,7 +77,7 @@ test('release workflow publishes archived metadata and verifies the signed Execu
   assert.match(workflow, /test "\$GITHUB_REF" = "refs\/tags\/\$TAG"/u)
   assert.match(workflow, /optional-host-native:[\s\S]*workflow_dispatch[\s\S]*--component host[\s\S]*name: optional-host-qualification-/u)
   assert.match(workflow, /native-assets:[\s\S]*--component executor[\s\S]*name: native-/u)
-  assert.match(workflow, /windows-assets:[\s\S]*runs-on: windows-latest[\s\S]*--component all[\s\S]*--native-target win32-x64/u)
+  assert.match(workflow, /windows-assets:[\s\S]*runs-on: windows-latest[\s\S]*Require GNU tar and gzip from Git for Windows[\s\S]*--component all[\s\S]*--native-target win32-x64/u)
   assert.match(workflow, /windows-capture-manifest\.json[\s\S]*Windows capture checksum mismatch/u)
   assert.match(workflow, /subject-path: release\/\*/u)
   assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*pnpm run verify:release-assets -- --require-signed/u)
