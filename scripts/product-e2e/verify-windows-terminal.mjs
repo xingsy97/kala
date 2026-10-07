@@ -36,6 +36,7 @@ try {
     KALA_BIND_HOST: '127.0.0.1', KALA_PORT: String(port), KALA_STATE_DIR: join(stateRoot, 'state'),
     KALA_SESSIONS_DIR: join(stateRoot, 'sessions'), KALA_ARTIFACTS_DIR: join(stateRoot, 'artifacts'), ANTHROPIC_API_KEY: 'unused',
     HOME: stateRoot, USERPROFILE: stateRoot,
+    ...(target === 'executor' ? { KALA_RELEASE_ASSETS_DIR: hostRelease } : {}),
   })
   await waitForHttp(`${origin}/models`)
   const dashboardResponse = await fetch(`${origin}/`)
