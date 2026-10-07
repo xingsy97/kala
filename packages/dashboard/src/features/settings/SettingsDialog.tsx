@@ -62,6 +62,7 @@ type Props = {
   open: boolean
   /** Includes the authenticated identity; prevents cross-organization Settings cache reuse. */
   cacheNamespace?: string
+  autoHideOfflineWorkspacesByDefault?: boolean
   onOpenChange(open: boolean): void
   onModelsChanged?(): void
   executors?: readonly AttachedExecutor[]
@@ -94,7 +95,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'deployment', label: 'settings.sections.deployment.label', hint: 'settings.sections.deployment.hint', icon: Rocket, group: 'administration' },
 ]
 
-export function SettingsDialog({ open, cacheNamespace = 'default', onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token, initialSection = 'connection', storageSocket }: Props): JSX.Element {
+export function SettingsDialog({ open, cacheNamespace = 'default', autoHideOfflineWorkspacesByDefault = true, onOpenChange, onModelsChanged, executors = [], sessionCache, host = '', token, initialSection = 'connection', storageSocket }: Props): JSX.Element {
   const { t } = useTranslation()
   const desktopLayout = useMinWidth(768)
   const queryClient = useQueryClient()
@@ -210,7 +211,7 @@ export function SettingsDialog({ open, cacheNamespace = 'default', onOpenChange,
               ) : section === 'hooks' ? (
                 <HooksSection payload={payload} />
               ) : section === 'interface' ? (
-                <InterfaceSection sessionCache={sessionCache} />
+                <InterfaceSection sessionCache={sessionCache} autoHideOfflineWorkspacesByDefault={autoHideOfflineWorkspacesByDefault} />
               ) : section === 'deployment' ? (
                 <DeploymentSection payload={payload} host={host} token={token} />
               ) : (

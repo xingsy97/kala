@@ -12,6 +12,7 @@ import { wakeLockSupported } from '../../../lib/wake-lock.js'
 import {
   DEFAULT_CHAT_CONTENT_WIDTH,
   DEFAULT_CHAT_FONT_SIZE,
+  DEFAULT_CODE_BLOCK_FONT_SIZE,
   DEFAULT_CHAT_LINE_HEIGHT,
   DEFAULT_CHAT_MATH_SCALE,
   DEFAULT_CHAT_SIDE_SPACE,
@@ -24,6 +25,7 @@ import {
   PREF_AUTO_HIDE_OFFLINE_WORKSPACES,
   PREF_CHAT_CONTENT_WIDTH,
   PREF_CHAT_FONT_SIZE,
+  PREF_CODE_BLOCK_FONT_SIZE,
   PREF_CHAT_LINE_HEIGHT,
   PREF_CHAT_MATH_SCALE,
   PREF_CHAT_SIDE_SPACE,
@@ -36,6 +38,7 @@ import {
   PREF_KEEP_SCREEN_AWAKE,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   PREF_MESSAGE_TIMESTAMPS,
+  PREF_CHAPTER_READING_MODE,
   PREF_TOOL_ACTIVITY_ICON_SCALE,
   PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_SESSION_SUBSCRIPTION_WARMTH_MINUTES,
@@ -88,14 +91,14 @@ function LanguageSetting(): JSX.Element {
   )
 }
 
-export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessionViewCache }): JSX.Element {
+export function InterfaceSection({ sessionCache, autoHideOfflineWorkspacesByDefault = true }: { sessionCache?: DurableSessionViewCache; autoHideOfflineWorkspacesByDefault?: boolean }): JSX.Element {
   const { t } = useTranslation()
   const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
   const [showPinnedMessage, setShowPinnedMessage] = useBooleanPref(PREF_SHOW_PINNED_MESSAGE, true)
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
   const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
   const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
-  const [autoHideOfflineWorkspaces, setAutoHideOfflineWorkspaces] = useBooleanPref(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, true)
+  const [autoHideOfflineWorkspaces, setAutoHideOfflineWorkspaces] = useBooleanPref(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, autoHideOfflineWorkspacesByDefault)
   const [hideSubAgentSessions, setHideSubAgentSessions] = useBooleanPref(PREF_HIDE_SUB_AGENT_SESSIONS, true)
   const [liveToolActivityTail, setLiveToolActivityTail] = useNumberPref(
     PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -105,6 +108,7 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
   const [interfaceScale, setInterfaceScale] = useNumberPref(PREF_INTERFACE_SCALE, DEFAULT_INTERFACE_SCALE, numberPreferenceOptions(DASHBOARD_PREFERENCES.interfaceScale))
   const [toolActivityIconScale, setToolActivityIconScale] = useNumberPref(PREF_TOOL_ACTIVITY_ICON_SCALE, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, numberPreferenceOptions(DASHBOARD_PREFERENCES.toolActivityIconScale))
   const [chatFontSize, setChatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.chatFontSize))
+  const [codeBlockFontSize, setCodeBlockFontSize] = useNumberPref(PREF_CODE_BLOCK_FONT_SIZE, DEFAULT_CODE_BLOCK_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.codeBlockFontSize))
   const [sessionExplorerFontSize, setSessionExplorerFontSize] = useNumberPref(PREF_SESSION_EXPLORER_FONT_SIZE, DEFAULT_SESSION_EXPLORER_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.sessionExplorerFontSize))
   const [fileExplorerFontSize, setFileExplorerFontSize] = useNumberPref(PREF_FILE_EXPLORER_FONT_SIZE, DEFAULT_FILE_EXPLORER_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.fileExplorerFontSize))
   const [fileViewFontSize, setFileViewFontSize] = useNumberPref(PREF_FILE_VIEW_FONT_SIZE, DEFAULT_FILE_VIEW_FONT_SIZE, numberPreferenceOptions(DASHBOARD_PREFERENCES.fileViewFontSize))
@@ -118,6 +122,7 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
   const [keepScreenAwake, setKeepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
   const [smoothStreamingText, setSmoothStreamingText] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
   const [messageTimestamps, setMessageTimestamps] = useStringPref(PREF_MESSAGE_TIMESTAMPS, 'auto')
+  const [chapterReadingMode, setChapterReadingMode] = useStringPref(PREF_CHAPTER_READING_MODE, 'chapters')
   const [theme, , setTheme, effectiveTheme] = useTheme()
   const [, setStoredVSCodeTheme] = useState<StoredVSCodeTheme | null>(() => readStoredVSCodeTheme())
   const activeVSCodeTheme = currentVSCodeTheme(effectiveTheme)
@@ -244,6 +249,14 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
           onChange={(pixels) => setChatFontSize(CHAT_FONT_SIZE_PX.indexOf(pixels))}
           min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} defaultValue={CHAT_FONT_SIZE_PX[DEFAULT_CHAT_FONT_SIZE] ?? 15} unit="px"
           testId="settings-chat-font-size"
+        />
+        <SizePreference
+          label={t('settings.interface.codeBlockFontSize')}
+          description={t('settings.interface.codeBlockFontSizeDesc')}
+          value={codeBlockFontSize}
+          onChange={setCodeBlockFontSize}
+          min={FONT_SIZE_MIN} max={FONT_SIZE_MAX} defaultValue={DEFAULT_CODE_BLOCK_FONT_SIZE} unit="px"
+          testId="settings-code-block-font-size"
         />
         <SizePreference
           label={t('settings.interface.fileViewFontSize')}
@@ -373,6 +386,16 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
           onChange={setHideSubAgentSessions}
           testId="settings-toggle-hide-sub-agent-sessions"
         />
+        <li className="flex items-center justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+          <div className="min-w-0">
+            <div className="font-medium">{t('settings.interface.chapterReadingMode')}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.interface.chapterReadingModeDesc')}</div>
+          </div>
+          <select value={chapterReadingMode === 'continuous' ? 'continuous' : 'chapters'} onChange={(event) => setChapterReadingMode(event.currentTarget.value)} className="h-8 w-28 flex-none rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.chapterReadingMode')} data-testid="settings-chapter-reading-mode">
+            <option value="chapters">{t('chat.transcript.chapterPaged')}</option>
+            <option value="continuous">{t('chat.transcript.chapterContinuous')}</option>
+          </select>
+        </li>
         <li className="flex items-center justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.messageTimestamps')}</div>

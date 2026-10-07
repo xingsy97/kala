@@ -27,9 +27,12 @@ type Props = {
   open: boolean
   onOpenChange(open: boolean): void
   host?: string
+  privateCloud?: boolean
+  organizationRole?: 'owner' | 'admin' | 'member' | 'viewer'
 }
 
 type InstallResponse = ExecutorInstallStatusSnapshot & { command?: string; setupCode?: string }
+type ExecutorInviteResponse = { id: string; inviteToken: string }
 type FormState = Pick<CreateExecutorInstall, 'platform' | 'mode' | 'privilegeMode'>
 
 const POLL_INTERVAL_MS = 2_000
@@ -37,7 +40,7 @@ const PLATFORMS = ['linux', 'macos'] as const satisfies readonly ExecutorInstall
 const MODES: ExecutorInstallMode[] = ['service', 'temporary']
 const PRIVILEGE_MODES: ExecutorPrivilegeMode[] = ['privileged', 'restricted']
 
-export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX.Element {
+export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud = false, organizationRole }: Props): JSX.Element {
   const { t } = useTranslation()
   const [form, setForm] = useState<FormState>(() => ({
     platform: detectCurrentPlatform(),
@@ -56,6 +59,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
   const generationRef = useRef(0)
   const createdFormRef = useRef<FormState | null>(null)
   const installationIdRef = useRef<string | null>(null)
+  const canCreateOrganizationInvite = !privateCloud || organizationRole === 'owner' || organizationRole === 'admin'
 
   useEffect(() => {
     if (!open) {
@@ -78,6 +82,25 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
 
     const generation = ++generationRef.current
     const controller = new AbortController()
+    if (privateCloud) {
+      setInstallation(null)
+      setPairingCode(null)
+      setCommand('')
+      setError(null)
+      if (!canCreateOrganizationInvite) return () => controller.abort()
+      void request<ExecutorInviteResponse>(apiEndpoint(host, '/auth/executor-invites'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+        signal: controller.signal,
+      }).then((invite) => {
+        if (generationRef.current !== generation) return
+        setCommand(organizationInviteCommand(host, invite.inviteToken))
+      }).catch((cause: unknown) => {
+        if (!controller.signal.aborted && generationRef.current === generation) setError(errorMessage(cause))
+      })
+      return () => controller.abort()
+    }
     const input = toApiInput(form)
     createdFormRef.current = form
     setError(null)
@@ -99,10 +122,10 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
     return () => controller.abort()
     // A session is created once per opening. Form edits are handled by the debounced PATCH effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host, open])
+  }, [canCreateOrganizationInvite, host, open, privateCloud])
 
   useEffect(() => {
-    if (!open || !installation || !createdFormRef.current || sameForm(form, createdFormRef.current)) return
+    if (privateCloud || !open || !installation || !createdFormRef.current || sameForm(form, createdFormRef.current)) return
     const previousInstallationId = installation.id
     const generation = generationRef.current
     const controller = new AbortController()
@@ -131,10 +154,10 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
       }
     })
     return () => controller.abort()
-  }, [form, host, installation, open])
+  }, [form, host, installation, open, privateCloud])
 
   useEffect(() => {
-    if (!open || !installation) return
+    if (privateCloud || !open || !installation) return
     const installationId = installation.id
     const generation = generationRef.current
     let lastSeq = installation.seq
@@ -174,7 +197,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
       if (timeout !== undefined) window.clearTimeout(timeout)
       controller?.abort()
     }
-  }, [host, installation?.id, open])
+  }, [host, installation?.id, open, privateCloud])
 
   const updateForm = (patch: Partial<FormState>): void => {
     setForm((current) => {
@@ -230,6 +253,23 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
           <DialogDescription className="max-w-2xl text-sm leading-5">{t('explorer.connectDialog.description')}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto p-5 sm:p-7">
+          {privateCloud ? (
+            <section className="mx-auto max-w-2xl space-y-4" data-testid="private-cloud-executor-invite">
+              <div className="rounded-2xl bg-primary/10 px-4 py-3 text-sm leading-6 text-muted-foreground">
+                <div className="flex items-start gap-2"><ShieldCheck className="mt-1 h-4 w-4 flex-none text-primary" aria-hidden="true" /><p>{t('explorer.connectDialog.organizationInviteDescription')}</p></div>
+              </div>
+              {canCreateOrganizationInvite ? (
+                <>
+                  <SectionLabel index="1" label={t('explorer.connectDialog.runCommand')} />
+                  <TerminalCommand command={command} copied={copied} mode="temporary" modeLabel={t('explorer.connectDialog.organizationInviteMode')} transitioning={false} onCopy={() => void copy()} />
+                  <p className="text-xs leading-5 text-muted-foreground">{t('explorer.connectDialog.organizationInviteTerminalHint')}</p>
+                  {error || copyError ? <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error ?? copyError}</p> : null}
+                </>
+              ) : (
+                <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert" data-testid="executor-invite-admin-required">{t('explorer.connectDialog.adminRequired')}</p>
+              )}
+            </section>
+          ) : (
           <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)] lg:gap-8">
             <section className="min-w-0 space-y-5" aria-label={t('executorPairing.installationOptions')}>
               <SectionLabel index="1" label={t('explorer.connectDialog.platform')} />
@@ -284,6 +324,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host }: Props): JSX
               {error || copyError ? <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error ?? copyError}</p> : null}
             </section>
           </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -369,6 +410,14 @@ function updatePairingCode(value: ExecutorInstallEvent | ExecutorInstallStatusSn
 function apiEndpoint(host: string | undefined, path: string): string {
   return host ? new URL(path, host).toString() : path
 }
+
+function organizationInviteCommand(host: string | undefined, inviteToken: string): string {
+  const origin = host ? new URL(host).origin : window.location.origin
+  const assets = `${origin}/install/assets`
+  return `tmp=$(mktemp) && trap 'rm -f "$tmp"' EXIT && curl -fsSL ${quoteSh(`${assets}/run.sh`)} -o "$tmp" && HOST_URL=${quoteSh(origin)} EXECUTOR_INVITE=${quoteSh(inviteToken)} KALA_RELEASE_BASE_URL=${quoteSh(assets)} COMPONENT=executor bash "$tmp"`
+}
+
+function quoteSh(value: string): string { return `'${value.replace(/'/gu, `'"'"'`)}'` }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)

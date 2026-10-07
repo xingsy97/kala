@@ -4,6 +4,7 @@ export { CHAT_FONT_SIZE_PX } from '../../lib/display-sizes.js'
 
 export type ChatDisplayPrefs = {
   fontSize: number
+  codeBlockFontSize?: number
   contentWidth: number
   sideSpace: number
   lineHeight: number
@@ -27,6 +28,7 @@ export function chatDisplayStyle(displayPrefs: ChatDisplayPrefs | undefined): CS
   const sideSpace = CHAT_SIDE_SPACE[clampIndex(displayPrefs?.sideSpace, CHAT_SIDE_SPACE, 1)] ?? CHAT_SIDE_SPACE[1]
   return {
     '--ak-chat-font-size': `${(CHAT_FONT_SIZE_PX[fontSize] ?? 15) / 16}rem`,
+    '--ak-code-font-size': `${Math.min(48, Math.max(10, displayPrefs?.codeBlockFontSize ?? 15)) / 16}rem`,
     '--ak-chat-line-height': String(CHAT_LINE_HEIGHT[lineHeight]),
     '--ak-chat-content-width': `${CHAT_CONTENT_WIDTH_REM[contentWidth]}rem`,
     '--ak-chat-math-scale': `${CHAT_MATH_SCALE_EM[mathScale]}em`,

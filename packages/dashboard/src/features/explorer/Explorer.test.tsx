@@ -131,6 +131,25 @@ describe('Explorer', () => {
     expect(screen.getByTestId('workspace-os-icon').classList.contains('lucide-monitor')).toBe(true)
   })
 
+  it('shows old offline workspace sessions by default in Private Cloud, but respects an explicit hide setting', () => {
+    const props = {
+      executors: [{ ...executor, workspaceId: 'tenant_current-workspace', workspaceName: 'Workspace' }],
+      sessions: [{ ...sessionSummary, workspaceId: 'previous-executor', workspaceName: 'old workspace' }],
+      selectedSessionId: null,
+      autoHideOfflineWorkspacesByDefault: false,
+      onSelect: () => {}, onNewSession: () => {}, onConnectWorkspace: () => {}, onDelete: () => {}, onRename: () => {},
+    }
+    const { rerender } = render(<Explorer {...props} />)
+    expect(screen.getAllByTestId('workspace-row')).toHaveLength(2)
+    expect(screen.getByTestId('session-row').textContent).toContain(sessionSummary.firstUserMessage?.slice(0, 20))
+
+    localStorage.setItem(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, '1')
+    fireEvent(window, new StorageEvent('storage', { key: PREF_AUTO_HIDE_OFFLINE_WORKSPACES, newValue: '1' }))
+    rerender(<Explorer {...props} />)
+    expect(screen.getAllByTestId('workspace-row')).toHaveLength(1)
+    expect(screen.queryByTestId('session-row')).toBeNull()
+  })
+
   it('hides sub-agent sessions by default while keeping the selected child reachable', () => {
     const child = { ...sessionSummary, sessionId: 'child-session', parentSessionId: sessionSummary.sessionId, firstUserMessage: 'child task' }
     const props = {

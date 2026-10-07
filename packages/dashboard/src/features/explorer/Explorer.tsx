@@ -100,6 +100,8 @@ type Props = {
   executors: readonly AttachedExecutor[]
   sessions: readonly SessionSummary[]
   loading?: boolean
+  /** Private Cloud should not hide historical sessions when their old Executor is offline. */
+  autoHideOfflineWorkspacesByDefault?: boolean
   selectedSessionId: string | null
   sessionStatuses?: ReadonlyMap<string, SessionActivityStatus>
   onSelect(sessionId: string): void
@@ -133,6 +135,7 @@ function ExplorerImpl({
   executors,
   sessions,
   loading = false,
+  autoHideOfflineWorkspacesByDefault = true,
   selectedSessionId,
   sessionStatuses,
   onSelect,
@@ -170,7 +173,7 @@ function ExplorerImpl({
   const preview = useSessionHoverPreview(selectedSessionId)
   const pointerActivatedSessionRef = useRef<string | null>(null)
   const hiddenWorkspaces = useHiddenWorkspaces()
-  const [autoHideOfflineWorkspaces] = useBooleanPref(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, true)
+  const [autoHideOfflineWorkspaces] = useBooleanPref(PREF_AUTO_HIDE_OFFLINE_WORKSPACES, autoHideOfflineWorkspacesByDefault)
   const [hideSubAgentSessions] = useBooleanPref(PREF_HIDE_SUB_AGENT_SESSIONS, true)
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
@@ -1706,6 +1709,7 @@ function RenameInput({
 
 function areExplorerPropsEqual(prev: Props, next: Props): boolean {
   return prev.loading === next.loading &&
+    prev.autoHideOfflineWorkspacesByDefault === next.autoHideOfflineWorkspacesByDefault &&
     prev.selectedSessionId === next.selectedSessionId &&
     prev.embeddedHeader === next.embeddedHeader &&
     prev.headerLeading === next.headerLeading &&

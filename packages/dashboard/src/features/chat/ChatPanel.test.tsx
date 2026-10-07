@@ -14,6 +14,45 @@ function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Elemen
 }
 
 describe('ChatPanel', () => {
+  it('pages a completed long Markdown answer, preserves full-copy content and reveals hidden sections on search', async () => {
+    const first = 'First section material. '.repeat(85)
+    const second = 'Second section material. '.repeat(85)
+    const text = `## First\n\n${first}\n\n## Second\n\n${second}`
+    const props = { messages: [{ role: 'assistant' as const, content: [{ type: 'text' as const, text }] }] }
+    const { rerender } = render(<ChatPanel {...props} />)
+    expect(await screen.findByTestId('chapter-reader')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'First' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Second' })).toBeNull()
+    fireEvent.click(screen.getByTestId('chapter-next'))
+    expect(screen.getByRole('heading', { name: 'Second' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'First' })).toBeNull()
+    expect(screen.getByTestId('copy-message')).toBeTruthy()
+    rerender(<ChatPanel {...props} highlightIndex={0} />)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'First' })).toBeTruthy())
+    expect(screen.getByRole('heading', { name: 'Second' })).toBeTruthy()
+  })
+
+  it('keeps chapter controls in the Assistant header and respects a session override over the global default', async () => {
+    const text = `## First\n\n${'Long first section. '.repeat(120)}\n\n## Second\n\n${'Long second section. '.repeat(120)}`
+    const messages = [{ role: 'assistant' as const, content: [{ type: 'text' as const, text }] }]
+    const onChapterReadingModeChange = vi.fn()
+    const { rerender } = render(<ChatPanel sessionId="session-a" messages={messages} onChapterReadingModeChange={onChapterReadingModeChange} />)
+    const navigation = await screen.findByTestId('chapter-navigation')
+    const header = screen.getByTestId('assistant-chapter-controls').parentElement!
+    expect(header.contains(navigation)).toBe(true)
+    expect(header.textContent).toContain('Assistant')
+
+    fireEvent.change(screen.getByTestId('chapter-mode'), { target: { value: 'continuous' } })
+    expect(onChapterReadingModeChange).toHaveBeenCalledWith('continuous')
+    rerender(<ChatPanel sessionId="session-a" messages={messages} onChapterReadingModeChange={onChapterReadingModeChange} chapterReadingModeOverride="continuous" />)
+    expect(screen.getByRole('heading', { name: 'First' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Second' })).toBeTruthy()
+    fireEvent.change(screen.getByTestId('chapter-mode'), { target: { value: 'inherit' } })
+    expect(onChapterReadingModeChange).toHaveBeenLastCalledWith(null)
+    rerender(<ChatPanel sessionId="session-a" messages={messages} onChapterReadingModeChange={onChapterReadingModeChange} />)
+    expect(screen.queryByRole('heading', { name: 'Second' })).toBeNull()
+  })
+
   it('renders a compact scheduled badge from operation provenance and opens its task', () => {
     const onOpenScheduledTask = vi.fn()
     render(<ChatPanel
@@ -47,7 +86,10 @@ describe('ChatPanel', () => {
     render(<DashboardChatPanel items={items} messages={[]} onEditAndRerun={vi.fn()} />)
     const footer = screen.getByTestId('turn-timing-turn-1')
     expect(footer.parentElement?.getAttribute('data-testid')).toBe('assistant-message-footer')
-    expect(footer.textContent).toContain('Completed · 1m 42s')
+    expect(footer.querySelector('button')?.textContent).toContain('✓1m 42s')
+    expect(footer.querySelector('button')?.textContent).not.toContain('Completed')
+    expect(footer.querySelector('button')?.getAttribute('aria-label')).toBe('Completed · 1m 42s')
+    expect(footer.querySelector('button > span')?.className).not.toContain('text-emerald')
     expect(footer.textContent).not.toContain('12 Tools')
     expect(footer.textContent).not.toContain('3 model calls')
     const messageFooter = screen.getByTestId('assistant-message-footer')
@@ -117,7 +159,9 @@ describe('ChatPanel', () => {
     )
 
     const timing = screen.getByTestId('turn-timing-turn-failed')
-    expect(timing.textContent).toContain('Failed · 4s')
+    expect(timing.querySelector('button')?.textContent).toContain('!4s')
+    expect(timing.querySelector('button')?.getAttribute('aria-label')).toBe('Failed · 4s')
+    expect(timing.querySelector('button > span')?.className).toContain('text-destructive')
     expect(timing.closest('[data-testid="user-message-surface"]')).toBeNull()
     const metadata = screen.getByTestId('user-message-metadata')
     expect(metadata.className).toContain('absolute')
@@ -155,7 +199,8 @@ describe('ChatPanel', () => {
     expect(metadata.contains(timing)).toBe(true)
     expect(metadata.contains(timestamp)).toBe(true)
     expect(timing.compareDocumentPosition(timestamp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(timing.textContent).toContain('Cancelled · 4s')
+    expect(timing.querySelector('button')?.textContent).toContain('◌4s')
+    expect(timing.querySelector('button')?.getAttribute('aria-label')).toBe('Cancelled · 4s')
     fireEvent.click(timing.querySelector('button')!)
     const details = screen.getByTestId('turn-timing-details-turn-cancelled')
     expect(details.className).toContain('order-first')
@@ -383,6 +428,25 @@ describe('ChatPanel', () => {
     expect(screen.getByText('1 / 3')).toBeTruthy()
     expect(screen.getByText('Inspecting')).toBeTruthy()
     expect(screen.getByTestId('thinking-block').closest('[data-testid="assistant-content-column"]')).toBeTruthy()
+  })
+
+  it('keeps adjacent original Thinking blocks in one message on separate pages, never concatenated within a page', () => {
+    render(<ChatPanel messages={[{ role: 'assistant', content: [
+      { type: 'thinking', text: 'First independent thought.' },
+      { type: 'thinking', text: 'Second independent thought.' },
+      { type: 'thinking', text: 'Third independent thought.' },
+    ] }]} />)
+    expect(screen.getAllByTestId('thinking-block')).toHaveLength(1)
+    expect(screen.getAllByTestId('thinking-update')).toHaveLength(1)
+    expect(screen.getByText('3 / 3')).toBeTruthy()
+    expect(screen.getByText('Third independent thought.')).toBeTruthy()
+    expect(screen.queryByText('First independent thought.')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Previous Thinking' }))
+    expect(screen.getByText('Second independent thought.')).toBeTruthy()
+    expect(screen.queryByText('Third independent thought.')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Previous Thinking' }))
+    expect(screen.getByText('First independent thought.')).toBeTruthy()
+    expect(screen.queryByText('Second independent thought.')).toBeNull()
   })
 
   it('merges thinking updates across messages that render no visible content', () => {
@@ -683,12 +747,13 @@ describe('ChatPanel', () => {
     const { container } = render(
       <ChatPanel
         messages={[{ role: 'assistant', content: [{ type: 'text', text: 'hello' }] }]}
-        displayPrefs={{ fontSize: 6, contentWidth: 2, sideSpace: 0, lineHeight: 2, mathScale: 4 }}
+        displayPrefs={{ fontSize: 6, codeBlockFontSize: 22, contentWidth: 2, sideSpace: 0, lineHeight: 2, mathScale: 4 }}
       />,
     )
     const root = container.querySelector('[style*="--ak-chat-font-size"]') as HTMLElement | null
 
     expect(root?.style.getPropertyValue('--ak-chat-font-size')).toBe('1.25rem')
+    expect(root?.style.getPropertyValue('--ak-code-font-size')).toBe('1.375rem')
     expect(root?.style.getPropertyValue('--ak-chat-content-width')).toBe('104rem')
     expect(root?.style.getPropertyValue('--ak-chat-line-height')).toBe('1.95')
     expect(root?.style.getPropertyValue('--ak-chat-math-scale')).toBe('3em')

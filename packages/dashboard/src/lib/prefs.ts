@@ -55,6 +55,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   autoHideOfflineWorkspaces: { key: 'ak-auto-hide-offline-workspaces', type: 'boolean', defaultValue: true },
   hideSubAgentSessions: { key: 'ak-hide-sub-agent-sessions', type: 'boolean', defaultValue: true },
   chatFontSize: { key: 'ak-chat-font-size', type: 'number', defaultValue: 3, min: 0, max: CHAT_FONT_SIZE_PX.length - 1 },
+  codeBlockFontSize: { key: 'ak-code-block-font-size', type: 'number', defaultValue: 15, min: 10, max: 48 },
   sessionExplorerFontSize: { key: 'ak-session-explorer-font-size', type: 'number', defaultValue: 2, min: 0, max: SESSION_EXPLORER_FONT_SIZE_PX.length - 1 },
   fileExplorerFontSize: { key: 'ak-file-explorer-font-size', type: 'number', defaultValue: 1, min: 0, max: FILE_EXPLORER_FONT_SIZE_PX.length - 1 },
   fileViewFontSize: { key: 'ak-file-view-font-size', type: 'number', defaultValue: 2, min: 0, max: FILE_VIEW_FONT_SIZE_PX.length - 1 },
@@ -69,6 +70,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   keepScreenAwake: { key: 'ak-keep-screen-awake', type: 'boolean', defaultValue: false },
   smoothStreamingText: { key: 'ak-smooth-streaming-text', type: 'boolean', defaultValue: true },
   messageTimestamps: { key: 'ak-message-timestamps', type: 'string', defaultValue: 'auto' },
+  chapterReadingMode: { key: 'ak-chapter-reading-mode', type: 'string', defaultValue: 'chapters' },
   desktopNotificationsEnabled: { key: 'ak-desktop-notifications-enabled', type: 'boolean', defaultValue: false },
   desktopNotificationApproval: { key: 'ak-desktop-notification-approval-required', type: 'boolean', defaultValue: true },
   desktopNotificationWaiting: { key: 'ak-desktop-notification-waiting-for-user', type: 'boolean', defaultValue: true },
@@ -282,6 +284,7 @@ export const PREF_TOPBAR_OPEN = DASHBOARD_PREFERENCES.topbarOpen.key
 export const PREF_AUTO_HIDE_OFFLINE_WORKSPACES = DASHBOARD_PREFERENCES.autoHideOfflineWorkspaces.key
 export const PREF_HIDE_SUB_AGENT_SESSIONS = DASHBOARD_PREFERENCES.hideSubAgentSessions.key
 export const PREF_CHAT_FONT_SIZE = DASHBOARD_PREFERENCES.chatFontSize.key
+export const PREF_CODE_BLOCK_FONT_SIZE = DASHBOARD_PREFERENCES.codeBlockFontSize.key
 export const PREF_SESSION_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.sessionExplorerFontSize.key
 export const PREF_FILE_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.fileExplorerFontSize.key
 export const PREF_FILE_VIEW_FONT_SIZE = DASHBOARD_PREFERENCES.fileViewFontSize.key
@@ -295,6 +298,7 @@ export const PREF_APP_BADGE_ENABLED = DASHBOARD_PREFERENCES.appBadgeEnabled.key
 export const PREF_KEEP_SCREEN_AWAKE = DASHBOARD_PREFERENCES.keepScreenAwake.key
 export const PREF_SMOOTH_STREAMING_TEXT = DASHBOARD_PREFERENCES.smoothStreamingText.key
 export const PREF_MESSAGE_TIMESTAMPS = DASHBOARD_PREFERENCES.messageTimestamps.key
+export const PREF_CHAPTER_READING_MODE = DASHBOARD_PREFERENCES.chapterReadingMode.key
 export const PREF_MODEL = DASHBOARD_PREFERENCES.model.key
 export const PREF_AGENT_RUNTIME = DASHBOARD_PREFERENCES.agentRuntime.key
 export const PREF_HOST_ENDPOINT = DASHBOARD_PREFERENCES.hostEndpoint.key
@@ -314,6 +318,7 @@ export const DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT = DASHBOARD_PREFERENCES.liveT
 export const DEFAULT_SESSION_SUBSCRIPTION_WARMTH_MINUTES = DASHBOARD_PREFERENCES.sessionSubscriptionWarmthMinutes.defaultValue
 export const DEFAULT_TOOL_ACTIVITY_ICON_SCALE = DASHBOARD_PREFERENCES.toolActivityIconScale.defaultValue
 export const DEFAULT_CHAT_FONT_SIZE = DASHBOARD_PREFERENCES.chatFontSize.defaultValue
+export const DEFAULT_CODE_BLOCK_FONT_SIZE = DASHBOARD_PREFERENCES.codeBlockFontSize.defaultValue
 export const DEFAULT_SESSION_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.sessionExplorerFontSize.defaultValue
 export const DEFAULT_FILE_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.fileExplorerFontSize.defaultValue
 export const DEFAULT_FILE_VIEW_FONT_SIZE = DASHBOARD_PREFERENCES.fileViewFontSize.defaultValue

@@ -16,6 +16,20 @@ describe('agent activity card', () => {
     expect(screen.getByTestId('inline-status-thinking').textContent).not.toContain('Previous step completed')
   })
 
+  it('restores working after A → B → A while A has stale cached idle state but a running summary', () => {
+    const cachedIdle = { ...state, status: 'idle' as const }
+    const { rerender } = render(<InlineStatusRow state={cachedIdle} fallbackStatus="idle" streamingActive={false} hydrated />)
+    expect(screen.queryByTestId('inline-status-thinking')).toBeNull()
+    // The switch clears the optimistic acknowledgement; A's new ready payload
+    // has not arrived yet, but the authoritative control summary is thinking.
+    rerender(<InlineStatusRow state={cachedIdle} fallbackStatus="thinking" streamingActive={false} hydrated={false} />)
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+    rerender(<InlineStatusRow state={{ ...state, status: 'thinking' }} fallbackStatus="thinking" streamingActive={false} hydrated />)
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+    rerender(<InlineStatusRow state={{ ...state, status: 'done' }} fallbackStatus="done" streamingActive={false} hydrated />)
+    expect(screen.queryByTestId('inline-status-thinking')).toBeNull()
+  })
+
   it('shows only Thinking when no persisted Tool intention exists', () => {
     render(<InlineStatusRow state={state} streamingActive={false} progress={{ phase: 'thinking', label: 'Thinking' }} />)
     expect(screen.getByTestId('inline-status-label').textContent).toContain('Thinking')

@@ -26,6 +26,7 @@ describe('ConnectWorkspaceDialog', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const rawUrl = String(input)
       const url = rawUrl.replace(/^http:\/\/host\.test:5301/u, '')
+      if ((url === '/auth/executor-invites' || url === 'https://cloud.example.test/auth/executor-invites') && init?.method === 'POST') return response({ id: 'inv_1', inviteToken: 'ak_invite_org_a' })
       if (url === '/api/executor-installs' && init?.method === 'POST') {
         const input = JSON.parse(String(init.body)) as Record<string, string>
         if (input.platform === 'macos' || input.mode === 'temporary') {
@@ -161,6 +162,25 @@ describe('ConnectWorkspaceDialog', () => {
     render(<ConnectWorkspaceDialog open host="http://host.test:5301" onOpenChange={() => {}} />)
     await screen.findByText(/curl -fsSL/)
     expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === 'http://host.test:5301/api/executor-installs' && init?.method === 'POST')).toBe(true)
+  })
+
+  it('uses an organization-bound invite instead of the anonymous pairing flow in Private Cloud', async () => {
+    render(<ConnectWorkspaceDialog open privateCloud organizationRole="admin" host="https://cloud.example.test" onOpenChange={() => {}} />)
+    const command = await screen.findByText(/EXECUTOR_INVITE=/)
+    expect(command.textContent).toContain("HOST_URL='https://cloud.example.test'")
+    expect(command.textContent).toContain("EXECUTOR_INVITE='ak_invite_org_a'")
+    expect(command.textContent).toContain("KALA_RELEASE_BASE_URL='https://cloud.example.test/install/assets'")
+    expect(command.textContent).not.toContain('KALA_SETUP_CODE')
+    expect(screen.queryByTestId('connect-workspace-expert-mode')).toBeNull()
+    expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === 'https://cloud.example.test/auth/executor-invites' && init?.method === 'POST')).toBe(true)
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/executor-installs'))).toBe(false)
+  })
+
+  it('clearly blocks non-admin members without creating an invite', async () => {
+    render(<ConnectWorkspaceDialog open privateCloud organizationRole="member" onOpenChange={() => {}} />)
+    expect((await screen.findByTestId('executor-invite-admin-required')).textContent).toMatch(/owner or administrator/i)
+    expect(screen.queryByTestId('executor-terminal-command')).toBeNull()
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
   })
 
   it('closes when the backdrop is clicked', async () => {

@@ -1121,7 +1121,7 @@ export function createSessionWithAck(
 export function updateSessionPreferences(
   socket: DashboardSocket,
   sessionId: string,
-  preferences: import('@agent-kernel/shared').SessionPreferences,
+  preferences: import('@agent-kernel/shared').SessionPreferencesPatch,
 ): Promise<void> {
   return emitRpc(socket, 'client:update_preferences', { sessionId, preferences })
 }

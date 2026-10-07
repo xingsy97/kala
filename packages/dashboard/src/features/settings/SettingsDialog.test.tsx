@@ -897,6 +897,18 @@ describe('SettingsDialog', () => {
     expect(localStorage.getItem('ak-hide-sub-agent-sessions')).toBe('0')
   })
 
+  it('shows Private Cloud offline history by default and reflects an explicit hide choice', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open autoHideOfflineWorkspacesByDefault={false} onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    const offline = await screen.findByTestId('settings-toggle-auto-hide-offline-workspaces')
+    expect(offline.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(offline)
+    expect(offline.getAttribute('aria-checked')).toBe('true')
+    expect(localStorage.getItem('ak-auto-hide-offline-workspaces')).toBe('1')
+  })
+
   it('defaults pinned messages on and persists hiding them', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
@@ -946,7 +958,9 @@ describe('SettingsDialog', () => {
     fireEvent.click(screen.getByTestId('settings-tab-interface'))
     await screen.findByTestId('settings-chat-font-size')
 
+    expect((screen.getByTestId('settings-code-block-font-size') as HTMLInputElement).value).toBe('15')
     fireEvent.change(screen.getByTestId('settings-chat-font-size'), { target: { value: '20' } })
+    fireEvent.change(screen.getByTestId('settings-code-block-font-size'), { target: { value: '22' } })
     fireEvent.change(screen.getByTestId('settings-file-view-font-size'), { target: { value: '18' } })
     fireEvent.change(screen.getByTestId('settings-session-explorer-font-size'), { target: { value: '14' } })
     fireEvent.change(screen.getByTestId('settings-file-explorer-font-size'), { target: { value: '12' } })
@@ -956,6 +970,9 @@ describe('SettingsDialog', () => {
     fireEvent.click(screen.getByTestId('settings-chat-math-scale-4'))
 
     expect(localStorage.getItem('ak-chat-font-size')).toBe('6')
+    expect(localStorage.getItem('ak-code-block-font-size')).toBe('22')
+    fireEvent.click(screen.getByTestId('settings-code-block-font-size-reset'))
+    expect(localStorage.getItem('ak-code-block-font-size')).toBe('15')
     expect(localStorage.getItem('ak-file-view-font-size')).toBe('4')
     expect(localStorage.getItem('ak-session-explorer-font-size')).toBe('3')
     expect(localStorage.getItem('ak-file-explorer-font-size')).toBe('2')

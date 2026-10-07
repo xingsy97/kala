@@ -2,7 +2,9 @@ import {
   Children,
   createContext,
   isValidElement,
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -64,7 +66,7 @@ import type {
   ToolCallContent,
   ToolResultContent,
 } from '@agent-kernel/kernel'
-import type { ApprovalRequiredEvent, ToolCardMode } from '@agent-kernel/shared'
+import type { ApprovalRequiredEvent, ChapterReadingMode, ToolCardMode } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -82,7 +84,7 @@ import { Textarea } from '../../components/ui/textarea.js'
 import { Typewriter } from '../../components/Typewriter.js'
 import { MarkdownTable } from '../../components/MarkdownTable.js'
 import { formatTokens } from '../../lib/format.js'
-import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, PREF_MESSAGE_TIMESTAMPS, PREF_SMOOTH_STREAMING_TEXT, PREF_TOOL_ACTIVITY_ICON_SCALE, useBooleanPref, useNumberPref, useStringPref } from '../../lib/prefs.js'
+import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, PREF_CHAPTER_READING_MODE, PREF_MESSAGE_TIMESTAMPS, PREF_SMOOTH_STREAMING_TEXT, PREF_TOOL_ACTIVITY_ICON_SCALE, useBooleanPref, useNumberPref, useStringPref } from '../../lib/prefs.js'
 import { useInterfaceScale } from '../../lib/interface-scale.js'
 import { cn } from '../../lib/utils.js'
 import { writeTextToClipboard } from '../../lib/clipboard.js'
@@ -110,6 +112,9 @@ import { groupConsecutiveToolDots, toolDotNodeWidth, toolDotRailBudget, toolPrev
 import { useIsMobile } from '../../app-logic/use-viewport.js'
 import { nextSearchMatchIndex, searchMatchSnippet, searchTranscript, type TranscriptSearchCategory, type TranscriptSearchMatch } from './transcript-search.js'
 import { normalizeMarkdownEmphasisAdjacency, remarkStripEmphasisAdjacencyMarker } from './normalize-markdown.js'
+
+// Keep the Markdown parser out of the initial chat bundle.
+const ChapterReader = lazy(() => import('./ChapterReader.js'))
 
 type Props = {
   messages?: readonly Message[]
@@ -139,6 +144,8 @@ type Props = {
    */
   parentSessionId?: string
   sessionId?: string | null
+  chapterReadingModeOverride?: ChapterReadingMode
+  onChapterReadingModeChange?: (mode: ChapterReadingMode | null) => void
   attachmentHost?: string
   attachmentToken?: string
   socket?: DashboardSocket | null
@@ -252,6 +259,8 @@ export function ChatPanel({
   topRightAccessory,
   parentSessionId,
   sessionId,
+  chapterReadingModeOverride,
+  onChapterReadingModeChange,
   attachmentHost,
   attachmentToken,
   socket,
@@ -272,6 +281,8 @@ export function ChatPanel({
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const [storedTimestampVisibility] = useStringPref(PREF_MESSAGE_TIMESTAMPS, 'auto')
+  const [storedChapterMode] = useStringPref(PREF_CHAPTER_READING_MODE, 'chapters')
+  const globalChapterMode: ChapterReadingMode = storedChapterMode === 'continuous' ? 'continuous' : 'chapters'
   const timestampVisibility: MessageTimestampVisibility =
     storedTimestampVisibility === 'always' || storedTimestampVisibility === 'hidden'
       ? storedTimestampVisibility
@@ -468,6 +479,15 @@ export function ChatPanel({
     item.kind === 'message' && item.message.role === 'user' ? [index] : []
   ), [transcriptItems])
 
+  const transcriptRef = useVirtualTranscriptScrollToken(scrollToBottomToken, transcriptItems.length)
+  const [localPinned, setLocalPinned] = useState(true)
+  const effectivePinned = pinnedToBottom ?? localPinned
+  const effectiveOnPinnedChange = onPinnedChange ?? setLocalPinned
+  const navigateChapter = useCallback((itemIndex: number) => {
+    effectiveOnPinnedChange(false)
+    transcriptRef.current?.scrollToIndex(itemIndex, { behavior: 'auto', align: 'start' })
+  }, [effectiveOnPinnedChange, transcriptRef])
+
   const renderItem = useCallback(
     (item: RenderTranscriptItem, itemIndex: number): JSX.Element => {
       if (item.kind === 'compact_progress') {
@@ -579,6 +599,11 @@ export function ChatPanel({
           turnTiming={item.turnTiming}
           scheduledTaskId={item.operationId ? scheduledMessageTasks?.[item.operationId] : undefined}
           onOpenScheduledTask={onOpenScheduledTask}
+          chapterSessionId={sessionId}
+          globalChapterMode={globalChapterMode}
+          chapterModeOverride={chapterReadingModeOverride}
+          onChapterModeChange={onChapterReadingModeChange}
+          onChapterNavigate={() => navigateChapter(itemIndex)}
         />
       )
     },
@@ -603,6 +628,11 @@ export function ChatPanel({
       scheduledMessageTasks,
       onOpenScheduledTask,
       searchItemIndex,
+      sessionId,
+      globalChapterMode,
+      chapterReadingModeOverride,
+      onChapterReadingModeChange,
+      navigateChapter,
     ],
   )
 
@@ -622,16 +652,6 @@ export function ChatPanel({
     [],
   )
 
-  const transcriptRef = useVirtualTranscriptScrollToken(
-    scrollToBottomToken,
-    transcriptItems.length,
-  )
-
-  // Uncontrolled fallback so tests / callers that don't wire the pin state
-  // still work. When both props are absent we own the state locally.
-  const [localPinned, setLocalPinned] = useState(true)
-  const effectivePinned = pinnedToBottom ?? localPinned
-  const effectiveOnPinnedChange = onPinnedChange ?? setLocalPinned
   useEffect(() => {
     if (!searchOpen || searchItemIndex == null || searchItemIndex < 0) return
     effectiveOnPinnedChange(false)
@@ -1958,6 +1978,11 @@ function MessageRow({
   turnTiming,
   scheduledTaskId,
   onOpenScheduledTask,
+  chapterSessionId,
+  globalChapterMode = 'chapters',
+  chapterModeOverride,
+  onChapterModeChange,
+  onChapterNavigate,
 }: {
   index: number
   message: Message
@@ -1983,6 +2008,11 @@ function MessageRow({
   turnTiming?: import('@agent-kernel/shared').TurnTimingSummary
   scheduledTaskId?: string
   onOpenScheduledTask?: (taskId: string) => void
+  chapterSessionId?: string | null
+  globalChapterMode?: ChapterReadingMode
+  chapterModeOverride?: ChapterReadingMode
+  onChapterModeChange?: (mode: ChapterReadingMode | null) => void
+  onChapterNavigate?: () => void
 }): JSX.Element | null {
   const { t } = useTranslation()
   const messageText = messagePlainText(message.content)
@@ -1993,6 +2023,7 @@ function MessageRow({
   const initialText = editable ? messageText : ''
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(initialText)
+  const [chapterHeaderTarget, setChapterHeaderTarget] = useState<HTMLDivElement | null>(null)
 
   if (editing && editable) {
     return (
@@ -2134,6 +2165,11 @@ function MessageRow({
     message.role === 'assistant'
       ? groupConsecutiveToolCalls(visibleContent, resultsByCallId)
       : visibleContent.map((c) => ({ kind: 'single', content: c }))
+  const chapterText = !streaming && message.role === 'assistant' && groupedItems.length === 1
+    && groupedItems[0]?.kind === 'single' && groupedItems[0].content.type === 'text'
+    && groupedItems[0].content.text.length >= 2_000
+      ? groupedItems[0].content.text
+      : null
 
   return (
     <div
@@ -2145,17 +2181,13 @@ function MessageRow({
       )}
     >
       <AssistantAvatarRail hidden={hideHeader} label={label} tool={message.role === 'tool'} />
-      <div className="relative min-w-0 max-w-full flex-1 overflow-hidden" data-testid="assistant-content-column">
-        {hideHeader ? null : (
-          <div
-            className={cn(
-              'mb-1 text-meta font-medium uppercase tracking-wider',
-              roleTextColor,
-            )}
-          >
-            {label}
+      <div className="relative min-w-0 max-w-full flex-1" data-testid="assistant-content-column">
+        {!hideHeader || chapterText ? (
+          <div className={cn('mb-1 flex min-w-0 items-center justify-between gap-2 text-meta font-medium uppercase tracking-wider', roleTextColor)}>
+            <span className="shrink-0">{label}</span>
+            {chapterText ? <div ref={setChapterHeaderTarget} className="flex min-w-0 items-center justify-end" data-testid="assistant-chapter-controls" /> : null}
           </div>
-        )}
+        ) : null}
         <div className="flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">
           {groupedItems.map((item, i) => {
             if (item.kind === 'tool_call_group') {
@@ -2188,6 +2220,21 @@ function MessageRow({
             }
             if (item.kind === 'thinking_group') {
               return <ThinkingBlock key={`thinking-${i}`} updates={item.updates} />
+            }
+            if (chapterText && item.kind === 'single' && item.content.type === 'text') {
+              return <Suspense key={i} fallback={<AssistantMarkdown text={chapterText} />}>
+                <ChapterReader
+                  key={chapterSessionId ?? 'local'}
+                  text={chapterText}
+                  headerTarget={chapterHeaderTarget}
+                  defaultMode={globalChapterMode}
+                  sessionMode={chapterModeOverride}
+                  onSessionModeChange={onChapterModeChange}
+                  onChapterNavigate={onChapterNavigate}
+                  revealAll={highlighted}
+                  renderMarkdown={(text) => <AssistantMarkdown text={text} />}
+                />
+              </Suspense>
             }
             return (
               <ContentBlock
@@ -2270,9 +2317,11 @@ function TurnTimingFooter({ summary, userMessage = false, cancelledUserMessage =
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-controls={detailsId}
+        aria-label={`${statusLabel} · ${formatTurnDuration(summary.wallDurationMs)}`}
+        title={statusLabel}
       >
-        <span aria-hidden="true">{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
-        <span>{statusLabel} · <span className="tabular-nums">{formatTurnDuration(summary.wallDurationMs)}</span></span>
+        <span aria-hidden="true" className={cn(summary.status === 'failed' && 'text-destructive', summary.status === 'interrupted' && 'text-amber-600 dark:text-amber-400')}>{summary.status === 'completed' ? '✓' : summary.status === 'failed' ? '!' : summary.status === 'interrupted' ? '⊘' : '◌'}</span>
+        <span className="tabular-nums">{formatTurnDuration(summary.wallDurationMs)}</span>
         {open ? <ChevronLeft className="h-3.5 w-3.5 flex-none" /> : <ChevronRight className="h-3.5 w-3.5 flex-none" />}
       </button>
       {open ? (

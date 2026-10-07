@@ -41,14 +41,16 @@ export type CompactStatus =
 type Props = {
   state: AgentState | null
   fallbackStatus?: AgentState['status']
+  /** Cached state belongs to the selected Session only after its ready baseline. */
+  hydrated?: boolean
   streamingActive: boolean
   toolExecutionStartedAt?: number | null
   awaitingAck?: boolean
   progress?: AgentProgress
 }
 
-export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolExecutionStartedAt, awaitingAck, progress }: Props): JSX.Element | null {
-  const status = state?.status ?? fallbackStatus
+export function InlineStatusRow({ state, fallbackStatus, hydrated = true, streamingActive, toolExecutionStartedAt, awaitingAck, progress }: Props): JSX.Element | null {
+  const status = hydrated ? state?.status ?? fallbackStatus : fallbackStatus
   if (status) {
     switch (status) {
       case 'thinking':

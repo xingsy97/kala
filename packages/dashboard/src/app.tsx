@@ -25,6 +25,7 @@ import type {
   SessionErrorEvent,
   SessionSummary,
   AttachedExecutor,
+  ChapterReadingMode,
   ToolCardMode,
 } from '@agent-kernel/shared'
 import { isSessionResting } from '@agent-kernel/shared'
@@ -172,6 +173,7 @@ import {
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   DEFAULT_CHAT_CONTENT_WIDTH,
   DEFAULT_CHAT_FONT_SIZE,
+  DEFAULT_CODE_BLOCK_FONT_SIZE,
   DEFAULT_CHAT_LINE_HEIGHT,
   DEFAULT_CHAT_MATH_SCALE,
   DEFAULT_CHAT_SIDE_SPACE,
@@ -179,6 +181,7 @@ import {
   DEFAULT_SESSION_EXPLORER_FONT_SIZE,
   PREF_CHAT_CONTENT_WIDTH,
   PREF_CHAT_FONT_SIZE,
+  PREF_CODE_BLOCK_FONT_SIZE,
   PREF_CHAT_LINE_HEIGHT,
   PREF_CHAT_MATH_SCALE,
   PREF_CHAT_SIDE_SPACE,
@@ -289,6 +292,7 @@ export function App(): JSX.Element {
   const [inspectorDrawerOpen, setInspectorDrawerOpen] = useState(false)
   const [rightPanelTabOverrides, setRightPanelTabOverrides] = useState<Record<string, RightPanelTab>>({})
   const [transcriptViewStartOverrides, setTranscriptViewStartOverrides] = useState<Record<string, number>>({})
+  const [chapterModeOverrides, setChapterModeOverrides] = useState<Record<string, ChapterReadingMode | null>>({})
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialSection, setSettingsInitialSection] = useState<'connection' | 'speech'>('connection')
@@ -345,6 +349,7 @@ export function App(): JSX.Element {
   )
   const interfaceScale = useInterfaceScale()
   const [chatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, { min: 0, max: CHAT_FONT_SIZE_PX.length - 1 })
+  const [codeBlockFontSize] = useNumberPref(PREF_CODE_BLOCK_FONT_SIZE, DEFAULT_CODE_BLOCK_FONT_SIZE, { min: 10, max: 48 })
   const [sessionExplorerFontSize] = useNumberPref(PREF_SESSION_EXPLORER_FONT_SIZE, DEFAULT_SESSION_EXPLORER_FONT_SIZE, { min: 0, max: SESSION_EXPLORER_FONT_SIZE_PX.length - 1 })
   const [fileExplorerFontSize] = useNumberPref(PREF_FILE_EXPLORER_FONT_SIZE, DEFAULT_FILE_EXPLORER_FONT_SIZE, { min: 0, max: FILE_EXPLORER_FONT_SIZE_PX.length - 1 })
   const [chatContentWidth] = useNumberPref(PREF_CHAT_CONTENT_WIDTH, DEFAULT_CHAT_CONTENT_WIDTH, { min: 0, max: 2 })
@@ -356,12 +361,13 @@ export function App(): JSX.Element {
   const chatDisplayPrefs = useMemo(
     () => ({
       fontSize: chatFontSize,
+      codeBlockFontSize,
       contentWidth: chatContentWidth,
       sideSpace: chatSideSpace,
       lineHeight: chatLineHeight,
       mathScale: chatMathScale,
     }),
-    [chatFontSize, chatContentWidth, chatSideSpace, chatLineHeight, chatMathScale],
+    [chatFontSize, codeBlockFontSize, chatContentWidth, chatSideSpace, chatLineHeight, chatMathScale],
   )
   const [sessionViewCacheMaxMb] = useNumberPref(PREF_SESSION_VIEW_CACHE_MAX_MB, DEFAULT_SESSION_VIEW_CACHE_MAX_MB, { min: 0, max: 4096 })
   const [durableSessionCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
@@ -623,6 +629,38 @@ export function App(): JSX.Element {
   const rightPanelTab: RightPanelTab = activeSessionId
     ? rightPanelTabOverrides[activeSessionId] ?? currentSession?.preferences?.rightPanelTab ?? 'files'
     : 'files'
+  const chapterModeOverride = activeSessionId && Object.prototype.hasOwnProperty.call(chapterModeOverrides, activeSessionId)
+    ? chapterModeOverrides[activeSessionId] ?? undefined
+    : currentSession?.preferences?.chapterReadingMode
+  const setChapterReadingModeForSession = useCallback((mode: ChapterReadingMode | null): void => {
+    if (!activeSessionId || !controlSocket) {
+      notify.error(t('chat.transcript.chapterSaveFailed'))
+      return
+    }
+    const sessionId = activeSessionId
+    setChapterModeOverrides((current) => ({ ...current, [sessionId]: mode }))
+    void updateSessionPreferences(controlSocket, sessionId, { chapterReadingMode: mode }).catch((error) => {
+      setChapterModeOverrides((current) => {
+        if (current[sessionId] !== mode) return current
+        const copy = { ...current }
+        delete copy[sessionId]
+        return copy
+      })
+      notify.error(t('chat.transcript.chapterSaveFailed'), { description: error instanceof Error ? error.message : String(error) })
+    })
+  }, [activeSessionId, controlSocket, t])
+  useEffect(() => {
+    if (!activeSessionId || !Object.prototype.hasOwnProperty.call(chapterModeOverrides, activeSessionId)) return
+    const optimistic = chapterModeOverrides[activeSessionId]
+    const persisted = currentSession?.preferences?.chapterReadingMode
+    if (optimistic !== (persisted ?? null)) return
+    setChapterModeOverrides((current) => {
+      if (current[activeSessionId] !== optimistic) return current
+      const copy = { ...current }
+      delete copy[activeSessionId]
+      return copy
+    })
+  }, [activeSessionId, chapterModeOverrides, currentSession?.preferences?.chapterReadingMode])
   const setRightPanelTab = useCallback((next: RightPanelTab): void => {
     if (!activeSessionId || !controlSocket) {
       notify.error('Unable to save the right panel', { description: 'No active Session connection.' })
@@ -2108,7 +2146,7 @@ export function App(): JSX.Element {
                         </div>
                       </div>
                       <div className="min-h-0 flex-1 overflow-hidden">
-                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader headerLeading={explorerHeaderLeading} fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} onOpenWorkspaceTerminal={openWorkspaceTerminal} />
+                        <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} autoHideOfflineWorkspacesByDefault={!privateCloudMode} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSession} onClearSelection={clearSessionSelection} onNewSession={newSession} onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader headerLeading={explorerHeaderLeading} fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openSessionInfoDialog} onWorkspaceInfo={setWorkspaceInfoId} onOpenWorkspaceTerminal={openWorkspaceTerminal} />
                       </div>
                       <div className="flex flex-none justify-end border-t border-border/35 px-3 py-2" data-testid="desktop-sidebar-footer">
                         <SidebarGlobalActions accountPlacement="footer" onOpenSettings={() => setSettingsOpen(true)} account={account} accountLoading={privateCloudMode && authSession.loading} onOpenAccount={openAccount} onOpenAdmin={openAdmin} onSignOut={announceSignOut} evaluationUrl={evaluationUrl} />
@@ -2235,6 +2273,8 @@ export function App(): JSX.Element {
                       ) : (
                         <ChatPanel
                         sessionId={activeSessionId}
+                        chapterReadingModeOverride={chapterModeOverride}
+                        onChapterReadingModeChange={setChapterReadingModeForSession}
                         scheduledMessageTasks={scheduledMessageOrigins?.sessionId === activeSessionId ? scheduledMessageOrigins.tasks : undefined}
                         onOpenScheduledTask={(taskId) => { void openScheduledTaskFromInbox(taskId) }}
                         attachmentHost={hostEndpoint.url}
@@ -2324,10 +2364,11 @@ export function App(): JSX.Element {
                             <InlineStatusRow
                               state={session.state}
                               fallbackStatus={currentSession?.status}
-                              streamingActive={session.streamingActive}
-                              toolExecutionStartedAt={session.toolExecutionStartedAt}
-                              awaitingAck={awaitingAck}
-                              progress={agentProgress}
+                              hydrated={sessionHydrated}
+                              streamingActive={sessionHydrated && session.streamingActive}
+                              toolExecutionStartedAt={sessionHydrated ? session.toolExecutionStartedAt : null}
+                              awaitingAck={sessionHydrated && awaitingAck}
+                              progress={sessionHydrated ? agentProgress : undefined}
                             />
                             {forkingFromSeq !== null ? (
                               <div
@@ -2690,7 +2731,7 @@ export function App(): JSX.Element {
             </div>
             {section === 'agent' ? (
               <div className="min-h-0 flex-1 overflow-hidden">
-                <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={runtimeCapabilities.workspace ? connectWorkspaceFromExplorerDrawer : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} onOpenWorkspaceTerminal={openWorkspaceTerminalFromExplorerDrawer} />
+                <Explorer executors={control.executors} sessions={control.sessions} loading={sessionDirectoryLoadingOwner === 'explorer'} autoHideOfflineWorkspacesByDefault={!privateCloudMode} selectedSessionId={explorerSelectedSessionId} sessionStatuses={sessionStatuses} onSelect={selectSessionFromExplorerDrawer} onClearSelection={clearSessionSelectionFromExplorerDrawer} onNewSession={newSessionFromExplorerDrawer} onConnectWorkspace={runtimeCapabilities.workspace ? connectWorkspaceFromExplorerDrawer : undefined} onDelete={deleteSessionAt} onRename={renameSessionAt} onRenameWorkspace={renameWorkspaceAt} embeddedHeader fontSizePx={sessionExplorerFontSizePx} previewStore={previewStore} onOpenSessionInfo={openExplorerDrawerSessionInfo} onWorkspaceInfo={openExplorerDrawerWorkspaceInfo} onOpenWorkspaceTerminal={openWorkspaceTerminalFromExplorerDrawer} />
               </div>
             ) : <div className="min-h-0 flex-1" />}
             <div className="flex min-h-14 flex-none items-center justify-end border-t border-border/35 px-3 py-2" data-testid="narrow-drawer-footer">
@@ -2828,6 +2869,7 @@ export function App(): JSX.Element {
           <SettingsDialog
             key={cacheNamespace}
             cacheNamespace={cacheNamespace}
+            autoHideOfflineWorkspacesByDefault={!privateCloudMode}
             open={settingsOpen}
             onOpenChange={(open) => {
               setSettingsOpen(open)
@@ -2896,6 +2938,8 @@ export function App(): JSX.Element {
         open={connectWorkspaceOpen}
         onOpenChange={setConnectWorkspaceOpen}
         host={hostEndpoint.url}
+        privateCloud={privateCloudMode}
+        organizationRole={authSession.session?.authenticated ? authSession.session.organization?.role : undefined}
       />
       <ExecutorPairingPrompt />
       <WorkspaceMetadataDialog

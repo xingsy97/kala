@@ -114,7 +114,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
         <pre
           data-testid={html ? 'code-block-highlighted' : 'code-block-raw'}
           data-lang={lang ?? ''}
-          className="ak-code-lines m-0 min-w-full overflow-visible bg-transparent py-2.5 font-mono text-xs leading-5 text-foreground"
+          className="ak-code-lines m-0 min-w-full overflow-visible bg-transparent py-2.5 font-mono text-foreground"
         >
           <span className="block min-w-full">
             {Array.from({ length: Math.max(visualLineCount, highlightedLines?.length ?? 0) }, (_, index) => {

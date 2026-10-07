@@ -1070,7 +1070,7 @@ export function Composer({
         {mode === 'simple' ? (
           <div className="flex min-w-0 flex-col gap-1" data-testid="composer-simple-frame">
             <div className="flex min-w-0 items-end gap-2 sm:-ml-8" data-testid="composer-simple-row">
-              <ComposerLeftAccessory mode={mode}>{leftAccessory}</ComposerLeftAccessory>
+              <ComposerLeftAccessory>{leftAccessory}</ComposerLeftAccessory>
               <div
                 className={cn(
                   'ak-composer-surface relative flex min-h-12 min-w-0 flex-1 flex-col overflow-visible rounded-[20px] transition-[border-color,background-color,box-shadow]',
@@ -1132,8 +1132,8 @@ export function Composer({
             </div>
           </div>
         ) : (
-        <div className="flex min-w-0 items-stretch gap-2" data-testid="composer-full-shell">
-        <ComposerLeftAccessory mode={mode}>{leftAccessory}</ComposerLeftAccessory>
+        <div className="flex min-w-0 items-stretch gap-2 sm:-ml-8" data-testid="composer-full-shell">
+        <ComposerLeftAccessory>{leftAccessory}</ComposerLeftAccessory>
         <div
           className={cn(
             'ak-composer-surface relative min-w-0 flex-1 rounded-2xl transition-[border-color,background-color,box-shadow]',
@@ -1380,15 +1380,12 @@ export function Composer({
   )
 }
 
-function ComposerLeftAccessory({ mode, children }: { mode: 'simple' | 'full'; children?: ReactNode }): JSX.Element | null {
+function ComposerLeftAccessory({ children }: { children?: ReactNode }): JSX.Element | null {
   if (!children) return null
   return (
     <div
       className={cn(
-        'hidden flex-none items-center justify-center sm:flex',
-        mode === 'simple'
-          ? 'self-center [&_[data-testid=user-message-navigation]]:flex-col [&_[data-testid=user-message-navigation]]:gap-0 [&_[data-testid=user-message-navigation]_button]:h-6 [&_[data-testid=user-message-navigation]_button]:w-6'
-          : 'self-stretch py-1',
+        'hidden flex-none items-center justify-center self-center sm:flex [&_[data-testid=user-message-navigation]]:flex-col [&_[data-testid=user-message-navigation]]:gap-0 [&_[data-testid=user-message-navigation]_button]:h-6 [&_[data-testid=user-message-navigation]_button]:w-6',
       )}
       data-testid="composer-left-accessory"
     >

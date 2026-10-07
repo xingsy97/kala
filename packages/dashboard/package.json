@@ -69,10 +69,12 @@
     "rehype-katex": "7.0.1",
     "remark-gfm": "4.0.1",
     "remark-math": "6.0.0",
+    "remark-parse": "11.0.0",
     "shiki": "4.3.1",
     "socket.io-client": "4.8.4",
     "sonner": "2.0.7",
     "tailwind-merge": "3.6.0",
+    "unified": "11.0.5",
     "zod": "4.4.3"
   },
   "devDependencies": {
